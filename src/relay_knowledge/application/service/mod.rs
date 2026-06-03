@@ -1,8 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, OnceLock},
-    time::Instant,
-};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use serde::Serialize;
 
@@ -26,8 +22,8 @@ use crate::{
     model_provider::ModelProviderConfigService,
     observability::ObservabilityRuntime,
     project::{
-        DATABASE_FILE_NAME, LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME,
-        PROJECT_NAME, WINDOWS_SERVICE_DEFINITION_FILE_NAME,
+        LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME, PROJECT_NAME,
+        WINDOWS_SERVICE_DEFINITION_FILE_NAME,
     },
     retrieval::{
         RetrievalPlan,
@@ -36,10 +32,11 @@ use crate::{
     },
     storage::{
         FileIndexDiagnostics, GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection,
-        GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest, SqliteGraphStore,
-        StorageError,
+        GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest, StorageError,
     },
 };
+
+use storage_provider::StorageProvider;
 
 use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
@@ -70,11 +67,9 @@ pub struct RelayKnowledgeService {
 impl RelayKnowledgeService {
     /// Creates a service from already validated foundational configuration.
     pub fn new(runtime: RuntimeConfiguration) -> Self {
-        let database_path = runtime.paths.data_dir.join(DATABASE_FILE_NAME);
-
         Self {
+            storage: StorageProvider::configured(&runtime),
             runtime,
-            storage: StorageProvider::sqlite(database_path),
             health_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
@@ -779,60 +774,6 @@ pub(super) fn current_time_millis() -> u64 {
         })
 }
 
-#[derive(Clone)]
-pub(super) struct StorageProvider {
-    path: Option<PathBuf>,
-    ready: Arc<OnceLock<Arc<dyn KnowledgeStore>>>,
-    init_lock: Arc<tokio::sync::Mutex<()>>,
-}
-
-impl StorageProvider {
-    fn sqlite(path: PathBuf) -> Self {
-        Self {
-            path: Some(path),
-            ready: Arc::new(OnceLock::new()),
-            init_lock: Arc::new(tokio::sync::Mutex::new(())),
-        }
-    }
-
-    fn ready(store: Arc<dyn KnowledgeStore>) -> Self {
-        let ready = OnceLock::new();
-        let _ = ready.set(store);
-
-        Self {
-            path: None,
-            ready: Arc::new(ready),
-            init_lock: Arc::new(tokio::sync::Mutex::new(())),
-        }
-    }
-
-    pub(super) async fn get(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
-        if let Some(store) = self.ready.get() {
-            return Ok(Arc::clone(store));
-        }
-        let _guard = self.init_lock.lock().await;
-        if let Some(store) = self.ready.get() {
-            return Ok(Arc::clone(store));
-        }
-
-        let Some(path) = self.path.clone() else {
-            return Err(StorageError::InvalidInput(
-                "storage provider was not initialized".to_owned(),
-            ));
-        };
-        let ready = Arc::clone(&self.ready);
-        tokio::task::spawn_blocking(move || {
-            if let Some(store) = ready.get() {
-                return Ok(Arc::clone(store));
-            }
-            let store = Arc::new(SqliteGraphStore::open(path)?) as Arc<dyn KnowledgeStore>;
-            let _ = ready.set(Arc::clone(&store));
-            Ok(store)
-        })
-        .await?
-    }
-}
-
 pub(super) fn storage_api_error(error: StorageError) -> ApiError {
     ApiError::storage_unavailable(error.to_string())
 }
@@ -944,6 +885,7 @@ fn service_definition_filename() -> &'static str {
 
 mod health;
 pub(crate) mod knowledge_map;
+mod storage_provider;
 
 #[cfg(test)]
 mod id_tests;

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use rusqlite::Connection;
 
 #[path = "code_query.rs"]
@@ -157,6 +159,35 @@ const MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT: usize = 500;
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     code_schema::initialize_code_schema(connection)?;
     software::initialize_schema(connection)
+}
+
+pub(super) fn import_repository_from_database(
+    connection: &mut Connection,
+    source_path: &Path,
+    repository_id: &str,
+    source_scope: Option<&str>,
+) -> Result<(), StorageError> {
+    code_snapshot::import_repository_from_database(
+        connection,
+        source_path,
+        repository_id,
+        source_scope,
+    )
+}
+
+pub(super) fn repository_totals_excluding(
+    connection: &mut Connection,
+    excluded_repository_ids: &[String],
+) -> Result<CodeRepositoryTotals, StorageError> {
+    code_report::repository_totals_excluding(connection, excluded_repository_ids)
+}
+
+pub(super) fn prune_scopes_with_retained(
+    connection: &mut Connection,
+    request: crate::storage::CodeScopeRetentionRequest,
+    extra_retained_scopes: Vec<String>,
+) -> Result<crate::domain::CodeScopeRetentionSummary, StorageError> {
+    code_tasks::prune_scopes_with_retained(connection, request, extra_retained_scopes)
 }
 
 impl CodeRepositoryStore for SqliteGraphStore {

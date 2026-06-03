@@ -15,6 +15,7 @@ pub struct RuntimeStatus {
     pub temp_dir: String,
     pub runtime_dir: String,
     pub service_dir: String,
+    pub storage_topology: String,
     pub http_bind: String,
     pub http_request_timeout_ms: u64,
     pub http_graceful_shutdown_timeout_ms: u64,

@@ -47,7 +47,34 @@ RELAY_KNOWLEDGE_SERVICE_DIR
 
 All overrides must be absolute paths and must not contain `..`.
 
-## 12.3 Retrieval Backends
+## 12.3 Storage Topology
+
+The default storage topology is `single_sqlite` and stores all runtime state in
+the main SQLite database under the runtime data directory. Use the partitioned
+topology only when you want repository code facts isolated into one SQLite file
+per registered repository:
+
+```bash
+RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite \
+  relay-knowledge repo register /path/to/repository --format json
+```
+
+`partitioned_sqlite` keeps global control state, durable tasks, leases, audit,
+and graph facts in the main database. Repository files, symbols, references,
+chunks, checkpoints, and scoped code queries use shard files under
+`stores/repositories/` in the runtime data directory. Repository-set overlay
+refresh still requires `single_sqlite` until cross-shard import/export
+aggregation is implemented.
+
+After the main database contains an active partitioned shard catalog,
+`single_sqlite` refuses to open that runtime state. Keep
+`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` enabled, or perform an
+explicit rollback that removes the shard catalog and shard files first.
+Shard catalog entries are relocatable: restores recompute shard paths from the
+repository id and the current runtime data directory, so move the main database
+and `stores/repositories/` together.
+
+## 12.4 Retrieval Backends
 
 The default is local deterministic read models. Enable external backend metadata only when an external worker writes derived read models under the same metadata contract:
 
@@ -82,7 +109,7 @@ RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS=100
 
 `RELAY_KNOWLEDGE_RERANK_BACKEND` accepts `local`, `external`, or `disabled`. `external` currently preserves the provider contract and degrades to local rerank; the query hot path does not synchronously call a remote rerank model.
 
-## 12.4 Network and QoS
+## 12.5 Network and QoS
 
 Resident service and MCP Streamable HTTP use `net::http` and `net::qos` for network capability:
 
@@ -116,7 +143,7 @@ ignored so a notice-only setting cannot block runtime loading.
 
 Non-loopback HTTP binds should also configure MCP remote-client policy and origin/scope restrictions. QoS budget is admission control, not authentication; it limits connections, in-flight requests, queue depth, timeouts, and overload behavior.
 
-## 12.5 MCP Policy
+## 12.6 MCP Policy
 
 Complete MCP policy variables:
 
@@ -133,7 +160,7 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 Default policy is read-only and local-first. Remote listening and unspecified scope both require explicit enablement. Registered code repository aliases can enter a process-local dynamic allow-list on first MCP access; unknown scopes still require `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`.
 
-## 12.6 Workers, Audit, and OTLP
+## 12.7 Workers, Audit, and OTLP
 
 Background workers and agent audit:
 
@@ -166,7 +193,7 @@ RELAY_OTEL_SERVICE_ENVIRONMENT
 
 Behavior is described in [Chapter 10](10-workers-proposals-audit.md) and [Chapter 11](11-observability-and-telemetry.md).
 
-## 12.7 Setup Interfaces
+## 12.8 Setup Interfaces
 
 Advanced configuration does not need to be assembled manually from docs. The CLI provides two read-only setup entry points:
 

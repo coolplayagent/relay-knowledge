@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, TryLockError},
     time::{Duration, Instant},
 };
@@ -189,9 +189,46 @@ impl SqliteGraphStore {
             .await?
         })
     }
+
+    pub(in crate::storage) fn import_code_repository_from_database(
+        &self,
+        source_path: PathBuf,
+        repository_id: String,
+        source_scope: Option<String>,
+    ) -> StorageFuture<'_, ()> {
+        self.run(move |connection| {
+            code::import_repository_from_database(
+                connection,
+                &source_path,
+                &repository_id,
+                source_scope.as_deref(),
+            )
+        })
+    }
+
+    pub(in crate::storage) fn code_repository_totals_excluding(
+        &self,
+        excluded_repository_ids: Vec<String>,
+    ) -> StorageFuture<'_, crate::domain::CodeRepositoryTotals> {
+        self.run_read(move |connection| {
+            code::repository_totals_excluding(connection, &excluded_repository_ids)
+        })
+    }
+
+    pub(in crate::storage) fn prune_code_repository_scopes_with_retained(
+        &self,
+        request: crate::storage::CodeScopeRetentionRequest,
+        extra_retained_scopes: Vec<String>,
+    ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
+        self.run(move |connection| {
+            code::prune_scopes_with_retained(connection, request, extra_retained_scopes)
+        })
+    }
 }
 
-fn configure_connection(connection: &Connection) -> Result<(), StorageError> {
+pub(in crate::storage) fn configure_connection(
+    connection: &Connection,
+) -> Result<(), StorageError> {
     connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
 
     Ok(())

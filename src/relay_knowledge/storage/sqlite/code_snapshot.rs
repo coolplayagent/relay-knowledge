@@ -1,6 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
-use rusqlite::{Connection, params, params_from_iter, types::Value};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::{
     domain::{
@@ -25,6 +28,239 @@ pub(super) use candidate_paths::candidate_path_fts_query;
 pub(super) use candidate_paths::{
     file_candidate_paths_for_query_scope, file_candidate_paths_for_scope,
 };
+
+const IMPORT_SCHEMA: &str = "relay_import";
+
+struct CodeScopeTable {
+    table: &'static str,
+    columns: &'static str,
+}
+
+const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
+    CodeScopeTable {
+        table: "code_repository_files",
+        columns: "repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len, line_count, parse_status, degraded_reason",
+    },
+    CodeScopeTable {
+        table: "code_repository_symbols",
+        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end",
+    },
+    CodeScopeTable {
+        table: "code_repository_references",
+        columns: "repository_id, source_scope, reference_id, file_id, path, name, kind, target_symbol_snapshot_id, target_hint, resolution_state, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end",
+    },
+    CodeScopeTable {
+        table: "code_repository_imports",
+        columns: "repository_id, source_scope, import_id, file_id, path, module, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+    },
+    CodeScopeTable {
+        table: "code_repository_dependencies",
+        columns: "repository_id, source_scope, dependency_id, file_id, path, language_id, ecosystem, package_name, requirement, resolved_version, dependency_group, source_kind, is_lockfile, line_start, line_end, excerpt",
+    },
+    CodeScopeTable {
+        table: "code_repository_calls",
+        columns: "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+    },
+    CodeScopeTable {
+        table: "code_repository_feature_flags",
+        columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
+    },
+    CodeScopeTable {
+        table: "code_repository_chunks",
+        columns: "repository_id, source_scope, chunk_id, file_id, path, language_id, content, byte_start, byte_end, line_start, line_end, symbol_snapshot_id",
+    },
+    CodeScopeTable {
+        table: "code_repository_file_diagnostics",
+        columns: "repository_id, source_scope, path, parse_status, message",
+    },
+    CodeScopeTable {
+        table: "code_repository_search",
+        columns: "source_scope, document_kind, record_id, path, language_id, content",
+    },
+];
+
+const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
+    CodeScopeTable {
+        table: "code_repository_index_checkpoints",
+        columns: "source_scope, repository_id, state, resolved_commit_sha, tree_hash, path_filters_json, language_filters_json, total_path_count, parsed_file_count, committed_file_count, committed_symbol_count, committed_reference_count, committed_chunk_count, batch_count, last_path, resource_budget_json, updated_at_ms, error_message",
+    },
+    CodeScopeTable {
+        table: "software_components",
+        columns: "component_id, repository_id, source_scope, ecosystem, name, requirement, resolved_version, dependency_group, source_kind, relationship_state, language_id, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_dependency_usages",
+        columns: "usage_id, component_id, repository_id, source_scope, ecosystem, package_name, language_id, module, target_hint, resolution_state, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_sdk_usages",
+        columns: "usage_id, repository_id, source_scope, language_id, module, target_hint, resolution_state, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_files",
+        columns: "software_file_id, repository_id, source_scope, path, language_id, file_role, parse_status, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_topics",
+        columns: "topic_id, repository_id, source_scope, name, topic_kind, source_path, line_start, line_end, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_relationships",
+        columns: "relationship_id, repository_id, source_scope, relationship_kind, source_id, source_kind, target_id, target_kind, target_hint, resolution_state, confidence_basis_points, confidence_tier, evidence_path, evidence_line_start, evidence_line_end, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_global_status",
+        columns: "source_scope, repository_id, projected_graph_version, stale, component_count, sdk_usage_count, file_count, topic_count, relationship_count, build_target_count, iac_resource_count, design_element_count, projection_schema_version, last_error",
+    },
+    CodeScopeTable {
+        table: "software_build_targets",
+        columns: "target_id, repository_id, source_scope, ecosystem, language_id, name, kind, command, output_hint, source_kind, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_iac_resources",
+        columns: "resource_id, repository_id, source_scope, language_id, provider, resource_kind, name, scope_hint, target_hint, resolution_state, source_kind, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
+    },
+    CodeScopeTable {
+        table: "software_design_elements",
+        columns: "element_id, repository_id, source_scope, language_id, element_kind, name, parent, summary, source_kind, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
+    },
+];
+
+pub(super) fn import_repository_from_database(
+    connection: &mut Connection,
+    source_path: &Path,
+    repository_id: &str,
+    source_scope: Option<&str>,
+) -> Result<(), StorageError> {
+    connection.execute(
+        &format!("ATTACH DATABASE ?1 AS {IMPORT_SCHEMA}"),
+        params![source_path.display().to_string()],
+    )?;
+    let result = import_attached_repository(connection, repository_id, source_scope);
+    let detach = connection.execute(&format!("DETACH DATABASE {IMPORT_SCHEMA}"), []);
+    match (result, detach) {
+        (Ok(()), Ok(_)) => Ok(()),
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(StorageError::from(error)),
+    }
+}
+
+fn import_attached_repository(
+    connection: &mut Connection,
+    repository_id: &str,
+    source_scope: Option<&str>,
+) -> Result<(), StorageError> {
+    let transaction = connection.transaction()?;
+    import_repository_metadata(&transaction, repository_id)?;
+    if let Some(source_scope) = source_scope {
+        import_code_scope(&transaction, repository_id, source_scope)?;
+    }
+    transaction.commit()?;
+
+    Ok(())
+}
+
+fn import_repository_metadata(
+    transaction: &rusqlite::Transaction<'_>,
+    repository_id: &str,
+) -> Result<(), StorageError> {
+    let main_has_repository = transaction
+        .query_row(
+            "SELECT 1 FROM code_repositories WHERE repository_id = ?1",
+            params![repository_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    let copied = transaction.execute(
+        &format!(
+            "
+            INSERT OR IGNORE INTO code_repositories (
+                repository_id, alias, root_path, path_filters_json, language_filters_json,
+                last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                indexed_file_count, symbol_count, reference_count, chunk_count,
+                stale, degraded_reason
+            )
+            SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
+                   last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                   indexed_file_count, symbol_count, reference_count, chunk_count,
+                   stale, degraded_reason
+            FROM {IMPORT_SCHEMA}.code_repositories
+            WHERE repository_id = ?1
+            "
+        ),
+        params![repository_id],
+    )?;
+    if !main_has_repository && copied == 0 {
+        return Err(StorageError::InvalidInput(format!(
+            "code repository '{repository_id}' is missing from the import database"
+        )));
+    }
+    transaction.execute(
+        &format!(
+            "
+            INSERT OR IGNORE INTO code_repository_aliases (alias, repository_id)
+            SELECT alias, repository_id
+            FROM {IMPORT_SCHEMA}.code_repository_aliases
+            WHERE repository_id = ?1
+            "
+        ),
+        params![repository_id],
+    )?;
+
+    Ok(())
+}
+
+fn import_code_scope(
+    transaction: &rusqlite::Transaction<'_>,
+    repository_id: &str,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    if transaction
+        .query_row(
+            "SELECT 1 FROM code_repository_scopes WHERE source_scope = ?1",
+            params![source_scope],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    delete_scope_index(transaction, source_scope)?;
+    let copied = transaction.execute(
+        &format!(
+            "
+            INSERT INTO code_repository_scopes (
+                source_scope, repository_id, resolved_commit_sha, tree_hash,
+                path_filters_json, language_filters_json, indexed_file_count,
+                symbol_count, reference_count, chunk_count, stale, degraded_reason
+            )
+            SELECT source_scope, repository_id, resolved_commit_sha, tree_hash,
+                   path_filters_json, language_filters_json, indexed_file_count,
+                   symbol_count, reference_count, chunk_count, stale, degraded_reason
+            FROM {IMPORT_SCHEMA}.code_repository_scopes
+            WHERE source_scope = ?1 AND repository_id = ?2
+            "
+        ),
+        params![source_scope, repository_id],
+    )?;
+    if copied == 0 {
+        return Err(StorageError::InvalidInput(format!(
+            "code repository '{repository_id}' has no importable source scope '{source_scope}'"
+        )));
+    }
+    for table in CODE_SCOPE_TABLES {
+        copy_attached_code_table(transaction, table, source_scope)?;
+    }
+    for table in IMPORTED_DERIVED_SCOPE_TABLES {
+        copy_attached_code_table(transaction, table, source_scope)?;
+    }
+    backfill_search_metadata_for_scope(transaction, source_scope)?;
+
+    Ok(())
+}
 
 pub(super) fn file_fingerprints(
     connection: &mut Connection,
@@ -341,76 +577,9 @@ fn clone_active_scope_for_incremental(
         return Ok(());
     }
     delete_scope_index(transaction, &snapshot.source_scope)?;
-    clone_code_table(
-        transaction,
-        "code_repository_files",
-        "repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len, line_count, parse_status, degraded_reason",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_symbols",
-        "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_references",
-        "repository_id, source_scope, reference_id, file_id, path, name, kind, target_symbol_snapshot_id, target_hint, resolution_state, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_imports",
-        "repository_id, source_scope, import_id, file_id, path, module, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_dependencies",
-        "repository_id, source_scope, dependency_id, file_id, path, language_id, ecosystem, package_name, requirement, resolved_version, dependency_group, source_kind, is_lockfile, line_start, line_end, excerpt",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_calls",
-        "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_feature_flags",
-        "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_chunks",
-        "repository_id, source_scope, chunk_id, file_id, path, language_id, content, byte_start, byte_end, line_start, line_end, symbol_snapshot_id",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_file_diagnostics",
-        "repository_id, source_scope, path, parse_status, message",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
-    clone_code_table(
-        transaction,
-        "code_repository_search",
-        "source_scope, document_kind, record_id, path, language_id, content",
-        &previous_scope,
-        &snapshot.source_scope,
-    )?;
+    for table in CODE_SCOPE_TABLES {
+        clone_code_table(transaction, table, &previous_scope, &snapshot.source_scope)?;
+    }
     backfill_search_metadata_for_scope(transaction, &snapshot.source_scope)?;
 
     Ok(())
@@ -418,17 +587,36 @@ fn clone_active_scope_for_incremental(
 
 fn clone_code_table(
     transaction: &rusqlite::Transaction<'_>,
-    table: &'static str,
-    columns: &'static str,
+    table: &CodeScopeTable,
     previous_scope: &str,
     next_scope: &str,
 ) -> Result<(), StorageError> {
-    let selected_columns = columns.replacen("source_scope", "?2", 1);
+    let selected_columns = table.columns.replacen("source_scope", "?2", 1);
     transaction.execute(
         &format!(
-            "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1"
+            "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1",
+            table = table.table,
+            columns = table.columns,
         ),
         params![previous_scope, next_scope],
+    )?;
+
+    Ok(())
+}
+
+fn copy_attached_code_table(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &CodeScopeTable,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        &format!(
+            "INSERT INTO {table} ({columns}) SELECT {columns} FROM {schema}.{table} WHERE source_scope = ?1",
+            table = table.table,
+            columns = table.columns,
+            schema = IMPORT_SCHEMA,
+        ),
+        params![source_scope],
     )?;
 
     Ok(())

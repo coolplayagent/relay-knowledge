@@ -97,6 +97,7 @@ mod tests {
                 temp_dir: "/tmp".to_owned(),
                 runtime_dir: "/run".to_owned(),
                 service_dir: "/service".to_owned(),
+                storage_topology: "single_sqlite".to_owned(),
                 http_bind: "127.0.0.1:8791".to_owned(),
                 http_request_timeout_ms: 30000,
                 http_graceful_shutdown_timeout_ms: 10000,

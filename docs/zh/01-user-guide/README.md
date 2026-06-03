@@ -34,7 +34,7 @@
 - [第 9 章 常驻服务](09-resident-service.md): 前台服务、同端口 Web/API/MCP、service manager 和 silent-update operator。
 - [第 10 章 Worker、Proposal 与 Audit](10-workers-proposals-audit.md): 后台 worker、人工审核、proposal 生命周期和审计。
 - [第 11 章 可观测性与遥测](11-observability-and-telemetry.md): Prometheus metrics、OTLP traces/metrics 和诊断状态。
-- [第 12 章 高级配置参考](12-advanced-configuration.md): 运行时目录、检索后端、网络/QoS、MCP、worker、audit 和 setup 变量。
+- [第 12 章 高级配置参考](12-advanced-configuration.md): 运行时目录、存储拓扑、检索后端、网络/QoS、MCP、worker、audit 和 setup 变量。
 - [第 13 章 运维与排障](13-operations-and-troubleshooting.md): 健康检查、索引新鲜度、常见错误、隔离复现和 PR 验证。
 
 ## 推荐阅读顺序

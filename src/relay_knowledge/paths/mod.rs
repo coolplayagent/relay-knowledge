@@ -14,8 +14,9 @@ use std::{
 use crate::{
     env::{PathEnvOverrides, PlatformEnvironment, PlatformKind},
     project::{
-        MODEL_CATALOG_CACHE_FILE_NAME, MODEL_FALLBACK_FILE_NAME, MODEL_PROFILES_FILE_NAME,
-        VERSION_CHECK_CACHE_FILE_NAME,
+        DATABASE_FILE_NAME, MODEL_CATALOG_CACHE_FILE_NAME, MODEL_FALLBACK_FILE_NAME,
+        MODEL_PROFILES_FILE_NAME, REPOSITORY_SHARD_DATABASE_FILE_NAME, REPOSITORY_SHARDS_DIR_NAME,
+        STORAGE_BACKENDS_DIR_NAME, VERSION_CHECK_CACHE_FILE_NAME,
     },
 };
 
@@ -96,6 +97,25 @@ impl RuntimePaths {
     /// Returns the JSONL audit log owned by resident agent protocol adapters.
     pub fn agent_audit_log_file(&self) -> PathBuf {
         self.log_dir.join("agent-audit.jsonl")
+    }
+
+    /// Returns the default single-file SQLite database path.
+    pub fn database_file(&self) -> PathBuf {
+        self.data_dir.join(DATABASE_FILE_NAME)
+    }
+
+    /// Returns the directory containing per-repository SQLite shards.
+    pub fn repository_shards_dir(&self) -> PathBuf {
+        self.data_dir
+            .join(STORAGE_BACKENDS_DIR_NAME)
+            .join(REPOSITORY_SHARDS_DIR_NAME)
+    }
+
+    /// Returns the SQLite database path for one repository shard.
+    pub fn repository_shard_database_file(&self, repository_id: &str) -> PathBuf {
+        self.repository_shards_dir()
+            .join(repository_shard_dir_name(repository_id))
+            .join(REPOSITORY_SHARD_DATABASE_FILE_NAME)
     }
 
     /// Returns the model provider profile configuration file.
@@ -492,6 +512,38 @@ fn validate_path(purpose: PathPurpose, path: &Path) -> Result<(), PathError> {
     Ok(())
 }
 
+fn repository_shard_dir_name(repository_id: &str) -> String {
+    let mut sanitized = String::with_capacity(repository_id.len().min(48) + 17);
+    for character in repository_id.chars().take(48) {
+        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+            sanitized.push(character);
+        } else {
+            sanitized.push('_');
+        }
+    }
+    if sanitized.is_empty() {
+        sanitized.push_str("repository");
+    }
+
+    format!(
+        "{sanitized}-{:016x}",
+        stable_hash64(repository_id.as_bytes())
+    )
+}
+
+fn stable_hash64(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -739,5 +791,33 @@ mod tests {
         assert_eq!(paths.temp_dir, PathBuf::from("/custom/tmp"));
         assert_eq!(paths.runtime_dir, PathBuf::from("/custom/run"));
         assert_eq!(paths.service_dir, PathBuf::from("/custom/service"));
+    }
+
+    #[test]
+    fn repository_shard_paths_are_safe_and_stable_under_data_dir() {
+        let overrides = PathEnvOverrides {
+            home: Some(std::env::temp_dir().join(format!(
+                "relay-knowledge-shard-paths-{}",
+                std::process::id()
+            ))),
+            ..PathEnvOverrides::default()
+        };
+        let paths =
+            RuntimePaths::resolve(&unix_environment(), &overrides).expect("paths should resolve");
+
+        let db_path = paths.repository_shard_database_file("git:/srv/repos/core");
+
+        assert!(db_path.starts_with(&paths.data_dir));
+        assert_eq!(
+            db_path.file_name().and_then(|value| value.to_str()),
+            Some(REPOSITORY_SHARD_DATABASE_FILE_NAME)
+        );
+        assert!(
+            db_path
+                .parent()
+                .and_then(|path| path.file_name())
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.starts_with("git__srv_repos_core-"))
+        );
     }
 }

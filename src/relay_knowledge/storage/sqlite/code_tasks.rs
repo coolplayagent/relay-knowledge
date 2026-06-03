@@ -580,12 +580,27 @@ pub(super) fn retention_status(
         .optional()?
         .flatten()
         .unwrap_or_default();
-    retention_summary(connection, repository_id, &active_scope, 2, false)
+    retention_summary(
+        connection,
+        repository_id,
+        &active_scope,
+        2,
+        false,
+        Vec::new(),
+    )
 }
 
 pub(super) fn prune_scopes(
     connection: &mut Connection,
     request: CodeScopeRetentionRequest,
+) -> Result<CodeScopeRetentionSummary, StorageError> {
+    prune_scopes_with_retained(connection, request, Vec::new())
+}
+
+pub(super) fn prune_scopes_with_retained(
+    connection: &mut Connection,
+    request: CodeScopeRetentionRequest,
+    extra_retained_scopes: Vec<String>,
 ) -> Result<CodeScopeRetentionSummary, StorageError> {
     retention_summary(
         connection,
@@ -593,6 +608,7 @@ pub(super) fn prune_scopes(
         &request.active_scope,
         request.retain_recent_successful_scopes,
         true,
+        extra_retained_scopes,
     )
 }
 
@@ -685,6 +701,7 @@ fn retention_summary(
     active_scope: &str,
     retain_recent_successful_scopes: usize,
     prune: bool,
+    extra_retained_scopes: Vec<String>,
 ) -> Result<CodeScopeRetentionSummary, StorageError> {
     let all_scopes = repository_scopes(connection, repository_id)?;
     let mut retained = BTreeSet::new();
@@ -700,6 +717,9 @@ fn retention_summary(
         retained.insert(scope);
     }
     for scope in repository_set_member_scopes(connection, repository_id)? {
+        retained.insert(scope);
+    }
+    for scope in extra_retained_scopes {
         retained.insert(scope);
     }
     let prunable = all_scopes

@@ -70,6 +70,7 @@ fn binary_outputs_single_json_object() {
     assert_eq!(value["project_name"], "relay-knowledge");
     assert_eq!(value["metadata"]["graph_version"], 0);
     assert_eq!(value["metadata"]["stale"], false);
+    assert_eq!(value["runtime"]["storage_topology"], "single_sqlite");
     assert_eq!(value["runtime"]["http_bind"], "127.0.0.1:8791");
     assert_eq!(value["runtime"]["http_proxy_configured"], false);
     assert_eq!(value["runtime"]["http_no_proxy_rules"], 0);
@@ -103,6 +104,7 @@ fn binary_outputs_streaming_json_as_ndjson_events() {
     assert_eq!(events[1]["event"], "progress");
     assert_eq!(events[2]["event"], "item");
     assert_eq!(events[2]["project_name"], "relay-knowledge");
+    assert_eq!(events[2]["runtime"]["storage_topology"], "single_sqlite");
     assert_eq!(events[2]["runtime"]["http_bind"], "127.0.0.1:8791");
     assert!(events[2]["payload"].is_null());
     assert_eq!(events[3]["event"], "completed");
