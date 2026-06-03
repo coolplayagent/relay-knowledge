@@ -18,6 +18,14 @@ When `--alias` is omitted, the short name used by later commands defaults to the
 
 Registration records the repository root, alias, and allowed scope. It does not parse files immediately. The path can point to a readable local Git worktree or ordinary source directory; the target ref, worktree overlay, or filesystem synthetic snapshot is resolved during indexing. Registering the same root again adds an alias to the same repository id. If an alias already belongs to another repository id, registration fails.
 
+Remove a registered repository when its runtime state should be rebuilt from scratch:
+
+```bash
+relay-knowledge repo remove repo --format json
+```
+
+Removal deletes the registration, all aliases for that repository id, indexed scopes, code-index tasks, repository-set membership and overlays, and software projection rows. It does not delete files from the source repository on disk. Removal is rejected while a code-index task for that repository is still running; after removal, the same path or alias can be registered again.
+
 ## 5.2 Preview Scope
 
 Preview the files covered by the current scope before indexing:

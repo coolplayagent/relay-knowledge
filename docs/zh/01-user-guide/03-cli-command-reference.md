@@ -90,6 +90,7 @@ relay-knowledge map source remove --id <id>
 relay-knowledge map validate
 relay-knowledge map agent-snippet
 relay-knowledge repo register <path> [--alias <name>] [--path <filter>]
+relay-knowledge repo remove <alias>
 relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset]
 relay-knowledge repo index-worker [--task-id <id>]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
@@ -123,6 +124,8 @@ relay-knowledge version check
 
 冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
 
+`repo remove <alias>` 会从 relay-knowledge 运行时状态中删除该 alias 指向的整个注册仓库，包括该 repository id 的全部 alias、代码索引 scope、code-index task、repository-set 成员关系、repository-set overlay 和软件全域投影行。它不会删除磁盘上的源码仓库。如果仓库仍有 running code-index task lease，删除会被拒绝；删除成功后，同一路径或 alias 可以重新注册。
+
 `repo query` 的 `definition`、`references` 和 `hybrid` 查询先走已索引 tree-sitter 图和 SQLite FTS 读模型。`--freshness allow-stale` 在目标 ref 正在 full indexing 且尚未 finalize 时，会继续读取上一个已完成 committed scope，并在响应中标记 stale/degraded reason；`wait-until-fresh` 仍会要求目标 scope 新鲜。只有这些结构化层存在明确召回缺口时，查询才会在同一 indexed commit 上启动有界内部 exact-text source fallback；命中会在 JSON 中标记 `retrieval_layers=["lexical","text_fallback"]`，definition 兜底还会带 `definition`。候选路径查询、候选文件数、物化字节或单行长度预算耗尽只会降级兜底层，并通过 `degraded_reason` 暴露，不会让结构化代码图结果失效。
 
 `repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。抽取器识别环境变量、config/settings key、布尔配置声明，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用。它不会同步 provider 控制面的状态、策略、segment 或 rollout variant。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
@@ -135,7 +138,7 @@ relay-knowledge version check
 
 ## 3.5 读写影响
 
-状态、健康、帮助、setup doctor/profile、provider probe、version check、report、map show/route/validate/agent-snippet 和 audit query 是诊断入口，不应修改图谱事实。`health` 是 liveness 快路径，不会排队 index refresh，也不会等待 code-index writer 完成；存储繁忙时它可以返回 stale/degraded `storage_busy`。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`map init`、`map source add/update/remove`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit、知识导航契约或 service definition。
+状态、健康、帮助、setup doctor/profile、provider probe、version check、report、map show/route/validate/agent-snippet 和 audit query 是诊断入口，不应修改图谱事实。`health` 是 liveness 快路径，不会排队 index refresh，也不会等待 code-index writer 完成；存储繁忙时它可以返回 stale/degraded `storage_busy`。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`map init`、`map source add/update/remove`、`repo remove`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit、知识导航契约或 service definition。
 
 自动化调用方应优先读取 `help --format json` 中的 operation 和 read/write 说明，再决定是否在 CI、agent 或 Web 操作面中开放命令。
 

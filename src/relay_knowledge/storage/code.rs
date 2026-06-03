@@ -3,11 +3,11 @@
 use crate::domain::{
     CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
     CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
-    CodeIndexTaskRecord, CodeRepositoryCrossEdge, CodeRepositoryRegistration, CodeRepositoryReport,
-    CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
-    CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
-    CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
-    SoftwareGlobalProjection, SoftwareGlobalRequest,
+    CodeIndexTaskRecord, CodeRepositoryCrossEdge, CodeRepositoryRegistration,
+    CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositorySet, CodeRepositorySetMember,
+    CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus,
+    CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
+    CodeScopeRetentionSummary, SoftwareGlobalProjection, SoftwareGlobalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -189,6 +189,18 @@ pub trait CodeRepositoryStore: Send + Sync {
         &self,
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>>;
+
+    fn remove_code_repository(
+        &self,
+        repository: String,
+        now_ms: u64,
+    ) -> StorageFuture<'_, Option<CodeRepositoryRemovalSummary>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code repository removal for '{repository}' at {now_ms} is unavailable"
+            )))
+        })
+    }
 
     fn code_repository_scope_status(
         &self,

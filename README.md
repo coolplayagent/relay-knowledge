@@ -385,6 +385,10 @@ directories require explicit path opt-in before recursive expansion.
 
 Registering the same repository root with an additional alias preserves prior
 aliases and resolves all aliases to the same repository id.
+`repo remove <alias>` deletes that repository's runtime registration, aliases,
+index scopes, tasks, repository-set membership and overlays, and software
+projections without deleting source files on disk; after removal, the same path
+or alias can be registered again.
 
 ### Code Retrieval
 

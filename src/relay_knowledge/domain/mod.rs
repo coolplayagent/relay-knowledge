@@ -50,11 +50,11 @@ pub use code_repository::{
     CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskRecord, CodeIndexTaskState,
     CodePathTombstone, CodeQueryKind, CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview,
     CodeRepositoryLargestFile, CodeRepositoryLatencySample, CodeRepositoryRegistration,
-    CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus,
-    CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest,
-    CodeScopeRetentionSummary, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
-    RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
-    code_snapshot_expected_scope_id, code_snapshot_scope_id,
+    CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositoryScopePreview,
+    CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
+    CodeRetrievalLayer, CodeRetrievalRequest, CodeScopeRetentionSummary, RepositoryCodeChunkRecord,
+    RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord, code_snapshot_expected_scope_id, code_snapshot_scope_id,
 };
 pub use code_repository_set::{
     CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetAddMemberRequest,

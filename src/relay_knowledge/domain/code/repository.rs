@@ -320,6 +320,17 @@ pub struct CodeRepositoryStatus {
     pub degraded_reason: Option<String>,
 }
 
+/// Counts and aliases removed when a registered repository is deleted.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryRemovalSummary {
+    pub repository_id: String,
+    pub aliases_removed: Vec<String>,
+    pub removed_scope_count: usize,
+    pub removed_index_task_count: usize,
+    pub removed_repository_set_member_count: usize,
+    pub invalidated_repository_set_count: usize,
+}
+
 /// File-level code index row.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeFileRecord {

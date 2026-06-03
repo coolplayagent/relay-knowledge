@@ -6,21 +6,22 @@ use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactPathGroups, CodeImpactRequest,
         CodeIndexCheckpoint, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryRegistration,
-        CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositorySelector,
-        CodeRepositorySet, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
-        CodeRepositorySetMember, CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest,
-        CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord,
-        CodeRepositorySetRemoveMemberRequest, CodeRepositorySetStatus, CodeRepositoryStatus,
-        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
-        CommitReceipt, ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
-        ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
-        IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
-        ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
-        RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
-        ServiceManagerAction, ServiceOperatorStatus, SoftwareBuildTarget, SoftwareComponent,
-        SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile, SoftwareGlobalRequest,
-        SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship, SoftwareSdkUsage,
-        SoftwareTopic, WorkerKind, WorkerStatus, WorkerTaskRecord,
+        CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositoryScopePreview,
+        CodeRepositorySelector, CodeRepositorySet, CodeRepositorySetAddMemberRequest,
+        CodeRepositorySetCreateRequest, CodeRepositorySetMember, CodeRepositorySetQueryHit,
+        CodeRepositorySetQueryRequest, CodeRepositorySetRefreshSummary,
+        CodeRepositorySetRefreshTaskRecord, CodeRepositorySetRemoveMemberRequest,
+        CodeRepositorySetStatus, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
+        CodeRetrievalRequest, CodeScopeRetentionSummary, CommitReceipt, ConfidenceScore,
+        EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan, ExtractionDiagnostic,
+        FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange, IndexKind, IndexStatus,
+        LayoutRegion, ProposalConflictRecord, ProposalRecord, ProposalState, RerankDiagnostics,
+        RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
+        RetrievedContextPack, ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorStatus,
+        SoftwareBuildTarget, SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement,
+        SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
+        SoftwareRelationship, SoftwareSdkUsage, SoftwareTopic, WorkerKind, WorkerStatus,
+        WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -621,6 +622,14 @@ pub struct CodeRepositoryRegisterResponse {
     pub metadata: ApiMetadata,
     pub registration: CodeRepositoryRegistration,
     pub status: CodeRepositoryStatus,
+}
+
+/// Code repository removal response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryRemoveResponse {
+    pub metadata: ApiMetadata,
+    pub removed_status: CodeRepositoryStatus,
+    pub summary: CodeRepositoryRemovalSummary,
 }
 
 /// Code repository index response.
