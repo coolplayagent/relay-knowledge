@@ -167,9 +167,11 @@ Use the repository scripts by responsibility:
 ./check.sh
 ```
 
-For unattended code and semantic/vector retrieval optimization experiments, the
-independent Rust self-iteration harness under `tools/self_iteration` can be
-started directly through the stable launcher:
+### Self-Iteration Harness
+
+For unattended code and semantic/vector retrieval optimization experiments,
+start the independent Rust self-iteration harness under `tools/self_iteration`
+through the stable launcher:
 
 ```bash
 ./self-iterate.sh
@@ -181,20 +183,26 @@ started directly through the stable launcher:
 The launcher auto-builds the harness binary when needed. It stores v2 run
 history, progressive memory, reports, patches, and score curves under
 `.git/relay-knowledge-self-iteration/` and only commits candidates that improve
-the configured score. The research judge supports OpenAI-compatible HTTP or an
-open coding-agent CLI, defaulting to `opencode` when no backend is configured.
-The semantic/vector fixture inherits the same `RELAY_KNOWLEDGE_*` embedding
-environment as normal runtime commands and does not persist secrets in
-benchmark cases. The `unattended-layered` strategy is tuned for 1-2 day runs:
-it performs short smoke-level Codex explores, validates promising candidates
-with the fast profile, persists resume state in
-`.git/relay-knowledge-self-iteration/unattended-state-v2.json`, and escalates
-to longer competitive-capability macro exploration when short attempts stall.
+the configured score.
+
+The research judge supports OpenAI-compatible HTTP or an open coding-agent CLI,
+defaulting to `opencode` when no backend is configured. The semantic/vector
+fixture inherits the same `RELAY_KNOWLEDGE_*` embedding environment as normal
+runtime commands and does not persist secrets in benchmark cases.
+
+The `unattended-layered` strategy is tuned for 1-2 day runs. It performs short
+smoke-level Codex explores, validates promising candidates with the fast
+profile, persists resume state in
+`.git/relay-knowledge-self-iteration/unattended-state-v2.json`, and escalates to
+longer competitive-capability macro exploration when short attempts stall.
+
 External repositories in the self-iteration evaluation set are pinned to
-documented commits, and C/C++ adds tree-sitter-oriented generated syntax
-fixtures. Multilingual generated fixtures extend the same evaluation set. See
+documented commits. C/C++ adds tree-sitter-oriented generated syntax fixtures,
+and multilingual generated fixtures extend the same evaluation set. See
 [Book 5, Chapter 6: C/C++ Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
 and [Book 5, Chapter 7: Multilingual Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md).
+
+### Quality Gates
 
 The underlying quality gates are:
 
@@ -209,29 +217,309 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 
 The self-iteration harness runs its own product and harness quality checks in
 parallel dependency stages and defaults `--jobs auto` to the local CPU count.
+
 The default `fast` profile also includes targeted `code_index_recovery_cases`,
-`code_index_sqlite_lock_cases`, and `code_index_health_isolation_cases`, plus a registration-language
-guardrail, so expired code-index leases, stale worker completions,
-dead-letter recovery, checkpoint lease renewal, duplicate-process SQLite lock avoidance,
-service health liveness, concurrent code-index task claiming, committed-scope
-code queries, and mixed-language registration safety cannot regress without
-running exhaustive large-repository workloads.
+`code_index_sqlite_lock_cases`, and `code_index_health_isolation_cases`, plus a
+registration-language guardrail. These keep expired code-index leases, stale
+worker completions, dead-letter recovery, checkpoint lease renewal,
+duplicate-process SQLite lock avoidance, service health liveness, concurrent
+code-index task claiming, committed-scope code queries, and mixed-language
+registration safety from regressing without exhaustive large-repository
+workloads.
 
-The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
-SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
-The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
-Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, Bash, SQL, Markdown, XML, Bazel/Starlark, Make, CMake, Dockerfile/Containerfile, Java properties, TOML, INI, YAML, JSON, Go module files, Ninja, Jinja2, and Go templates with tree-sitter grammars, falling back to text chunks for unsupported or degraded files. SQL files contribute schema object symbols such as tables, views and materialized views, functions and procedures, triggers, and types, plus SQL object references and function/procedure-call edges. Same-scope local file, template, and build-target references are resolved during finalize when unambiguous; external or ambiguous configuration relationships stay unresolved metadata. Registration rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results. C/C++ macro-heavy files can be conservatively recovered as parsed when errors are isolated to macro expansions, typedef-style external-header declarations such as Nginx/Kong module tables, GCC/Clang-style declaration attributes and inline extensions such as `__attribute__((always_inline))`, `attribute((always_inline))`, and `__always_inline`, bounded preprocessor directives, or recognized decorator-bearing declarations with declaration-shaped bodies, and reliable structured facts such as symbols, references, or imports are still extracted. Full Git repository indexing first discovers the tracked source layout, then uses resource-bounded SQLite batches with durable checkpoints and a finalize phase for cross-batch references, includes, and call edges, so large scopes expose `indexing` progress without replacing the previous fresh scope until finalization succeeds. Non-Git batch plans and delta snapshots recheck planned file content hashes before accepting live bytes, so a live edit cannot be committed under an older filesystem synthetic snapshot. Non-Git source directories use filesystem synthetic snapshots; when no path filter is supplied, they default to source/config/documentation whitelisted roots and do not walk unrelated directories, while explicit path filters opt into matching broad build, cache, and dependency directories and `--path .` opts into the whole root. Incremental updates use the same source-layout policy when new files appear outside `src/`. A cold full `repo index` queues a durable code-index task and returns a `task` handle immediately; the CLI starts a bounded single-shot worker, non-interactive agents can call `repo index-worker --task-id <id> --format json` for one explicit drain attempt, and `service run` drains the same queue with a bounded code-index worker pool controlled by `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` plus one repository-set overlay refresh worker. Distinct task fingerprints are queued and leased independently, while identical full-index fingerprints reuse the active task. SQLite writes stay on a single writer lane, while code queries, reports, graph reads, file queries, and health diagnostics use bounded read-only connections where SQLite WAL permits concurrent committed-snapshot reads. Public health is a liveness-safe read: it does not enqueue index refresh work, and under storage pressure it returns stale/degraded `storage_busy` diagnostics instead of waiting for indexing to finish. `repo query` and `repo feature-flags` with `allow-stale` continue serving the latest compatible completed scope when the requested ref and filters are still being indexed, marking the response stale rather than blocking behind the writer. `repo status` reports `active_task`, checkpoint counters, and scope retention; successful background tasks retain the active scope, the two latest completed scopes, and unfinished task scopes while pruning older repository scopes. Git branch, tag, and worktree selectors resolve to scoped commit/tree snapshots; indexed scopes remain queryable by explicit ref, rebase or force-moved heads require a new index before query, and same-tree branches reuse the same scope while preserving requested-ref audit metadata. Non-Git moving refs resolve to the current scoped filesystem synthetic snapshot using the same path and language filters as the indexed scope, while explicit stored `filesystem:` refs remain queryable by identity and only source-byte fallback verifies live content before reading. Registering the same repository root with an additional alias preserves prior aliases and resolves all aliases to the same repository id.
-Code-index task leases are attempt-scoped: expired running leases are recovered to retry or dead-letter before claim/status paths report them, stale workers cannot complete or fail a reclaimed task, and active workers renew the lease before expensive batch parsing, after each committed checkpoint batch, around finalization, and before task completion. Stores that do not implement the optional lease recovery/renewal hooks keep status and indexing reads compatible by treating those hooks as no-ops. Checkpoints expose `updated_at_ms` in JSON status so operators can distinguish slow progress from a stuck task.
-Code graph v1 responses distinguish stable `canonical_symbol_id` values from snapshot-bound `symbol_snapshot_id` values. Reference, call, import, and SBOM dependency hits expose `target_hint`, `resolution_state`, confidence basis points, and confidence tier so unresolved, ambiguous, declared, or locked edges are visible instead of being reported as certain calls. Import resolution covers local same-repository imports for every tree-sitter language listed above, including JavaScript/JSX, Kotlin, Scala, C#, PHP, Rust, and Swift; package-manager or SDK imports without authorized indexed source remain unresolved edge metadata rather than parser degradation.
-Repository source scope is not limited to a top-level `src/` layout: index planning inspects tracked paths before parsing, so real source under `external_deps/`, `packages/`, `modules/`, `plugins/`, `extensions/`, `Sources/`, `lib/`, and nested JVM source roots is indexed by default. Clean Git snapshots treat the tracked tree as the directory authority inside the registered and requested path scope, so tracked `.cloudbuild/`, `.cid/`, `.build_config/`, `build/`, `dist/`, `vendor/`, and `third_party/` paths are eligible instead of being rejected by name. Non-Git source directories do not have a tracked tree authority, so the default scan is whitelist based: root-level supported source/config/docs files and source-like roots such as `src/`, `include/`, `lib/`, `Sources/`, `packages/`, `modules/`, `plugins/`, `extensions/`, `docs/`, and `config/` are eligible, while `build/`, `dist/`, `target/`, `node_modules/`, `vendor/`, `third_party/`, cache, virtualenv, and coverage directories require explicit path opt-in. That opt-in is path-specific: `--path src` must not hash `node_modules/` or `target/`, while `--path build` or `--path build/generated.rs` opts into the matching broad directory and `--path .` opts into the whole root. Default non-Git scans descend only into directories that can contribute whitelist content; filtered non-Git scans descend only into requested paths and bounded discoverable source roots, so unrelated siblings such as `private/` are skipped instead of being read before selector filtering. Git probe failures on a directory with Git metadata, such as unsafe ownership or corrupt `.git`, fail loudly instead of falling back to non-Git filesystem indexing. A default `--path src` registration is expanded for discovered source roots during indexing, while precise selector path filters still narrow queries and avoid widening into unrelated dependency trees. Non-Git `filesystem:` snapshot ids are computed from the effective indexed scope after discovery, so unindexed file edits do not move the scoped ref; queued synthetic refs, full-index batch reads, and incremental delta bytes are verified before live bytes are accepted, and incremental deletes still remove files from previously discovered roots. Non-Git moving-ref resolution uses the effective path and language filters for the indexed scope. Non-Git impact path collection uses the same effective indexed filesystem filters, including explicit broad-directory opt-ins. Git ref normalization for query/status paths uses cheap ref/tree resolution instead of walking the full tracked tree. Worktree overlays use Git status for Git repositories: `.gitignore`-ignored untracked files are skipped, and untracked broad dependency/cache/build directories require explicit path opt-in before recursive expansion. Call graph retrieval also resolves static same-repository cross-language edges for C/C++, Go cgo `C.*`, and Rust FFI/bindings paths; this is code-graph evidence, not full build-system or linker analysis.
-Code repository lexical retrieval uses a SQLite FTS candidate table for symbols, references, calls, imports, SBOM dependencies, and chunks. Effective path filters are applied inside the FTS candidate window before bounded scoring, graph-edge candidates are ordered by BM25 before truncation, fuzzy symbol recall can match any query term while typed graph edge queries keep their narrower semantics, and Rust scoring recognizes snake_case/CamelCase identifier parts, multi-part symbol names, call-direction context, and declaration-shaped API chunks. `repo query --kind sbom` returns dependency inventory facts extracted during indexing from Cargo, npm, Go, Python, Maven effective `pom.xml`/BOM, Gradle, and Conan manifest or lock files; it does not execute package managers, contact registries, or provide vulnerability/license analysis. Maven effective POM handling resolves repository-local parent POMs, properties, dependency management, profiles, plugin management, modules, and imported BOM declarations from indexed evidence only. Call excerpts use a `source_scope + symbol_snapshot_id` chunk lookup and line containment so high fan-out caller/callee queries do not multiply one call edge across unrelated chunks. Code repository queries also use bounded internal exact-text source fallback: AST and indexed lexical layers run first, then the product scans materialized indexed-commit candidate content when definition/reference/hybrid recall has a specific gap or an import points at an unresolved external dependency target that is not indexed as a code graph target. For non-Git filesystem commits, fallback first verifies that the current synthetic snapshot still equals the indexed `filesystem:` commit; if it has moved, fallback reports degradation instead of reading live files from a different snapshot. Definition fallback chooses the last identifier-like query target, so command words in natural-language prompts are not searched as symbols. If the FTS read model is unavailable, candidate-path lookup first uses indexed path and chunk terms to keep source fallback query-aware; when no query-aware candidates can be produced, it reports the read-model degradation instead of scanning lexicographic file prefixes. Only source-plannable definition, reference, and single-identifier hybrid queries may return empty indexed results for source fallback; import, symbol, caller, callee, and non-plannable hybrid queries surface the read-model error instead of silently returning false negatives. When earlier lexical layers already produced usable hits, later FTS-layer outages preserve those partial hits and mark them degraded instead of clearing them or hiding the outage. Missing external dependency source is reported as unresolved edge coverage metadata, not as `degraded_reason`. External dependency fallback searches use the unresolved target hint rather than arbitrary user query text, stay below structured import-graph evidence in ranking, and are marked with `text_fallback` so agents treat them as current-repository source evidence, not dependency-library graph evidence. Candidate lookup, candidate-file, materialized-byte, and line-length budget failures degrade only the fallback layer; structured code graph results remain available and report diagnostics. For manual agent or maintainer inspection, prefer `rg`; if it is not installed, use bounded `grep -RIn` searches with VCS and build directories excluded rather than stopping source analysis.
-Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, configurable external semantic/vector backend metadata, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion, applies a deterministic local rerank before final truncation, and returns a context pack with retriever sources, ranking and rerank explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
-Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, retrieval groups those hits by parent to avoid duplicate context items, and background or maintenance workers commit OCR/caption/table/layout outputs through `commit_multimodal_extraction` rather than query hot paths.
-Operational productization persists worker tasks, manual proposals, audit events, and silent-update operator state. Multimodal ingest queues embedding/OCR/vision/extractor work; `worker run-once` calls a configured HTTP endpoint when available or creates a deterministic fallback proposal; `proposal accept` commits through the same graph mutation path; and service manager commands generate platform service definitions without running privileged installation.
-The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
-Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, explicit refresh paths surface queue-cap failures instead of reporting false freshness, and `index_refresh.stale_reasons` explains index-family and scoped-cursor lag or failure by kind, scope, modality, lag versions, and last error.
+### Runtime and Storage
 
-Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
+The binary starts a Tokio runtime, and the shared application service exposes
+async entrypoints from the CLI boundary inward. SQLite storage is opened through
+the storage boundary, and blocking database work is isolated behind Tokio
+blocking workers.
+
+The storage contract includes the v1 code graph data surface for tree-sitter
+output. Versioned code files, symbols, references, chunks, and parse-status
+diagnostics are committed through storage traits rather than direct SQLite
+access.
+
+SQLite writes stay on a single writer lane. Code queries, reports, graph reads,
+file queries, and health diagnostics use bounded read-only connections where
+SQLite WAL permits concurrent committed-snapshot reads.
+
+Public health is a liveness-safe read. It does not enqueue index refresh work,
+and under storage pressure it returns stale/degraded `storage_busy` diagnostics
+instead of waiting for indexing to finish.
+
+### Code Indexing
+
+Code repository indexing currently parses Rust, Python, JavaScript/JSX,
+TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, Bash,
+SQL, Markdown, XML, Bazel/Starlark, Make, CMake, Dockerfile/Containerfile, Java
+properties, TOML, INI, YAML, JSON, Go module files, Ninja, Jinja2, and Go
+templates with tree-sitter grammars. Unsupported or degraded files fall back to
+text chunks.
+
+SQL files contribute schema object symbols such as tables, views and
+materialized views, functions and procedures, triggers, and types, plus SQL
+object references and function/procedure-call edges.
+
+Same-scope local file, template, and build-target references are resolved during
+finalize when unambiguous. External or ambiguous configuration relationships
+stay unresolved metadata.
+
+Registration rejects language filters so mixed-language repositories keep their
+full language surface; use query-time `--language` to narrow results.
+
+C/C++ macro-heavy files can be conservatively recovered as parsed when errors
+are isolated to macro expansions, typedef-style external-header declarations
+such as Nginx/Kong module tables, GCC/Clang-style declaration attributes and
+inline extensions such as `__attribute__((always_inline))`,
+`attribute((always_inline))`, and `__always_inline`, bounded preprocessor
+directives, or recognized decorator-bearing declarations with
+declaration-shaped bodies. Recovery still requires reliable structured facts
+such as symbols, references, or imports.
+
+Full Git repository indexing first discovers the tracked source layout. It then
+uses resource-bounded SQLite batches with durable checkpoints and a finalize
+phase for cross-batch references, includes, and call edges, so large scopes
+expose `indexing` progress without replacing the previous fresh scope until
+finalization succeeds.
+
+Non-Git batch plans and delta snapshots recheck planned file content hashes
+before accepting live bytes, so a live edit cannot be committed under an older
+filesystem synthetic snapshot.
+
+Non-Git source directories use filesystem synthetic snapshots. When no path
+filter is supplied, they default to source/config/documentation whitelisted
+roots and do not walk unrelated directories. Explicit path filters opt into
+matching broad build, cache, and dependency directories, and `--path .` opts
+into the whole root.
+
+Incremental updates use the same source-layout policy when new files appear
+outside `src/`.
+
+A cold full `repo index` queues a durable code-index task and returns a `task`
+handle immediately. The CLI starts a bounded single-shot worker,
+non-interactive agents can call
+`repo index-worker --task-id <id> --format json` for one explicit drain attempt,
+and `service run` drains the same queue with a bounded code-index worker pool
+controlled by `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` plus one repository-set
+overlay refresh worker.
+
+Distinct task fingerprints are queued and leased independently, while identical
+full-index fingerprints reuse the active task.
+
+`repo query` and `repo feature-flags` with `allow-stale` continue serving the
+latest compatible completed scope when the requested ref and filters are still
+being indexed, marking the response stale rather than blocking behind the
+writer.
+
+`repo status` reports `active_task`, checkpoint counters, and scope retention.
+Successful background tasks retain the active scope, the two latest completed
+scopes, and unfinished task scopes while pruning older repository scopes.
+
+Code-index task leases are attempt-scoped. Expired running leases are recovered
+to retry or dead-letter before claim/status paths report them, stale workers
+cannot complete or fail a reclaimed task, and active workers renew the lease
+before expensive batch parsing, after each committed checkpoint batch, around
+finalization, and before task completion.
+
+Stores that do not implement the optional lease recovery/renewal hooks keep
+status and indexing reads compatible by treating those hooks as no-ops.
+Checkpoints expose `updated_at_ms` in JSON status so operators can distinguish
+slow progress from a stuck task.
+
+### Source Scopes and Overlays
+
+Repository source scope is not limited to a top-level `src/` layout. Index
+planning inspects tracked paths before parsing, so real source under
+`external_deps/`, `packages/`, `modules/`, `plugins/`, `extensions/`,
+`Sources/`, `lib/`, and nested JVM source roots is indexed by default.
+
+Clean Git snapshots treat the tracked tree as the directory authority inside
+the registered and requested path scope. Tracked `.cloudbuild/`, `.cid/`,
+`.build_config/`, `build/`, `dist/`, `vendor/`, and `third_party/` paths are
+eligible instead of being rejected by name.
+
+Non-Git source directories do not have a tracked tree authority, so the default
+scan is whitelist based. Root-level supported source/config/docs files and
+source-like roots such as `src/`, `include/`, `lib/`, `Sources/`, `packages/`,
+`modules/`, `plugins/`, `extensions/`, `docs/`, and `config/` are eligible,
+while `build/`, `dist/`, `target/`, `node_modules/`, `vendor/`, `third_party/`,
+cache, virtualenv, and coverage directories require explicit path opt-in.
+
+That opt-in is path-specific: `--path src` must not hash `node_modules/` or
+`target/`, while `--path build` or `--path build/generated.rs` opts into the
+matching broad directory and `--path .` opts into the whole root.
+
+Default non-Git scans descend only into directories that can contribute
+whitelist content. Filtered non-Git scans descend only into requested paths and
+bounded discoverable source roots, so unrelated siblings such as `private/` are
+skipped instead of being read before selector filtering.
+
+Git probe failures on a directory with Git metadata, such as unsafe ownership
+or corrupt `.git`, fail loudly instead of falling back to non-Git filesystem
+indexing.
+
+A default `--path src` registration is expanded for discovered source roots
+during indexing, while precise selector path filters still narrow queries and
+avoid widening into unrelated dependency trees.
+
+Non-Git `filesystem:` snapshot ids are computed from the effective indexed
+scope after discovery, so unindexed file edits do not move the scoped ref.
+Queued synthetic refs, full-index batch reads, and incremental delta bytes are
+verified before live bytes are accepted, and incremental deletes still remove
+files from previously discovered roots.
+
+Non-Git moving-ref resolution uses the effective path and language filters for
+the indexed scope. Non-Git impact path collection uses the same effective
+indexed filesystem filters, including explicit broad-directory opt-ins.
+
+Git ref normalization for query/status paths uses cheap ref/tree resolution
+instead of walking the full tracked tree. Git branch, tag, and worktree
+selectors resolve to scoped commit/tree snapshots; indexed scopes remain
+queryable by explicit ref, rebase or force-moved heads require a new index
+before query, and same-tree branches reuse the same scope while preserving
+requested-ref audit metadata.
+
+Worktree overlays use Git status for Git repositories. `.gitignore`-ignored
+untracked files are skipped, and untracked broad dependency/cache/build
+directories require explicit path opt-in before recursive expansion.
+
+Registering the same repository root with an additional alias preserves prior
+aliases and resolves all aliases to the same repository id.
+
+### Code Retrieval
+
+Code graph v1 responses distinguish stable `canonical_symbol_id` values from
+snapshot-bound `symbol_snapshot_id` values. Reference, call, import, and SBOM
+dependency hits expose `target_hint`, `resolution_state`, confidence basis
+points, and confidence tier so unresolved, ambiguous, declared, or locked edges
+are visible instead of being reported as certain calls.
+
+Import resolution covers local same-repository imports for every tree-sitter
+language listed above, including JavaScript/JSX, Kotlin, Scala, C#, PHP, Rust,
+and Swift. Package-manager or SDK imports without authorized indexed source
+remain unresolved edge metadata rather than parser degradation.
+
+Call graph retrieval resolves static same-repository cross-language edges for
+C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
+not full build-system or linker analysis.
+
+Code repository lexical retrieval uses a SQLite FTS candidate table for
+symbols, references, calls, imports, SBOM dependencies, and chunks. Effective
+path filters are applied inside the FTS candidate window before bounded
+scoring, graph-edge candidates are ordered by BM25 before truncation, fuzzy
+symbol recall can match any query term while typed graph edge queries keep their
+narrower semantics, and Rust scoring recognizes snake_case/CamelCase identifier
+parts, multi-part symbol names, call-direction context, and declaration-shaped
+API chunks.
+
+`repo query --kind sbom` returns dependency inventory facts extracted during
+indexing from Cargo, npm, Go, Python, Maven effective `pom.xml`/BOM, Gradle,
+and Conan manifest or lock files. It does not execute package managers, contact
+registries, or provide vulnerability/license analysis.
+
+Maven effective POM handling resolves repository-local parent POMs, properties,
+dependency management, profiles, plugin management, modules, and imported BOM
+declarations from indexed evidence only.
+
+Call excerpts use a `source_scope + symbol_snapshot_id` chunk lookup and line
+containment so high fan-out caller/callee queries do not multiply one call edge
+across unrelated chunks.
+
+Code repository queries also use bounded internal exact-text source fallback.
+AST and indexed lexical layers run first; then the product scans materialized
+indexed-commit candidate content when definition/reference/hybrid recall has a
+specific gap or an import points at an unresolved external dependency target
+that is not indexed as a code graph target.
+
+For non-Git filesystem commits, fallback first verifies that the current
+synthetic snapshot still equals the indexed `filesystem:` commit. If it has
+moved, fallback reports degradation instead of reading live files from a
+different snapshot.
+
+Definition fallback chooses the last identifier-like query target, so command
+words in natural-language prompts are not searched as symbols.
+
+If the FTS read model is unavailable, candidate-path lookup first uses indexed
+path and chunk terms to keep source fallback query-aware. When no query-aware
+candidates can be produced, it reports the read-model degradation instead of
+scanning lexicographic file prefixes.
+
+Only source-plannable definition, reference, and single-identifier hybrid
+queries may return empty indexed results for source fallback. Import, symbol,
+caller, callee, and non-plannable hybrid queries surface the read-model error
+instead of silently returning false negatives.
+
+When earlier lexical layers already produced usable hits, later FTS-layer
+outages preserve those partial hits and mark them degraded instead of clearing
+them or hiding the outage.
+
+Missing external dependency source is reported as unresolved edge coverage
+metadata, not as `degraded_reason`. External dependency fallback searches use
+the unresolved target hint rather than arbitrary user query text, stay below
+structured import-graph evidence in ranking, and are marked with
+`text_fallback` so agents treat them as current-repository source evidence, not
+dependency-library graph evidence.
+
+Candidate lookup, candidate-file, materialized-byte, and line-length budget
+failures degrade only the fallback layer. Structured code graph results remain
+available and report diagnostics.
+
+For manual agent or maintainer inspection, prefer `rg`. If it is not installed,
+use bounded `grep -RIn` searches with VCS and build directories excluded rather
+than stopping source analysis.
+
+### GraphRAG, Workers, and Recovery
+
+Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures,
+local hashed-vector ANN, configurable external semantic/vector backend metadata,
+graph evidence fallback, schema-guided path traversal, temporal event
+retrieval, community summaries, and code graph documents.
+
+It fuses candidates with reciprocal-rank fusion, applies a deterministic local
+rerank before final truncation, and returns a context pack with retriever
+sources, ranking and rerank explanations, entities, source spans, structured
+graph facts, direct graph path evidence, code artifacts, backend availability,
+freshness, truncation, and budget metadata. The BM25 read model indexes
+generated lexical aliases for entity labels and code symbols without returning
+those aliases as canonical labels.
+
+Evidence can carry multimodal extraction metadata for text spans, image assets,
+OCR text, captions, image embeddings, tables, and layout regions. Derived
+OCR/caption/image evidence references a parent evidence item, retrieval groups
+those hits by parent to avoid duplicate context items, and background or
+maintenance workers commit OCR/caption/table/layout outputs through
+`commit_multimodal_extraction` rather than query hot paths.
+
+Operational productization persists worker tasks, manual proposals, audit
+events, and silent-update operator state. Multimodal ingest queues
+embedding/OCR/vision/extractor work; `worker run-once` calls a configured HTTP
+endpoint when available or creates a deterministic fallback proposal;
+`proposal accept` commits through the same graph mutation path; and service
+manager commands generate platform service definitions without running
+privileged installation.
+
+The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate
+for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous
+entity, and code impact observations.
+
+Graph commits also persist Phase 2 index recovery metadata. Mutation log
+entries record affected scopes, entity ids, evidence ids, and source hashes,
+including scope moves and structured-fact evidence references. Scoped index
+cursors track kind/scope/modality freshness plus source hash, backend cursor,
+and optional model name/dimension metadata for semantic/vector workers.
+
+`ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and
+`service doctor` share the bounded refresh queue, active lease/attempt guards,
+retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve
+dead-letter isolation, explicit refresh paths surface queue-cap failures instead
+of reporting false freshness, and `index_refresh.stale_reasons` explains
+index-family and scoped-cursor lag or failure by kind, scope, modality, lag
+versions, and last error.
+
+### CLI Contract
+
+Current CLI commands use the compiled `relay-knowledge` binary with git-style
+subcommands:
 
 ```bash
 relay-knowledge status --format json
@@ -275,13 +563,16 @@ relay-knowledge query -- --help
 ```
 
 CLI parameter meaning is part of the public contract. Skills and other LLM tools
-should inspect `relay-knowledge help --format json` before issuing commands; it
+should inspect `relay-knowledge help --format json` before issuing commands. It
 describes each command path, operation, read/write effect, required parameters,
 defaults, allowed values, repeatability, examples, and notes.
+
 Local file indexing roots must be absolute and present in
 `RELAY_KNOWLEDGE_FILE_INDEX_ROOTS`; relative entries are rejected before a
 background or explicit scan starts. `RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS`
 sets the per-root scan timeout budget.
+
+### Semantic and Vector Backends
 
 Semantic/vector read-model backend metadata is configured only through the
 `env` boundary. The default mode is local deterministic read models; external
@@ -304,10 +595,13 @@ read-model backends are excluded from semantic/vector retrieval execution and
 refresh scheduling; blank embedding model names fail during runtime
 configuration.
 
+### Settings and Graph Facts
+
 The Web Settings page groups agent interoperability, retrieval defaults, and
 model providers. Agent/retrieval settings read the same redacted runtime and
 service diagnostics to prepare MCP exposure, scope policy, audit, and external
 model environment variables, including the configured MCP origin allow-list.
+
 Model provider settings manage named chat/completion profiles, fallback
 policies, catalog refresh from `models.dev`, endpoint probes, and model
 discovery through `/api/configs/model/*`. Profile and fallback files live under
@@ -315,6 +609,7 @@ the resolved config directory as `model-profiles.json` and
 `model-fallback.json`; the public catalog cache lives under the resolved cache
 directory as `model-catalog-cache.json`. Secret values are accepted only on save
 and are returned to the browser as configured booleans or redacted headers.
+
 Profile updates preserve redacted stored header secrets unless a replacement
 value is supplied, and API callers can set `clear_api_key=true` to explicitly
 remove a stored API key during header-only migrations.
@@ -329,6 +624,8 @@ pack items now expose direct `graph_paths` derived from those structured facts
 so agent callers can cite one-hop relation, claim, or event paths alongside raw
 fact provenance.
 
+### Web, MCP, and ACP
+
 `service run --web --mcp streamable-http` starts the same-port Web diagnostics,
 `/api/*`, and resident MCP Streamable HTTP adapters on the configured local HTTP
 bind, defaulting to `http://127.0.0.1:8791/` and
@@ -340,12 +637,14 @@ the requested scope matches a code repository alias already registered in this
 runtime. Registered repository aliases are promoted into a process-local MCP
 allow-list on first use; unknown scopes are still rejected with the missing
 scope and the exact `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` repair hint.
+
 The adapter validates `initialize` params, then issues an unpredictable
 `Mcp-Session-Id`. Clients must send `notifications/initialized`, then include
 that session header and `MCP-Protocol-Version` on later calls so `ping`, tool
 requests and `notifications/cancelled` stay bound to the issued session.
 Missing session headers are rejected with HTTP 400; unknown or evicted session
 IDs are rejected with HTTP 404.
+
 The MCP tool surface includes graph retrieval, graph inspection, health,
 service status, index status, authorized code graph queries, authorized
 software global-model queries, repository-set code graph queries, and
@@ -359,6 +658,7 @@ creating duplicate kinds. MCP does not expose index refresh or repository indexi
 run `relay-knowledge repo index`, `relay-knowledge repo update`, or
 `relay-knowledge index refresh` from an explicit CLI/Web workflow before MCP
 queries depend on fresh indexes.
+
 The MCP server also advertises resources and prompts: resources expose service
 status, health, index status, and Prometheus text metrics; the graph-wide
 summary resource is advertised only when
@@ -366,16 +666,20 @@ summary resource is advertised only when
 and code-impact planning templates. `/mcp/metrics` exports a
 small Prometheus-compatible snapshot for graph version, index refresh backlog,
 dead letters, QoS request counts, and per-index stale state.
+
 Agent requests write bounded in-process audit events with runtime identity,
 scope, freshness, QoS decision, budget, truncation, result count, and status.
 Set `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` to mirror those events to
 the path-owned JSONL file `logs/agent-audit.jsonl`; the sink uses a bounded
 async queue controlled by `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` and capped
 at 65536 entries.
+
 The local ACP session adapter exposes the same retrieval contract for
 agent-client sessions, including progress updates, cancellation, and context
 artifacts. Foreground service startup runs a recovery pass that refreshes stale
 index cursors before accepting resident adapter work.
+
+### Browser Checks
 
 Web diagnostics, operation workspace, and browser integration checks:
 
@@ -404,6 +708,8 @@ returns a service runtime snapshot rather than starting a resident loop from the
 browser. Web execute requests are bounded by
 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback HTTP binds require the
 remote-client access policy to be enabled explicitly.
+
+### Optional Hooks
 
 Optional local hooks:
 
