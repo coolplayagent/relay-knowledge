@@ -18,19 +18,18 @@ use crate::{
         CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
         CodeIndexResourceBudget, CodeRepositorySelector, CodeRepositoryStatus,
         CodeRetrievalRequest, FreshnessPolicy,
-        code_snapshot_expected_scope_id as expected_scope_id,
     },
     storage::CodeImpactChanges,
 };
 
 use crate::application::service::RelayKnowledgeService;
 
+use super::fast_index::fresh_full_index_response;
 use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
     apply_code_grep_fallback, code_index_worker_lease_owner, code_status_checkpoint,
-    degraded_file_count_for_fresh_index, feature_flag_request_at_indexed_ref,
-    fresh_full_index_probe, index_start_from_completed, indexed_source_scope,
+    feature_flag_request_at_indexed_ref, index_start_from_completed, indexed_source_scope,
     latest_compatible_code_scope_status, missing_indexed_source_scope_error, now_millis,
     previous_index_state_for_index, recover_code_index_task_leases,
     recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
@@ -124,9 +123,8 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryIndexResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
-        if let Some(response) = self
-            .fresh_full_index_response(&store, &status, &request, &context)
-            .await?
+        if let Some(response) =
+            fresh_full_index_response(&store, &status, &request, &context).await?
         {
             return Ok(response);
         }
@@ -239,9 +237,8 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryIndexStartResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
-        if let Some(response) = self
-            .fresh_full_index_response(&store, &status, &request, &context)
-            .await?
+        if let Some(response) =
+            fresh_full_index_response(&store, &status, &request, &context).await?
         {
             return Ok(index_start_from_completed(response, None));
         }
@@ -487,91 +484,6 @@ impl RelayKnowledgeService {
     ) -> Result<usize, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         recover_orphaned_code_index_task_leases(&store, now_millis()).await
-    }
-
-    async fn fresh_full_index_response(
-        &self,
-        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
-        status: &CodeRepositoryStatus,
-        request: &CodeIndexRequest,
-        context: &RequestContext,
-    ) -> Result<Option<CodeRepositoryIndexResponse>, ApiError> {
-        if request.mode != CodeIndexMode::Full {
-            return Ok(None);
-        }
-        let probe = fresh_full_index_probe(status, &request.repository).await?;
-        let scoped_status = store
-            .code_repository_scope_status(
-                request.repository.repository.clone(),
-                probe.resolved_commit_sha.clone(),
-                probe.path_filters.clone(),
-                probe.language_filters.clone(),
-            )
-            .await
-            .map_err(storage_api_error)?;
-        let Some(scoped_status) = scoped_status else {
-            return Ok(None);
-        };
-        let expected_source_scope = expected_scope_id(
-            &status.repository_id,
-            &probe.tree_hash,
-            &scoped_status.path_filters,
-            &scoped_status.language_filters,
-        );
-        if scoped_status.stale
-            || scoped_status.tree_hash.as_deref() != Some(probe.tree_hash.as_str())
-            || expected_source_scope.as_deref().is_some_and(|expected| {
-                scoped_status.last_indexed_scope_id.as_deref() != Some(expected)
-            })
-        {
-            return Ok(None);
-        }
-        let graph_version = store
-            .current_graph_version()
-            .await
-            .map_err(storage_api_error)?;
-        let source_scope = scoped_status
-            .last_indexed_scope_id
-            .clone()
-            .unwrap_or_default();
-        let degraded_file_count =
-            degraded_file_count_for_fresh_index(store, &scoped_status).await?;
-        let summary = crate::domain::CodeIndexSummary {
-            repository_id: scoped_status.repository_id.clone(),
-            source_scope,
-            resolved_commit_sha: probe.resolved_commit_sha,
-            tree_hash: probe.tree_hash,
-            indexed_file_count: scoped_status.indexed_file_count,
-            changed_path_count: 0,
-            skipped_unchanged_count: scoped_status.indexed_file_count,
-            deleted_path_count: 0,
-            symbol_count: scoped_status.symbol_count,
-            reference_count: scoped_status.reference_count,
-            chunk_count: scoped_status.chunk_count,
-            degraded_file_count,
-            progress: crate::domain::CodeIndexProgressSummary {
-                git_file_count: scoped_status.indexed_file_count,
-                blob_read_count: 0,
-                parsed_file_count: 0,
-                sqlite_write_count: 0,
-                skipped_file_count: scoped_status.indexed_file_count,
-                degraded_file_count,
-                batch_count: 0,
-                checkpoint_file_count: scoped_status.indexed_file_count,
-                resource_budget: crate::domain::CodeIndexResourceBudget::default(),
-            },
-        };
-
-        Ok(Some(CodeRepositoryIndexResponse {
-            metadata: ApiMetadata::graph_only(context, graph_version),
-            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
-                &scoped_status,
-                &request.repository,
-                request.repository.ref_selector.clone(),
-            ),
-            summary,
-            status: scoped_status,
-        }))
     }
 
     /// Previews the effective code repository indexing scope without writing rows.

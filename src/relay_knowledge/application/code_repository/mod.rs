@@ -1,3 +1,4 @@
+mod fast_index;
 mod repository;
 mod repository_set;
 #[cfg(test)]

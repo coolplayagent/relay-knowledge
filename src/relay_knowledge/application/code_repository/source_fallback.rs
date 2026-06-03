@@ -78,9 +78,6 @@ pub(super) fn plan_code_grep_fallback(
                 return None;
             }
             let paths = definition_source_candidate_paths(request, results, &identity);
-            if results.is_empty() && paths.is_empty() && path_filters.is_empty() {
-                return None;
-            }
             Some(CodeGrepFallbackPlan {
                 commit,
                 query: identity.clone(),

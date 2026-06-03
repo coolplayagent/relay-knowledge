@@ -49,14 +49,19 @@ fn fallback_plan_skips_results_with_exact_declaration() {
 }
 
 #[test]
-fn definition_fallback_skips_unanchored_empty_exact_miss() {
+fn definition_fallback_uses_scope_candidates_for_empty_unfiltered_results() {
     let request = request(
         "DefinitelyMissingSymbol",
         CodeQueryKind::Definition,
         Vec::new(),
     );
 
-    assert!(plan_code_grep_fallback(&status(), &request, &[]).is_none());
+    let plan = plan_code_grep_fallback(&status(), &request, &[])
+        .expect("empty definition results should still inspect bounded scope candidates");
+
+    assert_eq!(plan.query, "DefinitelyMissingSymbol");
+    assert!(plan.paths.is_empty());
+    assert!(plan.needs_scope_paths());
 }
 
 #[test]

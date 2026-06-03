@@ -19,6 +19,8 @@
 
 Repository-set member 也必须在状态和查询前重新校验事实版本。既有 member 若保存了旧 `source_scope`，只能在找到同 commit/filter 的当前事实版本 scope 后使用当前 scope 查询并把 member/overlay 标记为 stale；如果执行 repository-set refresh，刷新 overlay 前必须先把替换后的 member scope 写回持久层，确保 overlay edges 和 member version manifest 基于当前事实版本重建。如果找不到当前 scope，查询必须跳过旧 scope，refresh 也不能通过旧 scope 重建 overlay 或通过 `AllowStale` 继续服务旧事实。member 自身的 path/language filters 仍是查询、source fallback 和 freshness 语义边界；事实版本校验需要使用实际 indexed scope filters，不能用宽 scope 覆盖 member row filters。
 
+仓库重新注册到新的 root path、path filters 或 language filters 后，仓库行必须保持 stale/registered，不能因为旧 `code_repository_scopes` 行仍是 fresh 就清除仓库级 stale。Fresh full-index fast path 可以复用当前 fact-version 的代码 scope，但仍必须刷新同 scope 的 software global projection；否则缺失、stale 或失败的 projection 会在代码索引成功响应后继续影响 `repo software` 和 MCP software 查询。
+
 ## 本次约束
 
 Python 协议方法和服务方法中的类型注解需要成为代码图引用事实。若评估缓存是在该事实提取能力之前生成的，`W3ConnectorSaveRequest` 这类注解引用会缺失，但旧索引可能仍被 tree hash freshness 认为可用。

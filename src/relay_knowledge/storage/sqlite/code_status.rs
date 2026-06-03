@@ -25,6 +25,13 @@ pub(super) fn upsert_repository(
             root_path = excluded.root_path,
             path_filters_json = excluded.path_filters_json,
             language_filters_json = excluded.language_filters_json,
+            state = CASE
+                WHEN root_path != excluded.root_path
+                  OR path_filters_json != excluded.path_filters_json
+                  OR language_filters_json != excluded.language_filters_json
+                THEN 'registered'
+                ELSE state
+            END,
             stale = CASE
                 WHEN root_path != excluded.root_path
                   OR path_filters_json != excluded.path_filters_json

@@ -804,6 +804,38 @@ async fn changed_registration_scope_marks_fresh_status_stale() {
         .expect("status should exist");
 
     assert!(status.stale);
+    assert_eq!(status.state, "registered");
+}
+
+#[tokio::test]
+async fn changed_registration_root_keeps_fresh_scope_stale() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/lib.rs",
+        "fn stable_policy() {}",
+    ))
+    .await;
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "fixture",
+        "/tmp/other-repo",
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    store
+        .upsert_code_repository(registration)
+        .await
+        .expect("changed root registration should persist");
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert!(status.stale);
+    assert_eq!(status.state, "registered");
 }
 
 #[tokio::test]
