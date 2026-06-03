@@ -25,6 +25,7 @@ mod snapshot;
 mod source;
 mod source_declarations;
 mod source_gitlink;
+mod source_paths;
 pub(crate) mod source_roots;
 mod worktree_overlay;
 
@@ -37,6 +38,9 @@ mod source_filesystem_tests;
 #[cfg(test)]
 #[path = "tests/source/layout.rs"]
 mod source_layout_tests;
+#[cfg(test)]
+#[path = "tests/source/submodule_regression.rs"]
+mod source_submodule_regression_tests;
 #[cfg(test)]
 #[path = "tests/source/submodule.rs"]
 mod source_submodule_tests;
@@ -58,7 +62,10 @@ use crate::domain::{
 use changes::tracked_entries;
 #[cfg(test)]
 use changes::worktree_changed_paths;
-use changes::{GitChange, TrackedEntryScope, diff_changes, tracked_entries_with_scope};
+use changes::{
+    GitChange, TrackedEntryScope, diff_changes, tracked_entries_state_with_scope,
+    tracked_entries_with_scope,
+};
 #[cfg(test)]
 pub(crate) use changes::{
     reset_tracked_entries_call_count_for_root, tracked_entries_call_count_for_root,
@@ -95,8 +102,8 @@ use snapshot::{SnapshotBuild, SnapshotScopeFilters};
 #[cfg(test)]
 use source::{RepositorySourceKind, source_snapshot_batch_bytes};
 use source::{
-    registration_source, source_bytes_after_content_verification, source_commit_is_filesystem,
-    source_kind,
+    git_tree_hash_with_submodules, registration_source, source_bytes_after_content_verification,
+    source_commit_is_filesystem, source_kind,
 };
 pub(crate) use source_declarations::{
     SourceDeclarationMatch, safe_git_blob_path, simple_source_identifier,
@@ -693,12 +700,14 @@ fn build_incremental_snapshot(
     }
     let base_commit = resolve_ref(root, base_ref)?;
     let commit = resolve_ref(root, head_ref)?;
-    let tree_hash = resolve_tree(root, &commit)?;
+    let parent_tree_hash = resolve_tree(root, &commit)?;
     let changes = diff_changes(root, base_ref, head_ref)?;
     let entry_scope = tracked_entry_scope_for_selector(registration, selector);
     let base_entries = tracked_entries_with_scope(root, &base_commit, &entry_scope)?;
     let base_source_layout = discover_source_layout(&base_entries);
-    let head_entries = tracked_entries_with_scope(root, &commit, &entry_scope)?;
+    let head_state = tracked_entries_state_with_scope(root, &commit, &entry_scope)?;
+    let tree_hash = git_tree_hash_with_submodules(&parent_tree_hash, &head_state.submodule_states);
+    let head_entries = head_state.entries;
     let source_layout = discover_source_layout(&head_entries);
     let path_filters = effective_index_path_filters(registration, selector, &source_layout);
     let language_filters =

@@ -404,6 +404,59 @@ fn worktree_overlay_indexes_staged_submodule_gitlink_update() {
 }
 
 #[test]
+fn worktree_overlay_indexes_unstaged_submodule_gitlink_update() {
+    let source = TempGitRepo::create("overlay-unstaged-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-unstaged-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("lib.rs", "fn unstaged_submodule_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "submodule update"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should index unstaged submodule gitlink updates");
+
+    assert!(!snapshot.full_replace);
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/submodule/lib.rs")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "unstaged_submodule_value")
+    );
+}
+
+#[test]
 fn worktree_overlay_indexes_staged_submodule_gitlink_update_after_deinit() {
     let source = TempGitRepo::create("overlay-staged-deinit-submodule-source");
     source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");

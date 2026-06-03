@@ -154,6 +154,16 @@ pub(super) fn build_worktree_overlay_snapshot(
         }
         if file_type.is_dir() {
             if contains_git_metadata(root, Path::new(path))? {
+                let mut recorder = WorktreeOverlayRecorder {
+                    registration,
+                    selector,
+                    previous_hashes,
+                    overlay_hash_input: &mut overlay_hash_input,
+                    deleted_paths: &mut deleted_paths,
+                    files_to_parse: &mut files_to_parse,
+                    skipped_unchanged_count: &mut skipped_unchanged_count,
+                };
+                record_unstaged_gitlink_overlay(root, &commit, path, &mut recorder)?;
                 continue;
             }
             if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
@@ -350,7 +360,7 @@ impl WorktreeOverlayRecorder<'_> {
         record_worktree_deleted_path(path, self.overlay_hash_input, self.deleted_paths);
     }
 
-    fn record_staged_gitlink_file(
+    fn record_gitlink_file(
         &mut self,
         root: &Path,
         submodule_path: &str,
@@ -416,11 +426,59 @@ fn record_staged_gitlink_overlay(
 
     for entry in staged_entries {
         if recorder.path_is_selected(&entry.parent_path) {
-            recorder.record_staged_gitlink_file(root, path, &staged_commit, &entry)?;
+            recorder.record_gitlink_file(root, path, &staged_commit, &entry)?;
         }
     }
 
     Ok(true)
+}
+
+fn record_unstaged_gitlink_overlay(
+    root: &Path,
+    base_commit: &str,
+    path: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<bool, CodeIndexError> {
+    let Some(base_gitlink_commit) =
+        source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?
+    else {
+        return Ok(false);
+    };
+    let Some(worktree_commit) = submodule_worktree_head(root, path)? else {
+        return Ok(false);
+    };
+    if worktree_commit == base_gitlink_commit {
+        return Ok(false);
+    }
+
+    let worktree_entries = bounded_submodule_path_entries(root, path, &worktree_commit)?;
+    let worktree_paths = worktree_entries
+        .iter()
+        .map(|entry| entry.parent_path.clone())
+        .collect::<BTreeSet<_>>();
+    record_missing_base_gitlink_child_deletions(
+        root,
+        path,
+        &base_gitlink_commit,
+        &worktree_paths,
+        recorder,
+    )?;
+    for entry in worktree_entries {
+        if recorder.path_is_selected(&entry.parent_path) {
+            recorder.record_gitlink_file(root, path, &worktree_commit, &entry)?;
+        }
+    }
+
+    Ok(true)
+}
+
+fn submodule_worktree_head(root: &Path, path: &str) -> Result<Option<String>, CodeIndexError> {
+    let submodule_root = match source_gitlink::submodule_root(root, path) {
+        Ok(submodule_root) => submodule_root,
+        Err(_) => return Ok(None),
+    };
+
+    resolve_ref(&submodule_root, "HEAD").map(Some)
 }
 
 enum StagedPathKind {

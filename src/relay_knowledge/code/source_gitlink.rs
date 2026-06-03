@@ -131,7 +131,14 @@ impl<'a> GitlinkImpactExpander<'a> {
             BTreeSet::new()
         };
         let mut paths = base_paths.union(&head_paths).cloned().collect::<Vec<_>>();
+        if include_base && !base_is_gitlink {
+            paths.push(path.to_owned());
+        }
+        if include_head && !head_is_gitlink {
+            paths.push(path.to_owned());
+        }
         paths.sort();
+        paths.dedup();
 
         Ok(Some(paths))
     }

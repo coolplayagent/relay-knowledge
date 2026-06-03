@@ -18,53 +18,14 @@ use super::{
     languages::language_id,
     parser::{dependency_manifest_language_ids, dependency_manifest_overrides_default_exclusion},
     source_gitlink,
+    source_paths::{
+        DEFAULT_EXCLUDED_EXTENSIONS, DEFAULT_EXCLUDED_FILENAMES, FILESYSTEM_AUTO_DISCOVERY_FILTERS,
+        FILESYSTEM_BROAD_SEGMENTS, FILESYSTEM_DEFAULT_SOURCE_ROOTS,
+    },
     source_roots::STRIPPABLE_SOURCE_ROOTS,
 };
 
 const FILESYSTEM_SYNTHETIC_PREFIX: &str = "filesystem:";
-const DEFAULT_EXCLUDED_EXTENSIONS: &[&str] = &[
-    "7z", "avif", "bmp", "bz2", "class", "eot", "gif", "gz", "ico", "jar", "jpeg", "jpg", "jsonl",
-    "lockb", "map", "mov", "mp4", "otf", "pdf", "png", "svg", "tar", "tgz", "ttf", "wasm", "webm",
-    "woff", "woff2", "zip", "zst",
-];
-const DEFAULT_EXCLUDED_FILENAMES: &[&str] = &["uv.lock"];
-const FILESYSTEM_BROAD_SEGMENTS: &[&str] = &[
-    ".cache",
-    ".git",
-    ".next",
-    ".nuxt",
-    ".parcel-cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    ".venv",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "target",
-    "third_party",
-    "vendor",
-    "venv",
-];
-const FILESYSTEM_DEFAULT_SOURCE_ROOTS: &[&str] = &[
-    "app",
-    "config",
-    "configs",
-    "docs",
-    "extensions",
-    "include",
-    "lib",
-    "modules",
-    "packages",
-    "plugins",
-    "source",
-    "Sources",
-    "src",
-];
-const FILESYSTEM_AUTO_DISCOVERY_FILTERS: &[&str] = &["src", "include", "lib", "Sources"];
 
 #[cfg(test)]
 struct FileSystemPolicyReadMutation {
@@ -322,7 +283,10 @@ pub(super) fn source_snapshot(
     }
 }
 
-fn git_tree_hash_with_submodules(parent_tree_hash: &str, submodule_states: &[String]) -> String {
+pub(super) fn git_tree_hash_with_submodules(
+    parent_tree_hash: &str,
+    submodule_states: &[String],
+) -> String {
     if submodule_states.is_empty() {
         return parent_tree_hash.to_owned();
     }
