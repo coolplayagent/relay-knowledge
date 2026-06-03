@@ -5,7 +5,7 @@ use rusqlite::{Connection, params, params_from_iter, types::Value};
 use crate::{
     domain::{
         CodeFileFingerprint, CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary,
-        code_snapshot_expected_scope_id,
+        code_snapshot_expected_scope_id, code_snapshot_scope_is_fact_versioned,
     },
     storage::StorageError,
 };
@@ -318,13 +318,14 @@ fn clone_active_scope_for_incremental(
         let (source_scope, tree_hash, stored_path_filters, stored_language_filters) = row?;
         if canonical_path_filters(&stored_path_filters) == requested_path_filters
             && canonical_filter_values(&stored_language_filters) == requested_language_filters
-            && code_snapshot_expected_scope_id(
-                &snapshot.repository_id,
-                &tree_hash,
-                &stored_path_filters,
-                &stored_language_filters,
-            )
-            .is_some_and(|expected| expected == source_scope)
+            && (!code_snapshot_scope_is_fact_versioned(&source_scope)
+                || code_snapshot_expected_scope_id(
+                    &snapshot.repository_id,
+                    &tree_hash,
+                    &stored_path_filters,
+                    &stored_language_filters,
+                )
+                .is_some_and(|expected| expected == source_scope))
         {
             previous_scope = Some(source_scope);
             break;

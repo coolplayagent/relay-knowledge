@@ -63,6 +63,9 @@ mod tests {
         assert!(sqlite_transient_message_is_retryable(
             "vtable constructor failed: code_repository_search"
         ));
+        assert!(sqlite_transient_message_is_retryable(
+            "vtable constructor failed: file_index_search"
+        ));
         assert!(!sqlite_transient_message_is_retryable(
             "no such table: code_repository_search"
         ));

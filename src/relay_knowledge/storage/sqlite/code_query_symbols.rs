@@ -9,10 +9,11 @@ use crate::{
 };
 
 use super::{
-    HitParts,
+    HitParts, canonical_symbol_leaf_matches,
     code_query_api_identities::{
         ApiSymbolIdentity, api_identity_symbol_bonus, hybrid_api_symbol_identities,
     },
+    code_query_hybrid_planning::hybrid_query_prefers_chunk_first,
     code_query_line_ranges::{SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, symbol_result_line_range},
     code_query_path_ranking::{
         path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
@@ -20,9 +21,13 @@ use super::{
     },
     code_query_rows::SymbolRow,
     code_query_support::*,
-    code_search_plannable_outage_reason, dedupe_sort_truncate, hit_from_parts, mark_hits_degraded,
-    prepare_code_search_statement, required_scope, selected_row,
+    code_search_plannable_outage_reason, code_search_read_model_unavailable_reason,
+    dedupe_sort_truncate, hit_from_parts, mark_hits_degraded, prepare_code_search_statement,
+    required_scope, selected_row,
 };
+
+#[path = "code_query_hybrid_symbol_direct.rs"]
+mod hybrid_symbol_direct;
 
 struct SymbolIdentityRows {
     rows: Vec<SymbolRow>,
@@ -57,11 +62,17 @@ pub(super) fn search_symbols(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
+    direct_symbol_recovery_reason: Option<&str>,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let identity = SymbolIdentityQuery::from_query(&request.query);
     let api_identities = hybrid_api_symbol_identities(&request.query, request);
     let mut identity_hits = Vec::new();
     if let Some(identity) = &identity {
+        if identity_miss_can_answer_without_fts(request, false, identity)
+            && !symbol_identity_name_exists(connection, status, request, identity.leaf_name())?
+        {
+            return Ok(Vec::new());
+        }
         let identity_rows = search_symbol_identity_rows(connection, status, request, identity)?;
         let saturated = identity_rows.saturated;
         let rows = identity_rows
@@ -81,6 +92,9 @@ pub(super) fn search_symbols(
             dedupe_sort_truncate(&mut identity_hits, request.limit);
             return Ok(identity_hits);
         }
+        if identity_miss_can_answer_without_fts(request, saturated, identity) {
+            return Ok(Vec::new());
+        }
     }
 
     let api_identity_rows =
@@ -91,13 +105,34 @@ pub(super) fn search_symbols(
         dedupe_sort_truncate(&mut hits, request.limit);
         return Ok(hits);
     }
-
+    if let Some(reason) = direct_symbol_recovery_reason
+        && let Some(mut hits) = hybrid_symbol_direct::search_hybrid_direct_symbol_hits(
+            connection,
+            status,
+            request,
+            &api_identities,
+        )?
+    {
+        mark_hits_degraded(&mut hits, reason);
+        return Ok(hits);
+    }
     let symbol_fts_rows = match search_symbol_fts_rows(connection, status, request) {
         Ok(rows) => rows,
         Err(error) => {
-            let Some(reason) = code_search_plannable_outage_reason(request, &error) else {
+            let Some(reason) = code_search_plannable_outage_reason(request, &error)
+                .or_else(|| hybrid_chunk_first_symbol_outage_reason(request, &error))
+            else {
                 return Err(error);
             };
+            if let Some(mut hits) = hybrid_symbol_direct::search_hybrid_direct_symbol_hits(
+                connection,
+                status,
+                request,
+                &api_identities,
+            )? {
+                mark_hits_degraded(&mut hits, &reason);
+                return Ok(hits);
+            }
             let mut hits = identity_hits;
             hits.extend(symbol_rows_to_hits(
                 status,
@@ -123,6 +158,97 @@ pub(super) fn search_symbols(
     ));
 
     Ok(hits)
+}
+
+fn hybrid_chunk_first_symbol_outage_reason(
+    request: &CodeRetrievalRequest,
+    error: &StorageError,
+) -> Option<String> {
+    (request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request))
+        .then(|| code_search_read_model_unavailable_reason(error))
+        .flatten()
+}
+
+pub(super) fn hybrid_symbol_query_can_answer_without_non_symbol_layers(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+) -> bool {
+    if request.code_query_kind != CodeQueryKind::Hybrid
+        || hits.is_empty()
+        || !query_is_single_symbol_identity(&request.query)
+    {
+        return false;
+    }
+    let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
+        return false;
+    };
+
+    let exact_symbol_hits = hits
+        .iter()
+        .filter(|hit| hybrid_symbol_hit_matches_identity(hit, &identity))
+        .count();
+    exact_symbol_hits > 0 && exact_symbol_hits <= request.limit.max(1)
+}
+
+fn hybrid_symbol_hit_matches_identity(
+    hit: &CodeRetrievalHit,
+    identity: &SymbolIdentityQuery,
+) -> bool {
+    if !hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
+        || hit.symbol_snapshot_id.is_none()
+    {
+        return false;
+    }
+    let Some(canonical_symbol_id) = hit.canonical_symbol_id.as_deref() else {
+        return false;
+    };
+
+    if identity.is_scoped() {
+        identity.matches_symbol(
+            identity.leaf_name(),
+            &hit.excerpt,
+            &hit.excerpt,
+            canonical_symbol_id,
+        )
+    } else {
+        canonical_symbol_leaf_matches(canonical_symbol_id, identity.leaf_name())
+    }
+}
+
+fn symbol_identity_name_exists(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    name: &str,
+) -> Result<bool, StorageError> {
+    let path_filter = path_filter_sql_for_column("path", status, request);
+    let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let sql = format!(
+        "
+        SELECT 1
+        FROM code_repository_symbols
+        WHERE source_scope = ?
+          AND name = ?
+          {path_filter}
+          {language_filter}
+        LIMIT 1
+        "
+    );
+    let mut values = vec![
+        rusqlite::types::Value::Text(required_scope(status)?.to_owned()),
+        rusqlite::types::Value::Text(name.to_owned()),
+    ];
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
+
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
+    let mut rows = statement.query(params_from_iter(values))?;
+
+    rows.next()
+        .map_err(StorageError::from)
+        .map(|row| row.is_some())
 }
 
 fn search_symbol_identity_rows(
@@ -691,6 +817,25 @@ fn identity_hits_can_answer_without_fts(
         && (identity.is_scoped() || hit_count <= request.limit)
 }
 
+fn identity_miss_can_answer_without_fts(
+    request: &CodeRetrievalRequest,
+    saturated: bool,
+    identity: &SymbolIdentityQuery,
+) -> bool {
+    !saturated
+        && matches!(
+            request.code_query_kind,
+            CodeQueryKind::Definition | CodeQueryKind::Symbol
+        )
+        && query_is_single_symbol_identity(&request.query)
+        && identity_has_exact_case_intent(identity.leaf_name())
+}
+
+fn identity_has_exact_case_intent(name: &str) -> bool {
+    name.chars()
+        .any(|character| character.is_ascii_uppercase() || character == '_')
+}
+
 fn symbol_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
     candidate_limit(request, CandidateLayer::Symbol).min(200)
 }
@@ -700,117 +845,5 @@ fn hybrid_api_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::{CodeRepositorySelector, FreshnessPolicy};
-
-    #[test]
-    fn api_dense_hybrid_query_skips_broad_symbol_fts_when_identities_cover() {
-        let request = make_request(
-            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
-            CodeQueryKind::Hybrid,
-        );
-        let identities = hybrid_api_symbol_identities(&request.query, &request);
-        let rows = ApiIdentityRows {
-            rows: Vec::new(),
-            matched_identity_count: identities.len(),
-            saturated: false,
-        };
-
-        assert!(api_identity_rows_can_answer_without_fts(
-            &request,
-            &identities,
-            &rows
-        ));
-    }
-
-    #[test]
-    fn api_dense_symbol_query_still_requires_closed_identity_terms() {
-        let request = make_request(
-            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
-            CodeQueryKind::Symbol,
-        );
-        let identities = hybrid_api_symbol_identities(&request.query, &request);
-        let rows = ApiIdentityRows {
-            rows: Vec::new(),
-            matched_identity_count: identities.len(),
-            saturated: false,
-        };
-
-        assert!(!api_identity_rows_can_answer_without_fts(
-            &request,
-            &identities,
-            &rows
-        ));
-
-        let closed_request = make_request(
-            "worker.New RegisterWorkflow RegisterActivity InterruptCh",
-            CodeQueryKind::Symbol,
-        );
-        let closed_identities =
-            hybrid_api_symbol_identities(&closed_request.query, &closed_request);
-        let closed_rows = ApiIdentityRows {
-            rows: Vec::new(),
-            matched_identity_count: closed_identities.len(),
-            saturated: false,
-        };
-
-        assert!(api_identity_rows_can_answer_without_fts(
-            &closed_request,
-            &closed_identities,
-            &closed_rows
-        ));
-    }
-
-    #[test]
-    fn api_dense_hybrid_query_keeps_broad_symbol_fts_for_partial_or_empty_identity_lookup() {
-        let request = make_request(
-            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
-            CodeQueryKind::Hybrid,
-        );
-        let identities = hybrid_api_symbol_identities(&request.query, &request);
-        let partial_rows = ApiIdentityRows {
-            rows: Vec::new(),
-            matched_identity_count: identities.len() - 1,
-            saturated: false,
-        };
-        let empty_rows = ApiIdentityRows {
-            rows: Vec::new(),
-            matched_identity_count: 0,
-            saturated: false,
-        };
-        let saturated_rows = ApiIdentityRows {
-            rows: Vec::new(),
-            matched_identity_count: identities.len(),
-            saturated: true,
-        };
-
-        assert!(!api_identity_rows_can_answer_without_fts(
-            &request,
-            &identities,
-            &partial_rows
-        ));
-        assert!(!api_identity_rows_can_answer_without_fts(
-            &request,
-            &identities,
-            &empty_rows
-        ));
-        assert!(!api_identity_rows_can_answer_without_fts(
-            &request,
-            &identities,
-            &saturated_rows
-        ));
-    }
-
-    fn make_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
-        CodeRetrievalRequest::new(
-            query,
-            CodeRepositorySelector::new("repo", "HEAD", Vec::new(), vec!["go".to_owned()])
-                .expect("selector should validate"),
-            kind,
-            10,
-            FreshnessPolicy::AllowStale,
-        )
-        .expect("request should validate")
-    }
-}
+#[path = "code_query_symbols_tests.rs"]
+mod tests;

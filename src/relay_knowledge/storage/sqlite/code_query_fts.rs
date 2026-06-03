@@ -14,6 +14,11 @@ const MIN_HIGH_SIGNAL_TERM_PRIORITY: usize = 4;
 const MAX_API_DENSE_UNSTRUCTURED_TERMS: usize = 1;
 const STRICT_HYBRID_CHUNK_MIN_STRUCTURED_TERMS: usize = 2;
 const STRICT_HYBRID_CHUNK_MAX_TERMS: usize = 3;
+const FOCUSED_HYBRID_CHUNK_MAX_TERMS: usize = 8;
+const FOCUSED_HYBRID_CHUNK_PAIR_DISTANCE: usize = 4;
+const COMPOUND_HYBRID_CHUNK_MIN_TERM_LEN: usize = 4;
+const COMPOUND_HYBRID_CHUNK_MAX_TERMS: usize = 8;
+const COMPOUND_HYBRID_CHUNK_PAIR_DISTANCE: usize = 1;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::fts_query_terms(query), " ", true)
@@ -26,13 +31,110 @@ pub(in crate::storage::sqlite::code::code_query) fn symbol_fts_match_query(query
 pub(in crate::storage::sqlite::code::code_query) fn hybrid_chunk_fts_match_query(
     query: &str,
 ) -> String {
+    hybrid_chunk_fts_match_query_with_compound(query, true)
+}
+
+pub(in crate::storage::sqlite::code::code_query) fn direct_hybrid_chunk_fts_match_query(
+    query: &str,
+) -> String {
+    hybrid_chunk_fts_match_query_with_compound(query, false)
+}
+
+pub(in crate::storage::sqlite::code::code_query) fn focused_hybrid_chunk_fts_match_query(
+    query: &str,
+) -> Option<String> {
     let terms = dedupe_terms(super::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
-        return fts_match_query_with_operator(&terms, " OR ", true);
+        return None;
+    }
+    if terms.iter().any(|term| identifier_term_has_structure(term)) {
+        return None;
+    }
+    let terms = terms
+        .into_iter()
+        .filter(|term| term.len() >= MIN_HIGH_SIGNAL_TERM_PRIORITY)
+        .take(FOCUSED_HYBRID_CHUNK_MAX_TERMS)
+        .collect::<Vec<_>>();
+    if terms.len() < 3 {
+        return None;
+    }
+    let mut groups = Vec::new();
+    for (index, left) in terms.iter().enumerate() {
+        for right in terms
+            .iter()
+            .skip(index + 1)
+            .take(FOCUSED_HYBRID_CHUNK_PAIR_DISTANCE)
+        {
+            groups.push(format!(
+                "({} {})",
+                quote_fts_term(left),
+                quote_fts_term(right)
+            ));
+        }
+    }
+
+    (!groups.is_empty()).then(|| groups.join(" OR "))
+}
+
+pub(in crate::storage::sqlite::code::code_query) fn structured_hybrid_chunk_fts_match_query(
+    query: &str,
+) -> Option<String> {
+    let terms = dedupe_terms(super::fts_query_terms(query))
+        .into_iter()
+        .filter(|term| identifier_term_has_recall_structure(term))
+        .take(MAX_HYBRID_CHUNK_RECALL_ANCHORS)
+        .collect::<Vec<_>>();
+
+    (!terms.is_empty()).then(|| fts_match_query_with_operator(&terms, " OR ", false))
+}
+
+pub(in crate::storage::sqlite::code::code_query) fn compound_hybrid_chunk_fts_match_query(
+    query: &str,
+) -> Option<String> {
+    let terms = dedupe_terms(super::fts_query_terms(query))
+        .into_iter()
+        .filter(|term| term.len() >= COMPOUND_HYBRID_CHUNK_MIN_TERM_LEN)
+        .take(COMPOUND_HYBRID_CHUNK_MAX_TERMS)
+        .collect::<Vec<_>>();
+    if terms.len() < 2 {
+        return None;
+    }
+
+    let mut alternatives = Vec::new();
+    for (index, left) in terms.iter().enumerate() {
+        for right in terms
+            .iter()
+            .skip(index + 1)
+            .take(COMPOUND_HYBRID_CHUNK_PAIR_DISTANCE)
+        {
+            push_compound_identifier_window(
+                &mut alternatives,
+                &terms,
+                &[left.clone(), right.clone()],
+            );
+        }
+    }
+
+    (!alternatives.is_empty()).then(|| {
+        alternatives
+            .iter()
+            .map(|term| quote_fts_term(term))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    })
+}
+
+fn hybrid_chunk_fts_match_query_with_compound(
+    query: &str,
+    include_compound_identifiers: bool,
+) -> String {
+    let terms = dedupe_terms(super::fts_query_terms(query));
+    if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
+        return fts_match_query_with_operator(&terms, " OR ", include_compound_identifiers);
     }
 
     let recall_terms = hybrid_chunk_recall_terms(&terms);
-    fts_match_query_with_operator(&recall_terms, " OR ", true)
+    fts_match_query_with_operator(&recall_terms, " OR ", include_compound_identifiers)
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn strict_hybrid_chunk_fts_match_query(
@@ -369,11 +471,20 @@ fn hybrid_chunk_term_priority(term: &str) -> usize {
 }
 
 fn identifier_term_has_structure(term: &str) -> bool {
+    identifier_term_structure_boundary_count(term) > 0
+}
+
+fn identifier_term_has_recall_structure(term: &str) -> bool {
+    term.contains('_') || identifier_term_structure_boundary_count(term) >= 2
+}
+
+fn identifier_term_structure_boundary_count(term: &str) -> usize {
     if term.contains('_') {
-        return true;
+        return 1;
     }
     let mut previous: Option<char> = None;
     let chars = term.chars().collect::<Vec<_>>();
+    let mut boundaries = 0usize;
     for (index, character) in chars.iter().enumerate() {
         let next = chars.get(index + 1).copied();
         let starts_upper_word = character.is_ascii_uppercase()
@@ -383,12 +494,12 @@ fn identifier_term_has_structure(term: &str) -> bool {
                     || next.is_some_and(|next| next.is_ascii_lowercase())
             });
         if starts_upper_word {
-            return true;
+            boundaries += 1;
         }
         previous = Some(*character);
     }
 
-    false
+    boundaries
 }
 
 fn compound_identifier_fts_terms(terms: &[String]) -> Vec<String> {
@@ -526,5 +637,83 @@ mod tests {
         assert!(fts_query.contains("\"envconfig\""));
         assert!(!fts_query.contains("\"workflow\""));
         assert!(!fts_query.contains("\"client\""));
+    }
+
+    #[test]
+    fn direct_hybrid_chunk_fts_query_omits_compound_alternatives() {
+        assert_eq!(
+            direct_hybrid_chunk_fts_match_query("cache cache Lookup Insert"),
+            "\"cache\" OR \"Lookup\" OR \"Insert\""
+        );
+        assert!(
+            !direct_hybrid_chunk_fts_match_query("checkpoint metadata version constant")
+                .contains("\"checkpointmetadataversionconstant\"")
+        );
+    }
+
+    #[test]
+    fn focused_hybrid_chunk_fts_query_uses_bounded_neighbor_pairs() {
+        let fts_query = focused_hybrid_chunk_fts_match_query(
+            "typed arrow payload projector trim provider record",
+        )
+        .expect("focused hybrid query should be planned");
+
+        assert!(fts_query.contains("(\"payload\" \"projector\")"));
+        assert!(fts_query.contains("(\"payload\" \"trim\")"));
+        assert!(fts_query.contains("(\"payload\" \"provider\")"));
+        assert!(fts_query.contains("(\"provider\" \"record\")"));
+        assert!(!fts_query.contains("\"payload\" OR \"projector\""));
+    }
+
+    #[test]
+    fn focused_hybrid_chunk_fts_query_skips_structured_identifier_terms() {
+        assert!(
+            focused_hybrid_chunk_fts_match_query(
+                "EvalCheckpointStore signature mismatch append result"
+            )
+            .is_none()
+        );
+        assert!(
+            focused_hybrid_chunk_fts_match_query(
+                "external session workflow TypeScript client openExternalSession"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn structured_hybrid_chunk_fts_query_uses_identifier_terms_only() {
+        assert_eq!(
+            structured_hybrid_chunk_fts_match_query(
+                "external session workflow TypeScript client openExternalSession"
+            )
+            .as_deref(),
+            Some("\"openExternalSession\"")
+        );
+        assert!(structured_hybrid_chunk_fts_match_query("plain workflow query").is_none());
+    }
+
+    #[test]
+    fn compound_hybrid_chunk_fts_query_uses_bounded_adjacent_identifier_pairs() {
+        let fts_query = compound_hybrid_chunk_fts_match_query(
+            "tsx provider panel effect run provider envelope payload",
+        )
+        .expect("compound hybrid query should be planned");
+
+        assert!(fts_query.contains("\"providerpanel\""));
+        assert!(fts_query.contains("\"provider_panel\""));
+        assert!(fts_query.contains("\"envelopepayload\""));
+        assert!(!fts_query.contains("\"providerpaneleffect\""));
+    }
+
+    #[test]
+    fn compound_hybrid_chunk_fts_query_recalls_type_identifier_pairs() {
+        let fts_query = compound_hybrid_chunk_fts_match_query(
+            "typed arrow payload projector trim provider record",
+        )
+        .expect("compound hybrid query should be planned");
+
+        assert!(fts_query.contains("\"payloadprojector\""));
+        assert!(fts_query.contains("\"payload_projector\""));
     }
 }

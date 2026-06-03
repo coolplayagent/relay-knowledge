@@ -29,9 +29,10 @@ use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
     apply_code_grep_fallback, code_index_worker_lease_owner, code_status_checkpoint,
-    feature_flag_request_at_indexed_ref, fresh_full_index_probe, index_start_from_completed,
-    indexed_source_scope, latest_compatible_code_scope_status, missing_indexed_source_scope_error,
-    now_millis, previous_index_state_for_index, recover_code_index_task_leases,
+    degraded_file_count_for_fresh_index, feature_flag_request_at_indexed_ref,
+    fresh_full_index_probe, index_start_from_completed, indexed_source_scope,
+    latest_compatible_code_scope_status, missing_indexed_source_scope_error, now_millis,
+    previous_index_state_for_index, recover_code_index_task_leases,
     recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
     registration_from_status, required_code_repository, resolve_code_ref_for_selector,
     resolved_code_scope_status, retrieval_request_at_indexed_ref, run_blocking_code,
@@ -533,14 +534,8 @@ impl RelayKnowledgeService {
             .last_indexed_scope_id
             .clone()
             .unwrap_or_default();
-        let software_projection = store
-            .refresh_software_global_projection(source_scope.clone())
-            .await
-            .map_err(storage_api_error)?;
-        let report = store
-            .code_repository_report(scoped_status.repository_id.clone())
-            .await
-            .map_err(storage_api_error)?;
+        let degraded_file_count =
+            degraded_file_count_for_fresh_index(store, &scoped_status).await?;
         let summary = crate::domain::CodeIndexSummary {
             repository_id: scoped_status.repository_id.clone(),
             source_scope,
@@ -553,14 +548,14 @@ impl RelayKnowledgeService {
             symbol_count: scoped_status.symbol_count,
             reference_count: scoped_status.reference_count,
             chunk_count: scoped_status.chunk_count,
-            degraded_file_count: report.degraded_file_count,
+            degraded_file_count,
             progress: crate::domain::CodeIndexProgressSummary {
                 git_file_count: scoped_status.indexed_file_count,
                 blob_read_count: 0,
                 parsed_file_count: 0,
                 sqlite_write_count: 0,
                 skipped_file_count: scoped_status.indexed_file_count,
-                degraded_file_count: report.degraded_file_count,
+                degraded_file_count,
                 batch_count: 0,
                 checkpoint_file_count: scoped_status.indexed_file_count,
                 resource_budget: crate::domain::CodeIndexResourceBudget::default(),
@@ -575,12 +570,7 @@ impl RelayKnowledgeService {
                 request.repository.ref_selector.clone(),
             ),
             summary,
-            status: CodeRepositoryStatus {
-                degraded_reason: scoped_status
-                    .degraded_reason
-                    .or(software_projection.status.last_error.clone()),
-                ..scoped_status
-            },
+            status: scoped_status,
         }))
     }
 

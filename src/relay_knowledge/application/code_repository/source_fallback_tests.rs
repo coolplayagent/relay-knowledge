@@ -49,6 +49,32 @@ fn fallback_plan_skips_results_with_exact_declaration() {
 }
 
 #[test]
+fn definition_fallback_skips_unanchored_empty_exact_miss() {
+    let request = request(
+        "DefinitelyMissingSymbol",
+        CodeQueryKind::Definition,
+        Vec::new(),
+    );
+
+    assert!(plan_code_grep_fallback(&status(), &request, &[]).is_none());
+}
+
+#[test]
+fn definition_fallback_uses_exact_file_filter_without_indexed_hits() {
+    let request = request(
+        "rk_read_fn",
+        CodeQueryKind::Definition,
+        vec!["include/driver_ops.h".to_owned()],
+    );
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[])
+        .expect("exact file filter should anchor definition fallback");
+
+    assert_eq!(plan.paths, ["include/driver_ops.h"]);
+    assert!(!plan.needs_scope_paths());
+}
+
+#[test]
 fn hybrid_grep_fallback_fills_after_structured_hits() {
     let request = request("rk_helper", CodeQueryKind::Hybrid, Vec::new());
     let mut results = vec![hit("src/lib.c", "void structured_hit(void);")];
@@ -105,6 +131,37 @@ fn hybrid_grep_fallback_uses_text_fallback_for_non_symbol_coverage() {
 
     assert_eq!(plan.kind, SourceGrepKind::Hybrid);
     assert!(plan.needs_scope_paths());
+}
+
+#[test]
+fn reference_fallback_uses_exact_file_filter_without_scope_path_lookup() {
+    let request = request(
+        "RK_TRACE_NOTE",
+        CodeQueryKind::References,
+        vec!["./src/driver_ops.c".to_owned()],
+    );
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[])
+        .expect("exact path filter should plan fallback");
+
+    assert_eq!(plan.paths, ["src/driver_ops.c"]);
+    assert!(!plan.needs_scope_paths());
+}
+
+#[test]
+fn hybrid_fallback_uses_exact_file_filter_without_scope_path_lookup() {
+    let request = request(
+        "RK_PIPELINE_NOTE",
+        CodeQueryKind::Hybrid,
+        vec!["src/dispatch.c".to_owned()],
+    );
+    let result = hit("src/dispatch.c", "structured dispatch context");
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[result])
+        .expect("exact path filter should plan fallback");
+
+    assert_eq!(plan.paths, ["src/dispatch.c"]);
+    assert!(!plan.needs_scope_paths());
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use super::{
     CodeIndexResourceBudget, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
     FreshnessPolicy, RepositoryCodeRange, code_snapshot_expected_scope_id, code_snapshot_scope_id,
+    code_snapshot_scope_is_fact_versioned,
 };
 
 #[test]
@@ -52,6 +53,15 @@ fn expected_snapshot_scope_id_is_checked_for_unfiltered_repositories() {
         .expect("all repository snapshots should carry a fact version");
 
     assert_eq!(expected, scope);
+}
+
+#[test]
+fn fact_versioned_snapshot_scope_requires_generated_hash_shape() {
+    assert!(code_snapshot_scope_is_fact_versioned(
+        "git_snapshot:0123456789abcdef"
+    ));
+    assert!(!code_snapshot_scope_is_fact_versioned("git_snapshot:test"));
+    assert!(!code_snapshot_scope_is_fact_versioned("manual:test"));
 }
 
 #[test]

@@ -1,7 +1,10 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    domain::{CodeRepositoryRegistration, CodeRepositoryStatus, code_snapshot_expected_scope_id},
+    domain::{
+        CodeRepositoryRegistration, CodeRepositoryStatus, code_snapshot_expected_scope_id,
+        code_snapshot_scope_is_fact_versioned,
+    },
     storage::StorageError,
 };
 
@@ -22,7 +25,13 @@ pub(super) fn upsert_repository(
             root_path = excluded.root_path,
             path_filters_json = excluded.path_filters_json,
             language_filters_json = excluded.language_filters_json,
-            stale = 1
+            stale = CASE
+                WHEN root_path != excluded.root_path
+                  OR path_filters_json != excluded.path_filters_json
+                  OR language_filters_json != excluded.language_filters_json
+                THEN 1
+                ELSE stale
+            END
         ",
         params![
             registration.repository_id,
@@ -159,6 +168,9 @@ pub(super) fn repository_scope_status(
     let mut current_compatible = None;
     for row in rows {
         let (status, stored_path_filters, stored_language_filters) = row?;
+        if !status_matches_current_fact_version(&status) {
+            continue;
+        }
         if canonical_path_filters(&stored_path_filters) == requested_path_filters
             && canonical_filter_values(&stored_language_filters) == requested_language_filters
         {
@@ -236,6 +248,9 @@ pub(super) fn latest_repository_scope_status(
     })?;
     for row in rows {
         let (status, stored_path_filters, stored_language_filters) = row?;
+        if !status_matches_current_fact_version(&status) {
+            continue;
+        }
         if path_scope_filters_cover_request(
             &stored_path_filters,
             &base_path_filters,
@@ -251,6 +266,25 @@ pub(super) fn latest_repository_scope_status(
     }
 
     Ok(None)
+}
+
+fn status_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
+    let Some(source_scope) = status.last_indexed_scope_id.as_deref() else {
+        return false;
+    };
+    if !code_snapshot_scope_is_fact_versioned(source_scope) {
+        return true;
+    }
+    let Some(tree_hash) = status.tree_hash.as_deref() else {
+        return false;
+    };
+    code_snapshot_expected_scope_id(
+        &status.repository_id,
+        tree_hash,
+        &status.path_filters,
+        &status.language_filters,
+    )
+    .is_some_and(|expected| expected == source_scope)
 }
 
 pub(super) fn repository_scope_status_by_source_scope(
@@ -298,7 +332,7 @@ fn repository_status_by_column(
     repository: &str,
     column: RepositoryLookupColumn,
 ) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    connection
+    let status = connection
         .query_row(column.query(), params![repository], |row| {
             Ok(CodeRepositoryStatus {
                 repository_id: row.get(0)?,
@@ -318,8 +352,41 @@ fn repository_status_by_column(
                 degraded_reason: row.get(14)?,
             })
         })
-        .optional()
-        .map_err(StorageError::from)
+        .optional()?;
+
+    status
+        .map(|status| reconcile_repository_status_freshness(connection, status))
+        .transpose()
+}
+
+fn reconcile_repository_status_freshness(
+    connection: &Connection,
+    mut status: CodeRepositoryStatus,
+) -> Result<CodeRepositoryStatus, StorageError> {
+    if !status.stale || status.state != "fresh" || !status_matches_current_fact_version(&status) {
+        return Ok(status);
+    }
+    let Some(source_scope) = status.last_indexed_scope_id.as_deref() else {
+        return Ok(status);
+    };
+    let scope_is_fresh = connection
+        .query_row(
+            "
+            SELECT stale = 0
+            FROM code_repository_scopes
+            WHERE source_scope = ?1
+              AND repository_id = ?2
+            ",
+            params![source_scope, status.repository_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if scope_is_fresh {
+        status.stale = false;
+    }
+
+    Ok(status)
 }
 
 enum RepositoryLookupColumn {
@@ -368,7 +435,7 @@ fn scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
     ) else {
         return false;
     };
-    if !is_generated_git_snapshot_scope(source_scope) {
+    if !code_snapshot_scope_is_fact_versioned(source_scope) {
         return true;
     }
 
@@ -379,13 +446,6 @@ fn scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
         &status.language_filters,
     )
     .is_some_and(|expected| expected == source_scope)
-}
-
-fn is_generated_git_snapshot_scope(source_scope: &str) -> bool {
-    let Some(hash) = source_scope.strip_prefix("git_snapshot:") else {
-        return false;
-    };
-    hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub(super) fn canonical_path_filters(filters: &[String]) -> Vec<String> {

@@ -200,7 +200,7 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         10,
     )));
-    assert!(!hybrid_query_prefers_chunk_first(&request(
+    assert!(hybrid_query_prefers_chunk_first(&request(
         "EvalCheckpointStore signature mismatch append result",
         CodeQueryKind::Hybrid,
         10,
@@ -210,11 +210,22 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         10,
     )));
-    assert!(!hybrid_query_prefers_chunk_first(&request(
-        "typed arrow payload projector trim provider record",
-        CodeQueryKind::Hybrid,
-        12,
-    )));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "typed arrow payload projector trim provider record",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["typescript".to_owned()],
+        )
+    ));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "external session workflow TypeScript client openExternalSession",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["typescript".to_owned()],
+        )
+    ));
     assert!(hybrid_query_prefers_chunk_first(&request(
         "tsx provider panel effect run provider envelope payload",
         CodeQueryKind::Hybrid,

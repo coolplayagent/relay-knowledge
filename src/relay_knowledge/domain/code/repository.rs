@@ -40,6 +40,16 @@ pub fn code_snapshot_expected_scope_id(
     ))
 }
 
+pub fn code_snapshot_scope_is_fact_versioned(source_scope: &str) -> bool {
+    let Some(scope_hash) = source_scope.strip_prefix("git_snapshot:") else {
+        return false;
+    };
+    scope_hash.len() == 16
+        && scope_hash
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+}
+
 /// Inclusive byte or line range for repository code index rows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeRange {

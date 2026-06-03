@@ -20,11 +20,18 @@ pub(super) fn hybrid_direct_results_can_answer_without_graph_expansion(
         return false;
     }
 
-    if hits
-        .iter()
-        .take(request.limit.max(1))
-        .any(|hit| hybrid_direct_hit_covers_query(hit, &terms))
+    if hybrid_pascal_identifier_hit_covers_query(request, hits) {
+        return true;
+    }
+    if terms.len() <= 4
+        && hits
+            .iter()
+            .take(request.limit.max(1))
+            .any(|hit| hybrid_direct_hit_covers_query(hit, &terms))
     {
+        return true;
+    }
+    if hybrid_direct_lexical_surface_covers_query(request, hits, &terms) {
         return true;
     }
 
@@ -43,6 +50,99 @@ fn hybrid_direct_required_match_count(term_count: usize) -> usize {
         .div_ceil(5)
         .clamp(4, 6)
         .min(term_count)
+}
+
+fn hybrid_direct_lexical_surface_covers_query(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+    terms: &[String],
+) -> bool {
+    if terms.len() < 5 {
+        return false;
+    }
+    let required_coverage = terms.len().saturating_mul(2).div_ceil(3).max(4);
+    let required_supporting_hits = 3;
+    let mut covered_terms = Vec::new();
+    let mut supporting_hits = 0usize;
+    for hit in hits.iter().take(request.limit.max(1)) {
+        if !hybrid_direct_hit_can_answer(hit) {
+            continue;
+        }
+        let excerpt = hit.excerpt.to_ascii_lowercase();
+        let mut matched_terms = 0usize;
+        for term in terms {
+            if excerpt.contains(term.as_str()) {
+                matched_terms += 1;
+                if !covered_terms.contains(term) {
+                    covered_terms.push(term.clone());
+                }
+            }
+        }
+        if matched_terms >= 2 && hit.score >= 4.0 {
+            supporting_hits += 1;
+        }
+    }
+
+    supporting_hits >= required_supporting_hits && covered_terms.len() >= required_coverage
+}
+
+fn hybrid_pascal_identifier_hit_covers_query(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+) -> bool {
+    let identifiers = pascal_identifier_terms(&request.query);
+    if identifiers.is_empty() {
+        return false;
+    }
+
+    hits.iter()
+        .take(request.limit.max(1))
+        .filter(|hit| hybrid_direct_hit_can_answer(hit) && hit.score >= 4.0)
+        .any(|hit| {
+            identifiers
+                .iter()
+                .any(|identifier| hit.excerpt.contains(identifier))
+        })
+}
+
+fn pascal_identifier_terms(query: &str) -> Vec<String> {
+    let mut identifiers = Vec::new();
+    for token in query.split_whitespace().map(|term| {
+        term.trim_matches(|character: char| {
+            !(character.is_ascii_alphanumeric() || character == '_')
+        })
+    }) {
+        if token.len() < 6 || token.contains('_') {
+            continue;
+        }
+        let Some(first) = token.chars().next() else {
+            continue;
+        };
+        if !first.is_ascii_uppercase() || identifier_case_boundary_count(token) < 2 {
+            continue;
+        }
+        if !identifiers
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(token))
+        {
+            identifiers.push(token.to_owned());
+        }
+    }
+
+    identifiers
+}
+
+fn identifier_case_boundary_count(term: &str) -> usize {
+    let mut boundaries = 0usize;
+    let mut previous_lowercase = false;
+    for character in term.chars() {
+        if character.is_ascii_uppercase() && previous_lowercase {
+            boundaries += 1;
+        }
+        previous_lowercase = character.is_ascii_lowercase() || character.is_ascii_digit();
+    }
+
+    boundaries
 }
 
 fn hybrid_query_has_graph_expansion_intent(terms: &[String]) -> bool {
@@ -137,6 +237,83 @@ mod tests {
     use crate::domain::{CodeRepositorySelector, FreshnessPolicy, RepositoryCodeRange};
 
     #[test]
+    fn hybrid_direct_gate_accepts_collective_lexical_surface_coverage() {
+        let request = language_request(
+            "typed arrow payload projector trim provider record",
+            "typescript",
+            12,
+        );
+        let hits = vec![
+            lexical_hit(
+                "src/provider.ts",
+                "typescript",
+                8.0,
+                "record(payload: string): string { return trimPayload(payload); }",
+            ),
+            lexical_hit(
+                "src/protocol.ts",
+                "typescript",
+                7.0,
+                "export type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;",
+            ),
+            lexical_hit(
+                "src/provider.ts",
+                "typescript",
+                6.0,
+                "export class ProviderRuntime { record(payload: string) { return payload; } }",
+            ),
+        ];
+
+        assert!(hybrid_direct_results_can_answer_without_graph_expansion(
+            &request, &hits
+        ));
+    }
+
+    #[test]
+    fn hybrid_direct_gate_keeps_sparse_lexical_surface_for_graph_expansion() {
+        let request = request(
+            "typed arrow payload projector trim provider record",
+            CodeQueryKind::Hybrid,
+            12,
+        );
+        let hits = vec![
+            lexical_hit("src/provider.ts", "typescript", 8.0, "provider payload"),
+            lexical_hit("src/protocol.ts", "typescript", 7.0, "projector trim"),
+        ];
+
+        assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+            &request, &hits
+        ));
+    }
+
+    #[test]
+    fn hybrid_direct_gate_keeps_underfilled_long_lexical_surface_for_fallback_layers() {
+        let request = language_request(
+            "external session workflow TypeScript client openExternalSession",
+            "typescript",
+            12,
+        );
+        let hits = vec![
+            lexical_hit(
+                "external_deps/ts_sdk/sessionClient.ts",
+                "typescript",
+                16.0,
+                "openExternalSession(payload: string) creates an external TypeScript session client workflow",
+            ),
+            lexical_hit(
+                "external_deps/ts_sdk/sessionClient.ts",
+                "typescript",
+                13.0,
+                "ExternalTypeScriptSessionClient openExternalSession(payload: string)",
+            ),
+        ];
+
+        assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+            &request, &hits
+        ));
+    }
+
+    #[test]
     fn hybrid_direct_gate_accepts_collective_api_identity_symbol_coverage() {
         let request = request(
             "worker.New RegisterWorkflow InterruptCh task queue",
@@ -151,6 +328,25 @@ mod tests {
             ),
             symbol_hit("worker.InterruptCh", "fn InterruptCh() <-chan interface{}"),
         ];
+
+        assert!(hybrid_direct_results_can_answer_without_graph_expansion(
+            &request, &hits
+        ));
+    }
+
+    #[test]
+    fn hybrid_direct_gate_accepts_pascal_type_identifier_hits() {
+        let request = request(
+            "EvalCheckpointStore signature mismatch append result",
+            CodeQueryKind::Hybrid,
+            10,
+        );
+        let hits = vec![lexical_hit(
+            "src/checkpoint.py",
+            "python",
+            10.0,
+            "class EvalCheckpointStore: def append_result(self, result): ...",
+        )];
 
         assert!(hybrid_direct_results_can_answer_without_graph_expansion(
             &request, &hits
@@ -207,6 +403,45 @@ mod tests {
             FreshnessPolicy::AllowStale,
         )
         .expect("request should validate")
+    }
+
+    fn language_request(query: &str, language: &str, limit: usize) -> CodeRetrievalRequest {
+        CodeRetrievalRequest::new(
+            query,
+            CodeRepositorySelector::new("repo", "commit", Vec::new(), vec![language.to_owned()])
+                .expect("selector should validate"),
+            CodeQueryKind::Hybrid,
+            limit,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate")
+    }
+
+    fn lexical_hit(path: &str, language_id: &str, score: f64, excerpt: &str) -> CodeRetrievalHit {
+        CodeRetrievalHit {
+            repository_id: "repo".to_owned(),
+            scope_id: "code:test:hybrid-direct-gate:commit:tree".to_owned(),
+            resolved_commit_sha: "commit".to_owned(),
+            tree_hash: "tree".to_owned(),
+            path: path.to_owned(),
+            language_id: language_id.to_owned(),
+            byte_range: range(1, 1),
+            line_range: range(1, 1),
+            symbol_snapshot_id: None,
+            canonical_symbol_id: None,
+            file_id: Some("file".to_owned()),
+            retrieval_layers: vec![CodeRetrievalLayer::Lexical],
+            index_versions: Vec::new(),
+            stale: false,
+            degraded_reason: None,
+            edge_kind: None,
+            edge_resolution_state: None,
+            edge_target_hint: None,
+            edge_confidence_basis_points: None,
+            edge_confidence_tier: None,
+            score,
+            excerpt: excerpt.to_owned(),
+        }
     }
 
     fn symbol_hit(canonical_symbol_id: &str, excerpt: &str) -> CodeRetrievalHit {

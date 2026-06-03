@@ -59,6 +59,10 @@ mod software;
 mod code_tests;
 
 #[cfg(test)]
+#[path = "code_scope_status_tests.rs"]
+mod code_scope_status_tests;
+
+#[cfg(test)]
 #[path = "code_snapshot_candidate_paths_tests.rs"]
 mod code_snapshot_candidate_paths_tests;
 

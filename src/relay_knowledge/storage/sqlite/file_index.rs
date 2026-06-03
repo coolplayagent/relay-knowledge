@@ -163,7 +163,12 @@ pub(super) fn search(
         return Err(file_query_timeout());
     }
     connection.progress_handler(1000, Some(move || Instant::now() >= deadline));
-    let result = search_with_progress_handler(connection, request);
+    let result = super::retry::retry_sqlite_transient(|| {
+        if Instant::now() >= deadline {
+            return Err(file_query_timeout());
+        }
+        search_with_progress_handler(connection, request.clone())
+    });
     connection.progress_handler(0, None::<fn() -> bool>);
 
     match result {

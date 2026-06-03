@@ -13,10 +13,16 @@ const PROCEDURAL_LANGUAGE_MIN_HIGH_SIGNAL_TERMS: usize = 5;
 const WORKFLOW_SURFACE_MIN_TERMS: usize = 5;
 const WORKFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS: usize = 4;
 const WORKFLOW_SURFACE_MIN_DATAFLOW_TERMS: usize = 2;
+const CONTEXTUAL_API_SURFACE_MIN_TERMS: usize = 5;
+const CONTEXTUAL_API_SURFACE_MIN_CONTEXT_TERMS: usize = 3;
+const TYPED_DATAFLOW_SURFACE_MIN_TERMS: usize = 6;
+const TYPED_DATAFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS: usize = 5;
+const TYPED_DATAFLOW_SURFACE_MIN_DATAFLOW_TERMS: usize = 3;
 const HIGH_SIGNAL_TERM_LEN: usize = 5;
 
 enum HybridChunkFirstPlan {
     ApiIdentities,
+    ContextualSurface,
     StructuredSequence,
     FilteredProceduralSurface,
     WorkflowSurface {
@@ -37,6 +43,7 @@ pub(super) fn query_language_scoped_workflow_surface_scopes(
         }) => query_language_scopes,
         Some(
             HybridChunkFirstPlan::ApiIdentities
+            | HybridChunkFirstPlan::ContextualSurface
             | HybridChunkFirstPlan::StructuredSequence
             | HybridChunkFirstPlan::FilteredProceduralSurface,
         )
@@ -85,8 +92,16 @@ fn hybrid_chunk_first_plan(request: &CodeRetrievalRequest) -> Option<HybridChunk
     if hybrid_query_has_filtered_procedural_surface(request, &terms) {
         return Some(HybridChunkFirstPlan::FilteredProceduralSurface);
     }
+    if let Some(plan) = workflow_surface_chunk_first_plan(request, &raw_terms, &terms) {
+        return Some(plan);
+    }
+    if hybrid_query_has_contextual_api_surface(&raw_terms, &terms)
+        || hybrid_query_has_typed_dataflow_surface(request, &raw_terms, &terms)
+    {
+        return Some(HybridChunkFirstPlan::ContextualSurface);
+    }
 
-    workflow_surface_chunk_first_plan(request, &raw_terms, &terms)
+    None
 }
 
 pub(super) fn hybrid_sequence_terms(query: &str) -> Vec<String> {
@@ -140,6 +155,52 @@ fn hybrid_query_has_filtered_procedural_surface(
             >= PROCEDURAL_LANGUAGE_MIN_HIGH_SIGNAL_TERMS
 }
 
+fn hybrid_query_has_contextual_api_surface(raw_terms: &[String], terms: &[String]) -> bool {
+    if terms.len() < CONTEXTUAL_API_SURFACE_MIN_TERMS {
+        return false;
+    }
+
+    let contextual_api_terms = raw_terms
+        .iter()
+        .filter(|term| contextual_api_surface_term(term))
+        .count();
+    contextual_api_terms > 0
+        && terms.len().saturating_sub(contextual_api_terms)
+            >= CONTEXTUAL_API_SURFACE_MIN_CONTEXT_TERMS
+        && terms
+            .iter()
+            .filter(|term| hybrid_sequence_term_has_high_signal(term))
+            .count()
+            >= WORKFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS
+}
+
+fn hybrid_query_has_typed_dataflow_surface(
+    request: &CodeRetrievalRequest,
+    raw_terms: &[String],
+    terms: &[String],
+) -> bool {
+    let signal_terms = workflow_surface_signal_terms(raw_terms);
+    request
+        .repository
+        .language_filters
+        .iter()
+        .any(|language| workflow_chunk_first_language(language))
+        && terms.len() >= TYPED_DATAFLOW_SURFACE_MIN_TERMS
+        && terms
+            .iter()
+            .filter(|term| hybrid_sequence_term_has_high_signal(term))
+            .count()
+            >= TYPED_DATAFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS
+        && signal_terms
+            .iter()
+            .any(|term| typed_function_surface_term(term))
+        && signal_terms
+            .iter()
+            .filter(|term| dataflow_surface_term(term))
+            .count()
+            >= TYPED_DATAFLOW_SURFACE_MIN_DATAFLOW_TERMS
+}
+
 fn workflow_surface_chunk_first_plan(
     request: &CodeRetrievalRequest,
     raw_terms: &[String],
@@ -190,6 +251,10 @@ fn hybrid_sequence_term_has_high_signal(term: &str) -> bool {
 
 fn hybrid_term_has_structure(term: &str) -> bool {
     term.contains('_') || term_has_alpha_digit_mix(term) || term_has_case_boundary(term)
+}
+
+fn contextual_api_surface_term(term: &str) -> bool {
+    term.len() >= HIGH_SIGNAL_TERM_LEN && hybrid_term_has_structure(term)
 }
 
 fn procedural_chunk_first_language(language: &str) -> bool {
@@ -313,6 +378,13 @@ fn dataflow_surface_term(term: &str) -> bool {
             | "request"
             | "response"
             | "transport"
+    )
+}
+
+fn typed_function_surface_term(term: &str) -> bool {
+    matches!(
+        term.to_ascii_lowercase().as_str(),
+        "arrow" | "callback" | "closure" | "function" | "lambda" | "typed"
     )
 }
 

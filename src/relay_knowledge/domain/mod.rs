@@ -55,6 +55,7 @@ pub use code_repository::{
     CodeRetrievalLayer, CodeRetrievalRequest, CodeScopeRetentionSummary, RepositoryCodeChunkRecord,
     RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
     RepositoryCodeSymbolRecord, code_snapshot_expected_scope_id, code_snapshot_scope_id,
+    code_snapshot_scope_is_fact_versioned,
 };
 pub use code_repository_set::{
     CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetAddMemberRequest,
