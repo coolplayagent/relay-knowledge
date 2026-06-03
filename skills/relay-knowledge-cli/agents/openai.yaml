@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay Knowledge CLI"
-  short_description: "Query repo graph kinds by CLI"
-  default_prompt: "Use $relay-knowledge-cli first for repo query --kind and repo software --kind graph requests, including relationships, before grep/ripgrep/rg fallback."
+  short_description: "Background-task repo indexing and graph queries"
+  default_prompt: "Use $relay-knowledge-cli as the repo knowledge backend: for large cold repo indexing, recover timeouts through repo status <alias>, wait for stale lease recovery when needed, drain queued/retrying code-index tasks with service or bounded repo index-worker attempts, then query graph kinds before grep/ripgrep/rg fallback."
