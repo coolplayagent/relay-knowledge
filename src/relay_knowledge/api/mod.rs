@@ -18,10 +18,11 @@ pub use error::{ApiError, ErrorKind};
 pub use metadata::ApiMetadata;
 pub use operations::{
     AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeRepositoryFeatureFlagsResponse,
-    CodeRepositoryImpactResponse, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse,
-    CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
-    CodeRepositoryReportResponse, CodeRepositoryScopeMetadata, CodeRepositoryScopePreviewResponse,
-    CodeRepositorySetAddResponse, CodeRepositorySetCreateResponse, CodeRepositorySetQueryResponse,
+    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest,
+    CodeRepositoryRegisterResponse, CodeRepositoryReportResponse, CodeRepositoryScopeMetadata,
+    CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,
+    CodeRepositorySetCreateResponse, CodeRepositorySetQueryResponse,
     CodeRepositorySetRefreshResponse, CodeRepositorySetRemoveResponse,
     CodeRepositorySetStatusResponse, CodeRepositoryStatusResponse, EmbeddingProviderProbeResponse,
     FileIndexRequest, FileIndexResponse, FileQueryRequest, FileQueryResponse,

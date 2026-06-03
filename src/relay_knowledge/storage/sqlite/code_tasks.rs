@@ -126,6 +126,13 @@ fn claim_task_once(
                   AND candidate.next_retry_at_ms <= ?2
                   AND candidate.attempt_count < ?3
                   AND candidate.state IN ('queued', 'retrying')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM code_repository_index_tasks live
+                      WHERE live.repository_id = candidate.repository_id
+                        AND live.state = 'running'
+                        AND live.lease_expires_at_ms > ?2
+                  )
                 ",
                 params![task_id, request.now_ms, request.max_attempts],
                 |row| row.get::<_, String>(0),
@@ -140,6 +147,13 @@ fn claim_task_once(
                 WHERE candidate.next_retry_at_ms <= ?1
                   AND candidate.attempt_count < ?2
                   AND candidate.state IN ('queued', 'retrying')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM code_repository_index_tasks live
+                      WHERE live.repository_id = candidate.repository_id
+                        AND live.state = 'running'
+                        AND live.lease_expires_at_ms > ?1
+                  )
                 ORDER BY candidate.created_at_ms ASC, candidate.task_id ASC
                 LIMIT 1
                 ",
@@ -167,6 +181,14 @@ fn claim_task_once(
           AND (
             state IN ('queued', 'retrying')
             OR (state = 'running' AND lease_expires_at_ms <= ?4)
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM code_repository_index_tasks live
+              WHERE live.repository_id = code_repository_index_tasks.repository_id
+                AND live.task_id <> code_repository_index_tasks.task_id
+                AND live.state = 'running'
+                AND live.lease_expires_at_ms > ?4
           )
         ",
         params![
@@ -486,6 +508,63 @@ pub(super) fn recover_task_leases_by_task(
     transaction.commit()?;
 
     Ok(recovered)
+}
+
+pub(super) fn reset_tasks(
+    connection: &mut Connection,
+    repository_id: &str,
+    now_ms: u64,
+) -> Result<Vec<CodeIndexTaskRecord>, StorageError> {
+    super::super::retry::retry_sqlite_transient(|| {
+        reset_tasks_once(connection, repository_id, now_ms)
+    })
+}
+
+fn reset_tasks_once(
+    connection: &mut Connection,
+    repository_id: &str,
+    now_ms: u64,
+) -> Result<Vec<CodeIndexTaskRecord>, StorageError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let sql = task_update_returning_sql(
+        "
+        UPDATE code_repository_index_tasks
+        SET state = 'queued',
+            lease_owner = NULL,
+            lease_expires_at_ms = NULL,
+            attempt_count = 0,
+            next_retry_at_ms = ?2,
+            last_error_kind = NULL,
+            last_error_message = NULL,
+            updated_at_ms = ?2
+        WHERE repository_id = ?1
+          AND NOT EXISTS (
+              SELECT 1
+              FROM code_repository_index_tasks live
+              WHERE live.repository_id = ?1
+                AND live.state = 'running'
+                AND live.lease_expires_at_ms > ?2
+          )
+          AND (
+              state IN ('queued', 'retrying')
+              OR (
+                  state = 'running'
+                  AND (
+                      lease_expires_at_ms IS NULL
+                      OR lease_expires_at_ms <= ?2
+                  )
+              )
+          )
+        ",
+    );
+    let tasks = {
+        let mut statement = transaction.prepare(&sql)?;
+        let rows = statement.query_map(params![repository_id, now_ms], task_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    transaction.commit()?;
+
+    Ok(tasks)
 }
 
 pub(super) fn retention_status(

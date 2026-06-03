@@ -93,7 +93,7 @@ relay-knowledge map source remove --id <id>
 relay-knowledge map validate
 relay-knowledge map agent-snippet
 relay-knowledge repo register <path> [--alias <name>] [--path <filter>]
-relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
+relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset]
 relay-knowledge repo index-worker [--task-id <id>]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>
@@ -124,7 +124,7 @@ relay-knowledge version
 relay-knowledge version check
 ```
 
-Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. Non-interactive agents can run `repo index-worker --task-id <id> --format json` as an explicit single-shot drain command for queued or retrying tasks; `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running. Index writes use a single writer lane; queries, reports, graph reads, file queries, and health diagnostics use bounded read-only connections to read committed snapshots where SQLite WAL permits it.
+Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. Non-interactive agents can run `repo index-worker --task-id <id> --format json` as an explicit single-shot drain command for queued or retrying tasks; `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running. `repo index <alias> --reset --format json` clears unfinished task leases for the repository without deleting completed indexed scopes or reviving terminal dead-letter history. Index writes use one live writer per repository; queries, reports, graph reads, file queries, and health diagnostics use bounded read-only connections to read committed snapshots where SQLite WAL permits it.
 
 `repo query` runs `definition`, `references`, and `hybrid` queries through the indexed tree-sitter graph and SQLite FTS read model first. With `--freshness allow-stale`, if the target ref is still being full-indexed and has not finalized, the query reads the previous completed committed scope and marks the response stale/degraded; `wait-until-fresh` still requires the target scope to be fresh. Only when those structured layers leave a specific recall gap does the query start bounded internal exact-text source fallback against the same indexed commit. JSON hits are marked with `retrieval_layers=["lexical","text_fallback"]`; definition fallback may also include `definition`. Candidate-path lookup, candidate-file, materialized-byte, or line-length budget exhaustion degrades only the fallback layer and appears in `degraded_reason`; structured code graph results remain valid.
 

@@ -45,6 +45,10 @@ pub(super) async fn run_service(
         std::time::Duration::from_secs(5),
         code_index_shutdown_receiver,
     );
+    eprintln!(
+        "relay-knowledge service running; code_index_workers={}",
+        code_index_tasks.len()
+    );
     let (repo_set_refresh_shutdown, repo_set_refresh_shutdown_receiver) =
         tokio::sync::watch::channel(false);
     let repo_set_refresh_task = tokio::spawn(run_code_repository_set_refresh_loop(

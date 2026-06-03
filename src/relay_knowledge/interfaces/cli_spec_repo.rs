@@ -41,7 +41,7 @@ pub(super) fn repo_register() -> CliCommandSpec {
 pub(super) fn repo_index() -> CliCommandSpec {
     command!(
         &["repo", "index"],
-        "relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]",
+        "relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset]",
         "Index a registered repository ref.",
         "code.repo.index",
         CommandEffect::WritesIndexes,
@@ -72,10 +72,23 @@ pub(super) fn repo_index() -> CliCommandSpec {
                 None,
                 &[],
             ),
+            opt(
+                "--reset",
+                None,
+                false,
+                false,
+                "Reset unfinished code-index tasks for the repository.",
+                None,
+                &[],
+            ),
         ],
-        &["relay-knowledge repo index core --ref HEAD --format json"],
+        &[
+            "relay-knowledge repo index core --ref HEAD --format json",
+            "relay-knowledge repo index core --reset --format json",
+        ],
         &[
             "`--dry-run` returns a scope preview instead of writing index state.",
+            "`--reset` clears stale task leases and retry state for unfinished repository tasks without deleting completed indexed scopes or reviving terminal dead-letter history.",
             "Cold full indexes return a durable task handle and the CLI runs one bounded worker attempt before returning; service mode continues unfinished background tasks and `repo status` reports checkpoints.",
         ],
     )

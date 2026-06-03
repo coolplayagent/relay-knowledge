@@ -29,6 +29,9 @@ pub enum RepoCommand {
         ref_selector: String,
         dry_run: bool,
     },
+    IndexReset {
+        alias: String,
+    },
     IndexWorker {
         task_id: Option<String>,
     },
@@ -172,6 +175,19 @@ pub async fn run_repo(
 
             render_response(
                 "code.repo.index",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoCommand::IndexReset { alias } => {
+            let response = service
+                .reset_code_repository_index_tasks(alias, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "code.repo.index_reset",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -501,22 +517,52 @@ fn parse_register(tokens: &[String]) -> Result<RepoCommand, CliError> {
 }
 
 fn parse_index(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    if tokens.first().map(String::as_str) == Some("--reset") {
+        let alias = tokens
+            .get(1)
+            .filter(|value| !value.starts_with('-'))
+            .cloned()
+            .ok_or(CliError::MissingValue("<alias>"))?;
+        if let Some(extra) = tokens.get(2) {
+            return Err(CliError::UnexpectedArgument(extra.clone()));
+        }
+
+        return Ok(RepoCommand::IndexReset { alias });
+    }
+
     let alias = positional_alias(tokens)?;
     let mut ref_selector = "HEAD".to_owned();
+    let mut ref_was_set = false;
     let mut dry_run = false;
+    let mut reset = false;
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
             "--ref" => {
                 ref_selector = value_after(tokens, index, "--ref")?;
+                ref_was_set = true;
                 index += 2;
             }
             "--dry-run" => {
                 dry_run = true;
                 index += 1;
             }
+            "--reset" => {
+                reset = true;
+                index += 1;
+            }
             other => return Err(CliError::UnexpectedArgument(other.to_owned())),
         }
+    }
+    if reset {
+        if dry_run {
+            return Err(CliError::UnexpectedArgument("--dry-run".to_owned()));
+        }
+        if ref_was_set {
+            return Err(CliError::UnexpectedArgument("--ref".to_owned()));
+        }
+
+        return Ok(RepoCommand::IndexReset { alias });
     }
 
     Ok(RepoCommand::Index {

@@ -90,7 +90,7 @@ relay-knowledge map source remove --id <id>
 relay-knowledge map validate
 relay-knowledge map agent-snippet
 relay-knowledge repo register <path> [--alias <name>] [--path <filter>]
-relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
+relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset]
 relay-knowledge repo index-worker [--task-id <id>]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>
@@ -121,7 +121,7 @@ relay-knowledge version
 relay-knowledge version check
 ```
 
-冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。索引写入使用单 writer lane；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
+冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
 
 `repo query` 的 `definition`、`references` 和 `hybrid` 查询先走已索引 tree-sitter 图和 SQLite FTS 读模型。`--freshness allow-stale` 在目标 ref 正在 full indexing 且尚未 finalize 时，会继续读取上一个已完成 committed scope，并在响应中标记 stale/degraded reason；`wait-until-fresh` 仍会要求目标 scope 新鲜。只有这些结构化层存在明确召回缺口时，查询才会在同一 indexed commit 上启动有界内部 exact-text source fallback；命中会在 JSON 中标记 `retrieval_layers=["lexical","text_fallback"]`，definition 兜底还会带 `definition`。候选路径查询、候选文件数、物化字节或单行长度预算耗尽只会降级兜底层，并通过 `degraded_reason` 暴露，不会让结构化代码图结果失效。
 

@@ -112,6 +112,14 @@ mod code_metadata_tests;
 mod code_tasks_tests;
 
 #[cfg(test)]
+#[path = "code_tasks_lease_tests.rs"]
+mod code_tasks_lease_tests;
+
+#[cfg(test)]
+#[path = "code_tasks_reset_tests.rs"]
+mod code_tasks_reset_tests;
+
+#[cfg(test)]
 #[path = "code_set_tasks_tests.rs"]
 mod code_set_tasks_tests;
 
@@ -224,6 +232,14 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: crate::storage::CodeIndexTaskLeaseRecovery,
     ) -> StorageFuture<'_, usize> {
         self.run(move |connection| code_tasks::recover_task_leases_by_task(connection, request))
+    }
+
+    fn reset_code_index_tasks(
+        &self,
+        repository_id: String,
+        now_ms: u64,
+    ) -> StorageFuture<'_, Vec<crate::domain::CodeIndexTaskRecord>> {
+        self.run(move |connection| code_tasks::reset_tasks(connection, &repository_id, now_ms))
     }
 
     fn renew_code_index_task_lease(
