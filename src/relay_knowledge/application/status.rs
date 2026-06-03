@@ -38,6 +38,7 @@ pub(super) fn runtime_status_with_model_profiles(
         temp_dir: path_string(&runtime.paths.temp_dir),
         runtime_dir: path_string(&runtime.paths.runtime_dir),
         service_dir: path_string(&runtime.paths.service_dir),
+        storage_topology: runtime.storage.topology.as_str().to_owned(),
         http_bind: network.http.bind_address.to_string(),
         http_request_timeout_ms: duration_millis(network.http.request_timeout),
         http_graceful_shutdown_timeout_ms: duration_millis(network.http.graceful_shutdown_timeout),

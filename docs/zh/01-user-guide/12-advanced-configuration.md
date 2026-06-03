@@ -47,7 +47,23 @@ RELAY_KNOWLEDGE_SERVICE_DIR
 
 所有覆盖路径必须是绝对路径，且不能包含 `..`。
 
-## 12.3 检索后端
+## 12.3 存储拓扑
+
+默认存储拓扑是 `single_sqlite`，所有运行时状态写入 runtime data 目录下的主
+SQLite 数据库。需要把代码仓库事实隔离到每个注册仓库一个 SQLite 文件时，再启用分片拓扑:
+
+```bash
+RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite \
+  relay-knowledge repo register /path/to/repository --format json
+```
+
+`partitioned_sqlite` 会把全局控制状态、持久任务、lease、审计和图事实保留在主数据库中。仓库文件、符号、引用、chunk、checkpoint 和按 scope 的代码查询使用 runtime data 目录下 `stores/repositories/` 中的 shard 文件。多仓 repository-set overlay refresh 在跨 shard import/export 聚合实现前仍要求 `single_sqlite`。
+
+主数据库一旦包含 active 的分片目录，`single_sqlite` 会拒绝打开这份运行时状态。此后应继续设置 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite`，或先执行显式 rollback，清理分片目录和 shard 文件后再回退。
+
+分片目录记录是可迁移的：恢复时会根据 repository id 和当前 runtime data 目录重新计算 shard 路径，因此备份或移动时必须同时保留主数据库和 `stores/repositories/`。
+
+## 12.4 检索后端
 
 默认值是本地 deterministic read models。只有外部 worker 已经按同一 metadata contract 写入派生 read model 时，才启用 external backend metadata:
 
@@ -82,7 +98,7 @@ RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS=100
 
 `RELAY_KNOWLEDGE_RERANK_BACKEND` 接受 `local`、`external` 或 `disabled`。`external` 当前只保留 provider contract 并降级为本地 rerank；查询热路径不会同步调用远端 rerank 模型。
 
-## 12.4 网络与 QoS
+## 12.5 网络与 QoS
 
 常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力:
 
@@ -113,7 +129,7 @@ RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO
 
 非 loopback HTTP bind 应同时配置 MCP remote-client policy 和 origin/scope 限制。QoS budget 是 admission control，不是安全认证；它用于限制连接数、in-flight 请求、队列深度、超时和 overload 行为。
 
-## 12.5 MCP Policy
+## 12.6 MCP Policy
 
 完整 MCP policy 变量:
 
@@ -130,7 +146,7 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 默认 policy 是只读且本机优先。远程监听和 unspecified scope 都需要显式开启；已注册 code repository alias 可在首次 MCP 访问时按需进入进程内动态白名单，未知 scope 仍需要配置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`。
 
-## 12.6 Worker、Audit 与 OTLP
+## 12.7 Worker、Audit 与 OTLP
 
 后台 worker 和 agent audit:
 
@@ -162,7 +178,7 @@ RELAY_OTEL_SERVICE_ENVIRONMENT
 
 行为说明分别见 [第 10 章](10-workers-proposals-audit.md) 和 [第 11 章](11-observability-and-telemetry.md)。
 
-## 12.7 Setup 接口
+## 12.8 Setup 接口
 
 高级配置不需要从文档手工拼接。当前 CLI 提供两个只读 setup 入口:
 

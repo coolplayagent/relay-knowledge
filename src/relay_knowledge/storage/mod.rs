@@ -7,6 +7,7 @@
 mod canvas;
 mod code;
 mod file_index;
+mod partitioned;
 mod sqlite;
 
 use std::{error::Error, fmt, future::Future, pin::Pin};
@@ -39,12 +40,41 @@ pub use file_index::{
     FileIndexDiagnostics, FileIndexEntry, FileIndexRoot, FileIndexRootStatus, FileIndexRootUpdate,
     FileIndexScanSummary, FileSearchHit, FileSearchRequest,
 };
+pub use partitioned::PartitionedSqliteKnowledgeStore;
 pub use sqlite::SqliteGraphStore;
 
 pub type StorageFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 'a>>;
 
 /// Synthetic scope used for graph-wide index work that is not tied to evidence.
 pub const DEFAULT_INDEX_SOURCE_SCOPE: &str = "graph";
+
+/// Storage topology selected at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageTopology {
+    SingleSqlite,
+    PartitionedSqlite,
+}
+
+impl StorageTopology {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SingleSqlite => "single_sqlite",
+            Self::PartitionedSqlite => "partitioned_sqlite",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, StorageError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "single" | "single_sqlite" | "sqlite" => Ok(Self::SingleSqlite),
+            "partitioned" | "partitioned_sqlite" | "sqlite_partitioned" => {
+                Ok(Self::PartitionedSqlite)
+            }
+            other => Err(StorageError::InvalidInput(format!(
+                "storage topology '{other}' must be single_sqlite or partitioned_sqlite"
+            ))),
+        }
+    }
+}
 
 /// Graph fact persistence and query contract.
 pub trait GraphStore: Send + Sync {

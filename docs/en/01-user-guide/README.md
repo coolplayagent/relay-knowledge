@@ -34,7 +34,7 @@ This book only covers paths that users can run, verify, and troubleshoot directl
 - [Chapter 9: Resident Service](09-resident-service.md): foreground service mode, same-port Web/API/MCP, service manager support, and the silent-update operator.
 - [Chapter 10: Workers, Proposals, and Audit](10-workers-proposals-audit.md): worker endpoints, manual review, proposal lifecycle, and audit.
 - [Chapter 11: Observability and Telemetry](11-observability-and-telemetry.md): Prometheus metrics, OTLP traces/metrics, and diagnostic state.
-- [Chapter 12: Advanced Configuration](12-advanced-configuration.md): runtime directories, retrieval backends, network/QoS, MCP, workers, audit, and setup variables.
+- [Chapter 12: Advanced Configuration](12-advanced-configuration.md): runtime directories, storage topology, retrieval backends, network/QoS, MCP, workers, audit, and setup variables.
 - [Chapter 13: Operations and Troubleshooting](13-operations-and-troubleshooting.md): health checks, index freshness, common errors, isolated reproduction, and PR verification.
 
 ## Recommended Reading Path

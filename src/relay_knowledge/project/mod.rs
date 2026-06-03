@@ -9,6 +9,15 @@ pub const APP_DIR_NAME: &str = PROJECT_NAME;
 /// Default SQLite database filename stored under the resolved data directory.
 pub const DATABASE_FILE_NAME: &str = "relay-knowledge.sqlite";
 
+/// Directory under the data directory that stores pluggable storage backends.
+pub const STORAGE_BACKENDS_DIR_NAME: &str = "stores";
+
+/// Directory under the storage backends directory that stores repository shards.
+pub const REPOSITORY_SHARDS_DIR_NAME: &str = "repositories";
+
+/// SQLite filename used by each partitioned repository shard.
+pub const REPOSITORY_SHARD_DATABASE_FILE_NAME: &str = "code.sqlite";
+
 /// Model provider profile configuration filename stored under the config directory.
 pub const MODEL_PROFILES_FILE_NAME: &str = "model-profiles.json";
 

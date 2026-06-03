@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 2.3
-> 编制日期: 2026-06-02
+> 文档版本: 2.4
+> 编制日期: 2026-06-03
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -36,6 +36,9 @@ Installer 或安装脚本支持：版本选择、安装目录选择、dry run、
 template 不能默认扫描全盘、Linux `/opt`、挂载盘或 Windows 非系统盘；只有用户显式配置
 或通过 CLI 传入这些 root 时才建立索引。
 
+当启用 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` 时，主数据库仍保存控制状态，每个代码仓库的 shard 数据库位于运行时数据目录的 `stores/repositories/` 下。备份、迁移、doctor、卸载确认和回滚计划必须把主数据库与 shard 目录视为同一个 runtime state 集合；不能只移动或校验主数据库后宣称升级成功。
+shard catalog 路由是可迁移的，恢复时会基于当前 runtime data 目录重新解析；但这只有在 shard 目录随主数据库一起移动时才成立。
+
 ## 5. 升级与回滚
 
 升级流程：
@@ -61,6 +64,7 @@ preflight doctor
 - CLI 能说明稳定新版本可用，JSON 输出保持机器可读且普通命令不会自动安装新版。
 - service install 使用 systemd、launchd 或 Windows Service，而非 unmanaged loop。
 - uninstall 清理二进制和服务定义，但保留或按用户确认处理 runtime data。
+- 分片 SQLite 拓扑的 shard 目录参与 backup、migration、doctor 和 uninstall 确认。
 
 ---
 

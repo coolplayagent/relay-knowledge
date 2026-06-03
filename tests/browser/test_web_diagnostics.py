@@ -509,6 +509,7 @@ RUNTIME = {
     "temp_dir": "/tmp/relay-knowledge",
     "runtime_dir": "/srv/relay/run",
     "service_dir": "/srv/relay/service",
+    "storage_topology": "single_sqlite",
     "http_bind": "127.0.0.1:9900",
     "http_request_timeout_ms": 30000,
     "http_graceful_shutdown_timeout_ms": 10000,

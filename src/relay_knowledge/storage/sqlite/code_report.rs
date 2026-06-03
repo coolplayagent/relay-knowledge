@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter};
 
 use crate::{
     domain::{
@@ -21,6 +21,52 @@ pub(in crate::storage::sqlite) fn repository_totals(
         chunk_count: count_all_rows(connection, "code_repository_chunks")?,
         degraded_file_count: count_all_rows(connection, "code_repository_file_diagnostics")?,
         parse_status_counts: repository_parse_status_counts(connection)?,
+    })
+}
+
+pub(in crate::storage::sqlite) fn repository_totals_excluding(
+    connection: &mut Connection,
+    excluded_repository_ids: &[String],
+) -> Result<CodeRepositoryTotals, StorageError> {
+    if excluded_repository_ids.is_empty() {
+        return repository_totals(connection);
+    }
+
+    Ok(CodeRepositoryTotals {
+        repository_count: count_rows_excluding(
+            connection,
+            "code_repositories",
+            excluded_repository_ids,
+        )?,
+        indexed_file_count: count_rows_excluding(
+            connection,
+            "code_repository_files",
+            excluded_repository_ids,
+        )?,
+        symbol_count: count_rows_excluding(
+            connection,
+            "code_repository_symbols",
+            excluded_repository_ids,
+        )?,
+        reference_count: count_rows_excluding(
+            connection,
+            "code_repository_references",
+            excluded_repository_ids,
+        )?,
+        chunk_count: count_rows_excluding(
+            connection,
+            "code_repository_chunks",
+            excluded_repository_ids,
+        )?,
+        degraded_file_count: count_rows_excluding(
+            connection,
+            "code_repository_file_diagnostics",
+            excluded_repository_ids,
+        )?,
+        parse_status_counts: repository_parse_status_counts_excluding(
+            connection,
+            excluded_repository_ids,
+        )?,
     })
 }
 
@@ -79,6 +125,15 @@ fn repository_parse_status_counts(
     let rows = statement.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
     })?;
+    parse_status_counts_from_rows(rows)
+}
+
+fn parse_status_counts_from_rows(
+    rows: rusqlite::MappedRows<
+        '_,
+        impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<(String, usize)>,
+    >,
+) -> Result<CodeParseStatusCounts, StorageError> {
     let mut counts = CodeParseStatusCounts::default();
     for row in rows {
         let (status, count) = row?;
@@ -96,6 +151,25 @@ fn repository_parse_status_counts(
     }
 
     Ok(counts)
+}
+
+fn repository_parse_status_counts_excluding(
+    connection: &Connection,
+    excluded_repository_ids: &[String],
+) -> Result<CodeParseStatusCounts, StorageError> {
+    let placeholders = placeholders(excluded_repository_ids.len());
+    let mut statement = connection.prepare(&format!(
+        "
+        SELECT parse_status, COUNT(*)
+        FROM code_repository_files
+        WHERE repository_id NOT IN ({placeholders})
+        GROUP BY parse_status
+        "
+    ))?;
+    let rows = statement.query_map(params_from_iter(excluded_repository_ids), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+    })?;
+    parse_status_counts_from_rows(rows)
 }
 
 fn repository_degraded_file_count(
@@ -214,4 +288,25 @@ fn count_all_rows(connection: &Connection, table: &'static str) -> Result<usize,
             row.get(0)
         })
         .map_err(StorageError::from)
+}
+
+fn count_rows_excluding(
+    connection: &Connection,
+    table: &'static str,
+    excluded_repository_ids: &[String],
+) -> Result<usize, StorageError> {
+    let placeholders = placeholders(excluded_repository_ids.len());
+    connection
+        .query_row(
+            &format!("SELECT COUNT(*) FROM {table} WHERE repository_id NOT IN ({placeholders})"),
+            params_from_iter(excluded_repository_ids),
+            |row| row.get(0),
+        )
+        .map_err(StorageError::from)
+}
+
+fn placeholders(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

@@ -171,6 +171,9 @@ task claim 和混合语言注册安全性。
 二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。
 SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
 
+默认存储拓扑是 `single_sqlite`。设置
+`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` 后，全局控制状态仍写入主运行时数据库，代码仓库事实、checkpoint 和按 scope 的代码查询会路由到运行时数据目录下的每仓库 SQLite shard。多仓 `repo-set` overlay refresh 在跨 shard import/export 聚合实现前仍要求 `single_sqlite`。
+
 存储契约包含 v1 代码图数据面。tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。
 
 ### 代码索引

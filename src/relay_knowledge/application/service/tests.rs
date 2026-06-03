@@ -41,6 +41,7 @@ async fn status_includes_foundational_runtime_configuration() {
     assert_eq!(response.runtime.config_dir, "/srv/relay/config");
     assert_eq!(response.runtime.data_dir, "/srv/relay/data");
     assert_eq!(response.runtime.http_bind, "127.0.0.1:9000");
+    assert_eq!(response.runtime.storage_topology, "single_sqlite");
     assert!(response.runtime.http_proxy_configured);
     assert_eq!(response.runtime.http_no_proxy_rules, 2);
     assert!(!response.runtime.http_ssl_verify);

@@ -1,7 +1,9 @@
 use std::{path::PathBuf, time::Duration};
 
 use super::*;
-use crate::env::{PlatformKind, RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT};
+use crate::env::{
+    PlatformKind, RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT, RELAY_KNOWLEDGE_STORAGE_TOPOLOGY,
+};
 
 #[test]
 fn file_index_root_ids_use_canonical_paths_when_available() {
@@ -97,6 +99,61 @@ async fn caps_code_index_worker_concurrency_from_environment() {
         runtime.workers.code_index_max_in_flight,
         WorkerRuntimeConfig::MAX_CODE_INDEX_MAX_IN_FLIGHT
     );
+}
+
+#[tokio::test]
+async fn resolves_storage_topology_from_environment() {
+    let default_environment = storage_topology_test_environment(None);
+    let default_runtime = RuntimeConfiguration::from_environment(&default_environment)
+        .await
+        .expect("runtime should compose");
+
+    assert_eq!(
+        default_runtime.storage.topology,
+        StorageTopology::SingleSqlite
+    );
+
+    let partitioned_environment = storage_topology_test_environment(Some("partitioned_sqlite"));
+    let partitioned_runtime = RuntimeConfiguration::from_environment(&partitioned_environment)
+        .await
+        .expect("runtime should compose");
+
+    assert_eq!(
+        partitioned_runtime.storage.topology,
+        StorageTopology::PartitionedSqlite
+    );
+}
+
+#[tokio::test]
+async fn rejects_invalid_storage_topology_from_environment() {
+    let environment = storage_topology_test_environment(Some("distributed_sqlite"));
+
+    let error = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect_err("invalid storage topology should be rejected");
+
+    assert!(error.to_string().contains("single_sqlite"));
+    assert!(error.to_string().contains("partitioned_sqlite"));
+}
+
+fn storage_topology_test_environment(topology: Option<&str>) -> EnvironmentConfig {
+    let suffix = topology.unwrap_or("default");
+    let root = std::env::temp_dir().join(format!(
+        "relay-knowledge-runtime-storage-{suffix}-{}",
+        std::process::id()
+    ));
+    let mut pairs = vec![(
+        "RELAY_KNOWLEDGE_HOME".to_owned(),
+        root.display().to_string(),
+    )];
+    if let Some(topology) = topology {
+        pairs.push((
+            RELAY_KNOWLEDGE_STORAGE_TOPOLOGY.to_owned(),
+            topology.to_owned(),
+        ));
+    }
+
+    EnvironmentConfig::from_pairs(PlatformKind::current(), pairs).expect("environment should parse")
 }
 
 #[tokio::test]

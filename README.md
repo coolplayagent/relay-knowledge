@@ -234,6 +234,18 @@ async entrypoints from the CLI boundary inward. SQLite storage is opened through
 the storage boundary, and blocking database work is isolated behind Tokio
 blocking workers.
 
+The default storage topology is `single_sqlite`. Set
+`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` to keep global control
+state in the main runtime database while routing repository code facts,
+checkpoints, and scoped code queries into per-repository SQLite shard files
+under the runtime data directory. Repository-set overlay refresh still requires
+`single_sqlite` until cross-shard import/export aggregation is implemented.
+After partitioned shard catalog rows become active, startup with
+`single_sqlite` fails fast; keep the partitioned topology enabled or perform an
+explicit rollback that clears the shard catalog and files.
+Shard routes are resolved from the current runtime data directory, so backups
+and restores must keep the main database and `stores/repositories/` together.
+
 The storage contract includes the v1 code graph data surface for tree-sitter
 output. Versioned code files, symbols, references, chunks, and parse-status
 diagnostics are committed through storage traits rather than direct SQLite

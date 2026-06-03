@@ -23,6 +23,7 @@ pub const RELAY_KNOWLEDGE_LOG_DIR: &str = "RELAY_KNOWLEDGE_LOG_DIR";
 pub const RELAY_KNOWLEDGE_TEMP_DIR: &str = "RELAY_KNOWLEDGE_TEMP_DIR";
 pub const RELAY_KNOWLEDGE_RUNTIME_DIR: &str = "RELAY_KNOWLEDGE_RUNTIME_DIR";
 pub const RELAY_KNOWLEDGE_SERVICE_DIR: &str = "RELAY_KNOWLEDGE_SERVICE_DIR";
+pub const RELAY_KNOWLEDGE_STORAGE_TOPOLOGY: &str = "RELAY_KNOWLEDGE_STORAGE_TOPOLOGY";
 pub const RELAY_KNOWLEDGE_HTTP_BIND: &str = "RELAY_KNOWLEDGE_HTTP_BIND";
 pub const RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS";
 pub const RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS: &str =
@@ -281,6 +282,7 @@ pub struct EnvironmentConfig {
     pub file_index: FileIndexEnvOverrides,
     pub updates: UpdateEnvOverrides,
     pub telemetry: TelemetryEnvOverrides,
+    pub storage_topology: Option<String>,
 }
 
 impl EnvironmentConfig {
@@ -489,6 +491,7 @@ impl EnvironmentConfig {
                 export_timeout_ms: positive_u64_var(&values, RELAY_OTEL_EXPORT_TIMEOUT_MS)?,
                 service_environment: string_var(&values, RELAY_OTEL_SERVICE_ENVIRONMENT)?,
             },
+            storage_topology: string_var(&values, RELAY_KNOWLEDGE_STORAGE_TOPOLOGY)?,
         })
     }
 }

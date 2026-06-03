@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 2.3
-> Date: 2026-06-02
+> Document version: 2.4
+> Date: 2026-06-03
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -37,6 +37,16 @@ area. Installers and service templates must not default to scanning a whole
 disk, Linux `/opt`, mounted volumes, or non-system Windows drives; those roots
 are indexed only when the user configures them or passes them to the CLI.
 
+When `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` is enabled, the main
+database still stores control state and each code repository shard database
+lives under `stores/repositories/` in the runtime data directory. Backup,
+migration, doctor, uninstall confirmation, and rollback plans treat the main
+database and shard directory as one runtime state set; they cannot move or
+verify only the main database and then report upgrade success.
+Shard catalog routes are relocatable and are resolved against the current
+runtime data directory during restore, but this only works when the shard
+directory is moved with the main database.
+
 ## 5. Upgrade and Rollback
 
 Upgrade flow:
@@ -66,6 +76,7 @@ restart, and post-upgrade doctor flow.
 - The CLI can explain when a newer stable version is available, JSON output remains machine-readable, and ordinary commands never auto-install an update.
 - Service installation uses systemd, launchd, or Windows Service instead of unmanaged loops.
 - Uninstall removes binaries and service definitions while preserving runtime data unless the user explicitly confirms removal.
+- Partitioned SQLite shard directories participate in backup, migration, doctor, and uninstall confirmation.
 
 ---
 

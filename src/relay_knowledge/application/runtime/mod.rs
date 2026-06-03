@@ -25,6 +25,7 @@ use crate::{
         ReadModelBackendMode, ReadModelBackendModeError, ReadModelMetadata, RemoteEmbeddingConfig,
         RerankConfig,
     },
+    storage::StorageTopology,
 };
 
 use super::update::{UpdateRuntimeConfig, UpdateRuntimeConfigError};
@@ -40,6 +41,7 @@ pub struct RuntimeConfiguration {
     pub workers: WorkerRuntimeConfig,
     pub file_index: FileIndexRuntimeConfig,
     pub updates: UpdateRuntimeConfig,
+    pub storage: StorageRuntimeConfig,
 }
 
 impl RuntimeConfiguration {
@@ -69,6 +71,8 @@ impl RuntimeConfiguration {
             .map_err(RuntimeConfigurationError::FileIndex)?;
         let updates = UpdateRuntimeConfig::from_environment(&environment.updates)
             .map_err(RuntimeConfigurationError::Updates)?;
+        let storage = StorageRuntimeConfig::from_environment(environment)
+            .map_err(RuntimeConfigurationError::Storage)?;
 
         Ok(Self {
             paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
@@ -80,7 +84,55 @@ impl RuntimeConfiguration {
             workers,
             file_index,
             updates,
+            storage,
         })
+    }
+}
+
+/// Storage backend topology selected for this runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageRuntimeConfig {
+    pub topology: StorageTopology,
+}
+
+impl StorageRuntimeConfig {
+    pub fn from_environment(
+        environment: &EnvironmentConfig,
+    ) -> Result<Self, StorageRuntimeConfigError> {
+        let topology = environment
+            .storage_topology
+            .as_deref()
+            .map(parse_storage_topology)
+            .transpose()?
+            .unwrap_or(StorageTopology::SingleSqlite);
+
+        Ok(Self { topology })
+    }
+}
+
+/// Storage runtime configuration validation error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageRuntimeConfigError {
+    InvalidTopology(String),
+}
+
+impl fmt::Display for StorageRuntimeConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidTopology(value) => write!(
+                formatter,
+                "storage topology '{value}' must be single_sqlite or partitioned_sqlite"
+            ),
+        }
+    }
+}
+
+impl Error for StorageRuntimeConfigError {}
+
+fn parse_storage_topology(value: &str) -> Result<StorageTopology, StorageRuntimeConfigError> {
+    match StorageTopology::parse(value) {
+        Ok(topology) => Ok(topology),
+        Err(_) => Err(StorageRuntimeConfigError::InvalidTopology(value.to_owned())),
     }
 }
 
@@ -418,6 +470,7 @@ pub enum RuntimeConfigurationError {
     Workers(WorkerRuntimeConfigError),
     FileIndex(FileIndexRuntimeConfigError),
     Updates(UpdateRuntimeConfigError),
+    Storage(StorageRuntimeConfigError),
 }
 
 impl fmt::Display for RuntimeConfigurationError {
@@ -432,6 +485,7 @@ impl fmt::Display for RuntimeConfigurationError {
             Self::Workers(error) => write!(formatter, "{error}"),
             Self::FileIndex(error) => write!(formatter, "{error}"),
             Self::Updates(error) => write!(formatter, "{error}"),
+            Self::Storage(error) => write!(formatter, "{error}"),
         }
     }
 }
