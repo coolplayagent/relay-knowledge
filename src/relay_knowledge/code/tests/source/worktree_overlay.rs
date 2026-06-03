@@ -306,7 +306,7 @@ fn worktree_overlay_ignores_out_of_language_dangling_symlinks() {
 }
 
 #[test]
-fn worktree_overlay_skips_modified_submodule_directories() {
+fn worktree_overlay_uses_committed_submodule_snapshot_without_dirty_overlay() {
     let source = TempGitRepo::create("overlay-submodule-source");
     source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
     source.git(["add", "."]);
@@ -339,14 +339,107 @@ fn worktree_overlay_skips_modified_submodule_directories() {
     )
     .expect("overlay should not recurse into modified submodules");
 
+    assert!(snapshot.full_replace);
+    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
     assert!(
         snapshot
             .files
             .iter()
-            .all(|file| !file.path.starts_with("src/submodule/"))
+            .any(|file| file.path == "src/submodule/lib.rs")
     );
-    assert!(snapshot.full_replace);
-    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+}
+
+#[test]
+fn worktree_overlay_indexes_staged_submodule_gitlink_update() {
+    let source = TempGitRepo::create("overlay-staged-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-staged-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("lib.rs", "fn staged_submodule_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "submodule update"]);
+    repo.git(["add", "src/submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should index staged submodule gitlink updates");
+
+    assert!(!snapshot.full_replace);
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/submodule/lib.rs")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "staged_submodule_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_expands_staged_submodule_deletions() {
+    let source = TempGitRepo::create("overlay-delete-submodule-source");
+    source.write("lib.rs", "fn deleted_submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-delete-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    repo.git(["rm", "-f", "src/submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should expand staged submodule deletions");
+
+    assert!(!snapshot.full_replace);
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/submodule/lib.rs".to_owned())
+    );
+    assert!(!snapshot.deleted_paths.contains(&"src/submodule".to_owned()));
 }
 
 #[test]

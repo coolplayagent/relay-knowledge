@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use super::{
     CodeIndexError,
-    changes::{GitTreeEntry, tracked_entries},
+    changes::{GitTreeEntry, TrackedEntryScope, tracked_entries_state_with_scope},
     git::{
         git_batch_blob_sizes, git_batch_blobs, git_bytes, git_optional, resolve_git_root,
         resolve_ref, resolve_tree,
@@ -17,6 +17,7 @@ use super::{
     ids::{stable_content_hash, stable_hash64, stable_id},
     languages::language_id,
     parser::{dependency_manifest_language_ids, dependency_manifest_overrides_default_exclusion},
+    source_gitlink,
     source_roots::STRIPPABLE_SOURCE_ROOTS,
 };
 
@@ -221,6 +222,14 @@ impl FileSystemScanPolicy {
             .any(|filter| filesystem_filter_can_discover_roots(filter))
             && discoverable_source_directory(directory)
     }
+
+    pub(super) fn path_scope_filters(&self) -> &[String] {
+        if self.explicit_root_scope {
+            return &[];
+        }
+
+        &self.path_scope_filters
+    }
 }
 
 pub(super) fn registration_source(path: &Path) -> Result<RegistrationSource, CodeIndexError> {
@@ -293,18 +302,41 @@ pub(super) fn source_snapshot(
     match source_kind(root)? {
         RepositorySourceKind::Git => {
             let commit = resolve_ref(root, ref_selector)?;
-            let tree_hash = resolve_tree(root, &commit)?;
-            let entries = tracked_entries(root, &commit)?;
+            let parent_tree_hash = resolve_tree(root, &commit)?;
+            let tracked = tracked_entries_state_with_scope(
+                root,
+                &commit,
+                &TrackedEntryScope::from_path_filters(filesystem_policy.path_scope_filters()),
+            )?;
+            let tree_hash =
+                git_tree_hash_with_submodules(&parent_tree_hash, &tracked.submodule_states);
             Ok(RepositorySourceSnapshot {
                 kind: RepositorySourceKind::Git,
                 root: root.to_path_buf(),
                 resolved_commit_sha: commit,
                 tree_hash,
-                entries,
+                entries: tracked.entries,
             })
         }
         RepositorySourceKind::FileSystem => filesystem_source_snapshot(root, filesystem_policy),
     }
+}
+
+fn git_tree_hash_with_submodules(parent_tree_hash: &str, submodule_states: &[String]) -> String {
+    if submodule_states.is_empty() {
+        return parent_tree_hash.to_owned();
+    }
+
+    let mut hash_input = Vec::new();
+    hash_input.extend_from_slice(b"git-tree-with-submodules-v1\0");
+    hash_input.extend_from_slice(parent_tree_hash.as_bytes());
+    hash_input.push(0);
+    for state in submodule_states {
+        hash_input.extend_from_slice(state.as_bytes());
+        hash_input.push(0);
+    }
+
+    format!("git_tree:{:016x}", stable_hash64(&hash_input))
 }
 
 pub(super) fn filesystem_source_snapshot(
@@ -344,7 +376,10 @@ fn source_bytes_after_policy_verification(
     commit: &str,
     path: &str,
 ) -> Result<Vec<u8>, CodeIndexError> {
-    git_bytes(root, ["show", &format!("{commit}:{path}")])
+    match git_bytes(root, ["show", &format!("{commit}:{path}")]) {
+        Ok(bytes) => Ok(bytes),
+        Err(error) => source_gitlink::submodule_bytes(root, commit, path).map_err(|_| error),
+    }
 }
 
 pub(super) fn source_bytes_after_content_verification(
@@ -377,7 +412,7 @@ pub(super) fn source_snapshot_bytes(
         return filesystem_bytes(root, path);
     }
 
-    git_bytes(root, ["show", &format!("{commit}:{path}")])
+    source_bytes_after_policy_verification(root, commit, path)
 }
 
 fn source_batch_bytes_after_policy_verification(
@@ -385,7 +420,59 @@ fn source_batch_bytes_after_policy_verification(
     commit: &str,
     paths: &[String],
 ) -> Result<Vec<Vec<u8>>, CodeIndexError> {
-    git_batch_blobs(root, commit, paths)
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sizes = match git_batch_blob_sizes(root, commit, paths) {
+        Ok(sizes) => sizes,
+        Err(_) => {
+            return paths
+                .iter()
+                .map(|path| source_bytes_after_policy_verification(root, commit, path))
+                .collect();
+        }
+    };
+
+    let mut blobs = vec![None::<Vec<u8>>; paths.len()];
+    let mut parent_blob_indices = Vec::new();
+    let mut parent_blob_paths = Vec::new();
+    for (index, (path, size)) in paths.iter().zip(sizes.iter()).enumerate() {
+        if size.is_some() {
+            parent_blob_indices.push(index);
+            parent_blob_paths.push(path.clone());
+        }
+    }
+
+    let parent_blobs = if parent_blob_paths.is_empty() {
+        Vec::new()
+    } else {
+        match git_batch_blobs(root, commit, &parent_blob_paths) {
+            Ok(blobs) => blobs,
+            Err(_) => parent_blob_paths
+                .iter()
+                .map(|path| source_bytes_after_policy_verification(root, commit, path))
+                .collect::<Result<Vec<_>, _>>()?,
+        }
+    };
+    for (index, bytes) in parent_blob_indices.into_iter().zip(parent_blobs) {
+        blobs[index] = Some(bytes);
+    }
+    for (index, path) in paths.iter().enumerate() {
+        if blobs[index].is_none() {
+            blobs[index] = Some(source_bytes_after_policy_verification(root, commit, path)?);
+        }
+    }
+
+    blobs
+        .into_iter()
+        .map(|bytes| {
+            bytes.ok_or_else(|| {
+                CodeIndexError::InvalidInput(
+                    "source batch bytes left a path without content".to_owned(),
+                )
+            })
+        })
+        .collect()
 }
 
 pub(super) fn source_batch_bytes_after_content_verification(
@@ -419,7 +506,7 @@ pub(super) fn source_snapshot_batch_bytes(
             .collect();
     }
 
-    git_batch_blobs(root, commit, paths)
+    source_batch_bytes_after_policy_verification(root, commit, paths)
 }
 
 fn filesystem_blob_sizes(
@@ -446,7 +533,34 @@ pub(super) fn source_blob_sizes_after_policy_verification(
         return filesystem_blob_sizes(root, paths);
     }
 
-    git_batch_blob_sizes(root, commit, paths)
+    let mut sizes = match git_batch_blob_sizes(root, commit, paths) {
+        Ok(sizes) => sizes,
+        Err(_) => {
+            return paths
+                .iter()
+                .map(|path| git_blob_size_after_policy_verification(root, commit, path))
+                .collect();
+        }
+    };
+    for (path, size) in paths.iter().zip(sizes.iter_mut()) {
+        if size.is_none() {
+            *size = source_gitlink::submodule_blob_size(root, commit, path)?;
+        }
+    }
+
+    Ok(sizes)
+}
+
+fn git_blob_size_after_policy_verification(
+    root: &Path,
+    commit: &str,
+    path: &str,
+) -> Result<Option<usize>, CodeIndexError> {
+    let object = format!("{commit}:{path}");
+    match git_bytes(root, ["cat-file", "-s", &object]) {
+        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).trim().parse::<usize>().ok()),
+        Err(_) => source_gitlink::submodule_blob_size(root, commit, path),
+    }
 }
 
 pub(super) fn source_commit_is_filesystem(commit: &str) -> bool {

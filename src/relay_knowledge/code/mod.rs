@@ -1,12 +1,9 @@
-//! Git snapshot and tree-sitter code index construction.
-//!
-//! This module owns blocking Git, filesystem, and parser work. Application
-//! methods run these workflows behind explicit blocking-worker boundaries.
+//! Git snapshot and tree-sitter code index construction behind blocking-worker boundaries.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
-    fmt, fs,
+    fmt,
     path::{Path, PathBuf},
 };
 
@@ -26,7 +23,10 @@ mod resolution;
 mod scope;
 mod snapshot;
 mod source;
+mod source_declarations;
+mod source_gitlink;
 pub(crate) mod source_roots;
+mod worktree_overlay;
 
 #[cfg(test)]
 #[path = "tests/source/declarations.rs"]
@@ -38,6 +38,9 @@ mod source_filesystem_tests;
 #[path = "tests/source/layout.rs"]
 mod source_layout_tests;
 #[cfg(test)]
+#[path = "tests/source/submodule.rs"]
+mod source_submodule_tests;
+#[cfg(test)]
 #[path = "tests/fixtures.rs"]
 mod test_fixtures;
 #[cfg(test)]
@@ -47,11 +50,15 @@ mod tests;
 mod worktree_overlay_tests;
 
 use crate::domain::{
-    CodeFileFingerprint, CodeIndexMode, CodeIndexSnapshot, CodePathTombstone,
-    CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeRange,
+    CodeFileFingerprint, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSnapshot,
+    CodePathTombstone, CodeRepositoryRegistration, CodeRepositorySelector,
 };
 
-use changes::{GitChange, diff_changes, tracked_entries, worktree_changed_paths};
+#[cfg(test)]
+use changes::tracked_entries;
+#[cfg(test)]
+use changes::worktree_changed_paths;
+use changes::{GitChange, TrackedEntryScope, diff_changes, tracked_entries_with_scope};
 #[cfg(test)]
 pub(crate) use changes::{
     reset_tracked_entries_call_count_for_root, tracked_entries_call_count_for_root,
@@ -61,12 +68,14 @@ pub(crate) use filesystem_delta::changed_paths_for_filesystem_diff;
 use full_snapshot::build_full_snapshot;
 #[cfg(test)]
 pub(crate) use full_snapshot::mutate_next_filesystem_full_snapshot_read;
-use git::{git_bytes, resolve_ref, resolve_tree};
+#[cfg(test)]
+pub(crate) use git::{git_show_call_count_for_root, reset_git_show_call_count_for_root};
+use git::{resolve_ref, resolve_tree};
 pub(crate) use grep::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
     SourceGrepRequest, source_grep_matches,
 };
-use ids::{stable_content_hash, stable_hash64, stable_id};
+use ids::{stable_content_hash, stable_id};
 use parser::parse_indexed_file;
 pub use pipeline::{CodeIndexPlan, prepare_full_index_plan};
 pub use resolution::{
@@ -74,16 +83,25 @@ pub use resolution::{
     resolve_repository_ref_with_path_filters, resolve_repository_snapshot,
     resolve_repository_snapshot_with_filters, resolve_repository_snapshot_with_path_filters,
 };
+#[cfg(test)]
+use scope::path_scope_overlaps;
 use scope::{
     discover_source_layout, effective_index_path_filters, path_is_selected_with_layout,
-    path_scope_overlaps, scoped_source_snapshot_for_filters,
+    scoped_source_snapshot_for_filters,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
 use snapshot::{SnapshotBuild, SnapshotScopeFilters};
+#[cfg(test)]
+use source::{RepositorySourceKind, source_snapshot_batch_bytes};
 use source::{
     registration_source, source_bytes_after_content_verification, source_commit_is_filesystem,
     source_kind,
 };
+pub(crate) use source_declarations::{
+    SourceDeclarationMatch, safe_git_blob_path, simple_source_identifier,
+    source_declarations_for_identity, source_line_defines_identity,
+};
+use worktree_overlay::build_worktree_overlay_snapshot;
 
 #[cfg(test)]
 use {
@@ -96,6 +114,8 @@ pub(crate) const REGISTRATION_LANGUAGE_FILTER_ERROR: &str = concat!(
     "registration language filters are not supported; ",
     "register the full language surface and use query-time --language filters to narrow results"
 );
+const MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS: usize =
+    CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
 
 /// Blocking code index failure.
 #[derive(Debug)]
@@ -292,224 +312,10 @@ pub fn changed_paths_for_diff_with_filters(
     }
     let changes = diff_changes(root_path.as_ref(), base_ref, head_ref)?;
 
-    Ok(impact_paths_from_changes(changes))
+    impact_paths_from_changes_with_gitlinks(root_path.as_ref(), base_ref, head_ref, changes)
 }
 
-/// Exact source declaration recovered from an indexed Git snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SourceDeclarationMatch {
-    pub(crate) path: String,
-    pub(crate) excerpt: String,
-    pub(crate) byte_range: RepositoryCodeRange,
-    pub(crate) line_range: RepositoryCodeRange,
-}
-
-const MAX_SOURCE_DECLARATION_FILES: usize = 8;
-const MAX_SOURCE_DECLARATION_BYTES: usize = 512 * 1024;
-const WORKTREE_UNTRACKED_BROAD_SEGMENTS: &[&str] = &[
-    ".cache",
-    ".next",
-    ".nuxt",
-    ".parcel-cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    ".venv",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "target",
-    "third_party",
-    "vendor",
-    "venv",
-];
-
-/// Reads a bounded set of indexed Git blobs and returns exact declaration lines.
-pub(crate) fn source_declarations_for_identity(
-    registration: &CodeRepositoryRegistration,
-    commit: &str,
-    paths: Vec<String>,
-    path_filters: &[String],
-    language_filters: &[String],
-    identity: &str,
-) -> Result<Vec<SourceDeclarationMatch>, CodeIndexError> {
-    if !simple_source_identifier(identity) {
-        return Ok(Vec::new());
-    }
-
-    let root = PathBuf::from(&registration.root_path);
-    let filesystem_hashes = if source_commit_is_filesystem(commit) {
-        match scope::scoped_source_snapshot_for_registration(registration, commit).or_else(|_| {
-            scope::scoped_source_snapshot_for_registration_filters(
-                registration,
-                commit,
-                path_filters,
-                language_filters,
-            )
-        }) {
-            Ok(snapshot) => Some(snapshot.content_hashes),
-            Err(_) => return Ok(Vec::new()),
-        }
-    } else {
-        None
-    };
-    let mut seen = BTreeSet::new();
-    let mut files_considered = 0usize;
-    let mut matches = Vec::new();
-    for path in paths {
-        if files_considered >= MAX_SOURCE_DECLARATION_FILES {
-            break;
-        }
-        if !safe_git_blob_path(&path) || !seen.insert(path.clone()) {
-            continue;
-        }
-        files_considered += 1;
-        let Ok(bytes) = source_bytes_after_content_verification(
-            &root,
-            commit,
-            &path,
-            filesystem_hashes.as_ref(),
-        ) else {
-            continue;
-        };
-        if bytes.len() > MAX_SOURCE_DECLARATION_BYTES {
-            continue;
-        }
-        let Ok(content) = std::str::from_utf8(&bytes) else {
-            continue;
-        };
-        if let Some(declaration) = first_source_declaration_match(&path, content, identity)? {
-            matches.push(declaration);
-        }
-    }
-
-    Ok(matches)
-}
-
-fn first_source_declaration_match(
-    path: &str,
-    content: &str,
-    identity: &str,
-) -> Result<Option<SourceDeclarationMatch>, CodeIndexError> {
-    let mut byte_start = 0usize;
-    for (line_index, line) in content.split_inclusive('\n').enumerate() {
-        let line_without_newline = line.trim_end_matches(['\r', '\n']);
-        let byte_end = byte_start + line_without_newline.len();
-        if source_line_defines_identity(line_without_newline.trim(), identity) {
-            let line_number = line_index + 1;
-            return Ok(Some(SourceDeclarationMatch {
-                path: path.to_owned(),
-                excerpt: line_without_newline.trim().to_owned(),
-                byte_range: RepositoryCodeRange::new("byte_range", byte_start, byte_end)
-                    .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
-                line_range: RepositoryCodeRange::new("line_range", line_number, line_number)
-                    .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
-            }));
-        }
-        byte_start += line.len();
-    }
-
-    Ok(None)
-}
-
-pub(crate) fn source_line_defines_identity(line: &str, identity: &str) -> bool {
-    if line.is_empty() || !line_contains_identifier(line, identity) {
-        return false;
-    }
-    if line.starts_with("typedef ") || line.contains(" typedef ") {
-        return true;
-    }
-    if line.starts_with("#define ") {
-        return line
-            .strip_prefix("#define ")
-            .is_some_and(|suffix| line_starts_with_identifier(suffix, identity));
-    }
-    if line
-        .strip_prefix("using ")
-        .or_else(|| line.strip_prefix("typealias "))
-        .is_some_and(|suffix| line_starts_with_identifier(suffix, identity))
-    {
-        return true;
-    }
-    if ["struct ", "class ", "enum ", "union ", "interface "]
-        .into_iter()
-        .filter_map(|prefix| line.strip_prefix(prefix))
-        .any(|suffix| line_starts_with_identifier(suffix, identity))
-    {
-        return true;
-    }
-
-    line.contains('(') && line_looks_like_function_definition(line, identity)
-}
-
-fn line_looks_like_function_definition(line: &str, identity: &str) -> bool {
-    line.match_indices(identity).any(|(identity_start, _)| {
-        if !identifier_match_has_boundaries(line, identity, identity_start) {
-            return false;
-        }
-        let prefix = line[..identity_start].trim_start();
-        let suffix = line[identity_start + identity.len()..].trim_start();
-        if !suffix.starts_with('(') || prefix.contains('=') {
-            return false;
-        }
-        if prefix.chars().next_back().is_some_and(|character| {
-            matches!(character, '(' | '.' | '>') || (character == ':' && !prefix.ends_with("::"))
-        }) {
-            return false;
-        }
-        !matches!(
-            prefix.split_whitespace().next(),
-            Some("if" | "for" | "while" | "switch" | "return")
-        )
-    })
-}
-
-fn line_starts_with_identifier(line: &str, identifier: &str) -> bool {
-    let trimmed = line.trim_start();
-    trimmed.starts_with(identifier)
-        && trimmed
-            .get(identifier.len()..)
-            .is_some_and(|suffix| suffix.chars().next().is_none_or(|c| !is_identifier_char(c)))
-}
-
-fn line_contains_identifier(line: &str, identifier: &str) -> bool {
-    line.match_indices(identifier)
-        .any(|(start, _)| identifier_match_has_boundaries(line, identifier, start))
-}
-
-fn identifier_match_has_boundaries(line: &str, identifier: &str, start: usize) -> bool {
-    let end = start + identifier.len();
-    line.get(..start).is_some_and(|prefix| {
-        prefix
-            .chars()
-            .next_back()
-            .is_none_or(|c| !is_identifier_char(c))
-    }) && line
-        .get(end..)
-        .is_some_and(|suffix| suffix.chars().next().is_none_or(|c| !is_identifier_char(c)))
-}
-
-pub(crate) fn simple_source_identifier(value: &str) -> bool {
-    !value.is_empty() && value.chars().all(is_identifier_char)
-}
-
-fn is_identifier_char(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == '_'
-}
-
-fn safe_git_blob_path(path: &str) -> bool {
-    !path.is_empty()
-        && !path.starts_with('/')
-        && !path.contains('\\')
-        && !path.contains('\0')
-        && !path.contains('\n')
-        && !path.contains('\r')
-        && path.split('/').all(|part| !part.is_empty() && part != "..")
-}
-
+#[cfg(test)]
 fn impact_paths_from_changes(changes: Vec<GitChange>) -> Vec<String> {
     let mut paths = Vec::new();
     for change in changes {
@@ -530,6 +336,87 @@ fn impact_paths_from_changes(changes: Vec<GitChange>) -> Vec<String> {
     paths
 }
 
+fn impact_paths_from_changes_with_gitlinks(
+    root: &Path,
+    base_ref: &str,
+    head_ref: &str,
+    changes: Vec<GitChange>,
+) -> Result<Vec<String>, CodeIndexError> {
+    let base_commit = resolve_ref(root, base_ref)?;
+    let head_commit = resolve_ref(root, head_ref)?;
+    let mut expander = source_gitlink::GitlinkImpactExpander::new(
+        root,
+        base_commit,
+        head_commit,
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    );
+    let mut paths = Vec::new();
+    for change in changes {
+        match change {
+            GitChange::Deleted { path } => push_expanded_impact_paths_or_original(
+                &mut paths,
+                &mut expander,
+                true,
+                false,
+                &path,
+            )?,
+            GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
+                push_expanded_impact_paths_or_original(
+                    &mut paths,
+                    &mut expander,
+                    true,
+                    true,
+                    &path,
+                )?
+            }
+            GitChange::Renamed { old_path, new_path } => {
+                push_expanded_impact_paths_or_original(
+                    &mut paths,
+                    &mut expander,
+                    true,
+                    false,
+                    &old_path,
+                )?;
+                push_expanded_impact_paths_or_original(
+                    &mut paths,
+                    &mut expander,
+                    false,
+                    true,
+                    &new_path,
+                )?;
+            }
+            GitChange::Copied { new_path, .. } => {
+                push_expanded_impact_paths_or_original(
+                    &mut paths,
+                    &mut expander,
+                    false,
+                    true,
+                    &new_path,
+                )?;
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+
+    Ok(paths)
+}
+
+fn push_expanded_impact_paths_or_original(
+    paths: &mut Vec<String>,
+    expander: &mut source_gitlink::GitlinkImpactExpander<'_>,
+    include_base: bool,
+    include_head: bool,
+    path: &str,
+) -> Result<(), CodeIndexError> {
+    match expander.expanded_paths(path, include_base, include_head)? {
+        Some(expanded) if !expanded.is_empty() => paths.extend(expanded),
+        _ => paths.push(path.to_owned()),
+    }
+
+    Ok(())
+}
+
 /// Extracts symbol names removed by a diff so impact can include deleted APIs.
 pub fn deleted_symbol_names_for_diff(
     registration: &CodeRepositoryRegistration,
@@ -545,38 +432,174 @@ pub fn deleted_symbol_names_for_diff(
         return Ok(Vec::new());
     }
     let base_commit = resolve_ref(&root, base_ref)?;
+    let head_commit = resolve_ref(&root, head_ref)?;
     let changes = diff_changes(&root, base_ref, head_ref)?;
-    let base_entries = tracked_entries(&root, &base_commit)?;
+    let entry_scope = tracked_entry_scope_for_selector(registration, selector);
+    let base_entries = tracked_entries_with_scope(&root, &base_commit, &entry_scope)?;
     let source_layout = discover_source_layout(&base_entries);
+    let context = DeletedSymbolContext {
+        registration,
+        selector,
+        root: &root,
+        base_commit: &base_commit,
+        source_layout: &source_layout,
+    };
     let mut names = Vec::new();
 
     for change in changes {
-        let deleted_path = match change {
-            GitChange::Deleted { path } | GitChange::Renamed { old_path: path, .. } => path,
-            GitChange::AddedOrModified { .. }
-            | GitChange::Copied { .. }
-            | GitChange::TypeChanged { .. } => continue,
-        };
-        if !path_is_selected_with_layout(&deleted_path, registration, selector, &source_layout) {
-            continue;
+        match change {
+            GitChange::Deleted { path } | GitChange::Renamed { old_path: path, .. } => {
+                append_deleted_symbol_names_for_removed_path(
+                    &mut names,
+                    &context,
+                    &base_entries,
+                    &path,
+                )?;
+            }
+            GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
+                append_deleted_symbol_names_for_gitlink_update(
+                    &mut names,
+                    &context,
+                    &head_commit,
+                    &path,
+                )?;
+            }
+            GitChange::Copied { .. } => {}
         }
-        let bytes = git_bytes(&root, ["show", &format!("{base_commit}:{deleted_path}")])?;
-        let mut build = SnapshotBuild::new_with_selector(
-            registration,
-            selector,
-            base_commit.clone(),
-            "deleted-symbol-seed".to_owned(),
-            true,
-            1,
-            0,
-        );
-        parse_indexed_file(&mut build, &deleted_path, &bytes)?;
-        names.extend(build.symbols.into_iter().map(|symbol| symbol.name));
     }
     names.sort();
     names.dedup();
 
     Ok(names)
+}
+
+struct DeletedSymbolContext<'a> {
+    registration: &'a CodeRepositoryRegistration,
+    selector: &'a CodeRepositorySelector,
+    root: &'a Path,
+    base_commit: &'a str,
+    source_layout: &'a scope::SourceLayoutDiscovery,
+}
+
+fn append_deleted_symbol_names_for_removed_path(
+    names: &mut Vec<String>,
+    context: &DeletedSymbolContext<'_>,
+    base_entries: &[changes::GitTreeEntry],
+    path: &str,
+) -> Result<(), CodeIndexError> {
+    if source_gitlink::gitlink_commit_at_tree(context.root, context.base_commit, path)?.is_some() {
+        let paths = source_gitlink::bounded_expanded_paths_under(
+            base_entries,
+            path,
+            MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+        )?;
+        if !paths.is_empty() {
+            for path in paths {
+                append_deleted_symbol_names_for_path(names, context, context.base_commit, &path)?;
+            }
+            return Ok(());
+        }
+    }
+
+    append_deleted_symbol_names_for_path(names, context, context.base_commit, path)
+}
+
+fn append_deleted_symbol_names_for_gitlink_update(
+    names: &mut Vec<String>,
+    context: &DeletedSymbolContext<'_>,
+    head_commit: &str,
+    path: &str,
+) -> Result<(), CodeIndexError> {
+    let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
+        context.root,
+        path,
+        context.base_commit,
+        head_commit,
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    )?
+    else {
+        return Ok(());
+    };
+    if !expansion.base_is_gitlink {
+        append_deleted_symbol_names_for_path(names, context, context.base_commit, path)?;
+        return Ok(());
+    }
+    if expansion.base_paths.is_empty() {
+        return Ok(());
+    }
+    for path in expansion.base_paths {
+        if !path_is_selected_with_layout(
+            &path,
+            context.registration,
+            context.selector,
+            context.source_layout,
+        ) {
+            continue;
+        }
+        let mut removed = symbol_names_for_path(context, context.base_commit, &path)?;
+        if expansion.head_paths.contains(&path) {
+            let retained = symbol_names_for_path(context, head_commit, &path)?;
+            removed.retain(|name| !retained.contains(name));
+        }
+        names.extend(removed);
+    }
+
+    Ok(())
+}
+
+fn append_deleted_symbol_names_for_path(
+    names: &mut Vec<String>,
+    context: &DeletedSymbolContext<'_>,
+    commit: &str,
+    path: &str,
+) -> Result<(), CodeIndexError> {
+    if !path_is_selected_with_layout(
+        path,
+        context.registration,
+        context.selector,
+        context.source_layout,
+    ) {
+        return Ok(());
+    }
+    names.extend(symbol_names_for_path(context, commit, path)?);
+
+    Ok(())
+}
+
+fn symbol_names_for_path(
+    context: &DeletedSymbolContext<'_>,
+    commit: &str,
+    path: &str,
+) -> Result<BTreeSet<String>, CodeIndexError> {
+    let bytes = source_bytes_after_content_verification(context.root, commit, path, None)?;
+    let mut build = SnapshotBuild::new_with_selector(
+        context.registration,
+        context.selector,
+        commit.to_owned(),
+        "deleted-symbol-seed".to_owned(),
+        true,
+        1,
+        0,
+    );
+    parse_indexed_file(&mut build, path, &bytes)?;
+
+    Ok(build
+        .symbols
+        .into_iter()
+        .map(|symbol| symbol.name)
+        .collect())
+}
+
+fn tracked_entry_scope_for_selector(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> TrackedEntryScope {
+    TrackedEntryScope::from_path_filters(
+        registration
+            .path_filters
+            .iter()
+            .chain(selector.path_filters.iter()),
+    )
 }
 
 pub(crate) fn repository_uses_filesystem_source(
@@ -612,9 +635,10 @@ fn build_incremental_snapshot(
     let commit = resolve_ref(root, head_ref)?;
     let tree_hash = resolve_tree(root, &commit)?;
     let changes = diff_changes(root, base_ref, head_ref)?;
-    let base_entries = tracked_entries(root, &base_commit)?;
+    let entry_scope = tracked_entry_scope_for_selector(registration, selector);
+    let base_entries = tracked_entries_with_scope(root, &base_commit, &entry_scope)?;
     let base_source_layout = discover_source_layout(&base_entries);
-    let head_entries = tracked_entries(root, &commit)?;
+    let head_entries = tracked_entries_with_scope(root, &commit, &entry_scope)?;
     let source_layout = discover_source_layout(&head_entries);
     let path_filters = effective_index_path_filters(registration, selector, &source_layout);
     let language_filters =
@@ -636,6 +660,7 @@ fn build_incremental_snapshot(
         registration,
         selector,
         root,
+        base_commit: &base_commit,
         previous_hashes,
         source_layout: &source_layout,
     };
@@ -643,12 +668,40 @@ fn build_incremental_snapshot(
     for change in changes {
         match change {
             GitChange::Deleted { path } => {
+                if delete_expanded_gitlink_paths(
+                    &mut build,
+                    registration,
+                    selector,
+                    &base_entries,
+                    &base_source_layout,
+                    &path,
+                )? {
+                    continue;
+                }
                 if path_is_selected_with_layout(&path, registration, selector, &base_source_layout)
                 {
                     build.deleted_paths.push(path);
                 }
             }
             GitChange::Renamed { old_path, new_path } => {
+                if delete_expanded_gitlink_paths(
+                    &mut build,
+                    registration,
+                    selector,
+                    &base_entries,
+                    &base_source_layout,
+                    &old_path,
+                )? {
+                    if !parse_expanded_gitlink_paths(
+                        &mut build,
+                        &parse_context,
+                        &head_entries,
+                        &new_path,
+                    )? {
+                        parse_changed_path(&mut build, &parse_context, &new_path)?;
+                    }
+                    continue;
+                }
                 if path_is_selected_with_layout(
                     &old_path,
                     registration,
@@ -665,7 +718,14 @@ fn build_incremental_snapshot(
                         head_ref: head_ref.to_owned(),
                     });
                 }
-                parse_changed_path(&mut build, &parse_context, &new_path)?;
+                if !parse_expanded_gitlink_paths(
+                    &mut build,
+                    &parse_context,
+                    &head_entries,
+                    &new_path,
+                )? {
+                    parse_changed_path(&mut build, &parse_context, &new_path)?;
+                }
             }
             GitChange::Copied { old_path, new_path } => {
                 if path_is_selected_with_layout(&new_path, registration, selector, &source_layout) {
@@ -678,10 +738,24 @@ fn build_incremental_snapshot(
                         head_ref: head_ref.to_owned(),
                     });
                 }
-                parse_changed_path(&mut build, &parse_context, &new_path)?;
+                if !parse_expanded_gitlink_paths(
+                    &mut build,
+                    &parse_context,
+                    &head_entries,
+                    &new_path,
+                )? {
+                    parse_changed_path(&mut build, &parse_context, &new_path)?;
+                }
             }
             GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
-                parse_changed_path(&mut build, &parse_context, &path)?;
+                if !parse_expanded_gitlink_change(
+                    &mut build,
+                    &parse_context,
+                    &base_source_layout,
+                    &path,
+                )? {
+                    parse_changed_path(&mut build, &parse_context, &path)?;
+                }
             }
         }
     }
@@ -689,287 +763,100 @@ fn build_incremental_snapshot(
     Ok(build.finish())
 }
 
-fn build_worktree_overlay_snapshot(
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-    root: &Path,
-    previous_hashes: &BTreeMap<String, String>,
-    base_resolved_commit_sha: Option<&str>,
-) -> Result<CodeIndexSnapshot, CodeIndexError> {
-    if source_commit_is_filesystem(&selector.ref_selector)
-        || base_resolved_commit_sha.is_some_and(source_commit_is_filesystem)
-        || source_kind(root)?.is_filesystem()
-    {
-        return build_filesystem_delta_snapshot(
-            registration,
-            selector,
-            root,
-            &selector.ref_selector,
-            previous_hashes,
-            base_resolved_commit_sha,
-        );
-    }
-    let commit = resolve_ref(root, &selector.ref_selector)?;
-    let head_commit = resolve_ref(root, "HEAD")?;
-    if commit != head_commit {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "worktree overlay ref '{}' resolves to {}, but checked-out HEAD is {}",
-            selector.ref_selector, commit, head_commit
-        )));
-    }
-    let status = git_bytes(
-        root,
-        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    let changes = worktree_changed_paths(&status);
-    if changes.is_empty() {
-        return build_full_snapshot(registration, selector, root);
-    }
-    let mut overlay_hash_input = Vec::new();
-    let mut deleted_paths = Vec::new();
-    let mut files_to_parse = Vec::new();
-    let mut skipped_unchanged_count = 0;
-    for change in &changes {
-        if let Some(deleted_path) = &change.deleted_source {
-            if scope::path_is_selected(deleted_path, registration, selector) {
-                overlay_hash_input.extend_from_slice(b"D\0");
-                overlay_hash_input.extend_from_slice(deleted_path.as_bytes());
-                overlay_hash_input.push(0);
-                deleted_paths.push(deleted_path.clone());
-            }
-        }
-        let path = &change.path;
-        if !path_scope_overlaps(path, registration, selector) {
-            continue;
-        }
-        if change.is_untracked()
-            && !worktree_untracked_path_is_selected(path, registration, selector)
-        {
-            continue;
-        }
-        let full_path = root.join(path);
-        let metadata = match fs::symlink_metadata(&full_path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if scope::path_is_selected(path, registration, selector) {
-                    overlay_hash_input.extend_from_slice(b"D\0");
-                    overlay_hash_input.extend_from_slice(path.as_bytes());
-                    overlay_hash_input.push(0);
-                    deleted_paths.push(path.clone());
-                }
-                continue;
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let file_type = metadata.file_type();
-        if file_type.is_symlink() {
-            if scope::path_is_selected(path, registration, selector) {
-                record_worktree_status_marker(path, &mut overlay_hash_input);
-            }
-            continue;
-        }
-        if file_type.is_dir() {
-            if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
-                if scope::path_is_selected(path, registration, selector) {
-                    record_worktree_status_marker(path, &mut overlay_hash_input);
-                }
-                continue;
-            }
-            for nested_path in worktree_directory_files(root, path)? {
-                if worktree_untracked_path_is_selected(&nested_path, registration, selector) {
-                    record_worktree_file(
-                        root,
-                        &nested_path,
-                        previous_hashes,
-                        &mut overlay_hash_input,
-                        &mut files_to_parse,
-                        &mut skipped_unchanged_count,
-                    )?;
-                }
-            }
-            continue;
-        }
-        if !file_type.is_file() {
-            if scope::path_is_selected(path, registration, selector) {
-                record_worktree_status_marker(path, &mut overlay_hash_input);
-            }
-            continue;
-        }
-        if scope::path_is_selected(path, registration, selector) {
-            record_worktree_file(
-                root,
-                path,
-                previous_hashes,
-                &mut overlay_hash_input,
-                &mut files_to_parse,
-                &mut skipped_unchanged_count,
-            )?;
-        }
-    }
-    if overlay_hash_input.is_empty() {
-        return build_full_snapshot(registration, selector, root);
-    }
-
-    let overlay_hash = format!("{:016x}", stable_hash64(&overlay_hash_input));
-    let tree_hash = format!("worktree:{overlay_hash}");
-    let overlay_commit = format!("worktree:{commit}:{overlay_hash}");
-    let mut build = SnapshotBuild::new_with_selector(
-        registration,
-        selector,
-        overlay_commit,
-        tree_hash,
-        false,
-        changes.len(),
-        skipped_unchanged_count,
-    );
-    build.base_resolved_commit_sha = Some(commit);
-    build.deleted_paths = deleted_paths;
-
-    for (path, bytes) in files_to_parse {
-        parse_indexed_file(&mut build, &path, &bytes)?;
-    }
-
-    Ok(build.finish())
-}
-
-fn worktree_untracked_path_is_selected(
+fn parse_expanded_gitlink_change(
+    build: &mut SnapshotBuild,
+    context: &ChangedPathParseContext<'_>,
+    base_source_layout: &scope::SourceLayoutDiscovery,
     path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    scope::path_is_selected(path, registration, selector)
-        && (!worktree_untracked_path_contains_broad_segment(path)
-            || explicit_worktree_path_filter_covers(path, registration, selector))
-}
-
-fn worktree_untracked_path_contains_broad_segment(path: &str) -> bool {
-    normalize_worktree_path(path)
-        .split('/')
-        .any(|segment| WORKTREE_UNTRACKED_BROAD_SEGMENTS.contains(&segment))
-}
-
-fn explicit_worktree_path_filter_covers(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    registration
-        .path_filters
-        .iter()
-        .chain(selector.path_filters.iter())
-        .any(|filter| explicit_worktree_filter_matches_path(path, filter))
-}
-
-fn explicit_worktree_filter_matches_path(path: &str, filter: &str) -> bool {
-    let path = normalize_worktree_path(path);
-    let filter = normalize_worktree_path(filter);
-    if filter.is_empty() || filter == "." {
-        return false;
-    }
-
-    path == filter
-        || path.starts_with(&format!("{filter}/"))
-        || filter.starts_with(&format!("{path}/"))
-}
-
-fn normalize_worktree_path(path: &str) -> String {
-    path.replace('\\', "/")
-        .trim_start_matches("./")
-        .trim_matches('/')
-        .to_owned()
-}
-
-fn record_worktree_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {
-    overlay_hash_input.extend_from_slice(b"S\0");
-    overlay_hash_input.extend_from_slice(path.as_bytes());
-    overlay_hash_input.push(0);
-}
-
-fn record_worktree_file(
-    root: &Path,
-    path: &str,
-    previous_hashes: &BTreeMap<String, String>,
-    overlay_hash_input: &mut Vec<u8>,
-    files_to_parse: &mut Vec<(String, Vec<u8>)>,
-    skipped_unchanged_count: &mut usize,
-) -> Result<(), CodeIndexError> {
-    let bytes = fs::read(root.join(path))?;
-    let blob_hash = stable_content_hash(&bytes);
-    overlay_hash_input.extend_from_slice(b"F\0");
-    overlay_hash_input.extend_from_slice(path.as_bytes());
-    overlay_hash_input.push(0);
-    overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
-    overlay_hash_input.push(0);
-    if previous_hashes.get(path) == Some(&blob_hash) {
-        *skipped_unchanged_count += 1;
-        return Ok(());
-    }
-    files_to_parse.push((path.to_owned(), bytes));
-
-    Ok(())
-}
-
-fn worktree_directory_files(
-    root: &Path,
-    relative_dir: &str,
-) -> Result<Vec<String>, CodeIndexError> {
-    if !worktree_directory_is_expandable(root, relative_dir)? {
-        return Ok(Vec::new());
-    }
-    let mut files = Vec::new();
-    collect_worktree_directory_files(root, Path::new(relative_dir), &mut files)?;
-    files.sort();
-
-    Ok(files)
-}
-
-fn worktree_directory_is_expandable(
-    root: &Path,
-    relative_dir: &str,
 ) -> Result<bool, CodeIndexError> {
-    let full_path = root.join(relative_dir);
-    let metadata = fs::symlink_metadata(&full_path)?;
-    if !metadata.file_type().is_dir() {
+    let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
+        context.root,
+        path,
+        context.base_commit,
+        &build.commit,
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    )?
+    else {
+        return Ok(false);
+    };
+    for deleted_path in expansion.base_paths.difference(&expansion.head_paths) {
+        if path_is_selected_with_layout(
+            deleted_path,
+            context.registration,
+            context.selector,
+            base_source_layout,
+        ) {
+            build.deleted_paths.push(deleted_path.clone());
+        }
+    }
+    if !expansion.base_is_gitlink
+        && path_is_selected_with_layout(
+            path,
+            context.registration,
+            context.selector,
+            base_source_layout,
+        )
+    {
+        build.deleted_paths.push(path.to_owned());
+    }
+    for head_path in expansion.head_paths {
+        parse_changed_path(build, context, &head_path)?;
+    }
+
+    Ok(expansion.head_is_gitlink)
+}
+
+fn parse_expanded_gitlink_paths(
+    build: &mut SnapshotBuild,
+    context: &ChangedPathParseContext<'_>,
+    entries: &[changes::GitTreeEntry],
+    path: &str,
+) -> Result<bool, CodeIndexError> {
+    let paths = source_gitlink::bounded_expanded_paths_under(
+        entries,
+        path,
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    )?;
+    if paths.is_empty() {
         return Ok(false);
     }
-
-    Ok(!contains_git_metadata(root, Path::new(relative_dir))?)
-}
-
-fn contains_git_metadata(root: &Path, relative: &Path) -> Result<bool, CodeIndexError> {
-    match fs::symlink_metadata(root.join(relative).join(".git")) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error.into()),
+    for path in paths {
+        parse_changed_path(build, context, &path)?;
     }
+
+    Ok(true)
 }
 
-fn collect_worktree_directory_files(
-    root: &Path,
-    relative: &Path,
-    files: &mut Vec<String>,
-) -> Result<(), CodeIndexError> {
-    for entry in fs::read_dir(root.join(relative))? {
-        let entry = entry?;
-        let path = relative.join(entry.file_name());
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            if entry.file_name() == ".git" || contains_git_metadata(root, &path)? {
-                continue;
-            }
-            collect_worktree_directory_files(root, &path, files)?;
-        } else if file_type.is_file() {
-            files.push(path.to_string_lossy().replace('\\', "/"));
+fn delete_expanded_gitlink_paths(
+    build: &mut SnapshotBuild,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    entries: &[changes::GitTreeEntry],
+    source_layout: &scope::SourceLayoutDiscovery,
+    path: &str,
+) -> Result<bool, CodeIndexError> {
+    let paths = source_gitlink::bounded_expanded_paths_under(
+        entries,
+        path,
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    )?;
+    if paths.is_empty() {
+        return Ok(false);
+    }
+    for path in paths {
+        if path_is_selected_with_layout(&path, registration, selector, source_layout) {
+            build.deleted_paths.push(path);
         }
     }
 
-    Ok(())
+    Ok(true)
 }
 
 struct ChangedPathParseContext<'a> {
     registration: &'a CodeRepositoryRegistration,
     selector: &'a CodeRepositorySelector,
     root: &'a Path,
+    base_commit: &'a str,
     previous_hashes: &'a BTreeMap<String, String>,
     source_layout: &'a scope::SourceLayoutDiscovery,
 }
@@ -987,8 +874,7 @@ fn parse_changed_path(
     ) {
         return Ok(());
     }
-    let object = format!("{}:{path}", build.commit);
-    let bytes = git_bytes(context.root, ["show", &object])?;
+    let bytes = source_bytes_after_content_verification(context.root, &build.commit, path, None)?;
     let blob_hash = stable_content_hash(&bytes);
     if context.previous_hashes.get(path) == Some(&blob_hash) {
         build.skipped_unchanged_count += 1;
