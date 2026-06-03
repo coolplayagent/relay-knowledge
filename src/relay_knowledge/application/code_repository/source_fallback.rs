@@ -98,16 +98,22 @@ pub(super) fn plan_code_grep_fallback(
             }) {
                 return None;
             }
+            let paths = path_filters
+                .iter()
+                .filter(|path| exact_file_filter(path))
+                .map(|path| normalize_filter_path(path).to_owned())
+                .collect::<Vec<_>>();
+            let needs_scope_paths = paths.is_empty();
             Some(CodeGrepFallbackPlan {
                 commit,
                 query: identity,
-                paths: Vec::new(),
+                paths,
                 path_filters,
                 language_filters,
                 limit: request.limit,
                 kind: SourceGrepKind::References,
                 identity: None,
-                needs_scope_paths: true,
+                needs_scope_paths,
             })
         }
         CodeQueryKind::Imports => {
@@ -152,16 +158,22 @@ pub(super) fn plan_code_grep_fallback(
             if hybrid_results_cover_identity(results, &identity) {
                 return None;
             }
+            let paths = path_filters
+                .iter()
+                .filter(|path| exact_file_filter(path))
+                .map(|path| normalize_filter_path(path).to_owned())
+                .collect::<Vec<_>>();
+            let needs_scope_paths = paths.is_empty();
             Some(CodeGrepFallbackPlan {
                 commit,
                 query: identity,
-                paths: Vec::new(),
+                paths,
                 path_filters,
                 language_filters,
                 limit: request.limit.saturating_sub(results.len()).max(1),
                 kind: SourceGrepKind::Hybrid,
                 identity: None,
-                needs_scope_paths: true,
+                needs_scope_paths,
             })
         }
         _ => None,
@@ -460,14 +472,13 @@ fn hit_source_line_is_better(hit: &CodeRetrievalHit, matched: &SourceGrepMatch) 
 }
 
 fn hit_allows_source_refresh(hit: &CodeRetrievalHit) -> bool {
-    hit.retrieval_layers.iter().any(|layer| {
-        matches!(
-            layer,
-            CodeRetrievalLayer::Symbol
-                | CodeRetrievalLayer::Definition
-                | CodeRetrievalLayer::CallGraph
-        )
-    })
+    hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
+        || hit
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::Definition)
+        || hit
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::CallGraph)
 }
 
 fn reference_source_grep_score_adjustment(identity: &str, excerpt: &str) -> f64 {
@@ -981,7 +992,6 @@ fn dedupe_sort_truncate(results: &mut Vec<CodeRetrievalHit>, limit: usize) {
     });
     results.truncate(limit);
 }
-
 #[cfg(test)]
 #[path = "source_fallback_tests.rs"]
 mod tests;

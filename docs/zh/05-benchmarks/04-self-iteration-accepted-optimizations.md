@@ -990,17 +990,9 @@
 - summary: accepted Rust workflow chunk-first (`run-1780397808`, score 0.978577, 108/108 cases) and import query shape scoring (`run-1780398992`, score 0.979356, 108/108 cases) preserved foundational=1.000000, semantic_vector=1.000000, and stability=1.000000 while improving TypeScript dynamic import rank from 4 to 1 and competitive capability to 0.996795. Full patches, changed paths, improvements, degradations, and latency metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
 - performance memory: `run-1780398992` improved competitive capability but recorded performance=0.889226 with software-global, LevelDB, index-performance, and project-alias latency regressions. Later candidates should prefer general read-path or planning work reduction over more local scorer-only import tweaks.
 
-## run-1780401183
+## run-1780401183 compacted
+- score: 0.980895 with 108/108 cases passed; Hybrid direct-evidence coverage gate improved performance from 0.875658 to 0.897779 while preserving foundational=1.000000, semantic_vector=1.000000, and stability=1.000000. Full patch, metrics, improvements, and latency degradations remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1780401183.patch`, its report, and progressive memory.
 
-- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780401183.patch`
-- score: 0.980895 (foundational=1.000000, competitive=0.996795, accuracy=0.998397, semantic_vector=1.000000, research_judge=n/a, performance=0.897779, stability=1.000000)
-- cases: 108/108 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_direct_gate.rs`
-- key improvements: score_component:performance 0.875658->0.8977789443296978; metric:cargo_fmt_check_ms 4528.0->3409.0; metric:self_iteration_cargo_fmt_check_ms 566.0->383.0; metric:skill_metadata_policy_cases_ms 384.0->282.0; metric:cargo_build_debug_ms 39057.0->283.0; metric:self_iteration_cargo_check_ms 623.0->303.0; metric:code_index_recovery_cases_ms 25372.0->946.0; metric:code_index_sqlite_lock_cases_ms 25912.0->1188.0
-- known degradations: metric:software_global_fixture_index_ms 142.0->183.0; metric:software_global_fixture_register_index_ms 203.0->244.0; metric:nonstandard_layout_fixture_index_ms 162.0->225.0; metric:nonstandard_layout_fixture_register_index_ms 223.0->286.0; metric:relay_teams_query_p50_ms 243.0->463.0; metric:relay_teams_query_p95_ms 746.0->1389.0; metric:cpp_syntax_fixture_index_ms 222.0->262.0; metric:cpp_syntax_fixture_register_index_ms 283.0->323.0
-- latency metrics: cargo_fmt_check_ms=3409ms; self_iteration_cargo_fmt_check_ms=383ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=282ms; cargo_build_debug_ms=283ms; self_iteration_cargo_check_ms=303ms; code_index_recovery_cases_ms=946ms; code_index_sqlite_lock_cases_ms=1188ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
+## 2026-06-03 exact-symbol-miss, read-model outage, and fact-version scan
+- 算法/架构：Symbol/Definition 单标识符查询先执行精确 `name = ?` lookup；若未饱和且无直接命中，直接返回空结果，不再启动宽 FTS 证明负例。Hybrid chunk-first 在 FTS/read-model 暂时不可用时可用既有 graph/API identity rows 或 bounded symbol-table LIKE 候选继续返回有 `degraded_reason` 的结构化命中，source fallback 对无 indexed hit、无 path anchor 的精确定义 miss 直接退出，SQLite read pool busy timeout 降为固定短等待；`latest_repository_scope_status` 扫描候选时同步验证 `code_snapshot_expected_scope_id`，跳过 legacy fact-version scope 后继续寻找 current scope。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 写入、candidate 上限、任务 lease/checkpoint、repo-set overlay、semantic/vector read model、env/paths/net、QoS 或安装发布；Hybrid 仍只在 bounded candidates 与 dense evidence gate 下提前返回，Symbol/Definition 精确 kind 与无锚点 source fallback 不再用宽文本召回补空。预期降低 negative lookup、read-model lock 抖动、stale allow-fallback、performance/all file gates 和 TS/C/C++ Hybrid 尾延迟，同时修复 PR review 指出的 legacy scope 排序遮挡问题；风险是用户想用精确 Symbol/Definition 单词命中文本但没有结构化 symbol 时不再看到宽 FTS 结果，该行为与精确 query kind 语义一致，Hybrid/References/Imports 和多词查询仍保留完整召回，受 focused unit/storage/self-iteration tests 控制。

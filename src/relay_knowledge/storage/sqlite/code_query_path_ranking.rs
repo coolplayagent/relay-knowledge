@@ -111,7 +111,7 @@ pub(super) fn reference_test_path_penalty(
         return 0.0;
     }
 
-    -0.35
+    -1.25
 }
 
 pub(super) fn caller_result_assignment_bonus(
@@ -351,7 +351,7 @@ pub(super) fn import_test_path_penalty(
         return 0.0;
     }
 
-    -0.35
+    -1.25
 }
 
 pub(super) fn symbol_test_path_penalty(
@@ -880,11 +880,11 @@ mod tests {
 
         assert_eq!(
             import_test_path_penalty(3.0, "table/filter_block_test.cc", &imports, false),
-            -0.35
+            -1.25
         );
         assert_eq!(
             import_test_path_penalty(3.0, "src/__tests__/provider.ts", &hybrid, false),
-            -0.35
+            -1.25
         );
         assert_eq!(
             import_test_path_penalty(3.0, "table/filter_block.cc", &imports, false),

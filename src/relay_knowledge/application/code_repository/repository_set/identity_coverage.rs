@@ -258,6 +258,8 @@ mod tests {
                 priority,
             },
             tree_hash: format!("tree-{source_scope}"),
+            indexed_path_filters: Vec::new(),
+            indexed_language_filters: vec!["go".to_owned()],
             freshness_state: "fresh".to_owned(),
             stale: false,
             indexed_file_count: 1,

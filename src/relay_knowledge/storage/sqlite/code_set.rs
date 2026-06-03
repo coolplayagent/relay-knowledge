@@ -422,7 +422,8 @@ fn member_statuses(
                member.resolved_commit_sha, member.source_scope, member.path_filters_json,
                member.language_filters_json, member.priority, scope.tree_hash, scope.stale,
                scope.indexed_file_count, scope.symbol_count, scope.reference_count,
-               scope.chunk_count, scope.degraded_reason
+               scope.chunk_count, scope.degraded_reason, scope.path_filters_json,
+               scope.language_filters_json
         FROM code_repository_set_members member
         JOIN code_repository_scopes scope ON scope.source_scope = member.source_scope
         WHERE member.set_id = ?1
@@ -707,6 +708,8 @@ fn member_status_from_row(row: &Row<'_>) -> rusqlite::Result<CodeRepositorySetMe
             priority: row.get(8)?,
         },
         tree_hash: row.get(9)?,
+        indexed_path_filters: parse_json_list(row.get::<_, String>(16)?)?,
+        indexed_language_filters: parse_json_list(row.get::<_, String>(17)?)?,
         freshness_state: if stale {
             "stale".to_owned()
         } else {

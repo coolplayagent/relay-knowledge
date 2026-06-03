@@ -16,6 +16,7 @@ use relay_knowledge::{
     env::{EnvironmentConfig, PlatformKind},
     storage::SqliteGraphStore,
 };
+use rusqlite::{Connection, params};
 
 #[tokio::test]
 async fn software_projection_resolves_symbolic_refs_to_indexed_commit_scope() {
@@ -57,6 +58,74 @@ serde = "1"
 
     assert_eq!(projection.scope.requested_ref, "software-main");
     assert_eq!(projection.scope.scope_id, indexed.scope.scope_id);
+    assert!(
+        projection
+            .components
+            .iter()
+            .any(|component| component.name == "serde")
+    );
+}
+
+#[tokio::test]
+async fn fast_full_index_reuses_code_scope_but_refreshes_stale_software_projection() {
+    let repo = FixtureRepo::create("code-software-fast-refresh");
+    let db_path = repo.path.join("relay-knowledge.sqlite");
+    repo.write(
+        "Cargo.toml",
+        r#"
+[package]
+name = "fixture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1"
+"#,
+    );
+    repo.write("src/lib.rs", "pub fn uses_fast_projection_refresh() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "software manifest"]);
+    let service = service_with_store_path(&db_path).await;
+    register_fixture_repo(
+        &service,
+        &repo,
+        Vec::new(),
+        "register-software-fast-refresh",
+    )
+    .await;
+
+    let first = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-software-fast-first"),
+        )
+        .await
+        .expect("initial index should refresh software projection");
+    mark_software_projection_stale(&db_path, &first.summary.source_scope);
+
+    let second = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-software-fast-second"),
+        )
+        .await
+        .expect("fresh full-index reuse should refresh software projection");
+    let projection = software_projection(&service, "HEAD", FreshnessPolicy::WaitUntilFresh)
+        .await
+        .expect("fast-path refresh should clear stale software status");
+
+    assert_eq!(second.summary.source_scope, first.summary.source_scope);
+    assert_eq!(second.summary.progress.blob_read_count, 0);
+    assert!(!projection.status.stale);
+    assert_eq!(projection.status.last_error, None);
     assert!(
         projection
             .components
@@ -492,6 +561,20 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
+    service_with_store(Arc::new(
+        SqliteGraphStore::open_in_memory().expect("store should open"),
+    ))
+    .await
+}
+
+async fn service_with_store_path(path: &Path) -> RelayKnowledgeService {
+    service_with_store(Arc::new(
+        SqliteGraphStore::open(path).expect("persistent store should open"),
+    ))
+    .await
+}
+
+async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
@@ -504,9 +587,25 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
     let runtime = RuntimeConfiguration::from_environment(&environment)
         .await
         .expect("runtime should compose");
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
 
     RelayKnowledgeService::with_store(runtime, store)
+}
+
+fn mark_software_projection_stale(path: &Path, source_scope: &str) {
+    let connection = Connection::open(path).expect("store should open for test mutation");
+    let changed = connection
+        .execute(
+            "
+            UPDATE software_global_status
+            SET stale = 1,
+                last_error = 'previous projection failure'
+            WHERE source_scope = ?1
+            ",
+            params![source_scope],
+        )
+        .expect("software status should be marked stale");
+
+    assert_eq!(changed, 1);
 }
 
 struct FixtureRepo {

@@ -7,7 +7,9 @@ use crate::domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest};
 mod code_query_fts;
 
 pub(super) use code_query_fts::{
-    fts_match_query, hybrid_chunk_fts_match_query, strict_hybrid_chunk_fts_match_query,
+    compound_hybrid_chunk_fts_match_query, direct_hybrid_chunk_fts_match_query,
+    focused_hybrid_chunk_fts_match_query, fts_match_query, hybrid_chunk_fts_match_query,
+    strict_hybrid_chunk_fts_match_query, structured_hybrid_chunk_fts_match_query,
     symbol_fts_match_query,
 };
 

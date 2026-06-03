@@ -724,6 +724,121 @@ async fn repository_report_counts_degraded_files_beyond_summary_limit() {
 }
 
 #[tokio::test]
+async fn repeated_identical_registration_preserves_fresh_status() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/lib.rs",
+        "fn stable_policy() {}",
+    ))
+    .await;
+    let registration =
+        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+
+    store
+        .upsert_code_repository(registration)
+        .await
+        .expect("unchanged registration should persist");
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert!(!status.stale);
+}
+
+#[tokio::test]
+async fn repository_status_recovers_legacy_stale_flag_for_current_fresh_scope() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/lib.rs",
+        "fn stable_policy() {}",
+    ))
+    .await;
+    store
+        .run(|connection| {
+            connection.execute(
+                "UPDATE code_repositories SET stale = 1 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("legacy stale flag should update");
+
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert!(!status.stale);
+}
+
+#[tokio::test]
+async fn changed_registration_scope_marks_fresh_status_stale() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/lib.rs",
+        "fn stable_policy() {}",
+    ))
+    .await;
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "fixture",
+        "/tmp/repo",
+        vec!["src".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    store
+        .upsert_code_repository(registration)
+        .await
+        .expect("changed registration should persist");
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert!(status.stale);
+    assert_eq!(status.state, "registered");
+}
+
+#[tokio::test]
+async fn changed_registration_root_keeps_fresh_scope_stale() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/lib.rs",
+        "fn stable_policy() {}",
+    ))
+    .await;
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "fixture",
+        "/tmp/other-repo",
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    store
+        .upsert_code_repository(registration)
+        .await
+        .expect("changed root registration should persist");
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert!(status.stale);
+    assert_eq!(status.state, "registered");
+}
+
+#[tokio::test]
 async fn repository_report_counts_materialized_call_edges_once() {
     let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
 
@@ -763,6 +878,7 @@ async fn store_with_repository_snapshot_and_filters(
         snapshot.path_filters = path_filters;
         snapshot.language_filters = language_filters;
     }
+    retarget_snapshot_to_fact_scope(&mut snapshot);
     store
         .apply_code_index_snapshot(snapshot)
         .await

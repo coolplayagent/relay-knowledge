@@ -21,7 +21,7 @@ use super::{
     },
     code_query_import_targets::{
         attach_import_query_usage_context, attach_import_target_symbols,
-        search_imports_by_target_symbols,
+        search_imports_by_target_symbols, target_symbol_import_query,
     },
     code_query_path_ranking::{import_test_path_penalty, query_mentions_test_or_benchmark},
     code_query_rows::ImportRow,
@@ -47,13 +47,24 @@ pub(super) fn search_imports(
         return import_rows_to_hits(connection, status, request, direct_rows.rows);
     }
 
+    let target_symbol_rows = search_imports_by_target_symbols(connection, status, request)?;
+    let target_symbol_rows_can_answer =
+        import_target_symbol_rows_can_answer_without_fts(request, &target_symbol_rows);
+    if target_symbol_rows_can_answer {
+        return import_rows_to_hits(connection, status, request, target_symbol_rows);
+    }
+
     match search_import_fts_rows(connection, status, request) {
         Ok(mut rows) => {
             rows.extend(direct_rows.rows);
+            rows.extend(target_symbol_rows);
             import_rows_to_hits(connection, status, request, rows)
         }
         Err(_) if direct_rows_can_answer => {
             import_rows_to_hits(connection, status, request, direct_rows.rows)
+        }
+        Err(_) if target_symbol_rows_can_answer => {
+            import_rows_to_hits(connection, status, request, target_symbol_rows)
         }
         Err(error) => Err(error),
     }
@@ -161,6 +172,16 @@ fn import_path_rows_fit_request(request: &CodeRetrievalRequest, rows: &ImportPat
     !rows.saturated && rows.rows.len() <= request.limit.max(1)
 }
 
+fn import_target_symbol_rows_can_answer_without_fts(
+    request: &CodeRetrievalRequest,
+    rows: &[ImportRow],
+) -> bool {
+    request.code_query_kind == CodeQueryKind::Imports
+        && target_symbol_import_query(&request.query)
+        && !rows.is_empty()
+        && rows.len() <= request.limit.max(1)
+}
+
 fn search_import_fts_rows(
     connection: &Connection,
     status: &CodeRepositoryStatus,
@@ -233,9 +254,6 @@ fn import_rows_to_hits(
     request: &CodeRetrievalRequest,
     mut rows: Vec<ImportRow>,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    rows.extend(search_imports_by_target_symbols(
-        connection, status, request,
-    )?);
     if request.code_query_kind == CodeQueryKind::Imports
         && query_looks_like_import_path(&request.query)
     {

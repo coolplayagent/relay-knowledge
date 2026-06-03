@@ -5,7 +5,8 @@ use super::{
     error::required_text,
 };
 
-const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2";
+const CODE_SNAPSHOT_FACT_VERSION: &str =
+    "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1";
 
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(
@@ -37,6 +38,16 @@ pub fn code_snapshot_expected_scope_id(
         path_filters,
         language_filters,
     ))
+}
+
+pub fn code_snapshot_scope_is_fact_versioned(source_scope: &str) -> bool {
+    let Some(scope_hash) = source_scope.strip_prefix("git_snapshot:") else {
+        return false;
+    };
+    scope_hash.len() == 16
+        && scope_hash
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
 }
 
 /// Inclusive byte or line range for repository code index rows.

@@ -87,6 +87,43 @@ async fn repository_set_members_validate_real_indexed_scopes_and_report_missing_
 }
 
 #[tokio::test]
+async fn repository_set_status_preserves_member_filters_when_scope_is_broader() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .run(|connection| {
+            insert_repository_scope_with_filters(
+                connection,
+                "repo-a",
+                "app",
+                "scope-a",
+                "tree-a",
+                false,
+                ("[]", "[]"),
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 10))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 5),
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("fixture should insert");
+
+    let status = store
+        .run(|connection| code_set::set_status(connection, "workspace"))
+        .await
+        .expect("status should query")
+        .expect("set should exist");
+
+    let member = &status.members[0];
+    assert_eq!(member.member.path_filters, ["src"]);
+    assert_eq!(member.member.language_filters, ["rust"]);
+    assert!(member.indexed_path_filters.is_empty());
+    assert!(member.indexed_language_filters.is_empty());
+}
+
+#[tokio::test]
 async fn repository_set_readding_repository_replaces_previous_member_snapshot() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let status = store
@@ -681,6 +718,27 @@ fn insert_repository_scope(
     tree_hash: &str,
     stale: bool,
 ) -> Result<(), crate::storage::StorageError> {
+    insert_repository_scope_with_filters(
+        connection,
+        repository_id,
+        alias,
+        source_scope,
+        tree_hash,
+        stale,
+        ("[\"src\"]", "[\"rust\"]"),
+    )
+}
+
+fn insert_repository_scope_with_filters(
+    connection: &mut rusqlite::Connection,
+    repository_id: &str,
+    alias: &str,
+    source_scope: &str,
+    tree_hash: &str,
+    stale: bool,
+    filters_json: (&str, &str),
+) -> Result<(), crate::storage::StorageError> {
+    let (path_filters_json, language_filters_json) = filters_json;
     connection.execute(
         "
         INSERT OR IGNORE INTO code_repositories (
@@ -689,7 +747,7 @@ fn insert_repository_scope(
             indexed_file_count, symbol_count, reference_count, chunk_count, stale,
             degraded_reason
         )
-        VALUES (?1, ?2, '/tmp/repo', '[\"src\"]', '[\"rust\"]',
+        VALUES (?1, ?2, '/tmp/repo', ?7, ?8,
                 ?3, ?4, ?5, 'indexed', 1, 1, 0, 0, ?6, NULL)
         ",
         params![
@@ -699,6 +757,8 @@ fn insert_repository_scope(
             format!("commit-{source_scope}"),
             tree_hash,
             i64::from(stale),
+            path_filters_json,
+            language_filters_json,
         ],
     )?;
     connection.execute(
@@ -708,7 +768,7 @@ fn insert_repository_scope(
             path_filters_json, language_filters_json, indexed_file_count,
             symbol_count, reference_count, chunk_count, stale, degraded_reason
         )
-        VALUES (?1, ?2, ?3, ?4, '[\"src\"]', '[\"rust\"]', 1, 1, 0, 0, ?5, NULL)
+        VALUES (?1, ?2, ?3, ?4, ?6, ?7, 1, 1, 0, 0, ?5, NULL)
         ",
         params![
             source_scope,
@@ -716,6 +776,8 @@ fn insert_repository_scope(
             format!("commit-{source_scope}"),
             tree_hash,
             i64::from(stale),
+            path_filters_json,
+            language_filters_json,
         ],
     )?;
     connection.execute(

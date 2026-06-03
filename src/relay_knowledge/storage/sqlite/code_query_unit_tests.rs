@@ -213,6 +213,51 @@ async fn reference_identity_hits_report_read_model_outage_when_fts_unavailable()
     assert_read_model_degraded(&hits[0]);
 }
 
+#[tokio::test]
+async fn chunk_first_hybrid_api_hits_report_read_model_outage_when_fts_unavailable() {
+    let snapshot = code_query_snapshot(
+        vec![code_query_file("api-file", "src/worker.rs", "rust")],
+        vec![
+            code_query_symbol(
+                "register-workflow",
+                "api-file",
+                "src/worker.rs",
+                "RegisterWorkflow",
+            ),
+            code_query_symbol(
+                "register-activity",
+                "api-file",
+                "src/worker.rs",
+                "RegisterActivity",
+            ),
+        ],
+        Vec::new(),
+    );
+    let store = store_with_case_intent_snapshot(snapshot).await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+
+    let hits = store
+        .search_code(code_search_request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("chunk-first hybrid API hits should survive FTS outage");
+
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().all(|hit| {
+        hit.path == "src/worker.rs" && hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
+    }));
+    assert!(hits.iter().all(|hit| hit.degraded_reason.is_some()));
+    assert_read_model_degraded(&hits[0]);
+}
+
 #[test]
 fn score_text_matches_identifier_parts_inside_snake_case_names() {
     let score = score_text(

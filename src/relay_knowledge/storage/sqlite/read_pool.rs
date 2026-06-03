@@ -8,7 +8,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::storage::StorageError;
 
-const READ_SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
+const READ_SQLITE_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
 const READ_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(2);
 const READ_CONNECTIONS: usize = 4;
 

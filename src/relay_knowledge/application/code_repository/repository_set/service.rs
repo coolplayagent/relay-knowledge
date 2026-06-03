@@ -6,9 +6,9 @@ use crate::{
     },
     domain::{
         CodeQueryKind, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,
-        CodeRepositorySetCreateRequest, CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit,
-        CodeRepositorySetQueryRequest, CodeRepositorySetStatus, CodeRepositoryStatus,
-        CodeRetrievalHit, CodeRetrievalRequest, FreshnessPolicy,
+        CodeRepositorySetCreateRequest, CodeRepositorySetMember, CodeRepositorySetMemberStatus,
+        CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest, CodeRepositorySetStatus,
+        CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest, FreshnessPolicy,
     },
     storage::{
         CodeRepositorySetMemberSeed, CodeRepositorySetRefreshTaskClaimRequest,
@@ -28,6 +28,7 @@ use crate::application::{
 use crate::code::CodeIndexError;
 
 use super::{
+    member_freshness::{fact_version_scope_mismatch_reason, refresh_fact_version_member_freshness},
     plan::{
         dependency_symbol_plan_needs_hybrid_fallback, merge_dependency_symbol_fallback_hits,
         repository_set_member_query_plan,
@@ -122,6 +123,8 @@ impl RelayKnowledgeService {
                 request.repository_alias
             ))
         })?;
+        let scope_path_filters = scope.path_filters.clone();
+        let scope_language_filters = scope.language_filters.clone();
         let member = store
             .add_code_repository_set_member(CodeRepositorySetMemberSeed {
                 set_alias: request.set_alias.clone(),
@@ -130,8 +133,8 @@ impl RelayKnowledgeService {
                 ref_selector: request.ref_selector.clone(),
                 resolved_commit_sha,
                 source_scope,
-                path_filters,
-                language_filters,
+                path_filters: scope_path_filters,
+                language_filters: scope_language_filters,
                 priority: request.priority,
             })
             .await
@@ -266,6 +269,18 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositorySetRefreshResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
+        let (preflight_status, replacements) =
+            refreshed_required_set_status(&store, &set_alias).await?;
+        if let Some(reason) = preflight_status
+            .members
+            .iter()
+            .find_map(fact_version_scope_mismatch_reason)
+        {
+            return Err(ApiError::invalid_argument(format!(
+                "code repository set '{set_alias}' cannot refresh overlay: {reason}"
+            )));
+        }
+        persist_fact_version_member_replacements(&store, &set_alias, &replacements).await?;
         let summary = store
             .refresh_code_repository_set_overlay(set_alias.clone(), now_millis())
             .await
@@ -394,6 +409,7 @@ struct RepositorySetMemberQueryOutcome {
     hits: Vec<CodeRetrievalHit>,
     active_request: CodeRetrievalRequest,
     dependency_symbol_plan_satisfied: bool,
+    source_fallback_allowed: bool,
     degraded_reason: Option<String>,
 }
 
@@ -436,6 +452,16 @@ async fn query_repository_set_member(
     )
     .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
     let mut active_request = search_request.clone();
+    if let Some(reason) = fact_version_scope_mismatch_reason(&member_status) {
+        return Ok(RepositorySetMemberQueryOutcome {
+            member_status,
+            hits: Vec::new(),
+            active_request,
+            dependency_symbol_plan_satisfied: false,
+            source_fallback_allowed: false,
+            degraded_reason: Some(reason),
+        });
+    }
     let mut hits = store
         .search_code_scope(member.source_scope.clone(), search_request)
         .await
@@ -467,6 +493,7 @@ async fn query_repository_set_member(
         hits,
         active_request,
         dependency_symbol_plan_satisfied,
+        source_fallback_allowed: true,
         degraded_reason: None,
     })
 }
@@ -498,7 +525,8 @@ fn repository_set_deferred_source_fallback_needed(
     initial_results: &[CodeRepositorySetQueryHit],
 ) -> bool {
     if outcomes.iter().any(|outcome| {
-        outcome.active_request.code_query_kind != CodeQueryKind::Hybrid
+        outcome.source_fallback_allowed
+            && outcome.active_request.code_query_kind != CodeQueryKind::Hybrid
             && repository_set_member_source_fallback_needed(
                 request,
                 &outcome.active_request,
@@ -509,7 +537,8 @@ fn repository_set_deferred_source_fallback_needed(
         return true;
     }
     if outcomes.iter().any(|outcome| {
-        outcome.hits.is_empty()
+        outcome.source_fallback_allowed
+            && outcome.hits.is_empty()
             && repository_set_member_source_fallback_needed(
                 request,
                 &outcome.active_request,
@@ -534,12 +563,13 @@ async fn apply_repository_set_deferred_source_fallbacks(
         .iter()
         .enumerate()
         .filter(|(_, outcome)| {
-            repository_set_member_source_fallback_needed(
-                request,
-                &outcome.active_request,
-                outcome.hits.len(),
-                outcome.dependency_symbol_plan_satisfied,
-            )
+            outcome.source_fallback_allowed
+                && repository_set_member_source_fallback_needed(
+                    request,
+                    &outcome.active_request,
+                    outcome.hits.len(),
+                    outcome.dependency_symbol_plan_satisfied,
+                )
         })
         .map(|(index, outcome)| RepositorySetMemberSourceFallbackInput {
             index,
@@ -607,6 +637,15 @@ pub(super) async fn required_set_status(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     set_alias: &str,
 ) -> Result<CodeRepositorySetStatus, ApiError> {
+    refreshed_required_set_status(store, set_alias)
+        .await
+        .map(|(status, _)| status)
+}
+
+async fn refreshed_required_set_status(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    set_alias: &str,
+) -> Result<(CodeRepositorySetStatus, Vec<CodeRepositorySetMember>), ApiError> {
     let mut status = store
         .code_repository_set_status(set_alias.to_owned())
         .await
@@ -616,10 +655,37 @@ pub(super) async fn required_set_status(
                 "code repository set '{set_alias}' is not registered"
             ))
         })?;
+    let fact_version_replacements =
+        refresh_fact_version_member_freshness(store, &mut status).await?;
     refresh_moving_member_freshness(store, &mut status).await?;
     refresh_repository_set_freshness(&mut status);
 
-    Ok(status)
+    Ok((status, fact_version_replacements))
+}
+
+async fn persist_fact_version_member_replacements(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    set_alias: &str,
+    replacements: &[CodeRepositorySetMember],
+) -> Result<(), ApiError> {
+    for member in replacements {
+        store
+            .add_code_repository_set_member(CodeRepositorySetMemberSeed {
+                set_alias: set_alias.to_owned(),
+                repository_id: member.repository_id.clone(),
+                repository_alias: member.repository_alias.clone(),
+                ref_selector: member.ref_selector.clone(),
+                resolved_commit_sha: member.resolved_commit_sha.clone(),
+                source_scope: member.source_scope.clone(),
+                path_filters: member.path_filters.clone(),
+                language_filters: member.language_filters.clone(),
+                priority: member.priority,
+            })
+            .await
+            .map_err(storage_api_error)?;
+    }
+
+    Ok(())
 }
 
 fn join_degraded_reasons(reasons: impl IntoIterator<Item = Option<String>>) -> Option<String> {

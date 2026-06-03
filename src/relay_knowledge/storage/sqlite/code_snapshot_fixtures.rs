@@ -1,6 +1,9 @@
 use crate::{
     code::feature_flags::{FeatureFlagFileInput, extract_feature_flags},
-    domain::{CodeCallRecord, CodeFileDiagnostic, CodeIndexSnapshot, CodeParseStatus},
+    domain::{
+        CodeCallRecord, CodeFileDiagnostic, CodeIndexSnapshot, CodeParseStatus,
+        code_snapshot_scope_id,
+    },
 };
 
 use super::code_test_support::{
@@ -42,6 +45,18 @@ pub(in crate::storage::sqlite::code) fn retarget_snapshot_scope(
     for tombstone in &mut snapshot.tombstones {
         tombstone.source_scope = source_scope.to_owned();
     }
+}
+
+pub(in crate::storage::sqlite::code) fn retarget_snapshot_to_fact_scope(
+    snapshot: &mut CodeIndexSnapshot,
+) {
+    let source_scope = code_snapshot_scope_id(
+        &snapshot.repository_id,
+        &snapshot.tree_hash,
+        &snapshot.path_filters,
+        &snapshot.language_filters,
+    );
+    retarget_snapshot_scope(snapshot, &source_scope);
 }
 
 pub(in crate::storage::sqlite::code) fn snapshot_with_chunk(

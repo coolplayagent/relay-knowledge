@@ -19,6 +19,8 @@ pub(super) fn member_status(
             priority,
         },
         tree_hash: format!("tree-{source_scope}"),
+        indexed_path_filters: vec!["src".to_owned()],
+        indexed_language_filters: vec!["rust".to_owned()],
         freshness_state: "fresh".to_owned(),
         stale: false,
         indexed_file_count: 1,

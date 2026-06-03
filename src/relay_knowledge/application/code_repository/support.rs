@@ -12,6 +12,7 @@ use crate::{
         CodeFeatureFlagRequest, CodeIndexCheckpoint, CodeIndexMode, CodeIndexRequest,
         CodeIndexResourceBudget, CodeIndexTaskRecord, CodeRepositoryRegistration,
         CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalRequest,
+        code_snapshot_expected_scope_id, code_snapshot_scope_is_fact_versioned,
     },
     storage::{
         CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
@@ -307,6 +308,29 @@ pub(super) async fn fresh_full_index_probe(
     .await
 }
 
+pub(super) async fn degraded_file_count_for_fresh_index(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    scoped_status: &CodeRepositoryStatus,
+) -> Result<usize, ApiError> {
+    if let Some(count) = degraded_file_count_from_status(scoped_status) {
+        return Ok(count);
+    }
+    let report = store
+        .code_repository_report(scoped_status.repository_id.clone())
+        .await
+        .map_err(storage_api_error)?;
+
+    Ok(report.degraded_file_count)
+}
+
+fn degraded_file_count_from_status(status: &CodeRepositoryStatus) -> Option<usize> {
+    let reason = status.degraded_reason.as_deref()?;
+    let (count, rest) = reason.split_once(' ')?;
+    (rest == "file(s) degraded during code indexing")
+        .then(|| count.parse().ok())
+        .flatten()
+}
+
 pub(super) fn index_start_from_completed(
     response: CodeRepositoryIndexResponse,
     task: Option<crate::domain::CodeIndexTaskRecord>,
@@ -368,12 +392,18 @@ pub(super) async fn previous_index_state_for_index(
                 .unwrap_or("unscoped")
         )));
     }
-    let source_scope = base_scope.last_indexed_scope_id.ok_or_else(|| {
+    let source_scope = base_scope.last_indexed_scope_id.clone().ok_or_else(|| {
         ApiError::invalid_argument(format!(
             "incremental base ref '{}' has no persisted source scope",
             base_ref
         ))
     })?;
+    if !code_scope_matches_current_fact_version(&base_scope) {
+        return Err(ApiError::invalid_argument(format!(
+            "incremental base ref '{}' resolves to scope '{}' built with an older code fact version; run repo index --ref {} before repo update",
+            base_ref, source_scope, base_ref
+        )));
+    }
 
     let fingerprints = store
         .code_file_fingerprints_for_scope(source_scope)
@@ -505,7 +535,8 @@ pub(super) async fn resolved_code_scope_status(
             language_filters,
         )
         .await
-        .map_err(storage_api_error)?;
+        .map_err(storage_api_error)?
+        .filter(code_scope_matches_current_fact_version);
     let scoped_status = match exact_scope {
         Some(status) => Some(status),
         None if (!selector.path_filters.is_empty() || !selector.language_filters.is_empty())
@@ -520,12 +551,13 @@ pub(super) async fn resolved_code_scope_status(
                 )
                 .await
                 .map_err(storage_api_error)?
+                .filter(code_scope_matches_current_fact_version)
         }
         None => None,
     };
     scoped_status.ok_or_else(|| {
         ApiError::invalid_argument(format!(
-            "code repository '{}' has no index for ref {} and requested filters",
+            "code repository '{}' has no index for ref {} and requested filters at the current code fact version",
             selector.repository, selector.ref_selector
         ))
     })
@@ -544,7 +576,38 @@ pub(super) async fn latest_compatible_code_scope_status(
         .await
         .map_err(storage_api_error)?;
 
-    Ok(status)
+    Ok(status.filter(code_scope_matches_current_fact_version))
+}
+
+pub(super) fn code_scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
+    let Some(source_scope) = status.last_indexed_scope_id.as_deref() else {
+        return false;
+    };
+    if !code_snapshot_scope_is_fact_versioned(source_scope) {
+        return true;
+    }
+    let Some(tree_hash) = status.tree_hash.as_deref() else {
+        return false;
+    };
+
+    code_snapshot_expected_scope_id(
+        &status.repository_id,
+        tree_hash,
+        &status.path_filters,
+        &status.language_filters,
+    )
+    .is_some_and(|expected| expected == source_scope)
+}
+
+pub(super) fn indexed_source_scope(status: &CodeRepositoryStatus) -> Option<String> {
+    status.last_indexed_scope_id.clone()
+}
+
+pub(super) fn missing_indexed_source_scope_error(status: &CodeRepositoryStatus) -> ApiError {
+    ApiError::invalid_argument(format!(
+        "code repository '{}' does not have an indexed source scope",
+        status.alias
+    ))
 }
 
 pub(super) fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
@@ -844,91 +907,5 @@ pub(super) fn storage_api_error(error: StorageError) -> ApiError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recognizes_only_default_optional_code_index_lease_unavailable_errors() {
-        assert!(storage_error_message_is(
-            &StorageError::InvalidInput(CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE.to_owned()),
-            CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
-        ));
-        assert!(storage_error_message_is(
-            &StorageError::InvalidInput(CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE.to_owned()),
-            CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE,
-        ));
-        assert!(!storage_error_message_is(
-            &StorageError::InvalidInput("code index task lease expired".to_owned()),
-            CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
-        ));
-    }
-
-    #[test]
-    fn code_index_worker_pid_parses_only_owned_worker_leases() {
-        assert_eq!(code_index_worker_pid("code-index-worker-123"), Some(123));
-        assert_eq!(code_index_worker_pid("worker-123"), None);
-        assert_eq!(code_index_worker_pid("code-index-worker-"), None);
-        assert_eq!(code_index_worker_pid("code-index-worker-pid"), None);
-    }
-
-    #[test]
-    fn current_process_is_treated_as_running() {
-        assert!(process_is_running(std::process::id()));
-    }
-
-    #[test]
-    fn active_path_filters_preserve_registration_scope_boundaries() {
-        let registration = vec!["src".to_owned()];
-        let narrow_task = vec!["src".to_owned(), "src/a.rs".to_owned()];
-
-        assert!(!active_paths_cover_requested_scope(
-            &registration,
-            &narrow_task,
-            &[]
-        ));
-        assert!(active_paths_cover_requested_scope(
-            &registration,
-            &narrow_task,
-            &["src/a.rs".to_owned()]
-        ));
-        assert!(active_paths_cover_requested_scope(
-            &registration,
-            &registration,
-            &["src/a.rs".to_owned()]
-        ));
-        assert!(!active_paths_cover_requested_scope(
-            &registration,
-            &registration,
-            &["tests/a.rs".to_owned()]
-        ));
-        assert!(!active_paths_cover_requested_scope(
-            &[],
-            &["src/a.rs".to_owned()],
-            &["src".to_owned()]
-        ));
-    }
-
-    #[test]
-    fn active_language_filters_preserve_registration_scope_boundaries() {
-        assert!(!active_languages_cover_requested_scope(
-            &[],
-            &["python".to_owned()],
-            &[]
-        ));
-        assert!(active_languages_cover_requested_scope(
-            &[],
-            &["python".to_owned()],
-            &["python".to_owned()]
-        ));
-        assert!(!active_languages_cover_requested_scope(
-            &["rust".to_owned()],
-            &["rust".to_owned()],
-            &["python".to_owned()]
-        ));
-        assert!(!active_languages_cover_requested_scope(
-            &[],
-            &["python".to_owned()],
-            &["rust".to_owned()]
-        ));
-    }
-}
+#[path = "support_tests.rs"]
+mod support_tests;

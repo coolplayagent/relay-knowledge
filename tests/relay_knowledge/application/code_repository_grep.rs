@@ -16,7 +16,7 @@ use relay_knowledge::{
         CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
         CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord, CommitReceipt,
         FreshnessPolicy, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RepositoryCodeRange, RetrievalHit,
+        RepositoryCodeRange, RetrievalHit, code_snapshot_scope_id,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
@@ -450,15 +450,18 @@ async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeSer
 }
 
 fn repository_status(root: &std::path::Path, commit: &str) -> CodeRepositoryStatus {
+    let tree_hash = "tree".to_owned();
+    let source_scope = code_snapshot_scope_id("repo", &tree_hash, &[], &[]);
+
     CodeRepositoryStatus {
         repository_id: "repo".to_owned(),
         alias: "fixture".to_owned(),
         root_path: root.display().to_string(),
         path_filters: Vec::new(),
         language_filters: Vec::new(),
-        last_indexed_scope_id: Some("scope".to_owned()),
+        last_indexed_scope_id: Some(source_scope),
         last_indexed_commit: Some(commit.to_owned()),
-        tree_hash: Some("tree".to_owned()),
+        tree_hash: Some(tree_hash),
         state: "fresh".to_owned(),
         indexed_file_count: 1,
         symbol_count: 0,
@@ -617,6 +620,15 @@ impl CodeRepositoryStore for CandidatePathUnavailableStore {
         Box::pin(async move { Ok(vec![structured_hit(&status)]) })
     }
 
+    fn search_code_scope(
+        &self,
+        _source_scope: String,
+        _request: CodeRetrievalRequest,
+    ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
+        let status = self.status.clone();
+        Box::pin(async move { Ok(vec![structured_hit(&status)]) })
+    }
+
     unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
 
@@ -634,7 +646,14 @@ fn structured_hit(status: &CodeRepositoryStatus) -> CodeRetrievalHit {
         canonical_symbol_id: None,
         file_id: Some("file".to_owned()),
         retrieval_layers: vec![CodeRetrievalLayer::Lexical],
-        index_versions: vec!["code:scope:tree".to_owned()],
+        index_versions: vec![format!(
+            "code:{}:{}",
+            status
+                .last_indexed_scope_id
+                .as_deref()
+                .unwrap_or("unscoped"),
+            status.tree_hash.as_deref().unwrap_or("unindexed")
+        )],
         stale: false,
         degraded_reason: None,
         edge_kind: None,

@@ -28,6 +28,8 @@ const REFERENCE_PLAIN_CALL_USAGE_BONUS: f64 = 1.05;
 const REFERENCE_RETURN_CALL_USAGE_BONUS: f64 = 1.55;
 const REFERENCE_PARAMETER_TYPE_USAGE_BONUS: f64 = 0.45;
 const REFERENCE_EXPORTED_PARAMETER_TYPE_USAGE_BONUS: f64 = 0.75;
+const REFERENCE_MATCHING_PARAMETER_NAME_TYPE_BONUS: f64 = 0.65;
+const REFERENCE_MATCHING_MULTILINE_PARAMETER_NAME_TYPE_BONUS: f64 = 0.25;
 const REFERENCE_TYPE_USAGE_BONUS: f64 = 1.65;
 const MAX_GENERIC_CALL_LOOKAHEAD_BYTES: usize = 256;
 
@@ -466,7 +468,14 @@ fn reference_line_usage_bonus(
     identifier_ranges(line, name)
         .filter(|(start, end)| !line_declares_reference_name(line, name, *start, *end))
         .map(|(start, end)| {
-            reference_identifier_usage_bonus(line, reference_kind, start, end, parameter_context)
+            reference_identifier_usage_bonus(
+                line,
+                reference_kind,
+                name,
+                start,
+                end,
+                parameter_context,
+            )
         })
         .max_by(f64::total_cmp)
         .filter(|bonus| *bonus > 0.0)
@@ -475,6 +484,7 @@ fn reference_line_usage_bonus(
 fn reference_identifier_usage_bonus(
     line: &str,
     reference_kind: &str,
+    name: &str,
     start: usize,
     end: usize,
     parameter_context: Option<ParameterTypeContext>,
@@ -484,7 +494,7 @@ fn reference_identifier_usage_bonus(
     if reference_kind == "type" {
         if let Some(annotation_prefix) = type_annotation_context_prefix(before) {
             return REFERENCE_TYPE_USAGE_BONUS
-                + parameter_type_reference_bonus(line, annotation_prefix, parameter_context);
+                + parameter_type_reference_bonus(line, annotation_prefix, name, parameter_context);
         }
     }
     if identifier_is_indirect_call(after) {
@@ -534,6 +544,7 @@ fn parameter_type_context(previous_lines: &[&str]) -> Option<ParameterTypeContex
 fn parameter_type_reference_bonus(
     line: &str,
     before: &str,
+    name: &str,
     parameter_context: Option<ParameterTypeContext>,
 ) -> f64 {
     let same_line_parameter = type_annotation_is_callable_parameter(before);
@@ -543,13 +554,14 @@ fn parameter_type_reference_bonus(
     if !same_line_parameter && !multiline_parameter {
         return 0.0;
     }
-    if line_starts_exported_callable(line)
+    let callable_bonus = if line_starts_exported_callable(line)
         || parameter_context.is_some_and(|context| context.exported_callable)
     {
         REFERENCE_EXPORTED_PARAMETER_TYPE_USAGE_BONUS
     } else {
         REFERENCE_PARAMETER_TYPE_USAGE_BONUS
-    }
+    };
+    callable_bonus + matching_parameter_name_type_bonus(before, name, same_line_parameter)
 }
 
 fn type_annotation_is_callable_parameter(before: &str) -> bool {
@@ -578,15 +590,53 @@ fn type_annotation_has_parameter_name(before: &str) -> bool {
 }
 
 fn parameter_segment_has_name(segment: &str) -> bool {
-    segment
+    parameter_segment_name(segment).is_some_and(|name| !name.is_empty())
+}
+
+fn matching_parameter_name_type_bonus(before: &str, type_name: &str, same_line: bool) -> f64 {
+    let Some(parameter_name) = type_annotation_parameter_name(before, same_line) else {
+        return 0.0;
+    };
+    if !parameter_name_matches_type(&parameter_name, type_name) {
+        return 0.0;
+    }
+    if same_line {
+        REFERENCE_MATCHING_PARAMETER_NAME_TYPE_BONUS
+    } else {
+        REFERENCE_MATCHING_MULTILINE_PARAMETER_NAME_TYPE_BONUS
+    }
+}
+
+fn type_annotation_parameter_name(before: &str, same_line: bool) -> Option<String> {
+    let prefix = before.trim_end().strip_suffix(':')?;
+    let segment = if same_line {
+        let open_paren = prefix.rfind('(')?;
+        prefix[open_paren + 1..].split(',').next_back()?
+    } else {
+        prefix
+    };
+    parameter_segment_name(segment)
+}
+
+fn parameter_segment_name(segment: &str) -> Option<String> {
+    let segment = segment
         .trim()
         .trim_start_matches("readonly ")
         .trim_start_matches("public ")
         .trim_start_matches("private ")
-        .trim_start_matches("protected ")
-        .chars()
+        .trim_start_matches("protected ");
+    let name = segment
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .find(|part| !part.is_empty())?;
+    name.chars()
         .next()
-        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        .filter(|character| *character == '_' || character.is_ascii_alphabetic())?;
+    Some(name.to_owned())
+}
+
+fn parameter_name_matches_type(parameter_name: &str, type_name: &str) -> bool {
+    let parameter = normalized_identifier(parameter_name);
+    parameter.len() >= 4 && normalized_identifier(type_name).contains(&parameter)
 }
 
 fn line_starts_exported_callable(line: &str) -> bool {
@@ -886,7 +936,7 @@ mod tests {
 
         assert!(returned > assignment);
         assert!(type_signature > 0.0);
-        assert!(nested_type_signature >= type_signature);
+        assert!(type_signature > nested_type_signature);
         assert!(
             reference_same_name_file_penalty(
                 5.0,

@@ -40,10 +40,22 @@ pub(super) fn code_search_plannable_outage_reason(
     if !code_query_can_plan_source_fallback(request) {
         return None;
     }
+    code_search_read_model_unavailable_reason(error)
+}
+
+pub(super) fn code_search_read_model_unavailable_reason(error: &StorageError) -> Option<String> {
     match error {
         StorageError::Sqlite(error) => {
-            code_search_read_model_unavailable_message(&error.to_string())
-                .then(|| format!("code search read model unavailable: {error}"))
+            let message = error.to_string();
+            if code_search_read_model_unavailable_message(&message) {
+                Some(format!("code search read model unavailable: {error}"))
+            } else if code_search_prepare_error_message_is_retryable(&message) {
+                Some(format!(
+                    "code search read model temporarily unavailable: {error}"
+                ))
+            } else {
+                None
+            }
         }
         _ => None,
     }
@@ -194,6 +206,13 @@ mod tests {
             &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
                 Some("no such module: fts5".to_owned()),
+            ))
+        ));
+        assert!(code_search_error_can_use_empty_results(
+            &request("rk_handler", CodeQueryKind::References),
+            &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("database is locked".to_owned()),
             ))
         ));
         assert!(!code_search_error_can_use_empty_results(

@@ -1,7 +1,11 @@
+use super::super::member_freshness;
 use super::*;
 use crate::{
     api::ErrorKind,
-    domain::{CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetOverlayStatus},
+    domain::{
+        CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetOverlayStatus,
+        code_snapshot_scope_id,
+    },
     domain::{CodeRepositorySetMemberStatus, CodeRetrievalLayer, RepositoryCodeRange},
     storage::SqliteGraphStore,
 };
@@ -187,6 +191,61 @@ async fn helper_required_status_reports_missing_sets() {
     assert!(error.message.contains("is not registered"));
 }
 
+#[test]
+fn helper_detects_repository_set_member_fact_version_scopes() {
+    let mut current = member_status("app", "placeholder", 0);
+    current.member.path_filters = Vec::new();
+    current.member.language_filters = Vec::new();
+    current.indexed_path_filters = current.member.path_filters.clone();
+    current.indexed_language_filters = current.member.language_filters.clone();
+    current.tree_hash = "tree-current".to_owned();
+    current.member.source_scope = code_snapshot_scope_id(
+        &current.member.repository_id,
+        &current.tree_hash,
+        &current.member.path_filters,
+        &current.member.language_filters,
+    );
+    let mut legacy = current.clone();
+    legacy.member.source_scope = "git_snapshot:0000000000000000".to_owned();
+    let mut custom = current.clone();
+    custom.member.source_scope = "git_snapshot:fixture".to_owned();
+
+    assert!(member_freshness::member_scope_matches_current_fact_version(
+        &current
+    ));
+    assert!(member_freshness::member_scope_matches_current_fact_version(
+        &custom
+    ));
+    assert!(
+        member_freshness::fact_version_scope_mismatch_reason(&legacy)
+            .is_some_and(|reason| reason.contains("code fact version"))
+    );
+}
+
+#[tokio::test]
+async fn query_member_skips_legacy_fact_version_scope_without_source_fallback() {
+    let store: Arc<dyn crate::storage::KnowledgeStore> =
+        Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let mut legacy = member_status("app", "git_snapshot:0000000000000000", 0);
+    legacy.member.path_filters = Vec::new();
+    legacy.member.language_filters = Vec::new();
+    legacy.tree_hash = "tree-current".to_owned();
+    let request = set_query_request(CodeQueryKind::Definition, 5);
+
+    let outcome = query_repository_set_member(store, request, legacy, 0, 5)
+        .await
+        .expect("legacy member should produce a skipped outcome");
+
+    assert!(outcome.hits.is_empty());
+    assert!(!outcome.source_fallback_allowed);
+    assert!(
+        outcome
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("code fact version"))
+    );
+}
+
 fn status_with_members(
     members: Vec<CodeRepositorySetMemberStatus>,
     overlay: CodeRepositorySetOverlayStatus,
@@ -244,6 +303,7 @@ fn member_outcome(
         hits,
         active_request,
         dependency_symbol_plan_satisfied,
+        source_fallback_allowed: true,
         degraded_reason: None,
     }
 }
@@ -313,6 +373,8 @@ fn member_status(
             priority,
         },
         tree_hash: format!("tree-{source_scope}"),
+        indexed_path_filters: vec!["src".to_owned()],
+        indexed_language_filters: vec!["rust".to_owned()],
         freshness_state: "fresh".to_owned(),
         stale: false,
         indexed_file_count: 1,

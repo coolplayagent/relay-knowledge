@@ -66,7 +66,8 @@ pub(super) use super::code_query_hits::{
 };
 use super::code_query_prepare::{
     code_search_error_can_use_empty_results, code_search_plannable_outage_reason,
-    prepare_code_search_statement, retry_code_search_operation,
+    code_search_read_model_unavailable_reason, prepare_code_search_statement,
+    retry_code_search_operation,
 };
 #[cfg(test)]
 use super::code_query_scope::path_matches_filter;
@@ -99,7 +100,9 @@ use code_query_references::{reference_usage_context_bonus, search_references};
 use code_query_rows::ChunkRow;
 use code_query_sbom::search_sbom;
 use code_query_support::*;
-use code_query_symbols::search_symbols;
+use code_query_symbols::{
+    hybrid_symbol_query_can_answer_without_non_symbol_layers, search_symbols,
+};
 
 const STRICT_HYBRID_CHUNK_LIMIT_MULTIPLIER: usize = 6;
 const STRICT_HYBRID_CHUNK_MIN_CANDIDATES: usize = 40;
@@ -152,24 +155,44 @@ fn search_code_with_status(
     }
     let mut hits = Vec::new();
     let mut searched_chunks = false;
+    let mut chunk_first_outage = None;
     if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
     {
-        if let Ok(mut chunk_hits) = search_chunks(connection, status, request) {
-            searched_chunks = true;
-            retain_query_language_scoped_workflow_hits(request, &mut chunk_hits);
-            if hybrid_chunk_results_can_answer_without_graph_expansion(request, &chunk_hits) {
+        match search_chunks(connection, status, request) {
+            Ok(mut chunk_hits) => {
+                searched_chunks = true;
+                retain_query_language_scoped_workflow_hits(request, &mut chunk_hits);
+                if hybrid_chunk_results_can_answer_without_graph_expansion(request, &chunk_hits)
+                    || hybrid_direct_results_can_answer_without_graph_expansion(
+                        request,
+                        &chunk_hits,
+                    )
+                {
+                    hits.extend(chunk_hits);
+                    dedupe_sort_truncate(&mut hits, request.limit);
+                    return Ok(hits);
+                }
                 hits.extend(chunk_hits);
-                dedupe_sort_truncate(&mut hits, request.limit);
-                return Ok(hits);
             }
-            hits.extend(chunk_hits);
+            Err(error) => {
+                let Some(reason) = hybrid_chunk_first_search_outage_reason(request, &error) else {
+                    return Err(error);
+                };
+                searched_chunks = true;
+                chunk_first_outage = Some((reason, error));
+            }
         }
     }
     if matches!(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::Symbol | CodeQueryKind::Definition
     ) {
-        hits.extend(search_symbols(connection, status, request)?);
+        hits.extend(search_symbols(
+            connection,
+            status,
+            request,
+            chunk_first_outage.as_ref().map(|outage| outage.0.as_str()),
+        )?);
         if hybrid_symbol_query_can_answer_without_non_symbol_layers(request, &hits) {
             dedupe_sort_truncate(&mut hits, request.limit);
             return Ok(hits);
@@ -216,6 +239,12 @@ fn search_code_with_status(
         {
             return Ok(partial_hits);
         }
+        if let Some((reason, error)) = chunk_first_outage {
+            if hits.is_empty() {
+                return Err(error);
+            }
+            mark_hits_degraded(&mut hits, &reason);
+        }
         dedupe_sort_truncate(&mut hits, request.limit);
         return Ok(hits);
     }
@@ -250,7 +279,9 @@ fn append_hits_or_return_partial_on_search_outage(
             Ok(None)
         }
         Err(error) if !hits.is_empty() => {
-            let Some(reason) = code_search_plannable_outage_reason(request, &error) else {
+            let Some(reason) = code_search_plannable_outage_reason(request, &error)
+                .or_else(|| hybrid_chunk_first_search_outage_reason(request, &error))
+            else {
                 return Err(error);
             };
             mark_hits_degraded(hits, &reason);
@@ -259,6 +290,15 @@ fn append_hits_or_return_partial_on_search_outage(
         }
         Err(error) => Err(error),
     }
+}
+
+fn hybrid_chunk_first_search_outage_reason(
+    request: &CodeRetrievalRequest,
+    error: &StorageError,
+) -> Option<String> {
+    (request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request))
+        .then(|| code_search_read_model_unavailable_reason(error))
+        .flatten()
 }
 
 fn definition_query_needs_chunk_fallback(
@@ -353,52 +393,6 @@ fn declaration_line_defines_identity(line: &str, leaf_name: &str) -> bool {
         .into_iter()
         .filter_map(|prefix| line.strip_prefix(prefix))
         .any(|remainder| line_starts_with_identifier(remainder, leaf_name))
-}
-
-fn hybrid_symbol_query_can_answer_without_non_symbol_layers(
-    request: &CodeRetrievalRequest,
-    hits: &[CodeRetrievalHit],
-) -> bool {
-    if request.code_query_kind != CodeQueryKind::Hybrid
-        || hits.is_empty()
-        || !query_is_single_symbol_identity(&request.query)
-    {
-        return false;
-    }
-    let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
-        return false;
-    };
-
-    let exact_symbol_hits = hits
-        .iter()
-        .filter(|hit| hybrid_symbol_hit_matches_identity(hit, &identity))
-        .count();
-    exact_symbol_hits > 0 && exact_symbol_hits <= request.limit.max(1)
-}
-
-fn hybrid_symbol_hit_matches_identity(
-    hit: &CodeRetrievalHit,
-    identity: &SymbolIdentityQuery,
-) -> bool {
-    if !hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
-        || hit.symbol_snapshot_id.is_none()
-    {
-        return false;
-    }
-    let Some(canonical_symbol_id) = hit.canonical_symbol_id.as_deref() else {
-        return false;
-    };
-
-    if identity.is_scoped() {
-        identity.matches_symbol(
-            identity.leaf_name(),
-            &hit.excerpt,
-            &hit.excerpt,
-            canonical_symbol_id,
-        )
-    } else {
-        canonical_symbol_leaf_matches(canonical_symbol_id, identity.leaf_name())
-    }
 }
 
 fn hybrid_chunk_results_can_answer_without_graph_expansion(
@@ -536,7 +530,11 @@ fn search_chunks(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let strict_hits = if request.code_query_kind == CodeQueryKind::Hybrid {
+    let chunk_first = request.code_query_kind == CodeQueryKind::Hybrid
+        && hybrid_query_prefers_chunk_first(request);
+    let chunk_candidate_limit = hybrid_chunk_candidate_limit(request);
+    let mut narrow_hits = Vec::new();
+    if request.code_query_kind == CodeQueryKind::Hybrid {
         if let Some(strict_fts_query) = strict_hybrid_chunk_fts_match_query(&request.query) {
             let mut hits = search_chunks_with_fts_query(
                 connection,
@@ -546,34 +544,96 @@ fn search_chunks(
                 strict_hybrid_chunk_candidate_limit(request),
             )?;
             retain_query_language_scoped_workflow_hits(request, &mut hits);
-            if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
+            if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits)
+                || hybrid_direct_results_can_answer_without_graph_expansion(request, &hits)
+            {
                 return Ok(hits);
             }
-            Some(hits)
-        } else {
-            None
+            narrow_hits =
+                merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
         }
-    } else {
-        None
-    };
+    }
 
-    let fts_query = hybrid_chunk_fts_match_query(&request.query);
+    if chunk_first
+        && let Some(structured_fts_query) = structured_hybrid_chunk_fts_match_query(&request.query)
+    {
+        let mut hits = search_chunks_with_fts_query(
+            connection,
+            status,
+            request,
+            &structured_fts_query,
+            chunk_candidate_limit,
+        )?;
+        retain_query_language_scoped_workflow_hits(request, &mut hits);
+        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &narrow_hits)
+            || hybrid_direct_results_can_answer_without_graph_expansion(request, &narrow_hits)
+        {
+            return Ok(narrow_hits);
+        }
+    }
+
+    if chunk_first
+        && let Some(focused_fts_query) = focused_hybrid_chunk_fts_match_query(&request.query)
+    {
+        let mut hits = search_chunks_with_fts_query(
+            connection,
+            status,
+            request,
+            &focused_fts_query,
+            chunk_candidate_limit,
+        )?;
+        retain_query_language_scoped_workflow_hits(request, &mut hits);
+        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+    }
+
+    if chunk_first
+        && let Some(compound_fts_query) = compound_hybrid_chunk_fts_match_query(&request.query)
+    {
+        let mut hits = search_chunks_with_fts_query(
+            connection,
+            status,
+            request,
+            &compound_fts_query,
+            chunk_candidate_limit,
+        )?;
+        retain_query_language_scoped_workflow_hits(request, &mut hits);
+        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+    }
+    if chunk_first
+        && !narrow_hits.is_empty()
+        && (hybrid_chunk_results_can_answer_without_graph_expansion(request, &narrow_hits)
+            || hybrid_direct_results_can_answer_without_graph_expansion(request, &narrow_hits))
+    {
+        return Ok(narrow_hits);
+    }
+
+    let fts_query = if chunk_first {
+        direct_hybrid_chunk_fts_match_query(&request.query)
+    } else {
+        hybrid_chunk_fts_match_query(&request.query)
+    };
     let mut hits = search_chunks_with_fts_query(
         connection,
         status,
         request,
         &fts_query,
-        candidate_limit(request, CandidateLayer::Chunk),
+        chunk_candidate_limit,
     )?;
-    if let Some(strict_hits) = strict_hits {
-        hits = merge_strict_and_broad_chunk_hits(
-            strict_hits,
-            hits,
-            candidate_limit(request, CandidateLayer::Chunk),
-        );
+    if !narrow_hits.is_empty() {
+        hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
     }
 
     Ok(hits)
+}
+
+fn hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
+    {
+        strict_hybrid_chunk_candidate_limit(request)
+    } else {
+        candidate_limit(request, CandidateLayer::Chunk)
+    }
 }
 
 fn merge_strict_and_broad_chunk_hits(

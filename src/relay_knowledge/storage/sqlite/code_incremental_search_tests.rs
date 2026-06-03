@@ -4,7 +4,7 @@ use crate::{
         CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
         RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeSymbolRecord,
+        RepositoryCodeSymbolRecord, code_snapshot_scope_id,
     },
     storage::SqliteGraphStore,
 };
@@ -362,7 +362,7 @@ fn call(
     }
 }
 
-async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
+async fn store_with_repository_snapshot(mut snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let registration =
         CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
@@ -371,10 +371,33 @@ async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGr
         .upsert_code_repository(registration)
         .await
         .expect("repository should persist");
+    retarget_snapshot_to_fact_scope(&mut snapshot);
     store
         .apply_code_index_snapshot(snapshot)
         .await
         .expect("snapshot should apply");
 
     store
+}
+
+fn retarget_snapshot_to_fact_scope(snapshot: &mut CodeIndexSnapshot) {
+    let source_scope = code_snapshot_scope_id(
+        &snapshot.repository_id,
+        &snapshot.tree_hash,
+        &snapshot.path_filters,
+        &snapshot.language_filters,
+    );
+    snapshot.source_scope = source_scope.clone();
+    for file in &mut snapshot.files {
+        file.source_scope = source_scope.clone();
+    }
+    for symbol in &mut snapshot.symbols {
+        symbol.source_scope = source_scope.clone();
+    }
+    for call in &mut snapshot.calls {
+        call.source_scope = source_scope.clone();
+    }
+    for chunk in &mut snapshot.chunks {
+        chunk.source_scope = source_scope.clone();
+    }
 }
