@@ -7,9 +7,11 @@ use std::fs;
 use super::{
     RepositorySourceKind, SourceGrepKind, SourceGrepRequest, build_index_snapshot,
     changed_paths_for_diff, changed_paths_for_diff_with_filters, deleted_symbol_names_for_diff,
-    git_show_call_count_for_root, prepare_full_index_plan, reset_git_show_call_count_for_root,
-    reset_tracked_entries_call_count_for_root, resolve_repository_snapshot_with_path_filters,
-    source_grep_matches, source_snapshot_batch_bytes, test_fixtures::TempGitRepo, tracked_entries,
+    git_ls_tree_full_scan_call_count_for_root, git_show_call_count_for_root,
+    prepare_full_index_plan, reset_git_ls_tree_full_scan_call_count_for_root,
+    reset_git_show_call_count_for_root, reset_tracked_entries_call_count_for_root,
+    resolve_repository_snapshot_with_path_filters, source_grep_matches,
+    source_snapshot_batch_bytes, test_fixtures::TempGitRepo, tracked_entries,
     tracked_entries_call_count_for_root,
 };
 
@@ -191,6 +193,56 @@ fn full_index_snapshot_hash_changes_when_submodule_becomes_available() {
 }
 
 #[test]
+fn scoped_freshness_probe_does_not_run_full_tree_scan_for_unrelated_filters() {
+    let fixture = SubmoduleFixture::create("freshness-scoped-probe");
+    let path_filters = vec!["src".to_owned()];
+    reset_git_ls_tree_full_scan_call_count_for_root(fixture.parent.path.clone());
+
+    resolve_repository_snapshot_with_path_filters(&fixture.parent.path, "HEAD", &path_filters)
+        .expect("scoped freshness probe should resolve");
+
+    assert_eq!(
+        git_ls_tree_full_scan_call_count_for_root(&fixture.parent.path),
+        0
+    );
+}
+
+#[test]
+fn scoped_freshness_probe_detects_gitlink_for_child_path_filter() {
+    let fixture = SubmoduleFixture::create("freshness-child-filter");
+    fixture
+        .parent
+        .git(["submodule", "deinit", "-f", "vendor/module"]);
+    let git_dir = fixture.parent.path.join(".git/modules/vendor/module");
+    if git_dir.exists() {
+        fs::remove_dir_all(&git_dir).expect("submodule gitdir should be removable");
+    }
+    let worktree = fixture.parent.path.join("vendor/module");
+    if worktree.exists() {
+        fs::remove_dir_all(&worktree).expect("submodule worktree should be removable");
+    }
+    let path_filters = vec!["vendor/module/src".to_owned()];
+
+    let before =
+        resolve_repository_snapshot_with_path_filters(&fixture.parent.path, "HEAD", &path_filters)
+            .expect("unavailable scoped submodule snapshot should resolve");
+    fixture.parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "vendor/module",
+    ]);
+    let after =
+        resolve_repository_snapshot_with_path_filters(&fixture.parent.path, "HEAD", &path_filters)
+            .expect("available scoped submodule snapshot should resolve");
+
+    assert_eq!(before.0, after.0);
+    assert_ne!(before.1, after.1);
+}
+
+#[test]
 fn incremental_index_expands_submodule_commit_updates() {
     let fixture = SubmoduleFixture::create("incremental");
     let base = fixture.parent_head();
@@ -227,6 +279,61 @@ fn incremental_index_expands_submodule_commit_updates() {
             .files
             .iter()
             .any(|file| file.path == "vendor/module/src/child.rs")
+    );
+}
+
+#[test]
+fn incremental_index_does_not_expand_out_of_scope_submodule_updates() {
+    let fixture = SubmoduleFixture::create("incremental-out-of-scope");
+    let base = fixture.parent_head();
+    let previous_hashes = build_index_snapshot(
+        &fixture.parent_src_registration(),
+        &fixture.parent_selector(),
+        CodeIndexMode::Full,
+        Vec::new(),
+    )
+    .expect("base scoped full snapshot should build")
+    .files
+    .into_iter()
+    .map(|file| CodeFileFingerprint {
+        path: file.path,
+        blob_hash: file.blob_hash,
+    })
+    .collect::<Vec<_>>();
+    let submodule_path = fixture.parent.path.join("vendor/module");
+    for index in 0..=CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH {
+        fs::write(
+            submodule_path.join(format!("src/incremental_generated_{index}.rs")),
+            format!("pub fn incremental_generated_{index}() -> u32 {{ {index} }}\n"),
+        )
+        .expect("generated submodule file should be written");
+    }
+    git_in(
+        &submodule_path,
+        ["config", "user.email", "relay@example.invalid"],
+    );
+    git_in(&submodule_path, ["config", "user.name", "Relay Test"]);
+    git_in(&submodule_path, ["add", "."]);
+    git_in(&submodule_path, ["commit", "-m", "large child update"]);
+    fixture.parent.git(["add", "vendor/module"]);
+    fixture.parent.git(["commit", "-m", "update submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &fixture.parent_src_registration(),
+        &fixture.parent_selector(),
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("out-of-scope submodule update should not expand");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("vendor/module/"))
     );
 }
 

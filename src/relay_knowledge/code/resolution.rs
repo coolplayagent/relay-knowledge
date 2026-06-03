@@ -93,15 +93,13 @@ fn git_tree_has_scoped_gitlinks(
     commit: &str,
     path_filters: &[String],
 ) -> Result<bool, CodeIndexError> {
-    let bytes = git_bytes(root, ["ls-tree", "-r", "-z", commit])?;
-    for record in split_nul(&bytes) {
-        let Some((metadata, path)) = record.split_once('\t') else {
-            continue;
-        };
-        let fields = metadata.split_whitespace().collect::<Vec<_>>();
-        if fields.get(1).copied() == Some("commit")
-            && path_filters_allow_gitlink(path_filters, path)
-        {
+    let filters = scoped_gitlink_filters(path_filters);
+    if filters.is_empty() {
+        return git_tree_has_gitlinks_under(root, commit, None);
+    }
+
+    for filter in filters {
+        if git_tree_has_gitlink_overlapping_filter(root, commit, &filter)? {
             return Ok(true);
         }
     }
@@ -109,24 +107,89 @@ fn git_tree_has_scoped_gitlinks(
     Ok(false)
 }
 
-fn path_filters_allow_gitlink(path_filters: &[String], path: &str) -> bool {
-    path_filters.is_empty()
-        || path_filters
-            .iter()
-            .any(|filter| path_overlaps_filter(path, filter))
+fn git_tree_has_gitlink_overlapping_filter(
+    root: &Path,
+    commit: &str,
+    filter: &str,
+) -> Result<bool, CodeIndexError> {
+    for ancestor in path_and_ancestors(filter) {
+        if git_tree_exact_path_is_gitlink(root, commit, ancestor)? {
+            return Ok(true);
+        }
+    }
+
+    git_tree_has_gitlinks_under(root, commit, Some(filter))
 }
 
-fn path_overlaps_filter(path: &str, filter: &str) -> bool {
-    let path = normalize_path_filter(path);
-    let filter = normalize_path_filter(filter);
-    if filter == "." {
-        return true;
+fn git_tree_has_gitlinks_under(
+    root: &Path,
+    commit: &str,
+    scope: Option<&str>,
+) -> Result<bool, CodeIndexError> {
+    let bytes = match scope {
+        Some(scope) => git_bytes(root, ["ls-tree", "-r", "-z", commit, "--", scope])?,
+        None => git_bytes(root, ["ls-tree", "-r", "-z", commit])?,
+    };
+    for record in split_nul(&bytes) {
+        if git_tree_record_is_gitlink(&record) {
+            return Ok(true);
+        }
     }
-    !path.is_empty()
-        && !filter.is_empty()
-        && (path == filter
-            || path.starts_with(&format!("{filter}/"))
-            || filter.starts_with(&format!("{path}/")))
+
+    Ok(false)
+}
+
+fn git_tree_exact_path_is_gitlink(
+    root: &Path,
+    commit: &str,
+    path: &str,
+) -> Result<bool, CodeIndexError> {
+    let bytes = git_bytes(root, ["ls-tree", "-z", commit, "--", path])?;
+
+    Ok(split_nul(&bytes)
+        .into_iter()
+        .any(|record| git_tree_record_is_gitlink(&record)))
+}
+
+fn git_tree_record_is_gitlink(record: &str) -> bool {
+    let Some((metadata, _)) = record.split_once('\t') else {
+        return false;
+    };
+    let fields = metadata.split_whitespace().collect::<Vec<_>>();
+
+    fields.get(1).copied() == Some("commit")
+}
+
+fn scoped_gitlink_filters(path_filters: &[String]) -> Vec<String> {
+    let mut filters = Vec::new();
+    for filter in path_filters {
+        let normalized = normalize_path_filter(filter);
+        if normalized.is_empty() {
+            continue;
+        }
+        if normalized == "." {
+            return Vec::new();
+        }
+        if !filters.iter().any(|existing| existing == normalized) {
+            filters.push(normalized.to_owned());
+        }
+    }
+
+    filters
+}
+
+fn path_and_ancestors(path: &str) -> Vec<&str> {
+    let mut ancestors = Vec::new();
+    let mut current = path;
+    while !current.is_empty() {
+        ancestors.push(current);
+        let Some((parent, _)) = current.rsplit_once('/') else {
+            break;
+        };
+        current = parent;
+    }
+
+    ancestors
 }
 
 fn normalize_path_filter(filter: &str) -> &str {

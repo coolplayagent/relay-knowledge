@@ -69,7 +69,10 @@ use full_snapshot::build_full_snapshot;
 #[cfg(test)]
 pub(crate) use full_snapshot::mutate_next_filesystem_full_snapshot_read;
 #[cfg(test)]
-pub(crate) use git::{git_show_call_count_for_root, reset_git_show_call_count_for_root};
+pub(crate) use git::{
+    git_ls_tree_full_scan_call_count_for_root, git_show_call_count_for_root,
+    reset_git_ls_tree_full_scan_call_count_for_root, reset_git_show_call_count_for_root,
+};
 use git::{resolve_ref, resolve_tree};
 pub(crate) use grep::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
@@ -826,6 +829,9 @@ fn parse_expanded_gitlink_change(
     base_source_layout: &scope::SourceLayoutDiscovery,
     path: &str,
 ) -> Result<bool, CodeIndexError> {
+    if !path_scope_overlaps(path, context.registration, context.selector) {
+        return Ok(false);
+    }
     let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
         context.root,
         path,

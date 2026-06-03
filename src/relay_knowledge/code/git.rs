@@ -16,6 +16,8 @@ const GIT_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[cfg(test)]
 static GIT_SHOW_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
+#[cfg(test)]
+static GIT_LS_TREE_FULL_SCAN_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
 
 #[cfg(test)]
 pub(crate) fn reset_git_show_call_count_for_root(root: PathBuf) {
@@ -29,6 +31,24 @@ pub(crate) fn git_show_call_count_for_root(root: &Path) -> usize {
     GIT_SHOW_OBSERVER
         .lock()
         .expect("git show observer should lock")
+        .as_ref()
+        .filter(|(observed_root, _)| observed_root == root)
+        .map(|(_, count)| *count)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_git_ls_tree_full_scan_call_count_for_root(root: PathBuf) {
+    *GIT_LS_TREE_FULL_SCAN_OBSERVER
+        .lock()
+        .expect("git ls-tree observer should lock") = Some((root, 0));
+}
+
+#[cfg(test)]
+pub(crate) fn git_ls_tree_full_scan_call_count_for_root(root: &Path) -> usize {
+    GIT_LS_TREE_FULL_SCAN_OBSERVER
+        .lock()
+        .expect("git ls-tree observer should lock")
         .as_ref()
         .filter(|(observed_root, _)| observed_root == root)
         .map(|(_, count)| *count)
@@ -103,6 +123,7 @@ pub(super) fn git_bytes<const N: usize>(
     args: [&str; N],
 ) -> Result<Vec<u8>, CodeIndexError> {
     record_git_show_call(root, &args);
+    record_git_ls_tree_full_scan_call(root, &args);
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -127,6 +148,26 @@ fn record_git_show_call<const N: usize>(_root: &Path, _args: &[&str; N]) {
         if let Some((observed_root, count)) = GIT_SHOW_OBSERVER
             .lock()
             .expect("git show observer should lock")
+            .as_mut()
+            && observed_root == _root
+        {
+            *count += 1;
+        }
+    }
+}
+
+fn record_git_ls_tree_full_scan_call<const N: usize>(_root: &Path, _args: &[&str; N]) {
+    #[cfg(test)]
+    {
+        if _args.first().copied() != Some("ls-tree")
+            || !_args.contains(&"-r")
+            || _args.contains(&"--")
+        {
+            return;
+        }
+        if let Some((observed_root, count)) = GIT_LS_TREE_FULL_SCAN_OBSERVER
+            .lock()
+            .expect("git ls-tree observer should lock")
             .as_mut()
             && observed_root == _root
         {
