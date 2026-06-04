@@ -2,7 +2,7 @@ use crate::domain::{CodeFileFingerprint, CodeIndexMode, CodeRepositoryRegistrati
 
 use super::test_fixtures::TempGitRepo;
 use super::{
-    build_index_snapshot,
+    build_index_snapshot, changed_paths_for_diff_with_filters,
     changes::{TrackedEntryScope, tracked_entries_with_scope},
     git_ls_tree_full_scan_call_count_for_root, reset_git_ls_tree_full_scan_call_count_for_root,
     scope,
@@ -99,6 +99,112 @@ fn incremental_gitlink_update_uses_discovered_source_root_scope() {
             .iter()
             .any(|file| file.path == "external_deps/rust_sdk/lib.rs")
     );
+}
+
+#[test]
+fn full_snapshot_scoped_nested_submodule_probe_uses_gitlink_boundary() {
+    let nested = TempGitRepo::create("followup-boundary-nested");
+    nested.write("src/nested.rs", "pub fn nested_value() -> u32 { 1 }\n");
+    nested.git(["add", "."]);
+    nested.git(["commit", "-m", "nested"]);
+    let child = TempGitRepo::create("followup-boundary-child");
+    child.write("src/child.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    add_named_submodule(&child, &nested, "deps_nested", "deps/nested");
+    child.git(["commit", "-am", "add nested submodule"]);
+    let parent = TempGitRepo::create("followup-boundary-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "vendor/module");
+    parent.git(["commit", "-am", "add outer submodule"]);
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "vendor/module",
+    ]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        parent.path.display().to_string(),
+        vec!["vendor/module/deps/nested/src/nested.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &parent.selector(),
+        CodeIndexMode::Full,
+        Vec::new(),
+    )
+    .expect("scoped pathspec should probe the actual nested gitlink path");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "vendor/module/deps/nested/src/nested.rs")
+    );
+}
+
+#[test]
+fn impact_nested_deinitialized_child_uses_initialized_parent_gitdir() {
+    let nested = TempGitRepo::create("followup-nested-deinit-nested");
+    nested.write("src/nested.rs", "pub fn nested_value() -> u32 { 1 }\n");
+    nested.git(["add", "."]);
+    nested.git(["commit", "-m", "nested"]);
+    let child = TempGitRepo::create("followup-nested-deinit-child");
+    child.write("src/child.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    add_named_submodule(&child, &nested, "deps_nested", "deps/nested");
+    child.git(["commit", "-am", "add nested submodule"]);
+    let parent = TempGitRepo::create("followup-nested-deinit-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "vendor/module");
+    parent.git(["commit", "-am", "add outer submodule"]);
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "vendor/module",
+    ]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let nested_checkout = TempGitRepo {
+        path: parent.path.join("vendor/module/deps/nested"),
+    };
+    nested_checkout.git(["config", "user.email", "relay@example.invalid"]);
+    nested_checkout.git(["config", "user.name", "Relay Test"]);
+    nested_checkout.write("src/nested.rs", "pub fn nested_value() -> u32 { 2 }\n");
+    nested_checkout.git(["add", "."]);
+    nested_checkout.git(["commit", "-m", "nested update"]);
+    let child_checkout = TempGitRepo {
+        path: parent.path.join("vendor/module"),
+    };
+    child_checkout.git(["config", "user.email", "relay@example.invalid"]);
+    child_checkout.git(["config", "user.name", "Relay Test"]);
+    child_checkout.git(["add", "deps/nested"]);
+    child_checkout.git(["commit", "-m", "update nested pointer"]);
+    parent.git(["add", "vendor/module"]);
+    parent.git(["commit", "-m", "update outer pointer"]);
+    child_checkout.git(["submodule", "deinit", "-f", "deps/nested"]);
+
+    let paths = changed_paths_for_diff_with_filters(&parent.path, &base, "HEAD", &[], &[])
+        .expect("initialized parent gitdir should resolve deinitialized nested cached objects");
+
+    assert!(paths.contains(&"vendor/module/deps/nested/src/nested.rs".to_owned()));
+    assert!(!paths.contains(&"vendor/module/deps/nested".to_owned()));
 }
 
 fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, path: &str) {

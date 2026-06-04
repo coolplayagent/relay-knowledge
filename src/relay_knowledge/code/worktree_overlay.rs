@@ -335,18 +335,38 @@ fn record_worktree_file(
     files_to_parse: &mut Vec<(String, Vec<u8>)>,
     skipped_unchanged_count: &mut usize,
 ) -> Result<(), CodeIndexError> {
-    let bytes = fs::read(root.join(path))?;
+    record_worktree_file_as(
+        root,
+        path,
+        path,
+        previous_hashes,
+        overlay_hash_input,
+        files_to_parse,
+        skipped_unchanged_count,
+    )
+}
+
+fn record_worktree_file_as(
+    root: &Path,
+    source_path: &str,
+    indexed_path: &str,
+    previous_hashes: &BTreeMap<String, String>,
+    overlay_hash_input: &mut Vec<u8>,
+    files_to_parse: &mut Vec<(String, Vec<u8>)>,
+    skipped_unchanged_count: &mut usize,
+) -> Result<(), CodeIndexError> {
+    let bytes = fs::read(root.join(source_path))?;
     let blob_hash = stable_content_hash(&bytes);
     overlay_hash_input.extend_from_slice(b"F\0");
-    overlay_hash_input.extend_from_slice(path.as_bytes());
+    overlay_hash_input.extend_from_slice(indexed_path.as_bytes());
     overlay_hash_input.push(0);
     overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
     overlay_hash_input.push(0);
-    if previous_hashes.get(path) == Some(&blob_hash) {
+    if previous_hashes.get(indexed_path) == Some(&blob_hash) {
         *skipped_unchanged_count += 1;
         return Ok(());
     }
-    files_to_parse.push((path.to_owned(), bytes));
+    files_to_parse.push((indexed_path.to_owned(), bytes));
 
     Ok(())
 }
@@ -554,7 +574,7 @@ fn record_unstaged_gitlink_overlay(
         return Ok(false);
     };
     if worktree_commit == base_gitlink_commit {
-        return Ok(false);
+        return record_dirty_submodule_worktree_overlay(root, path, recorder);
     }
 
     let worktree_entries = bounded_submodule_path_entries(
@@ -588,6 +608,120 @@ fn record_unstaged_gitlink_overlay(
     }
 
     Ok(true)
+}
+
+fn record_dirty_submodule_worktree_overlay(
+    root: &Path,
+    path: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<bool, CodeIndexError> {
+    let submodule_root = match source_gitlink::submodule_root(root, path) {
+        Ok(submodule_root) => submodule_root,
+        Err(_) => return Ok(false),
+    };
+    let status = git_bytes(
+        &submodule_root,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+    let changes = changes::worktree_changed_paths(&status);
+    if changes.is_empty() {
+        return Ok(false);
+    }
+    for change in &changes {
+        if let Some(deleted_path) = &change.deleted_source {
+            let parent_deleted_path = submodule_worktree_parent_path(path, deleted_path);
+            if recorder.path_is_selected(&parent_deleted_path) {
+                recorder.record_deleted_path(&parent_deleted_path);
+            }
+        }
+        let parent_path = submodule_worktree_parent_path(path, &change.path);
+        if !scope::path_scope_overlaps(&parent_path, recorder.registration, recorder.selector) {
+            continue;
+        }
+        if change.is_untracked()
+            && !worktree_untracked_path_is_selected(
+                &parent_path,
+                recorder.registration,
+                recorder.selector,
+            )
+        {
+            continue;
+        }
+        record_dirty_submodule_path(
+            &submodule_root,
+            path,
+            &change.path,
+            &parent_path,
+            change,
+            recorder,
+        )?;
+    }
+
+    Ok(true)
+}
+
+fn record_dirty_submodule_path(
+    submodule_root: &Path,
+    submodule_path: &str,
+    child_path: &str,
+    parent_path: &str,
+    change: &changes::WorktreePathChange,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    let metadata = match fs::symlink_metadata(submodule_root.join(child_path)) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if recorder.path_is_selected(parent_path) {
+                recorder.record_deleted_path(parent_path);
+            }
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_file() && recorder.path_is_selected(parent_path) {
+        return record_worktree_file_as(
+            submodule_root,
+            child_path,
+            parent_path,
+            recorder.previous_hashes,
+            recorder.overlay_hash_input,
+            recorder.files_to_parse,
+            recorder.skipped_unchanged_count,
+        );
+    }
+    if file_type.is_dir()
+        && change.is_untracked()
+        && !contains_git_metadata(submodule_root, Path::new(child_path))?
+        && worktree_directory_is_expandable(submodule_root, child_path)?
+    {
+        for nested_path in worktree_directory_files(submodule_root, child_path)? {
+            let parent_nested_path = submodule_worktree_parent_path(submodule_path, &nested_path);
+            if worktree_untracked_path_is_selected(
+                &parent_nested_path,
+                recorder.registration,
+                recorder.selector,
+            ) {
+                record_worktree_file_as(
+                    submodule_root,
+                    &nested_path,
+                    &parent_nested_path,
+                    recorder.previous_hashes,
+                    recorder.overlay_hash_input,
+                    recorder.files_to_parse,
+                    recorder.skipped_unchanged_count,
+                )?;
+            }
+        }
+    } else if recorder.path_is_selected(parent_path) {
+        record_worktree_status_marker(parent_path, recorder.overlay_hash_input);
+    }
+
+    Ok(())
+}
+
+fn submodule_worktree_parent_path(parent_path: &str, child_path: &str) -> String {
+    format!("{}/{}", parent_path.trim_end_matches('/'), child_path)
 }
 
 fn submodule_worktree_head(root: &Path, path: &str) -> Result<Option<String>, CodeIndexError> {

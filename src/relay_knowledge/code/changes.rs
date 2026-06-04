@@ -188,8 +188,8 @@ impl EntryPathspecs {
             .collect::<BTreeSet<_>>();
         let mut gitlink_candidates = BTreeSet::new();
         for filter in &paths {
-            if let Some((candidate, _)) = filter.split_once('/') {
-                gitlink_candidates.insert(candidate.to_owned());
+            for (index, _) in filter.match_indices('/') {
+                gitlink_candidates.insert(filter[..index].to_owned());
             }
         }
         gitlink_candidates.retain(|candidate| !paths.contains(candidate));

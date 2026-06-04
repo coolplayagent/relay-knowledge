@@ -307,7 +307,7 @@ fn worktree_overlay_ignores_out_of_language_dangling_symlinks() {
 }
 
 #[test]
-fn worktree_overlay_uses_committed_submodule_snapshot_without_dirty_overlay() {
+fn worktree_overlay_indexes_dirty_submodule_worktree_without_head_change() {
     let source = TempGitRepo::create("overlay-submodule-source");
     source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
     source.git(["add", "."]);
@@ -328,7 +328,7 @@ fn worktree_overlay_uses_committed_submodule_snapshot_without_dirty_overlay() {
     repo.git(["commit", "-am", "add submodule"]);
     fs::write(
         repo.path.join("src/submodule/lib.rs"),
-        "fn submodule_value() -> u32 { 1 }\n",
+        "fn dirty_submodule_value() -> u32 { 1 }\n",
     )
     .expect("submodule worktree should be modified");
 
@@ -338,15 +338,21 @@ fn worktree_overlay_uses_committed_submodule_snapshot_without_dirty_overlay() {
         CodeIndexMode::WorktreeOverlay,
         Vec::new(),
     )
-    .expect("overlay should not recurse into modified submodules");
+    .expect("overlay should index dirty submodule worktree content");
 
-    assert!(snapshot.full_replace);
-    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(!snapshot.full_replace);
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
     assert!(
         snapshot
             .files
             .iter()
             .any(|file| file.path == "src/submodule/lib.rs")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "dirty_submodule_value")
     );
 }
 

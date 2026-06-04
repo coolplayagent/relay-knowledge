@@ -811,13 +811,8 @@ fn current_submodule_git_dir(
     path: &str,
     parent_commit: &str,
     base_gitlink: &str,
-    head_gitlink: &str,
+    _head_gitlink: &str,
 ) -> Result<Option<PathBuf>, CodeIndexError> {
-    if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, base_gitlink)
-        && git_root_has_commit(&submodule_root, head_gitlink)
-    {
-        return Ok(None);
-    }
     match submodule_git_dir(root, path, Some(parent_commit), Some(base_gitlink)) {
         Ok(git_dir) => Ok(Some(git_dir)),
         Err(error) if submodule_expansion_is_unavailable(&error) => Ok(None),
