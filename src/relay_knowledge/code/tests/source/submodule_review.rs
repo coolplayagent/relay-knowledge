@@ -582,6 +582,99 @@ fn incremental_deleted_unavailable_gitlink_deletes_previous_children() {
     );
 }
 
+#[test]
+fn full_snapshot_scoped_submodule_child_uses_pathspec_after_recursion() {
+    let child = TempGitRepo::create("review-full-pathspec-child");
+    child.write(
+        "src/target.rs",
+        "pub fn selected_child_value() -> u32 { 1 }\n",
+    );
+    write_many_files(
+        &child,
+        "noise/generated",
+        "rs",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    let parent = TempGitRepo::create("review-full-pathspec-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "vendor/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let submodule_root = parent.path.join("vendor/module");
+    reset_git_ls_tree_full_scan_call_count_for_root(submodule_root.clone());
+    let registration = scoped_registration(&parent, vec!["vendor/module/src/target.rs".to_owned()]);
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &parent.selector(),
+        CodeIndexMode::Full,
+        Vec::new(),
+    )
+    .expect("scoped full snapshot should use child pathspecs inside submodules");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "vendor/module/src/target.rs")
+    );
+    assert_eq!(
+        git_ls_tree_full_scan_call_count_for_root(&submodule_root),
+        0
+    );
+}
+
+#[test]
+fn full_snapshot_scoped_nested_submodule_pathspec_enters_gitlink() {
+    let nested = TempGitRepo::create("review-full-nested-pathspec-nested");
+    nested.write("src/nested.rs", "pub fn nested_value() -> u32 { 1 }\n");
+    nested.git(["add", "."]);
+    nested.git(["commit", "-m", "nested"]);
+    let child = TempGitRepo::create("review-full-nested-pathspec-child");
+    child.write("src/child.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    add_named_submodule(&child, &nested, "nested", "nested");
+    child.git(["commit", "-am", "add nested submodule"]);
+    let parent = TempGitRepo::create("review-full-nested-pathspec-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "vendor/module");
+    parent.git(["commit", "-am", "add outer submodule"]);
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "vendor/module",
+    ]);
+    let registration = scoped_registration(
+        &parent,
+        vec!["vendor/module/nested/src/nested.rs".to_owned()],
+    );
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &parent.selector(),
+        CodeIndexMode::Full,
+        Vec::new(),
+    )
+    .expect("scoped nested submodule pathspec should still discover the nested gitlink");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "vendor/module/nested/src/nested.rs")
+    );
+}
+
 fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, path: &str) {
     let child_path = child.path.to_str().expect("child path should be unicode");
     parent.git([

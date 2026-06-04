@@ -147,12 +147,62 @@ impl TrackedEntryScope {
         }
     }
 
-    fn entry_pathspecs(&self) -> Option<Vec<&str>> {
-        if self.entry_filter != TrackedEntryFilter::All || self.path_filters.is_empty() {
+    fn entry_pathspecs(&self, prefix: &str) -> Option<EntryPathspecs> {
+        if self.entry_filter == TrackedEntryFilter::All {
+            return EntryPathspecs::from_filters(&self.path_filters);
+        }
+        if self.entry_filter != TrackedEntryFilter::Nested
+            || prefix.is_empty()
+            || self.path_filters.is_empty()
+        {
             return None;
         }
+        let prefix_path = prefix.trim_end_matches('/');
+        let mut paths = Vec::new();
+        for filter in &self.path_filters {
+            if filter == "." || path_matches_filter(prefix_path, filter) {
+                return None;
+            }
+            if let Some(child_filter) = filter.strip_prefix(prefix)
+                && !child_filter.is_empty()
+            {
+                paths.push(child_filter.to_owned());
+            }
+        }
 
-        Some(self.path_filters.iter().map(String::as_str).collect())
+        EntryPathspecs::from_filters(&paths)
+    }
+}
+
+struct EntryPathspecs {
+    paths: Vec<String>,
+    gitlink_candidates: Vec<String>,
+}
+
+impl EntryPathspecs {
+    fn from_filters(filters: &[String]) -> Option<Self> {
+        if filters.is_empty() {
+            return None;
+        }
+        let mut paths = Vec::new();
+        let mut gitlink_candidates = Vec::new();
+        for filter in filters {
+            if filter.is_empty() {
+                continue;
+            }
+            paths.push(filter.to_owned());
+            if let Some((candidate, _)) = filter.split_once('/')
+                && !gitlink_candidates
+                    .iter()
+                    .any(|existing| existing == candidate)
+            {
+                gitlink_candidates.push(candidate.to_owned());
+            }
+        }
+        (!paths.is_empty()).then_some(Self {
+            paths,
+            gitlink_candidates,
+        })
     }
 }
 
@@ -184,7 +234,7 @@ fn tracked_entries_inner(
     if !visited.insert(visit_key.clone()) {
         return Ok(GitTrackedEntries::default());
     }
-    let bytes = match tracked_entries_ls_tree_bytes(root, commit, scope) {
+    let bytes = match tracked_entries_ls_tree_bytes(root, commit, prefix, scope) {
         Ok(bytes) => bytes,
         Err(error) => {
             visited.remove(&visit_key);
@@ -353,7 +403,7 @@ fn tracked_entries_from_git_dir_inner(
     if !visited.insert(visit_key.clone()) {
         return Ok(GitTrackedEntries::default());
     }
-    let bytes = match tracked_entries_git_dir_ls_tree_bytes(git_dir, commit, scope) {
+    let bytes = match tracked_entries_git_dir_ls_tree_bytes(git_dir, commit, prefix, scope) {
         Ok(bytes) => bytes,
         Err(error) => {
             visited.remove(&visit_key);
@@ -418,29 +468,43 @@ fn tracked_entries_from_git_dir_inner(
 fn tracked_entries_ls_tree_bytes(
     root: &Path,
     commit: &str,
+    prefix: &str,
     scope: &TrackedEntryScope,
 ) -> Result<Vec<u8>, CodeIndexError> {
-    let Some(pathspecs) = scope.entry_pathspecs() else {
+    let Some(pathspecs) = scope.entry_pathspecs(prefix) else {
         return git_bytes(root, ["ls-tree", "-r", "-l", "-z", commit]);
     };
     let mut args = vec!["ls-tree", "-r", "-l", "-z", commit, "--"];
-    args.extend(pathspecs);
+    args.extend(pathspecs.paths.iter().map(String::as_str));
+    let mut bytes = git_bytes_slice(root, &args)?;
+    for candidate in &pathspecs.gitlink_candidates {
+        let mut candidate_bytes =
+            git_bytes_slice(root, &["ls-tree", "-l", "-z", commit, "--", candidate])?;
+        bytes.append(&mut candidate_bytes);
+    }
 
-    git_bytes_slice(root, &args)
+    Ok(bytes)
 }
 
 fn tracked_entries_git_dir_ls_tree_bytes(
     git_dir: &Path,
     commit: &str,
+    prefix: &str,
     scope: &TrackedEntryScope,
 ) -> Result<Vec<u8>, CodeIndexError> {
-    let Some(pathspecs) = scope.entry_pathspecs() else {
+    let Some(pathspecs) = scope.entry_pathspecs(prefix) else {
         return git_dir_bytes(git_dir, &["ls-tree", "-r", "-l", "-z", commit]);
     };
     let mut args = vec!["ls-tree", "-r", "-l", "-z", commit, "--"];
-    args.extend(pathspecs);
+    args.extend(pathspecs.paths.iter().map(String::as_str));
+    let mut bytes = git_dir_bytes(git_dir, &args)?;
+    for candidate in &pathspecs.gitlink_candidates {
+        let mut candidate_bytes =
+            git_dir_bytes(git_dir, &["ls-tree", "-l", "-z", commit, "--", candidate])?;
+        bytes.append(&mut candidate_bytes);
+    }
 
-    git_dir_bytes(git_dir, &args)
+    Ok(bytes)
 }
 
 struct GitDirSubmoduleRequest<'a> {
