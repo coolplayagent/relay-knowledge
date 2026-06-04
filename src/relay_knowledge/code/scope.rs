@@ -621,6 +621,44 @@ fn merged_path_filters(left: &[String], right: &[String]) -> Vec<String> {
     merged
 }
 
+pub(super) fn intersect_path_filters(left: &[String], right: &[String]) -> Option<Vec<String>> {
+    let left = normalized_path_filters(left);
+    let right = normalized_path_filters(right);
+    if left.is_empty() {
+        return Some(right);
+    }
+    if right.is_empty() {
+        return Some(left);
+    }
+
+    let mut intersections = Vec::new();
+    for left_filter in &left {
+        for right_filter in &right {
+            if path_filter_covers(left_filter, right_filter) {
+                push_filter_if_missing(&mut intersections, right_filter);
+            } else if path_filter_covers(right_filter, left_filter) {
+                push_filter_if_missing(&mut intersections, left_filter);
+            }
+        }
+    }
+
+    (!intersections.is_empty()).then_some(intersections)
+}
+
+fn normalized_path_filters(filters: &[String]) -> Vec<String> {
+    filters
+        .iter()
+        .map(|filter| normalize_path_filter(filter).to_owned())
+        .filter(|filter| !filter.is_empty())
+        .collect()
+}
+
+fn push_filter_if_missing(filters: &mut Vec<String>, filter: &str) {
+    if !filters.iter().any(|existing| existing == filter) {
+        filters.push(filter.to_owned());
+    }
+}
+
 fn push_filter_if_uncovered(filters: &mut Vec<String>, root: &str) {
     if filters
         .iter()

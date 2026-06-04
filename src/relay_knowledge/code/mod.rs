@@ -671,12 +671,10 @@ fn tracked_entry_scope_for_selector(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> TrackedEntryScope {
-    TrackedEntryScope::from_path_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-    )
+    match scope::intersect_path_filters(&registration.path_filters, &selector.path_filters) {
+        Some(filters) => TrackedEntryScope::from_path_filters(filters.iter()),
+        None => TrackedEntryScope::empty(),
+    }
 }
 
 pub(crate) fn repository_uses_filesystem_source(

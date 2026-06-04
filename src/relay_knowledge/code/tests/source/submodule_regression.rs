@@ -1,12 +1,13 @@
-use crate::domain::{CodeFileFingerprint, CodeIndexMode};
+use crate::domain::{CodeFileFingerprint, CodeIndexMode, CodeRepositorySelector};
 use std::{fs, process::Command};
 
 use super::{
     build_index_snapshot, changed_paths_for_diff,
     changes::{TrackedEntryScope, tracked_entries_with_scope},
-    resolve_repository_snapshot_with_path_filters, source_gitlink,
+    reset_tracked_entries_call_count_for_root, resolve_repository_snapshot_with_path_filters,
+    source_gitlink,
     test_fixtures::TempGitRepo,
-    tracked_entries,
+    tracked_entries, tracked_entries_call_count_for_root,
 };
 
 #[test]
@@ -227,6 +228,59 @@ fn incremental_submodule_update_deletes_base_children_when_head_unavailable() {
 }
 
 #[test]
+fn incremental_submodule_update_parses_head_children_when_base_unavailable() {
+    let available_child = TempGitRepo::create("incremental-head-available-child");
+    available_child.write("lib.rs", "pub fn available_child_value() -> u32 { 1 }\n");
+    available_child.git(["add", "."]);
+    available_child.git(["commit", "-m", "available child"]);
+    let available_commit = available_child.git_text(["rev-parse", "HEAD"]);
+    let missing_child = TempGitRepo::create("incremental-base-missing-child");
+    missing_child.write("old.rs", "pub fn missing_child_value() -> u32 { 1 }\n");
+    missing_child.git(["add", "."]);
+    missing_child.git(["commit", "-m", "missing child"]);
+    let missing_commit = missing_child.git_text(["rev-parse", "HEAD"]);
+
+    let parent = TempGitRepo::create("incremental-head-available-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &available_child, "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    stage_gitlink_commit(&parent, "src/module", &missing_commit);
+    parent.git(["commit", "-m", "point at unavailable base"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+
+    stage_gitlink_commit(&parent, "src/module", &available_commit);
+    parent.git(["commit", "-m", "restore available submodule pointer"]);
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("incremental should parse available head submodule children");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/module/lib.rs")
+    );
+}
+
+#[test]
 fn worktree_overlay_deletes_base_children_for_unavailable_staged_gitlink() {
     let child = TempGitRepo::create("overlay-unavailable-child");
     child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
@@ -314,6 +368,86 @@ fn configured_submodule_gitdir_must_contain_requested_commit() {
             .iter()
             .all(|entry| entry.path != "src/module/old.rs")
     );
+}
+
+#[test]
+fn tracked_entries_fall_back_to_gitdir_when_worktree_lacks_historical_commit() {
+    let old_child = TempGitRepo::create("worktree-fallback-old-child");
+    old_child.write("old.rs", "pub fn old_child_value() -> u32 { 1 }\n");
+    old_child.git(["add", "."]);
+    old_child.git(["commit", "-m", "old child"]);
+    let new_child = TempGitRepo::create("worktree-fallback-new-child");
+    new_child.write("new.rs", "pub fn new_child_value() -> u32 { 1 }\n");
+    new_child.git(["add", "."]);
+    new_child.git(["commit", "-m", "new child"]);
+
+    let parent = TempGitRepo::create("worktree-fallback-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &old_child, "a_old", "src/module");
+    parent.git(["commit", "-am", "add old submodule"]);
+    let old_parent_commit = parent.git_text(["rev-parse", "HEAD"]);
+    parent.git(["rm", "-f", "src/module"]);
+    parent.git(["commit", "-m", "remove old submodule"]);
+    add_named_submodule(&parent, &new_child, "z_new", "src/module");
+    parent.git(["commit", "-am", "add new submodule"]);
+
+    let entries = tracked_entries(&parent.path, &old_parent_commit)
+        .expect("historical submodule entries should fall back to cached gitdir");
+
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.path == "src/module/old.rs")
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.path != "src/module/new.rs")
+    );
+}
+
+#[test]
+fn tracked_entry_scope_intersects_registration_and_selector_before_submodule_expansion() {
+    let child = TempGitRepo::create("disjoint-scope-child");
+    child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("disjoint-scope-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "vendor/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let submodule_root = parent.path.join("vendor/module");
+    reset_tracked_entries_call_count_for_root(submodule_root.clone());
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 2 }\n");
+    parent.git(["add", "src/lib.rs"]);
+    parent.git(["commit", "-m", "update parent"]);
+    let selector = CodeRepositorySelector::new(
+        "alias",
+        "HEAD",
+        vec!["vendor/module/lib.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("selector should validate");
+
+    let snapshot = build_index_snapshot(
+        &parent.registration(),
+        &selector,
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        Vec::new(),
+    )
+    .expect("disjoint registration and selector scopes should build");
+
+    assert!(snapshot.files.is_empty());
+    assert_eq!(tracked_entries_call_count_for_root(&submodule_root), 0);
 }
 
 #[test]

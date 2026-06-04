@@ -8,6 +8,18 @@ pub(super) struct SubmodulePathEntry {
     pub(super) child_path: String,
 }
 
+pub(super) struct SubmoduleChangedPathSets {
+    pub(super) base_paths: BTreeSet<String>,
+    pub(super) head_paths: BTreeSet<String>,
+}
+
+pub(super) struct GitlinkPathExpansion {
+    pub(super) base_is_gitlink: bool,
+    pub(super) head_is_gitlink: bool,
+    pub(super) base_paths: BTreeSet<String>,
+    pub(super) head_paths: BTreeSet<String>,
+}
+
 pub(super) fn expanded_paths_under(entries: &[GitTreeEntry], path: &str) -> BTreeSet<String> {
     let prefix = format!("{}/", path.trim_end_matches('/'));
     entries

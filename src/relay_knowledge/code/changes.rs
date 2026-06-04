@@ -73,10 +73,11 @@ pub(super) struct TrackedEntryScope {
     entry_filter: TrackedEntryFilter,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum TrackedEntryFilter {
     #[default]
     None,
+    Empty,
     Nested,
     All,
 }
@@ -86,6 +87,13 @@ impl TrackedEntryScope {
         Self {
             path_filters: Vec::new(),
             entry_filter: TrackedEntryFilter::None,
+        }
+    }
+
+    pub(super) fn empty() -> Self {
+        Self {
+            path_filters: Vec::new(),
+            entry_filter: TrackedEntryFilter::Empty,
         }
     }
 
@@ -114,17 +122,19 @@ impl TrackedEntryScope {
     }
 
     fn allows_submodule_expansion(&self, path: &str) -> bool {
-        self.path_filters.is_empty()
-            || self
-                .path_filters
-                .iter()
-                .any(|filter| path_overlaps_filter(path, filter))
+        self.entry_filter != TrackedEntryFilter::Empty
+            && (self.path_filters.is_empty()
+                || self
+                    .path_filters
+                    .iter()
+                    .any(|filter| path_overlaps_filter(path, filter)))
     }
 
     fn allows_entry(&self, prefix: &str, path: &str) -> bool {
         let path = format!("{prefix}{path}");
         match self.entry_filter {
             TrackedEntryFilter::None => true,
+            TrackedEntryFilter::Empty => false,
             TrackedEntryFilter::Nested if prefix.is_empty() => true,
             TrackedEntryFilter::Nested | TrackedEntryFilter::All => {
                 self.path_filters.is_empty()
@@ -242,14 +252,18 @@ fn tracked_submodule_entries(
     scope: &TrackedEntryScope,
 ) -> Result<GitTrackedEntries, CodeIndexError> {
     if let Ok(submodule_root) = submodule_worktree_root(request.root, request.path) {
-        return tracked_entries_inner(
+        match tracked_entries_inner(
             &submodule_root,
             request.submodule_commit,
             request.prefix,
             request.depth,
             visited,
             scope,
-        );
+        ) {
+            Ok(state) => return Ok(state),
+            Err(error) if tracked_entries_commit_lookup_failed(&error) => {}
+            Err(error) => return Err(error),
+        }
     }
 
     let git_dir = submodule_git_dir(
@@ -266,6 +280,10 @@ fn tracked_submodule_entries(
         visited,
         scope,
     )
+}
+
+fn tracked_entries_commit_lookup_failed(error: &CodeIndexError) -> bool {
+    matches!(error, CodeIndexError::Git { args, .. } if args.iter().any(|arg| arg == "ls-tree"))
 }
 
 fn push_blob_entry(prefix: &str, path: &str, fields: &[&str], entries: &mut Vec<GitTreeEntry>) {

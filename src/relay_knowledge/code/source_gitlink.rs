@@ -15,7 +15,10 @@ use super::{
     source_gitlink_paths::bounded_expanded_paths_under_with_selector,
 };
 
-pub(super) use super::source_gitlink_paths::{SubmodulePathEntry, bounded_expanded_paths_under};
+pub(super) use super::source_gitlink_paths::{
+    GitlinkPathExpansion, SubmoduleChangedPathSets, SubmodulePathEntry,
+    bounded_expanded_paths_under,
+};
 pub(super) use super::source_gitlink_selector::GitlinkPathSelector;
 
 const MAX_NESTED_GITLINK_DIFF_DEPTH: usize = 8;
@@ -165,18 +168,6 @@ impl<'a> GitlinkImpactExpander<'a> {
     }
 }
 
-pub(super) struct GitlinkPathExpansion {
-    pub(super) base_is_gitlink: bool,
-    pub(super) head_is_gitlink: bool,
-    pub(super) base_paths: BTreeSet<String>,
-    pub(super) head_paths: BTreeSet<String>,
-}
-
-struct SubmoduleChangedPathSets {
-    base_paths: BTreeSet<String>,
-    head_paths: BTreeSet<String>,
-}
-
 pub(super) fn changed_gitlink_path_expansion(
     root: &Path,
     path: &str,
@@ -203,11 +194,13 @@ pub(super) fn changed_gitlink_path_expansion(
         else {
             let base_paths =
                 bounded_submodule_parent_paths(root, path, base_gitlink, max_paths, selector)?;
+            let head_paths =
+                bounded_submodule_parent_paths(root, path, head_gitlink, max_paths, selector)?;
             return Ok(Some(GitlinkPathExpansion {
                 base_is_gitlink: true,
                 head_is_gitlink: true,
                 base_paths,
-                head_paths: BTreeSet::new(),
+                head_paths,
             }));
         };
         return Ok(Some(GitlinkPathExpansion {
@@ -335,8 +328,16 @@ fn changed_submodule_paths_for_parent_commits(
         selector,
     )?
     else {
-        return bounded_submodule_parent_paths(root, path, &base_gitlink, max_paths, selector)
-            .map(Some);
+        let mut paths =
+            bounded_submodule_parent_paths(root, path, &base_gitlink, max_paths, selector)?;
+        paths.extend(bounded_submodule_parent_paths(
+            root,
+            path,
+            &head_gitlink,
+            max_paths,
+            selector,
+        )?);
+        return Ok(Some(paths));
     };
 
     Ok(Some(
