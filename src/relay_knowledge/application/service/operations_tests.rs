@@ -225,6 +225,19 @@ async fn service_status_reports_partitioned_storage_diagnostics() {
 
     assert_eq!(degraded.storage.missing_shard_count, 1);
     assert!(degraded.storage.degraded_reason.is_some());
+
+    let health = service
+        .health(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-health-missing-shard",
+            "trace-health-missing-shard",
+        ))
+        .await
+        .expect("health should degrade instead of failing");
+
+    assert!(!health.healthy);
+    assert_eq!(health.storage.missing_shard_count, 1);
+    assert!(health.degraded_reason.is_some());
 }
 
 #[tokio::test]

@@ -2,7 +2,7 @@
 
 [English](../../en/06-verification/10-service-deployment-control-data-plane-2026-06-04.md) | [中文](../../zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md)
 
-> Document version: 1.1
+> Document version: 1.2
 > Prepared: 2026-06-04
 > Scope: GitHub issue #250, Book 3 Chapter 22, related architecture chapters, resident service user guide, README files, and this documentation sync record.
 
@@ -12,6 +12,7 @@
 - Turned issue #250 service deployment goals into the `embedded_cli`, `resident_single_process`, `resident_partitioned_sqlite`, and future `split_worker_preview` topologies.
 - Synchronized storage, unified API, background service, installation/upgrade, resident service, and top-level README guidance so control-plane APIs, data-plane shards, split-worker leases, and backup/migration/uninstall boundaries are explicit.
 - Follow-up implementation adds storage topology diagnostics to `service status`/`health`, read-only `/api/v1/control/*` preview routes, `service plan` runtime state paths and warnings, and the `service worker run [--task-id <id>]` split-worker preview CLI.
+- After Codex review, the control-plane implementation was hardened so `health` returns degraded diagnostics instead of an API error when a partitioned shard is missing, storage topology diagnostics stay inside the same health timeout budget, and `/api/v1/control/service/status` uses a read-only status path that does not enqueue index refresh work.
 
 ## 2. Source Verification
 
@@ -34,6 +35,8 @@ Recommended verification commands:
 rg -n "第 22 章|Chapter 22|22-service-deployment-control-data-plane|B.10" docs README.md README.zh-CN.md
 rg -n "split_worker_preview|resident_partitioned_sqlite|control plane|data plane" docs/zh docs/en README.md README.zh-CN.md
 rg -n "/api/v1/control|service worker run|runtime_state_paths|missing_shard_count" src docs/zh docs/en
+cargo test --all-targets --all-features service_status_reports_partitioned_storage_diagnostics -- --nocapture
+cargo test --all-targets --all-features control_service_status_does_not_queue_index_refresh_work -- --nocapture
 wc -l docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/en/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md \

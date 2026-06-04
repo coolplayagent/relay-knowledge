@@ -42,8 +42,8 @@ use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
     knowledge::{
         index_refresh::{
-            index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
-            recover_index_kinds, refresh_index_kinds,
+            filter_outcome_to_read_models, index_refresh_outcome, metadata_for_indexes,
+            reconcile_index_refreshes, recover_index_kinds, refresh_index_kinds,
         },
         ingest::mutation_batch_from_request,
         multimodal::extraction_ingest_request,
@@ -62,6 +62,12 @@ pub struct RelayKnowledgeService {
     pub(super) runtime: RuntimeConfiguration,
     pub(super) storage: StorageProvider,
     pub(super) health_cache: Arc<tokio::sync::RwLock<Option<HealthResponse>>>,
+}
+
+#[derive(Clone, Copy)]
+enum ServiceStatusRefreshMode {
+    Reconcile,
+    Observe,
 }
 
 impl RelayKnowledgeService {
@@ -687,13 +693,41 @@ impl RelayKnowledgeService {
         &self,
         context: RequestContext,
     ) -> Result<ServiceStatusResponse, ApiError> {
+        self.service_status_with_refresh_mode(context, ServiceStatusRefreshMode::Reconcile)
+            .await
+    }
+
+    /// Returns service diagnostics without queuing derived-index refresh work.
+    pub async fn read_only_service_status(
+        &self,
+        context: RequestContext,
+    ) -> Result<ServiceStatusResponse, ApiError> {
+        self.service_status_with_refresh_mode(context, ServiceStatusRefreshMode::Observe)
+            .await
+    }
+
+    async fn service_status_with_refresh_mode(
+        &self,
+        context: RequestContext,
+        refresh_mode: ServiceStatusRefreshMode,
+    ) -> Result<ServiceStatusResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let graph_version = store
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let index_refresh =
-            reconcile_index_refreshes(&store, graph_version, &self.runtime.retrieval).await?;
+        let index_refresh = match refresh_mode {
+            ServiceStatusRefreshMode::Reconcile => {
+                reconcile_index_refreshes(&store, graph_version, &self.runtime.retrieval).await?
+            }
+            ServiceStatusRefreshMode::Observe => {
+                filter_outcome_to_read_models(
+                    index_refresh_outcome(&store).await?,
+                    &self.runtime.retrieval,
+                )
+                .diagnostics
+            }
+        };
         let file_index = file_index_diagnostics_or_default(&store).await?;
         let service_definition_path = self
             .runtime
