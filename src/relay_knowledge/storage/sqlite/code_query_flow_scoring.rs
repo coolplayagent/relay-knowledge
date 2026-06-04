@@ -10,6 +10,8 @@ const EXECUTION_FLOW_TERMS: &[&str] = &[
     "connection",
     "event",
     "events",
+    "finalize",
+    "finalized",
     "finish",
     "flow",
     "lifecycle",
@@ -400,6 +402,7 @@ fn flow_action_density(content: &str) -> f64 {
                 || line.contains(".on")
                 || line.contains(".pipe")
                 || line.contains(".make")
+                || line.contains(".finalize")
                 || line.contains(".finish")
                 || line.contains(".initial")
         })
@@ -723,6 +726,20 @@ mod tests {
         assert!(
             finalization > wrapper,
             "finalization={finalization} wrapper={wrapper}"
+        );
+
+        let finalize = request(
+            "OpenAI Chat protocol sse tool call delta lifecycle finalized events",
+            CodeQueryKind::Hybrid,
+        );
+        assert!(
+            execution_flow_chunk_bonus(
+                8.0,
+                &finalize.query,
+                "yield* Lifecycle.finalize(lifecycle, events)",
+                "packages/llm/src/protocols/openai-chat.ts",
+                &finalize,
+            ) > 0.0
         );
     }
 

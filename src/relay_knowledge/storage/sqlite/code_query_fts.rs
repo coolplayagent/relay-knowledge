@@ -171,10 +171,8 @@ pub(in crate::storage::sqlite::code::code_query) fn lifecycle_hybrid_chunk_fts_m
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return None;
     }
-    if !terms
-        .iter()
-        .any(|term| matches!(term.as_str(), "finish" | "finalize" | "finalized"))
-    {
+    let finalization_terms = lifecycle_finalization_recall_terms(&terms);
+    if finalization_terms.is_empty() {
         return None;
     }
     let has_tool_call_intent = terms
@@ -200,8 +198,23 @@ pub(in crate::storage::sqlite::code::code_query) fn lifecycle_hybrid_chunk_fts_m
     } else {
         "lifecycle"
     };
-    let recall_terms = vec![anchor.to_owned(), "finish".to_owned()];
-    Some(fts_match_query_with_operator(&recall_terms, " ", false))
+    Some(lifecycle_recall_match_query(anchor, &finalization_terms))
+}
+
+fn lifecycle_finalization_recall_terms(terms: &[String]) -> Vec<String> {
+    terms
+        .iter()
+        .filter(|term| matches!(term.as_str(), "finish" | "finalize" | "finalized"))
+        .cloned()
+        .collect()
+}
+
+fn lifecycle_recall_match_query(anchor: &str, finalization_terms: &[String]) -> String {
+    finalization_terms
+        .iter()
+        .map(|term| format!("{} {}", quote_fts_term(anchor), quote_fts_term(term)))
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn structured_hybrid_chunk_fts_match_query(
@@ -840,6 +853,20 @@ mod tests {
             )
             .as_deref(),
             Some("\"delta\" \"finish\"")
+        );
+        assert_eq!(
+            lifecycle_hybrid_chunk_fts_match_query(
+                "OpenAI Chat protocol sse tool call delta lifecycle finalize events"
+            )
+            .as_deref(),
+            Some("\"delta\" \"finalize\"")
+        );
+        assert_eq!(
+            lifecycle_hybrid_chunk_fts_match_query(
+                "OpenAI Chat protocol sse tool call delta lifecycle finalized events"
+            )
+            .as_deref(),
+            Some("\"delta\" \"finalized\"")
         );
         assert!(lifecycle_hybrid_chunk_fts_match_query("protocol lifecycle events").is_none());
         assert!(lifecycle_hybrid_chunk_fts_match_query("tool call setup delta events").is_none());

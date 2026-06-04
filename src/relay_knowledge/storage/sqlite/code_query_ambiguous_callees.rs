@@ -166,7 +166,7 @@ fn search_callee_implementation_candidates(
     contexts: &[AmbiguousCalleeContext],
     limit: usize,
 ) -> Result<Vec<CalleeImplementationCandidate>, StorageError> {
-    let callee_names = unique_context_values(contexts, |context| context.callee_name.as_str());
+    let callee_names = ambiguous_context_callee_lookup_names(contexts);
     let language_ids = unique_context_values(contexts, |context| context.language_id.as_str());
     let exact_paths = unique_context_values(contexts, |context| context.path.as_str());
     let path_prefixes = ambiguous_context_path_prefixes(contexts);
@@ -266,6 +266,20 @@ where
     values
 }
 
+fn ambiguous_context_callee_lookup_names(contexts: &[AmbiguousCalleeContext]) -> Vec<String> {
+    let mut names = Vec::new();
+    for context in contexts {
+        let Some(name) = callable_leaf_name(&context.callee_name) else {
+            continue;
+        };
+        if !names.iter().any(|existing| existing == &name) {
+            names.push(name);
+        }
+    }
+
+    names
+}
+
 fn ambiguous_context_path_prefixes(contexts: &[AmbiguousCalleeContext]) -> Vec<String> {
     let mut prefixes = Vec::new();
     for context in contexts {
@@ -286,11 +300,11 @@ fn ambiguous_context_target_hint_term_sets(
 ) -> Vec<Vec<String>> {
     let mut sets = Vec::new();
     for context in contexts {
-        let terms =
-            specific_target_hint_terms(context.target_hint.as_deref(), &context.callee_name)
-                .into_iter()
-                .take(AMBIGUOUS_CALLEE_TARGET_HINT_TERM_LIMIT)
-                .collect::<Vec<_>>();
+        let callee_leaf = callable_leaf_name(&context.callee_name).unwrap_or_default();
+        let terms = specific_target_hint_terms(context.target_hint.as_deref(), &callee_leaf)
+            .into_iter()
+            .take(AMBIGUOUS_CALLEE_TARGET_HINT_TERM_LIMIT)
+            .collect::<Vec<_>>();
         if !terms.is_empty() && !sets.contains(&terms) {
             sets.push(terms);
         }
@@ -357,7 +371,9 @@ fn ambiguous_callee_context_score(
     candidate: &CalleeImplementationCandidate,
     context: &AmbiguousCalleeContext,
 ) -> f64 {
-    if candidate.name != context.callee_name || candidate.language_id != context.language_id {
+    if callable_leaf_name(&context.callee_name).as_deref() != Some(candidate.name.as_str())
+        || candidate.language_id != context.language_id
+    {
         return 0.0;
     }
 
@@ -445,6 +461,36 @@ fn same_parent_path(left: &str, right: &str) -> bool {
     parent_path(left)
         .zip(parent_path(right))
         .is_some_and(|(left, right)| left == right)
+}
+
+fn callable_leaf_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let mut end = trimmed.len();
+    while end > 0 {
+        let Some((index, character)) = trimmed[..end].char_indices().next_back() else {
+            break;
+        };
+        if callable_identifier_character(character) {
+            break;
+        }
+        end = index;
+    }
+    let mut start = end;
+    while start > 0 {
+        let Some((index, character)) = trimmed[..start].char_indices().next_back() else {
+            break;
+        };
+        if !callable_identifier_character(character) {
+            break;
+        }
+        start = index;
+    }
+
+    (start < end).then(|| trimmed[start..end].to_owned())
+}
+
+fn callable_identifier_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '_' | '$')
 }
 
 fn specific_target_hint_matches_candidate(
@@ -691,6 +737,46 @@ mod tests {
         assert!(!target_hint_terms[0].contains(&"handle".to_owned()));
         assert!(predicate.contains("canonical_symbol_id"), "{predicate}");
         assert!(predicate.contains("s.path IN (?)"), "{predicate}");
+    }
+
+    #[test]
+    fn ambiguous_callee_lookup_uses_leaf_but_keeps_qualified_hint_terms() {
+        let mut call_context = context(
+            "src/main/java/example/ConnectorFactory.java",
+            Some("net::C.connect"),
+        );
+        call_context.callee_name = "C.connect".to_owned();
+        let lookup_names = ambiguous_context_callee_lookup_names(&[call_context]);
+
+        assert_eq!(lookup_names, vec!["connect".to_owned()]);
+
+        let mut call_context = context(
+            "src/main/java/example/ConnectorFactory.java",
+            Some("net::C.connect"),
+        );
+        call_context.callee_name = "C.connect".to_owned();
+        let hint_terms = ambiguous_context_target_hint_term_sets(&[call_context]);
+
+        assert!(hint_terms[0].contains(&"net".to_owned()));
+        assert!(!hint_terms[0].contains(&"connect".to_owned()));
+    }
+
+    #[test]
+    fn ambiguous_callee_context_accepts_qualified_member_leaf() {
+        let mut context = context(
+            "src/main/java/example/ConnectorFactory.java",
+            Some("net::C.connect"),
+        );
+        context.callee_name = "C.connect".to_owned();
+        let mut candidate = candidate(
+            "src/main/java/net/C.java",
+            "public Connection connect(Target target) { return target.open(); }",
+        );
+        candidate.name = "connect".to_owned();
+        candidate.signature = "public Connection connect(Target target)".to_owned();
+        candidate.canonical_symbol_id = "repo://repo/net::C.connect".to_owned();
+
+        assert!(ambiguous_callee_context_score(&candidate, &context) > 0.0);
     }
 
     fn context(path: &str, target_hint: Option<&str>) -> AmbiguousCalleeContext {
