@@ -274,12 +274,6 @@ fn deleted_symbol_gitlink_budget_counts_language_selected_children() {
         "src/lib.rs",
         "pub fn removed_submodule_api() -> u32 { 0 }\n",
     );
-    write_many_files(
-        &child,
-        "docs/generated",
-        "md",
-        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
-    );
     child.git(["add", "."]);
     child.git(["commit", "-m", "child"]);
     let parent = TempGitRepo::create("review-deleted-symbol-language-budget-parent");
@@ -288,6 +282,21 @@ fn deleted_symbol_gitlink_budget_counts_language_selected_children() {
     parent.git(["commit", "-m", "parent"]);
     add_named_submodule(&parent, &child, "module", "src/module");
     parent.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: parent.path.join("src/module"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    write_many_files(
+        &submodule,
+        "docs/generated",
+        "md",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "large non-rust surface"]);
+    parent.git(["add", "src/module"]);
+    parent.git(["commit", "-m", "update submodule"]);
     let base = parent.git_text(["rev-parse", "HEAD"]);
     parent.git(["rm", "-f", "src/module"]);
     parent.git(["commit", "-m", "remove submodule"]);
