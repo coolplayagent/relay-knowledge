@@ -191,8 +191,8 @@ pub(super) fn changed_gitlink_path_expansion(
         return Ok(None);
     }
 
-    if let (Some(base_gitlink), Some(head_gitlink)) = (&base_gitlink, &head_gitlink)
-        && let Some(changed_paths) = changed_submodule_path_sets(
+    if let (Some(base_gitlink), Some(head_gitlink)) = (&base_gitlink, &head_gitlink) {
+        let Some(changed_paths) = changed_submodule_path_sets(
             root,
             path,
             base_gitlink,
@@ -200,7 +200,14 @@ pub(super) fn changed_gitlink_path_expansion(
             max_paths,
             selector,
         )?
-    {
+        else {
+            return Ok(Some(GitlinkPathExpansion {
+                base_is_gitlink: true,
+                head_is_gitlink: true,
+                base_paths: BTreeSet::new(),
+                head_paths: BTreeSet::new(),
+            }));
+        };
         return Ok(Some(GitlinkPathExpansion {
             base_is_gitlink: true,
             head_is_gitlink: true,
@@ -332,7 +339,7 @@ fn changed_submodule_paths_for_parent_commits(
         selector,
     )?
     else {
-        return Ok(None);
+        return Ok(Some(BTreeSet::new()));
     };
 
     Ok(Some(
@@ -637,7 +644,7 @@ fn append_bounded_submodule_entry_paths(
     max_paths: usize,
     selector: &GitlinkPathSelector<'_>,
 ) -> Result<(), CodeIndexError> {
-    let entries = submodule_path_entries(root, path, commit)?;
+    let entries = submodule_path_entries_for_expansion(root, path, commit)?;
     let selected = entries
         .into_iter()
         .filter(|entry| selector.includes(&entry.parent_path))
@@ -742,7 +749,7 @@ fn bounded_submodule_parent_paths(
     max_paths: usize,
     selector: &GitlinkPathSelector<'_>,
 ) -> Result<BTreeSet<String>, CodeIndexError> {
-    let entries = submodule_path_entries(root, path, commit)?;
+    let entries = submodule_path_entries_for_expansion(root, path, commit)?;
     let selected = entries
         .into_iter()
         .filter(|entry| selector.includes(&entry.parent_path))
@@ -756,6 +763,26 @@ fn bounded_submodule_parent_paths(
     }
 
     Ok(selected)
+}
+
+fn submodule_path_entries_for_expansion(
+    root: &Path,
+    path: &str,
+    commit: &str,
+) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
+    match submodule_path_entries(root, path, commit) {
+        Ok(entries) => Ok(entries),
+        Err(error) if submodule_expansion_is_unavailable(&error) => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn submodule_expansion_is_unavailable(error: &CodeIndexError) -> bool {
+    matches!(
+        error,
+        CodeIndexError::InvalidInput(message)
+            if message.contains("submodule git dir") && message.contains("unavailable")
+    )
 }
 
 fn git_blob_bytes_with_submodules(

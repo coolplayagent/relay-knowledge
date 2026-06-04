@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeSet,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::Command,
 };
 
@@ -70,14 +70,22 @@ pub(super) struct GitTrackedEntries {
 #[derive(Debug, Clone, Default)]
 pub(super) struct TrackedEntryScope {
     path_filters: Vec<String>,
-    filter_entries: bool,
+    entry_filter: TrackedEntryFilter,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum TrackedEntryFilter {
+    #[default]
+    None,
+    Nested,
+    All,
 }
 
 impl TrackedEntryScope {
     pub(super) fn all() -> Self {
         Self {
             path_filters: Vec::new(),
-            filter_entries: false,
+            entry_filter: TrackedEntryFilter::None,
         }
     }
 
@@ -88,7 +96,7 @@ impl TrackedEntryScope {
                 .map(|filter| normalize_path_filter(filter).to_owned())
                 .filter(|filter| !filter.is_empty())
                 .collect(),
-            filter_entries: false,
+            entry_filter: TrackedEntryFilter::Nested,
         }
     }
 
@@ -101,7 +109,7 @@ impl TrackedEntryScope {
                 .map(|filter| normalize_path_filter(filter).to_owned())
                 .filter(|filter| !filter.is_empty())
                 .collect(),
-            filter_entries: true,
+            entry_filter: TrackedEntryFilter::All,
         }
     }
 
@@ -113,13 +121,19 @@ impl TrackedEntryScope {
                 .any(|filter| path_overlaps_filter(path, filter))
     }
 
-    fn allows_entry(&self, path: &str) -> bool {
-        !self.filter_entries
-            || self.path_filters.is_empty()
-            || self
-                .path_filters
-                .iter()
-                .any(|filter| path_matches_filter(path, filter))
+    fn allows_entry(&self, prefix: &str, path: &str) -> bool {
+        let path = format!("{prefix}{path}");
+        match self.entry_filter {
+            TrackedEntryFilter::None => true,
+            TrackedEntryFilter::Nested if prefix.is_empty() => true,
+            TrackedEntryFilter::Nested | TrackedEntryFilter::All => {
+                self.path_filters.is_empty()
+                    || self
+                        .path_filters
+                        .iter()
+                        .any(|filter| path_matches_filter(&path, filter))
+            }
+        }
     }
 }
 
@@ -165,7 +179,7 @@ fn tracked_entries_inner(
         };
         let fields = metadata.split_whitespace().collect::<Vec<_>>();
         match fields.get(1).copied() {
-            Some("blob") if scope.allows_entry(&format!("{prefix}{path}")) => {
+            Some("blob") if scope.allows_entry(prefix, path) => {
                 push_blob_entry(prefix, path, &fields, &mut state.entries);
             }
             Some("commit")
@@ -326,7 +340,7 @@ fn tracked_entries_from_git_dir_inner(
         };
         let fields = metadata.split_whitespace().collect::<Vec<_>>();
         match fields.get(1).copied() {
-            Some("blob") if scope.allows_entry(&format!("{prefix}{path}")) => {
+            Some("blob") if scope.allows_entry(prefix, path) => {
                 push_blob_entry(prefix, path, &fields, &mut state.entries);
             }
             Some("commit")
@@ -607,11 +621,7 @@ fn gitmodules_section_name(line: &str) -> Option<String> {
 }
 
 fn submodule_git_dir_for_name(root: &Path, name: &str) -> Result<PathBuf, CodeIndexError> {
-    if name.is_empty() {
-        return Err(CodeIndexError::InvalidInput(
-            "submodule name is empty".to_owned(),
-        ));
-    }
+    validate_submodule_name(name)?;
     let git_path = format!("modules/{name}");
     let bytes = git_bytes(
         root,
@@ -636,11 +646,7 @@ fn submodule_git_dir_for_name_from_git_dir(
     git_dir: &Path,
     name: &str,
 ) -> Result<PathBuf, CodeIndexError> {
-    if name.is_empty() {
-        return Err(CodeIndexError::InvalidInput(
-            "submodule name is empty".to_owned(),
-        ));
-    }
+    validate_submodule_name(name)?;
     let git_path = format!("modules/{name}");
     let bytes = git_dir_bytes(
         git_dir,
@@ -659,6 +665,29 @@ fn submodule_git_dir_for_name_from_git_dir(
     Err(CodeIndexError::InvalidInput(format!(
         "nested submodule git dir for name {name} is unavailable"
     )))
+}
+
+fn validate_submodule_name(name: &str) -> Result<(), CodeIndexError> {
+    if name.is_empty() {
+        return Err(CodeIndexError::InvalidInput(
+            "submodule name is empty".to_owned(),
+        ));
+    }
+    let path = Path::new(name);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::Prefix(_) | Component::RootDir
+            )
+        })
+    {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "submodule name '{name}' cannot escape the repository git modules directory"
+        )));
+    }
+
+    Ok(())
 }
 
 fn scan_submodule_git_dirs_for_commit(
