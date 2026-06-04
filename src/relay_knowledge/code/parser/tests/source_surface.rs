@@ -100,6 +100,7 @@ final class RequestPipeline {
         snapshot.symbols
     );
     assert_call(&snapshot, "request");
+    assert_no_call(&snapshot, "url");
 }
 
 fn assert_call(snapshot: &CodeIndexSnapshot, name: &str) {
@@ -109,6 +110,17 @@ fn assert_call(snapshot: &CodeIndexSnapshot, name: &str) {
             .iter()
             .any(|reference| reference.name == name && reference.kind == "call"),
         "{name} call should be indexed: {:?}",
+        snapshot.references
+    );
+}
+
+fn assert_no_call(snapshot: &CodeIndexSnapshot, name: &str) {
+    assert!(
+        snapshot
+            .references
+            .iter()
+            .all(|reference| reference.name != name || reference.kind != "call"),
+        "{name} should not be indexed as a call: {:?}",
         snapshot.references
     );
 }

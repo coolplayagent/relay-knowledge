@@ -14,9 +14,20 @@ use super::{
         path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
     },
     code_query_rows::CallRow,
-    dedupe_sort_truncate, hit_from_parts, prepare_code_search_statement, required_scope,
-    selected_row,
+    dedupe_sort_truncate, escape_sql_like, hit_from_parts, prepare_code_search_statement,
+    required_scope, selected_row,
 };
+
+struct AmbiguousCalleeContext {
+    callee_name: String,
+    path: String,
+    language_id: String,
+    target_hint: Option<String>,
+    caller_name: Option<String>,
+    caller_signature: Option<String>,
+    caller_excerpt: Option<String>,
+    caller_canonical_symbol_id: Option<String>,
+}
 
 struct CalleeImplementationCandidate {
     file_id: String,
@@ -34,6 +45,9 @@ struct CalleeImplementationCandidate {
 }
 
 const AMBIGUOUS_CALLEE_IMPLEMENTATION_LIMIT: usize = 120;
+const AMBIGUOUS_CALLEE_CONTEXT_LIMIT: usize = 32;
+const AMBIGUOUS_CALLEE_CONTEXT_MIN_SCORE: f64 = 1.5;
+const AMBIGUOUS_CALLEE_IMPLEMENTATION_BASE_SCORE: f64 = 4.65;
 
 pub(super) fn search_ambiguous_callee_implementation_hits(
     connection: &Connection,
@@ -44,15 +58,15 @@ pub(super) fn search_ambiguous_callee_implementation_hits(
     if request.code_query_kind != CodeQueryKind::Callees {
         return Ok(Vec::new());
     }
-    let callee_names = ambiguous_callee_names(rows);
-    if callee_names.is_empty() {
+    let contexts = ambiguous_callee_contexts(rows);
+    if contexts.is_empty() {
         return Ok(Vec::new());
     }
 
     let candidates = search_callee_implementation_candidates(
         connection,
         status,
-        &callee_names,
+        &contexts,
         AMBIGUOUS_CALLEE_IMPLEMENTATION_LIMIT,
     )?;
     let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
@@ -63,9 +77,19 @@ pub(super) fn search_ambiguous_callee_implementation_hits(
                 && (query_has_test_intent || !path_looks_like_test_or_benchmark(&candidate.path))
         })
         .filter_map(|candidate| {
-            let caller = caller_for_callee(rows, &candidate.name).unwrap_or("<module>");
-            let score = ambiguous_callee_implementation_score(&candidate, query_has_test_intent);
+            let (context, context_score) = best_ambiguous_callee_context(&candidate, &contexts)?;
+            let caller = context.caller_name.as_deref().unwrap_or("<module>");
+            let score = ambiguous_callee_implementation_score(
+                &candidate,
+                query_has_test_intent,
+                context_score,
+            );
             (score > 0.0).then(|| {
+                let edge_target_hint = context
+                    .target_hint
+                    .clone()
+                    .filter(|target_hint| !target_hint.trim().is_empty())
+                    .unwrap_or_else(|| candidate.name.clone());
                 hit_from_parts(
                     status,
                     HitParts {
@@ -90,7 +114,7 @@ pub(super) fn search_ambiguous_callee_implementation_hits(
                         degraded_reason: candidate.degraded_reason,
                         edge_kind: Some("call".to_owned()),
                         edge_resolution_state: Some("inferred".to_owned()),
-                        edge_target_hint: Some(candidate.name),
+                        edge_target_hint: Some(edge_target_hint),
                         edge_confidence_basis_points: Some(5_500),
                         edge_confidence_tier: Some("inferred".to_owned()),
                     },
@@ -103,32 +127,65 @@ pub(super) fn search_ambiguous_callee_implementation_hits(
     Ok(hits)
 }
 
-fn ambiguous_callee_names(rows: &[CallRow]) -> Vec<String> {
-    let mut names = Vec::new();
+fn ambiguous_callee_contexts(rows: &[CallRow]) -> Vec<AmbiguousCalleeContext> {
+    let mut contexts = Vec::new();
     for row in rows {
-        if row.resolution_state == "ambiguous" && !names.contains(&row.callee_name) {
-            names.push(row.callee_name.clone());
+        if row.resolution_state != "ambiguous" || row.callee_name.trim().is_empty() {
+            continue;
+        }
+        let duplicate = contexts.iter().any(|context: &AmbiguousCalleeContext| {
+            context.callee_name == row.callee_name
+                && context.path == row.path
+                && context.caller_name == row.caller_name
+        });
+        if !duplicate {
+            contexts.push(AmbiguousCalleeContext {
+                callee_name: row.callee_name.clone(),
+                path: row.path.clone(),
+                language_id: row.language_id.clone(),
+                target_hint: row.target_hint.clone(),
+                caller_name: row.caller_name.clone(),
+                caller_signature: row.caller_signature.clone(),
+                caller_excerpt: row.caller_excerpt.clone(),
+                caller_canonical_symbol_id: row.caller_canonical_symbol_id.clone(),
+            });
+        }
+        if contexts.len() >= AMBIGUOUS_CALLEE_CONTEXT_LIMIT {
+            break;
         }
     }
 
-    names
-}
-
-fn caller_for_callee<'row>(rows: &'row [CallRow], callee_name: &str) -> Option<&'row str> {
-    rows.iter()
-        .find(|row| row.callee_name == callee_name)
-        .and_then(|row| row.caller_name.as_deref())
+    contexts
 }
 
 fn search_callee_implementation_candidates(
     connection: &Connection,
     status: &CodeRepositoryStatus,
-    callee_names: &[String],
+    contexts: &[AmbiguousCalleeContext],
     limit: usize,
 ) -> Result<Vec<CalleeImplementationCandidate>, StorageError> {
+    let callee_names = unique_context_values(contexts, |context| context.callee_name.as_str());
+    let language_ids = unique_context_values(contexts, |context| context.language_id.as_str());
+    let exact_paths = unique_context_values(contexts, |context| context.path.as_str());
+    let path_prefixes = ambiguous_context_path_prefixes(contexts);
     let placeholders = std::iter::repeat_n("?", callee_names.len())
         .collect::<Vec<_>>()
         .join(", ");
+    let language_placeholders = std::iter::repeat_n("?", language_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let exact_path_placeholders = std::iter::repeat_n("?", exact_paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let path_prefix_predicates =
+        std::iter::repeat_n("s.path LIKE ? ESCAPE '\\'", path_prefixes.len())
+            .collect::<Vec<_>>()
+            .join(" OR ");
+    let path_predicate = if path_prefix_predicates.is_empty() {
+        format!("s.path IN ({exact_path_placeholders})")
+    } else {
+        format!("s.path IN ({exact_path_placeholders}) OR {path_prefix_predicates}")
+    };
     let sql = format!(
         "
         SELECT s.file_id, s.path, s.language_id, s.symbol_snapshot_id,
@@ -149,13 +206,18 @@ fn search_callee_implementation_candidates(
             ON f.source_scope = s.source_scope AND f.path = s.path
         WHERE s.source_scope = ?
           AND s.name IN ({placeholders})
+          AND s.language_id IN ({language_placeholders})
+          AND ({path_predicate})
           AND s.kind IN ('function', 'method')
         ORDER BY s.path ASC, s.line_start ASC
         LIMIT ?
         "
     );
     let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
-    values.extend(callee_names.iter().cloned().map(Value::Text));
+    values.extend(callee_names.into_iter().map(Value::Text));
+    values.extend(language_ids.into_iter().map(Value::Text));
+    values.extend(exact_paths.into_iter().map(Value::Text));
+    values.extend(path_prefixes.into_iter().map(Value::Text));
     values.push(Value::Integer(limit as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
@@ -186,9 +248,81 @@ fn search_callee_implementation_candidates(
         .map_err(StorageError::from)
 }
 
+fn unique_context_values<F>(contexts: &[AmbiguousCalleeContext], value: F) -> Vec<String>
+where
+    F: Fn(&AmbiguousCalleeContext) -> &str,
+{
+    let mut values = Vec::new();
+    for context in contexts {
+        let value = value(context).trim();
+        if !value.is_empty() && !values.iter().any(|existing| existing == value) {
+            values.push(value.to_owned());
+        }
+    }
+
+    values
+}
+
+fn ambiguous_context_path_prefixes(contexts: &[AmbiguousCalleeContext]) -> Vec<String> {
+    let mut prefixes = Vec::new();
+    for context in contexts {
+        let Some(parent) = parent_path(&context.path) else {
+            continue;
+        };
+        let prefix = format!("{}/%", escape_sql_like(parent));
+        if !prefixes.contains(&prefix) {
+            prefixes.push(prefix);
+        }
+    }
+
+    prefixes
+}
+
+fn best_ambiguous_callee_context<'context>(
+    candidate: &CalleeImplementationCandidate,
+    contexts: &'context [AmbiguousCalleeContext],
+) -> Option<(&'context AmbiguousCalleeContext, f64)> {
+    contexts
+        .iter()
+        .filter_map(|context| {
+            let score = ambiguous_callee_context_score(candidate, context);
+            (score > 0.0).then_some((context, score))
+        })
+        .max_by(|(_, left), (_, right)| left.total_cmp(right))
+}
+
+fn ambiguous_callee_context_score(
+    candidate: &CalleeImplementationCandidate,
+    context: &AmbiguousCalleeContext,
+) -> f64 {
+    if candidate.name != context.callee_name || candidate.language_id != context.language_id {
+        return 0.0;
+    }
+
+    let mut score = 0.6;
+    if candidate.path == context.path {
+        score += 2.4;
+    } else if same_parent_path(&candidate.path, &context.path) {
+        score += 1.5;
+    }
+    if specific_target_hint_matches_candidate(context.target_hint.as_deref(), candidate) {
+        score += 2.2;
+    }
+    if caller_context_mentions_candidate(context, candidate) {
+        score += 1.0;
+    }
+
+    if score >= AMBIGUOUS_CALLEE_CONTEXT_MIN_SCORE {
+        score
+    } else {
+        0.0
+    }
+}
+
 fn ambiguous_callee_implementation_score(
     candidate: &CalleeImplementationCandidate,
     query_has_test_intent: bool,
+    context_score: f64,
 ) -> f64 {
     let body = candidate.body_excerpt.as_deref().unwrap_or_default();
     let concrete_body = body_contains_executable_implementation(body, &candidate.name);
@@ -202,7 +336,11 @@ fn ambiguous_callee_implementation_score(
     let parse_bonus = (candidate.parse_status == "parsed") as u8 as f64 * 0.25;
     let body_bonus = if concrete_body { 2.2 } else { 0.0 };
 
-    8.0 + source_bonus + parse_bonus + body_bonus
+    AMBIGUOUS_CALLEE_IMPLEMENTATION_BASE_SCORE
+        + context_score
+        + source_bonus
+        + parse_bonus
+        + body_bonus
 }
 
 fn body_contains_executable_implementation(body: &str, name: &str) -> bool {
@@ -234,6 +372,158 @@ fn compact_excerpt(body: &str) -> String {
         .join(" ")
 }
 
+fn parent_path(path: &str) -> Option<&str> {
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .filter(|parent| !parent.is_empty())
+}
+
+fn same_parent_path(left: &str, right: &str) -> bool {
+    parent_path(left)
+        .zip(parent_path(right))
+        .is_some_and(|(left, right)| left == right)
+}
+
+fn specific_target_hint_matches_candidate(
+    target_hint: Option<&str>,
+    candidate: &CalleeImplementationCandidate,
+) -> bool {
+    let Some(target_hint) = target_hint.map(str::trim).filter(|hint| !hint.is_empty()) else {
+        return false;
+    };
+    let hint_terms = identifier_terms(target_hint);
+    let name_terms = identifier_terms(&candidate.name);
+    let specific_terms = hint_terms
+        .iter()
+        .filter(|term| !name_terms.iter().any(|name_term| name_term == *term))
+        .collect::<Vec<_>>();
+    if specific_terms.is_empty() {
+        return false;
+    }
+    let candidate_terms = identifier_terms(&format!(
+        "{} {} {}",
+        candidate.canonical_symbol_id, candidate.signature, candidate.path
+    ));
+
+    specific_terms
+        .iter()
+        .all(|term| candidate_terms.iter().any(|candidate| candidate == *term))
+}
+
+fn caller_context_mentions_candidate(
+    context: &AmbiguousCalleeContext,
+    candidate: &CalleeImplementationCandidate,
+) -> bool {
+    let context_text = [
+        context.caller_name.as_deref().unwrap_or_default(),
+        context.caller_signature.as_deref().unwrap_or_default(),
+        context.caller_excerpt.as_deref().unwrap_or_default(),
+        context
+            .caller_canonical_symbol_id
+            .as_deref()
+            .unwrap_or_default(),
+    ]
+    .join(" ");
+    if context_text.trim().is_empty() {
+        return false;
+    }
+    if path_stem(&candidate.path)
+        .is_some_and(|stem| stem.len() >= 4 && contains_identifier_surface(&context_text, stem))
+    {
+        return true;
+    }
+
+    let context_terms = identifier_terms(&context_text);
+    let candidate_terms = candidate_identity_terms(candidate);
+    let matched_terms = candidate_terms
+        .iter()
+        .filter(|term| {
+            context_terms
+                .iter()
+                .any(|context_term| context_term == *term)
+        })
+        .take(2)
+        .count();
+
+    matched_terms >= 2
+}
+
+fn candidate_identity_terms(candidate: &CalleeImplementationCandidate) -> Vec<String> {
+    let name_terms = identifier_terms(&candidate.name);
+    identifier_terms(&format!(
+        "{} {} {}",
+        candidate.canonical_symbol_id, candidate.signature, candidate.path
+    ))
+    .into_iter()
+    .filter(|term| term.len() >= 4)
+    .filter(|term| !name_terms.iter().any(|name_term| name_term == term))
+    .filter(|term| {
+        !matches!(
+            term.as_str(),
+            "java" | "main" | "src" | "source" | "function" | "method" | "repo"
+        )
+    })
+    .collect()
+}
+
+fn path_stem(path: &str) -> Option<&str> {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    file_name
+        .rsplit_once('.')
+        .map_or(Some(file_name), |(stem, _)| {
+            (!stem.is_empty()).then_some(stem)
+        })
+}
+
+fn contains_identifier_surface(haystack: &str, needle: &str) -> bool {
+    let haystack = haystack.to_ascii_lowercase();
+    let needle = needle.to_ascii_lowercase();
+    haystack.contains(&needle)
+}
+
+fn identifier_terms(value: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut current = String::new();
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            current.push(character);
+        } else {
+            push_identifier_token(&current, &mut terms);
+            current.clear();
+        }
+    }
+    push_identifier_token(&current, &mut terms);
+
+    terms
+}
+
+fn push_identifier_token(token: &str, terms: &mut Vec<String>) {
+    if token.is_empty() {
+        return;
+    }
+    let normalized = token.to_ascii_lowercase();
+    push_unique_term(&normalized, terms);
+    push_camel_terms(token, terms);
+}
+
+fn push_camel_terms(token: &str, terms: &mut Vec<String>) {
+    let mut current = String::new();
+    for character in token.chars() {
+        if character.is_ascii_uppercase() && !current.is_empty() {
+            push_unique_term(&current.to_ascii_lowercase(), terms);
+            current.clear();
+        }
+        current.push(character);
+    }
+    push_unique_term(&current.to_ascii_lowercase(), terms);
+}
+
+fn push_unique_term(term: &str, terms: &mut Vec<String>) {
+    if term.len() >= 2 && !terms.iter().any(|existing| existing == term) {
+        terms.push(term.to_owned());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,12 +544,12 @@ mod tests {
         );
 
         assert!(
-            ambiguous_callee_implementation_score(&source, false)
-                > ambiguous_callee_implementation_score(&interface, false)
+            ambiguous_callee_implementation_score(&source, false, 2.0)
+                > ambiguous_callee_implementation_score(&interface, false, 2.0)
         );
         assert!(
-            ambiguous_callee_implementation_score(&source, false)
-                > ambiguous_callee_implementation_score(&fake, false)
+            ambiguous_callee_implementation_score(&source, false, 2.0)
+                > ambiguous_callee_implementation_score(&fake, false, 2.0)
         );
     }
 
@@ -273,6 +563,57 @@ mod tests {
         );
 
         assert!(excerpt.contains("normalize(value).trim()"));
+    }
+
+    #[test]
+    fn ambiguous_callee_context_accepts_same_directory_implementation() {
+        let context = context("src/main/java/example/ServiceFactory.java", None);
+        let candidate = candidate(
+            "src/main/java/example/AnnotatedService.java",
+            "public String handle(String value) { return normalize(value).trim(); }",
+        );
+
+        assert!(ambiguous_callee_context_score(&candidate, &context) > 0.0);
+    }
+
+    #[test]
+    fn ambiguous_callee_context_rejects_same_name_without_local_evidence() {
+        let context = context("src/main/java/example/ServiceFactory.java", None);
+        let candidate = candidate(
+            "src/main/java/other/RemoteHandler.java",
+            "public String handle(String value) { return value; }",
+        );
+
+        assert_eq!(ambiguous_callee_context_score(&candidate, &context), 0.0);
+    }
+
+    #[test]
+    fn ambiguous_callee_context_accepts_specific_target_hint() {
+        let context = context(
+            "src/main/java/example/ServiceFactory.java",
+            Some("com.acme.worker.AnnotatedService.handle"),
+        );
+        let mut candidate = candidate(
+            "src/main/java/worker/AnnotatedService.java",
+            "public String handle(String value) { return normalize(value).trim(); }",
+        );
+        candidate.canonical_symbol_id =
+            "repo://repo/com::acme::worker::AnnotatedService.handle".to_owned();
+
+        assert!(ambiguous_callee_context_score(&candidate, &context) > 0.0);
+    }
+
+    fn context(path: &str, target_hint: Option<&str>) -> AmbiguousCalleeContext {
+        AmbiguousCalleeContext {
+            callee_name: "handle".to_owned(),
+            path: path.to_owned(),
+            language_id: "java".to_owned(),
+            target_hint: target_hint.map(str::to_owned),
+            caller_name: Some("dispatch".to_owned()),
+            caller_signature: Some("void dispatch(Service service)".to_owned()),
+            caller_excerpt: Some("return service.handle(payload);".to_owned()),
+            caller_canonical_symbol_id: Some("repo://repo/ServiceFactory.dispatch".to_owned()),
+        }
     }
 
     fn candidate(path: &str, body: &str) -> CalleeImplementationCandidate {
