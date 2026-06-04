@@ -134,6 +134,7 @@ impl<'a> GitlinkImpactExpander<'a> {
         }
         paths.sort();
         paths.dedup();
+        ensure_gitlink_expansion_budget(path, paths.len(), max_paths)?;
 
         Ok(Some(paths))
     }
@@ -167,6 +168,11 @@ pub(super) fn changed_gitlink_path_expansion(
                 bounded_submodule_parent_paths(root, path, base_gitlink, max_paths, selector)?;
             let head_paths =
                 bounded_submodule_parent_paths(root, path, head_gitlink, max_paths, selector)?;
+            ensure_gitlink_expansion_budget(
+                path,
+                base_paths.len().saturating_add(head_paths.len()),
+                max_paths,
+            )?;
             return Ok(Some(GitlinkPathExpansion {
                 base_is_gitlink: true,
                 head_is_gitlink: true,
@@ -238,14 +244,16 @@ fn submodule_path_entries_with_scope(
     scope: &TrackedEntryScope,
 ) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
     let prefix = format!("{}/", path.trim_end_matches('/'));
-    let entries = match submodule_worktree_root(root, path) {
-        Ok(submodule_root) => tracked_entries_with_scope(&submodule_root, commit, scope)?,
-        Err(_) => tracked_entries_from_git_dir_with_scope(
-            &submodule_git_dir(root, path, None, Some(commit))?,
-            commit,
-            scope,
-        )?,
-    };
+    let entries =
+        if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, commit) {
+            tracked_entries_with_scope(&submodule_root, commit, scope)?
+        } else {
+            tracked_entries_from_git_dir_with_scope(
+                &submodule_git_dir(root, path, None, Some(commit))?,
+                commit,
+                scope,
+            )?
+        };
 
     Ok(entries
         .into_iter()
@@ -262,13 +270,14 @@ pub(super) fn submodule_entry_bytes(
     commit: &str,
     child_path: &str,
 ) -> Result<Vec<u8>, CodeIndexError> {
-    match submodule_worktree_root(root, path) {
-        Ok(submodule_root) => git_blob_bytes_with_submodules(&submodule_root, commit, child_path),
-        Err(_) => git_dir_blob_bytes_with_submodules(
+    if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, commit) {
+        git_blob_bytes_with_submodules(&submodule_root, commit, child_path)
+    } else {
+        git_dir_blob_bytes_with_submodules(
             &submodule_git_dir(root, path, None, Some(commit))?,
             commit,
             child_path,
-        ),
+        )
     }
 }
 
@@ -438,11 +447,11 @@ fn changed_submodule_path_sets_inner(
                 }
             }
         }
-        if base_paths.len().saturating_add(head_paths.len()) > max_paths {
-            return Err(CodeIndexError::InvalidInput(format!(
-                "gitlink path {path} expands to more than {max_paths} changed files; run a full code index so the work is checkpointed and batched"
-            )));
-        }
+        ensure_gitlink_expansion_budget(
+            path,
+            base_paths.len().saturating_add(head_paths.len()),
+            max_paths,
+        )?;
     }
 
     Ok(Some(SubmoduleChangedPathSets {
@@ -619,12 +628,7 @@ fn append_bounded_submodule_entry_paths(
         .filter(|entry| selector.includes(&entry.parent_path))
         .map(|entry| entry.parent_path)
         .collect::<Vec<_>>();
-    if selected.len() > max_paths {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "gitlink path {path} expands to {} files; run a full code index so the work is checkpointed and batched",
-            selected.len()
-        )));
-    }
+    ensure_gitlink_expansion_budget(path, selected.len(), max_paths)?;
     paths.extend(selected);
 
     Ok(())
@@ -636,16 +640,15 @@ fn submodule_gitlink_commit(
     commit: &str,
     child_path: &str,
 ) -> Result<Option<String>, CodeIndexError> {
-    match submodule_root(root, path) {
-        Ok(submodule_root) => Ok(git_tree_entry(&submodule_root, commit, child_path)?
+    if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, commit) {
+        Ok(git_tree_entry(&submodule_root, commit, child_path)?
             .filter(|entry| entry.kind == "commit")
-            .map(|entry| entry.object)),
-        Err(_) => {
-            let git_dir = submodule_git_dir(root, path, None, Some(commit))?;
-            Ok(git_tree_entry_from_git_dir(&git_dir, commit, child_path)?
-                .filter(|entry| entry.kind == "commit")
-                .map(|entry| entry.object))
-        }
+            .map(|entry| entry.object))
+    } else {
+        let git_dir = submodule_git_dir(root, path, None, Some(commit))?;
+        Ok(git_tree_entry_from_git_dir(&git_dir, commit, child_path)?
+            .filter(|entry| entry.kind == "commit")
+            .map(|entry| entry.object))
     }
 }
 
@@ -655,13 +658,16 @@ fn diff_submodule_changes(
     base_gitlink: &str,
     head_gitlink: &str,
 ) -> Result<Vec<GitChange>, CodeIndexError> {
-    match submodule_root(root, path) {
-        Ok(submodule_root) => diff_changes(&submodule_root, base_gitlink, head_gitlink),
-        Err(_) => diff_changes_from_git_dir(
+    if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, base_gitlink)
+        && git_root_has_commit(&submodule_root, head_gitlink)
+    {
+        diff_changes(&submodule_root, base_gitlink, head_gitlink)
+    } else {
+        diff_changes_from_git_dir(
             &submodule_git_dir(root, path, None, Some(base_gitlink))?,
             base_gitlink,
             head_gitlink,
-        ),
+        )
     }
 }
 
@@ -671,17 +677,18 @@ fn submodule_blob_exists(
     commit: &str,
     child_path: &str,
 ) -> Result<bool, CodeIndexError> {
-    match submodule_root(root, path) {
-        Ok(submodule_root) => Ok(git_bytes(
+    if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, commit) {
+        Ok(git_bytes(
             &submodule_root,
             ["cat-file", "-e", &format!("{commit}:{child_path}")],
         )
-        .is_ok()),
-        Err(_) => Ok(git_dir_bytes(
+        .is_ok())
+    } else {
+        Ok(git_dir_bytes(
             &submodule_git_dir(root, path, None, Some(commit))?,
             &["cat-file", "-e", &format!("{commit}:{child_path}")],
         )
-        .is_ok()),
+        .is_ok())
     }
 }
 
@@ -724,14 +731,23 @@ fn bounded_submodule_parent_paths(
         .filter(|entry| selector.includes(&entry.parent_path))
         .map(|entry| entry.parent_path)
         .collect::<BTreeSet<_>>();
-    if selected.len() > max_paths {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "gitlink path {path} expands to {} files; run a full code index so the work is checkpointed and batched",
-            selected.len()
-        )));
-    }
+    ensure_gitlink_expansion_budget(path, selected.len(), max_paths)?;
 
     Ok(selected)
+}
+
+fn ensure_gitlink_expansion_budget(
+    path: &str,
+    expanded_count: usize,
+    max_paths: usize,
+) -> Result<(), CodeIndexError> {
+    if expanded_count <= max_paths {
+        return Ok(());
+    }
+
+    Err(CodeIndexError::InvalidInput(format!(
+        "gitlink path {path} expands to {expanded_count} files; run a full code index so the work is checkpointed and batched"
+    )))
 }
 
 fn submodule_path_entries_for_expansion(
@@ -865,6 +881,12 @@ fn gitlink_target_for_path(
 
 fn git_root_has_commit(root: &Path, commit: &str) -> bool {
     git_bytes(root, ["cat-file", "-e", &format!("{commit}^{{commit}}")]).is_ok()
+}
+
+fn submodule_worktree_root_for_commit(root: &Path, path: &str, commit: &str) -> Option<PathBuf> {
+    submodule_worktree_root(root, path)
+        .ok()
+        .filter(|submodule_root| git_root_has_commit(submodule_root, commit))
 }
 
 fn gitlink_target_for_git_dir_path(

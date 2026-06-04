@@ -44,6 +44,9 @@ mod source_layout_tests;
 #[path = "tests/source/submodule_regression.rs"]
 mod source_submodule_regression_tests;
 #[cfg(test)]
+#[path = "tests/source/submodule_review.rs"]
+mod source_submodule_review_tests;
+#[cfg(test)]
 #[path = "tests/source/submodule.rs"]
 mod source_submodule_tests;
 #[cfg(test)]
@@ -583,16 +586,23 @@ fn append_deleted_symbol_names_for_gitlink_update(
     if !path_scope_overlaps(path, context.registration, context.selector) {
         return Ok(());
     }
+    let include_expanded_path = |path: &str| {
+        path_is_selected_with_layout(
+            path,
+            context.registration,
+            context.selector,
+            context.source_layout,
+        )
+    };
+    let expanded_scope_overlaps =
+        |path: &str| path_scope_overlaps(path, context.registration, context.selector);
     let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
         context.root,
         path,
         context.base_commit,
         head_commit,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
-        &source_gitlink::GitlinkPathSelector::new(
-            &|path| path_scope_overlaps(path, context.registration, context.selector),
-            &|path| path_scope_overlaps(path, context.registration, context.selector),
-        ),
+        &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &expanded_scope_overlaps),
     )?
     else {
         return Ok(());
@@ -849,16 +859,28 @@ fn parse_expanded_gitlink_change(
     if !path_scope_overlaps(path, context.registration, context.selector) {
         return Ok(false);
     }
+    let include_expanded_path = |path: &str| {
+        path_is_selected_with_layout(
+            path,
+            context.registration,
+            context.selector,
+            base_source_layout,
+        ) || path_is_selected_with_layout(
+            path,
+            context.registration,
+            context.selector,
+            context.source_layout,
+        )
+    };
+    let expanded_scope_overlaps =
+        |path: &str| path_scope_overlaps(path, context.registration, context.selector);
     let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
         context.root,
         path,
         context.base_commit,
         &build.commit,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
-        &source_gitlink::GitlinkPathSelector::new(
-            &|path| path_scope_overlaps(path, context.registration, context.selector),
-            &|path| path_scope_overlaps(path, context.registration, context.selector),
-        ),
+        &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &expanded_scope_overlaps),
     )?
     else {
         return Ok(false);
