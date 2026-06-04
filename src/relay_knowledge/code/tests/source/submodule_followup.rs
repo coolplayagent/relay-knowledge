@@ -207,6 +207,156 @@ fn impact_nested_deinitialized_child_uses_initialized_parent_gitdir() {
     assert!(!paths.contains(&"vendor/module/deps/nested".to_owned()));
 }
 
+#[test]
+fn worktree_overlay_preserves_dirty_file_after_submodule_head_moves() {
+    let child = TempGitRepo::create("followup-overlay-moved-head-child");
+    child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    let parent = TempGitRepo::create("followup-overlay-moved-head-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "submodule", "src/submodule");
+    parent.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: parent.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("lib.rs", "pub fn committed_child_value() -> u32 { 2 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "move head"]);
+    submodule.write("lib.rs", "pub fn dirty_child_value() -> u32 { 3 }\n");
+
+    let snapshot = build_index_snapshot(
+        &parent.registration(),
+        &parent.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("dirty submodule worktree should override moved HEAD content");
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "dirty_child_value")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .all(|symbol| symbol.name != "committed_child_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_recurses_into_dirty_nested_submodule_for_scoped_child() {
+    let nested = TempGitRepo::create("followup-overlay-dirty-nested-source");
+    nested.write("src/nested.rs", "pub fn nested_value() -> u32 { 1 }\n");
+    nested.git(["add", "."]);
+    nested.git(["commit", "-m", "nested"]);
+    let child = TempGitRepo::create("followup-overlay-dirty-nested-child");
+    child.write("src/child.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    add_named_submodule(&child, &nested, "nested", "nested");
+    child.git(["commit", "-am", "add nested submodule"]);
+    let parent = TempGitRepo::create("followup-overlay-dirty-nested-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "vendor/module");
+    parent.git(["commit", "-am", "add outer submodule"]);
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "vendor/module",
+    ]);
+    let nested_checkout = TempGitRepo {
+        path: parent.path.join("vendor/module/nested"),
+    };
+    nested_checkout.write(
+        "src/nested.rs",
+        "pub fn dirty_nested_value() -> u32 { 2 }\n",
+    );
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        parent.path.display().to_string(),
+        vec!["vendor/module/nested/src/nested.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &parent.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("scoped overlay should recurse into dirty nested submodule");
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "dirty_nested_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_honors_previous_discovered_source_roots() {
+    let repo = TempGitRepo::create("followup-overlay-discovered-root");
+    repo.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    repo.write(
+        "external_deps/rust_sdk/lib.rs",
+        "pub fn old_sdk_value() -> u32 { 1 }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec!["src".to_owned()],
+        vec!["rust".to_owned()],
+    )
+    .expect("registration should validate");
+    let selector = repo.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    repo.write(
+        "external_deps/rust_sdk/lib.rs",
+        "pub fn worktree_sdk_value() -> u32 { 2 }\n",
+    );
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        previous_hashes,
+    )
+    .expect("worktree overlay should use previous discovered source roots");
+
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "worktree_sdk_value")
+    );
+}
+
 fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, path: &str) {
     let child_path = child.path.to_str().expect("child path should be unicode");
     parent.git([

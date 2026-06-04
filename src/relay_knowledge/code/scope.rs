@@ -397,6 +397,7 @@ pub fn partition_changed_paths_for_selector(
     })
 }
 
+#[cfg(test)]
 pub(super) fn path_is_selected(
     path: &str,
     registration: &CodeRepositoryRegistration,
@@ -414,6 +415,7 @@ pub(super) fn path_is_selected_with_layout(
     selection_exclusion_reason_with_layout(path, registration, selector, source_layout).is_none()
 }
 
+#[cfg(test)]
 pub(super) fn selection_exclusion_reason(
     path: &str,
     registration: &CodeRepositoryRegistration,
@@ -555,6 +557,25 @@ pub(super) fn effective_index_path_filters_for_layouts(
     }
 
     filters
+}
+
+pub(super) fn effective_path_filter_intersections_for_layouts(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    source_layouts: &[&SourceLayoutDiscovery],
+) -> Option<Vec<String>> {
+    let mut filters = normalized_path_filters(&registration.path_filters);
+    if registration_scope_can_discover_source_roots(&registration.path_filters) {
+        for source_layout in source_layouts {
+            for root in &source_layout.source_roots {
+                if selector_filter_allows_root(root, &selector.path_filters) {
+                    push_filter_if_uncovered(&mut filters, root);
+                }
+            }
+        }
+    }
+
+    intersect_path_filters(&filters, &selector.path_filters)
 }
 
 fn filesystem_default_scope_excludes(
@@ -776,6 +797,10 @@ pub(super) fn path_scope_overlaps(
 ) -> bool {
     path_filter_overlaps(path, &registration.path_filters)
         && path_filter_overlaps(path, &selector.path_filters)
+}
+
+pub(super) fn path_overlaps_any_filter(path: &str, filters: &[String]) -> bool {
+    path_filter_overlaps(path, filters)
 }
 
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {

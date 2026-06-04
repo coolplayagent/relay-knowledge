@@ -14,7 +14,7 @@ use super::{
     ids::{stable_content_hash, stable_hash64},
     parser::parse_indexed_file,
     scope,
-    snapshot::SnapshotBuild,
+    snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
     source::{source_commit_is_filesystem, source_kind},
     source_gitlink,
 };
@@ -76,28 +76,27 @@ pub(super) fn build_worktree_overlay_snapshot(
     if changes.is_empty() {
         return build_full_snapshot(registration, selector, root);
     }
+    let overlay_scope = WorktreeOverlayScope::new(registration, selector, previous_hashes);
     let mut overlay_hash_input = Vec::new();
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
     for change in &changes {
         if let Some(deleted_path) = &change.deleted_source {
-            let deleted_gitlink =
-                if scope::path_scope_overlaps(deleted_path, registration, selector) {
-                    let mut recorder = WorktreeOverlayRecorder {
-                        registration,
-                        selector,
-                        previous_hashes,
-                        overlay_hash_input: &mut overlay_hash_input,
-                        deleted_paths: &mut deleted_paths,
-                        files_to_parse: &mut files_to_parse,
-                        skipped_unchanged_count: &mut skipped_unchanged_count,
-                    };
-                    record_deleted_gitlink_overlay(root, &commit, deleted_path, &mut recorder)?
-                } else {
-                    false
+            let deleted_gitlink = if overlay_scope.overlaps(deleted_path) {
+                let mut recorder = WorktreeOverlayRecorder {
+                    scope: &overlay_scope,
+                    previous_hashes,
+                    overlay_hash_input: &mut overlay_hash_input,
+                    deleted_paths: &mut deleted_paths,
+                    files_to_parse: &mut files_to_parse,
+                    skipped_unchanged_count: &mut skipped_unchanged_count,
                 };
-            if !deleted_gitlink && scope::path_is_selected(deleted_path, registration, selector) {
+                record_deleted_gitlink_overlay(root, &commit, deleted_path, &mut recorder)?
+            } else {
+                false
+            };
+            if !deleted_gitlink && overlay_scope.selected(deleted_path) {
                 record_worktree_deleted_path(
                     deleted_path,
                     &mut overlay_hash_input,
@@ -106,18 +105,15 @@ pub(super) fn build_worktree_overlay_snapshot(
             }
         }
         let path = &change.path;
-        if !scope::path_scope_overlaps(path, registration, selector) {
+        if !overlay_scope.overlaps(path) {
             continue;
         }
-        if change.is_untracked()
-            && !worktree_untracked_path_is_selected(path, registration, selector)
-        {
+        if change.is_untracked() && !overlay_scope.untracked_selected(path) {
             continue;
         }
         {
             let mut recorder = WorktreeOverlayRecorder {
-                registration,
-                selector,
+                scope: &overlay_scope,
                 previous_hashes,
                 overlay_hash_input: &mut overlay_hash_input,
                 deleted_paths: &mut deleted_paths,
@@ -133,8 +129,7 @@ pub(super) fn build_worktree_overlay_snapshot(
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let mut recorder = WorktreeOverlayRecorder {
-                    registration,
-                    selector,
+                    scope: &overlay_scope,
                     previous_hashes,
                     overlay_hash_input: &mut overlay_hash_input,
                     deleted_paths: &mut deleted_paths,
@@ -143,7 +138,7 @@ pub(super) fn build_worktree_overlay_snapshot(
                 };
                 if record_deleted_gitlink_overlay(root, &commit, path, &mut recorder)? {
                     continue;
-                } else if scope::path_is_selected(path, registration, selector) {
+                } else if overlay_scope.selected(path) {
                     record_worktree_deleted_path(path, &mut overlay_hash_input, &mut deleted_paths);
                 }
                 continue;
@@ -152,7 +147,7 @@ pub(super) fn build_worktree_overlay_snapshot(
         };
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
-            if scope::path_is_selected(path, registration, selector) {
+            if overlay_scope.selected(path) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
@@ -160,8 +155,7 @@ pub(super) fn build_worktree_overlay_snapshot(
         if file_type.is_dir() {
             if contains_git_metadata(root, Path::new(path))? {
                 let mut recorder = WorktreeOverlayRecorder {
-                    registration,
-                    selector,
+                    scope: &overlay_scope,
                     previous_hashes,
                     overlay_hash_input: &mut overlay_hash_input,
                     deleted_paths: &mut deleted_paths,
@@ -172,13 +166,13 @@ pub(super) fn build_worktree_overlay_snapshot(
                 continue;
             }
             if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
-                if scope::path_is_selected(path, registration, selector) {
+                if overlay_scope.selected(path) {
                     record_worktree_status_marker(path, &mut overlay_hash_input);
                 }
                 continue;
             }
             for nested_path in worktree_directory_files(root, path)? {
-                if worktree_untracked_path_is_selected(&nested_path, registration, selector) {
+                if overlay_scope.untracked_selected(&nested_path) {
                     record_worktree_file(
                         root,
                         &nested_path,
@@ -192,12 +186,12 @@ pub(super) fn build_worktree_overlay_snapshot(
             continue;
         }
         if !file_type.is_file() {
-            if scope::path_is_selected(path, registration, selector) {
+            if overlay_scope.selected(path) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
-        if scope::path_is_selected(path, registration, selector) {
+        if overlay_scope.selected(path) {
             record_worktree_file(
                 root,
                 path,
@@ -215,11 +209,16 @@ pub(super) fn build_worktree_overlay_snapshot(
     let overlay_hash = format!("{:016x}", stable_hash64(&overlay_hash_input));
     let tree_hash = format!("worktree:{overlay_hash}");
     let overlay_commit = format!("worktree:{commit}:{overlay_hash}");
-    let mut build = SnapshotBuild::new_with_selector(
+    let language_filters =
+        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
-        selector,
         overlay_commit,
         tree_hash,
+        SnapshotScopeFilters {
+            path_filters: overlay_scope.path_filters.clone(),
+            language_filters,
+        },
         false,
         changes.len(),
         skipped_unchanged_count,
@@ -234,14 +233,67 @@ pub(super) fn build_worktree_overlay_snapshot(
     Ok(build.finish())
 }
 
-fn worktree_untracked_path_is_selected(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    scope::path_is_selected(path, registration, selector)
-        && (!worktree_untracked_path_contains_broad_segment(path)
-            || explicit_worktree_path_filter_covers(path, registration, selector))
+struct WorktreeOverlayScope<'a> {
+    registration: &'a CodeRepositoryRegistration,
+    selector: &'a CodeRepositorySelector,
+    source_layout: scope::SourceLayoutDiscovery,
+    path_filters: Vec<String>,
+    selection_path_filters: Option<Vec<String>>,
+}
+
+impl<'a> WorktreeOverlayScope<'a> {
+    fn new(
+        registration: &'a CodeRepositoryRegistration,
+        selector: &'a CodeRepositorySelector,
+        previous_hashes: &BTreeMap<String, String>,
+    ) -> Self {
+        let previous_entries = previous_hashes
+            .keys()
+            .map(|path| changes::GitTreeEntry {
+                path: path.clone(),
+                byte_count: 0,
+            })
+            .collect::<Vec<_>>();
+        let source_layout = scope::discover_source_layout(&previous_entries);
+        let path_filters = scope::effective_index_path_filters_for_layouts(
+            registration,
+            selector,
+            &[&source_layout],
+        );
+        let selection_path_filters = scope::effective_path_filter_intersections_for_layouts(
+            registration,
+            selector,
+            &[&source_layout],
+        );
+        Self {
+            registration,
+            selector,
+            source_layout,
+            path_filters,
+            selection_path_filters,
+        }
+    }
+
+    fn selected(&self, path: &str) -> bool {
+        scope::path_is_selected_with_layout(
+            path,
+            self.registration,
+            self.selector,
+            &self.source_layout,
+        )
+    }
+
+    fn overlaps(&self, path: &str) -> bool {
+        self.selection_path_filters
+            .as_ref()
+            .is_some_and(|filters| scope::path_overlaps_any_filter(path, filters))
+    }
+
+    fn untracked_selected(&self, path: &str) -> bool {
+        self.selected(path)
+            && (!worktree_untracked_path_contains_broad_segment(path)
+                || explicit_worktree_path_filter_covers(path, self.registration, self.selector))
+    }
 }
 
 fn worktree_untracked_path_contains_broad_segment(path: &str) -> bool {
@@ -301,8 +353,7 @@ fn record_worktree_deleted_path(
 fn record_previous_gitlink_child_deletions(
     path: &str,
     previous_hashes: &BTreeMap<String, String>,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
+    scope: &WorktreeOverlayScope<'_>,
     retained_paths: &BTreeSet<String>,
     overlay_hash_input: &mut Vec<u8>,
     deleted_paths: &mut Vec<String>,
@@ -312,7 +363,7 @@ fn record_previous_gitlink_child_deletions(
         .keys()
         .filter(|previous_path| previous_path.starts_with(&prefix))
         .filter(|previous_path| !retained_paths.contains(*previous_path))
-        .filter(|previous_path| scope::path_is_selected(previous_path, registration, selector))
+        .filter(|previous_path| scope.selected(previous_path))
         .cloned()
         .collect::<BTreeSet<_>>();
     source_gitlink::ensure_gitlink_expansion_budget(
@@ -366,6 +417,7 @@ fn record_worktree_file_as(
         *skipped_unchanged_count += 1;
         return Ok(());
     }
+    files_to_parse.retain(|(path, _)| path != indexed_path);
     files_to_parse.push((indexed_path.to_owned(), bytes));
 
     Ok(())
@@ -387,29 +439,25 @@ fn record_deleted_gitlink_overlay(
         path,
         Some(base_commit),
         &base_gitlink_commit,
-        recorder.registration,
-        recorder.selector,
+        recorder.scope,
     )?;
     if entries.is_empty() {
         let retained_paths = BTreeSet::new();
         let recorded = record_previous_gitlink_child_deletions(
             path,
             recorder.previous_hashes,
-            recorder.registration,
-            recorder.selector,
+            recorder.scope,
             &retained_paths,
             recorder.overlay_hash_input,
             recorder.deleted_paths,
         )?;
-        if !recorded
-            && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector)
-        {
+        if !recorded && submodule_path_scope_overlaps(path, recorder.scope) {
             record_worktree_status_marker(path, recorder.overlay_hash_input);
         }
         return Ok(true);
     }
     for entry in entries {
-        if scope::path_is_selected(&entry.parent_path, recorder.registration, recorder.selector) {
+        if recorder.path_is_selected(&entry.parent_path) {
             recorder.record_deleted_path(&entry.parent_path);
         }
     }
@@ -418,8 +466,7 @@ fn record_deleted_gitlink_overlay(
 }
 
 struct WorktreeOverlayRecorder<'a> {
-    registration: &'a CodeRepositoryRegistration,
-    selector: &'a CodeRepositorySelector,
+    scope: &'a WorktreeOverlayScope<'a>,
     previous_hashes: &'a BTreeMap<String, String>,
     overlay_hash_input: &'a mut Vec<u8>,
     deleted_paths: &'a mut Vec<String>,
@@ -429,7 +476,15 @@ struct WorktreeOverlayRecorder<'a> {
 
 impl WorktreeOverlayRecorder<'_> {
     fn path_is_selected(&self, path: &str) -> bool {
-        scope::path_is_selected(path, self.registration, self.selector)
+        self.scope.selected(path)
+    }
+
+    fn path_scope_overlaps(&self, path: &str) -> bool {
+        self.scope.overlaps(path)
+    }
+
+    fn untracked_path_is_selected(&self, path: &str) -> bool {
+        self.scope.untracked_selected(path)
     }
 
     fn record_deleted_path(&mut self, path: &str) {
@@ -505,10 +560,14 @@ fn record_staged_gitlink_overlay(
         && worktree_commit != staged_commit
     {
         record_gitlink_commit_overlay(root, base_commit, path, &worktree_commit, recorder)?;
+        record_dirty_submodule_worktree_overlay(root, path, path, recorder)?;
         return Ok(true);
     }
 
     record_gitlink_commit_overlay(root, base_commit, path, &staged_commit, recorder)?;
+    if change.has_worktree_change() {
+        record_dirty_submodule_worktree_overlay(root, path, path, recorder)?;
+    }
 
     Ok(true)
 }
@@ -521,14 +580,8 @@ fn record_gitlink_commit_overlay(
     recorder: &mut WorktreeOverlayRecorder<'_>,
 ) -> Result<(), CodeIndexError> {
     let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
-    let staged_entries = bounded_submodule_path_entries(
-        root,
-        path,
-        None,
-        gitlink_commit,
-        recorder.registration,
-        recorder.selector,
-    )?;
+    let staged_entries =
+        bounded_submodule_path_entries(root, path, None, gitlink_commit, recorder.scope)?;
     let staged_entries_are_empty = staged_entries.is_empty();
     if let Some(base_gitlink_commit) = base_gitlink {
         let staged_paths = staged_entries
@@ -547,9 +600,7 @@ fn record_gitlink_commit_overlay(
         recorder.record_deleted_path(path);
     }
 
-    if staged_entries_are_empty
-        && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector)
-    {
+    if staged_entries_are_empty && submodule_path_scope_overlaps(path, recorder.scope) {
         record_worktree_status_marker(path, recorder.overlay_hash_input);
     }
     for entry in staged_entries {
@@ -574,17 +625,11 @@ fn record_unstaged_gitlink_overlay(
         return Ok(false);
     };
     if worktree_commit == base_gitlink_commit {
-        return record_dirty_submodule_worktree_overlay(root, path, recorder);
+        return record_dirty_submodule_worktree_overlay(root, path, path, recorder);
     }
 
-    let worktree_entries = bounded_submodule_path_entries(
-        root,
-        path,
-        None,
-        &worktree_commit,
-        recorder.registration,
-        recorder.selector,
-    )?;
+    let worktree_entries =
+        bounded_submodule_path_entries(root, path, None, &worktree_commit, recorder.scope)?;
     let worktree_entries_are_empty = worktree_entries.is_empty();
     let worktree_paths = worktree_entries
         .iter()
@@ -598,14 +643,13 @@ fn record_unstaged_gitlink_overlay(
         &worktree_paths,
         recorder,
     )?;
-    if worktree_entries_are_empty
-        && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector)
-    {
+    if worktree_entries_are_empty && submodule_path_scope_overlaps(path, recorder.scope) {
         record_worktree_status_marker(path, recorder.overlay_hash_input);
     }
     for entry in worktree_entries {
         recorder.record_gitlink_file(root, path, &worktree_commit, &entry)?;
     }
+    record_dirty_submodule_worktree_overlay(root, path, path, recorder)?;
 
     Ok(true)
 }
@@ -613,6 +657,7 @@ fn record_unstaged_gitlink_overlay(
 fn record_dirty_submodule_worktree_overlay(
     root: &Path,
     path: &str,
+    indexed_path: &str,
     recorder: &mut WorktreeOverlayRecorder<'_>,
 ) -> Result<bool, CodeIndexError> {
     let submodule_root = match source_gitlink::submodule_root(root, path) {
@@ -629,27 +674,21 @@ fn record_dirty_submodule_worktree_overlay(
     }
     for change in &changes {
         if let Some(deleted_path) = &change.deleted_source {
-            let parent_deleted_path = submodule_worktree_parent_path(path, deleted_path);
+            let parent_deleted_path = submodule_worktree_parent_path(indexed_path, deleted_path);
             if recorder.path_is_selected(&parent_deleted_path) {
                 recorder.record_deleted_path(&parent_deleted_path);
             }
         }
-        let parent_path = submodule_worktree_parent_path(path, &change.path);
-        if !scope::path_scope_overlaps(&parent_path, recorder.registration, recorder.selector) {
+        let parent_path = submodule_worktree_parent_path(indexed_path, &change.path);
+        if !recorder.path_scope_overlaps(&parent_path) {
             continue;
         }
-        if change.is_untracked()
-            && !worktree_untracked_path_is_selected(
-                &parent_path,
-                recorder.registration,
-                recorder.selector,
-            )
-        {
+        if change.is_untracked() && !recorder.untracked_path_is_selected(&parent_path) {
             continue;
         }
         record_dirty_submodule_path(
             &submodule_root,
-            path,
+            indexed_path,
             &change.path,
             &parent_path,
             change,
@@ -690,18 +729,22 @@ fn record_dirty_submodule_path(
             recorder.skipped_unchanged_count,
         );
     }
-    if file_type.is_dir()
+    if file_type.is_dir() && contains_git_metadata(submodule_root, Path::new(child_path))? {
+        if record_dirty_submodule_worktree_overlay(
+            submodule_root,
+            child_path,
+            parent_path,
+            recorder,
+        )? {
+            return Ok(());
+        }
+    } else if file_type.is_dir()
         && change.is_untracked()
-        && !contains_git_metadata(submodule_root, Path::new(child_path))?
         && worktree_directory_is_expandable(submodule_root, child_path)?
     {
         for nested_path in worktree_directory_files(submodule_root, child_path)? {
             let parent_nested_path = submodule_worktree_parent_path(submodule_path, &nested_path);
-            if worktree_untracked_path_is_selected(
-                &parent_nested_path,
-                recorder.registration,
-                recorder.selector,
-            ) {
+            if recorder.untracked_path_is_selected(&parent_nested_path) {
                 record_worktree_file_as(
                     submodule_root,
                     &nested_path,
@@ -713,7 +756,7 @@ fn record_dirty_submodule_path(
                 )?;
             }
         }
-    } else if recorder.path_is_selected(parent_path) {
+    } else if recorder.path_scope_overlaps(parent_path) {
         record_worktree_status_marker(parent_path, recorder.overlay_hash_input);
     }
 
@@ -773,8 +816,7 @@ fn record_base_gitlink_child_deletions(
         path,
         Some(base_commit),
         base_gitlink_commit,
-        recorder.registration,
-        recorder.selector,
+        recorder.scope,
     )? {
         recorder.record_deleted_path(&entry.parent_path);
         recorded = true;
@@ -784,14 +826,13 @@ fn record_base_gitlink_child_deletions(
         recorded = record_previous_gitlink_child_deletions(
             path,
             recorder.previous_hashes,
-            recorder.registration,
-            recorder.selector,
+            recorder.scope,
             &retained_paths,
             recorder.overlay_hash_input,
             recorder.deleted_paths,
         )?;
     }
-    if !recorded && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector) {
+    if !recorded && submodule_path_scope_overlaps(path, recorder.scope) {
         record_worktree_status_marker(path, recorder.overlay_hash_input);
     }
 
@@ -812,8 +853,7 @@ fn record_missing_base_gitlink_child_deletions(
         path,
         Some(base_commit),
         base_gitlink_commit,
-        recorder.registration,
-        recorder.selector,
+        recorder.scope,
     )? {
         if !staged_paths.contains(&entry.parent_path) {
             recorder.record_deleted_path(&entry.parent_path);
@@ -824,14 +864,13 @@ fn record_missing_base_gitlink_child_deletions(
         recorded = record_previous_gitlink_child_deletions(
             path,
             recorder.previous_hashes,
-            recorder.registration,
-            recorder.selector,
+            recorder.scope,
             staged_paths,
             recorder.overlay_hash_input,
             recorder.deleted_paths,
         )?;
     }
-    if !recorded && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector) {
+    if !recorded && submodule_path_scope_overlaps(path, recorder.scope) {
         record_worktree_status_marker(path, recorder.overlay_hash_input);
     }
 
@@ -858,10 +897,13 @@ fn bounded_submodule_path_entries(
     path: &str,
     parent_commit: Option<&str>,
     commit: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
+    scope: &WorktreeOverlayScope<'_>,
 ) -> Result<Vec<source_gitlink::SubmodulePathEntry>, CodeIndexError> {
-    let Some(child_filters) = scope::submodule_child_scope_filters(path, registration, selector)
+    let Some(selection_filters) = scope.selection_path_filters.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let Some(child_filters) =
+        scope::submodule_child_scope_filters_from_filters(path, selection_filters)
     else {
         return Ok(Vec::new());
     };
@@ -878,7 +920,7 @@ fn bounded_submodule_path_entries(
     };
     let selected_entries = entries
         .into_iter()
-        .filter(|entry| scope::path_is_selected(&entry.parent_path, registration, selector))
+        .filter(|entry| scope.selected(&entry.parent_path))
         .collect::<Vec<_>>();
     if selected_entries.len() > MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS {
         return Err(CodeIndexError::InvalidInput(format!(
@@ -890,12 +932,13 @@ fn bounded_submodule_path_entries(
     Ok(selected_entries)
 }
 
-fn submodule_path_scope_overlaps(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    scope::submodule_child_scope_filters(path, registration, selector).is_some()
+fn submodule_path_scope_overlaps(path: &str, scope: &WorktreeOverlayScope<'_>) -> bool {
+    scope
+        .selection_path_filters
+        .as_ref()
+        .is_some_and(|filters| {
+            scope::submodule_child_scope_filters_from_filters(path, filters).is_some()
+        })
 }
 
 fn worktree_directory_files(
