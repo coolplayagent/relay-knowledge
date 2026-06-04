@@ -684,6 +684,188 @@ fn full_snapshot_scoped_nested_submodule_pathspec_enters_gitlink() {
     );
 }
 
+#[test]
+fn incremental_changed_unavailable_gitlink_deletes_previous_children() {
+    let child = TempGitRepo::create("review-changed-unavailable-child");
+    child.write("src/lib.rs", "pub fn old_child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "old child"]);
+    let parent = TempGitRepo::create("review-changed-unavailable-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    let submodule = checked_out_submodule(&parent, "src/module");
+    fs::remove_file(parent.path.join("src/module/src/lib.rs"))
+        .expect("old child file should be removable");
+    submodule.write("src/new.rs", "pub fn new_child_value() -> u32 { 2 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "new child"]);
+    parent.git(["add", "src/module"]);
+    parent.git(["commit", "-m", "update submodule"]);
+    remove_submodule_checkout_and_gitdir(&parent, "src/module");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("unavailable changed gitlink should delete prior indexed children");
+
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/module/src/lib.rs".to_owned())
+    );
+}
+
+#[test]
+fn worktree_overlay_changed_unavailable_gitlink_deletes_previous_children() {
+    let child = TempGitRepo::create("review-overlay-changed-unavailable-child");
+    child.write("src/lib.rs", "pub fn old_child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "old child"]);
+    let parent = TempGitRepo::create("review-overlay-changed-unavailable-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    let submodule = checked_out_submodule(&parent, "src/module");
+    fs::remove_file(parent.path.join("src/module/src/lib.rs"))
+        .expect("old child file should be removable");
+    submodule.write("src/new.rs", "pub fn new_child_value() -> u32 { 2 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "new child"]);
+    parent.git(["add", "src/module"]);
+    remove_submodule_checkout_and_gitdir(&parent, "src/module");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        previous_hashes,
+    )
+    .expect("unavailable overlay update should delete prior indexed children");
+
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/module/src/lib.rs".to_owned())
+    );
+}
+
+#[test]
+fn worktree_overlay_removed_unavailable_gitlink_deletes_previous_children() {
+    let child = TempGitRepo::create("review-overlay-removed-unavailable-child");
+    child.write("src/lib.rs", "pub fn old_child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "old child"]);
+    let parent = TempGitRepo::create("review-overlay-removed-unavailable-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    parent.git(["rm", "-f", "src/module"]);
+    remove_submodule_checkout_and_gitdir(&parent, "src/module");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        previous_hashes,
+    )
+    .expect("unavailable overlay removal should delete prior indexed children");
+
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/module/src/lib.rs".to_owned())
+    );
+}
+
+#[test]
+fn full_snapshot_overlapping_nested_submodule_filters_do_not_duplicate_children() {
+    let nested = TempGitRepo::create("review-dedupe-nested-pathspec-nested");
+    nested.write("src/nested.rs", "pub fn nested_value() -> u32 { 1 }\n");
+    nested.git(["add", "."]);
+    nested.git(["commit", "-m", "nested"]);
+    let child = TempGitRepo::create("review-dedupe-nested-pathspec-child");
+    child.write("src/child.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    add_named_submodule(&child, &nested, "nested", "nested");
+    child.git(["commit", "-am", "add nested submodule"]);
+    let parent = TempGitRepo::create("review-dedupe-nested-pathspec-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "vendor/module");
+    parent.git(["commit", "-am", "add outer submodule"]);
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "vendor/module",
+    ]);
+    let registration = scoped_registration(
+        &parent,
+        vec![
+            "vendor/module/nested".to_owned(),
+            "vendor/module/nested/src/nested.rs".to_owned(),
+        ],
+    );
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &parent.selector(),
+        CodeIndexMode::Full,
+        Vec::new(),
+    )
+    .expect("overlapping nested submodule filters should not duplicate expansion");
+    let nested_file_count = snapshot
+        .files
+        .iter()
+        .filter(|file| file.path == "vendor/module/nested/src/nested.rs")
+        .count();
+
+    assert_eq!(nested_file_count, 1);
+}
+
 fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, path: &str) {
     let child_path = child.path.to_str().expect("child path should be unicode");
     parent.git([
@@ -710,6 +892,15 @@ fn scoped_registration(
         Vec::new(),
     )
     .expect("registration should validate")
+}
+
+fn checked_out_submodule(parent: &TempGitRepo, path: &str) -> TempGitRepo {
+    let submodule = TempGitRepo {
+        path: parent.path.join(path),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule
 }
 
 fn remove_submodule_checkout_and_gitdir(parent: &TempGitRepo, path: &str) {

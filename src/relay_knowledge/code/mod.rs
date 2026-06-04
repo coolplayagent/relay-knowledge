@@ -776,6 +776,7 @@ fn parse_expanded_gitlink_change(
     else {
         return Ok(false);
     };
+    let base_paths_are_empty = expansion.base_paths.is_empty();
     for deleted_path in expansion.base_paths.difference(&expansion.head_paths) {
         if path_is_selected_with_layout(
             deleted_path,
@@ -785,6 +786,15 @@ fn parse_expanded_gitlink_change(
         ) {
             build.deleted_paths.push(deleted_path.clone());
         }
+    }
+    if expansion.base_is_gitlink && base_paths_are_empty {
+        delete_previous_paths_under_except(
+            build,
+            context,
+            base_source_layout,
+            path,
+            &expansion.head_paths,
+        )?;
     }
     if !expansion.base_is_gitlink
         && path_is_selected_with_layout(
@@ -871,11 +881,22 @@ fn delete_previous_paths_under(
     source_layout: &scope::SourceLayoutDiscovery,
     path: &str,
 ) -> Result<bool, CodeIndexError> {
+    delete_previous_paths_under_except(build, context, source_layout, path, &BTreeSet::new())
+}
+
+fn delete_previous_paths_under_except(
+    build: &mut SnapshotBuild,
+    context: &ChangedPathParseContext<'_>,
+    source_layout: &scope::SourceLayoutDiscovery,
+    path: &str,
+    retained_paths: &BTreeSet<String>,
+) -> Result<bool, CodeIndexError> {
     let prefix = format!("{}/", path.trim_end_matches('/'));
     let paths = context
         .previous_hashes
         .keys()
         .filter(|previous_path| previous_path.starts_with(&prefix))
+        .filter(|previous_path| !retained_paths.contains(*previous_path))
         .filter(|previous_path| {
             path_is_selected_with_layout(
                 previous_path,

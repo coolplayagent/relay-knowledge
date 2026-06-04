@@ -181,27 +181,23 @@ struct EntryPathspecs {
 
 impl EntryPathspecs {
     fn from_filters(filters: &[String]) -> Option<Self> {
-        if filters.is_empty() {
-            return None;
-        }
-        let mut paths = Vec::new();
-        let mut gitlink_candidates = Vec::new();
-        for filter in filters {
-            if filter.is_empty() {
-                continue;
-            }
-            paths.push(filter.to_owned());
-            if let Some((candidate, _)) = filter.split_once('/')
-                && !gitlink_candidates
-                    .iter()
-                    .any(|existing| existing == candidate)
-            {
-                gitlink_candidates.push(candidate.to_owned());
-            }
-        }
-        (!paths.is_empty()).then_some(Self {
-            paths,
-            gitlink_candidates,
+        let paths = filters
+            .iter()
+            .filter(|filter| !filter.is_empty())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let gitlink_candidates = paths
+            .iter()
+            .filter_map(|filter| {
+                filter
+                    .split_once('/')
+                    .map(|(candidate, _)| candidate.to_owned())
+            })
+            .filter(|candidate| !paths.contains(candidate))
+            .collect::<BTreeSet<_>>();
+        (!paths.is_empty()).then(|| Self {
+            paths: paths.into_iter().collect(),
+            gitlink_candidates: gitlink_candidates.into_iter().collect(),
         })
     }
 }

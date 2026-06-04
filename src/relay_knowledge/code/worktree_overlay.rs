@@ -82,18 +82,22 @@ pub(super) fn build_worktree_overlay_snapshot(
     let mut skipped_unchanged_count = 0;
     for change in &changes {
         if let Some(deleted_path) = &change.deleted_source {
-            if scope::path_scope_overlaps(deleted_path, registration, selector)
-                && !record_deleted_gitlink_overlay(
-                    root,
-                    &commit,
-                    deleted_path,
-                    registration,
-                    selector,
-                    &mut overlay_hash_input,
-                    &mut deleted_paths,
-                )?
-                && scope::path_is_selected(deleted_path, registration, selector)
-            {
+            let deleted_gitlink =
+                if scope::path_scope_overlaps(deleted_path, registration, selector) {
+                    let mut recorder = WorktreeOverlayRecorder {
+                        registration,
+                        selector,
+                        previous_hashes,
+                        overlay_hash_input: &mut overlay_hash_input,
+                        deleted_paths: &mut deleted_paths,
+                        files_to_parse: &mut files_to_parse,
+                        skipped_unchanged_count: &mut skipped_unchanged_count,
+                    };
+                    record_deleted_gitlink_overlay(root, &commit, deleted_path, &mut recorder)?
+                } else {
+                    false
+                };
+            if !deleted_gitlink && scope::path_is_selected(deleted_path, registration, selector) {
                 record_worktree_deleted_path(
                     deleted_path,
                     &mut overlay_hash_input,
@@ -128,15 +132,16 @@ pub(super) fn build_worktree_overlay_snapshot(
         let metadata = match fs::symlink_metadata(&full_path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if record_deleted_gitlink_overlay(
-                    root,
-                    &commit,
-                    path,
+                let mut recorder = WorktreeOverlayRecorder {
                     registration,
                     selector,
-                    &mut overlay_hash_input,
-                    &mut deleted_paths,
-                )? {
+                    previous_hashes,
+                    overlay_hash_input: &mut overlay_hash_input,
+                    deleted_paths: &mut deleted_paths,
+                    files_to_parse: &mut files_to_parse,
+                    skipped_unchanged_count: &mut skipped_unchanged_count,
+                };
+                if record_deleted_gitlink_overlay(root, &commit, path, &mut recorder)? {
                     continue;
                 } else if scope::path_is_selected(path, registration, selector) {
                     record_worktree_deleted_path(path, &mut overlay_hash_input, &mut deleted_paths);
@@ -293,6 +298,35 @@ fn record_worktree_deleted_path(
     deleted_paths.push(path.to_owned());
 }
 
+fn record_previous_gitlink_child_deletions(
+    path: &str,
+    previous_hashes: &BTreeMap<String, String>,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    retained_paths: &BTreeSet<String>,
+    overlay_hash_input: &mut Vec<u8>,
+    deleted_paths: &mut Vec<String>,
+) -> Result<bool, CodeIndexError> {
+    let prefix = format!("{}/", path.trim_end_matches('/'));
+    let paths = previous_hashes
+        .keys()
+        .filter(|previous_path| previous_path.starts_with(&prefix))
+        .filter(|previous_path| !retained_paths.contains(*previous_path))
+        .filter(|previous_path| scope::path_is_selected(previous_path, registration, selector))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    source_gitlink::ensure_gitlink_expansion_budget(
+        path,
+        paths.len(),
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    )?;
+    for path in &paths {
+        record_worktree_deleted_path(path, overlay_hash_input, deleted_paths);
+    }
+
+    Ok(!paths.is_empty())
+}
+
 fn record_worktree_file(
     root: &Path,
     path: &str,
@@ -321,10 +355,7 @@ fn record_deleted_gitlink_overlay(
     root: &Path,
     base_commit: &str,
     path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-    overlay_hash_input: &mut Vec<u8>,
-    deleted_paths: &mut Vec<String>,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
 ) -> Result<bool, CodeIndexError> {
     let Some(base_gitlink_commit) =
         source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?
@@ -336,18 +367,30 @@ fn record_deleted_gitlink_overlay(
         path,
         Some(base_commit),
         &base_gitlink_commit,
-        registration,
-        selector,
+        recorder.registration,
+        recorder.selector,
     )?;
     if entries.is_empty() {
-        if submodule_path_scope_overlaps(path, registration, selector) {
-            record_worktree_status_marker(path, overlay_hash_input);
+        let retained_paths = BTreeSet::new();
+        let recorded = record_previous_gitlink_child_deletions(
+            path,
+            recorder.previous_hashes,
+            recorder.registration,
+            recorder.selector,
+            &retained_paths,
+            recorder.overlay_hash_input,
+            recorder.deleted_paths,
+        )?;
+        if !recorded
+            && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector)
+        {
+            record_worktree_status_marker(path, recorder.overlay_hash_input);
         }
         return Ok(true);
     }
     for entry in entries {
-        if scope::path_is_selected(&entry.parent_path, registration, selector) {
-            record_worktree_deleted_path(&entry.parent_path, overlay_hash_input, deleted_paths);
+        if scope::path_is_selected(&entry.parent_path, recorder.registration, recorder.selector) {
+            recorder.record_deleted_path(&entry.parent_path);
         }
     }
 
@@ -602,6 +645,18 @@ fn record_base_gitlink_child_deletions(
         recorder.record_deleted_path(&entry.parent_path);
         recorded = true;
     }
+    if !recorded {
+        let retained_paths = BTreeSet::new();
+        recorded = record_previous_gitlink_child_deletions(
+            path,
+            recorder.previous_hashes,
+            recorder.registration,
+            recorder.selector,
+            &retained_paths,
+            recorder.overlay_hash_input,
+            recorder.deleted_paths,
+        )?;
+    }
     if !recorded && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector) {
         record_worktree_status_marker(path, recorder.overlay_hash_input);
     }
@@ -630,6 +685,17 @@ fn record_missing_base_gitlink_child_deletions(
             recorder.record_deleted_path(&entry.parent_path);
             recorded = true;
         }
+    }
+    if !recorded {
+        recorded = record_previous_gitlink_child_deletions(
+            path,
+            recorder.previous_hashes,
+            recorder.registration,
+            recorder.selector,
+            staged_paths,
+            recorder.overlay_hash_input,
+            recorder.deleted_paths,
+        )?;
     }
     if !recorded && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector) {
         record_worktree_status_marker(path, recorder.overlay_hash_input);
