@@ -20,7 +20,7 @@ fn declaration_bonus_boosts_type_relationship_surfaces() {
             &terms,
             "class BloomFilterPolicy : public FilterPolicy {\n public:\n  void CreateFilter(const Slice* keys, int n, std::string* dst) const override;\n  bool KeyMayMatch(const Slice& key, const Slice& filter) const override;\n};",
         ),
-        2.75
+        5.75
     );
 }
 
@@ -33,7 +33,7 @@ fn declaration_bonus_accepts_exported_class_relationship_surfaces() {
             &terms,
             "export class ChatRoute extends BaseRoute {\n  override handle() {}\n}",
         ),
-        2.75
+        5.75
     );
 }
 

@@ -217,6 +217,27 @@ fn projection_orders_operational_files_and_relationships_first() {
     initialize_schema(&connection).expect("software schema should initialize");
     seed_scope(&connection);
     seed_documented_configuration(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES ('repo', 'scope-1', 'workflow-file', '.github/workflows/ci.yml', 'yaml', 'parsed')",
+            [],
+        )
+        .expect("workflow file should insert");
+    connection
+        .execute(
+            "INSERT INTO code_repository_dependencies (
+                repository_id, source_scope, ecosystem, package_name, requirement,
+                resolved_version, dependency_group, source_kind, is_lockfile, language_id,
+                path, line_start, line_end
+            ) VALUES (
+                'repo', 'scope-1', 'github-actions', 'actions/checkout', 'v4',
+                NULL, 'normal', 'manifest', 0, 'yaml', '.github/workflows/ci.yml', 9, 9
+            )",
+            [],
+        )
+        .expect("workflow action dependency should insert");
     refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
 
     let files = SoftwareGlobalRequest::new(

@@ -434,6 +434,74 @@ async fn definition_path_queries_rank_exact_symbol_path_above_mentions() {
     );
 }
 
+#[tokio::test]
+async fn definition_queries_rank_source_implementations_above_header_declarations() {
+    let header_path = "include/store/cache.hpp";
+    let implementation_path = "src/cache.cpp";
+    let mut declaration = symbol(
+        "insert-declaration",
+        "header-file",
+        header_path,
+        "method",
+        "Insert(const Key& key)",
+        range(21, 21),
+    );
+    declaration.name = "Insert".to_owned();
+    declaration.qualified_name = "rk::store::Cache::Insert".to_owned();
+    declaration.canonical_symbol_id =
+        "repo://repo/include::store::cache::rk::store.Cache.Insert".to_owned();
+    let mut implementation = symbol(
+        "insert-implementation",
+        "implementation-file",
+        implementation_path,
+        "method",
+        "void Cache<Key>::Insert(const Key& key) {",
+        range(11, 15),
+    );
+    implementation.name = "Insert".to_owned();
+    implementation.qualified_name = "rk::store::Cache::Insert".to_owned();
+    implementation.canonical_symbol_id =
+        "repo://repo/src::cache::rk::store.Cache.Insert".to_owned();
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("header-file", header_path),
+            file("implementation-file", implementation_path),
+        ],
+        symbols: vec![declaration, implementation],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("Insert", CodeQueryKind::Definition))
+        .await
+        .expect("definition query should succeed");
+
+    assert_eq!(
+        hits[0].symbol_snapshot_id.as_deref(),
+        Some("insert-implementation")
+    );
+}
+
 fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {
     hits.iter()
         .find(|hit| hit.path == path)

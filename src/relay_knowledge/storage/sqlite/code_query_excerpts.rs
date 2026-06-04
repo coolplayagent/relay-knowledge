@@ -32,20 +32,31 @@ pub(super) fn reference_excerpt(source_excerpt: Option<&str>, kind: &str, name: 
     }
 }
 
-pub(super) fn callee_excerpt(caller_excerpt: Option<&str>, caller: &str, callee: &str) -> String {
+pub(super) fn callee_excerpt(
+    caller_excerpt: Option<&str>,
+    callee_excerpt: Option<&str>,
+    caller: &str,
+    callee: &str,
+) -> String {
     let summary = format!("{caller} calls {callee}");
-    let Some(site) = caller_excerpt
+    let site = caller_excerpt
         .map(str::trim)
         .filter(|excerpt| !excerpt.is_empty())
-        .map(|excerpt| call_site_excerpt(excerpt, callee, true))
-    else {
-        return summary;
-    };
+        .map(|excerpt| call_site_excerpt(excerpt, callee, true));
+    let body = callee_excerpt
+        .map(str::trim)
+        .filter(|excerpt| !excerpt.is_empty())
+        .map(compact_callee_body_excerpt);
 
-    if site.is_empty() || site == summary {
-        summary
-    } else {
-        format!("{summary}: {site}")
+    match (site, body) {
+        (Some(site), Some(body))
+            if !site.is_empty() && !body.is_empty() && !site.contains(&body) =>
+        {
+            format!("{summary}: {site} callee body: {body}")
+        }
+        (Some(site), _) if !site.is_empty() && site != summary => format!("{summary}: {site}"),
+        (_, Some(body)) if !body.is_empty() => format!("{summary}: {body}"),
+        _ => summary,
     }
 }
 
@@ -74,7 +85,13 @@ fn call_site_excerpt(
         })
         .map(|(index, line)| {
             if include_execution_context {
-                call_context_excerpt(caller_excerpt, index, include_execution_context, false)
+                let start_index = call_site_context_start(caller_excerpt, index);
+                call_context_excerpt(
+                    caller_excerpt,
+                    start_index,
+                    include_execution_context,
+                    false,
+                )
             } else {
                 compact_excerpt_line(line)
             }
@@ -83,8 +100,31 @@ fn call_site_excerpt(
         .unwrap_or_else(|| compact_excerpt_line(caller_excerpt))
 }
 
-const MAX_CALLEE_CONTEXT_LINES: usize = 10;
+const MAX_CALLEE_CONTEXT_LINES: usize = 11;
 const MAX_LOCAL_CALLABLE_CONTEXT_LINES: usize = 6;
+const MAX_CALLEE_BODY_CONTEXT_LINES: usize = 32;
+const MAX_PRECEDING_EXECUTION_CONTEXT_LINES: usize = 1;
+
+fn call_site_context_start(caller_excerpt: &str, call_index: usize) -> usize {
+    let mut preceding_lines = 0usize;
+    let lines = caller_excerpt.lines().collect::<Vec<_>>();
+    for index in (0..call_index.min(lines.len())).rev() {
+        let line = lines[index];
+        if compact_excerpt_line(line).is_empty() {
+            continue;
+        }
+        preceding_lines += 1;
+        if preceding_lines >= MAX_PRECEDING_EXECUTION_CONTEXT_LINES {
+            return index;
+        }
+    }
+
+    call_index
+}
+
+fn compact_callee_body_excerpt(callee_excerpt: &str) -> String {
+    compact_context_lines(callee_excerpt, 0, MAX_CALLEE_BODY_CONTEXT_LINES, false)
+}
 
 fn call_context_excerpt(
     caller_excerpt: &str,

@@ -35,7 +35,9 @@ pub(super) fn last_identifier_text(content: &str, node: Node<'_>) -> Option<Stri
                 | "identifier"
                 | "field_identifier"
                 | "property_identifier"
+                | "simple_identifier"
                 | "type_identifier"
+                | "value_identifier"
                 | "word"
         ) {
             last = Some(node_text(content, current));

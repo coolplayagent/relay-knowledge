@@ -2,12 +2,16 @@ use std::collections::BTreeSet;
 
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
+use super::code_query_lifecycle_scoring::lifecycle_finalization_bonus;
+
 const EXECUTION_FLOW_TERMS: &[&str] = &[
     "background",
     "connect",
     "connection",
     "event",
     "events",
+    "finalize",
+    "finalized",
     "finish",
     "flow",
     "lifecycle",
@@ -33,76 +37,11 @@ const SOURCE_DEFINITION_BODY_MAX_NONBLANK_LINES: usize = 36;
 const SOURCE_DEFINITION_BODY_MIN_BASE_SCORE: f64 = 6.0;
 const SOURCE_DEFINITION_BODY_MIN_MATCHED_TERMS: usize = 4;
 
-pub(super) fn caller_context_density_bonus(
-    base_score: f64,
-    query: &str,
-    caller_name: Option<&str>,
-    callee_name: &str,
-    path: &str,
-    caller_excerpt: Option<&str>,
-    request: &CodeRetrievalRequest,
-) -> f64 {
-    if base_score <= 0.0 || request.code_query_kind != CodeQueryKind::Callers {
-        return 0.0;
-    }
-
-    let target_terms = identifier_terms(&format!("{query} {callee_name}"));
-    if target_terms.is_empty() {
-        return 0.0;
-    }
-
-    caller_name_bonus(caller_name, &target_terms)
-        + target_path_surface_bonus(path, &target_terms)
-        + repeated_target_mention_bonus(caller_excerpt, callee_name)
-}
-
-fn caller_name_bonus(caller_name: Option<&str>, target_terms: &[String]) -> f64 {
-    let Some(caller_name) = caller_name else {
-        return 0.0;
-    };
-    let caller_terms = identifier_terms(caller_name);
-    if caller_terms
-        .iter()
-        .any(|caller_term| target_terms.iter().any(|target| caller_term == target))
-    {
-        0.35
-    } else {
-        0.0
-    }
-}
-
-fn target_path_surface_bonus(path: &str, target_terms: &[String]) -> f64 {
-    let path_terms = identifier_terms(path);
-    let has_surface_match = target_terms.iter().any(|target| {
-        target.len() >= 4
-            && path_terms
-                .iter()
-                .any(|path_term| related_identifier_terms(path_term, target))
-    });
-    if has_surface_match { 0.85 } else { 0.0 }
-}
-
 fn related_identifier_terms(left: &str, right: &str) -> bool {
     left == right
         || (left.len() >= 4
             && right.len() >= 4
             && (left.starts_with(right) || right.starts_with(left)))
-}
-
-fn repeated_target_mention_bonus(caller_excerpt: Option<&str>, callee_name: &str) -> f64 {
-    let Some(caller_excerpt) = caller_excerpt else {
-        return 0.0;
-    };
-    let callee = callee_name.trim();
-    if callee.is_empty() {
-        return 0.0;
-    }
-    let mentions = caller_excerpt.match_indices(callee).count();
-    if mentions <= 1 {
-        0.0
-    } else {
-        (mentions.saturating_sub(1).min(3) as f64) * 0.2
-    }
 }
 
 pub(super) fn execution_flow_chunk_bonus(
@@ -130,10 +69,11 @@ pub(super) fn execution_flow_chunk_bonus(
         return 0.0;
     }
 
+    let finalization_bonus = lifecycle_finalization_bonus(&query_terms, &content_terms, content);
     let coverage = matched_terms.len() as f64 / query_terms.len() as f64;
     let ordered = ordered_query_term_coverage(&query_terms, &content_terms);
     let action_density = flow_action_density(content);
-    ((coverage * 1.8) + (ordered * 0.9) + action_density).min(3.0)
+    ((coverage * 1.8) + (ordered * 0.9) + action_density + finalization_bonus).min(4.25)
 }
 
 pub(super) fn inline_construct_chunk_bonus(
@@ -462,6 +402,7 @@ fn flow_action_density(content: &str) -> f64 {
                 || line.contains(".on")
                 || line.contains(".pipe")
                 || line.contains(".make")
+                || line.contains(".finalize")
                 || line.contains(".finish")
                 || line.contains(".initial")
         })
@@ -696,6 +637,7 @@ fn push_camel_terms(token: &str, terms: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::code_query_caller_context_scoring::caller_context_density_bonus;
     use super::*;
     use crate::domain::{CodeRepositorySelector, FreshnessPolicy};
 
@@ -757,6 +699,47 @@ mod tests {
                 &symbol
             ),
             0.0
+        );
+    }
+
+    #[test]
+    fn execution_flow_bonus_prefers_tool_lifecycle_finalization_steps() {
+        let hybrid = request(
+            "OpenAI Chat protocol sse tool call delta lifecycle finish events",
+            CodeQueryKind::Hybrid,
+        );
+        let finalization = execution_flow_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "const finished = finishReason !== undefined\n  ? yield* ToolStream.finishAll(ADAPTER, tools)\n  : undefined\nreturn [{ toolCallEvents: finished?.events, lifecycle }, events]",
+            "packages/llm/src/protocols/openai-chat.ts",
+            &hybrid,
+        );
+        let wrapper = execution_flow_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "export const protocol = Protocol.make({ stream: { initial: () => ({ tools: ToolStream.empty(), lifecycle: Lifecycle.initial() }) } })",
+            "packages/llm/src/protocols/openai-chat.ts",
+            &hybrid,
+        );
+
+        assert!(
+            finalization > wrapper,
+            "finalization={finalization} wrapper={wrapper}"
+        );
+
+        let finalize = request(
+            "OpenAI Chat protocol sse tool call delta lifecycle finalized events",
+            CodeQueryKind::Hybrid,
+        );
+        assert!(
+            execution_flow_chunk_bonus(
+                8.0,
+                &finalize.query,
+                "yield* Lifecycle.finalize(lifecycle, events)",
+                "packages/llm/src/protocols/openai-chat.ts",
+                &finalize,
+            ) > 0.0
         );
     }
 

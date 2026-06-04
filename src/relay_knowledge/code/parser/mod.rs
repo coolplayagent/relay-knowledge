@@ -789,6 +789,10 @@ mod cpp_tests;
 mod manual_tests;
 
 #[cfg(test)]
+#[path = "tests/source_surface.rs"]
+mod source_surface_tests;
+
+#[cfg(test)]
 #[path = "tests/knowledge_map.rs"]
 mod knowledge_map_tests;
 

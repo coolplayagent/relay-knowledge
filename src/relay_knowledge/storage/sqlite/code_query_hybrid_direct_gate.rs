@@ -2,7 +2,11 @@ use crate::domain::{CodeQueryKind, CodeRetrievalHit, CodeRetrievalLayer, CodeRet
 
 use super::{
     code_query_api_identities::{ApiSymbolIdentity, hybrid_api_symbol_identities},
-    code_query_hybrid_planning::hybrid_sequence_terms,
+    code_query_hybrid_planning::{
+        hybrid_query_has_conversion_expansion_intent,
+        hybrid_query_has_declaration_expansion_intent, hybrid_query_has_inline_expansion_intent,
+        hybrid_sequence_terms,
+    },
 };
 
 pub(super) fn hybrid_direct_results_can_answer_without_graph_expansion(
@@ -17,6 +21,15 @@ pub(super) fn hybrid_direct_results_can_answer_without_graph_expansion(
         return false;
     }
     if hybrid_query_has_graph_expansion_intent(&terms) {
+        return false;
+    }
+    if hybrid_query_has_declaration_expansion_intent(&request.query) {
+        return false;
+    }
+    if hybrid_query_has_conversion_expansion_intent(&request.query) {
+        return false;
+    }
+    if hybrid_query_has_inline_expansion_intent(&request.query) {
         return false;
     }
 
@@ -279,6 +292,87 @@ mod tests {
         let hits = vec![
             lexical_hit("src/provider.ts", "typescript", 8.0, "provider payload"),
             lexical_hit("src/protocol.ts", "typescript", 7.0, "projector trim"),
+        ];
+
+        assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+            &request, &hits
+        ));
+    }
+
+    #[test]
+    fn hybrid_direct_gate_keeps_declaration_intent_for_graph_expansion() {
+        let request = request(
+            "decorated async service overload exception subclass normalize payload",
+            CodeQueryKind::Hybrid,
+            12,
+        );
+        let hits = vec![
+            lexical_hit(
+                "syntax_service/service.py",
+                "python",
+                10.0,
+                "raise OverloadedServiceError normalize payload async service",
+            ),
+            lexical_hit(
+                "syntax_service/decorators.py",
+                "python",
+                6.0,
+                "def traced_operation(name): async wrapper",
+            ),
+        ];
+
+        assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+            &request, &hits
+        ));
+    }
+
+    #[test]
+    fn hybrid_direct_gate_keeps_conversion_chunk_intent_for_graph_expansion() {
+        let request = request(
+            "openai responses tool calls function_call_output convert common chunk",
+            CodeQueryKind::Hybrid,
+            12,
+        );
+        let hits = vec![
+            lexical_hit(
+                "src/provider/openai.ts",
+                "typescript",
+                9.0,
+                "function_call_output responses provider chunk convert",
+            ),
+            lexical_hit(
+                "src/provider/common.ts",
+                "typescript",
+                6.0,
+                "common chunk conversion maps tool calls",
+            ),
+        ];
+
+        assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+            &request, &hits
+        ));
+    }
+
+    #[test]
+    fn hybrid_direct_gate_keeps_inline_lambda_intent_for_graph_expansion() {
+        let request = request(
+            "kotlin lambda request handler timeout default trim",
+            CodeQueryKind::Hybrid,
+            12,
+        );
+        let hits = vec![
+            lexical_hit(
+                "src/main/kotlin/example/Client.kt",
+                "kotlin",
+                12.0,
+                "fun defaultHandler(): RequestHandler = { value -> value.trim() }",
+            ),
+            lexical_hit(
+                "src/main/kotlin/example/Client.kt",
+                "kotlin",
+                10.0,
+                "fun withTimeout(timeout: Duration): SyntaxClient = SyntaxClient { value -> value }",
+            ),
         ];
 
         assert!(!hybrid_direct_results_can_answer_without_graph_expansion(

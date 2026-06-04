@@ -315,6 +315,54 @@ fn declaration_chunk_bonus_preserves_interface_boost() {
 }
 
 #[test]
+fn declaration_chunk_bonus_accepts_mixin_and_parenthesized_inheritance_surfaces() {
+    let ruby_terms = query_terms("module mixin controller runtime normalize event dispatch");
+    let python_terms = query_terms("service overload exception subclass normalize payload");
+    let interface_terms = query_terms("interfaces cache lookup adapter surface");
+
+    assert_eq!(
+        declaration_chunk_bonus(
+            &ruby_terms,
+            "module Extensions\n  def normalize_event(event)\n    event.to_s.strip\n  end\nend",
+        ),
+        4.75
+    );
+    assert_eq!(
+        declaration_chunk_bonus(
+            &python_terms,
+            "class OverloadedServiceError(ServiceError):\n    pass",
+        ),
+        2.75
+    );
+    assert_eq!(
+        declaration_chunk_bonus(
+            &interface_terms,
+            "interface CacheAdapter {\n  lookup(key: string): CacheEntry\n}",
+        ),
+        4.75
+    );
+}
+
+#[test]
+fn scoped_identity_matches_over_nested_owner_scopes() {
+    let identity = SymbolIdentityQuery::from_query("SessionClient.request")
+        .expect("scoped identity should parse");
+
+    assert!(identity.matches_symbol(
+        "request",
+        "Sources::App::SessionClient::SessionClient.init.request.request",
+        "func request(url: URL) async throws -> Data {",
+        "repo://repo/Sources::App::SessionClient::SessionClient.init.request.request",
+    ));
+    assert!(!identity.matches_symbol(
+        "send",
+        "Sources::App::SessionClient::SessionTransport.send",
+        "func send(_ request: URLRequest) async throws -> Data",
+        "repo://repo/Sources::App::SessionClient::SessionTransport.send",
+    ));
+}
+
+#[test]
 fn import_surface_bonus_prefers_public_reexport_files() {
     assert_eq!(
         import_surface_bonus(0.0, "src/pkg/__init__.py", CodeQueryKind::Hybrid),
@@ -459,6 +507,78 @@ fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() {
             &callers,
         ),
         0.0
+    );
+}
+
+#[test]
+fn symbol_query_bonus_prefers_stream_connection_lifecycle_openers() {
+    let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+    let query = "background stream discovery reconcile multiplex run event source reconnect";
+
+    let opener_bonus = symbol_query_bonus(
+        query,
+        "openRunStreamConnection",
+        "frontend.stream.openRunStreamConnection",
+        "function openRunStreamConnection(connection, { reason, afterEventId = null } = {})",
+        "repo://frontend/stream/openRunStreamConnection",
+        &hybrid,
+    );
+    let incidental_helper_bonus = symbol_query_bonus(
+        query,
+        "runBackgroundDiscovery",
+        "frontend.stream.runBackgroundDiscovery",
+        "async function runBackgroundDiscovery()",
+        "repo://frontend/stream/runBackgroundDiscovery",
+        &hybrid,
+    );
+
+    assert!(opener_bonus > incidental_helper_bonus, "{opener_bonus}");
+}
+
+#[test]
+fn symbol_query_bonus_prefers_common_chunk_conversion_adapters() {
+    let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+    let query = "provider responses tool calls convert common chunk";
+
+    let adapter_bonus = symbol_query_bonus(
+        query,
+        "fromProviderChunk",
+        "provider.fromProviderChunk",
+        "export function fromProviderChunk(chunk: string): CommonChunk | string {",
+        "repo://provider/fromProviderChunk",
+        &hybrid,
+    );
+    let type_guard_bonus = symbol_query_bonus(
+        query,
+        "isResponseFunctionCallArgumentsDeltaChunk",
+        "provider.isResponseFunctionCallArgumentsDeltaChunk",
+        "function isResponseFunctionCallArgumentsDeltaChunk(chunk: ProviderChunk): chunk is ResponseDeltaChunk {",
+        "repo://provider/isResponseFunctionCallArgumentsDeltaChunk",
+        &hybrid,
+    );
+
+    assert!(adapter_bonus > type_guard_bonus, "{adapter_bonus}");
+
+    let provider_event_bonus = symbol_query_bonus(
+        "shared provider events transform response parts",
+        "fromProviderEvent",
+        "provider.fromProviderEvent",
+        "export function fromProviderEvent(event: SharedProviderEvent): ResponsePart {",
+        "repo://provider/fromProviderEvent",
+        &hybrid,
+    );
+    let provider_guard_bonus = symbol_query_bonus(
+        "shared provider events transform response parts",
+        "isProviderEvent",
+        "provider.isProviderEvent",
+        "function isProviderEvent(event: unknown): event is SharedProviderEvent {",
+        "repo://provider/isProviderEvent",
+        &hybrid,
+    );
+
+    assert!(
+        provider_event_bonus > provider_guard_bonus,
+        "{provider_event_bonus}"
     );
 }
 

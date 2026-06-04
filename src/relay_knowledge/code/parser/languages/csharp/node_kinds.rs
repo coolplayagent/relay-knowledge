@@ -9,5 +9,11 @@ pub(in crate::code::parser) fn definition_kind(node_kind: &str) -> Option<&'stat
 }
 
 pub(in crate::code::parser) fn is_call_node(node_kind: &str) -> bool {
-    matches!(node_kind, "call_expression" | "new_expression")
+    matches!(
+        node_kind,
+        "call_expression"
+            | "invocation_expression"
+            | "new_expression"
+            | "object_creation_expression"
+    )
 }

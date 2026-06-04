@@ -2,6 +2,7 @@ use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
 use super::{
     code_query_api_identities,
+    code_query_conversion_terms::conversion_action_term,
     code_query_support::{query_is_single_symbol_identity, query_terms},
 };
 
@@ -121,6 +122,71 @@ fn hybrid_chunk_first_plan(request: &CodeRetrievalRequest) -> Option<HybridChunk
 pub(super) fn hybrid_sequence_terms(query: &str) -> Vec<String> {
     let raw_terms = query_terms(query);
     hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str))
+}
+
+pub(super) fn hybrid_query_has_declaration_expansion_intent(query: &str) -> bool {
+    hybrid_sequence_terms(query).iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "class"
+                | "classes"
+                | "exception"
+                | "exceptions"
+                | "extends"
+                | "implement"
+                | "implements"
+                | "inherit"
+                | "inheritance"
+                | "inherits"
+                | "interface"
+                | "interfaces"
+                | "mixin"
+                | "mixins"
+                | "module"
+                | "modules"
+                | "protocol"
+                | "protocols"
+                | "subclass"
+                | "subclasses"
+                | "trait"
+                | "traits"
+        )
+    })
+}
+
+pub(super) fn hybrid_query_has_conversion_expansion_intent(query: &str) -> bool {
+    let raw_terms = query_terms(query);
+    let terms = hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str));
+    let has_conversion = raw_terms
+        .iter()
+        .any(|term| conversion_action_term(&term.to_ascii_lowercase()));
+    let has_chunk_or_common_surface = terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "chunk"
+                | "chunks"
+                | "common"
+                | "event"
+                | "events"
+                | "part"
+                | "parts"
+                | "provider"
+                | "providers"
+                | "response"
+                | "responses"
+        )
+    });
+
+    has_conversion && has_chunk_or_common_surface
+}
+
+pub(super) fn hybrid_query_has_inline_expansion_intent(query: &str) -> bool {
+    hybrid_sequence_terms(query).iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "callback" | "callbacks" | "closure" | "closures" | "lambda" | "lambdas"
+        )
+    })
 }
 
 pub(super) fn workflow_language_scope_matches(language_id: &str, scope: &str) -> bool {
@@ -421,4 +487,31 @@ fn term_has_alpha_digit_mix(term: &str) -> bool {
     }
 
     has_alpha && has_digit
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conversion_expansion_intent_accepts_scored_conversion_verbs() {
+        for verb in ["adapt", "map", "normalize"] {
+            assert!(
+                hybrid_query_has_conversion_expansion_intent(&format!(
+                    "provider response parts {verb} shared event"
+                )),
+                "{verb} should request conversion expansion"
+            );
+        }
+    }
+
+    #[test]
+    fn conversion_expansion_intent_accepts_cased_conversion_verbs() {
+        for query in ["Convert Common Chunk", "Map Provider Response Parts"] {
+            assert!(
+                hybrid_query_has_conversion_expansion_intent(query),
+                "{query} should request conversion expansion"
+            );
+        }
+    }
 }

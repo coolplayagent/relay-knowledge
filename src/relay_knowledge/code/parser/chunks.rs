@@ -5,6 +5,9 @@ use super::{
     text::count_lines,
 };
 
+const MAX_SOURCE_SURFACE_CHUNK_BYTES: usize = 8_000;
+const MAX_SOURCE_SURFACE_CHUNK_LINES: usize = 200;
+
 pub(super) fn chunks_for_symbols(
     build: &SnapshotBuild,
     path: &str,
@@ -40,14 +43,27 @@ pub(super) fn chunks_for_symbols(
             symbol_snapshot_id: Some(symbol.symbol_snapshot_id.clone()),
         });
     }
-    if chunks.is_empty() || keeps_file_chunk_with_symbol_chunks(language_id) {
+    if chunks.is_empty() || keeps_file_chunk_with_symbol_chunks(language_id, content, symbols) {
         add_file_chunk_to_vec(build, path, file_id, language_id, content, &mut chunks)?;
     }
 
     Ok(chunks)
 }
 
-fn keeps_file_chunk_with_symbol_chunks(language_id: &str) -> bool {
+fn keeps_file_chunk_with_symbol_chunks(
+    language_id: &str,
+    content: &str,
+    symbols: &[RepositoryCodeSymbolRecord],
+) -> bool {
+    if language_keeps_complete_file_chunk(language_id) {
+        return true;
+    }
+    content.len() <= MAX_SOURCE_SURFACE_CHUNK_BYTES
+        && count_lines(content.as_bytes()) <= MAX_SOURCE_SURFACE_CHUNK_LINES
+        && has_uncovered_source_surface(content, symbols)
+}
+
+fn language_keeps_complete_file_chunk(language_id: &str) -> bool {
     matches!(
         language_id,
         "cmake"
@@ -66,6 +82,34 @@ fn keeps_file_chunk_with_symbol_chunks(language_id: &str) -> bool {
             | "xml"
             | "yaml"
     )
+}
+
+fn has_uncovered_source_surface(content: &str, symbols: &[RepositoryCodeSymbolRecord]) -> bool {
+    let mut ranges = symbols
+        .iter()
+        .filter_map(|symbol| {
+            let start = usize::try_from(symbol.byte_range.start).ok()?;
+            let end = usize::try_from(symbol.byte_range.end).ok()?;
+            (start < end && end <= content.len()).then_some((start, end))
+        })
+        .collect::<Vec<_>>();
+    ranges.sort_unstable_by_key(|range| range.0);
+
+    let mut covered_end = 0usize;
+    for (start, end) in ranges {
+        if start > covered_end && contains_source_token(&content[covered_end..start]) {
+            return true;
+        }
+        covered_end = covered_end.max(end);
+    }
+
+    covered_end < content.len() && contains_source_token(&content[covered_end..])
+}
+
+fn contains_source_token(content: &str) -> bool {
+    content
+        .chars()
+        .any(|character| character.is_alphanumeric() || matches!(character, '_' | '#' | '@'))
 }
 
 pub(super) fn add_file_chunk(

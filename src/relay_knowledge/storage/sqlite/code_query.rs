@@ -1,6 +1,8 @@
 use rusqlite::types::Value;
 use rusqlite::{Connection, params_from_iter};
 
+#[path = "code_query_ambiguous_callees.rs"]
+mod code_query_ambiguous_callees;
 #[path = "code_query_api_identities.rs"]
 mod code_query_api_identities;
 #[path = "code_query_api_sequence_scoring.rs"]
@@ -9,10 +11,18 @@ mod code_query_api_sequence_scoring;
 mod code_query_call_counts;
 #[path = "code_query_call_direction.rs"]
 mod code_query_call_direction;
+#[path = "code_query_call_identity_support.rs"]
+mod code_query_call_identity_support;
+#[path = "code_query_call_site_scoring.rs"]
+mod code_query_call_site_scoring;
 #[path = "code_query_call_target_ranking.rs"]
 mod code_query_call_target_ranking;
+#[path = "code_query_caller_context_scoring.rs"]
+mod code_query_caller_context_scoring;
 #[path = "code_query_calls.rs"]
 mod code_query_calls;
+#[path = "code_query_conversion_terms.rs"]
+mod code_query_conversion_terms;
 #[path = "code_query_designated_initializer_scoring.rs"]
 mod code_query_designated_initializer_scoring;
 #[path = "code_query_excerpts.rs"]
@@ -33,8 +43,16 @@ mod code_query_import_scoring;
 mod code_query_import_targets;
 #[path = "code_query_imports.rs"]
 mod code_query_imports;
+#[path = "code_query_inline_usage_scoring.rs"]
+mod code_query_inline_usage_scoring;
+#[path = "code_query_interface_scoring.rs"]
+mod code_query_interface_scoring;
+#[path = "code_query_lifecycle_scoring.rs"]
+mod code_query_lifecycle_scoring;
 #[path = "code_query_line_ranges.rs"]
 mod code_query_line_ranges;
+#[path = "code_query_local_callable_scoring.rs"]
+mod code_query_local_callable_scoring;
 #[path = "code_query_path_ranking.rs"]
 mod code_query_path_ranking;
 #[path = "code_query_proximity_scoring.rs"]
@@ -87,9 +105,10 @@ use code_query_hybrid_exact_path::{
     hybrid_query_should_use_layered_chunk_search,
 };
 use code_query_hybrid_planning::{
-    hybrid_query_prefers_chunk_first, hybrid_sequence_terms,
-    query_language_scoped_workflow_surface_scopes, workflow_language_scope_language_ids,
-    workflow_language_scope_matches,
+    hybrid_query_has_conversion_expansion_intent, hybrid_query_has_declaration_expansion_intent,
+    hybrid_query_has_inline_expansion_intent, hybrid_query_prefers_chunk_first,
+    hybrid_sequence_terms, query_language_scoped_workflow_surface_scopes,
+    workflow_language_scope_language_ids, workflow_language_scope_matches,
 };
 #[cfg(test)]
 use code_query_import_scoring::{
@@ -100,6 +119,8 @@ use code_query_import_scoring::{
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
 use code_query_imports::search_imports;
+use code_query_inline_usage_scoring::language_scoped_inline_usage_chunk_bonus;
+use code_query_interface_scoring::public_interface_chunk_bonus;
 use code_query_path_ranking::declaration_surface_path_bonus;
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};
@@ -418,6 +439,15 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
     if request.code_query_kind != CodeQueryKind::Hybrid {
         return false;
     }
+    if hybrid_query_has_declaration_expansion_intent(&request.query) {
+        return false;
+    }
+    if hybrid_query_has_conversion_expansion_intent(&request.query) {
+        return false;
+    }
+    if hybrid_query_has_inline_expansion_intent(&request.query) {
+        return false;
+    }
     let terms = hybrid_sequence_terms(&request.query);
     if terms.len() < 3 {
         return false;
@@ -598,6 +628,20 @@ fn search_chunks(
             status,
             request,
             &focused_fts_query,
+            chunk_candidate_limit,
+        )?;
+        retain_query_language_scoped_workflow_hits(request, &mut hits);
+        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+    }
+
+    if chunk_first
+        && let Some(lifecycle_fts_query) = lifecycle_hybrid_chunk_fts_match_query(&request.query)
+    {
+        let mut hits = search_chunks_with_fts_query(
+            connection,
+            status,
+            request,
+            &lifecycle_fts_query,
             chunk_candidate_limit,
         )?;
         retain_query_language_scoped_workflow_hits(request, &mut hits);
@@ -789,6 +833,7 @@ fn search_chunks_with_fts_query(
                 request,
             )
             + query_proximity_chunk_bonus(score, &request.query, &row.content, &row.path, request)
+            + public_interface_chunk_bonus(score, &request.query, &row.content, &row.path, request)
             + execution_flow_chunk_bonus(score, &request.query, &row.content, &row.path, request)
             + designated_initializer_chunk_bonus(
                 score,
@@ -798,6 +843,14 @@ fn search_chunks_with_fts_query(
                 request,
             )
             + inline_construct_chunk_bonus(score, &request.query, &row.content, &row.path, request)
+            + language_scoped_inline_usage_chunk_bonus(
+                score,
+                &request.query,
+                &row.content,
+                &row.path,
+                &row.language_id,
+                request,
+            )
             + source_definition_body_chunk_bonus(
                 score,
                 &request.query,
@@ -930,49 +983,5 @@ fn chunk_layers_for_request(
 }
 
 #[cfg(test)]
-#[path = "code_query_unit_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "code_query_score_tests.rs"]
-mod score_tests;
-
-#[cfg(test)]
-#[path = "code_query_identity_tests.rs"]
-mod identity_tests;
-
-#[cfg(test)]
-#[path = "code_query_hybrid_symbol_planner_tests.rs"]
-mod hybrid_symbol_planner_tests;
-
-#[cfg(test)]
-#[path = "code_query_hybrid_chunk_gate_tests.rs"]
-mod hybrid_chunk_gate_tests;
-
-#[cfg(test)]
-#[path = "code_query_call_ranking_tests.rs"]
-mod call_ranking_tests;
-
-#[cfg(test)]
-#[path = "code_query_indirect_call_tests.rs"]
-mod indirect_call_tests;
-
-#[cfg(test)]
-#[path = "code_query_chunk_ranking_tests.rs"]
-mod chunk_ranking_tests;
-
-#[cfg(test)]
-#[path = "code_query_symbol_ranking_tests.rs"]
-mod symbol_ranking_tests;
-
-#[cfg(test)]
-#[path = "code_query_definition_fallback_tests.rs"]
-mod definition_fallback_tests;
-
-#[cfg(test)]
-#[path = "code_query_reference_ranking_tests.rs"]
-mod reference_ranking_tests;
-
-#[cfg(test)]
-#[path = "code_query_excerpt_tests.rs"]
-mod excerpt_tests;
+#[path = "code_query_test_modules.rs"]
+mod test_modules;

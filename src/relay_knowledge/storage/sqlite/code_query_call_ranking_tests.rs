@@ -1,3 +1,4 @@
+use super::code_query_call_site_scoring::exact_caller_named_receiver_member_call_bonus;
 use super::code_query_path_ranking::{
     CallSiteQueryIntent, callee_member_context_bonus, caller_result_assignment_bonus,
 };
@@ -79,6 +80,86 @@ async fn callees_rank_receiver_qualified_member_call_sites() {
 
     assert!(hits[0].excerpt.contains("ToolRuntime.stream"));
     assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
+async fn callees_use_widest_caller_chunk_and_resolved_callee_body() {
+    let path = "src/service.ts";
+    let mut caller_symbol = symbol("dispatch-symbol", "service-file", path, "dispatch");
+    caller_symbol.line_range = range(10, 18);
+    let mut callee_symbol = symbol("handle-symbol", "service-file", path, "handle");
+    callee_symbol.line_range = range(30, 34);
+
+    let narrow_caller_chunk = chunk(
+        "dispatch-narrow-chunk",
+        "service-file",
+        path,
+        "  return service.handle(value)",
+        Some("dispatch-symbol"),
+        range(14, 14),
+    );
+    let wide_caller_chunk = chunk(
+        "dispatch-wide-chunk",
+        "service-file",
+        path,
+        "function dispatch(value) {\n  const prepared = prepare(value)\n  return service.handle(prepared)\n}",
+        Some("dispatch-symbol"),
+        range(10, 18),
+    );
+    let callee_chunk = chunk(
+        "handle-chunk",
+        "service-file",
+        path,
+        "function handle(value) {\n  return normalize(value).trim()\n}",
+        Some("handle-symbol"),
+        range(30, 34),
+    );
+
+    let mut call = call("handle-call", "service-file", path);
+    call.caller_symbol_snapshot_id = Some("dispatch-symbol".to_owned());
+    call.caller_name = Some("dispatch".to_owned());
+    call.callee_symbol_snapshot_id = Some("handle-symbol".to_owned());
+    call.callee_name = "handle".to_owned();
+    call.target_hint = Some("handle".to_owned());
+    call.resolution_state = "resolved".to_owned();
+    call.confidence_basis_points = 8_000;
+    call.confidence_tier = "inferred".to_owned();
+    call.line_range = range(14, 14);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("service-file", path, "typescript")],
+        symbols: vec![caller_symbol, callee_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![call],
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![narrow_caller_chunk, callee_chunk, wide_caller_chunk],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("dispatch", CodeQueryKind::Callees))
+        .await
+        .expect("callee query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert!(hits[0].excerpt.contains("const prepared = prepare(value)"));
+    assert!(hits[0].excerpt.contains("service.handle(prepared)"));
+    assert!(hits[0].excerpt.contains("normalize(value).trim()"));
 }
 
 #[tokio::test]
@@ -707,170 +788,8 @@ async fn callers_rank_high_confidence_inferred_target_bindings() {
     assert!(hits[0].score > hits[1].score);
 }
 
-#[test]
-fn caller_result_assignment_bonus_requires_assignment_shape_and_query_intent() {
-    let callers = request("createPool", CodeQueryKind::Callers);
-    let callees = request("createPool", CodeQueryKind::Callees);
-    let production_intent = CallSiteQueryIntent {
-        test_or_benchmark: false,
-        example_or_sample: false,
-    };
-    let example_intent = CallSiteQueryIntent {
-        test_or_benchmark: false,
-        example_or_sample: true,
-    };
-
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "src/runtime/cache_config.ts",
-            "createPool",
-            Some("settings.pool = createPool(options)"),
-            "createPool",
-            &callers,
-            production_intent,
-        ),
-        1.4
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "db/db_impl.cc",
-            "NewLRUCache",
-            Some("result.block_cache = NewLRUCache(8 << 20);"),
-            "NewLRUCache",
-            &callers,
-            production_intent,
-        ),
-        1.4
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "src/runtime/client.go",
-            "Dial",
-            Some("client, err := Dial(options)"),
-            "Dial",
-            &callers,
-            production_intent,
-        ),
-        1.15
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "src/runtime/cache_config.ts",
-            "createPool",
-            Some("if (current == createPool(options)) return"),
-            "createPool",
-            &callers,
-            production_intent,
-        ),
-        0.0
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "src/runtime/cache_config.ts",
-            "createPool",
-            Some("settings.pool = recreatePool(options)"),
-            "createPool",
-            &callers,
-            production_intent,
-        ),
-        0.0
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "src/runtime/cache_config.ts",
-            "createPool",
-            Some("settings.factory = createPool(options)"),
-            "createPool",
-            &callers,
-            production_intent,
-        ),
-        1.15
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "examples/cache_demo.ts",
-            "createPool",
-            Some("settings.pool = createPool(options)"),
-            "createPool",
-            &callers,
-            production_intent,
-        ),
-        0.0
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "examples/cache_demo.ts",
-            "createPool example",
-            Some("settings.pool = createPool(options)"),
-            "createPool",
-            &callers,
-            example_intent,
-        ),
-        1.4
-    );
-    assert_eq!(
-        caller_result_assignment_bonus(
-            4.0,
-            "src/runtime/cache_config.ts",
-            "createPool",
-            Some("settings.pool = createPool(options)"),
-            "createPool",
-            &callees,
-            production_intent,
-        ),
-        0.0
-    );
-}
-
-#[test]
-fn callee_member_context_bonus_requires_member_call_shape() {
-    let callees = request("OwnerTarget", CodeQueryKind::Callees);
-    let callers = request("OwnerTarget", CodeQueryKind::Callers);
-
-    assert_eq!(
-        callee_member_context_bonus(
-            4.0,
-            Some("return ToolRuntime.stream({ input })"),
-            "stream",
-            &callees,
-        ),
-        0.45
-    );
-    assert_eq!(
-        callee_member_context_bonus(
-            4.0,
-            Some("return ToolRuntime::stream(input)"),
-            "stream",
-            &callees,
-        ),
-        0.45
-    );
-    assert_eq!(
-        callee_member_context_bonus(4.0, Some("stream: streamRequest"), "stream", &callees,),
-        0.0
-    );
-    assert_eq!(
-        callee_member_context_bonus(4.0, Some("stream(input)"), "stream", &callees),
-        0.0
-    );
-    assert_eq!(
-        callee_member_context_bonus(
-            4.0,
-            Some("return ToolRuntime.stream({ input })"),
-            "stream",
-            &callers,
-        ),
-        0.0
-    );
-}
+#[path = "code_query_call_scoring_tests.rs"]
+mod scoring_tests;
 
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
