@@ -517,11 +517,6 @@ fn worktree_overlay_prefers_unstaged_submodule_head_over_staged_gitlink() {
 #[test]
 fn worktree_overlay_bounds_submodule_entries_after_scope_filtering() {
     let source = TempGitRepo::create("overlay-scoped-bound-source");
-    write_many_rust_files(
-        &source,
-        "noise",
-        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
-    );
     source.write("src/target.rs", "pub fn scoped_target() -> u32 { 0 }\n");
     source.git(["add", "."]);
     source.git(["commit", "-m", "initial"]);
@@ -544,6 +539,11 @@ fn worktree_overlay_bounds_submodule_entries_after_scope_filtering() {
     };
     submodule.git(["config", "user.email", "relay@example.invalid"]);
     submodule.git(["config", "user.name", "Relay Test"]);
+    write_many_rust_files(
+        &submodule,
+        "noise",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
     submodule.write("src/target.rs", "pub fn scoped_target() -> u32 { 1 }\n");
     submodule.git(["add", "."]);
     submodule.git(["commit", "-m", "update selected path"]);
