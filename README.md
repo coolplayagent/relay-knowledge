@@ -101,6 +101,9 @@ This skill-over-CLI path is separate from MCP/ACP protocol access.
 - Worker queues, deterministic fallback proposals, manual proposal acceptance,
   persistent audit events, silent-update operator state, and service definition
   generation for platform service managers.
+- Service deployment topologies documenting `embedded_cli`,
+  `resident_single_process`, `resident_partitioned_sqlite`, and future split
+  worker control-plane/data-plane boundaries.
 - MCP Streamable HTTP and local ACP adapter access through the shared
   application service, with scope policy, QoS admission, cancellation,
   resources/prompts, durable audit metadata, and OTLP-ready agent metrics.
@@ -245,6 +248,11 @@ After partitioned shard catalog rows become active, startup with
 explicit rollback that clears the shard catalog and files.
 Shard routes are resolved from the current runtime data directory, so backups
 and restores must keep the main database and `stores/repositories/` together.
+The control plane continues to own task leases, audit, operator state, topology
+catalogs, and diagnostics; data-plane shards only execute reads and writes
+authorized and budgeted by shared application services. See
+[Service Deployment, Control Plane, and Data Plane](docs/en/03-architecture-specs/22-service-deployment-control-data-plane.md)
+for the full contract.
 
 The storage contract includes the v1 code graph data surface for tree-sitter
 output. Versioned code files, symbols, references, chunks, and parse-status

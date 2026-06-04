@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 2.4
-> Date: 2026-06-03
+> Document version: 2.5
+> Date: 2026-06-04
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -27,6 +27,8 @@ Installation and release are part of product architecture. Stable releases are v
 
 Installers or install scripts support version selection, install directory selection, dry run, checksum verification, service-definition generation, failure rollback, and uninstall plans. Runtime data is not written to release extraction directories by default.
 
+The service deployment installation experience must state the selected topology explicitly: `embedded_cli` installs no resident service, `resident_single_process` installs one platform service, `resident_partitioned_sqlite` also includes the shard directory in backup/migration/uninstall confirmation, and future `split_worker_preview` generates separate control-service and worker-service definitions with each process's permissions, environment variables, logs, and shutdown behavior.
+
 Exact code-source fallback is implemented inside the product and must not require `rg` at runtime. Agent-facing setup notes may mention bounded `rg` or `grep -RIn` as manual inspection tools, but installers must not make recursive grep a service dependency or a replacement for indexed query behavior.
 
 ## 4. Runtime State
@@ -46,6 +48,12 @@ verify only the main database and then report upgrade success.
 Shard catalog routes are relocatable and are resolved against the current
 runtime data directory during restore, but this only works when the shard
 directory is moved with the main database.
+
+Future external graph/vector/storage backends or replicated SQLite backends are
+also runtime state. Installers, doctor, and upgrade plans must record backend
+kind, endpoint or local directory, authentication configuration source,
+schema/index migration state, and rollback notes; replacing only the binary is
+not enough to report data-plane upgrade success.
 
 ## 5. Upgrade and Rollback
 
@@ -77,6 +85,7 @@ restart, and post-upgrade doctor flow.
 - Service installation uses systemd, launchd, or Windows Service instead of unmanaged loops.
 - Uninstall removes binaries and service definitions while preserving runtime data unless the user explicitly confirms removal.
 - Partitioned SQLite shard directories participate in backup, migration, doctor, and uninstall confirmation.
+- Control-service and split-worker service definitions, runtime directories, logs, environment variables, and permission boundaries are diagnosable and rollbackable in plan/install/uninstall flows.
 
 ---
 

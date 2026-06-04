@@ -64,6 +64,7 @@
 - [第 19 章 安装、发布与升级](03-architecture-specs/19-installation-release-and-upgrade.md)
 - [第 20 章 多仓库代码图谱薄覆盖层](03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 - [第 21 章 软件全域建模架构](03-architecture-specs/21-software-global-domain-modeling.md)
+- [第 22 章 服务化部署、控制面与数据面分离](03-architecture-specs/22-service-deployment-control-data-plane.md)
 
 ## 第四卷：研究资料
 
@@ -99,3 +100,4 @@
 - [附录 B.7 Grep 兜底文档刷新审计 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md)：代码检索 exact-text fallback 的章节同步记录。
 - [附录 B.8 软件全域建模文档刷新审计 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md)：软件全域建模研究与架构归档验证记录。
 - [附录 B.9 软件全域、CodeGraph 与 Search Everything 研究文档刷新审计 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md)：第 11 章研究与书籍目录同步记录。
+- [附录 B.10 服务化部署、控制面与数据面分离文档刷新审计 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md)：issue #250 服务化部署方案和架构目录同步记录。

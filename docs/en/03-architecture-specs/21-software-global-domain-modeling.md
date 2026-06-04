@@ -121,4 +121,4 @@ The first foundation slice remains bounded by repository snapshot/source scope a
 
 ---
 
-Navigation: Previous: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md)
+Navigation: Previous: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md) | Next: [22. Service Deployment, Control Plane, and Data Plane](22-service-deployment-control-data-plane.md)

@@ -4,6 +4,8 @@
 
 常驻服务用于托管 Web、API、MCP、startup reconciler 和后台运维入口。开发机可以前台运行；长期后台运行必须交给平台 service manager。
 
+当前服务化拓扑分为 `embedded_cli`、`resident_single_process` 和 `resident_partitioned_sqlite`。前两者使用单个运行时数据库；启用 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` 后，控制状态仍在主数据库，代码仓库数据进入每仓库 shard。未来 split worker 只允许通过控制面 claim 持久 task 后执行，不提供未受管后台循环。
+
 ## 9.1 前台服务
 
 启动 MCP Streamable HTTP:
@@ -47,6 +49,8 @@ relay-knowledge service definition write --format json
 ```
 
 Linux 输出 systemd user service 计划，macOS 输出 launchd plist 计划，Windows 输出 service XML/PowerShell 计划。runtime state、graph database、indexes、audit 和 worker 队列仍使用 `paths` 解析后的 platform data/state/log/cache 目录，不写入 release extraction directory。
+
+启用 `partitioned_sqlite` 时，service doctor、备份、迁移和卸载确认必须同时覆盖主数据库和 `stores/repositories/` shard 目录。只移动主数据库会让代码事实不可见，不能被视为成功迁移或回滚。
 
 ## 9.4 Silent Update Operator
 

@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/17-background-service-recovery-and-self-healing.md) | [中文](../../zh/03-architecture-specs/17-background-service-recovery-and-self-healing.md)
 
-> Document version: 2.0
-> Date: 2026-05-17
+> Document version: 2.1
+> Date: 2026-06-04
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -20,9 +20,13 @@ Background service operation is not an unmanaged CLI loop. Long-running refresh,
 
 CLI may generate service definitions and run doctor checks, but it does not pretend to be the resident service manager.
 
+Service deployment supports `resident_single_process` and future `split_worker_preview`. In single-process mode, the control-plane API, startup reconciler, operator, and workers run in one process. In split-worker mode, independent workers may work only after claiming durable tasks from the control plane; they must not create unmanaged scheduling loops, directly read or write shards, skip QoS, or bypass application services.
+
 ## 3. Work Queues
 
 Every background task has kind, scope, priority, budget, attempt, lease owner, lease expiry, target graph version, payload hash, and last error. Queue capacity is a hard ceiling; enqueue failure returns overload or retryable errors.
+
+A cross-process worker lease is authorization for data-plane writes. A worker cannot complete, fail, renew, or commit data-plane writes when it does not hold a valid lease, the lease expired, the attempt count does not match, the task was reset, the task was reclaimed, or the task entered dead-letter. Control-plane status must explain active, running, retrying, and dead-letter sources; process existence is not evidence of task success.
 
 ## 4. Reconciler
 
@@ -57,6 +61,7 @@ Overload handling follows SRE and adaptive-concurrency principles: when queue, I
 - Diagnostic paths do not automatically revive dead-letter tasks.
 - CPU/IO-heavy background work does not block query hot paths.
 - Watcher lag, scan backlog, cursor invalidation, and overload decisions are explainable through health and service doctor.
+- Split-worker deployments preserve durable task leases, bounded retry/backoff, checkpoint replay, dead-letter isolation, and per-repository active writer constraints.
 
 ---
 
