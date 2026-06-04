@@ -44,6 +44,9 @@ mod source_filesystem_tests;
 #[path = "tests/source/layout.rs"]
 mod source_layout_tests;
 #[cfg(test)]
+#[path = "tests/source/submodule_followup.rs"]
+mod source_submodule_followup_tests;
+#[cfg(test)]
 #[path = "tests/source/submodule_regression.rs"]
 mod source_submodule_regression_tests;
 #[cfg(test)]
@@ -102,7 +105,7 @@ pub use resolution::{
     resolve_repository_snapshot_with_filters, resolve_repository_snapshot_with_path_filters,
 };
 use scope::{
-    discover_source_layout, effective_index_path_filters, path_is_selected_with_layout,
+    discover_source_layout, effective_index_path_filters_for_layouts, path_is_selected_with_layout,
     path_scope_overlaps, scoped_source_snapshot_for_filters,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
@@ -609,11 +612,24 @@ fn build_incremental_snapshot(
     let entry_scope = tracked_entry_scope_for_selector(registration, selector);
     let base_entries = tracked_entries_with_scope(root, &base_commit, &entry_scope)?;
     let base_source_layout = discover_source_layout(&base_entries);
+    let previous_entries = previous_hashes
+        .keys()
+        .map(|path| changes::GitTreeEntry {
+            path: path.clone(),
+            byte_count: 0,
+        })
+        .collect::<Vec<_>>();
+    let previous_source_layout = discover_source_layout(&previous_entries);
     let head_state = tracked_entries_state_with_scope(root, &commit, &entry_scope)?;
     let tree_hash = git_tree_hash_with_submodules(&parent_tree_hash, &head_state.submodule_states);
     let head_entries = head_state.entries;
     let source_layout = discover_source_layout(&head_entries);
-    let path_filters = effective_index_path_filters(registration, selector, &source_layout);
+    let path_filters = effective_index_path_filters_for_layouts(
+        registration,
+        selector,
+        &[&source_layout, &base_source_layout, &previous_source_layout],
+    );
+    let effective_path_filters = path_filters.clone();
     let language_filters =
         snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
     let mut build = SnapshotBuild::new_with_scope_filters(
@@ -636,6 +652,8 @@ fn build_incremental_snapshot(
         base_commit: &base_commit,
         previous_hashes,
         source_layout: &source_layout,
+        previous_source_layout: &previous_source_layout,
+        effective_path_filters: &effective_path_filters,
     };
 
     for change in changes {
@@ -740,7 +758,7 @@ fn parse_expanded_gitlink_change(
     base_source_layout: &scope::SourceLayoutDiscovery,
     path: &str,
 ) -> Result<bool, CodeIndexError> {
-    if !path_scope_overlaps(path, context.registration, context.selector) {
+    if !gitlink_scope_overlaps(path, context) {
         return Ok(false);
     }
     let include_expanded_path = |path: &str| {
@@ -754,12 +772,16 @@ fn parse_expanded_gitlink_change(
             context.registration,
             context.selector,
             context.source_layout,
+        ) || path_is_selected_with_layout(
+            path,
+            context.registration,
+            context.selector,
+            context.previous_source_layout,
         )
     };
-    let expanded_scope_overlaps =
-        |path: &str| path_scope_overlaps(path, context.registration, context.selector);
+    let expanded_scope_overlaps = |path: &str| gitlink_scope_overlaps(path, context);
     let child_filters = |path: &str| {
-        scope::submodule_child_scope_filters(path, context.registration, context.selector)
+        scope::submodule_child_scope_filters_from_filters(path, context.effective_path_filters)
     };
     let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
         context.root,
@@ -928,6 +950,8 @@ struct ChangedPathParseContext<'a> {
     base_commit: &'a str,
     previous_hashes: &'a BTreeMap<String, String>,
     source_layout: &'a scope::SourceLayoutDiscovery,
+    previous_source_layout: &'a scope::SourceLayoutDiscovery,
+    effective_path_filters: &'a [String],
 }
 
 fn parse_changed_path(
@@ -940,6 +964,11 @@ fn parse_changed_path(
         context.registration,
         context.selector,
         context.source_layout,
+    ) && !path_is_selected_with_layout(
+        path,
+        context.registration,
+        context.selector,
+        context.previous_source_layout,
     ) {
         return Ok(());
     }
@@ -951,4 +980,10 @@ fn parse_changed_path(
     }
 
     parse_indexed_file(build, path, &bytes)
+}
+
+fn gitlink_scope_overlaps(path: &str, context: &ChangedPathParseContext<'_>) -> bool {
+    path_scope_overlaps(path, context.registration, context.selector)
+        || scope::submodule_child_scope_filters_from_filters(path, context.effective_path_filters)
+            .is_some()
 }

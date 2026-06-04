@@ -647,6 +647,13 @@ pub(super) fn submodule_child_scope_filters(
     selector: &CodeRepositorySelector,
 ) -> Option<Vec<String>> {
     let filters = intersect_path_filters(&registration.path_filters, &selector.path_filters)?;
+    submodule_child_scope_filters_from_filters(path, &filters)
+}
+
+pub(super) fn submodule_child_scope_filters_from_filters(
+    path: &str,
+    filters: &[String],
+) -> Option<Vec<String>> {
     if filters.is_empty() {
         return Some(Vec::new());
     }
@@ -658,7 +665,7 @@ pub(super) fn submodule_child_scope_filters(
     let mut child_filters = Vec::new();
     let mut parent_scope_covers_submodule = false;
     for filter in filters {
-        let filter = normalize_scope_path(&filter);
+        let filter = normalize_scope_path(filter);
         if filter.is_empty()
             || filter == "."
             || filter == path
@@ -672,6 +679,9 @@ pub(super) fn submodule_child_scope_filters(
         {
             child_filters.push(child_filter.to_owned());
         }
+    }
+    if parent_scope_covers_submodule {
+        return Some(Vec::new());
     }
     if child_filters.is_empty() && !parent_scope_covers_submodule {
         return None;

@@ -186,15 +186,13 @@ impl EntryPathspecs {
             .filter(|filter| !filter.is_empty())
             .cloned()
             .collect::<BTreeSet<_>>();
-        let gitlink_candidates = paths
-            .iter()
-            .filter_map(|filter| {
-                filter
-                    .split_once('/')
-                    .map(|(candidate, _)| candidate.to_owned())
-            })
-            .filter(|candidate| !paths.contains(candidate))
-            .collect::<BTreeSet<_>>();
+        let mut gitlink_candidates = BTreeSet::new();
+        for filter in &paths {
+            if let Some((candidate, _)) = filter.split_once('/') {
+                gitlink_candidates.insert(candidate.to_owned());
+            }
+        }
+        gitlink_candidates.retain(|candidate| !paths.contains(candidate));
         (!paths.is_empty()).then(|| Self {
             paths: paths.into_iter().collect(),
             gitlink_candidates: gitlink_candidates.into_iter().collect(),
@@ -467,6 +465,9 @@ fn tracked_entries_ls_tree_bytes(
     prefix: &str,
     scope: &TrackedEntryScope,
 ) -> Result<Vec<u8>, CodeIndexError> {
+    if scope.entry_filter == TrackedEntryFilter::Empty {
+        return Ok(Vec::new());
+    }
     let Some(pathspecs) = scope.entry_pathspecs(prefix) else {
         return git_bytes(root, ["ls-tree", "-r", "-l", "-z", commit]);
     };
@@ -488,6 +489,9 @@ fn tracked_entries_git_dir_ls_tree_bytes(
     prefix: &str,
     scope: &TrackedEntryScope,
 ) -> Result<Vec<u8>, CodeIndexError> {
+    if scope.entry_filter == TrackedEntryFilter::Empty {
+        return Ok(Vec::new());
+    }
     let Some(pathspecs) = scope.entry_pathspecs(prefix) else {
         return git_dir_bytes(git_dir, &["ls-tree", "-r", "-l", "-z", commit]);
     };
