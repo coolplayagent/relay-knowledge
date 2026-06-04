@@ -6,11 +6,13 @@
 
 ## 2.1 命令结构
 
-CLI 使用 git-style 子命令。全局 `--format` 可以放在命令前后；命令参数仍按各子命令解析:
+CLI 使用 git-style 子命令。全局 `--format` 和 `--remote <base-url>` 可以放在命令前后；命令参数仍按各子命令解析:
 
 ```bash
-relay-knowledge [command] [command options] [--format text|json|markdown|streaming-json]
+relay-knowledge [command] [command options] [--remote <base-url>] [--format text|json|markdown|streaming-json]
 ```
+
+`--remote` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 会让支持的代码仓库索引、scope preview、status 和 query 命令访问常驻服务 HTTP API，而不是打开本机 runtime storage。远端模式不会执行 `repo index-worker`，索引任务由远端 `service run --web` 的有界 worker pool 消费。
 
 没有子命令时等同于 `status`。查看帮助:
 

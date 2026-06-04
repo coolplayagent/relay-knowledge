@@ -86,7 +86,7 @@ New backends must pass the same contract tests:
 
 ## 7. API Extension Contract
 
-Control-plane HTTP routes use `/api/*`, and same-origin Web operations continue to use `/api/web/operations/execute`. External control-plane APIs use `/api/v1/control/*` or an equivalent name. The current preview exposes only read-only status, health, service status, and storage topology diagnostics while keeping CLI JSON, Web, and MCP tool semantics compatible.
+Control-plane HTTP routes use `/api/*`, and same-origin Web operations continue to use `/api/web/operations/execute`. External control-plane APIs use `/api/v1/control/*` or an equivalent name. The current preview exposes only read-only status, health, service status, and storage topology diagnostics while keeping CLI JSON, Web, and MCP tool semantics compatible. Remote code-repository CLI commands use `/api/v1/code/repositories/{alias}/index`, `/scope/preview`, `/status`, and `/query`; these routes must reuse shared `api` request/response types and must not treat Web composer payloads as the external contract.
 
 API responses must include metadata, warnings/degraded state, freshness/truncation, stable error kind, and trace context. Long-running operations return only task handles, checkpoints, and queryable status; they must not synchronously run unbounded indexing, unbounded scans, large external-provider batches, or shard migration.
 

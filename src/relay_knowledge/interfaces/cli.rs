@@ -14,6 +14,8 @@ mod knowledge_cli;
 mod map_cli;
 #[path = "ops_cli.rs"]
 mod ops_cli;
+#[path = "remote_cli.rs"]
+mod remote_cli;
 #[path = "repo_cli.rs"]
 mod repo_cli;
 #[path = "repo_set_cli.rs"]
@@ -34,6 +36,7 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
+    env::EnvironmentConfig,
 };
 
 use cli_render::{render_project_status, render_response, serialize_line};
@@ -79,6 +82,7 @@ impl OutputFormat {
 pub struct CliCommand {
     pub action: CliAction,
     pub format: OutputFormat,
+    pub remote_base_url: Option<String>,
     pub help: bool,
 }
 
@@ -92,6 +96,7 @@ impl CliCommand {
         let tokens = args.into_iter().map(Into::into).collect::<Vec<_>>();
         let mut action_tokens = Vec::new();
         let mut format = OutputFormat::default();
+        let mut remote_base_url = None;
         let mut help = false;
         let mut version = false;
         let mut command_seen = false;
@@ -113,6 +118,20 @@ impl CliCommand {
                 index += 2;
             } else if let Some(value) = arg.strip_prefix("--format=") {
                 format = OutputFormat::parse(value)?;
+                index += 1;
+            } else if arg == "--remote" {
+                remote_base_url = Some(
+                    tokens
+                        .get(index + 1)
+                        .ok_or(CliError::MissingValue("--remote"))?
+                        .clone(),
+                );
+                index += 2;
+            } else if let Some(value) = arg.strip_prefix("--remote=") {
+                if value.trim().is_empty() {
+                    return Err(CliError::MissingValue("--remote"));
+                }
+                remote_base_url = Some(value.to_owned());
                 index += 1;
             } else if arg == "--help" || arg == "-h" {
                 help = true;
@@ -159,6 +178,7 @@ impl CliCommand {
         Ok(Self {
             action,
             format,
+            remote_base_url,
             help,
         })
     }
@@ -595,10 +615,35 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
         return map_cli::run_map(map_command, context, command.format).await;
     }
 
-    let service = RelayKnowledgeService::from_process_environment()
-        .await
+    let environment = EnvironmentConfig::from_process()
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
     let context = RequestContext::for_interface(InterfaceKind::Cli);
+    let remote_base_url = command
+        .remote_base_url
+        .clone()
+        .or_else(|| environment.remote_cli.base_url.clone());
+    if let Some(base_url) = remote_base_url {
+        return remote_cli::run_remote(
+            &environment.network,
+            &base_url,
+            &command.action,
+            context,
+            command.format,
+        )
+        .await
+        .and_then(|output| {
+            output.ok_or_else(|| {
+                CliError::ApiFailed(
+                    "remote CLI mode supports repo index, repo scope preview, repo status, and repo query; unset RELAY_KNOWLEDGE_REMOTE_BASE_URL to run this command locally"
+                        .to_owned(),
+                )
+            })
+        });
+    }
+
+    let service = RelayKnowledgeService::from_environment(&environment)
+        .await
+        .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
 
     run_with_service(&service, command, context).await
 }
@@ -869,6 +914,14 @@ mod cli_naming_tests;
 #[cfg(test)]
 #[path = "cli_tests.rs"]
 mod cli_tests;
+
+#[cfg(test)]
+#[path = "cli_parse_tests.rs"]
+mod cli_parse_tests;
+
+#[cfg(test)]
+#[path = "remote_cli_tests.rs"]
+mod remote_cli_tests;
 
 #[cfg(test)]
 #[path = "cli_map_tests.rs"]

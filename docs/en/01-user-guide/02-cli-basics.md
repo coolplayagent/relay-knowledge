@@ -6,11 +6,13 @@ This chapter explains shared CLI syntax, outputs, freshness, and parser diagnost
 
 ## 2.1 Command Structure
 
-The CLI uses git-style subcommands. Global `--format` can be placed before or after the command; command options are still parsed by the selected subcommand:
+The CLI uses git-style subcommands. Global `--format` and `--remote <base-url>` can be placed before or after the command; command options are still parsed by the selected subcommand:
 
 ```bash
-relay-knowledge [command] [command options] [--format text|json|markdown|streaming-json]
+relay-knowledge [command] [command options] [--remote <base-url>] [--format text|json|markdown|streaming-json]
 ```
+
+`--remote` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL` sends supported code repository index, scope preview, status, and query commands to the resident service HTTP API instead of opening local runtime storage. Remote mode does not run `repo index-worker`; index tasks are drained by the bounded worker pool in the remote `service run --web` process.
 
 Calling the binary without a subcommand is equivalent to `status`. Help examples:
 

@@ -948,7 +948,7 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
     }
 }
 
-fn selector(
+pub(super) fn selector(
     alias: String,
     ref_selector: impl Into<String>,
     path_filters: Vec<String>,

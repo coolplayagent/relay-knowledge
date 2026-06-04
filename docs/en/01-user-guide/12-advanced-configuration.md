@@ -18,12 +18,14 @@ Advanced configuration is grouped by purpose:
 
 | Layer | Purpose | Examples |
 | --- | --- | --- |
-| Basic | Daily CLI arguments | `--source`, `--limit`, `--freshness`, `--format` |
+| Basic | Daily CLI arguments | `--source`, `--limit`, `--freshness`, `--format`, `--remote` |
 | Advanced | Retrieval, network, QoS, MCP policy | embedding backend, request timeout, scope allow-list |
 | Deployment | Installation, service manager, remote access | systemd, Windows Service, launchd, service dir |
 | Diagnostic | CI, failure reproduction, temporary isolation | one-off home dir, browser test paths |
 
 ## 12.2 Runtime Directories
+
+Remote service access can be supplied once with `--remote http://host:8791`, or set in an automation profile as `RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://host:8791`. The variable affects only supported code repository index/status/query commands and does not change local runtime directory resolution.
 
 Prefer default directories. For isolated one-off experiments, set one root:
 

@@ -60,6 +60,14 @@ Full indexing reads ordinary blobs from a clean tree through Git or reads a file
 
 When the requested full scope is not already fresh, `repo index` queues a durable background task and returns JSON with `task.state=queued` plus the target scope metadata instead of blocking on the entire cold parse. The CLI starts a bounded single-shot `repo index-worker` for that task; non-interactive agents can also call `repo index-worker --task-id <id> --format json` explicitly when they need to drain a queued or retrying task without holding a foreground `service run` process open. `relay-knowledge service run` acts as the resident master: it recovers expired code-index leases during startup, emits a startup status line on stderr, and drains the same queue with a bounded code-index worker pool, defaulting to 2 workers and configurable with `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` up to the documented cap of 8. Distinct fingerprints queue, lease, and checkpoint independently; identical full-index fingerprints reuse the active task instead of starting duplicate rebuilds. `relay-knowledge service status --format json` reports `code_index_workers` with configured workers, active worker slots, queue depth, queued/running/retrying/dead-letter task counts, running leases, and last error. During cross-batch finalization, `checkpoint.state` reports concrete phases such as `finalizing:resolve_references`, `finalizing:rebuild_reference_search`, `finalizing:rebuild_calls`, and `finalizing:publish_scope`; queries become fresh only after the checkpoint reaches `completed`.
 
+In remote service mode, register the repository on the service host, start `service run --web`, and point the local CLI at the resident HTTP API with `--remote http://host:8791` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote `repo index` only submits a durable task and returns task/status/checkpoint data; it does not run `repo index-worker` in the local CLI process. The remote resident master drains the task through its code-index worker pool. Remote mode currently supports `repo index`, `repo scope preview`, `repo status`, and `repo query`; it does not register local paths into a remote service.
+
+```bash
+RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
+  relay-knowledge repo index repo --ref HEAD --format json
+relay-knowledge --remote http://127.0.0.1:8791 repo query repo --query retry_policy --kind definition --freshness wait-until-fresh --format json
+```
+
 Agent-oriented initialization should keep each command finite:
 
 ```bash

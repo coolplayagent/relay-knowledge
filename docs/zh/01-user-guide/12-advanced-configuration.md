@@ -18,12 +18,14 @@
 
 | 层级 | 用途 | 示例 |
 | --- | --- | --- |
-| Basic | 日常 CLI 参数 | `--source`、`--limit`、`--freshness`、`--format` |
+| Basic | 日常 CLI 参数 | `--source`、`--limit`、`--freshness`、`--format`、`--remote` |
 | Advanced | 检索、网络、QoS、MCP policy | embedding backend、request timeout、scope allow-list |
 | Deployment | 安装、service manager、远程访问 | systemd、Windows Service、launchd、service dir |
 | Diagnostic | CI、故障复现、临时隔离 | one-off home dir、browser test paths |
 
 ## 12.2 运行时目录
+
+远端服务访问可用一次性 `--remote http://host:8791`，或在 automation profile 中设置 `RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://host:8791`。该变量只影响支持的代码仓库 index/status/query 命令，不改变本地 runtime 目录解析。
 
 优先使用默认目录。需要隔离一次性实验时，只设置一个根目录:
 
