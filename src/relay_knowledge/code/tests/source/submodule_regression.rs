@@ -173,6 +173,150 @@ fn impact_submodule_update_without_cached_objects_keeps_gitlink_path() {
 }
 
 #[test]
+fn incremental_submodule_update_deletes_base_children_when_head_unavailable() {
+    let child = TempGitRepo::create("incremental-unavailable-child");
+    child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("incremental-unavailable-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+
+    child.write("lib.rs", "pub fn child_value() -> u32 { 2 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child update"]);
+    let missing_commit = child.git_text(["rev-parse", "HEAD"]);
+    stage_gitlink_commit(&parent, "src/module", &missing_commit);
+    parent.git(["commit", "-m", "advance submodule pointer"]);
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("incremental unavailable submodule update should build");
+
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/module/lib.rs".to_owned())
+    );
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("src/module/"))
+    );
+}
+
+#[test]
+fn worktree_overlay_deletes_base_children_for_unavailable_staged_gitlink() {
+    let child = TempGitRepo::create("overlay-unavailable-child");
+    child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("overlay-unavailable-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+
+    child.write("lib.rs", "pub fn child_value() -> u32 { 2 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child update"]);
+    let missing_commit = child.git_text(["rev-parse", "HEAD"]);
+    stage_gitlink_commit(&parent, "src/module", &missing_commit);
+    remove_submodule_checkout(&parent, "src/module");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        previous_hashes,
+    )
+    .expect("worktree overlay should tolerate unavailable staged gitlinks");
+
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/module/lib.rs".to_owned())
+    );
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("src/module/"))
+    );
+}
+
+#[test]
+fn configured_submodule_gitdir_must_contain_requested_commit() {
+    let old_child = TempGitRepo::create("named-gitdir-old-child");
+    old_child.write("old.rs", "pub fn old_child_value() -> u32 { 1 }\n");
+    old_child.git(["add", "."]);
+    old_child.git(["commit", "-m", "old child"]);
+    let new_child = TempGitRepo::create("named-gitdir-new-child");
+    new_child.write("new.rs", "pub fn new_child_value() -> u32 { 1 }\n");
+    new_child.git(["add", "."]);
+    new_child.git(["commit", "-m", "new child"]);
+
+    let parent = TempGitRepo::create("named-gitdir-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &old_child, "a_old", "src/module");
+    parent.git(["commit", "-am", "add old submodule"]);
+    parent.git(["rm", "-f", "src/module"]);
+    parent.git(["commit", "-m", "remove old submodule"]);
+    add_named_submodule(&parent, &new_child, "z_new", "src/module");
+    parent.git(["commit", "-am", "add new submodule"]);
+    parent.git(["config", "submodule.a_old.path", "src/module"]);
+    remove_submodule_checkout(&parent, "src/module");
+
+    let entries = tracked_entries(&parent.path, "HEAD")
+        .expect("tracked entries should select the gitdir containing the target commit");
+
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.path == "src/module/new.rs")
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.path != "src/module/old.rs")
+    );
+}
+
+#[test]
 fn config_submodule_name_cannot_escape_git_modules() {
     let child = TempGitRepo::create("malicious-name-child");
     child.write("lib.rs", "pub fn outside_child_value() -> u32 { 1 }\n");
@@ -284,6 +428,28 @@ fn add_submodule(parent: &TempGitRepo, child: &TempGitRepo, path: &str) {
     ]);
 }
 
+fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, path: &str) {
+    let child_path = child
+        .path
+        .to_str()
+        .expect("child path should be unicode")
+        .to_owned();
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--name",
+        name,
+        child_path.as_str(),
+        path,
+    ]);
+}
+
+fn stage_gitlink_commit(parent: &TempGitRepo, path: &str, commit: &str) {
+    parent.git(["update-index", "--cacheinfo", "160000", commit, path]);
+}
+
 fn commit_submodule_file(parent: &TempGitRepo, path: &str, file: &str, content: &str) {
     let submodule_path = parent.path.join(path);
     git_in(
@@ -296,15 +462,19 @@ fn commit_submodule_file(parent: &TempGitRepo, path: &str, file: &str, content: 
     git_in(&submodule_path, ["commit", "-m", "submodule update"]);
 }
 
+fn remove_submodule_checkout(parent: &TempGitRepo, path: &str) {
+    let worktree = parent.path.join(path);
+    if worktree.exists() {
+        fs::remove_dir_all(worktree).expect("submodule worktree should be removable");
+    }
+}
+
 fn remove_submodule_checkout_and_gitdir(parent: &TempGitRepo, path: &str) {
     let git_dir = parent.path.join(".git/modules").join(path);
     if git_dir.exists() {
         fs::remove_dir_all(git_dir).expect("submodule gitdir should be removable");
     }
-    let worktree = parent.path.join(path);
-    if worktree.exists() {
-        fs::remove_dir_all(worktree).expect("submodule worktree should be removable");
-    }
+    remove_submodule_checkout(parent, path);
 }
 
 fn git_clone_bare(source: &TempGitRepo, destination: &std::path::Path) {

@@ -15,7 +15,7 @@ use super::{
     source_gitlink_paths::bounded_expanded_paths_under_with_selector,
 };
 
-pub(super) use super::source_gitlink_paths::bounded_expanded_paths_under;
+pub(super) use super::source_gitlink_paths::{SubmodulePathEntry, bounded_expanded_paths_under};
 pub(super) use super::source_gitlink_selector::GitlinkPathSelector;
 
 const MAX_NESTED_GITLINK_DIFF_DEPTH: usize = 8;
@@ -201,10 +201,12 @@ pub(super) fn changed_gitlink_path_expansion(
             selector,
         )?
         else {
+            let base_paths =
+                bounded_submodule_parent_paths(root, path, base_gitlink, max_paths, selector)?;
             return Ok(Some(GitlinkPathExpansion {
                 base_is_gitlink: true,
                 head_is_gitlink: true,
-                base_paths: BTreeSet::new(),
+                base_paths,
                 head_paths: BTreeSet::new(),
             }));
         };
@@ -231,12 +233,6 @@ pub(super) fn changed_gitlink_path_expansion(
         base_paths,
         head_paths,
     }))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SubmodulePathEntry {
-    pub(super) parent_path: String,
-    pub(super) child_path: String,
 }
 
 pub(super) fn gitlink_commit_at_tree(
@@ -339,7 +335,8 @@ fn changed_submodule_paths_for_parent_commits(
         selector,
     )?
     else {
-        return Ok(Some(BTreeSet::new()));
+        return bounded_submodule_parent_paths(root, path, &base_gitlink, max_paths, selector)
+            .map(Some);
     };
 
     Ok(Some(
@@ -777,12 +774,14 @@ fn submodule_path_entries_for_expansion(
     }
 }
 
-fn submodule_expansion_is_unavailable(error: &CodeIndexError) -> bool {
-    matches!(
-        error,
-        CodeIndexError::InvalidInput(message)
-            if message.contains("submodule git dir") && message.contains("unavailable")
-    )
+pub(super) fn submodule_expansion_is_unavailable(error: &CodeIndexError) -> bool {
+    match error {
+        CodeIndexError::InvalidInput(message) => {
+            message.contains("submodule git dir") && message.contains("unavailable")
+        }
+        CodeIndexError::Git { args, .. } => args.iter().any(|arg| arg == "ls-tree"),
+        _ => false,
+    }
 }
 
 fn git_blob_bytes_with_submodules(

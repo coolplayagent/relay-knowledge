@@ -425,11 +425,15 @@ pub(super) fn submodule_git_dir(
     submodule_commit: Option<&str>,
 ) -> Result<PathBuf, CodeIndexError> {
     for name in submodule_names_for_path(root, path, parent_commit) {
-        if let Ok(git_dir) = submodule_git_dir_for_name(root, &name) {
+        if let Ok(git_dir) = submodule_git_dir_for_name(root, &name)
+            && submodule_git_dir_matches_commit(&git_dir, submodule_commit)
+        {
             return Ok(git_dir);
         }
     }
-    if let Ok(git_dir) = submodule_git_dir_for_name(root, path.trim_matches('/')) {
+    if let Ok(git_dir) = submodule_git_dir_for_name(root, path.trim_matches('/'))
+        && submodule_git_dir_matches_commit(&git_dir, submodule_commit)
+    {
         return Ok(git_dir);
     }
     if let Some(commit) = submodule_commit
@@ -450,12 +454,15 @@ pub(super) fn submodule_git_dir_from_git_dir(
     submodule_commit: Option<&str>,
 ) -> Result<PathBuf, CodeIndexError> {
     for name in submodule_names_for_path_from_git_dir(git_dir, path, parent_commit) {
-        if let Ok(submodule_git_dir) = submodule_git_dir_for_name_from_git_dir(git_dir, &name) {
+        if let Ok(submodule_git_dir) = submodule_git_dir_for_name_from_git_dir(git_dir, &name)
+            && submodule_git_dir_matches_commit(&submodule_git_dir, submodule_commit)
+        {
             return Ok(submodule_git_dir);
         }
     }
     if let Ok(submodule_git_dir) =
         submodule_git_dir_for_name_from_git_dir(git_dir, path.trim_matches('/'))
+        && submodule_git_dir_matches_commit(&submodule_git_dir, submodule_commit)
     {
         return Ok(submodule_git_dir);
     }
@@ -688,6 +695,10 @@ fn validate_submodule_name(name: &str) -> Result<(), CodeIndexError> {
     }
 
     Ok(())
+}
+
+fn submodule_git_dir_matches_commit(git_dir: &Path, commit: Option<&str>) -> bool {
+    commit.is_none_or(|commit| submodule_git_dir_has_commit(git_dir, commit))
 }
 
 fn scan_submodule_git_dirs_for_commit(

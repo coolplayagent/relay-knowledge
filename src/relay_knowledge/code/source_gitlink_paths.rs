@@ -2,6 +2,12 @@ use std::collections::BTreeSet;
 
 use super::{CodeIndexError, changes::GitTreeEntry, source_gitlink_selector::GitlinkPathSelector};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SubmodulePathEntry {
+    pub(super) parent_path: String,
+    pub(super) child_path: String,
+}
+
 pub(super) fn expanded_paths_under(entries: &[GitTreeEntry], path: &str) -> BTreeSet<String> {
     let prefix = format!("{}/", path.trim_end_matches('/'));
     entries

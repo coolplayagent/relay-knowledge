@@ -357,6 +357,10 @@ impl WorktreeOverlayRecorder<'_> {
         scope::path_is_selected(path, self.registration, self.selector)
     }
 
+    fn path_scope_overlaps(&self, path: &str) -> bool {
+        scope::path_scope_overlaps(path, self.registration, self.selector)
+    }
+
     fn record_deleted_path(&mut self, path: &str) {
         record_worktree_deleted_path(path, self.overlay_hash_input, self.deleted_paths);
     }
@@ -437,6 +441,7 @@ fn record_gitlink_commit_overlay(
         recorder.registration,
         recorder.selector,
     )?;
+    let staged_entries_are_empty = staged_entries.is_empty();
     if let Some(base_gitlink_commit) = base_gitlink {
         let staged_paths = staged_entries
             .iter()
@@ -453,6 +458,9 @@ fn record_gitlink_commit_overlay(
         recorder.record_deleted_path(path);
     }
 
+    if staged_entries_are_empty && recorder.path_scope_overlaps(path) {
+        record_worktree_status_marker(path, recorder.overlay_hash_input);
+    }
     for entry in staged_entries {
         recorder.record_gitlink_file(root, path, gitlink_commit, &entry)?;
     }
@@ -603,12 +611,16 @@ fn bounded_submodule_path_entries(
     selector: &CodeRepositorySelector,
 ) -> Result<Vec<source_gitlink::SubmodulePathEntry>, CodeIndexError> {
     let child_filters = submodule_child_scope_filters(path, registration, selector);
-    let entries = source_gitlink::submodule_path_entries_with_child_filters(
+    let entries = match source_gitlink::submodule_path_entries_with_child_filters(
         root,
         path,
         commit,
         &child_filters,
-    )?;
+    ) {
+        Ok(entries) => entries,
+        Err(error) if source_gitlink::submodule_expansion_is_unavailable(&error) => Vec::new(),
+        Err(error) => return Err(error),
+    };
     let selected_entries = entries
         .into_iter()
         .filter(|entry| scope::path_is_selected(&entry.parent_path, registration, selector))
