@@ -224,6 +224,30 @@ class Worker {
     );
 }
 
+#[test]
+fn csharp_target_typed_new_does_not_index_argument_as_callee() {
+    let snapshot = parse_snapshot(
+        "src/app/Worker.cs",
+        br#"
+class Foo {
+    public Foo(object value) {}
+}
+
+class Worker {
+    Foo Create(object bar) {
+        Foo inferred = new(bar);
+        return new Foo(bar);
+    }
+}
+"#,
+    );
+
+    assert!(
+        !snapshot.calls.iter().any(|call| call.callee_name == "bar"),
+        "target-typed object creation must not fall back to argument identifiers"
+    );
+}
+
 fn parse_snapshot(path: &str, source: &[u8]) -> crate::domain::CodeIndexSnapshot {
     let mut build = snapshot_build();
     parse_indexed_file(&mut build, path, source).expect("file should parse");

@@ -199,6 +199,84 @@ async fn callers_merge_indirect_bindings_when_direct_calls_exist() {
 }
 
 #[tokio::test]
+async fn callers_preserve_cross_file_indirect_bindings_with_receiver_context() {
+    let binding_path = "src/ops.c";
+    let caller_path = "src/driver.c";
+
+    let mut caller_symbol = symbol("driver-read-symbol", "driver-file", caller_path, "rk_read");
+    caller_symbol.line_range = range(30, 34);
+    caller_symbol.signature = "int rk_read(struct rk_driver_ops *ops)".to_owned();
+
+    let mut indirect_call = call("driver-read-call", "driver-file", caller_path);
+    indirect_call.caller_symbol_snapshot_id = Some("driver-read-symbol".to_owned());
+    indirect_call.caller_name = Some("rk_read".to_owned());
+    indirect_call.callee_name = "read".to_owned();
+    indirect_call.line_range = range(32, 32);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("ops-file", binding_path, "c"),
+            file("driver-file", caller_path, "c"),
+        ],
+        symbols: vec![caller_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![indirect_call],
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "ops-init-chunk",
+                "ops-file",
+                binding_path,
+                "static const struct rk_driver_ops rk_driver_ops = {\n\
+    .read = rk_driver_read,\n\
+};",
+                None,
+                range(10, 14),
+            ),
+            chunk(
+                "driver-read-chunk",
+                "driver-file",
+                caller_path,
+                "int rk_read(struct rk_driver_ops *ops)\n\
+{\n\
+    return ops->read(ops);\n\
+}",
+                Some("driver-read-symbol"),
+                range(30, 34),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_driver_read", CodeQueryKind::Callers))
+        .await
+        .expect("cross-file indirect caller query should succeed");
+
+    assert!(
+        hits.iter().any(|hit| {
+            hit.path == caller_path && hit.edge_target_hint.as_deref() == Some("rk_driver_read")
+        }),
+        "{hits:?}"
+    );
+}
+
+#[tokio::test]
 async fn indirect_callers_ignore_same_field_calls_in_other_files() {
     let binding_path = "src/generated_table.c";
     let unrelated_path = "src/unrelated_device.c";

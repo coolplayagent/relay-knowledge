@@ -187,6 +187,8 @@ fn search_callee_implementation_candidates(
         .join(", ");
     let candidate_scope_predicate =
         callee_candidate_scope_predicate(&exact_paths, &path_prefixes, &target_hint_term_sets);
+    let target_hint_order_expression =
+        callee_candidate_target_hint_order_expression(&target_hint_term_sets);
     let sql = format!(
         "
         SELECT s.file_id, s.path, s.language_id, s.symbol_snapshot_id,
@@ -210,7 +212,7 @@ fn search_callee_implementation_candidates(
           AND s.language_id IN ({language_placeholders})
           AND ({candidate_scope_predicate})
           AND s.kind IN ('function', 'method')
-        ORDER BY s.path ASC, s.line_start ASC
+        ORDER BY {target_hint_order_expression} ASC, s.path ASC, s.line_start ASC
         LIMIT ?
         "
     );
@@ -219,13 +221,8 @@ fn search_callee_implementation_candidates(
     values.extend(language_ids.into_iter().map(Value::Text));
     values.extend(exact_paths.into_iter().map(Value::Text));
     values.extend(path_prefixes.into_iter().map(Value::Text));
-    for term_set in target_hint_term_sets {
-        values.extend(
-            term_set
-                .into_iter()
-                .map(|term| Value::Text(format!("%{}%", escape_sql_like(&term)))),
-        );
-    }
+    push_target_hint_term_values(&mut values, &target_hint_term_sets);
+    push_target_hint_term_values(&mut values, &target_hint_term_sets);
     values.push(Value::Integer(limit as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
@@ -341,21 +338,47 @@ fn callee_candidate_scope_predicate(
         ));
     }
     for term_set in target_hint_term_sets {
-        predicates.push(format!(
-            "({})",
-            std::iter::repeat_n(
-                "lower(coalesce(s.canonical_symbol_id, '') || ' ' || coalesce(s.signature, '') || ' ' || s.path) LIKE ? ESCAPE '\\'",
-                term_set.len(),
-            )
-            .collect::<Vec<_>>()
-            .join(" AND ")
-        ));
+        predicates.push(callee_candidate_target_hint_match_predicate(term_set));
     }
 
     if predicates.is_empty() {
         "0 = 1".to_owned()
     } else {
         predicates.join(" OR ")
+    }
+}
+
+fn callee_candidate_target_hint_order_expression(target_hint_term_sets: &[Vec<String>]) -> String {
+    let predicates = target_hint_term_sets
+        .iter()
+        .map(|term_set| callee_candidate_target_hint_match_predicate(term_set))
+        .collect::<Vec<_>>();
+    if predicates.is_empty() {
+        "1".to_owned()
+    } else {
+        format!("CASE WHEN ({}) THEN 0 ELSE 1 END", predicates.join(" OR "))
+    }
+}
+
+fn callee_candidate_target_hint_match_predicate(term_set: &[String]) -> String {
+    format!(
+        "({})",
+        std::iter::repeat_n(
+            "lower(coalesce(s.canonical_symbol_id, '') || ' ' || coalesce(s.signature, '') || ' ' || s.path) LIKE ? ESCAPE '\\'",
+            term_set.len(),
+        )
+        .collect::<Vec<_>>()
+        .join(" AND ")
+    )
+}
+
+fn push_target_hint_term_values(values: &mut Vec<Value>, target_hint_term_sets: &[Vec<String>]) {
+    for term_set in target_hint_term_sets {
+        values.extend(
+            term_set
+                .iter()
+                .map(|term| Value::Text(format!("%{}%", escape_sql_like(term)))),
+        );
     }
 }
 
@@ -742,6 +765,20 @@ mod tests {
         assert!(!target_hint_terms[0].contains(&"handle".to_owned()));
         assert!(predicate.contains("canonical_symbol_id"), "{predicate}");
         assert!(predicate.contains("s.path IN (?)"), "{predicate}");
+    }
+
+    #[test]
+    fn ambiguous_callee_order_prioritizes_target_hint_identity_terms() {
+        let context = context(
+            "src/main/java/example/ServiceFactory.java",
+            Some("com.acme.worker.AnnotatedService.handle"),
+        );
+        let target_hint_terms = ambiguous_context_target_hint_term_sets(&[context]);
+        let expression = callee_candidate_target_hint_order_expression(&target_hint_terms);
+
+        assert!(expression.starts_with("CASE WHEN"), "{expression}");
+        assert!(expression.contains("canonical_symbol_id"), "{expression}");
+        assert!(expression.contains("THEN 0 ELSE 1"), "{expression}");
     }
 
     #[test]

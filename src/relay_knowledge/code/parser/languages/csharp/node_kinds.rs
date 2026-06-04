@@ -12,7 +12,6 @@ pub(in crate::code::parser) fn is_call_node(node_kind: &str) -> bool {
     matches!(
         node_kind,
         "call_expression"
-            | "implicit_object_creation_expression"
             | "invocation_expression"
             | "new_expression"
             | "object_creation_expression"

@@ -21,6 +21,7 @@ struct IndirectCallBinding {
     field_name: String,
     target_name: String,
     binding_path: String,
+    context_terms: Vec<String>,
 }
 
 struct IndirectCallBindings {
@@ -149,10 +150,13 @@ fn search_indirect_call_bindings(
     let mut bindings: Vec<IndirectCallBinding> = Vec::new();
     for (path, excerpt) in rows {
         for field_name in indirect_call_binding_fields(&excerpt, target_name) {
+            let context_terms =
+                indirect_call_binding_context_terms(&excerpt, &field_name, target_name);
             let binding = IndirectCallBinding {
                 field_name,
                 target_name: target_name.to_owned(),
                 binding_path: path.clone(),
+                context_terms,
             };
             if !bindings.iter().any(|existing| {
                 existing.field_name == binding.field_name
@@ -176,7 +180,8 @@ fn best_indirect_call_binding<'a>(
     bindings.iter().find(|binding| {
         binding.field_name == row.callee_name
             && (binding.binding_path == row.path
-                || row_has_indirect_target_evidence(row, &binding.target_name))
+                || row_has_indirect_target_evidence(row, &binding.target_name)
+                || row_has_indirect_binding_context(row, binding))
     })
 }
 
@@ -191,6 +196,19 @@ fn row_has_indirect_target_evidence(row: &CallRow, target_name: &str) -> bool {
         .into_iter()
         .flatten()
         .any(|field| line_contains_identifier(field, target_name))
+}
+
+fn row_has_indirect_binding_context(row: &CallRow, binding: &IndirectCallBinding) -> bool {
+    if binding.context_terms.is_empty() {
+        return false;
+    }
+    let row_terms = indirect_call_row_context_terms(row, &binding.field_name);
+    row_terms.iter().any(|row_term| {
+        binding
+            .context_terms
+            .iter()
+            .any(|binding_term| binding_term == row_term)
+    })
 }
 
 fn indirect_call_binding_fields(excerpt: &str, target_name: &str) -> Vec<String> {
@@ -209,14 +227,100 @@ fn indirect_call_binding_fields(excerpt: &str, target_name: &str) -> Vec<String>
     fields
 }
 
+fn indirect_call_binding_context_terms(
+    excerpt: &str,
+    field_name: &str,
+    target_name: &str,
+) -> Vec<String> {
+    let mut terms = Vec::new();
+    if excerpt
+        .lines()
+        .any(|line| line_contains_identifier(line, target_name))
+    {
+        push_indirect_context_terms(excerpt, &mut terms);
+    }
+    prune_indirect_context_terms(&mut terms, field_name, target_name);
+    terms
+}
+
+fn indirect_call_row_context_terms(row: &CallRow, field_name: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for value in [
+        row.caller_name.as_deref(),
+        row.caller_canonical_symbol_id.as_deref(),
+        row.caller_signature.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        push_indirect_context_terms(value, &mut terms);
+    }
+    if let Some(excerpt) = row.caller_excerpt.as_deref() {
+        for line in excerpt.lines() {
+            push_indirect_receiver_context_terms(line, field_name, &mut terms);
+        }
+    }
+    prune_indirect_context_terms(&mut terms, field_name, "");
+    terms
+}
+
+fn push_indirect_receiver_context_terms(line: &str, field_name: &str, terms: &mut Vec<String>) {
+    for operator in [format!("->{field_name}"), format!(".{field_name}")] {
+        for (index, _) in line.match_indices(&operator) {
+            if let Some(surface) = trailing_receiver_surface(&line[..index]) {
+                push_indirect_context_terms(surface, terms);
+            }
+        }
+    }
+}
+
+fn trailing_receiver_surface(value: &str) -> Option<&str> {
+    let value = value.trim_end();
+    if value.is_empty() {
+        return None;
+    }
+    let start = value
+        .char_indices()
+        .rev()
+        .find(|(_, character)| {
+            character.is_whitespace() || matches!(character, '(' | ',' | ';' | '=' | '{')
+        })
+        .map_or(0, |(index, character)| index + character.len_utf8());
+    value
+        .get(start..)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
 fn field_name_before_bound_target(line: &str, target_name: &str) -> Option<String> {
     let target_start = identifier_start(line, target_name)?;
     let before_target = line.get(..target_start)?;
-    let assignment_start = before_target
-        .rfind('=')
-        .or_else(|| before_target.rfind(':'))?;
+    let assignment_start = binding_assignment_start(before_target)?;
     let left = before_target.get(..assignment_start)?.trim_end();
+    if left.contains('(') || left.contains(')') {
+        return None;
+    }
     field_name_from_member_surface(left).filter(|field_name| field_name != target_name)
+}
+
+fn binding_assignment_start(value: &str) -> Option<usize> {
+    value.char_indices().rev().find_map(|(index, character)| {
+        if character == ':' {
+            return Some(index);
+        }
+        if character != '=' {
+            return None;
+        }
+        let previous = value.get(..index)?.chars().next_back();
+        let next = value.get(index + character.len_utf8()..)?.chars().next();
+        if previous.is_some_and(|character| matches!(character, '=' | '!' | '<' | '>'))
+            || next.is_some_and(|character| matches!(character, '=' | '>'))
+        {
+            None
+        } else {
+            Some(index)
+        }
+    })
 }
 
 fn field_name_from_member_surface(value: &str) -> Option<String> {
@@ -242,6 +346,66 @@ fn leading_identifier(value: &str) -> Option<String> {
         end = index + character.len_utf8();
     }
     (end > 0).then(|| value[..end].to_owned())
+}
+
+fn push_indirect_context_terms(value: &str, terms: &mut Vec<String>) {
+    let mut token = String::new();
+    for character in value.chars() {
+        if identifier_character(character) {
+            token.push(character);
+        } else {
+            push_indirect_context_token(&token, terms);
+            token.clear();
+        }
+    }
+    push_indirect_context_token(&token, terms);
+}
+
+fn push_indirect_context_token(token: &str, terms: &mut Vec<String>) {
+    if token.is_empty() {
+        return;
+    }
+    let normalized = token.to_ascii_lowercase();
+    push_indirect_context_term(&normalized, terms);
+    for part in normalized.split('_') {
+        push_indirect_context_term(part, terms);
+    }
+}
+
+fn push_indirect_context_term(term: &str, terms: &mut Vec<String>) {
+    if term.len() >= 3
+        && !indirect_context_noise_term(term)
+        && !terms.iter().any(|existing| existing == term)
+    {
+        terms.push(term.to_owned());
+    }
+}
+
+fn prune_indirect_context_terms(terms: &mut Vec<String>, field_name: &str, target_name: &str) {
+    let field_name = field_name.to_ascii_lowercase();
+    let target_name = target_name.to_ascii_lowercase();
+    terms.retain(|term| {
+        term != &field_name
+            && (target_name.is_empty() || term != &target_name)
+            && !indirect_context_noise_term(term)
+    });
+}
+
+fn indirect_context_noise_term(term: &str) -> bool {
+    matches!(
+        term,
+        "char"
+            | "const"
+            | "int"
+            | "return"
+            | "self"
+            | "size"
+            | "size_t"
+            | "static"
+            | "struct"
+            | "this"
+            | "void"
+    )
 }
 
 fn line_contains_identifier(line: &str, identifier: &str) -> bool {
@@ -278,4 +442,29 @@ fn placeholders(count: usize) -> String {
     std::iter::repeat_n("?", count)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::indirect_call_binding_fields;
+
+    #[test]
+    fn indirect_binding_fields_accept_member_assignments() {
+        let fields = indirect_call_binding_fields(
+            "static const struct ops table = {\n    .read = rk_driver_read,\n};",
+            "rk_driver_read",
+        );
+
+        assert_eq!(fields, vec!["read".to_owned()]);
+    }
+
+    #[test]
+    fn indirect_binding_fields_ignore_function_call_wrappers() {
+        let fields = indirect_call_binding_fields(
+            "return yield* Effect.promise(() => generateObject(params).then((r) => r.object))",
+            "generateObject",
+        );
+
+        assert!(fields.is_empty(), "{fields:?}");
+    }
 }
