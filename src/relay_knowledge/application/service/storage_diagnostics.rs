@@ -4,6 +4,7 @@ use crate::{
         StorageTopologyResponse,
     },
     application::service::{RelayKnowledgeService, storage_api_error},
+    domain::GraphVersion,
     storage::StorageTopologySnapshot,
 };
 
@@ -23,11 +24,13 @@ impl RelayKnowledgeService {
         &self,
         context: RequestContext,
     ) -> Result<StorageTopologyResponse, ApiError> {
-        let store = self.storage.get().await.map_err(storage_api_error)?;
-        let graph_version = store
-            .current_graph_version()
-            .await
-            .map_err(storage_api_error)?;
+        let graph_version = match self.storage.ready_store() {
+            Some(store) => store
+                .current_graph_version()
+                .await
+                .map_err(storage_api_error)?,
+            None => GraphVersion::ZERO,
+        };
 
         Ok(StorageTopologyResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),

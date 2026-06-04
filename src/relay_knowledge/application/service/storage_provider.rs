@@ -71,6 +71,10 @@ impl StorageProvider {
         .await?
     }
 
+    pub(in crate::application) fn ready_store(&self) -> Option<Arc<dyn KnowledgeStore>> {
+        self.ready.get().map(Arc::clone)
+    }
+
     pub(in crate::application) async fn topology_snapshot(
         &self,
     ) -> Result<StorageTopologySnapshot, StorageError> {
@@ -80,11 +84,13 @@ impl StorageProvider {
         match config.topology {
             StorageTopology::SingleSqlite => Ok(StorageTopologySnapshot::default()),
             StorageTopology::PartitionedSqlite => {
-                let store = tokio::task::spawn_blocking(move || {
-                    PartitionedSqliteKnowledgeStore::open(config.database_path, config.paths)
+                tokio::task::spawn_blocking(move || {
+                    PartitionedSqliteKnowledgeStore::topology_snapshot_from_catalog(
+                        config.database_path,
+                        &config.paths,
+                    )
                 })
-                .await??;
-                store.topology_snapshot().await
+                .await?
             }
         }
     }

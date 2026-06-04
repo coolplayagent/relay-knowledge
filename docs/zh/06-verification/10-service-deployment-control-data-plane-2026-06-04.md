@@ -2,7 +2,7 @@
 
 [中文](../../zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md) | [English](../../en/06-verification/10-service-deployment-control-data-plane-2026-06-04.md)
 
-> 文档版本: 1.2
+> 文档版本: 1.3
 > 编制日期: 2026-06-04
 > 范围: GitHub issue #250、第三卷第 22 章、相关架构章节、常驻服务用户指南、README 和本次文档同步记录。
 
@@ -13,6 +13,7 @@
 - 同步存储、统一 API、后台服务、安装升级、常驻服务和顶层 README，明确控制面 API、数据面 shard、split worker lease、备份/迁移/卸载边界。
 - 后续实现补齐 `service status`/`health` 的 storage topology diagnostics、只读 `/api/v1/control/*` preview route、`service plan` runtime state path/warning、以及 `service worker run [--task-id <id>]` split-worker preview CLI。
 - Codex review 后补强控制面实现：缺失 partitioned shard 时 `health` 返回降级诊断而不是 API 错误；`health` 的 storage topology 查询纳入同一个超时预算；`/api/v1/control/service/status` 使用只读状态路径，不触发 index refresh 入队。
+- Codex 复审后继续补强只读控制面：`/api/v1/control/status` 不再打开 graph storage；`/api/v1/control/storage/topology` 在冷 partitioned runtime 上直接只读 catalog 并返回 graph-zero metadata；只读 service status 不恢复 code-index lease。
 
 ## 2. 来源核验
 
@@ -37,6 +38,8 @@ rg -n "split_worker_preview|resident_partitioned_sqlite|控制面|data plane" do
 rg -n "/api/v1/control|service worker run|runtime_state_paths|missing_shard_count" src docs/zh docs/en
 cargo test --all-targets --all-features service_status_reports_partitioned_storage_diagnostics -- --nocapture
 cargo test --all-targets --all-features control_service_status_does_not_queue_index_refresh_work -- --nocapture
+cargo test --all-targets --all-features read_only_service_status_does_not_recover_expired_code_index_leases -- --nocapture
+cargo test --all-targets --all-features cold_control_status_and_topology_do_not_open_partitioned_storage -- --nocapture
 wc -l docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/en/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md \

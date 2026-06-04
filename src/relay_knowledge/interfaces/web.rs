@@ -58,7 +58,7 @@ fn router_with_assets(
         .route("/api/project/status", get(project_status))
         .route("/api/health", get(health))
         .route("/api/service/status", get(service_status))
-        .route("/api/v1/control/status", get(project_status))
+        .route("/api/v1/control/status", get(control_status))
         .route("/api/v1/control/health", get(health))
         .route(
             "/api/v1/control/service/status",
@@ -83,6 +83,14 @@ async fn project_status(State(state): State<WebState>) -> Response {
         Ok(response) => Json(response).into_response(),
         Err(error) => api_error_response(error),
     }
+}
+
+async fn control_status(State(state): State<WebState>) -> Response {
+    let (response, _) = state
+        .service
+        .runtime_diagnostics(RequestContext::for_interface(InterfaceKind::Web));
+
+    Json(response).into_response()
 }
 
 async fn health(State(state): State<WebState>) -> Response {

@@ -745,7 +745,12 @@ impl RelayKnowledgeService {
             store.worker_statuses().await.map_err(storage_api_error)?,
             &self.runtime.workers,
         );
-        let code_index_workers = self.code_index_worker_status(&store).await?;
+        let code_index_workers = match refresh_mode {
+            ServiceStatusRefreshMode::Reconcile => self.code_index_worker_status(&store).await?,
+            ServiceStatusRefreshMode::Observe => {
+                self.read_only_code_index_worker_status(&store).await?
+            }
+        };
         let proposal_backlog = store
             .list_proposals(ProposalListRequest {
                 state: Some(ProposalState::Proposed),

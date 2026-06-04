@@ -290,6 +290,51 @@ async fn service_status_recovers_expired_code_index_leases_before_diagnostics() 
 }
 
 #[tokio::test]
+async fn read_only_service_status_does_not_recover_expired_code_index_leases() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let expired = store
+        .queue_code_index_task(code_index_seed("fp-readonly", "scope-readonly", 10))
+        .await
+        .expect("expired task should queue");
+    store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(expired.task_id),
+            lease_owner: "worker-expired-readonly".to_owned(),
+            lease_duration_ms: 1,
+            max_attempts: 3,
+            now_ms: 20,
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should claim");
+    let service = RelayKnowledgeService::with_store(
+        runtime().await,
+        store.clone() as Arc<dyn KnowledgeStore>,
+    );
+
+    let status = service
+        .read_only_service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-readonly-code-index-workers",
+            "trace-readonly-code-index-workers",
+        ))
+        .await
+        .expect("read-only service status should load");
+
+    assert_eq!(status.code_index_workers.running_task_count, 1);
+    assert_eq!(status.code_index_workers.running_lease_count, 1);
+    assert_eq!(status.code_index_workers.retrying_task_count, 0);
+    assert_eq!(status.code_index_workers.queue_depth, 0);
+}
+
+#[tokio::test]
 async fn service_status_recovers_orphaned_code_index_leases_before_diagnostics() {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
     store

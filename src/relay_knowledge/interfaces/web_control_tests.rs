@@ -52,6 +52,27 @@ async fn control_service_status_does_not_queue_index_refresh_work() {
     );
 }
 
+#[tokio::test]
+async fn cold_control_status_and_topology_do_not_open_partitioned_storage() {
+    let environment = partitioned_control_test_environment("cold-control-status");
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+    let database_path = runtime.paths.database_file();
+    let router = router(
+        RelayKnowledgeService::new(runtime),
+        crate::net::http::DEFAULT_MAX_BODY_BYTES,
+    );
+
+    let status = get_json(router.clone(), "/api/v1/control/status").await;
+    let topology = get_json(router, "/api/v1/control/storage/topology").await;
+
+    assert_eq!(status["metadata"]["graph_version"], 0);
+    assert_eq!(topology["metadata"]["graph_version"], 0);
+    assert_eq!(topology["storage"]["topology"], "partitioned_sqlite");
+    assert!(!database_path.exists());
+}
+
 fn control_test_environment(label: &str) -> EnvironmentConfig {
     let home = unique_temp_dir(label);
     EnvironmentConfig::from_pairs(
@@ -62,6 +83,22 @@ fn control_test_environment(label: &str) -> EnvironmentConfig {
                 "RELAY_KNOWLEDGE_HOME",
                 home.as_path().to_str().expect("home path should be utf8"),
             ),
+        ],
+    )
+    .expect("environment should parse")
+}
+
+fn partitioned_control_test_environment(label: &str) -> EnvironmentConfig {
+    let home = unique_temp_dir(label);
+    EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/tmp"),
+            (
+                "RELAY_KNOWLEDGE_HOME",
+                home.as_path().to_str().expect("home path should be utf8"),
+            ),
+            ("RELAY_KNOWLEDGE_STORAGE_TOPOLOGY", "partitioned_sqlite"),
         ],
     )
     .expect("environment should parse")

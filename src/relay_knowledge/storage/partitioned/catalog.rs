@@ -5,7 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
     domain::CodeRepositoryStatus,
@@ -434,7 +434,7 @@ pub(super) fn catalog_topology_snapshot(
     if !control_path.exists() {
         return Ok(StorageTopologySnapshot::default());
     }
-    let connection = open_catalog_connection(control_path)?;
+    let connection = open_catalog_readonly_connection(control_path)?;
     let has_catalog = connection
         .query_row(
             "
@@ -505,6 +505,12 @@ fn remove_catalog_repository(control_path: &Path, repository_id: &str) -> Result
 
 fn open_catalog_connection(control_path: &Path) -> Result<Connection, StorageError> {
     let connection = Connection::open(control_path)?;
+    configure_connection(&connection)?;
+    Ok(connection)
+}
+
+fn open_catalog_readonly_connection(control_path: &Path) -> Result<Connection, StorageError> {
+    let connection = Connection::open_with_flags(control_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     configure_connection(&connection)?;
     Ok(connection)
 }
