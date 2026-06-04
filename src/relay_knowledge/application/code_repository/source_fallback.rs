@@ -11,11 +11,18 @@ use crate::{
     },
 };
 
+use super::source_fallback_surface::{
+    exact_path_hybrid_source_line_score, hit_allows_source_refresh, hit_source_line_is_better,
+    hybrid_exact_path_source_fallback, hybrid_source_surface_fallback,
+    source_type_declaration_line_matches_query,
+};
 use super::source_surface::hit_has_complete_source_surface;
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
 const MAX_IMPORT_SOURCE_CANDIDATE_PATHS: usize = 32;
 const DYNAMIC_IMPORT_SOURCE_FALLBACK_BONUS: f64 = 1.1;
+const HYBRID_EXACT_TYPE_DECLARATION_BONUS: f64 = 6.0;
+const REFERENCE_DECLARATION_INTENT_BONUS: f64 = 2.2;
 const REFERENCE_SOURCE_DECLARATION_PENALTY: f64 = -1.9;
 
 pub(super) struct CodeGrepFallbackPlan {
@@ -74,6 +81,9 @@ pub(super) fn plan_code_grep_fallback(
                     hit.retrieval_layers
                         .contains(&CodeRetrievalLayer::Definition)
                 })
+                && results
+                    .iter()
+                    .any(|hit| hit_has_complete_source_surface(hit, &identity))
             {
                 return None;
             }
@@ -91,7 +101,7 @@ pub(super) fn plan_code_grep_fallback(
             })
         }
         CodeQueryKind::References => {
-            let identity = source_grep_identity(&request.query)?;
+            let identity = reference_grep_query(&request.query)?;
             if results.iter().any(|hit| {
                 hit.retrieval_layers
                     .contains(&CodeRetrievalLayer::Reference)
@@ -138,6 +148,19 @@ pub(super) fn plan_code_grep_fallback(
             })
         }
         CodeQueryKind::Hybrid => {
+            if let Some((query, paths)) = hybrid_exact_path_source_fallback(request, results) {
+                return Some(CodeGrepFallbackPlan {
+                    commit,
+                    query,
+                    paths,
+                    path_filters,
+                    language_filters,
+                    limit: request.limit,
+                    kind: SourceGrepKind::Hybrid,
+                    identity: None,
+                    needs_scope_paths: false,
+                });
+            }
             if let Some((identity, paths)) = hybrid_source_surface_fallback(request, results) {
                 return Some(CodeGrepFallbackPlan {
                     commit,
@@ -194,7 +217,8 @@ pub(super) fn append_code_grep_fallback(
     let base_fallback_score = grep_score(plan.kind, score_bounds);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
-        let fallback_score = source_grep_match_score(request, plan, &matched, base_fallback_score);
+        let fallback_score =
+            source_grep_match_score(request, plan, &matched, score_bounds, base_fallback_score);
         if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == matched.path
                 && hit.line_range.start == matched.line_range.start
@@ -204,11 +228,33 @@ pub(super) fn append_code_grep_fallback(
             add_code_grep_layers(existing, plan.kind);
             if plan.kind == SourceGrepKind::Hybrid
                 && hit_allows_source_refresh(existing)
-                && hit_source_line_is_better(existing, &matched)
+                && hit_source_line_is_better(existing, &matched, &plan.query)
             {
                 existing.excerpt = matched.excerpt.clone();
             }
             existing.score = existing.score.max(fallback_score);
+            continue;
+        }
+        let mut should_push_nested_match = true;
+        if plan.kind == SourceGrepKind::Hybrid
+            && let Some(existing) = results.iter_mut().find(|hit| {
+                hit.path == matched.path
+                    && hit_allows_source_refresh(hit)
+                    && matched.line_range.start >= hit.line_range.start
+                    && matched.line_range.end <= hit.line_range.end
+            })
+        {
+            add_code_grep_layers(existing, plan.kind);
+            if hit_source_line_is_better(existing, &matched, &plan.query) {
+                existing.excerpt = matched.excerpt.clone();
+                should_push_nested_match = false;
+            }
+            existing.score = existing.score.max(fallback_score);
+            if matched.line_range.start == existing.line_range.start {
+                should_push_nested_match = false;
+            }
+        }
+        if !should_push_nested_match {
             continue;
         }
         let path_metadata = metadata.get(&matched.path);
@@ -414,11 +460,29 @@ fn source_grep_match_score(
     request: &CodeRetrievalRequest,
     plan: &CodeGrepFallbackPlan,
     matched: &SourceGrepMatch,
+    score_bounds: ScoreBounds,
     base_score: f64,
 ) -> f64 {
+    if plan.kind == SourceGrepKind::Hybrid
+        && plan.paths.iter().any(|path| exact_file_filter(path))
+        && source_type_declaration_line_matches_query(&matched.excerpt, &request.query)
+    {
+        return score_bounds.best.unwrap_or(base_score) + HYBRID_EXACT_TYPE_DECLARATION_BONUS;
+    }
+    if plan.kind == SourceGrepKind::Hybrid {
+        if let Some(score) = exact_path_hybrid_source_line_score(
+            request,
+            plan.paths.as_slice(),
+            matched,
+            score_bounds.lowest,
+        ) {
+            return score;
+        }
+    }
+
     let adjustment = match plan.kind {
         SourceGrepKind::References => {
-            reference_source_grep_score_adjustment(&plan.query, &matched.excerpt)
+            reference_source_grep_score_adjustment(&request.query, &plan.query, &matched.excerpt)
         }
         SourceGrepKind::Imports => {
             import_source_grep_score_adjustment(&request.query, &plan.query, &matched.excerpt)
@@ -466,22 +530,7 @@ fn source_line_starts_with_comment(line: &str) -> bool {
         .any(|prefix| line.starts_with(prefix))
 }
 
-fn hit_source_line_is_better(hit: &CodeRetrievalHit, matched: &SourceGrepMatch) -> bool {
-    matched.excerpt.len() > hit.excerpt.len()
-        || (matched.excerpt.contains("export ") && !hit.excerpt.contains("export "))
-}
-
-fn hit_allows_source_refresh(hit: &CodeRetrievalHit) -> bool {
-    hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
-        || hit
-            .retrieval_layers
-            .contains(&CodeRetrievalLayer::Definition)
-        || hit
-            .retrieval_layers
-            .contains(&CodeRetrievalLayer::CallGraph)
-}
-
-fn reference_source_grep_score_adjustment(identity: &str, excerpt: &str) -> f64 {
+fn reference_source_grep_score_adjustment(query: &str, identity: &str, excerpt: &str) -> f64 {
     if !simple_source_identifier(identity) {
         return 0.0;
     }
@@ -491,10 +540,20 @@ fn reference_source_grep_score_adjustment(identity: &str, excerpt: &str) -> f64 
     }
 
     if source_reference_line_declares_identity(line, identity) {
-        REFERENCE_SOURCE_DECLARATION_PENALTY
+        if reference_query_has_declaration_intent(query) {
+            REFERENCE_DECLARATION_INTENT_BONUS
+        } else {
+            REFERENCE_SOURCE_DECLARATION_PENALTY
+        }
     } else {
         0.0
     }
+}
+
+fn reference_query_has_declaration_intent(query: &str) -> bool {
+    query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .any(|term| matches!(term, "typedef" | "typealias" | "alias" | "using"))
 }
 
 fn source_reference_line_declares_identity(line: &str, identity: &str) -> bool {
@@ -642,109 +701,6 @@ fn hybrid_results_cover_identity(results: &[CodeRetrievalHit], identity: &str) -
     })
 }
 
-fn hybrid_source_surface_fallback(
-    request: &CodeRetrievalRequest,
-    results: &[CodeRetrievalHit],
-) -> Option<(String, Vec<String>)> {
-    let query_terms = identifier_terms(&request.query);
-    if query_terms.len() < 2 {
-        return None;
-    }
-    let mut best: Option<(String, Vec<String>, usize, usize)> = None;
-    for hit in results {
-        if !hit.retrieval_layers.iter().any(|layer| {
-            matches!(
-                layer,
-                CodeRetrievalLayer::Symbol
-                    | CodeRetrievalLayer::Definition
-                    | CodeRetrievalLayer::CallGraph
-            )
-        }) {
-            continue;
-        }
-        let identity = hit_identity(hit)?;
-        let identity_terms = identifier_terms(&identity);
-        if identity_terms.len() >= 2
-            && identity_terms.len() < query_terms.len()
-            && identity_terms.iter().all(|term| query_terms.contains(term))
-        {
-            if hybrid_results_have_complete_source_surface(results, &identity) {
-                continue;
-            }
-            let term_count = identity_terms.len();
-            let identity_len = identity.len();
-            if best.as_ref().is_none_or(|(_, _, best_terms, best_len)| {
-                (term_count, identity_len) > (*best_terms, *best_len)
-            }) {
-                best = Some((identity, vec![hit.path.clone()], term_count, identity_len));
-            }
-        }
-    }
-
-    best.map(|(identity, paths, _, _)| (identity, paths))
-}
-
-fn hybrid_results_have_complete_source_surface(
-    results: &[CodeRetrievalHit],
-    identity: &str,
-) -> bool {
-    results
-        .iter()
-        .any(|hit| hit_has_complete_source_surface(hit, identity))
-}
-
-fn hit_identity(hit: &CodeRetrievalHit) -> Option<String> {
-    hit.canonical_symbol_id
-        .as_deref()
-        .and_then(|symbol_id| {
-            symbol_id
-                .rsplit(|character: char| !source_identifier_char(character))
-                .find(|term| !term.is_empty())
-        })
-        .or_else(|| {
-            hit.excerpt
-                .split(|character: char| !source_identifier_char(character))
-                .find(|term| simple_source_identifier(term))
-        })
-        .map(str::to_owned)
-}
-
-fn identifier_terms(value: &str) -> BTreeSet<String> {
-    let mut terms = BTreeSet::new();
-    for token in value.split(|character: char| !source_identifier_char(character)) {
-        if token.is_empty() {
-            continue;
-        }
-        for term in split_identifier_token(token) {
-            if term.len() > 1 {
-                terms.insert(term.to_ascii_lowercase());
-            }
-        }
-    }
-
-    terms
-}
-
-fn split_identifier_token(token: &str) -> Vec<&str> {
-    let mut terms = Vec::new();
-    let mut start = 0usize;
-    let mut previous_lowercase = false;
-    for (index, character) in token.char_indices() {
-        let boundary = index > start
-            && (character == '_' || (character.is_ascii_uppercase() && previous_lowercase));
-        if boundary {
-            terms.push(token[start..index].trim_matches('_'));
-            start = index + usize::from(character == '_');
-        }
-        previous_lowercase = character.is_ascii_lowercase() || character.is_ascii_digit();
-    }
-    if start < token.len() {
-        terms.push(token[start..].trim_matches('_'));
-    }
-
-    terms.into_iter().filter(|term| !term.is_empty()).collect()
-}
-
 fn canonical_symbol_leaf_matches(canonical_symbol_id: &str, identity: &str) -> bool {
     canonical_symbol_id
         .rsplit(|character: char| !source_identifier_char(character))
@@ -808,6 +764,44 @@ fn definition_identity(query: &str) -> Option<String> {
 fn source_grep_identity(query: &str) -> Option<String> {
     let identity = definition_identity(query)?;
     (query.split_whitespace().count() == 1).then_some(identity)
+}
+
+fn reference_grep_query(query: &str) -> Option<String> {
+    source_grep_identity(query).or_else(|| leading_source_identifier(query))
+}
+
+fn leading_source_identifier(query: &str) -> Option<String> {
+    for raw_token in query.split_whitespace().map(str::trim) {
+        if raw_token.contains('/') || raw_token.contains('\\') {
+            continue;
+        }
+        let token = raw_token.trim_matches(|character: char| {
+            !(character.is_ascii_alphanumeric()
+                || character == '_'
+                || character == '.'
+                || character == ':')
+        });
+        if token.is_empty() {
+            continue;
+        }
+        if (token.contains('.') || token.contains("::"))
+            && token
+                .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+                .filter(|term| simple_source_identifier(term))
+                .count()
+                >= 2
+        {
+            return Some(token.to_owned());
+        }
+        if let Some(term) = token
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .find(|term| term.len() >= 3 && simple_source_identifier(term))
+        {
+            return Some(term.to_owned());
+        }
+    }
+
+    None
 }
 
 fn import_grep_query(
@@ -995,3 +989,7 @@ fn dedupe_sort_truncate(results: &mut Vec<CodeRetrievalHit>, limit: usize) {
 #[cfg(test)]
 #[path = "source_fallback_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "source_fallback_reference_tests.rs"]
+mod reference_tests;

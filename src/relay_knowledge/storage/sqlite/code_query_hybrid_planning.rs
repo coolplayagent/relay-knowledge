@@ -34,6 +34,20 @@ pub(super) fn hybrid_query_prefers_chunk_first(request: &CodeRetrievalRequest) -
     hybrid_chunk_first_plan(request).is_some()
 }
 
+pub(super) fn hybrid_query_requires_chunk_first_before_symbols(
+    request: &CodeRetrievalRequest,
+) -> bool {
+    matches!(
+        hybrid_chunk_first_plan(request),
+        Some(
+            HybridChunkFirstPlan::ApiIdentities
+                | HybridChunkFirstPlan::StructuredSequence
+                | HybridChunkFirstPlan::FilteredProceduralSurface
+                | HybridChunkFirstPlan::WorkflowSurface { .. }
+        )
+    )
+}
+
 pub(super) fn query_language_scoped_workflow_surface_scopes(
     request: &CodeRetrievalRequest,
 ) -> Vec<&'static str> {

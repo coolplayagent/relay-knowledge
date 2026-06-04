@@ -21,6 +21,7 @@ mod read_pool;
 mod retrieval;
 mod retry;
 mod schema_columns;
+mod schema_marker;
 mod schema_migration;
 mod store_impls;
 
@@ -61,8 +62,11 @@ impl SqliteGraphStore {
 
         let connection = Connection::open(&path)?;
         configure_connection(&connection)?;
-        schema_migration::prepare_existing_database(&connection)?;
-        initialize_schema(&connection)?;
+        if !schema_marker::schema_initialization_is_current(&connection)? {
+            schema_migration::prepare_existing_database(&connection)?;
+            initialize_schema(&connection)?;
+            schema_marker::mark_schema_initialization_current(&connection)?;
+        }
         let read_pool = ReadConnectionPool::open(&path)?;
 
         Ok(Self {
@@ -230,6 +234,7 @@ pub(in crate::storage) fn configure_connection(
     connection: &Connection,
 ) -> Result<(), StorageError> {
     connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
+    connection.execute_batch("PRAGMA foreign_keys = ON;")?;
 
     Ok(())
 }
@@ -378,6 +383,7 @@ fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
     file_index::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
     retrieval::initialize_schema(connection)?;
+    schema_marker::initialize_schema_marker(connection)?;
 
     Ok(())
 }

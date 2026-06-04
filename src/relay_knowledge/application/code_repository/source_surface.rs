@@ -25,6 +25,9 @@ fn source_surface_line_defines_identity(line: &str, identity: &str) -> bool {
     if line.is_empty() || source_identifier_ranges(line, identity).next().is_none() {
         return false;
     }
+    if synthetic_qualified_summary_line(line) {
+        return false;
+    }
     if source_line_defines_identity(line, identity) {
         return true;
     }
@@ -37,6 +40,17 @@ fn source_surface_line_defines_identity(line: &str, identity: &str) -> bool {
     source_line_defines_identity(stripped, identity)
         || source_value_declaration_defines_identity(stripped, identity)
         || (exported_type_surface && source_type_alias_defines_identity(stripped, identity))
+}
+
+fn synthetic_qualified_summary_line(line: &str) -> bool {
+    let Some((prefix, _)) = line.split_once(':') else {
+        return false;
+    };
+    let prefix = prefix.trim();
+    (prefix.contains('.') || prefix.contains("::"))
+        && prefix.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | ':')
+        })
 }
 
 fn strip_source_surface_modifiers(mut line: &str) -> &str {

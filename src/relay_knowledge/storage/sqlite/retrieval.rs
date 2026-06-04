@@ -58,6 +58,10 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
     Ok(())
 }
 
+pub(super) fn derived_documents_current(connection: &Connection) -> Result<bool, StorageError> {
+    Ok(!migration::derived_documents_missing(connection)?)
+}
+
 fn execute_retrieval_schema(connection: &Connection) -> Result<(), StorageError> {
     for delay_ms in GRAPH_RETRIEVAL_SCHEMA_RETRY_DELAYS_MS {
         match connection.execute_batch(RETRIEVAL_SCHEMA_SQL) {

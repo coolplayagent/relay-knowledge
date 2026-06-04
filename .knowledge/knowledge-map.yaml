@@ -1,6 +1,6 @@
 schema_version: 1
-map_version: 2
-updated_at: unix:1780329600
+map_version: 3
+updated_at: unix:1780532533
 topics:
 - id: architecture
   title: Architecture knowledge
@@ -42,6 +42,16 @@ sources:
   status: active
   version: 1
   description: Code index fact-version policy for parser and retrieval benchmark changes.
+- id: profile-all-performance-source-surface-2026-06-04
+  topic: benchmarks
+  kind: doc
+  uri: docs/zh/05-benchmarks/10-profile-all-performance-source-surface-2026-06-04.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Profile full performance and bounded hybrid source-surface validation notes.
 - id: cli-skill-workflows
   topic: cli
   kind: doc
@@ -59,6 +69,7 @@ routes:
   fallback: bounded-search
 - topic: benchmarks
   source_order:
+  - profile-all-performance-source-surface-2026-06-04
   - code-index-fact-versioning
   fallback: bounded-search
 - topic: cli
@@ -67,6 +78,10 @@ routes:
   - cli-skill-workflows
   fallback: bounded-search
 history:
+- version: 3
+  action: update
+  actor: codex
+  summary: Added profile full performance and source-surface validation documentation.
 - version: 2
   action: update
   actor: codex

@@ -457,7 +457,13 @@ pub(super) fn source_language_filter_allows(path: &str, filters: &[String]) -> b
     if filters.is_empty() {
         return true;
     }
-    if language_id(path).is_some_and(|language| filters.iter().any(|filter| filter == language)) {
+    if language_id(path).is_some_and(|language| {
+        filters.iter().any(|filter| {
+            filter == language
+                || cxx_header_filter_allows(path, language, filter)
+                || unknown_filter_allows_document_path(path, language, filter)
+        })
+    }) {
         return true;
     }
     dependency_manifest_language_ids(path).is_some_and(|languages| {
@@ -465,6 +471,27 @@ pub(super) fn source_language_filter_allows(path: &str, filters: &[String]) -> b
             .iter()
             .any(|language| filters.iter().any(|filter| filter == language))
     })
+}
+
+fn cxx_header_filter_allows(path: &str, language_id: &str, filter: &str) -> bool {
+    filter == "cpp" && language_id == "c" && path.to_ascii_lowercase().ends_with(".h")
+}
+
+fn unknown_filter_allows_document_path(path: &str, language_id: &str, filter: &str) -> bool {
+    filter == "unknown" && document_like_language_path(path, language_id)
+}
+
+fn document_like_language_path(path: &str, language_id: &str) -> bool {
+    matches!(
+        language_id,
+        "markdown" | "json" | "yaml" | "toml" | "xml" | "ini" | "properties"
+    ) || matches!(
+        path.rsplit('.')
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("md" | "markdown" | "txt" | "rst" | "adoc")
+    )
 }
 
 pub(super) fn filesystem_tree_hash_for_paths(

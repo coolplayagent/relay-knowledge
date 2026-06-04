@@ -101,7 +101,8 @@ fn search_reference_identity_rows(
     identity: &SymbolIdentityQuery,
 ) -> Result<ReferenceIdentityRows, StorageError> {
     let path_filter = path_filter_sql_for_column("r.path", status, request);
-    let language_filter = language_filter_sql_for_column("f.language_id", status, request);
+    let language_filter =
+        language_filter_sql_for_columns("f.language_id", "f.path", status, request);
     let direct_limit = reference_identity_candidate_limit(request);
     let sql = reference_rows_sql(&format!(
         "

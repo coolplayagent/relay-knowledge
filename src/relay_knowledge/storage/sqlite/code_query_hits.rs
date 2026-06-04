@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     code_query_scope::{
-        language_filter_allows, path_filter_allows, selector_filters_fit_indexed_scope,
+        language_filter_allows_path, path_filter_allows, selector_filters_fit_indexed_scope,
     },
     code_status::{repository_scope_status, repository_status},
 };
@@ -84,8 +84,8 @@ pub(super) fn selected_row(
 ) -> bool {
     path_filter_allows(path, &status.path_filters)
         && path_filter_allows(path, &request.repository.path_filters)
-        && language_filter_allows(language_id, &status.language_filters)
-        && language_filter_allows(language_id, &request.repository.language_filters)
+        && language_filter_allows_path(path, language_id, &status.language_filters)
+        && language_filter_allows_path(path, language_id, &request.repository.language_filters)
 }
 
 pub(super) fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {

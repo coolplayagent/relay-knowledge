@@ -13,6 +13,7 @@ use super::{
     code_query_api_identities::{
         ApiSymbolIdentity, api_identity_symbol_bonus, hybrid_api_symbol_identities,
     },
+    code_query_hybrid_exact_path::request_has_exact_file_filter,
     code_query_hybrid_planning::hybrid_query_prefers_chunk_first,
     code_query_line_ranges::{SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, symbol_result_line_range},
     code_query_path_ranking::{
@@ -425,7 +426,7 @@ fn search_symbol_fts_rows(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<SymbolRow>, StorageError> {
-    let fts_query = symbol_fts_match_query(&request.query);
+    let fts_query = symbol_fts_match_query_for_request(request);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
     let sql = format!(
         "
@@ -470,6 +471,16 @@ fn search_symbol_fts_rows(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn symbol_fts_match_query_for_request(request: &CodeRetrievalRequest) -> String {
+    if (request.code_query_kind == CodeQueryKind::Hybrid || request_has_exact_file_filter(request))
+        && let Some(query) = focused_symbol_fts_match_query(&request.query)
+    {
+        return query;
+    }
+
+    symbol_fts_match_query(&request.query)
 }
 
 fn row_to_symbol(row: &rusqlite::Row<'_>) -> rusqlite::Result<SymbolRow> {

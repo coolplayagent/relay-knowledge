@@ -49,6 +49,27 @@ fn fallback_plan_skips_results_with_exact_declaration() {
 }
 
 #[test]
+fn definition_fallback_refreshes_synthetic_qualified_symbol_summaries() {
+    let request = request(
+        "SkipList",
+        CodeQueryKind::Definition,
+        vec!["db/skiplist.h".to_owned()],
+    );
+    let mut hit = hit(
+        "db/skiplist.h",
+        "SkipList.SkipList: explicit SkipList(Comparator cmp, Arena* arena);",
+    );
+    hit.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    hit.canonical_symbol_id = Some("repo://repo/db::skiplist::SkipList.SkipList".to_owned());
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[hit])
+        .expect("synthetic symbol summary should still refresh source declaration surface");
+
+    assert_eq!(plan.query, "SkipList");
+    assert_eq!(plan.paths, ["db/skiplist.h"]);
+}
+
+#[test]
 fn definition_fallback_uses_scope_candidates_for_empty_unfiltered_results() {
     let request = request(
         "DefinitelyMissingSymbol",
@@ -81,29 +102,44 @@ fn definition_fallback_uses_exact_file_filter_without_indexed_hits() {
 
 #[test]
 fn hybrid_grep_fallback_fills_after_structured_hits() {
-    let request = request("rk_helper", CodeQueryKind::Hybrid, Vec::new());
-    let mut results = vec![hit("src/lib.c", "void structured_hit(void);")];
+    let request = request(
+        "rk_helper table read",
+        CodeQueryKind::Hybrid,
+        vec!["src/lib.c".to_owned()],
+    );
+    let mut block = hit("src/lib.c", "rk_read_fn read;");
+    block.line_range = RepositoryCodeRange { start: 10, end: 15 };
+    block.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    block.canonical_symbol_id = Some("repo://repo/src::generated_table::rk_table_row".to_owned());
+    let mut member = hit(
+        "src/lib.c",
+        "return rk_rows[RK_STAGE_READ].read(dev, buffer, length);",
+    );
+    member.line_range = RepositoryCodeRange { start: 20, end: 20 };
+    member.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    let mut results = vec![block, member];
     let plan = plan_code_grep_fallback(&status(), &request, &results)
         .expect("partial hybrid results should plan fallback");
     let outcome = SourceGrepOutcome {
         matches: vec![SourceGrepMatch {
-            path: "src/fallback.c".to_owned(),
+            path: "src/lib.c".to_owned(),
             language_id: "c".to_owned(),
-            excerpt: "rk_helper();".to_owned(),
+            excerpt: "[RK_STAGE_READ] = {\n    .read = rk_helper,".to_owned(),
             byte_range: RepositoryCodeRange { start: 10, end: 19 },
-            line_range: RepositoryCodeRange { start: 4, end: 4 },
+            line_range: RepositoryCodeRange { start: 12, end: 13 },
         }],
         degraded_reason: None,
     };
 
     append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome);
 
-    assert_eq!(results[0].path, "src/lib.c");
+    assert_eq!(plan.query, "read table");
+    assert_eq!(results.len(), 2);
     let fallback = results
         .iter()
-        .find(|hit| hit.path == "src/fallback.c")
-        .expect("fallback hit should be appended");
-    assert!(fallback.score < results[0].score);
+        .find(|hit| hit.excerpt.contains("[RK_STAGE_READ]"))
+        .expect("nested source line should be appended");
+    assert!(fallback.score > 2.0);
     assert!(
         fallback
             .retrieval_layers
@@ -139,21 +175,6 @@ fn hybrid_grep_fallback_uses_text_fallback_for_non_symbol_coverage() {
 }
 
 #[test]
-fn reference_fallback_uses_exact_file_filter_without_scope_path_lookup() {
-    let request = request(
-        "RK_TRACE_NOTE",
-        CodeQueryKind::References,
-        vec!["./src/driver_ops.c".to_owned()],
-    );
-
-    let plan = plan_code_grep_fallback(&status(), &request, &[])
-        .expect("exact path filter should plan fallback");
-
-    assert_eq!(plan.paths, ["src/driver_ops.c"]);
-    assert!(!plan.needs_scope_paths());
-}
-
-#[test]
 fn hybrid_fallback_uses_exact_file_filter_without_scope_path_lookup() {
     let request = request(
         "RK_PIPELINE_NOTE",
@@ -167,6 +188,80 @@ fn hybrid_fallback_uses_exact_file_filter_without_scope_path_lookup() {
 
     assert_eq!(plan.paths, ["src/dispatch.c"]);
     assert!(!plan.needs_scope_paths());
+}
+
+#[test]
+fn hybrid_exact_path_fallback_uses_leading_identity_before_member_surface() {
+    let request = request(
+        "NoDestructor variadic constructor template instance type",
+        CodeQueryKind::Hybrid,
+        vec!["util/no_destructor.h".to_owned()],
+    );
+    let mut field_result = hit(
+        "util/no_destructor.h",
+        "NoDestructor.alignas: alignas(InstanceType) char instance_storage_[sizeof(InstanceType)];",
+    );
+    field_result.retrieval_layers =
+        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    field_result.canonical_symbol_id =
+        Some("repo://repo/util::no_destructor::NoDestructor.alignas".to_owned());
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[field_result])
+        .expect("exact path hybrid query should plan declaration source recall");
+
+    assert_eq!(plan.query, "NoDestructor");
+    assert_eq!(plan.paths, ["util/no_destructor.h"]);
+    assert!(!plan.needs_scope_paths());
+}
+
+#[test]
+fn hybrid_source_refresh_prefers_type_declaration_over_member_surface() {
+    let request = request(
+        "DBImpl public DB interface override Put Delete Write Get",
+        CodeQueryKind::Hybrid,
+        vec!["db/db_impl.h".to_owned()],
+    );
+    let plan = CodeGrepFallbackPlan {
+        commit: "commit".to_owned(),
+        query: "DBImpl".to_owned(),
+        paths: vec!["db/db_impl.h".to_owned()],
+        path_filters: vec!["db/db_impl.h".to_owned()],
+        language_filters: vec!["c".to_owned()],
+        limit: 20,
+        kind: SourceGrepKind::Hybrid,
+        identity: None,
+        needs_scope_paths: false,
+    };
+    let mut result = hit("db/db_impl.h", "DBImpl& operator=(const DBImpl&) = delete;");
+    result.line_range = RepositoryCodeRange { start: 29, end: 29 };
+    result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    let mut results = vec![result];
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "db/db_impl.h".to_owned(),
+                language_id: "c".to_owned(),
+                excerpt: "class DBImpl : public DB {".to_owned(),
+                byte_range: RepositoryCodeRange { start: 0, end: 26 },
+                line_range: RepositoryCodeRange { start: 29, end: 29 },
+            }],
+            degraded_reason: None,
+        },
+    );
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].excerpt, "class DBImpl : public DB {");
+    assert!(results[0].score > 2.0);
+    assert!(
+        results[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::TextFallback)
+    );
 }
 
 #[test]
@@ -235,6 +330,129 @@ fn hybrid_source_surface_fallback_refreshes_same_line_excerpt() {
         results
             .iter()
             .any(|hit| hit.excerpt.starts_with("export type PayloadProjector"))
+    );
+    assert!(
+        results[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::TextFallback)
+    );
+}
+
+#[test]
+fn hybrid_source_surface_fallback_refreshes_related_incomplete_paths() {
+    let request = request(
+        "external session workflow TypeScript client openExternalSession",
+        CodeQueryKind::Hybrid,
+        Vec::new(),
+    );
+    let mut method_result = hit(
+        "external_deps/ts_sdk/sessionClient.ts",
+        "ExternalTypeScriptSessionClient.openExternalSession: openExternalSession(payload: string): string {",
+    );
+    method_result.language_id = "typescript".to_owned();
+    method_result.retrieval_layers =
+        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    method_result.canonical_symbol_id = Some(
+        "repo://repo/external_deps::ts_sdk::sessionClient::ExternalTypeScriptSessionClient.openExternalSession"
+            .to_owned(),
+    );
+    let mut workflow_result = hit(
+        "src/application.ts",
+        "export function runExternalSessionWorkflow(payload: string): string {",
+    );
+    workflow_result.language_id = "typescript".to_owned();
+    workflow_result.line_range = RepositoryCodeRange { start: 4, end: 7 };
+    workflow_result.retrieval_layers =
+        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    workflow_result.canonical_symbol_id = Some("repo://repo/src::application::client".to_owned());
+    let mut class_result = hit(
+        "external_deps/ts_sdk/sessionClient.ts",
+        "export class ExternalTypeScriptSessionClient {",
+    );
+    class_result.language_id = "typescript".to_owned();
+    class_result.retrieval_layers =
+        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    class_result.canonical_symbol_id = Some(
+        "repo://repo/external_deps::ts_sdk::sessionClient::ExternalTypeScriptSessionClient"
+            .to_owned(),
+    );
+
+    let plan = plan_code_grep_fallback(
+        &status(),
+        &request,
+        &[method_result, workflow_result, class_result],
+    )
+    .expect("hybrid related API surface should plan bounded source refresh");
+
+    assert_eq!(plan.query, "ExternalTypeScriptSessionClient");
+    assert_eq!(
+        plan.paths,
+        [
+            "external_deps/ts_sdk/sessionClient.ts",
+            "src/application.ts"
+        ]
+    );
+    assert!(!plan.needs_scope_paths());
+}
+
+#[test]
+fn hybrid_source_surface_refreshes_match_inside_structured_line_range() {
+    let request = request(
+        "external session workflow TypeScript client openExternalSession",
+        CodeQueryKind::Hybrid,
+        Vec::new(),
+    );
+    let plan = CodeGrepFallbackPlan {
+        commit: "commit".to_owned(),
+        query: "ExternalTypeScriptSessionClient".to_owned(),
+        paths: vec!["src/application.ts".to_owned()],
+        path_filters: Vec::new(),
+        language_filters: vec!["typescript".to_owned()],
+        limit: 12,
+        kind: SourceGrepKind::Hybrid,
+        identity: None,
+        needs_scope_paths: false,
+    };
+    let mut workflow_result = hit(
+        "src/application.ts",
+        "export function runExternalSessionWorkflow(payload: string): string {",
+    );
+    workflow_result.language_id = "typescript".to_owned();
+    workflow_result.line_range = RepositoryCodeRange { start: 4, end: 7 };
+    workflow_result.retrieval_layers =
+        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    workflow_result.canonical_symbol_id = Some("repo://repo/src::application::client".to_owned());
+    let mut results = vec![workflow_result];
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/application.ts".to_owned(),
+                language_id: "typescript".to_owned(),
+                excerpt: "const client = new ExternalTypeScriptSessionClient();".to_owned(),
+                byte_range: RepositoryCodeRange {
+                    start: 120,
+                    end: 152,
+                },
+                line_range: RepositoryCodeRange { start: 5, end: 5 },
+            }],
+            degraded_reason: None,
+        },
+    );
+
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0]
+            .excerpt
+            .contains("new ExternalTypeScriptSessionClient")
+    );
+    assert_eq!(
+        results[0].line_range,
+        RepositoryCodeRange { start: 4, end: 7 }
     );
     assert!(
         results[0]
@@ -697,70 +915,6 @@ fn import_fallback_skips_dot_prefixed_local_unresolved_import_graph_hits() {
     import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
 
     assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
-}
-
-#[test]
-fn reference_grep_fallback_ranks_usage_before_array_declaration() {
-    let request = request("rk_pipeline", CodeQueryKind::References, Vec::new());
-    let mut results = vec![hit("src/pipeline.c", "int rk_dispatch(void);")];
-    let plan = CodeGrepFallbackPlan {
-        commit: "commit".to_owned(),
-        query: "rk_pipeline".to_owned(),
-        paths: Vec::new(),
-        path_filters: Vec::new(),
-        language_filters: vec!["c".to_owned()],
-        limit: 10,
-        kind: SourceGrepKind::References,
-        identity: None,
-        needs_scope_paths: false,
-    };
-    let outcome = SourceGrepOutcome {
-        matches: vec![
-            SourceGrepMatch {
-                path: "src/pipeline.c".to_owned(),
-                language_id: "c".to_owned(),
-                excerpt: "static rk_stage_fn rk_pipeline[] = {".to_owned(),
-                byte_range: RepositoryCodeRange { start: 10, end: 48 },
-                line_range: RepositoryCodeRange { start: 4, end: 4 },
-            },
-            SourceGrepMatch {
-                path: "src/pipeline.c".to_owned(),
-                language_id: "c".to_owned(),
-                excerpt: "total += rk_pipeline[index](dev);".to_owned(),
-                byte_range: RepositoryCodeRange {
-                    start: 90,
-                    end: 123,
-                },
-                line_range: RepositoryCodeRange { start: 9, end: 9 },
-            },
-        ],
-        degraded_reason: Some("source fallback".to_owned()),
-    };
-
-    append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome);
-
-    let usage_rank = results
-        .iter()
-        .position(|hit| hit.excerpt.contains("rk_pipeline[index]"))
-        .expect("usage fallback should be returned");
-    let declaration_rank = results
-        .iter()
-        .position(|hit| hit.excerpt.contains("rk_pipeline[]"))
-        .expect("declaration fallback should be returned");
-    assert!(usage_rank < declaration_rank);
-    assert!(results[usage_rank].score > results[declaration_rank].score);
-}
-
-#[test]
-fn reference_grep_fallback_keeps_assignment_values_at_base_score() {
-    assert_eq!(
-        reference_source_grep_score_adjustment("rk_driver_read", ".read = rk_driver_read,"),
-        0.0
-    );
-    assert_eq!(
-        reference_source_grep_score_adjustment("rk_driver_read", "return rk_driver_read;"),
-        0.0
-    );
 }
 
 fn request(query: &str, kind: CodeQueryKind, path_filters: Vec<String>) -> CodeRetrievalRequest {

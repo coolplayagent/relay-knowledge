@@ -12,7 +12,7 @@ use super::code_query_import_scoring::{
 };
 use super::code_query_rows::ImportRow;
 use super::code_query_support::{
-    CandidateLayer, candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
+    CandidateLayer, candidate_limit, language_filter_sql_for_columns, path_filter_sql_for_column,
     push_language_filter_values, push_path_filter_values, score_text, symbol_fts_match_query,
 };
 use super::{prepare_code_search_statement, required_scope};
@@ -269,7 +269,8 @@ fn search_imports_by_target_hint_chunk(
     values.extend(target_hints.iter().cloned().map(Value::Text));
     let placeholders = placeholders(target_hints.len());
     let import_path_filter = path_filter_sql_for_column("i.path", status, request);
-    let import_language_filter = language_filter_sql_for_column("f.language_id", status, request);
+    let import_language_filter =
+        language_filter_sql_for_columns("f.language_id", "f.path", status, request);
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);

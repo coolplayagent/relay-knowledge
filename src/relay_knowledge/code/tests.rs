@@ -4,6 +4,7 @@ use std::fs;
 
 use super::changes::{GitChange, parse_name_status_z, tracked_entries};
 use super::git::git_batch_blobs;
+use super::source::source_language_filter_allows;
 use super::test_fixtures::{TempGitRepo, TempSourceDir, reference, symbol};
 
 #[test]
@@ -57,6 +58,22 @@ fn detects_supported_languages_and_filters_paths() {
     ));
     assert!(!path_is_selected("tests/lib.rs", &registration, &selector));
     assert!(!path_is_selected("src/app.py", &registration, &selector));
+    assert!(source_language_filter_allows(
+        "include/app.h",
+        &["cpp".to_owned()]
+    ));
+    assert!(source_language_filter_allows(
+        "docs/operations.md",
+        &["unknown".to_owned()]
+    ));
+    assert!(!source_language_filter_allows(
+        "src/app.py",
+        &["unknown".to_owned()]
+    ));
+    assert!(!source_language_filter_allows(
+        "src/app.c",
+        &["cpp".to_owned()]
+    ));
 
     let file_filter_selector = CodeRepositorySelector::new(
         "alias",

@@ -119,7 +119,8 @@ fn search_call_identity_rows(
     identity: &CallIdentityQuery,
 ) -> Result<CallIdentityRows, StorageError> {
     let path_filter = path_filter_sql_for_column("c.path", status, request);
-    let language_filter = language_filter_sql_for_column("f.language_id", status, request);
+    let language_filter =
+        language_filter_sql_for_columns("f.language_id", "f.path", status, request);
     let direct_limit = call_identity_candidate_limit(request);
     let sql = call_rows_sql(&format!(
         "
@@ -182,7 +183,8 @@ fn search_indirect_call_identity_rows(
     }
 
     let path_filter = path_filter_sql_for_column("c.path", status, request);
-    let language_filter = language_filter_sql_for_column("f.language_id", status, request);
+    let language_filter =
+        language_filter_sql_for_columns("f.language_id", "f.path", status, request);
     let placeholders = placeholders(field_names.len());
     let sql = call_rows_sql(&format!(
         "

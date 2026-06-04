@@ -142,10 +142,58 @@ fn single_symbol_identity_miss_skips_broad_fts_for_exact_symbol_kinds() {
     ));
 }
 
+#[test]
+fn exact_path_long_symbol_queries_use_focused_fts_terms() {
+    let request = make_request_with_path(
+        "NoDestructor variadic constructor template instance type",
+        CodeQueryKind::Hybrid,
+        vec!["util/no_destructor.h".to_owned()],
+    );
+    let broad_request = make_request(
+        "NoDestructor variadic constructor template instance type",
+        CodeQueryKind::Hybrid,
+    );
+
+    assert_eq!(
+        symbol_fts_match_query_for_request(&request),
+        "\"NoDestructor\" OR \"constructor\" OR \"variadic\""
+    );
+    assert_eq!(
+        symbol_fts_match_query_for_request(&broad_request),
+        "\"NoDestructor\" OR \"constructor\" OR \"variadic\""
+    );
+}
+
+#[test]
+fn broad_hybrid_queries_use_focused_symbol_fts_terms() {
+    let hybrid = make_request(
+        "function literal notify payload goroutine callback",
+        CodeQueryKind::Hybrid,
+    );
+    let symbol = make_request(
+        "function literal notify payload goroutine callback",
+        CodeQueryKind::Symbol,
+    );
+
+    assert_eq!(
+        symbol_fts_match_query_for_request(&hybrid),
+        "\"goroutine\" OR \"callback\" OR \"notify\""
+    );
+    assert!(symbol_fts_match_query_for_request(&symbol).contains("\"payload\""));
+}
+
 fn make_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
+    make_request_with_path(query, kind, Vec::new())
+}
+
+fn make_request_with_path(
+    query: &str,
+    kind: CodeQueryKind,
+    path_filters: Vec<String>,
+) -> CodeRetrievalRequest {
     CodeRetrievalRequest::new(
         query,
-        CodeRepositorySelector::new("repo", "HEAD", Vec::new(), vec!["go".to_owned()])
+        CodeRepositorySelector::new("repo", "HEAD", path_filters, vec!["go".to_owned()])
             .expect("selector should validate"),
         kind,
         10,

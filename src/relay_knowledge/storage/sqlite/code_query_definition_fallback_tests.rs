@@ -40,6 +40,40 @@ async fn definition_queries_fall_back_to_chunks_when_symbol_hit_is_contextual() 
     assert!(hits[0].excerpt.contains("typedef int (*rk_read_fn)"));
 }
 
+#[tokio::test]
+async fn cpp_language_queries_include_c_header_chunks_for_exact_path() {
+    let store = store_with_snapshot(snapshot_with_cpp_header_chunk()).await;
+    let selector = CodeRepositorySelector::new(
+        "repo",
+        "commit",
+        vec!["util/no_destructor.h".to_owned()],
+        vec!["cpp".to_owned()],
+    )
+    .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "NoDestructor variadic constructor template instance type",
+                selector,
+                CodeQueryKind::Hybrid,
+                20,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid header query should succeed");
+
+    assert!(
+        hits.iter().any(|hit| {
+            hit.path == "util/no_destructor.h"
+                && hit.excerpt.contains("template <typename InstanceType>")
+        }),
+        "cpp language filters should not exclude .h header chunks: {hits:?}"
+    );
+}
+
 fn snapshot_with_contextual_symbol_and_typedef_chunk() -> CodeIndexSnapshot {
     let typedef_chunk = chunk(
         "driver-ops-typedefs",
@@ -78,6 +112,45 @@ fn snapshot_with_contextual_symbol_and_typedef_chunk() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![typedef_chunk],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_cpp_header_chunk() -> CodeIndexSnapshot {
+    let header_chunk = chunk(
+        "no-destructor-header",
+        "no-destructor-file",
+        "util/no_destructor.h",
+        "template <typename InstanceType>\n\
+         class NoDestructor {\n\
+         public:\n\
+           template <typename... ConstructorArgTypes>\n\
+           explicit NoDestructor(ConstructorArgTypes&&... constructor_args);\n\
+         };",
+        range(17, 22),
+    );
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("no-destructor-file", "util/no_destructor.h", "c")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![header_chunk],
         diagnostics: Vec::new(),
     }
 }

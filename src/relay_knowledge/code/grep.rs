@@ -21,6 +21,10 @@ use super::{
     source_line_defines_identity,
 };
 
+#[path = "grep_query.rs"]
+mod grep_query;
+use grep_query::{find_query_bytes, source_grep_queries};
+
 pub(crate) const SOURCE_GREP_CANDIDATE_FILE_LIMIT: usize = 256;
 const MAX_GREP_CANDIDATE_FILES: usize = SOURCE_GREP_CANDIDATE_FILE_LIMIT;
 const MAX_GREP_BYTES: usize = 8 * 1024 * 1024;
@@ -122,7 +126,12 @@ fn source_grep_matches_from_materialized_tree(
 }
 
 fn source_grep_accepts(kind: SourceGrepKind, query: &str, matched: &SourceGrepMatch) -> bool {
-    kind != SourceGrepKind::Definition || source_line_defines_identity(&matched.excerpt, query)
+    kind != SourceGrepKind::Definition
+        || matched
+            .excerpt
+            .lines()
+            .map(str::trim)
+            .any(|line| source_line_defines_identity(line, query))
 }
 
 fn selected_candidate_paths(request: &SourceGrepRequest) -> CandidatePaths {
@@ -138,7 +147,7 @@ fn selected_candidate_paths(request: &SourceGrepRequest) -> CandidatePaths {
             continue;
         }
         let language = language_id(path).unwrap_or("unknown");
-        if !language_filter_allows(language, &request.language_filters) {
+        if !language_filter_allows(path, language, &request.language_filters) {
             continue;
         }
         if seen.insert(path.clone()) {
@@ -397,8 +406,8 @@ fn internal_source_grep_matches(
     request: &SourceGrepRequest,
     accepts: impl Fn(&SourceGrepMatch) -> bool,
 ) -> Result<Vec<SourceGrepMatch>, CodeIndexError> {
-    let query = request.query.as_bytes();
-    if query.is_empty() {
+    let queries = source_grep_queries(request);
+    if queries.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -416,7 +425,7 @@ fn internal_source_grep_matches(
         push_internal_file_matches(
             path,
             &bytes,
-            query,
+            &queries,
             request.kind,
             request.limit,
             &accepts,
@@ -430,7 +439,7 @@ fn internal_source_grep_matches(
 fn push_internal_file_matches(
     path: &str,
     bytes: &[u8],
-    query: &[u8],
+    queries: &[Vec<u8>],
     kind: SourceGrepKind,
     limit: usize,
     accepts: &impl Fn(&SourceGrepMatch) -> bool,
@@ -438,13 +447,19 @@ fn push_internal_file_matches(
 ) -> Result<(), CodeIndexError> {
     let mut line_start = 0usize;
     let mut line_number = 1usize;
+    let mut previous_line = None;
     while line_start < bytes.len() && matches.len() < limit {
         let line_end = bytes[line_start..]
             .iter()
             .position(|byte| *byte == b'\n')
             .map_or(bytes.len(), |offset| line_start + offset);
         let line = &bytes[line_start..line_end];
-        if let Some(match_start) = find_bytes(line, query) {
+        let mut carried_line = SourceLineContext {
+            byte_start: line_start,
+            byte_end: line_end,
+            line_start: line_number,
+        };
+        if let Some((match_start, match_end)) = find_query_bytes(line, queries) {
             if line.len() > MAX_GREP_LINE_BYTES && kind == SourceGrepKind::Definition {
                 line_start = if line_end < bytes.len() {
                     line_end + 1
@@ -454,20 +469,42 @@ fn push_internal_file_matches(
                 line_number += 1;
                 continue;
             }
-            let match_end = match_start + query.len();
+            let context = source_grep_line_context(bytes, line_start, line_end, previous_line);
+            if let Some(context) = context {
+                carried_line = context;
+            }
             let byte_range = RepositoryCodeRange::new(
                 "byte_range",
-                line_start + match_start,
-                line_start + match_end,
+                context
+                    .as_ref()
+                    .map_or(line_start + match_start, |context| context.byte_start),
+                context
+                    .as_ref()
+                    .map_or(line_start + match_end, |context| context.byte_end),
             )
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
-            let line_range = RepositoryCodeRange::new("line_range", line_number, line_number)
-                .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
-            let excerpt =
-                String::from_utf8_lossy(source_line_excerpt(line, match_start, match_end))
-                    .trim_end_matches('\r')
-                    .trim()
-                    .to_owned();
+            let line_range = RepositoryCodeRange::new(
+                "line_range",
+                context
+                    .as_ref()
+                    .map_or(line_number, |context| context.line_start),
+                line_number,
+            )
+            .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
+            let excerpt = context.map_or_else(
+                || {
+                    String::from_utf8_lossy(source_line_excerpt(line, match_start, match_end))
+                        .trim_end_matches('\r')
+                        .trim()
+                        .to_owned()
+                },
+                |context| {
+                    String::from_utf8_lossy(&bytes[context.byte_start..context.byte_end])
+                        .trim_end_matches('\r')
+                        .trim()
+                        .to_owned()
+                },
+            );
             let matched = SourceGrepMatch {
                 path: path.to_owned(),
                 language_id: language_id(path).unwrap_or("unknown").to_owned(),
@@ -479,6 +516,7 @@ fn push_internal_file_matches(
                 matches.push(matched);
             }
         }
+        previous_line = Some(carried_line);
         line_start = if line_end < bytes.len() {
             line_end + 1
         } else {
@@ -488,6 +526,44 @@ fn push_internal_file_matches(
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct SourceLineContext {
+    byte_start: usize,
+    byte_end: usize,
+    line_start: usize,
+}
+
+fn source_grep_line_context(
+    bytes: &[u8],
+    line_start: usize,
+    line_end: usize,
+    previous_line: Option<SourceLineContext>,
+) -> Option<SourceLineContext> {
+    let previous = previous_line?;
+    let previous_line = std::str::from_utf8(&bytes[previous.byte_start..previous.byte_end])
+        .ok()?
+        .trim();
+    let current_line = std::str::from_utf8(&bytes[line_start..line_end])
+        .ok()?
+        .trim_start();
+    if previous_line.starts_with("template ")
+        || (current_line.starts_with('.')
+            && (previous_line.ends_with('{')
+                || previous_line
+                    .lines()
+                    .next()
+                    .is_some_and(|line| line.trim_end().ends_with('{'))))
+    {
+        Some(SourceLineContext {
+            byte_start: previous.byte_start,
+            byte_end: line_end,
+            line_start: previous.line_start,
+        })
+    } else {
+        None
+    }
 }
 
 fn source_bytes_are_binary(bytes: &[u8]) -> bool {
@@ -508,15 +584,6 @@ fn source_line_excerpt(line: &[u8], match_start: usize, match_end: usize) -> &[u
     &line[start..end]
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {
     filters.is_empty()
         || filters.iter().any(|filter| {
@@ -525,8 +592,34 @@ fn path_filter_allows(path: &str, filters: &[String]) -> bool {
         })
 }
 
-fn language_filter_allows(language_id: &str, filters: &[String]) -> bool {
-    filters.is_empty() || filters.iter().any(|filter| filter == language_id)
+fn language_filter_allows(path: &str, language_id: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters.iter().any(|filter| {
+            filter == language_id
+                || cxx_header_filter_allows(path, language_id, filter)
+                || unknown_filter_allows_document_path(path, language_id, filter)
+        })
+}
+
+fn cxx_header_filter_allows(path: &str, language_id: &str, filter: &str) -> bool {
+    filter == "cpp" && language_id == "c" && path.to_ascii_lowercase().ends_with(".h")
+}
+
+fn unknown_filter_allows_document_path(path: &str, language_id: &str, filter: &str) -> bool {
+    filter == "unknown" && document_like_language_path(path, language_id)
+}
+
+fn document_like_language_path(path: &str, language_id: &str) -> bool {
+    matches!(
+        language_id,
+        "markdown" | "json" | "yaml" | "toml" | "xml" | "ini" | "properties"
+    ) || matches!(
+        path.rsplit('.')
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("md" | "markdown" | "txt" | "rst" | "adoc")
+    )
 }
 
 fn normalize_filter_path(filter: &str) -> &str {
@@ -613,6 +706,82 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].line_range.start, 2);
         assert_eq!(matches[0].excerpt, "int target(void);");
+    }
+
+    #[test]
+    fn internal_scanner_includes_template_preamble_for_declaration_lines() {
+        let mut tree = TempSourceTree::create().expect("temp tree should be created");
+        tree.write(
+            "include/cache.h",
+            b"template <typename InstanceType>\nclass NoDestructor {};\n",
+        )
+        .expect("source path should be written");
+        let request = SourceGrepRequest {
+            query: "NoDestructor".to_owned(),
+            paths: vec!["include/cache.h".to_owned()],
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            limit: 1,
+            kind: SourceGrepKind::Definition,
+        };
+
+        let matches =
+            internal_source_grep_matches(&tree.root, &request.paths, &request, |matched| {
+                source_grep_accepts(SourceGrepKind::Definition, "NoDestructor", matched)
+            })
+            .expect("internal scanner should include template context");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(
+            matches[0].line_range,
+            RepositoryCodeRange { start: 1, end: 2 }
+        );
+        assert!(
+            matches[0]
+                .excerpt
+                .contains("template <typename InstanceType>")
+        );
+        assert!(matches[0].excerpt.contains("class NoDestructor"));
+    }
+
+    #[test]
+    fn hybrid_scanner_tokenizes_query_and_keeps_initializer_header() {
+        let mut tree = TempSourceTree::create().expect("temp tree should be created");
+        tree.write(
+            "src/generated_table.c",
+            b"static const struct rk_table_row rk_rows[] = {\n  [RK_STAGE_READ] = {\n    .name = \"read\",\n    .read = rk_driver_read,\n  },\n};\n",
+        )
+        .expect("source path should be written");
+        let request = SourceGrepRequest {
+            query: "compound initializer table row read function pointer".to_owned(),
+            paths: vec!["src/generated_table.c".to_owned()],
+            path_filters: vec!["src/generated_table.c".to_owned()],
+            language_filters: vec!["c".to_owned()],
+            limit: 5,
+            kind: SourceGrepKind::Hybrid,
+        };
+
+        let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
+            .expect("hybrid scanner should search query terms");
+
+        assert!(matches.iter().any(|matched| {
+            matched.excerpt.contains("[RK_STAGE_READ]")
+                && matched.excerpt.contains(".read = rk_driver_read")
+        }));
+    }
+
+    #[test]
+    fn unknown_language_filter_allows_document_source_fallback_candidates() {
+        assert!(language_filter_allows(
+            "docs/operations.md",
+            "markdown",
+            &["unknown".to_owned()]
+        ));
+        assert!(!language_filter_allows(
+            "src/service.py",
+            "python",
+            &["unknown".to_owned()]
+        ));
     }
 
     #[test]

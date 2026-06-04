@@ -84,7 +84,8 @@ fn search_import_path_rows(
     let direct_limit =
         candidate_limit(request, CandidateLayer::Import).min(IMPORT_PATH_DIRECT_LIMIT);
     let path_filter = path_filter_sql_for_column("i.path", status, request);
-    let language_filter = language_filter_sql_for_column("f.language_id", status, request);
+    let language_filter =
+        language_filter_sql_for_columns("f.language_id", "f.path", status, request);
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,

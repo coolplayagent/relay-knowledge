@@ -59,6 +59,21 @@ pub(in crate::storage::sqlite::code) fn language_filter_allows(
     filters.is_empty() || filters.iter().any(|filter| filter == language_id)
 }
 
+pub(in crate::storage::sqlite::code) fn language_filter_allows_path(
+    path: &str,
+    language_id: &str,
+    filters: &[String],
+) -> bool {
+    filters.is_empty()
+        || filters.iter().any(|filter| {
+            filter == language_id || cxx_header_filter_allows(path, language_id, filter)
+        })
+}
+
+fn cxx_header_filter_allows(path: &str, language_id: &str, filter: &str) -> bool {
+    filter == "cpp" && language_id == "c" && path.to_ascii_lowercase().ends_with(".h")
+}
+
 pub(in crate::storage::sqlite::code) fn path_matches_filter(path: &str, filter: &str) -> bool {
     let filter = normalize_path_filter(filter);
     if filter == "." {

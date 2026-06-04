@@ -19,6 +19,7 @@ const FOCUSED_HYBRID_CHUNK_PAIR_DISTANCE: usize = 4;
 const COMPOUND_HYBRID_CHUNK_MIN_TERM_LEN: usize = 4;
 const COMPOUND_HYBRID_CHUNK_MAX_TERMS: usize = 8;
 const COMPOUND_HYBRID_CHUNK_PAIR_DISTANCE: usize = 1;
+const FOCUSED_SYMBOL_MAX_TERMS: usize = 3;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::fts_query_terms(query), " ", true)
@@ -26,6 +27,68 @@ pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str)
 
 pub(in crate::storage::sqlite::code::code_query) fn symbol_fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::fts_query_terms(query), " OR ", true)
+}
+
+pub(in crate::storage::sqlite::code::code_query) fn focused_symbol_fts_match_query(
+    query: &str,
+) -> Option<String> {
+    let terms = dedupe_terms(super::fts_query_terms(query));
+    if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
+        return None;
+    }
+    let mut ranked = terms
+        .iter()
+        .enumerate()
+        .filter(|(_, term)| !focused_symbol_generic_term(term))
+        .map(|(position, term)| {
+            (
+                identifier_term_has_structure(term),
+                hybrid_chunk_term_priority(term),
+                position,
+                term,
+            )
+        })
+        .filter(|(_, priority, _, _)| *priority >= 2)
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.cmp(right.3))
+    });
+    let recall_terms = ranked
+        .into_iter()
+        .map(|(_, _, _, term)| term.to_owned())
+        .take(FOCUSED_SYMBOL_MAX_TERMS)
+        .collect::<Vec<_>>();
+
+    (recall_terms.len() >= 2).then(|| fts_match_query_with_operator(&recall_terms, " OR ", false))
+}
+
+fn focused_symbol_generic_term(term: &str) -> bool {
+    matches!(
+        term.to_ascii_lowercase().as_str(),
+        "call"
+            | "arrow"
+            | "client"
+            | "contract"
+            | "flow"
+            | "function"
+            | "generic"
+            | "handler"
+            | "interface"
+            | "literal"
+            | "object"
+            | "provider"
+            | "record"
+            | "request"
+            | "response"
+            | "service"
+            | "typed"
+            | "type"
+    )
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn hybrid_chunk_fts_match_query(
@@ -649,6 +712,18 @@ mod tests {
             !direct_hybrid_chunk_fts_match_query("checkpoint metadata version constant")
                 .contains("\"checkpointmetadataversionconstant\"")
         );
+    }
+
+    #[test]
+    fn focused_symbol_fts_query_uses_bounded_high_signal_terms() {
+        assert_eq!(
+            focused_symbol_fts_match_query(
+                "NoDestructor variadic constructor template instance type"
+            )
+            .as_deref(),
+            Some("\"NoDestructor\" OR \"constructor\" OR \"variadic\"")
+        );
+        assert!(focused_symbol_fts_match_query("NoDestructor constructor").is_none());
     }
 
     #[test]

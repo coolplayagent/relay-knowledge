@@ -21,6 +21,8 @@ mod code_query_excerpts;
 mod code_query_flow_scoring;
 #[path = "code_query_hybrid_direct_gate.rs"]
 mod code_query_hybrid_direct_gate;
+#[path = "code_query_hybrid_exact_path.rs"]
+mod code_query_hybrid_exact_path;
 #[path = "code_query_hybrid_planning.rs"]
 mod code_query_hybrid_planning;
 #[path = "code_query_identifiers.rs"]
@@ -80,6 +82,10 @@ use code_query_flow_scoring::{
     execution_flow_chunk_bonus, inline_construct_chunk_bonus, source_definition_body_chunk_bonus,
 };
 use code_query_hybrid_direct_gate::hybrid_direct_results_can_answer_without_graph_expansion;
+use code_query_hybrid_exact_path::{
+    hybrid_exact_path_query_can_defer_to_source_fallback, hybrid_query_can_skip_graph_expansion,
+    hybrid_query_should_use_layered_chunk_search,
+};
 use code_query_hybrid_planning::{
     hybrid_query_prefers_chunk_first, hybrid_sequence_terms,
     query_language_scoped_workflow_surface_scopes, workflow_language_scope_language_ids,
@@ -156,7 +162,9 @@ fn search_code_with_status(
     let mut hits = Vec::new();
     let mut searched_chunks = false;
     let mut chunk_first_outage = None;
-    if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
+    if request.code_query_kind == CodeQueryKind::Hybrid
+        && hybrid_query_prefers_chunk_first(request)
+        && hybrid_query_should_use_layered_chunk_search(request)
     {
         match search_chunks(connection, status, request) {
             Ok(mut chunk_hits) => {
@@ -207,6 +215,10 @@ fn search_code_with_status(
         }
     }
     if request.code_query_kind == CodeQueryKind::Hybrid {
+        if hybrid_exact_path_query_can_defer_to_source_fallback(request, &hits) {
+            dedupe_sort_truncate(&mut hits, request.limit);
+            return Ok(hits);
+        }
         if !searched_chunks {
             let chunk_hits = search_chunks(connection, status, request);
             if let Some(partial_hits) =
@@ -218,6 +230,10 @@ fn search_code_with_status(
         if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits)
             || hybrid_direct_results_can_answer_without_graph_expansion(request, &hits)
         {
+            dedupe_sort_truncate(&mut hits, request.limit);
+            return Ok(hits);
+        }
+        if hybrid_query_can_skip_graph_expansion(request, &hits) {
             dedupe_sort_truncate(&mut hits, request.limit);
             return Ok(hits);
         }
@@ -531,7 +547,8 @@ fn search_chunks(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let chunk_first = request.code_query_kind == CodeQueryKind::Hybrid
-        && hybrid_query_prefers_chunk_first(request);
+        && hybrid_query_prefers_chunk_first(request)
+        && hybrid_query_should_use_layered_chunk_search(request);
     let chunk_candidate_limit = hybrid_chunk_candidate_limit(request);
     let mut narrow_hits = Vec::new();
     if request.code_query_kind == CodeQueryKind::Hybrid {
@@ -608,7 +625,7 @@ fn search_chunks(
         return Ok(narrow_hits);
     }
 
-    let fts_query = if chunk_first {
+    let fts_query = if request.code_query_kind == CodeQueryKind::Hybrid {
         direct_hybrid_chunk_fts_match_query(&request.query)
     } else {
         hybrid_chunk_fts_match_query(&request.query)
@@ -628,7 +645,9 @@ fn search_chunks(
 }
 
 fn hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
-    if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
+    if request.code_query_kind == CodeQueryKind::Hybrid
+        && hybrid_query_prefers_chunk_first(request)
+        && hybrid_query_should_use_layered_chunk_search(request)
     {
         strict_hybrid_chunk_candidate_limit(request)
     } else {
