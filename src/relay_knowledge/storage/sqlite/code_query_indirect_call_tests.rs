@@ -86,6 +86,105 @@ async fn callers_follow_designated_function_pointer_bindings() {
     assert!(hits[0].excerpt.contains("rk_rows[RK_STAGE_READ].read"));
 }
 
+#[tokio::test]
+async fn indirect_callers_ignore_same_field_calls_in_other_files() {
+    let binding_path = "src/generated_table.c";
+    let unrelated_path = "src/unrelated_device.c";
+    let mut caller_symbol = symbol(
+        "table-read-symbol",
+        "table-file",
+        binding_path,
+        "rk_table_read",
+    );
+    caller_symbol.language_id = "c".to_owned();
+    caller_symbol.line_range = range(20, 24);
+
+    let mut local_read_call = call("table-read-call", "table-file", binding_path);
+    local_read_call.caller_symbol_snapshot_id = Some("table-read-symbol".to_owned());
+    local_read_call.caller_name = Some("rk_table_read".to_owned());
+    local_read_call.callee_name = "read".to_owned();
+    local_read_call.line_range = range(22, 22);
+
+    let mut unrelated_call = call("unrelated-read-call", "unrelated-file", unrelated_path);
+    unrelated_call.caller_name = Some("poll_unrelated_device".to_owned());
+    unrelated_call.callee_name = "read".to_owned();
+    unrelated_call.line_range = range(42, 42);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("table-file", binding_path, "c"),
+            file("unrelated-file", unrelated_path, "c"),
+        ],
+        symbols: vec![caller_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![local_read_call, unrelated_call],
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "table-init-chunk",
+                "table-file",
+                binding_path,
+                "static const struct rk_table_row rk_rows[] = {\n\
+    [RK_STAGE_READ] = {\n\
+        .read = rk_driver_read,\n\
+    },\n\
+};",
+                None,
+                range(10, 16),
+            ),
+            chunk(
+                "table-read-chunk",
+                "table-file",
+                binding_path,
+                "int rk_table_read(struct rk_device *dev, char *buffer, size_t length)\n\
+{\n\
+    return rk_rows[RK_STAGE_READ].read(dev, buffer, length);\n\
+}",
+                Some("table-read-symbol"),
+                range(20, 24),
+            ),
+            chunk(
+                "unrelated-read-chunk",
+                "unrelated-file",
+                unrelated_path,
+                "int poll_unrelated_device(struct rk_device *dev)\n\
+{\n\
+    return dev->ops.read(dev);\n\
+}",
+                None,
+                range(40, 44),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_driver_read", CodeQueryKind::Callers))
+        .await
+        .expect("indirect caller query should succeed");
+
+    assert!(hits.iter().any(|hit| hit.path == binding_path), "{hits:?}");
+    assert!(
+        hits.iter().all(|hit| hit.path != unrelated_path),
+        "{hits:?}"
+    );
+}
+
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");

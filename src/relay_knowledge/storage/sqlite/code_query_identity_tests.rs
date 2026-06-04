@@ -60,4 +60,8 @@ fn scoped_identity_query_bonus_matches_qualified_edge_targets() {
         scoped_identity_query_bonus("TargetThing", ["pkg.service.TargetThing"]),
         0.0
     );
+    assert_eq!(
+        scoped_identity_query_bonus("pkg.Client", ["repo://example/src::pkg::test::Client"]),
+        0.0
+    );
 }

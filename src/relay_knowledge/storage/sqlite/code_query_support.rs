@@ -590,17 +590,36 @@ fn scoped_query_terms(query: &str) -> Option<Vec<String>> {
 }
 
 fn contains_scoped_terms(field: &str, query_terms: &[String]) -> bool {
+    if query_terms.is_empty() {
+        return false;
+    }
     let field_terms = scoped_terms(field);
-    let mut next_query_index = 0usize;
-    for field_term in field_terms {
-        if query_terms
-            .get(next_query_index)
-            .is_some_and(|query_term| field_term == *query_term)
+    field_terms
+        .windows(query_terms.len())
+        .any(|window| window == query_terms)
+        || contains_constructor_nested_scoped_terms(&field_terms, query_terms)
+}
+
+fn contains_constructor_nested_scoped_terms(
+    field_terms: &[String],
+    query_terms: &[String],
+) -> bool {
+    if query_terms.len() != 2 {
+        return false;
+    }
+    for start in 0..field_terms.len().saturating_sub(2) {
+        if field_terms[start] != query_terms[0] || field_terms[start + 1] != query_terms[0] {
+            continue;
+        }
+        let tail = &field_terms[start + 2..];
+        let Some(leaf_index) = tail.iter().position(|term| term == &query_terms[1]) else {
+            continue;
+        };
+        if tail[..leaf_index]
+            .iter()
+            .all(|term| matches!(term.as_str(), "constructor" | "init" | "new"))
         {
-            next_query_index += 1;
-            if next_query_index == query_terms.len() {
-                return true;
-            }
+            return true;
         }
     }
 

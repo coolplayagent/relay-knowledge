@@ -217,20 +217,18 @@ fn search_indirect_call_identity_rows(
         .map_err(StorageError::from)?;
     let saturated = rows.len() > direct_limit;
     rows.truncate(direct_limit);
-    for row in &mut rows {
-        if let Some(binding) =
-            best_indirect_call_binding(&bindings.bindings, &row.callee_name, &row.path)
-        {
-            row.target_hint = Some(binding.target_name.clone());
-            row.resolution_state = "inferred".to_owned();
-            row.confidence_basis_points = if row.path == binding.binding_path {
-                7_500
-            } else {
-                5_500
-            };
-            row.confidence_tier = "inferred".to_owned();
-        }
-    }
+    rows.retain_mut(|row| {
+        let Some(binding) = best_indirect_call_binding(&bindings.bindings, row) else {
+            return false;
+        };
+        let same_path = row.path == binding.binding_path;
+        row.target_hint = Some(binding.target_name.clone());
+        row.resolution_state = "inferred".to_owned();
+        let confidence_floor = if same_path { 7_500 } else { 5_500 };
+        row.confidence_basis_points = row.confidence_basis_points.max(confidence_floor);
+        row.confidence_tier = "inferred".to_owned();
+        true
+    });
 
     Ok(CallIdentityRows {
         rows,
@@ -301,17 +299,26 @@ fn search_indirect_call_bindings(
 
 fn best_indirect_call_binding<'a>(
     bindings: &'a [IndirectCallBinding],
-    field_name: &str,
-    call_path: &str,
+    row: &CallRow,
 ) -> Option<&'a IndirectCallBinding> {
-    bindings
-        .iter()
-        .find(|binding| binding.field_name == field_name && binding.binding_path == call_path)
-        .or_else(|| {
-            bindings
-                .iter()
-                .find(|binding| binding.field_name == field_name)
-        })
+    bindings.iter().find(|binding| {
+        binding.field_name == row.callee_name
+            && (binding.binding_path == row.path
+                || row_has_indirect_target_evidence(row, &binding.target_name))
+    })
+}
+
+fn row_has_indirect_target_evidence(row: &CallRow, target_name: &str) -> bool {
+    matches!(row.resolution_state.as_str(), "resolved" | "inferred")
+        && row.confidence_basis_points >= 5_000
+        && [
+            row.target_hint.as_deref(),
+            row.callee_canonical_symbol_id.as_deref(),
+            row.callee_signature.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|field| line_contains_identifier(field, target_name))
 }
 
 impl CallIdentityQuery {

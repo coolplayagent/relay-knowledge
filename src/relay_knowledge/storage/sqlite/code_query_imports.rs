@@ -135,15 +135,29 @@ fn import_identifier_patterns(query: &str) -> Vec<String> {
     query_terms(query)
         .into_iter()
         .filter(|term| term.len() >= 3)
-        .filter(|term| {
-            !matches!(
-                term.as_str(),
-                "and" | "are" | "for" | "from" | "the" | "type"
-            )
-        })
+        .filter(|term| !import_identifier_stop_term(term))
         .take(8)
         .map(|term| format!("%{}%", escape_sql_like(&term.to_ascii_lowercase())))
         .collect()
+}
+
+fn import_identifier_stop_term(term: &str) -> bool {
+    matches!(
+        term.to_ascii_lowercase().as_str(),
+        "and"
+            | "are"
+            | "crate"
+            | "extern"
+            | "for"
+            | "from"
+            | "import"
+            | "include"
+            | "require"
+            | "the"
+            | "type"
+            | "use"
+            | "using"
+    )
 }
 
 fn search_import_path_rows(
@@ -695,6 +709,18 @@ mod tests {
         assert!(patterns.contains(&"%rundisposers%".to_owned()));
         assert!(patterns.contains(&"%registry%".to_owned()));
         assert!(!patterns.contains(&"%as%".to_owned()));
+    }
+
+    #[test]
+    fn import_identifier_patterns_drop_import_syntax_keywords() {
+        let patterns = import_identifier_patterns("import serde using System include vector");
+
+        assert!(patterns.contains(&"%serde%".to_owned()));
+        assert!(patterns.contains(&"%system%".to_owned()));
+        assert!(patterns.contains(&"%vector%".to_owned()));
+        assert!(!patterns.contains(&"%import%".to_owned()));
+        assert!(!patterns.contains(&"%using%".to_owned()));
+        assert!(!patterns.contains(&"%include%".to_owned()));
     }
 
     #[test]

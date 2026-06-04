@@ -48,6 +48,8 @@ const AMBIGUOUS_CALLEE_IMPLEMENTATION_LIMIT: usize = 120;
 const AMBIGUOUS_CALLEE_CONTEXT_LIMIT: usize = 32;
 const AMBIGUOUS_CALLEE_CONTEXT_MIN_SCORE: f64 = 1.5;
 const AMBIGUOUS_CALLEE_IMPLEMENTATION_BASE_SCORE: f64 = 4.65;
+const AMBIGUOUS_CALLEE_IMPLEMENTATION_MAX_SCORE: f64 = 10.25;
+const AMBIGUOUS_CALLEE_TARGET_HINT_TERM_LIMIT: usize = 8;
 
 pub(super) fn search_ambiguous_callee_implementation_hits(
     connection: &Connection,
@@ -168,24 +170,18 @@ fn search_callee_implementation_candidates(
     let language_ids = unique_context_values(contexts, |context| context.language_id.as_str());
     let exact_paths = unique_context_values(contexts, |context| context.path.as_str());
     let path_prefixes = ambiguous_context_path_prefixes(contexts);
+    let target_hint_term_sets = ambiguous_context_target_hint_term_sets(contexts);
+    if callee_names.is_empty() || language_ids.is_empty() {
+        return Ok(Vec::new());
+    }
     let placeholders = std::iter::repeat_n("?", callee_names.len())
         .collect::<Vec<_>>()
         .join(", ");
     let language_placeholders = std::iter::repeat_n("?", language_ids.len())
         .collect::<Vec<_>>()
         .join(", ");
-    let exact_path_placeholders = std::iter::repeat_n("?", exact_paths.len())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let path_prefix_predicates =
-        std::iter::repeat_n("s.path LIKE ? ESCAPE '\\'", path_prefixes.len())
-            .collect::<Vec<_>>()
-            .join(" OR ");
-    let path_predicate = if path_prefix_predicates.is_empty() {
-        format!("s.path IN ({exact_path_placeholders})")
-    } else {
-        format!("s.path IN ({exact_path_placeholders}) OR {path_prefix_predicates}")
-    };
+    let candidate_scope_predicate =
+        callee_candidate_scope_predicate(&exact_paths, &path_prefixes, &target_hint_term_sets);
     let sql = format!(
         "
         SELECT s.file_id, s.path, s.language_id, s.symbol_snapshot_id,
@@ -207,7 +203,7 @@ fn search_callee_implementation_candidates(
         WHERE s.source_scope = ?
           AND s.name IN ({placeholders})
           AND s.language_id IN ({language_placeholders})
-          AND ({path_predicate})
+          AND ({candidate_scope_predicate})
           AND s.kind IN ('function', 'method')
         ORDER BY s.path ASC, s.line_start ASC
         LIMIT ?
@@ -218,6 +214,13 @@ fn search_callee_implementation_candidates(
     values.extend(language_ids.into_iter().map(Value::Text));
     values.extend(exact_paths.into_iter().map(Value::Text));
     values.extend(path_prefixes.into_iter().map(Value::Text));
+    for term_set in target_hint_term_sets {
+        values.extend(
+            term_set
+                .into_iter()
+                .map(|term| Value::Text(format!("%{}%", escape_sql_like(&term)))),
+        );
+    }
     values.push(Value::Integer(limit as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
@@ -278,6 +281,65 @@ fn ambiguous_context_path_prefixes(contexts: &[AmbiguousCalleeContext]) -> Vec<S
     prefixes
 }
 
+fn ambiguous_context_target_hint_term_sets(
+    contexts: &[AmbiguousCalleeContext],
+) -> Vec<Vec<String>> {
+    let mut sets = Vec::new();
+    for context in contexts {
+        let terms =
+            specific_target_hint_terms(context.target_hint.as_deref(), &context.callee_name)
+                .into_iter()
+                .take(AMBIGUOUS_CALLEE_TARGET_HINT_TERM_LIMIT)
+                .collect::<Vec<_>>();
+        if !terms.is_empty() && !sets.contains(&terms) {
+            sets.push(terms);
+        }
+    }
+
+    sets
+}
+
+fn callee_candidate_scope_predicate(
+    exact_paths: &[String],
+    path_prefixes: &[String],
+    target_hint_term_sets: &[Vec<String>],
+) -> String {
+    let mut predicates = Vec::new();
+    if !exact_paths.is_empty() {
+        predicates.push(format!(
+            "s.path IN ({})",
+            std::iter::repeat_n("?", exact_paths.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !path_prefixes.is_empty() {
+        predicates.push(format!(
+            "({})",
+            std::iter::repeat_n("s.path LIKE ? ESCAPE '\\'", path_prefixes.len())
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        ));
+    }
+    for term_set in target_hint_term_sets {
+        predicates.push(format!(
+            "({})",
+            std::iter::repeat_n(
+                "lower(coalesce(s.canonical_symbol_id, '') || ' ' || coalesce(s.signature, '') || ' ' || s.path) LIKE ? ESCAPE '\\'",
+                term_set.len(),
+            )
+            .collect::<Vec<_>>()
+            .join(" AND ")
+        ));
+    }
+
+    if predicates.is_empty() {
+        "0 = 1".to_owned()
+    } else {
+        predicates.join(" OR ")
+    }
+}
+
 fn best_ambiguous_callee_context<'context>(
     candidate: &CalleeImplementationCandidate,
     contexts: &'context [AmbiguousCalleeContext],
@@ -336,11 +398,12 @@ fn ambiguous_callee_implementation_score(
     let parse_bonus = (candidate.parse_status == "parsed") as u8 as f64 * 0.25;
     let body_bonus = if concrete_body { 2.2 } else { 0.0 };
 
-    AMBIGUOUS_CALLEE_IMPLEMENTATION_BASE_SCORE
+    (AMBIGUOUS_CALLEE_IMPLEMENTATION_BASE_SCORE
         + context_score
         + source_bonus
         + parse_bonus
-        + body_bonus
+        + body_bonus)
+        .min(AMBIGUOUS_CALLEE_IMPLEMENTATION_MAX_SCORE)
 }
 
 fn body_contains_executable_implementation(body: &str, name: &str) -> bool {
@@ -388,15 +451,7 @@ fn specific_target_hint_matches_candidate(
     target_hint: Option<&str>,
     candidate: &CalleeImplementationCandidate,
 ) -> bool {
-    let Some(target_hint) = target_hint.map(str::trim).filter(|hint| !hint.is_empty()) else {
-        return false;
-    };
-    let hint_terms = identifier_terms(target_hint);
-    let name_terms = identifier_terms(&candidate.name);
-    let specific_terms = hint_terms
-        .iter()
-        .filter(|term| !name_terms.iter().any(|name_term| name_term == *term))
-        .collect::<Vec<_>>();
+    let specific_terms = specific_target_hint_terms(target_hint, &candidate.name);
     if specific_terms.is_empty() {
         return false;
     }
@@ -407,7 +462,18 @@ fn specific_target_hint_matches_candidate(
 
     specific_terms
         .iter()
-        .all(|term| candidate_terms.iter().any(|candidate| candidate == *term))
+        .all(|term| candidate_terms.iter().any(|candidate| candidate == term))
+}
+
+fn specific_target_hint_terms(target_hint: Option<&str>, callee_name: &str) -> Vec<String> {
+    let Some(target_hint) = target_hint.map(str::trim).filter(|hint| !hint.is_empty()) else {
+        return Vec::new();
+    };
+    let name_terms = identifier_terms(callee_name);
+    identifier_terms(target_hint)
+        .into_iter()
+        .filter(|term| !name_terms.iter().any(|name_term| name_term == term))
+        .collect()
 }
 
 fn caller_context_mentions_candidate(
@@ -551,6 +617,10 @@ mod tests {
             ambiguous_callee_implementation_score(&source, false, 2.0)
                 > ambiguous_callee_implementation_score(&fake, false, 2.0)
         );
+        assert_eq!(
+            ambiguous_callee_implementation_score(&source, false, 4.0),
+            AMBIGUOUS_CALLEE_IMPLEMENTATION_MAX_SCORE
+        );
     }
 
     #[test]
@@ -601,6 +671,26 @@ mod tests {
             "repo://repo/com::acme::worker::AnnotatedService.handle".to_owned();
 
         assert!(ambiguous_callee_context_score(&candidate, &context) > 0.0);
+    }
+
+    #[test]
+    fn ambiguous_callee_candidate_scope_includes_target_hint_identity_terms() {
+        let context = context(
+            "src/main/java/example/ServiceFactory.java",
+            Some("com.acme.worker.AnnotatedService.handle"),
+        );
+        let target_hint_terms = ambiguous_context_target_hint_term_sets(&[context]);
+        let predicate = callee_candidate_scope_predicate(
+            &["src/main/java/example/ServiceFactory.java".to_owned()],
+            &[],
+            &target_hint_terms,
+        );
+
+        assert!(target_hint_terms[0].contains(&"worker".to_owned()));
+        assert!(target_hint_terms[0].contains(&"annotatedservice".to_owned()));
+        assert!(!target_hint_terms[0].contains(&"handle".to_owned()));
+        assert!(predicate.contains("canonical_symbol_id"), "{predicate}");
+        assert!(predicate.contains("s.path IN (?)"), "{predicate}");
     }
 
     fn context(path: &str, target_hint: Option<&str>) -> AmbiguousCalleeContext {
