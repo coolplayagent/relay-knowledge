@@ -3,7 +3,10 @@ use crate::domain::{
 };
 
 use super::test_fixtures::TempGitRepo;
-use super::{build_index_snapshot, source_gitlink};
+use super::{
+    build_index_snapshot, changed_paths_for_diff_with_filters, deleted_symbol_names_for_diff,
+    source_gitlink,
+};
 
 #[test]
 fn incremental_readded_submodule_deletes_historical_cached_children() {
@@ -154,6 +157,204 @@ fn fallback_gitlink_expansion_enforces_combined_side_budget() {
     };
 
     assert!(error.to_string().contains("expands to 520 files"));
+}
+
+#[test]
+fn incremental_renamed_submodule_budget_counts_language_selected_children() {
+    let child = TempGitRepo::create("review-rename-language-budget-child");
+    child.write(
+        "src/target.rs",
+        "pub fn renamed_selected_value() -> u32 { 0 }\n",
+    );
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    let parent = TempGitRepo::create("review-rename-language-budget-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: parent.path.join("src/module"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    write_many_files(
+        &submodule,
+        "docs/generated",
+        "md",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "large non-rust surface"]);
+    parent.git(["add", "src/module"]);
+    parent.git(["commit", "-m", "update submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &parent.registration(),
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    parent.git(["mv", "src/module", "src/renamed"]);
+    parent.git(["commit", "-am", "rename submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &parent.registration(),
+        &selector,
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("non-rust renamed children should not consume rust expansion budget");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/renamed/src/target.rs")
+    );
+}
+
+#[test]
+fn impact_gitlink_budget_counts_language_selected_children() {
+    let child = TempGitRepo::create("review-impact-language-budget-child");
+    child.write(
+        "src/target.rs",
+        "pub fn impact_selected_value() -> u32 { 0 }\n",
+    );
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    let parent = TempGitRepo::create("review-impact-language-budget-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let submodule = TempGitRepo {
+        path: parent.path.join("src/module"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    write_many_files(
+        &submodule,
+        "docs/generated",
+        "md",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    submodule.write(
+        "src/target.rs",
+        "pub fn impact_selected_value() -> u32 { 1 }\n",
+    );
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "mixed language update"]);
+    parent.git(["add", "src/module"]);
+    parent.git(["commit", "-m", "update submodule"]);
+
+    let paths =
+        changed_paths_for_diff_with_filters(&parent.path, &base, "HEAD", &[], &["rust".to_owned()])
+            .expect("non-rust impact paths should not consume rust expansion budget");
+
+    assert_eq!(paths, vec!["src/module/src/target.rs".to_owned()]);
+}
+
+#[test]
+fn deleted_symbol_gitlink_budget_counts_language_selected_children() {
+    let child = TempGitRepo::create("review-deleted-symbol-language-budget-child");
+    child.write(
+        "src/lib.rs",
+        "pub fn removed_submodule_api() -> u32 { 0 }\n",
+    );
+    write_many_files(
+        &child,
+        "docs/generated",
+        "md",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    let parent = TempGitRepo::create("review-deleted-symbol-language-budget-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    parent.git(["rm", "-f", "src/module"]);
+    parent.git(["commit", "-m", "remove submodule"]);
+    let selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+
+    let names = deleted_symbol_names_for_diff(&parent.registration(), &selector, &base, "HEAD")
+        .expect("non-rust deleted children should not consume rust expansion budget");
+
+    assert!(names.contains(&"removed_submodule_api".to_owned()));
+}
+
+#[test]
+fn impact_fallback_gitlink_expansion_enforces_combined_side_budget() {
+    let old_child = TempGitRepo::create("review-impact-budget-old-child");
+    write_many_files(&old_child, "src/old", "rs", 260);
+    old_child.git(["add", "."]);
+    old_child.git(["commit", "-m", "old child"]);
+    let new_child = TempGitRepo::create("review-impact-budget-new-child");
+    write_many_files(&new_child, "src/new", "rs", 260);
+    new_child.git(["add", "."]);
+    new_child.git(["commit", "-m", "new child"]);
+    let parent = TempGitRepo::create("review-impact-budget-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &old_child, "a_old", "src/module");
+    parent.git(["commit", "-am", "add old submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    parent.git(["rm", "-f", "src/module"]);
+    parent.git(["commit", "-m", "remove old submodule"]);
+    add_named_submodule(&parent, &new_child, "z_new", "src/module");
+    parent.git(["commit", "-am", "add new submodule"]);
+
+    let error = changed_paths_for_diff_with_filters(&parent.path, &base, "HEAD", &[], &[])
+        .expect_err("impact fallback should enforce the shared expansion budget");
+
+    assert!(error.to_string().contains("expands to 520 files"));
+}
+
+#[test]
+fn impact_missing_submodule_does_not_scan_unrelated_cached_gitdir() {
+    let child = TempGitRepo::create("review-unrelated-cache-child");
+    child.write("private.rs", "pub fn private_cached_value() -> u32 { 0 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "private child"]);
+    let child_commit = child.git_text(["rev-parse", "HEAD"]);
+    let parent = TempGitRepo::create("review-unrelated-cache-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "private_cache", "vendor/private");
+    parent.git(["commit", "-am", "add unrelated configured submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    parent.git([
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        "160000",
+        &child_commit,
+        "src/missing",
+    ]);
+    parent.git(["commit", "-m", "add unconfigured gitlink"]);
+
+    let paths = changed_paths_for_diff_with_filters(&parent.path, &base, "HEAD", &[], &[])
+        .expect("unconfigured gitlink should remain unresolved");
+
+    assert!(paths.contains(&"src/missing".to_owned()));
+    assert!(!paths.contains(&"src/missing/private.rs".to_owned()));
 }
 
 fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, path: &str) {

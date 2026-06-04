@@ -7,56 +7,22 @@ use super::{
     CodeIndexError,
     changes::{
         GitChange, TrackedEntryScope, diff_changes, git_dir_bytes, parse_name_status_z,
-        submodule_git_dir, submodule_git_dir_from_git_dir, submodule_worktree_root,
-        tracked_entries_from_git_dir_with_scope, tracked_entries_with_scope,
+        submodule_git_dir, submodule_worktree_root, tracked_entries_from_git_dir_with_scope,
+        tracked_entries_with_scope,
     },
     git::git_bytes,
 };
 
 pub(super) use super::source_gitlink_paths::{
-    GitlinkPathExpansion, GitlinkTarget, GitlinkTargetLocation, SubmoduleChangedPathSets,
-    SubmodulePathEntry, bounded_expanded_paths_under,
+    GitlinkPathExpansion, SubmoduleChangedPathSets, SubmodulePathEntry,
 };
 pub(super) use super::source_gitlink_selector::GitlinkPathSelector;
+pub(super) use super::source_gitlink_target::{
+    git_blob_bytes_with_submodules, git_dir_blob_bytes_with_submodules, submodule_blob_size,
+    submodule_bytes,
+};
 
 const MAX_NESTED_GITLINK_DIFF_DEPTH: usize = 8;
-
-pub(super) fn submodule_bytes(
-    root: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<Vec<u8>, CodeIndexError> {
-    let target = gitlink_target_for_path(root, commit, path)?;
-
-    match target.location {
-        GitlinkTargetLocation::Worktree(root) => {
-            git_blob_bytes_with_submodules(&root, &target.commit, &target.path)
-        }
-        GitlinkTargetLocation::GitDir(git_dir) => {
-            git_dir_blob_bytes_with_submodules(&git_dir, &target.commit, &target.path)
-        }
-    }
-}
-
-pub(super) fn submodule_blob_size(
-    root: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<Option<usize>, CodeIndexError> {
-    let target = match gitlink_target_for_path(root, commit, path) {
-        Ok(target) => target,
-        Err(_) => return Ok(None),
-    };
-
-    match target.location {
-        GitlinkTargetLocation::Worktree(root) => {
-            git_blob_size_with_submodules(&root, &target.commit, &target.path)
-        }
-        GitlinkTargetLocation::GitDir(git_dir) => {
-            git_dir_blob_size_with_submodules(&git_dir, &target.commit, &target.path)
-        }
-    }
-}
 
 pub(super) struct GitlinkImpactExpander<'a> {
     root: &'a Path,
@@ -114,15 +80,25 @@ impl<'a> GitlinkImpactExpander<'a> {
 
         let max_paths = self.max_paths;
         let base_paths = match &base_gitlink {
-            Some(commit) => {
-                bounded_submodule_parent_paths(self.root, path, commit, max_paths, selector)?
-            }
+            Some(commit) => bounded_submodule_parent_paths(
+                self.root,
+                path,
+                &self.base_commit,
+                commit,
+                max_paths,
+                selector,
+            )?,
             None => BTreeSet::new(),
         };
         let head_paths = match &head_gitlink {
-            Some(commit) => {
-                bounded_submodule_parent_paths(self.root, path, commit, max_paths, selector)?
-            }
+            Some(commit) => bounded_submodule_parent_paths(
+                self.root,
+                path,
+                &self.head_commit,
+                commit,
+                max_paths,
+                selector,
+            )?,
             None => BTreeSet::new(),
         };
         let mut paths = base_paths.union(&head_paths).cloned().collect::<Vec<_>>();
@@ -156,18 +132,34 @@ pub(super) fn changed_gitlink_path_expansion(
 
     if let (Some(base_gitlink), Some(head_gitlink)) = (&base_gitlink, &head_gitlink) {
         let Some(changed_paths) = changed_submodule_path_sets(
-            root,
-            path,
-            base_gitlink,
-            head_gitlink,
-            max_paths,
+            SubmoduleDiffRequest {
+                root,
+                path,
+                base_parent_commit,
+                head_parent_commit,
+                base_gitlink,
+                head_gitlink,
+                max_paths,
+            },
             selector,
         )?
         else {
-            let base_paths =
-                bounded_submodule_parent_paths(root, path, base_gitlink, max_paths, selector)?;
-            let head_paths =
-                bounded_submodule_parent_paths(root, path, head_gitlink, max_paths, selector)?;
+            let base_paths = bounded_submodule_parent_paths(
+                root,
+                path,
+                base_parent_commit,
+                base_gitlink,
+                max_paths,
+                selector,
+            )?;
+            let head_paths = bounded_submodule_parent_paths(
+                root,
+                path,
+                head_parent_commit,
+                head_gitlink,
+                max_paths,
+                selector,
+            )?;
             ensure_gitlink_expansion_budget(
                 path,
                 base_paths.len().saturating_add(head_paths.len()),
@@ -189,11 +181,25 @@ pub(super) fn changed_gitlink_path_expansion(
     }
 
     let base_paths = match &base_gitlink {
-        Some(commit) => bounded_submodule_parent_paths(root, path, commit, max_paths, selector)?,
+        Some(commit) => bounded_submodule_parent_paths(
+            root,
+            path,
+            base_parent_commit,
+            commit,
+            max_paths,
+            selector,
+        )?,
         None => BTreeSet::new(),
     };
     let head_paths = match &head_gitlink {
-        Some(commit) => bounded_submodule_parent_paths(root, path, commit, max_paths, selector)?,
+        Some(commit) => bounded_submodule_parent_paths(
+            root,
+            path,
+            head_parent_commit,
+            commit,
+            max_paths,
+            selector,
+        )?,
         None => BTreeSet::new(),
     };
 
@@ -215,23 +221,17 @@ pub(super) fn gitlink_commit_at_tree(
         .map(|entry| entry.object))
 }
 
-pub(super) fn submodule_path_entries(
-    root: &Path,
-    path: &str,
-    commit: &str,
-) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
-    submodule_path_entries_with_scope(root, path, commit, &TrackedEntryScope::all())
-}
-
 pub(super) fn submodule_path_entries_with_child_filters(
     root: &Path,
     path: &str,
+    parent_commit: Option<&str>,
     commit: &str,
     child_filters: &[String],
 ) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
     submodule_path_entries_with_scope(
         root,
         path,
+        parent_commit,
         commit,
         &TrackedEntryScope::from_entry_path_filters(child_filters.iter()),
     )
@@ -240,6 +240,7 @@ pub(super) fn submodule_path_entries_with_child_filters(
 fn submodule_path_entries_with_scope(
     root: &Path,
     path: &str,
+    parent_commit: Option<&str>,
     commit: &str,
     scope: &TrackedEntryScope,
 ) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
@@ -249,7 +250,7 @@ fn submodule_path_entries_with_scope(
             tracked_entries_with_scope(&submodule_root, commit, scope)?
         } else {
             tracked_entries_from_git_dir_with_scope(
-                &submodule_git_dir(root, path, None, Some(commit))?,
+                &submodule_git_dir(root, path, parent_commit, Some(commit))?,
                 commit,
                 scope,
             )?
@@ -300,23 +301,35 @@ fn changed_submodule_paths_for_parent_commits(
         return Ok(None);
     };
     let Some(changed_paths) = changed_submodule_path_sets(
-        root,
-        path,
-        &base_gitlink,
-        &head_gitlink,
-        max_paths,
+        SubmoduleDiffRequest {
+            root,
+            path,
+            base_parent_commit,
+            head_parent_commit,
+            base_gitlink: &base_gitlink,
+            head_gitlink: &head_gitlink,
+            max_paths,
+        },
         selector,
     )?
     else {
-        let mut paths =
-            bounded_submodule_parent_paths(root, path, &base_gitlink, max_paths, selector)?;
+        let mut paths = bounded_submodule_parent_paths(
+            root,
+            path,
+            base_parent_commit,
+            &base_gitlink,
+            max_paths,
+            selector,
+        )?;
         paths.extend(bounded_submodule_parent_paths(
             root,
             path,
+            head_parent_commit,
             &head_gitlink,
             max_paths,
             selector,
         )?);
+        ensure_gitlink_expansion_budget(path, paths.len(), max_paths)?;
         return Ok(Some(paths));
     };
 
@@ -329,57 +342,61 @@ fn changed_submodule_paths_for_parent_commits(
     ))
 }
 
-fn changed_submodule_path_sets(
-    root: &Path,
-    path: &str,
-    base_gitlink: &str,
-    head_gitlink: &str,
+#[derive(Clone, Copy)]
+struct SubmoduleDiffRequest<'a> {
+    root: &'a Path,
+    path: &'a str,
+    base_parent_commit: &'a str,
+    head_parent_commit: &'a str,
+    base_gitlink: &'a str,
+    head_gitlink: &'a str,
     max_paths: usize,
+}
+
+fn changed_submodule_path_sets(
+    request: SubmoduleDiffRequest<'_>,
     selector: &GitlinkPathSelector<'_>,
 ) -> Result<Option<SubmoduleChangedPathSets>, CodeIndexError> {
-    changed_submodule_path_sets_inner(
-        root,
-        path,
-        base_gitlink,
-        head_gitlink,
-        max_paths,
-        0,
-        selector,
-    )
+    changed_submodule_path_sets_inner(request, 0, selector)
 }
 
 fn changed_submodule_path_sets_inner(
-    root: &Path,
-    path: &str,
-    base_gitlink: &str,
-    head_gitlink: &str,
-    max_paths: usize,
+    request: SubmoduleDiffRequest<'_>,
     depth: usize,
     selector: &GitlinkPathSelector<'_>,
 ) -> Result<Option<SubmoduleChangedPathSets>, CodeIndexError> {
-    if base_gitlink == head_gitlink {
+    if request.base_gitlink == request.head_gitlink {
         return Ok(Some(SubmoduleChangedPathSets {
             base_paths: BTreeSet::new(),
             head_paths: BTreeSet::new(),
         }));
     }
-    let changes = match diff_submodule_changes(root, path, base_gitlink, head_gitlink) {
+    let changes = match diff_submodule_changes(
+        request.root,
+        request.path,
+        request.base_parent_commit,
+        request.base_gitlink,
+        request.head_gitlink,
+    ) {
         Ok(changes) => changes,
         Err(_) => return Ok(None),
     };
     let mut base_paths = BTreeSet::new();
     let mut head_paths = BTreeSet::new();
-    let parent_path = path;
+    let parent_path = request.path;
     for change in changes {
         match change {
             GitChange::Deleted { path } => {
                 if !append_side_nested_gitlink_paths(
-                    root,
-                    parent_path,
-                    base_gitlink,
-                    &path,
+                    SideNestedGitlinkRequest {
+                        root: request.root,
+                        parent_path,
+                        parent_commit: request.base_parent_commit,
+                        parent_gitlink: request.base_gitlink,
+                        child_path: &path,
+                        max_paths: request.max_paths,
+                    },
                     &mut base_paths,
-                    max_paths,
                     selector,
                 )? {
                     insert_selected_parent_path(&mut base_paths, parent_path, &path, selector);
@@ -388,12 +405,14 @@ fn changed_submodule_path_sets_inner(
             GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
                 if !append_changed_nested_gitlink_paths(
                     NestedGitlinkChange {
-                        root,
+                        root: request.root,
                         parent_path,
-                        base_gitlink,
-                        head_gitlink,
+                        base_parent_commit: request.base_parent_commit,
+                        head_parent_commit: request.head_parent_commit,
+                        base_gitlink: request.base_gitlink,
+                        head_gitlink: request.head_gitlink,
                         child_path: &path,
-                        max_paths,
+                        max_paths: request.max_paths,
                         depth,
                     },
                     &mut base_paths,
@@ -402,7 +421,13 @@ fn changed_submodule_path_sets_inner(
                 )? {
                     let parent_child_path = parent_submodule_path(parent_path, &path);
                     if selector.includes(&parent_child_path) {
-                        if submodule_blob_exists(root, parent_path, base_gitlink, &path)? {
+                        if submodule_blob_exists(
+                            request.root,
+                            parent_path,
+                            request.base_parent_commit,
+                            request.base_gitlink,
+                            &path,
+                        )? {
                             base_paths.insert(parent_child_path.clone());
                         }
                         head_paths.insert(parent_child_path);
@@ -411,23 +436,29 @@ fn changed_submodule_path_sets_inner(
             }
             GitChange::Renamed { old_path, new_path } => {
                 if !append_side_nested_gitlink_paths(
-                    root,
-                    parent_path,
-                    base_gitlink,
-                    &old_path,
+                    SideNestedGitlinkRequest {
+                        root: request.root,
+                        parent_path,
+                        parent_commit: request.base_parent_commit,
+                        parent_gitlink: request.base_gitlink,
+                        child_path: &old_path,
+                        max_paths: request.max_paths,
+                    },
                     &mut base_paths,
-                    max_paths,
                     selector,
                 )? {
                     insert_selected_parent_path(&mut base_paths, parent_path, &old_path, selector);
                 }
                 if !append_side_nested_gitlink_paths(
-                    root,
-                    parent_path,
-                    head_gitlink,
-                    &new_path,
+                    SideNestedGitlinkRequest {
+                        root: request.root,
+                        parent_path,
+                        parent_commit: request.head_parent_commit,
+                        parent_gitlink: request.head_gitlink,
+                        child_path: &new_path,
+                        max_paths: request.max_paths,
+                    },
                     &mut head_paths,
-                    max_paths,
                     selector,
                 )? {
                     insert_selected_parent_path(&mut head_paths, parent_path, &new_path, selector);
@@ -435,12 +466,15 @@ fn changed_submodule_path_sets_inner(
             }
             GitChange::Copied { new_path, .. } => {
                 if !append_side_nested_gitlink_paths(
-                    root,
-                    parent_path,
-                    head_gitlink,
-                    &new_path,
+                    SideNestedGitlinkRequest {
+                        root: request.root,
+                        parent_path,
+                        parent_commit: request.head_parent_commit,
+                        parent_gitlink: request.head_gitlink,
+                        child_path: &new_path,
+                        max_paths: request.max_paths,
+                    },
                     &mut head_paths,
-                    max_paths,
                     selector,
                 )? {
                     insert_selected_parent_path(&mut head_paths, parent_path, &new_path, selector);
@@ -448,9 +482,9 @@ fn changed_submodule_path_sets_inner(
             }
         }
         ensure_gitlink_expansion_budget(
-            path,
+            request.path,
             base_paths.len().saturating_add(head_paths.len()),
-            max_paths,
+            request.max_paths,
         )?;
     }
 
@@ -486,6 +520,8 @@ fn insert_selected_path(
 struct NestedGitlinkChange<'a> {
     root: &'a Path,
     parent_path: &'a str,
+    base_parent_commit: &'a str,
+    head_parent_commit: &'a str,
     base_gitlink: &'a str,
     head_gitlink: &'a str,
     child_path: &'a str,
@@ -502,12 +538,14 @@ fn append_changed_nested_gitlink_paths(
     let base_nested = submodule_gitlink_commit(
         change.root,
         change.parent_path,
+        change.base_parent_commit,
         change.base_gitlink,
         change.child_path,
     )?;
     let head_nested = submodule_gitlink_commit(
         change.root,
         change.parent_path,
+        change.head_parent_commit,
         change.head_gitlink,
         change.child_path,
     )?;
@@ -524,11 +562,15 @@ fn append_changed_nested_gitlink_paths(
         }
         if change.depth < MAX_NESTED_GITLINK_DIFF_DEPTH
             && let Some(changed_paths) = changed_submodule_path_sets_inner(
-                change.root,
-                &nested_parent_path,
-                base_commit,
-                head_commit,
-                change.max_paths,
+                SubmoduleDiffRequest {
+                    root: change.root,
+                    path: &nested_parent_path,
+                    base_parent_commit: change.base_gitlink,
+                    head_parent_commit: change.head_gitlink,
+                    base_gitlink: base_commit,
+                    head_gitlink: head_commit,
+                    max_paths: change.max_paths,
+                },
                 change.depth + 1,
                 selector,
             )?
@@ -543,6 +585,7 @@ fn append_changed_nested_gitlink_paths(
         Some(commit) => append_bounded_submodule_entry_paths(
             change.root,
             &nested_parent_path,
+            change.base_gitlink,
             &commit,
             base_paths,
             change.max_paths,
@@ -551,6 +594,7 @@ fn append_changed_nested_gitlink_paths(
         None if submodule_blob_exists(
             change.root,
             change.parent_path,
+            change.base_parent_commit,
             change.base_gitlink,
             change.child_path,
         )? =>
@@ -567,6 +611,7 @@ fn append_changed_nested_gitlink_paths(
         Some(commit) => append_bounded_submodule_entry_paths(
             change.root,
             &nested_parent_path,
+            change.head_gitlink,
             &commit,
             head_paths,
             change.max_paths,
@@ -584,30 +629,41 @@ fn append_changed_nested_gitlink_paths(
     Ok(true)
 }
 
-fn append_side_nested_gitlink_paths(
-    root: &Path,
-    parent_path: &str,
-    parent_commit: &str,
-    child_path: &str,
-    paths: &mut BTreeSet<String>,
+struct SideNestedGitlinkRequest<'a> {
+    root: &'a Path,
+    parent_path: &'a str,
+    parent_commit: &'a str,
+    parent_gitlink: &'a str,
+    child_path: &'a str,
     max_paths: usize,
+}
+
+fn append_side_nested_gitlink_paths(
+    request: SideNestedGitlinkRequest<'_>,
+    paths: &mut BTreeSet<String>,
     selector: &GitlinkPathSelector<'_>,
 ) -> Result<bool, CodeIndexError> {
-    let Some(nested_commit) =
-        submodule_gitlink_commit(root, parent_path, parent_commit, child_path)?
+    let Some(nested_commit) = submodule_gitlink_commit(
+        request.root,
+        request.parent_path,
+        request.parent_commit,
+        request.parent_gitlink,
+        request.child_path,
+    )?
     else {
         return Ok(false);
     };
-    let nested_parent_path = parent_submodule_path(parent_path, child_path);
+    let nested_parent_path = parent_submodule_path(request.parent_path, request.child_path);
     if !selector.overlaps(&nested_parent_path) {
         return Ok(true);
     }
     append_bounded_submodule_entry_paths(
-        root,
+        request.root,
         &nested_parent_path,
+        request.parent_gitlink,
         &nested_commit,
         paths,
-        max_paths,
+        request.max_paths,
         selector,
     )?;
 
@@ -617,12 +673,13 @@ fn append_side_nested_gitlink_paths(
 fn append_bounded_submodule_entry_paths(
     root: &Path,
     path: &str,
+    parent_commit: &str,
     commit: &str,
     paths: &mut BTreeSet<String>,
     max_paths: usize,
     selector: &GitlinkPathSelector<'_>,
 ) -> Result<(), CodeIndexError> {
-    let entries = submodule_path_entries_for_expansion(root, path, commit)?;
+    let entries = submodule_path_entries_for_expansion(root, path, Some(parent_commit), commit)?;
     let selected = entries
         .into_iter()
         .filter(|entry| selector.includes(&entry.parent_path))
@@ -637,6 +694,7 @@ fn append_bounded_submodule_entry_paths(
 fn submodule_gitlink_commit(
     root: &Path,
     path: &str,
+    parent_commit: &str,
     commit: &str,
     child_path: &str,
 ) -> Result<Option<String>, CodeIndexError> {
@@ -645,7 +703,7 @@ fn submodule_gitlink_commit(
             .filter(|entry| entry.kind == "commit")
             .map(|entry| entry.object))
     } else {
-        let git_dir = submodule_git_dir(root, path, None, Some(commit))?;
+        let git_dir = submodule_git_dir(root, path, Some(parent_commit), Some(commit))?;
         Ok(git_tree_entry_from_git_dir(&git_dir, commit, child_path)?
             .filter(|entry| entry.kind == "commit")
             .map(|entry| entry.object))
@@ -655,6 +713,7 @@ fn submodule_gitlink_commit(
 fn diff_submodule_changes(
     root: &Path,
     path: &str,
+    base_parent_commit: &str,
     base_gitlink: &str,
     head_gitlink: &str,
 ) -> Result<Vec<GitChange>, CodeIndexError> {
@@ -664,7 +723,7 @@ fn diff_submodule_changes(
         diff_changes(&submodule_root, base_gitlink, head_gitlink)
     } else {
         diff_changes_from_git_dir(
-            &submodule_git_dir(root, path, None, Some(base_gitlink))?,
+            &submodule_git_dir(root, path, Some(base_parent_commit), Some(base_gitlink))?,
             base_gitlink,
             head_gitlink,
         )
@@ -674,6 +733,7 @@ fn diff_submodule_changes(
 fn submodule_blob_exists(
     root: &Path,
     path: &str,
+    parent_commit: &str,
     commit: &str,
     child_path: &str,
 ) -> Result<bool, CodeIndexError> {
@@ -685,7 +745,7 @@ fn submodule_blob_exists(
         .is_ok())
     } else {
         Ok(git_dir_bytes(
-            &submodule_git_dir(root, path, None, Some(commit))?,
+            &submodule_git_dir(root, path, Some(parent_commit), Some(commit))?,
             &["cat-file", "-e", &format!("{commit}:{child_path}")],
         )
         .is_ok())
@@ -721,11 +781,12 @@ fn parent_submodule_path(parent_path: &str, child_path: &str) -> String {
 fn bounded_submodule_parent_paths(
     root: &Path,
     path: &str,
+    parent_commit: &str,
     commit: &str,
     max_paths: usize,
     selector: &GitlinkPathSelector<'_>,
 ) -> Result<BTreeSet<String>, CodeIndexError> {
-    let entries = submodule_path_entries_for_expansion(root, path, commit)?;
+    let entries = submodule_path_entries_for_expansion(root, path, Some(parent_commit), commit)?;
     let selected = entries
         .into_iter()
         .filter(|entry| selector.includes(&entry.parent_path))
@@ -753,9 +814,16 @@ fn ensure_gitlink_expansion_budget(
 fn submodule_path_entries_for_expansion(
     root: &Path,
     path: &str,
+    parent_commit: Option<&str>,
     commit: &str,
 ) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
-    match submodule_path_entries(root, path, commit) {
+    match submodule_path_entries_with_scope(
+        root,
+        path,
+        parent_commit,
+        commit,
+        &TrackedEntryScope::all(),
+    ) {
         Ok(entries) => Ok(entries),
         Err(error) if submodule_expansion_is_unavailable(&error) => Ok(Vec::new()),
         Err(error) => Err(error),
@@ -772,114 +840,7 @@ pub(super) fn submodule_expansion_is_unavailable(error: &CodeIndexError) -> bool
     }
 }
 
-fn git_blob_bytes_with_submodules(
-    root: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<Vec<u8>, CodeIndexError> {
-    match git_bytes(root, ["show", &format!("{commit}:{path}")]) {
-        Ok(bytes) => Ok(bytes),
-        Err(error) => submodule_bytes(root, commit, path).map_err(|_| error),
-    }
-}
-
-fn git_dir_blob_bytes_with_submodules(
-    git_dir: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<Vec<u8>, CodeIndexError> {
-    match git_dir_bytes(git_dir, &["show", &format!("{commit}:{path}")]) {
-        Ok(bytes) => Ok(bytes),
-        Err(error) => gitlink_target_for_git_dir_path(git_dir, commit, path)
-            .and_then(|target| {
-                let GitlinkTargetLocation::GitDir(target_git_dir) = target.location else {
-                    return Err(CodeIndexError::InvalidInput(
-                        "gitdir submodule target unexpectedly resolved to a worktree".to_owned(),
-                    ));
-                };
-                git_dir_blob_bytes_with_submodules(&target_git_dir, &target.commit, &target.path)
-            })
-            .map_err(|_| error),
-    }
-}
-
-fn git_blob_size_with_submodules(
-    root: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<Option<usize>, CodeIndexError> {
-    let object = format!("{commit}:{path}");
-    match git_bytes(root, ["cat-file", "-s", &object]) {
-        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).trim().parse::<usize>().ok()),
-        Err(_) => submodule_blob_size(root, commit, path),
-    }
-}
-
-fn git_dir_blob_size_with_submodules(
-    git_dir: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<Option<usize>, CodeIndexError> {
-    match git_dir_bytes(git_dir, &["cat-file", "-s", &format!("{commit}:{path}")]) {
-        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).trim().parse::<usize>().ok()),
-        Err(_) => match gitlink_target_for_git_dir_path(git_dir, commit, path) {
-            Ok(target) => {
-                let GitlinkTargetLocation::GitDir(target_git_dir) = target.location else {
-                    return Err(CodeIndexError::InvalidInput(
-                        "gitdir submodule target unexpectedly resolved to a worktree".to_owned(),
-                    ));
-                };
-                git_dir_blob_size_with_submodules(&target_git_dir, &target.commit, &target.path)
-            }
-            Err(_) => Ok(None),
-        },
-    }
-}
-
-fn gitlink_target_for_path(
-    root: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<GitlinkTarget, CodeIndexError> {
-    if !safe_relative_path(path) {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "unsafe repository source path '{path}'"
-        )));
-    }
-    let segments = path.split('/').collect::<Vec<_>>();
-    for prefix_len in 1..segments.len() {
-        let prefix = segments[..prefix_len].join("/");
-        let Some(entry) = git_tree_entry(root, commit, &prefix)? else {
-            continue;
-        };
-        if entry.kind != "commit" {
-            continue;
-        }
-        let location = match submodule_worktree_root(root, &prefix) {
-            Ok(submodule_root) if git_root_has_commit(&submodule_root, &entry.object) => {
-                GitlinkTargetLocation::Worktree(submodule_root)
-            }
-            _ => GitlinkTargetLocation::GitDir(submodule_git_dir(
-                root,
-                &prefix,
-                Some(commit),
-                Some(&entry.object),
-            )?),
-        };
-        let remaining_path = segments[prefix_len..].join("/");
-        return Ok(GitlinkTarget {
-            location,
-            commit: entry.object,
-            path: remaining_path,
-        });
-    }
-
-    Err(CodeIndexError::InvalidInput(format!(
-        "repository source path {path} is not a checked-out submodule path"
-    )))
-}
-
-fn git_root_has_commit(root: &Path, commit: &str) -> bool {
+pub(super) fn git_root_has_commit(root: &Path, commit: &str) -> bool {
     git_bytes(root, ["cat-file", "-e", &format!("{commit}^{{commit}}")]).is_ok()
 }
 
@@ -889,50 +850,13 @@ fn submodule_worktree_root_for_commit(root: &Path, path: &str, commit: &str) -> 
         .filter(|submodule_root| git_root_has_commit(submodule_root, commit))
 }
 
-fn gitlink_target_for_git_dir_path(
-    git_dir: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<GitlinkTarget, CodeIndexError> {
-    if !safe_relative_path(path) {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "unsafe repository source path '{path}'"
-        )));
-    }
-    let segments = path.split('/').collect::<Vec<_>>();
-    for prefix_len in 1..segments.len() {
-        let prefix = segments[..prefix_len].join("/");
-        let Some(entry) = git_tree_entry_from_git_dir(git_dir, commit, &prefix)? else {
-            continue;
-        };
-        if entry.kind != "commit" {
-            continue;
-        }
-        let remaining_path = segments[prefix_len..].join("/");
-        return Ok(GitlinkTarget {
-            location: GitlinkTargetLocation::GitDir(submodule_git_dir_from_git_dir(
-                git_dir,
-                &prefix,
-                Some(commit),
-                Some(&entry.object),
-            )?),
-            commit: entry.object,
-            path: remaining_path,
-        });
-    }
-
-    Err(CodeIndexError::InvalidInput(format!(
-        "repository source path {path} is not a checked-out submodule path"
-    )))
-}
-
 #[derive(Debug)]
-struct GitTreeLookup {
-    object: String,
-    kind: String,
+pub(super) struct GitTreeLookup {
+    pub(super) object: String,
+    pub(super) kind: String,
 }
 
-fn git_tree_entry(
+pub(super) fn git_tree_entry(
     root: &Path,
     commit: &str,
     path: &str,
@@ -959,7 +883,7 @@ fn git_tree_entry(
     }))
 }
 
-fn git_tree_entry_from_git_dir(
+pub(super) fn git_tree_entry_from_git_dir(
     git_dir: &Path,
     commit: &str,
     path: &str,
@@ -986,7 +910,7 @@ fn git_tree_entry_from_git_dir(
     }))
 }
 
-fn safe_relative_path(path: &str) -> bool {
+pub(super) fn safe_relative_path(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('/')
         && !path.contains('\\')

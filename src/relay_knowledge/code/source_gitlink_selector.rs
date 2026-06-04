@@ -14,6 +14,7 @@ impl<'a> GitlinkPathSelector<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn all() -> Self {
         Self {
             include_path: &path_always_matches,
@@ -30,6 +31,7 @@ impl<'a> GitlinkPathSelector<'a> {
     }
 }
 
+#[cfg(test)]
 fn path_always_matches(_: &str) -> bool {
     true
 }

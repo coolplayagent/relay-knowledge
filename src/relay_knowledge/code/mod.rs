@@ -16,6 +16,7 @@ mod git;
 mod grep;
 mod identity;
 mod ids;
+mod impact_paths;
 mod languages;
 mod parser;
 mod pipeline;
@@ -27,6 +28,7 @@ mod source_declarations;
 mod source_gitlink;
 mod source_gitlink_paths;
 mod source_gitlink_selector;
+mod source_gitlink_target;
 mod source_paths;
 pub(crate) mod source_roots;
 mod worktree_overlay;
@@ -325,12 +327,13 @@ pub fn changed_paths_for_diff_with_filters(
     }
     let changes = diff_changes(root_path.as_ref(), base_ref, head_ref)?;
 
-    impact_paths_from_changes_with_gitlinks(
+    impact_paths::paths_from_changes_with_gitlinks(
         root_path.as_ref(),
         base_ref,
         head_ref,
         changes,
         path_filters,
+        language_filters,
     )
 }
 
@@ -353,141 +356,6 @@ fn impact_paths_from_changes(changes: Vec<GitChange>) -> Vec<String> {
     paths.dedup();
 
     paths
-}
-
-fn impact_paths_from_changes_with_gitlinks(
-    root: &Path,
-    base_ref: &str,
-    head_ref: &str,
-    changes: Vec<GitChange>,
-    path_filters: &[String],
-) -> Result<Vec<String>, CodeIndexError> {
-    let base_commit = resolve_ref(root, base_ref)?;
-    let head_commit = resolve_ref(root, head_ref)?;
-    let mut expander = source_gitlink::GitlinkImpactExpander::new(
-        root,
-        base_commit,
-        head_commit,
-        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
-    );
-    let mut paths = Vec::new();
-    for change in changes {
-        match change {
-            GitChange::Deleted { path } => {
-                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
-                    paths: &mut paths,
-                    expander: &mut expander,
-                    path_filters,
-                    include_base: true,
-                    include_head: false,
-                    path: &path,
-                })?
-            }
-            GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
-                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
-                    paths: &mut paths,
-                    expander: &mut expander,
-                    path_filters,
-                    include_base: true,
-                    include_head: true,
-                    path: &path,
-                })?
-            }
-            GitChange::Renamed { old_path, new_path } => {
-                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
-                    paths: &mut paths,
-                    expander: &mut expander,
-                    path_filters,
-                    include_base: true,
-                    include_head: false,
-                    path: &old_path,
-                })?;
-                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
-                    paths: &mut paths,
-                    expander: &mut expander,
-                    path_filters,
-                    include_base: false,
-                    include_head: true,
-                    path: &new_path,
-                })?;
-            }
-            GitChange::Copied { new_path, .. } => {
-                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
-                    paths: &mut paths,
-                    expander: &mut expander,
-                    path_filters,
-                    include_base: false,
-                    include_head: true,
-                    path: &new_path,
-                })?;
-            }
-        }
-    }
-    paths.sort();
-    paths.dedup();
-
-    Ok(paths)
-}
-
-struct ImpactPathPush<'a, 'b> {
-    paths: &'a mut Vec<String>,
-    expander: &'a mut source_gitlink::GitlinkImpactExpander<'b>,
-    path_filters: &'a [String],
-    include_base: bool,
-    include_head: bool,
-    path: &'a str,
-}
-
-fn push_scoped_expanded_impact_paths_or_original(
-    request: ImpactPathPush<'_, '_>,
-) -> Result<(), CodeIndexError> {
-    if !impact_path_scope_overlaps(request.path, request.path_filters) {
-        request.paths.push(request.path.to_owned());
-        return Ok(());
-    }
-    match request.expander.expanded_paths(
-        request.path,
-        request.include_base,
-        request.include_head,
-        &source_gitlink::GitlinkPathSelector::new(
-            &|path| impact_path_scope_overlaps(path, request.path_filters),
-            &|path| impact_path_scope_overlaps(path, request.path_filters),
-        ),
-    )? {
-        Some(expanded) if !expanded.is_empty() => request.paths.extend(expanded),
-        _ => request.paths.push(request.path.to_owned()),
-    }
-
-    Ok(())
-}
-
-fn impact_path_scope_overlaps(path: &str, path_filters: &[String]) -> bool {
-    path_filters.is_empty()
-        || path_filters
-            .iter()
-            .any(|filter| impact_path_overlaps_filter(path, filter))
-}
-
-fn impact_path_overlaps_filter(path: &str, filter: &str) -> bool {
-    let path = normalize_impact_path_filter(path);
-    let filter = normalize_impact_path_filter(filter);
-    if filter == "." {
-        return true;
-    }
-    !path.is_empty()
-        && !filter.is_empty()
-        && (path == filter
-            || path.starts_with(&format!("{filter}/"))
-            || filter.starts_with(&format!("{path}/")))
-}
-
-fn normalize_impact_path_filter(filter: &str) -> &str {
-    let mut filter = filter.trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    filter
 }
 
 /// Extracts symbol names removed by a diff so impact can include deleted APIs.
@@ -561,17 +429,27 @@ fn append_deleted_symbol_names_for_removed_path(
     path: &str,
 ) -> Result<(), CodeIndexError> {
     if source_gitlink::gitlink_commit_at_tree(context.root, context.base_commit, path)?.is_some() {
-        let paths = source_gitlink::bounded_expanded_paths_under(
+        let include_expanded_path = |path: &str| {
+            path_is_selected_with_layout(
+                path,
+                context.registration,
+                context.selector,
+                context.source_layout,
+            )
+        };
+        let paths = source_gitlink_paths::bounded_expanded_paths_under_with_selector(
             base_entries,
             path,
             MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+            &source_gitlink::GitlinkPathSelector::new(
+                &include_expanded_path,
+                &include_expanded_path,
+            ),
         )?;
-        if !paths.is_empty() {
-            for path in paths {
-                append_deleted_symbol_names_for_path(names, context, context.base_commit, &path)?;
-            }
-            return Ok(());
+        for path in paths {
+            append_deleted_symbol_names_for_path(names, context, context.base_commit, &path)?;
         }
+        return Ok(());
     }
 
     append_deleted_symbol_names_for_path(names, context, context.base_commit, path)
@@ -918,13 +796,23 @@ fn parse_expanded_gitlink_paths(
     entries: &[changes::GitTreeEntry],
     path: &str,
 ) -> Result<bool, CodeIndexError> {
-    let paths = source_gitlink::bounded_expanded_paths_under(
+    let include_expanded_path = |path: &str| {
+        path_is_selected_with_layout(
+            path,
+            context.registration,
+            context.selector,
+            context.source_layout,
+        )
+    };
+    let paths = source_gitlink_paths::bounded_expanded_paths_under_with_selector(
         entries,
         path,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+        &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &include_expanded_path),
     )?;
+    let expanded = !source_gitlink_paths::expanded_paths_under(entries, path).is_empty();
     if paths.is_empty() {
-        return Ok(false);
+        return Ok(expanded);
     }
     for path in paths {
         parse_changed_path(build, context, &path)?;
@@ -941,19 +829,19 @@ fn delete_expanded_gitlink_paths(
     source_layout: &scope::SourceLayoutDiscovery,
     path: &str,
 ) -> Result<bool, CodeIndexError> {
-    let paths = source_gitlink::bounded_expanded_paths_under(
+    let include_expanded_path =
+        |path: &str| path_is_selected_with_layout(path, registration, selector, source_layout);
+    let paths = source_gitlink_paths::bounded_expanded_paths_under_with_selector(
         entries,
         path,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+        &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &include_expanded_path),
     )?;
+    let expanded = !source_gitlink_paths::expanded_paths_under(entries, path).is_empty();
     if paths.is_empty() {
-        return Ok(false);
+        return Ok(expanded);
     }
-    for path in paths {
-        if path_is_selected_with_layout(&path, registration, selector, source_layout) {
-            build.deleted_paths.push(path);
-        }
-    }
+    build.deleted_paths.extend(paths);
 
     Ok(true)
 }

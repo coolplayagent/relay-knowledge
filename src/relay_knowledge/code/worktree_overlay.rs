@@ -331,8 +331,14 @@ fn record_deleted_gitlink_overlay(
     else {
         return Ok(false);
     };
-    let entries =
-        bounded_submodule_path_entries(root, path, &base_gitlink_commit, registration, selector)?;
+    let entries = bounded_submodule_path_entries(
+        root,
+        path,
+        Some(base_commit),
+        &base_gitlink_commit,
+        registration,
+        selector,
+    )?;
     if entries.is_empty() {
         if submodule_path_scope_overlaps(path, registration, selector) {
             record_worktree_status_marker(path, overlay_hash_input);
@@ -407,14 +413,26 @@ fn record_staged_gitlink_overlay(
     let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
     let Some(staged_kind) = staged_path_kind(root, path)? else {
         if let Some(base_gitlink_commit) = base_gitlink {
-            record_base_gitlink_child_deletions(root, path, &base_gitlink_commit, recorder)?;
+            record_base_gitlink_child_deletions(
+                root,
+                path,
+                base_commit,
+                &base_gitlink_commit,
+                recorder,
+            )?;
             return Ok(true);
         }
         return Ok(false);
     };
     let StagedPathKind::Gitlink(staged_commit) = staged_kind else {
         if let Some(base_gitlink_commit) = base_gitlink {
-            record_base_gitlink_child_deletions(root, path, &base_gitlink_commit, recorder)?;
+            record_base_gitlink_child_deletions(
+                root,
+                path,
+                base_commit,
+                &base_gitlink_commit,
+                recorder,
+            )?;
         }
         return Ok(false);
     };
@@ -443,6 +461,7 @@ fn record_gitlink_commit_overlay(
     let staged_entries = bounded_submodule_path_entries(
         root,
         path,
+        None,
         gitlink_commit,
         recorder.registration,
         recorder.selector,
@@ -456,6 +475,7 @@ fn record_gitlink_commit_overlay(
         record_missing_base_gitlink_child_deletions(
             root,
             path,
+            base_commit,
             &base_gitlink_commit,
             &staged_paths,
             recorder,
@@ -497,6 +517,7 @@ fn record_unstaged_gitlink_overlay(
     let worktree_entries = bounded_submodule_path_entries(
         root,
         path,
+        None,
         &worktree_commit,
         recorder.registration,
         recorder.selector,
@@ -509,6 +530,7 @@ fn record_unstaged_gitlink_overlay(
     record_missing_base_gitlink_child_deletions(
         root,
         path,
+        base_commit,
         &base_gitlink_commit,
         &worktree_paths,
         recorder,
@@ -564,12 +586,14 @@ fn staged_path_kind(root: &Path, path: &str) -> Result<Option<StagedPathKind>, C
 fn record_base_gitlink_child_deletions(
     root: &Path,
     path: &str,
+    base_commit: &str,
     base_gitlink_commit: &str,
     recorder: &mut WorktreeOverlayRecorder<'_>,
 ) -> Result<(), CodeIndexError> {
     for entry in bounded_submodule_path_entries(
         root,
         path,
+        Some(base_commit),
         base_gitlink_commit,
         recorder.registration,
         recorder.selector,
@@ -583,6 +607,7 @@ fn record_base_gitlink_child_deletions(
 fn record_missing_base_gitlink_child_deletions(
     root: &Path,
     path: &str,
+    base_commit: &str,
     base_gitlink_commit: &str,
     staged_paths: &BTreeSet<String>,
     recorder: &mut WorktreeOverlayRecorder<'_>,
@@ -590,6 +615,7 @@ fn record_missing_base_gitlink_child_deletions(
     for entry in bounded_submodule_path_entries(
         root,
         path,
+        Some(base_commit),
         base_gitlink_commit,
         recorder.registration,
         recorder.selector,
@@ -620,6 +646,7 @@ fn git_object_kind(
 fn bounded_submodule_path_entries(
     root: &Path,
     path: &str,
+    parent_commit: Option<&str>,
     commit: &str,
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
@@ -630,6 +657,7 @@ fn bounded_submodule_path_entries(
     let entries = match source_gitlink::submodule_path_entries_with_child_filters(
         root,
         path,
+        parent_commit,
         commit,
         &child_filters,
     ) {

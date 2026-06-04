@@ -42,19 +42,6 @@ pub(super) fn expanded_paths_under(entries: &[GitTreeEntry], path: &str) -> BTre
         .collect()
 }
 
-pub(super) fn bounded_expanded_paths_under(
-    entries: &[GitTreeEntry],
-    path: &str,
-    max_paths: usize,
-) -> Result<BTreeSet<String>, CodeIndexError> {
-    bounded_expanded_paths_under_with_selector(
-        entries,
-        path,
-        max_paths,
-        &GitlinkPathSelector::all(),
-    )
-}
-
 pub(super) fn bounded_expanded_paths_under_with_selector(
     entries: &[GitTreeEntry],
     path: &str,

@@ -14,7 +14,6 @@ use super::{
 };
 
 const MAX_SUBMODULE_EXPANSION_DEPTH: usize = 8;
-const MAX_SUBMODULE_GIT_DIR_SCAN: usize = 512;
 
 #[cfg(test)]
 static TRACKED_ENTRIES_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
@@ -455,12 +454,6 @@ pub(super) fn submodule_git_dir(
     {
         return Ok(git_dir);
     }
-    if let Some(commit) = submodule_commit
-        && let Some(git_dir) = scan_submodule_git_dirs_for_commit(root, commit)?
-    {
-        return Ok(git_dir);
-    }
-
     Err(CodeIndexError::InvalidInput(format!(
         "submodule git dir for path {path} is unavailable"
     )))
@@ -485,12 +478,6 @@ pub(super) fn submodule_git_dir_from_git_dir(
     {
         return Ok(submodule_git_dir);
     }
-    if let Some(commit) = submodule_commit
-        && let Some(submodule_git_dir) = scan_nested_submodule_git_dirs_for_commit(git_dir, commit)?
-    {
-        return Ok(submodule_git_dir);
-    }
-
     Err(CodeIndexError::InvalidInput(format!(
         "nested submodule git dir for path {path} is unavailable"
     )))
@@ -718,93 +705,6 @@ fn validate_submodule_name(name: &str) -> Result<(), CodeIndexError> {
 
 fn submodule_git_dir_matches_commit(git_dir: &Path, commit: Option<&str>) -> bool {
     commit.is_none_or(|commit| submodule_git_dir_has_commit(git_dir, commit))
-}
-
-fn scan_submodule_git_dirs_for_commit(
-    root: &Path,
-    commit: &str,
-) -> Result<Option<PathBuf>, CodeIndexError> {
-    let modules_root = submodule_modules_root(root)?;
-    if !modules_root.exists() {
-        return Ok(None);
-    }
-    let mut stack = vec![modules_root];
-    let mut scanned = 0usize;
-    while let Some(candidate) = stack.pop() {
-        scanned += 1;
-        if scanned > MAX_SUBMODULE_GIT_DIR_SCAN {
-            return Ok(None);
-        }
-        if submodule_git_dir_has_commit(&candidate, commit) {
-            return Ok(Some(candidate));
-        }
-        let Ok(children) = fs::read_dir(&candidate) else {
-            continue;
-        };
-        for child in children.flatten() {
-            let path = child.path();
-            if path.is_dir() {
-                stack.push(path);
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-fn submodule_modules_root(root: &Path) -> Result<PathBuf, CodeIndexError> {
-    let bytes = git_bytes(
-        root,
-        [
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "modules",
-        ],
-    )?;
-
-    Ok(PathBuf::from(
-        String::from_utf8_lossy(&bytes).trim().to_owned(),
-    ))
-}
-
-fn scan_nested_submodule_git_dirs_for_commit(
-    git_dir: &Path,
-    commit: &str,
-) -> Result<Option<PathBuf>, CodeIndexError> {
-    let modules_root = git_dir.join("modules");
-    if !modules_root.exists() {
-        return Ok(None);
-    }
-    scan_submodule_git_dir_tree_for_commit(modules_root, commit)
-}
-
-fn scan_submodule_git_dir_tree_for_commit(
-    modules_root: PathBuf,
-    commit: &str,
-) -> Result<Option<PathBuf>, CodeIndexError> {
-    let mut stack = vec![modules_root];
-    let mut scanned = 0usize;
-    while let Some(candidate) = stack.pop() {
-        scanned += 1;
-        if scanned > MAX_SUBMODULE_GIT_DIR_SCAN {
-            return Ok(None);
-        }
-        if submodule_git_dir_has_commit(&candidate, commit) {
-            return Ok(Some(candidate));
-        }
-        let Ok(children) = fs::read_dir(&candidate) else {
-            continue;
-        };
-        for child in children.flatten() {
-            let path = child.path();
-            if path.is_dir() {
-                stack.push(path);
-            }
-        }
-    }
-
-    Ok(None)
 }
 
 fn submodule_git_dir_has_commit(git_dir: &Path, commit: &str) -> bool {
