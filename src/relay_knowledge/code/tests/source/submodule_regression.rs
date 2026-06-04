@@ -1,4 +1,6 @@
-use crate::domain::{CodeFileFingerprint, CodeIndexMode, CodeRepositorySelector};
+use crate::domain::{
+    CodeFileFingerprint, CodeIndexMode, CodeRepositoryRegistration, CodeRepositorySelector,
+};
 use std::{fs, process::Command};
 
 use super::{
@@ -603,6 +605,123 @@ fn tracked_entry_scope_intersects_registration_and_selector_before_submodule_exp
 }
 
 #[test]
+fn full_snapshot_intersects_registration_and_selector_before_submodule_expansion() {
+    let child = TempGitRepo::create("full-disjoint-child");
+    child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("full-disjoint-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "vendor/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let submodule_root = parent.path.join("vendor/module");
+    reset_tracked_entries_call_count_for_root(submodule_root.clone());
+    let selector = CodeRepositorySelector::new(
+        "alias",
+        "HEAD",
+        vec!["vendor/module/lib.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("selector should validate");
+
+    let snapshot = build_index_snapshot(
+        &parent.registration(),
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    )
+    .expect("disjoint full snapshot should build");
+
+    assert!(snapshot.files.is_empty());
+    assert_eq!(tracked_entries_call_count_for_root(&submodule_root), 0);
+}
+
+#[test]
+fn worktree_overlay_intersects_submodule_child_scopes_before_expansion() {
+    let child = TempGitRepo::create("overlay-disjoint-child");
+    child.write("src/target.rs", "pub fn src_value() -> u32 { 0 }\n");
+    child.write("tests/target.rs", "pub fn test_value() -> u32 { 0 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("overlay-disjoint-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "vendor/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: parent.path.join("vendor/module"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("src/target.rs", "pub fn src_value() -> u32 { 1 }\n");
+    submodule.write("tests/target.rs", "pub fn test_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "child update"]);
+    parent.git(["add", "vendor/module"]);
+    reset_tracked_entries_call_count_for_root(submodule.path.clone());
+    let registration = scoped_registration(&parent, vec!["vendor/module/src".to_owned()]);
+    let selector = CodeRepositorySelector::new(
+        "alias",
+        "HEAD",
+        vec!["vendor/module/tests".to_owned()],
+        Vec::new(),
+    )
+    .expect("selector should validate");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("disjoint overlay should build");
+
+    assert!(snapshot.files.is_empty());
+    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert_eq!(tracked_entries_call_count_for_root(&submodule.path), 0);
+}
+
+#[test]
+fn worktree_overlay_marks_empty_unstaged_submodule_update_dirty() {
+    let child = TempGitRepo::create("overlay-empty-unstaged-child");
+    child.write("src/lib.rs", "pub fn child_value() -> u32 { 0 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("overlay-empty-unstaged-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "vendor/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: parent.path.join("vendor/module"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("src/lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "child update"]);
+    let registration = scoped_registration(&parent, vec!["vendor/module/tests".to_owned()]);
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &parent.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("empty unstaged submodule update should mark worktree dirty");
+
+    assert!(snapshot.files.is_empty());
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+}
+
+#[test]
 fn config_submodule_name_cannot_escape_git_modules() {
     let child = TempGitRepo::create("malicious-name-child");
     child.write("lib.rs", "pub fn outside_child_value() -> u32 { 1 }\n");
@@ -682,6 +801,20 @@ fn tracked_entry_scope_filters_blobs_inside_scoped_submodule() {
             .iter()
             .all(|entry| entry.path != "vendor/module/noise/ignored.rs")
     );
+}
+
+fn scoped_registration(
+    parent: &TempGitRepo,
+    path_filters: Vec<String>,
+) -> CodeRepositoryRegistration {
+    CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        parent.path.display().to_string(),
+        path_filters,
+        Vec::new(),
+    )
+    .expect("registration should validate")
 }
 
 fn snapshot_fingerprints(

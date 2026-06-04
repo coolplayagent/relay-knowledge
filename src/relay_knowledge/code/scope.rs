@@ -128,14 +128,7 @@ fn scoped_source_snapshot_inner(
     ref_selector: &str,
     allow_filesystem_ref: bool,
 ) -> Result<ScopedSourceSnapshot, CodeIndexError> {
-    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-        &registration.language_filters,
-        &selector.language_filters,
-    );
+    let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let snapshot =
         source_snapshot_for_scope(root, ref_selector, filesystem_policy, allow_filesystem_ref)?;
     let source_layout = discover_source_layout(&snapshot.entries);
@@ -191,6 +184,23 @@ fn source_snapshot_for_scope(
     source_snapshot(root, ref_selector, filesystem_policy)
 }
 
+pub(super) fn filesystem_policy_for_selector(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> FileSystemScanPolicy {
+    let filters = intersect_path_filters(&registration.path_filters, &selector.path_filters);
+    let policy = FileSystemScanPolicy::from_path_and_language_filters(
+        filters.as_deref().unwrap_or(&[]),
+        &registration.language_filters,
+        &selector.language_filters,
+    );
+    if filters.is_none() {
+        policy.with_denied_path_scope()
+    } else {
+        policy
+    }
+}
+
 fn registration_allows_filesystem_ref(
     registration: &CodeRepositoryRegistration,
     root: &std::path::Path,
@@ -232,14 +242,7 @@ pub fn preview_repository_scope(
     selector: &CodeRepositorySelector,
 ) -> Result<CodeRepositoryScopePreview, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
-    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-        &registration.language_filters,
-        &selector.language_filters,
-    );
+    let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let allow_filesystem_ref =
         registration_allows_filesystem_ref(registration, &root, &selector.ref_selector)?;
     let snapshot = source_snapshot_for_scope(
@@ -357,14 +360,7 @@ pub fn partition_changed_paths_for_selector(
         });
     }
     let root = PathBuf::from(&registration.root_path);
-    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-        &registration.language_filters,
-        &selector.language_filters,
-    );
+    let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let (source_layout, source_kind) = if source_commit_is_filesystem(&selector.ref_selector) {
         let snapshot =
             scoped_source_snapshot(registration, selector, &root, &selector.ref_selector)?;

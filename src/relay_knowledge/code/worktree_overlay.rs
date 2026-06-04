@@ -334,7 +334,7 @@ fn record_deleted_gitlink_overlay(
     let entries =
         bounded_submodule_path_entries(root, path, &base_gitlink_commit, registration, selector)?;
     if entries.is_empty() {
-        if scope::path_scope_overlaps(path, registration, selector) {
+        if submodule_path_scope_overlaps(path, registration, selector) {
             record_worktree_status_marker(path, overlay_hash_input);
         }
         return Ok(true);
@@ -361,10 +361,6 @@ struct WorktreeOverlayRecorder<'a> {
 impl WorktreeOverlayRecorder<'_> {
     fn path_is_selected(&self, path: &str) -> bool {
         scope::path_is_selected(path, self.registration, self.selector)
-    }
-
-    fn path_scope_overlaps(&self, path: &str) -> bool {
-        scope::path_scope_overlaps(path, self.registration, self.selector)
     }
 
     fn record_deleted_path(&mut self, path: &str) {
@@ -468,7 +464,9 @@ fn record_gitlink_commit_overlay(
         recorder.record_deleted_path(path);
     }
 
-    if staged_entries_are_empty && recorder.path_scope_overlaps(path) {
+    if staged_entries_are_empty
+        && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector)
+    {
         record_worktree_status_marker(path, recorder.overlay_hash_input);
     }
     for entry in staged_entries {
@@ -503,6 +501,7 @@ fn record_unstaged_gitlink_overlay(
         recorder.registration,
         recorder.selector,
     )?;
+    let worktree_entries_are_empty = worktree_entries.is_empty();
     let worktree_paths = worktree_entries
         .iter()
         .map(|entry| entry.parent_path.clone())
@@ -514,6 +513,11 @@ fn record_unstaged_gitlink_overlay(
         &worktree_paths,
         recorder,
     )?;
+    if worktree_entries_are_empty
+        && submodule_path_scope_overlaps(path, recorder.registration, recorder.selector)
+    {
+        record_worktree_status_marker(path, recorder.overlay_hash_input);
+    }
     for entry in worktree_entries {
         recorder.record_gitlink_file(root, path, &worktree_commit, &entry)?;
     }
@@ -620,7 +624,9 @@ fn bounded_submodule_path_entries(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> Result<Vec<source_gitlink::SubmodulePathEntry>, CodeIndexError> {
-    let child_filters = submodule_child_scope_filters(path, registration, selector);
+    let Some(child_filters) = submodule_child_scope_filters(path, registration, selector) else {
+        return Ok(Vec::new());
+    };
     let entries = match source_gitlink::submodule_path_entries_with_child_filters(
         root,
         path,
@@ -649,33 +655,27 @@ fn submodule_child_scope_filters(
     path: &str,
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
-) -> Vec<String> {
+) -> Option<Vec<String>> {
+    let filters =
+        scope::intersect_path_filters(&registration.path_filters, &selector.path_filters)?;
+    if filters.is_empty() {
+        return Some(Vec::new());
+    }
     let mut child_filters = Vec::new();
-    append_submodule_child_scope_filters(path, &registration.path_filters, &mut child_filters);
-    append_submodule_child_scope_filters(path, &selector.path_filters, &mut child_filters);
-    child_filters.sort();
-    child_filters.dedup();
-
-    child_filters
-}
-
-fn append_submodule_child_scope_filters(
-    path: &str,
-    filters: &[String],
-    child_filters: &mut Vec<String>,
-) {
+    let mut parent_scope_covers_submodule = false;
     let path = normalize_worktree_path(path);
     if path.is_empty() {
-        return;
+        return None;
     }
     let child_prefix = format!("{path}/");
     for filter in filters {
-        let filter = normalize_worktree_path(filter);
+        let filter = normalize_worktree_path(&filter);
         if filter.is_empty()
             || filter == "."
             || filter == path
             || path.starts_with(&format!("{filter}/"))
         {
+            parent_scope_covers_submodule = true;
             continue;
         }
         if let Some(child_filter) = filter.strip_prefix(&child_prefix)
@@ -684,6 +684,21 @@ fn append_submodule_child_scope_filters(
             child_filters.push(child_filter.to_owned());
         }
     }
+    if child_filters.is_empty() && !parent_scope_covers_submodule {
+        return None;
+    }
+    child_filters.sort();
+    child_filters.dedup();
+
+    Some(child_filters)
+}
+
+fn submodule_path_scope_overlaps(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    submodule_child_scope_filters(path, registration, selector).is_some()
 }
 
 fn worktree_directory_files(

@@ -79,6 +79,7 @@ pub(super) struct RepositorySourceSnapshot {
 #[derive(Debug, Clone, Default)]
 pub(super) struct FileSystemScanPolicy {
     explicit_root_scope: bool,
+    path_scope_denied: bool,
     broad_directory_filters: Vec<String>,
     path_scope_filters: Vec<String>,
     language_filter_sets: Vec<Vec<String>>,
@@ -111,6 +112,7 @@ impl FileSystemScanPolicy {
 
         Self {
             explicit_root_scope: normalized.iter().any(|filter| filter == "."),
+            path_scope_denied: false,
             broad_directory_filters: normalized
                 .iter()
                 .filter(|filter| filter.as_str() != ".")
@@ -122,6 +124,11 @@ impl FileSystemScanPolicy {
                 .collect(),
             language_filter_sets,
         }
+    }
+
+    pub(super) fn with_denied_path_scope(mut self) -> Self {
+        self.path_scope_denied = true;
+        self
     }
 
     fn includes_broad_directory(&self, directory: &str) -> bool {
@@ -264,11 +271,12 @@ pub(super) fn source_snapshot(
         RepositorySourceKind::Git => {
             let commit = resolve_ref(root, ref_selector)?;
             let parent_tree_hash = resolve_tree(root, &commit)?;
-            let tracked = tracked_entries_state_with_scope(
-                root,
-                &commit,
-                &TrackedEntryScope::from_path_filters(filesystem_policy.path_scope_filters()),
-            )?;
+            let entry_scope = if filesystem_policy.path_scope_denied {
+                TrackedEntryScope::empty()
+            } else {
+                TrackedEntryScope::from_path_filters(filesystem_policy.path_scope_filters())
+            };
+            let tracked = tracked_entries_state_with_scope(root, &commit, &entry_scope)?;
             let tree_hash =
                 git_tree_hash_with_submodules(&parent_tree_hash, &tracked.submodule_states);
             Ok(RepositorySourceSnapshot {
@@ -743,6 +751,9 @@ fn filesystem_files(
     root: &Path,
     policy: &FileSystemScanPolicy,
 ) -> Result<Vec<FileSystemFile>, CodeIndexError> {
+    if policy.path_scope_denied {
+        return Ok(Vec::new());
+    }
     let mut files = Vec::new();
     collect_files(root, Path::new(""), policy, &mut files)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
