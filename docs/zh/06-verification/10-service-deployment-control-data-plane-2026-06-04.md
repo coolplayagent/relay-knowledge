@@ -14,6 +14,7 @@
 - 后续实现补齐 `service status`/`health` 的 storage topology diagnostics、只读 `/api/v1/control/*` preview route、`service plan` runtime state path/warning、以及 `service worker run [--task-id <id>]` split-worker preview CLI。
 - Codex review 后补强控制面实现：缺失 partitioned shard 时 `health` 返回降级诊断而不是 API 错误；`health` 的 storage topology 查询纳入同一个超时预算；`/api/v1/control/service/status` 使用只读状态路径，不触发 index refresh 入队。
 - Codex 复审后继续补强只读控制面：`/api/v1/control/status` 不再打开 graph storage；`/api/v1/control/storage/topology` 在冷 partitioned runtime 上直接只读 catalog 并返回 graph-zero metadata；只读 service status 不恢复 code-index lease。
+- 最新 Codex review 后收敛 cold 只读控制面行为：`/api/v1/control/health` 和 `/api/v1/control/service/status` 不再打开 cold storage；topology diagnostics 即使在 runtime 配置为 `single_sqlite` 时也会报告 active partitioned catalog。
 
 ## 2. 来源核验
 
@@ -40,6 +41,7 @@ cargo test --all-targets --all-features service_status_reports_partitioned_stora
 cargo test --all-targets --all-features control_service_status_does_not_queue_index_refresh_work -- --nocapture
 cargo test --all-targets --all-features read_only_service_status_does_not_recover_expired_code_index_leases -- --nocapture
 cargo test --all-targets --all-features cold_control_status_and_topology_do_not_open_partitioned_storage -- --nocapture
+cargo test --all-targets --all-features control_topology_reports_partitioned_catalog_under_single_config -- --nocapture
 wc -l docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/en/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md \

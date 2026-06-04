@@ -61,7 +61,7 @@ v1 支持并文档化四种拓扑：
 - repository register/index/status/report/set overlay refresh。
 - audit、authorization identity、request id、trace id、QoS admission 和 overload decision。
 
-新增控制面接口必须先定义共享 `api` request/response 类型和 application service 方法，再映射到 CLI、Web、MCP 或 HTTP route。接口层不得复制业务逻辑、直接读取 storage catalog、直接续租 worker task，或绕过 QoS。当前只读控制面 HTTP preview 暴露 `/api/v1/control/status`、`/api/v1/control/health`、`/api/v1/control/service/status` 和 `/api/v1/control/storage/topology`。
+新增控制面接口必须先定义共享 `api` request/response 类型和 application service 方法，再映射到 CLI、Web、MCP 或 HTTP route。接口层不得复制业务逻辑、直接读取 storage catalog、直接续租 worker task，或绕过 QoS。当前只读控制面 HTTP preview 暴露 `/api/v1/control/status`、`/api/v1/control/health`、`/api/v1/control/service/status` 和 `/api/v1/control/storage/topology`。这些 route 必须在 cold runtime 上保持安全：health 和 service-status 诊断不得打开或迁移 storage；topology diagnostics 只能使用有界只读 catalog probe，并且要暴露 single-SQLite 配置下残留的 active partitioned catalog。
 
 ## 5. 数据面职责
 

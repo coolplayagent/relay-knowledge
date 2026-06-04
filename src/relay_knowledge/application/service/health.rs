@@ -49,6 +49,42 @@ impl RelayKnowledgeService {
         }
     }
 
+    /// Returns control-plane health without opening cold graph storage.
+    pub async fn read_only_health(
+        &self,
+        context: RequestContext,
+    ) -> Result<HealthResponse, ApiError> {
+        if self.storage.ready_store().is_some() {
+            return self.health(context).await;
+        }
+
+        Ok(self.storage_free_health(context).await)
+    }
+
+    async fn storage_free_health(&self, context: RequestContext) -> HealthResponse {
+        let storage = self.storage_topology_diagnostics().await;
+        let degraded_reason = storage.degraded_reason.clone();
+
+        HealthResponse {
+            metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
+            healthy: degraded_reason.is_none(),
+            degraded_reason,
+            storage,
+            graph: GraphInspection::default(),
+            repository_code_totals: CodeRepositoryTotals::default(),
+            indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
+            file_index: FileIndexDiagnostics::default(),
+            runtime: runtime_status_with_model_profiles(
+                &self.runtime,
+                self.model_provider_config()
+                    .profile_summary(&self.runtime.retrieval)
+                    .await,
+            ),
+        }
+    }
+
     async fn health_storage_report(
         &self,
         store: &Arc<dyn KnowledgeStore>,

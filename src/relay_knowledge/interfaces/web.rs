@@ -59,7 +59,7 @@ fn router_with_assets(
         .route("/api/health", get(health))
         .route("/api/service/status", get(service_status))
         .route("/api/v1/control/status", get(control_status))
-        .route("/api/v1/control/health", get(health))
+        .route("/api/v1/control/health", get(control_health))
         .route(
             "/api/v1/control/service/status",
             get(read_only_service_status),
@@ -97,6 +97,17 @@ async fn health(State(state): State<WebState>) -> Response {
     match state
         .service
         .health(RequestContext::for_interface(InterfaceKind::Web))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn control_health(State(state): State<WebState>) -> Response {
+    match state
+        .service
+        .read_only_health(RequestContext::for_interface(InterfaceKind::Web))
         .await
     {
         Ok(response) => Json(response).into_response(),

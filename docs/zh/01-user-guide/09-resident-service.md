@@ -36,7 +36,7 @@ target/release/relay-knowledge service run --web --mcp streamable-http
 
 HTTP `/api/health` 和 CLI `health` 是 liveness-safe 入口：它只做短预算只读快照，不会排队 index refresh，也不会等待大型 repository indexing 完成。存储读通道繁忙时，health 会返回 cached 或最小 degraded 响应，并用 `storage_busy`、stale metadata 或 degraded reason 暴露压力。普通代码查询不会因此被排除；`allow-stale` 查询在目标 ref 和 filters 正在索引时读取最新兼容的已完成 committed scope，`wait-until-fresh` 查询才要求目标 scope 已 finalize。
 
-稳定外部控制面仍保持 preview 范围，当前只提供只读 HTTP route：`/api/v1/control/status`、`/api/v1/control/health`、`/api/v1/control/service/status` 和 `/api/v1/control/storage/topology`。这些 route 复用 CLI/Web/MCP 的共享 API 类型，不同步执行索引、迁移或 shard 修复。
+稳定外部控制面仍保持 preview 范围，当前只提供只读 HTTP route：`/api/v1/control/status`、`/api/v1/control/health`、`/api/v1/control/service/status` 和 `/api/v1/control/storage/topology`。这些 route 复用 CLI/Web/MCP 的共享 API 类型，不同步执行索引、迁移或 shard 修复。Storage 尚未打开时，control health 和 service-status route 会基于 runtime 配置和只读 topology probe 返回 graph-zero 诊断，而不会打开 SQLite。Topology diagnostics 还会在 `single_sqlite` runtime 下报告探测到的 active `partitioned_sqlite` shard catalog，让 rollback 或 topology 配置错误在 storage open 失败前可见。
 
 ## 9.2 Web 中的 Service Run
 

@@ -45,9 +45,11 @@ impl RelayKnowledgeService {
     ) -> StorageTopologyDiagnostics {
         let topology = self.runtime.storage.topology.as_str().to_owned();
         let control_database_path = self.runtime.paths.database_file().display().to_string();
-        let repository_shards_dir = (self.runtime.storage.topology
-            == crate::storage::StorageTopology::PartitionedSqlite)
-            .then(|| {
+        let has_partitioned_catalog = !snapshot.shards.is_empty();
+        let configured_partitioned =
+            self.runtime.storage.topology == crate::storage::StorageTopology::PartitionedSqlite;
+        let repository_shards_dir =
+            (configured_partitioned || has_partitioned_catalog).then(|| {
                 self.runtime
                     .paths
                     .repository_shards_dir()
@@ -84,9 +86,16 @@ impl RelayKnowledgeService {
             .count();
         let missing_shard_count = shards.iter().filter(|shard| !shard.exists).count();
         let degraded_reason = snapshot_error.or_else(|| {
-            (missing_shard_count > 0).then(|| {
-                "partitioned_sqlite shard catalog references missing shard files".to_owned()
-            })
+            if !configured_partitioned && active_shard_count > 0 {
+                Some(
+                    "single_sqlite configuration found active partitioned_sqlite shard catalog"
+                        .to_owned(),
+                )
+            } else {
+                (missing_shard_count > 0).then(|| {
+                    "partitioned_sqlite shard catalog references missing shard files".to_owned()
+                })
+            }
         });
 
         StorageTopologyDiagnostics {

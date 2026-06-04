@@ -9,9 +9,12 @@ use tower::ServiceExt;
 
 use crate::{
     application::{RelayKnowledgeService, RuntimeConfiguration},
-    domain::{EvidenceRecord, GraphMutationBatch, SourceScope},
+    domain::{CodeRepositoryRegistration, EvidenceRecord, GraphMutationBatch, SourceScope},
     env::{EnvironmentConfig, PlatformKind},
-    storage::{GraphStore, KnowledgeStore, SqliteGraphStore},
+    storage::{
+        CodeRepositoryStore, GraphStore, KnowledgeStore, PartitionedSqliteKnowledgeStore,
+        SqliteGraphStore,
+    },
 };
 
 #[tokio::test]
@@ -65,12 +68,93 @@ async fn cold_control_status_and_topology_do_not_open_partitioned_storage() {
     );
 
     let status = get_json(router.clone(), "/api/v1/control/status").await;
+    let health = get_json(router.clone(), "/api/v1/control/health").await;
+    let service_status = get_json(router.clone(), "/api/v1/control/service/status").await;
     let topology = get_json(router, "/api/v1/control/storage/topology").await;
 
     assert_eq!(status["metadata"]["graph_version"], 0);
+    assert_eq!(health["metadata"]["graph_version"], 0);
+    assert_eq!(service_status["metadata"]["graph_version"], 0);
     assert_eq!(topology["metadata"]["graph_version"], 0);
+    assert_eq!(health["storage"]["topology"], "partitioned_sqlite");
+    assert_eq!(service_status["storage"]["topology"], "partitioned_sqlite");
     assert_eq!(topology["storage"]["topology"], "partitioned_sqlite");
     assert!(!database_path.exists());
+}
+
+#[tokio::test]
+async fn control_topology_reports_partitioned_catalog_under_single_config() {
+    let home = unique_temp_dir("single-config-partitioned-catalog");
+    let partitioned_environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/tmp"),
+            (
+                "RELAY_KNOWLEDGE_HOME",
+                home.as_path().to_str().expect("home path should be utf8"),
+            ),
+            ("RELAY_KNOWLEDGE_STORAGE_TOPOLOGY", "partitioned_sqlite"),
+        ],
+    )
+    .expect("environment should parse");
+    let partitioned_runtime = RuntimeConfiguration::from_environment(&partitioned_environment)
+        .await
+        .expect("partitioned runtime should compose");
+    let partitioned_store = PartitionedSqliteKnowledgeStore::open(
+        partitioned_runtime.paths.database_file(),
+        partitioned_runtime.paths.clone(),
+    )
+    .expect("partitioned store should open");
+    partitioned_store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo-alpha",
+                "alpha",
+                "/tmp/alpha",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("registration should validate"),
+        )
+        .await
+        .expect("partitioned catalog should register");
+    drop(partitioned_store);
+
+    let single_environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/tmp"),
+            (
+                "RELAY_KNOWLEDGE_HOME",
+                home.as_path().to_str().expect("home path should be utf8"),
+            ),
+        ],
+    )
+    .expect("environment should parse");
+    let single_runtime = RuntimeConfiguration::from_environment(&single_environment)
+        .await
+        .expect("single runtime should compose");
+    let router = router(
+        RelayKnowledgeService::new(single_runtime),
+        crate::net::http::DEFAULT_MAX_BODY_BYTES,
+    );
+
+    let topology = get_json(router, "/api/v1/control/storage/topology").await;
+
+    assert_eq!(topology["storage"]["topology"], "single_sqlite");
+    assert_eq!(topology["storage"]["shard_catalog_active"], true);
+    assert_eq!(topology["storage"]["active_shard_count"], 1);
+    assert_eq!(topology["storage"]["missing_shard_count"], 0);
+    assert!(
+        topology["storage"]["degraded_reason"]
+            .as_str()
+            .expect("degraded reason should serialize")
+            .contains("partitioned_sqlite")
+    );
+    assert_eq!(
+        topology["storage"]["shards"][0]["repository_id"],
+        "repo-alpha"
+    );
 }
 
 fn control_test_environment(label: &str) -> EnvironmentConfig {

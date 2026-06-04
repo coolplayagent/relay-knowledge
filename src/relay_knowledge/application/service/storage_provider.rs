@@ -82,8 +82,7 @@ impl StorageProvider {
             return Ok(StorageTopologySnapshot::default());
         };
         match config.topology {
-            StorageTopology::SingleSqlite => Ok(StorageTopologySnapshot::default()),
-            StorageTopology::PartitionedSqlite => {
+            StorageTopology::SingleSqlite | StorageTopology::PartitionedSqlite => {
                 tokio::task::spawn_blocking(move || {
                     PartitionedSqliteKnowledgeStore::topology_snapshot_from_catalog(
                         config.database_path,

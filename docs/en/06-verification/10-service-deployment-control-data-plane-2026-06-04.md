@@ -14,6 +14,7 @@
 - Follow-up implementation adds storage topology diagnostics to `service status`/`health`, read-only `/api/v1/control/*` preview routes, `service plan` runtime state paths and warnings, and the `service worker run [--task-id <id>]` split-worker preview CLI.
 - After Codex review, the control-plane implementation was hardened so `health` returns degraded diagnostics instead of an API error when a partitioned shard is missing, storage topology diagnostics stay inside the same health timeout budget, and `/api/v1/control/service/status` uses a read-only status path that does not enqueue index refresh work.
 - After Codex re-review, read-only control-plane behavior was hardened further: `/api/v1/control/status` no longer opens graph storage, `/api/v1/control/storage/topology` reads the catalog directly and returns graph-zero metadata for cold partitioned runtimes, and read-only service status does not recover code-index leases.
+- After the latest Codex review, cold read-only control behavior was closed out: `/api/v1/control/health` and `/api/v1/control/service/status` no longer open cold storage, and topology diagnostics report active partitioned catalogs even when the runtime is configured as `single_sqlite`.
 
 ## 2. Source Verification
 
@@ -40,6 +41,7 @@ cargo test --all-targets --all-features service_status_reports_partitioned_stora
 cargo test --all-targets --all-features control_service_status_does_not_queue_index_refresh_work -- --nocapture
 cargo test --all-targets --all-features read_only_service_status_does_not_recover_expired_code_index_leases -- --nocapture
 cargo test --all-targets --all-features cold_control_status_and_topology_do_not_open_partitioned_storage -- --nocapture
+cargo test --all-targets --all-features control_topology_reports_partitioned_catalog_under_single_config -- --nocapture
 wc -l docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/en/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md \

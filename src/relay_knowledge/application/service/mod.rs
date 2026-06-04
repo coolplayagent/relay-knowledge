@@ -10,13 +10,13 @@ use crate::{
         GraphCanvasSummary, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
         HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
         IngestRequest, IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
-        ProjectStatusResponse, RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
+        ProjectStatusResponse, RequestContext, ServiceRecoveryReport,
     },
     domain::{
         AuditStatus, CodeParseStatusCounts, CodeRepositoryTotals, ContextGraphPath,
-        ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind, ProposalState,
-        RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
-        RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
+        ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind, RECIPROCAL_RANK_FUSION_K,
+        RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
+        RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
     model_provider::ModelProviderConfigService,
@@ -32,7 +32,7 @@ use crate::{
     },
     storage::{
         FileIndexDiagnostics, GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection,
-        GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest, StorageError,
+        GraphSearchRequest, KnowledgeStore, NewAuditEvent, StorageError,
     },
 };
 
@@ -42,15 +42,13 @@ use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
     knowledge::{
         index_refresh::{
-            filter_outcome_to_read_models, index_refresh_outcome, metadata_for_indexes,
-            reconcile_index_refreshes, recover_index_kinds, refresh_index_kinds,
+            index_refresh_outcome, metadata_for_indexes, recover_index_kinds, refresh_index_kinds,
         },
         ingest::mutation_batch_from_request,
         multimodal::extraction_ingest_request,
     },
     status::{agent_protocol_status, runtime_status, runtime_status_with_model_profiles},
     update::{VersionCheckResponse, check_for_updates},
-    worker::operations::overlay_worker_runtime,
 };
 
 #[cfg(test)]
@@ -62,12 +60,6 @@ pub struct RelayKnowledgeService {
     pub(super) runtime: RuntimeConfiguration,
     pub(super) storage: StorageProvider,
     pub(super) health_cache: Arc<tokio::sync::RwLock<Option<HealthResponse>>>,
-}
-
-#[derive(Clone, Copy)]
-enum ServiceStatusRefreshMode {
-    Reconcile,
-    Observe,
 }
 
 impl RelayKnowledgeService {
@@ -688,102 +680,6 @@ impl RelayKnowledgeService {
         })
     }
 
-    /// Returns the managed background service definition location and defaults.
-    pub async fn service_status(
-        &self,
-        context: RequestContext,
-    ) -> Result<ServiceStatusResponse, ApiError> {
-        self.service_status_with_refresh_mode(context, ServiceStatusRefreshMode::Reconcile)
-            .await
-    }
-
-    /// Returns service diagnostics without queuing derived-index refresh work.
-    pub async fn read_only_service_status(
-        &self,
-        context: RequestContext,
-    ) -> Result<ServiceStatusResponse, ApiError> {
-        self.service_status_with_refresh_mode(context, ServiceStatusRefreshMode::Observe)
-            .await
-    }
-
-    async fn service_status_with_refresh_mode(
-        &self,
-        context: RequestContext,
-        refresh_mode: ServiceStatusRefreshMode,
-    ) -> Result<ServiceStatusResponse, ApiError> {
-        let store = self.storage.get().await.map_err(storage_api_error)?;
-        let graph_version = store
-            .current_graph_version()
-            .await
-            .map_err(storage_api_error)?;
-        let index_refresh = match refresh_mode {
-            ServiceStatusRefreshMode::Reconcile => {
-                reconcile_index_refreshes(&store, graph_version, &self.runtime.retrieval).await?
-            }
-            ServiceStatusRefreshMode::Observe => {
-                filter_outcome_to_read_models(
-                    index_refresh_outcome(&store).await?,
-                    &self.runtime.retrieval,
-                )
-                .diagnostics
-            }
-        };
-        let file_index = file_index_diagnostics_or_default(&store).await?;
-        let service_definition_path = self
-            .runtime
-            .paths
-            .service_dir
-            .join(service_definition_filename())
-            .display()
-            .to_string();
-        let storage = self.storage_topology_diagnostics().await;
-        let operator = store
-            .service_operator_status()
-            .await
-            .map_err(storage_api_error)?;
-        let workers = overlay_worker_runtime(
-            store.worker_statuses().await.map_err(storage_api_error)?,
-            &self.runtime.workers,
-        );
-        let code_index_workers = match refresh_mode {
-            ServiceStatusRefreshMode::Reconcile => self.code_index_worker_status(&store).await?,
-            ServiceStatusRefreshMode::Observe => {
-                self.read_only_code_index_worker_status(&store).await?
-            }
-        };
-        let proposal_backlog = store
-            .list_proposals(ProposalListRequest {
-                state: Some(ProposalState::Proposed),
-                limit: usize::MAX,
-            })
-            .await
-            .map_err(storage_api_error)?
-            .len();
-        let audit_event_count = store.audit_event_count().await.map_err(storage_api_error)?;
-
-        Ok(ServiceStatusResponse {
-            metadata: ApiMetadata::graph_only(&context, graph_version),
-            service_name: PROJECT_NAME.to_owned(),
-            mode: operator.state.as_str().to_owned(),
-            background_enabled: operator.state != crate::domain::ServiceOperatorState::Disabled,
-            silent_updates_enabled: operator.silent_updates_enabled,
-            service_definition_path,
-            storage,
-            index_refresh,
-            file_index,
-            agent_protocols: agent_protocol_status(&self.runtime),
-            operator,
-            workers,
-            code_index_workers,
-            proposal_backlog,
-            audit_sink: crate::api::AuditSinkStatus {
-                durable: true,
-                event_count: audit_event_count,
-                last_error: None,
-            },
-        })
-    }
-
     pub(super) async fn store(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
         self.storage.get().await
     }
@@ -951,6 +847,7 @@ fn service_definition_filename() -> &'static str {
 
 mod health;
 pub(crate) mod knowledge_map;
+mod service_status;
 mod storage_diagnostics;
 mod storage_provider;
 
