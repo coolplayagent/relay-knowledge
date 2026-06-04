@@ -517,6 +517,8 @@ pub struct ServiceDefinitionPlan {
     pub uninstall_command: Vec<String>,
     pub start_command: Vec<String>,
     pub stop_command: Vec<String>,
+    pub runtime_state_paths: Vec<String>,
+    pub warnings: Vec<String>,
     pub checksum: String,
 }
 

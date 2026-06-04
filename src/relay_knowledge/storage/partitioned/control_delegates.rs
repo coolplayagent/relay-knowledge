@@ -4,7 +4,7 @@ use crate::{
     domain::{
         AuditEventRecord, CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt,
         CodeReferenceRecord, CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion,
-        IndexKind, IndexStatus, RetrievalHit, ServiceOperatorStatus, WorkerStatus,
+        IndexKind, IndexStatus, ProposalState, RetrievalHit, ServiceOperatorStatus, WorkerStatus,
         WorkerTaskRecord,
     },
     storage::{
@@ -158,6 +158,10 @@ impl IndexStore for PartitionedSqliteKnowledgeStore {
         request: ProposalListRequest,
     ) -> StorageFuture<'_, Vec<crate::domain::ProposalRecord>> {
         self.control.list_proposals(request)
+    }
+
+    fn proposal_count(&self, state: Option<ProposalState>) -> StorageFuture<'_, usize> {
+        self.control.proposal_count(state)
     }
 
     fn proposal_by_id(

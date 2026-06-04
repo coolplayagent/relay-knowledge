@@ -2,16 +2,21 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
     domain::CodeRepositoryStatus,
     paths::RuntimePaths,
-    storage::{SqliteGraphStore, StorageError, sqlite::configure_connection},
+    storage::{
+        SqliteGraphStore, StorageError, StorageShardCatalogEntry, StorageTopologySnapshot,
+        sqlite::configure_connection,
+    },
 };
+
+const CATALOG_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 pub(super) struct SqliteShardCatalog {
@@ -171,6 +176,13 @@ impl SqliteShardCatalog {
     pub(super) async fn repository_ids(&self) -> Result<Vec<String>, StorageError> {
         let control_path = self.control_path.clone();
         tokio::task::spawn_blocking(move || catalog_repository_ids(&control_path)).await?
+    }
+
+    pub(super) async fn topology_snapshot(&self) -> Result<StorageTopologySnapshot, StorageError> {
+        let control_path = self.control_path.clone();
+        let paths = self.paths.clone();
+        tokio::task::spawn_blocking(move || catalog_topology_snapshot(&control_path, &paths))
+            .await?
     }
 
     pub(super) async fn remove_repository(
@@ -417,6 +429,65 @@ pub(super) fn catalog_has_active_repositories(control_path: &Path) -> Result<boo
         .map_err(StorageError::from)
 }
 
+pub(super) fn catalog_topology_snapshot(
+    control_path: &Path,
+    paths: &RuntimePaths,
+) -> Result<StorageTopologySnapshot, StorageError> {
+    if !control_path.exists() {
+        return Ok(StorageTopologySnapshot::default());
+    }
+    let connection = open_catalog_readonly_connection(control_path)?;
+    let has_catalog = connection
+        .query_row(
+            "
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'storage_repository_shards'
+            ",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !has_catalog {
+        return Ok(StorageTopologySnapshot::default());
+    }
+
+    let mut statement = connection.prepare(
+        "
+        SELECT shard.repository_id,
+               shard.state,
+               shard.db_path,
+               COUNT(scope.source_scope) AS source_scope_count,
+               shard.updated_at_ms
+        FROM storage_repository_shards shard
+        LEFT JOIN storage_repository_shard_scopes scope
+               ON scope.repository_id = shard.repository_id
+        WHERE shard.state IN ('active', 'staged')
+        GROUP BY shard.repository_id, shard.state, shard.db_path, shard.updated_at_ms
+        ORDER BY shard.repository_id ASC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let repository_id = row.get::<_, String>(0)?;
+        let resolved_path = paths.repository_shard_database_file(&repository_id);
+        Ok(StorageShardCatalogEntry {
+            repository_id,
+            state: row.get(1)?,
+            shard_locator: row.get(2)?,
+            resolved_path: resolved_path.display().to_string(),
+            source_scope_count: row.get::<_, i64>(3)?.max(0) as usize,
+            exists: resolved_path.exists(),
+            updated_at_ms: row.get::<_, i64>(4)?.max(0) as u64,
+        })
+    })?;
+    let shards = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+
+    Ok(StorageTopologySnapshot { shards })
+}
+
 fn remove_catalog_repository(control_path: &Path, repository_id: &str) -> Result<(), StorageError> {
     let connection = open_catalog_connection(control_path)?;
     connection.execute(
@@ -437,6 +508,13 @@ fn remove_catalog_repository(control_path: &Path, repository_id: &str) -> Result
 fn open_catalog_connection(control_path: &Path) -> Result<Connection, StorageError> {
     let connection = Connection::open(control_path)?;
     configure_connection(&connection)?;
+    Ok(connection)
+}
+
+fn open_catalog_readonly_connection(control_path: &Path) -> Result<Connection, StorageError> {
+    let connection = Connection::open_with_flags(control_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    configure_connection(&connection)?;
+    connection.busy_timeout(CATALOG_READ_BUSY_TIMEOUT)?;
     Ok(connection)
 }
 

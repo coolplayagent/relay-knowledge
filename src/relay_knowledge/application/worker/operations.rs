@@ -564,6 +564,29 @@ impl RelayKnowledgeService {
             &self.runtime.paths.data_dir.display().to_string(),
         );
         let checksum = format!("{:016x}", stable_hash64(definition.as_bytes()));
+        let mut runtime_state_paths = vec![
+            self.runtime.paths.database_file().display().to_string(),
+            self.runtime.paths.config_dir.display().to_string(),
+            self.runtime.paths.state_dir.display().to_string(),
+            self.runtime.paths.log_dir.display().to_string(),
+            self.runtime.paths.cache_dir.display().to_string(),
+        ];
+        let mut warnings = vec![
+            "service manager commands are a generated plan; privileged install, uninstall, backup, migration, and rollback remain caller-executed".to_owned(),
+        ];
+        if self.runtime.storage.topology == crate::storage::StorageTopology::PartitionedSqlite {
+            runtime_state_paths.push(
+                self.runtime
+                    .paths
+                    .repository_shards_dir()
+                    .display()
+                    .to_string(),
+            );
+            warnings.push(
+                "partitioned_sqlite backup, migration, rollback, and uninstall confirmation must include both the control database and repository shard directory"
+                    .to_owned(),
+            );
+        }
 
         ServiceDefinitionPlan {
             action,
@@ -574,6 +597,8 @@ impl RelayKnowledgeService {
             uninstall_command: uninstall_command(&platform),
             start_command: start_command(&platform),
             stop_command: stop_command(&platform),
+            runtime_state_paths,
+            warnings,
             definition,
             checksum,
         }

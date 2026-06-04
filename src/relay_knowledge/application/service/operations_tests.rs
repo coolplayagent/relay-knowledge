@@ -1,4 +1,9 @@
-use std::sync::Arc;
+use std::{
+    fs,
+    path::PathBuf,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use crate::{
     api::{
@@ -150,6 +155,92 @@ async fn service_status_reports_code_index_master_worker_diagnostics() {
 }
 
 #[tokio::test]
+async fn service_status_reports_partitioned_storage_diagnostics() {
+    let home = unique_temp_dir("partitioned-service-status");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            (
+                "RELAY_KNOWLEDGE_HOME",
+                home.to_str().expect("home should be utf8"),
+            ),
+            ("RELAY_KNOWLEDGE_STORAGE_TOPOLOGY", "partitioned_sqlite"),
+        ],
+    )
+    .expect("environment should parse");
+    let service = RelayKnowledgeService::from_environment(&environment)
+        .await
+        .expect("service should compose");
+    let store = service.store().await.expect("store should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo-alpha",
+                "alpha",
+                "/tmp/repo-alpha",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should register");
+    let shard_path = service
+        .runtime
+        .paths
+        .repository_shard_database_file("repo-alpha");
+
+    let status = service
+        .service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-storage",
+            "trace-storage",
+        ))
+        .await
+        .expect("service status should load");
+
+    assert_eq!(status.storage.topology, "partitioned_sqlite");
+    assert_eq!(status.storage.active_shard_count, 1);
+    assert_eq!(status.storage.missing_shard_count, 0);
+    assert!(status.storage.repository_shards_dir.is_some());
+    assert!(
+        status
+            .storage
+            .runtime_state_paths
+            .iter()
+            .any(|path| path.contains("repositories"))
+    );
+
+    fs::remove_file(shard_path).expect("shard file should remove");
+    let degraded = service
+        .service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-storage-missing",
+            "trace-storage",
+        ))
+        .await
+        .expect("service status should remain available");
+
+    assert_eq!(degraded.storage.missing_shard_count, 1);
+    assert!(degraded.storage.degraded_reason.is_some());
+
+    let health = service
+        .health(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-health-missing-shard",
+            "trace-health-missing-shard",
+        ))
+        .await
+        .expect("health should degrade instead of failing");
+
+    assert!(!health.healthy);
+    assert_eq!(health.storage.missing_shard_count, 1);
+    assert!(health.degraded_reason.is_some());
+}
+
+#[tokio::test]
 async fn service_status_recovers_expired_code_index_leases_before_diagnostics() {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
     store
@@ -196,6 +287,51 @@ async fn service_status_recovers_expired_code_index_leases_before_diagnostics() 
         status.code_index_workers.last_error.as_deref(),
         Some("code index task lease expired")
     );
+}
+
+#[tokio::test]
+async fn read_only_service_status_does_not_recover_expired_code_index_leases() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let expired = store
+        .queue_code_index_task(code_index_seed("fp-readonly", "scope-readonly", 10))
+        .await
+        .expect("expired task should queue");
+    store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(expired.task_id),
+            lease_owner: "worker-expired-readonly".to_owned(),
+            lease_duration_ms: 1,
+            max_attempts: 3,
+            now_ms: 20,
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should claim");
+    let service = RelayKnowledgeService::with_store(
+        runtime().await,
+        store.clone() as Arc<dyn KnowledgeStore>,
+    );
+
+    let status = service
+        .read_only_service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-readonly-code-index-workers",
+            "trace-readonly-code-index-workers",
+        ))
+        .await
+        .expect("read-only service status should load");
+
+    assert_eq!(status.code_index_workers.running_task_count, 1);
+    assert_eq!(status.code_index_workers.running_lease_count, 1);
+    assert_eq!(status.code_index_workers.retrying_task_count, 0);
+    assert_eq!(status.code_index_workers.queue_depth, 0);
 }
 
 #[tokio::test]
@@ -496,6 +632,19 @@ fn current_time_millis() -> u64 {
         .map_or(0, |duration| {
             u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
         })
+}
+
+fn unique_temp_dir(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "relay-knowledge-{name}-{}-{nanos}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&path);
+    path
 }
 
 fn ingest_request(evidence: Vec<IngestEvidence>) -> IngestRequest {

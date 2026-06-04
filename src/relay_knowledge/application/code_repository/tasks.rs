@@ -62,6 +62,13 @@ impl RelayKnowledgeService {
         store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     ) -> Result<CodeIndexWorkerStatus, ApiError> {
         recover_orphaned_code_index_task_leases(store, now_millis()).await?;
+        self.read_only_code_index_worker_status(store).await
+    }
+
+    pub(crate) async fn read_only_code_index_worker_status(
+        &self,
+        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    ) -> Result<CodeIndexWorkerStatus, ApiError> {
         let queue = store
             .code_index_task_queue_status()
             .await

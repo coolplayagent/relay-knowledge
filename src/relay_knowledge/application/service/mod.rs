@@ -4,19 +4,19 @@ use serde::Serialize;
 
 use crate::{
     api::{
-        AgentProtocolStatus, ApiError, ApiMetadata, EmbeddingProviderProbeResponse,
-        GRAPH_CANVAS_MAX_LIMIT, GraphCanvasEdge, GraphCanvasKind, GraphCanvasNode,
-        GraphCanvasRequest, GraphCanvasResponse, GraphCanvasSummary, GraphInspectionRequest,
-        GraphInspectionResponse, HealthResponse, HybridRetrievalRequest, HybridRetrievalResponse,
-        IndexRefreshRequest, IndexRefreshResponse, IngestRequest, IngestResponse,
-        MultimodalExtractionRequest, MultimodalExtractionResponse, ProjectStatusResponse,
-        RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
+        AgentProtocolStatus, ApiError, ApiMetadata, CodeIndexWorkerRunRequest,
+        CodeIndexWorkerRunResponse, EmbeddingProviderProbeResponse, GRAPH_CANVAS_MAX_LIMIT,
+        GraphCanvasEdge, GraphCanvasKind, GraphCanvasNode, GraphCanvasRequest, GraphCanvasResponse,
+        GraphCanvasSummary, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
+        HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
+        IngestRequest, IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
+        ProjectStatusResponse, RequestContext, ServiceRecoveryReport,
     },
     domain::{
         AuditStatus, CodeParseStatusCounts, CodeRepositoryTotals, ContextGraphPath,
-        ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind, ProposalState,
-        RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
-        RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
+        ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind, RECIPROCAL_RANK_FUSION_K,
+        RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
+        RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
     model_provider::ModelProviderConfigService,
@@ -32,7 +32,7 @@ use crate::{
     },
     storage::{
         FileIndexDiagnostics, GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection,
-        GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest, StorageError,
+        GraphSearchRequest, KnowledgeStore, NewAuditEvent, StorageError,
     },
 };
 
@@ -42,15 +42,13 @@ use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
     knowledge::{
         index_refresh::{
-            index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
-            recover_index_kinds, refresh_index_kinds,
+            index_refresh_outcome, metadata_for_indexes, recover_index_kinds, refresh_index_kinds,
         },
         ingest::mutation_batch_from_request,
         multimodal::extraction_ingest_request,
     },
     status::{agent_protocol_status, runtime_status, runtime_status_with_model_profiles},
     update::{VersionCheckResponse, check_for_updates},
-    worker::operations::overlay_worker_runtime,
 };
 
 #[cfg(test)]
@@ -682,69 +680,31 @@ impl RelayKnowledgeService {
         })
     }
 
-    /// Returns the managed background service definition location and defaults.
-    pub async fn service_status(
+    pub(super) async fn store(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
+        self.storage.get().await
+    }
+
+    /// Runs one split-worker preview code-index attempt through durable task leases.
+    pub async fn run_code_index_worker_preview(
         &self,
+        request: CodeIndexWorkerRunRequest,
         context: RequestContext,
-    ) -> Result<ServiceStatusResponse, ApiError> {
+    ) -> Result<CodeIndexWorkerRunResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
+        let task = self
+            .run_code_index_task_once(request.task_id, context.clone())
+            .await?;
         let graph_version = store
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let index_refresh =
-            reconcile_index_refreshes(&store, graph_version, &self.runtime.retrieval).await?;
-        let file_index = file_index_diagnostics_or_default(&store).await?;
-        let service_definition_path = self
-            .runtime
-            .paths
-            .service_dir
-            .join(service_definition_filename())
-            .display()
-            .to_string();
-        let operator = store
-            .service_operator_status()
-            .await
-            .map_err(storage_api_error)?;
-        let workers = overlay_worker_runtime(
-            store.worker_statuses().await.map_err(storage_api_error)?,
-            &self.runtime.workers,
-        );
-        let code_index_workers = self.code_index_worker_status(&store).await?;
-        let proposal_backlog = store
-            .list_proposals(ProposalListRequest {
-                state: Some(ProposalState::Proposed),
-                limit: usize::MAX,
-            })
-            .await
-            .map_err(storage_api_error)?
-            .len();
-        let audit_event_count = store.audit_event_count().await.map_err(storage_api_error)?;
 
-        Ok(ServiceStatusResponse {
+        Ok(CodeIndexWorkerRunResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
-            service_name: PROJECT_NAME.to_owned(),
-            mode: operator.state.as_str().to_owned(),
-            background_enabled: operator.state != crate::domain::ServiceOperatorState::Disabled,
-            silent_updates_enabled: operator.silent_updates_enabled,
-            service_definition_path,
-            index_refresh,
-            file_index,
-            agent_protocols: agent_protocol_status(&self.runtime),
-            operator,
-            workers,
-            code_index_workers,
-            proposal_backlog,
-            audit_sink: crate::api::AuditSinkStatus {
-                durable: true,
-                event_count: audit_event_count,
-                last_error: None,
-            },
+            worker_kind: "code_index".to_owned(),
+            claimed: task.is_some(),
+            task,
         })
-    }
-
-    pub(super) async fn store(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
-        self.storage.get().await
     }
 
     /// Returns the persistent agent audit log path resolved by the path boundary.
@@ -887,6 +847,8 @@ fn service_definition_filename() -> &'static str {
 
 mod health;
 pub(crate) mod knowledge_map;
+mod service_status;
+mod storage_diagnostics;
 mod storage_provider;
 
 #[cfg(test)]

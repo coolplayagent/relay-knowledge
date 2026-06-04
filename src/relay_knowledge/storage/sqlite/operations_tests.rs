@@ -112,6 +112,20 @@ async fn sqlite_proposals_conflicts_audit_and_operator_round_trip() {
     assert_eq!(proposal.conflict_count, 1);
     assert_eq!(proposal.provenance.producer, "ocr_worker");
     assert_eq!(proposal.provenance.input_fact_ids, ["ev-1"]);
+    assert_eq!(
+        store
+            .proposal_count(Some(ProposalState::Proposed))
+            .await
+            .expect("proposal count should load"),
+        1
+    );
+    assert_eq!(
+        store
+            .proposal_count(Some(ProposalState::Rejected))
+            .await
+            .expect("rejected proposal count should load"),
+        0
+    );
 
     let listed = store
         .list_proposals(ProposalListRequest {
@@ -141,6 +155,20 @@ async fn sqlite_proposals_conflicts_audit_and_operator_round_trip() {
 
     assert_eq!(decided.state, ProposalState::Rejected);
     assert_eq!(decided.decided_by.as_deref(), Some("reviewer"));
+    assert_eq!(
+        store
+            .proposal_count(Some(ProposalState::Proposed))
+            .await
+            .expect("updated proposal count should load"),
+        0
+    );
+    assert_eq!(
+        store
+            .proposal_count(Some(ProposalState::Rejected))
+            .await
+            .expect("updated rejected count should load"),
+        1
+    );
 
     store
         .insert_audit_event(NewAuditEvent {

@@ -58,6 +58,13 @@ fn router_with_assets(
         .route("/api/project/status", get(project_status))
         .route("/api/health", get(health))
         .route("/api/service/status", get(service_status))
+        .route("/api/v1/control/status", get(control_status))
+        .route("/api/v1/control/health", get(control_health))
+        .route(
+            "/api/v1/control/service/status",
+            get(read_only_service_status),
+        )
+        .route("/api/v1/control/storage/topology", get(storage_topology))
         .route("/api/web/graph/canvas", get(graph_canvas))
         .route("/api/web/operations/execute", post(execute_operation))
         .merge(web_model_config::routes())
@@ -78,6 +85,14 @@ async fn project_status(State(state): State<WebState>) -> Response {
     }
 }
 
+async fn control_status(State(state): State<WebState>) -> Response {
+    let (response, _) = state
+        .service
+        .runtime_diagnostics(RequestContext::for_interface(InterfaceKind::Web));
+
+    Json(response).into_response()
+}
+
 async fn health(State(state): State<WebState>) -> Response {
     match state
         .service
@@ -89,10 +104,43 @@ async fn health(State(state): State<WebState>) -> Response {
     }
 }
 
+async fn control_health(State(state): State<WebState>) -> Response {
+    match state
+        .service
+        .read_only_health(RequestContext::for_interface(InterfaceKind::Web))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
 async fn service_status(State(state): State<WebState>) -> Response {
     match state
         .service
         .service_status(RequestContext::for_interface(InterfaceKind::Web))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn read_only_service_status(State(state): State<WebState>) -> Response {
+    match state
+        .service
+        .read_only_service_status(RequestContext::for_interface(InterfaceKind::Web))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn storage_topology(State(state): State<WebState>) -> Response {
+    match state
+        .service
+        .storage_topology_status(RequestContext::for_interface(InterfaceKind::Web))
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -906,6 +954,10 @@ pub(super) struct WebState {
     pub(super) service: RelayKnowledgeService,
     asset_root: Arc<PathBuf>,
 }
+
+#[cfg(test)]
+#[path = "web_control_tests.rs"]
+mod control_tests;
 
 #[cfg(test)]
 #[path = "web_tests.rs"]

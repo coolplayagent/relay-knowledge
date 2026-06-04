@@ -212,6 +212,9 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
     let provider = CliCommand::parse(["provider", "probe"]).expect("provider command should parse");
     let service_plan =
         CliCommand::parse(["service", "plan", "uninstall"]).expect("service plan should parse");
+    let service_worker =
+        CliCommand::parse(["service", "worker", "run", "--task-id", "code-index-task:1"])
+            .expect("service worker command should parse");
     let operator = CliCommand::parse(["service", "operator", "resume"])
         .expect("operator command should parse");
     let setup_doctor = CliCommand::parse(["setup", "doctor"]).expect("setup doctor should parse");
@@ -251,6 +254,12 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
         service_plan.action,
         CliAction::ServicePlan {
             action: ServiceManagerAction::Uninstall,
+        }
+    );
+    assert_eq!(
+        service_worker.action,
+        CliAction::ServiceWorkerRun {
+            task_id: Some("code-index-task:1".to_owned()),
         }
     );
     assert_eq!(operator.action, CliAction::ServiceOperatorResume);
@@ -643,7 +652,10 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
         health,
         "healthy=true repo_code_files=0 repo_code_symbols=0\n"
     );
-    assert_eq!(service_status, "service=relay-knowledge mode=disabled\n");
+    assert_eq!(
+        service_status,
+        "service=relay-knowledge mode=disabled storage=single_sqlite missing_shards=0\n"
+    );
     assert_eq!(
         provider,
         "provider=none ok=false model=relay-local-hash-ann-v1 dimension=16\n"
@@ -812,6 +824,17 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
     )
     .await
     .expect("service plan should run");
+    let service_worker = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ServiceWorkerRun { task_id: None },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("service-worker-run"),
+    )
+    .await
+    .expect("service worker should run");
     let paused = run_with_service(
         &service,
         CliCommand {
@@ -838,6 +861,10 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
     assert!(proposal_list.starts_with("proposals="));
     assert!(audit.starts_with("audit_events="));
     assert!(service_plan.contains("service_plan=install"));
+    assert_eq!(
+        service_worker,
+        "worker=code_index claimed=false task_state=none\n"
+    );
     assert_eq!(paused, "operator=paused\n");
     assert_eq!(resumed, "operator=enabled\n");
 }

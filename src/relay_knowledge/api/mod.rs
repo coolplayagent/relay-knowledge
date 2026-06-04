@@ -17,9 +17,9 @@ pub use context::{InterfaceKind, RequestContext};
 pub use error::{ApiError, ErrorKind};
 pub use metadata::ApiMetadata;
 pub use operations::{
-    AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeIndexWorkerStatus,
-    CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
-    CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeIndexWorkerRunRequest,
+    CodeIndexWorkerRunResponse, CodeIndexWorkerStatus, CodeRepositoryFeatureFlagsResponse,
+    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest,
     CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse, CodeRepositoryReportResponse,
     CodeRepositoryScopeMetadata, CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,
@@ -36,7 +36,8 @@ pub use operations::{
     ProposalDecisionResponse, ProposalListApiRequest, ProposalListResponse, ProposalShowResponse,
     ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServicePlanRequest,
     ServicePlanResponse, ServiceRecoveryReport, ServiceStatusResponse, SoftwareGlobalResponse,
-    WorkerRunRequest, WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
+    StorageShardDiagnostics, StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest,
+    WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};

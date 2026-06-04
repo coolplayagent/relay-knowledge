@@ -399,6 +399,25 @@ pub(super) fn list_proposals(
     collect_rows(rows)
 }
 
+pub(super) fn proposal_count(
+    connection: &Connection,
+    state: Option<ProposalState>,
+) -> Result<usize, StorageError> {
+    let count = if let Some(state) = state {
+        connection.query_row(
+            "SELECT COUNT(*) FROM proposals WHERE state = ?1",
+            params![state.as_str()],
+            |row| row.get::<_, u64>(0),
+        )?
+    } else {
+        connection.query_row("SELECT COUNT(*) FROM proposals", [], |row| {
+            row.get::<_, u64>(0)
+        })?
+    };
+
+    Ok(usize::try_from(count).unwrap_or(usize::MAX))
+}
+
 pub(super) fn proposal_by_id(
     connection: &Connection,
     proposal_id: &str,

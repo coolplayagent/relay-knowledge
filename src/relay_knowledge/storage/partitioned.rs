@@ -4,6 +4,8 @@ use std::{path::Path, sync::Arc};
 mod catalog;
 #[path = "partitioned/control_delegates.rs"]
 mod control_delegates;
+#[path = "partitioned/diagnostics.rs"]
+mod diagnostics;
 #[path = "partitioned/retention.rs"]
 mod retention;
 #[path = "partitioned/routing.rs"]
@@ -34,7 +36,7 @@ use crate::{
     },
 };
 
-use catalog::{SqliteShardCatalog, catalog_has_active_repositories, initialize_catalog_schema};
+use catalog::{SqliteShardCatalog, initialize_catalog_schema};
 use retention::merge_scope_retention_summaries;
 use routing::{
     current_control_scope, is_missing_code_scope_error, repository_store_for_selector,
@@ -61,10 +63,6 @@ impl PartitionedSqliteKnowledgeStore {
             control,
             catalog: Arc::new(SqliteShardCatalog::new(control_path, paths)),
         })
-    }
-
-    pub fn has_active_catalog(control_path: impl AsRef<Path>) -> Result<bool, StorageError> {
-        catalog_has_active_repositories(control_path.as_ref())
     }
 
     async fn incremental_base_scope(

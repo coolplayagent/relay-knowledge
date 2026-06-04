@@ -61,7 +61,7 @@ Control-plane APIs must cover:
 - repository register/index/status/report/set overlay refresh.
 - audit, authorization identity, request id, trace id, QoS admission, and overload decisions.
 
-New control-plane interfaces must first define shared `api` request/response types and application service methods, then map them to CLI, Web, MCP, or HTTP routes. Interface layers must not duplicate business logic, read the storage catalog directly, renew worker tasks directly, or bypass QoS.
+New control-plane interfaces must first define shared `api` request/response types and application service methods, then map them to CLI, Web, MCP, or HTTP routes. Interface layers must not duplicate business logic, read the storage catalog directly, renew worker tasks directly, or bypass QoS. The current read-only control-plane HTTP preview exposes `/api/v1/control/status`, `/api/v1/control/health`, `/api/v1/control/service/status`, and `/api/v1/control/storage/topology`. These routes must remain safe on cold runtimes: health and service-status diagnostics cannot open or migrate storage, topology diagnostics may only use bounded read-only catalog probes that also surface active partitioned catalogs under a single-SQLite configuration, and backlog counters must use storage count APIs instead of unbounded list materialization.
 
 ## 5. Data Plane Responsibilities
 
@@ -86,15 +86,15 @@ New backends must pass the same contract tests:
 
 ## 7. API Extension Contract
 
-Control-plane HTTP routes use `/api/*`, and same-origin Web operations continue to use `/api/web/operations/execute`. If a stable external control-plane API is introduced later, it must be versioned as `/api/v1/control/*` or an equivalent name while keeping CLI JSON, Web, and MCP tool semantics compatible.
+Control-plane HTTP routes use `/api/*`, and same-origin Web operations continue to use `/api/web/operations/execute`. External control-plane APIs use `/api/v1/control/*` or an equivalent name. The current preview exposes only read-only status, health, service status, and storage topology diagnostics while keeping CLI JSON, Web, and MCP tool semantics compatible.
 
 API responses must include metadata, warnings/degraded state, freshness/truncation, stable error kind, and trace context. Long-running operations return only task handles, checkpoints, and queryable status; they must not synchronously run unbounded indexing, unbounded scans, large external-provider batches, or shard migration.
 
 ## 8. Acceptance Criteria
 
 - `single_sqlite` rejects a runtime database with an active shard catalog.
-- `partitioned_sqlite` doctor, backup, migration, and uninstall plans cover both the control database and shard directory.
-- Split workers cannot complete, fail, or write when no task was claimed, the lease expired, or the attempt does not match.
+- `partitioned_sqlite` doctor/status, backup, migration, and uninstall plans cover both the control database and shard directory, with storage diagnostics reporting active/staged/missing shard counts.
+- Split-worker preview claims durable code-index tasks through `service worker run [--task-id <id>]`; workers cannot complete, fail, or write when no task was claimed, the lease expired, or the attempt does not match.
 - `health`, `service status`, and Web diagnostics return bounded degraded status while the data plane is busy.
 - New graph/vector/event/workflow adapters enter only as implementation details under storage, retrieval, net, or worker boundaries and do not change domain/API semantics.
 

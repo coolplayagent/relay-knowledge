@@ -246,6 +246,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
             &["Does not perform privileged service installation."],
         ),
         service_operator(),
+        service_worker(),
         service_run(),
         command!(
             &["setup", "doctor"],
@@ -693,6 +694,30 @@ fn service_plan() -> CliCommandSpec {
         &[],
         &["relay-knowledge service plan install --format json"],
         &["Returns commands for the platform service manager without executing privileged steps."],
+    )
+}
+
+fn service_worker() -> CliCommandSpec {
+    command!(
+        &["service", "worker", "run"],
+        "relay-knowledge service worker run [--task-id <id>]",
+        "Run one preview split-worker code-index task through durable leases.",
+        "service.worker.run",
+        CommandEffect::WritesIndexes,
+        &[],
+        &[opt(
+            "--task-id",
+            Some("id"),
+            false,
+            false,
+            "Specific durable code-index task to claim.",
+            None,
+            &[],
+        )],
+        &["relay-knowledge service worker run --format json"],
+        &[
+            "Claims at most one queued code-index task and completes or fails it through the storage lease contract.",
+        ],
     )
 }
 
