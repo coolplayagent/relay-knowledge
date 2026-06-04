@@ -207,11 +207,21 @@ pub(in crate::storage::sqlite::code::code_query) fn lifecycle_hybrid_chunk_fts_m
 }
 
 fn lifecycle_finalization_recall_terms(terms: &[String]) -> Vec<String> {
-    terms
-        .iter()
-        .filter(|term| matches!(term.as_str(), "finish" | "finalize" | "finalized"))
-        .cloned()
-        .collect()
+    let mut recall_terms = Vec::new();
+    for term in terms {
+        match term.as_str() {
+            "finish" | "finalize" | "finalized" => recall_terms.push(term.clone()),
+            "finished" => {
+                recall_terms.push("finish".to_owned());
+                recall_terms.push("finished".to_owned());
+            }
+            _ => {}
+        }
+    }
+    recall_terms.sort();
+    recall_terms.dedup();
+
+    recall_terms
 }
 
 fn lifecycle_recall_match_query(anchor: &str, finalization_terms: &[String]) -> String {
@@ -879,6 +889,13 @@ mod tests {
             )
             .as_deref(),
             Some("\"delta\" \"finalized\"")
+        );
+        assert_eq!(
+            lifecycle_hybrid_chunk_fts_match_query(
+                "OpenAI Chat protocol sse tool call delta lifecycle finished events"
+            )
+            .as_deref(),
+            Some("\"delta\" \"finish\" OR \"delta\" \"finished\"")
         );
         assert!(lifecycle_hybrid_chunk_fts_match_query("protocol lifecycle events").is_none());
         assert!(lifecycle_hybrid_chunk_fts_match_query("tool call setup delta events").is_none());

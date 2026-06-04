@@ -87,6 +87,118 @@ async fn callers_follow_designated_function_pointer_bindings() {
 }
 
 #[tokio::test]
+async fn callers_merge_indirect_bindings_when_direct_calls_exist() {
+    let direct_path = "src/direct_driver.c";
+    let table_path = "src/generated_table.c";
+
+    let mut direct_symbol = symbol(
+        "direct-read-symbol",
+        "direct-file",
+        direct_path,
+        "rk_direct_read",
+    );
+    direct_symbol.line_range = range(30, 34);
+    let mut direct_call = call("direct-read-call", "direct-file", direct_path);
+    direct_call.caller_symbol_snapshot_id = Some("direct-read-symbol".to_owned());
+    direct_call.caller_name = Some("rk_direct_read".to_owned());
+    direct_call.callee_name = "rk_driver_read".to_owned();
+    direct_call.target_hint = Some("rk_driver_read".to_owned());
+    direct_call.resolution_state = "resolved".to_owned();
+    direct_call.confidence_basis_points = 9_000;
+    direct_call.confidence_tier = "resolved".to_owned();
+    direct_call.line_range = range(32, 32);
+
+    let mut table_symbol = symbol(
+        "table-read-symbol",
+        "table-file",
+        table_path,
+        "rk_table_read",
+    );
+    table_symbol.line_range = range(20, 24);
+    let mut indirect_call = call("table-read-call", "table-file", table_path);
+    indirect_call.caller_symbol_snapshot_id = Some("table-read-symbol".to_owned());
+    indirect_call.caller_name = Some("rk_table_read".to_owned());
+    indirect_call.callee_name = "read".to_owned();
+    indirect_call.line_range = range(22, 22);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("direct-file", direct_path, "c"),
+            file("table-file", table_path, "c"),
+        ],
+        symbols: vec![direct_symbol, table_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![direct_call, indirect_call],
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "direct-read-chunk",
+                "direct-file",
+                direct_path,
+                "int rk_direct_read(struct rk_device *dev)\n\
+{\n\
+    return rk_driver_read(dev);\n\
+}",
+                Some("direct-read-symbol"),
+                range(30, 34),
+            ),
+            chunk(
+                "table-init-chunk",
+                "table-file",
+                table_path,
+                "static const struct rk_table_row rk_rows[] = {\n\
+    [RK_STAGE_READ] = {\n\
+        .read = rk_driver_read,\n\
+    },\n\
+};",
+                None,
+                range(10, 16),
+            ),
+            chunk(
+                "table-read-chunk",
+                "table-file",
+                table_path,
+                "int rk_table_read(struct rk_device *dev, char *buffer, size_t length)\n\
+{\n\
+    return rk_rows[RK_STAGE_READ].read(dev, buffer, length);\n\
+}",
+                Some("table-read-symbol"),
+                range(20, 24),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_driver_read", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should merge direct and indirect matches");
+
+    assert!(hits.iter().any(|hit| hit.path == direct_path), "{hits:?}");
+    assert!(
+        hits.iter().any(|hit| {
+            hit.path == table_path && hit.edge_target_hint.as_deref() == Some("rk_driver_read")
+        }),
+        "{hits:?}"
+    );
+}
+
+#[tokio::test]
 async fn indirect_callers_ignore_same_field_calls_in_other_files() {
     let binding_path = "src/generated_table.c";
     let unrelated_path = "src/unrelated_device.c";
