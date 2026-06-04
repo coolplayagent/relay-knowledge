@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use super::{
     CodeIndexError,
-    git::{git_bytes, resolve_git_root, validate_git_ref_arg},
+    git::{git_bytes, git_bytes_slice, resolve_git_root, validate_git_ref_arg},
 };
 
 const MAX_SUBMODULE_EXPANSION_DEPTH: usize = 8;
@@ -83,6 +83,7 @@ enum TrackedEntryFilter {
 }
 
 impl TrackedEntryScope {
+    #[cfg(test)]
     pub(super) fn all() -> Self {
         Self {
             path_filters: Vec::new(),
@@ -145,6 +146,14 @@ impl TrackedEntryScope {
             }
         }
     }
+
+    fn entry_pathspecs(&self) -> Option<Vec<&str>> {
+        if self.entry_filter != TrackedEntryFilter::All || self.path_filters.is_empty() {
+            return None;
+        }
+
+        Some(self.path_filters.iter().map(String::as_str).collect())
+    }
 }
 
 fn record_tracked_entries_call(_root: &Path) {
@@ -175,7 +184,7 @@ fn tracked_entries_inner(
     if !visited.insert(visit_key.clone()) {
         return Ok(GitTrackedEntries::default());
     }
-    let bytes = match git_bytes(root, ["ls-tree", "-r", "-l", "-z", commit]) {
+    let bytes = match tracked_entries_ls_tree_bytes(root, commit, scope) {
         Ok(bytes) => bytes,
         Err(error) => {
             visited.remove(&visit_key);
@@ -344,7 +353,7 @@ fn tracked_entries_from_git_dir_inner(
     if !visited.insert(visit_key.clone()) {
         return Ok(GitTrackedEntries::default());
     }
-    let bytes = match git_dir_bytes(git_dir, &["ls-tree", "-r", "-l", "-z", commit]) {
+    let bytes = match tracked_entries_git_dir_ls_tree_bytes(git_dir, commit, scope) {
         Ok(bytes) => bytes,
         Err(error) => {
             visited.remove(&visit_key);
@@ -404,6 +413,34 @@ fn tracked_entries_from_git_dir_inner(
     visited.remove(&visit_key);
 
     Ok(state)
+}
+
+fn tracked_entries_ls_tree_bytes(
+    root: &Path,
+    commit: &str,
+    scope: &TrackedEntryScope,
+) -> Result<Vec<u8>, CodeIndexError> {
+    let Some(pathspecs) = scope.entry_pathspecs() else {
+        return git_bytes(root, ["ls-tree", "-r", "-l", "-z", commit]);
+    };
+    let mut args = vec!["ls-tree", "-r", "-l", "-z", commit, "--"];
+    args.extend(pathspecs);
+
+    git_bytes_slice(root, &args)
+}
+
+fn tracked_entries_git_dir_ls_tree_bytes(
+    git_dir: &Path,
+    commit: &str,
+    scope: &TrackedEntryScope,
+) -> Result<Vec<u8>, CodeIndexError> {
+    let Some(pathspecs) = scope.entry_pathspecs() else {
+        return git_dir_bytes(git_dir, &["ls-tree", "-r", "-l", "-z", commit]);
+    };
+    let mut args = vec!["ls-tree", "-r", "-l", "-z", commit, "--"];
+    args.extend(pathspecs);
+
+    git_dir_bytes(git_dir, &args)
 }
 
 struct GitDirSubmoduleRequest<'a> {

@@ -133,11 +133,18 @@ fn push_impact_paths(request: ImpactPathPush<'_, '_>) -> Result<(), CodeIndexErr
         )
     };
     let scope_overlaps = |path: &str| path_scope_overlaps(path, request.path_filters);
+    let child_filters = |path: &str| {
+        scope::submodule_child_scope_filters(path, request.registration, request.selector)
+    };
     match request.expander.expanded_paths(
         request.path,
         request.include_base,
         request.include_head,
-        &source_gitlink::GitlinkPathSelector::new(&include_path, &scope_overlaps),
+        &source_gitlink::GitlinkPathSelector::new_with_child_filters(
+            &include_path,
+            &scope_overlaps,
+            &child_filters,
+        ),
     )? {
         Some(expanded) if !expanded.is_empty() => request.paths.extend(expanded),
         _ => request.paths.push(request.path.to_owned()),

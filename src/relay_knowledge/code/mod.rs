@@ -26,6 +26,7 @@ mod snapshot;
 mod source;
 mod source_declarations;
 mod source_gitlink;
+mod source_gitlink_git;
 mod source_gitlink_paths;
 mod source_gitlink_selector;
 mod source_gitlink_target;
@@ -474,13 +475,20 @@ fn append_deleted_symbol_names_for_gitlink_update(
     };
     let expanded_scope_overlaps =
         |path: &str| path_scope_overlaps(path, context.registration, context.selector);
+    let child_filters = |path: &str| {
+        scope::submodule_child_scope_filters(path, context.registration, context.selector)
+    };
     let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
         context.root,
         path,
         context.base_commit,
         head_commit,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
-        &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &expanded_scope_overlaps),
+        &source_gitlink::GitlinkPathSelector::new_with_child_filters(
+            &include_expanded_path,
+            &expanded_scope_overlaps,
+            &child_filters,
+        ),
     )?
     else {
         return Ok(());
@@ -635,8 +643,7 @@ fn build_incremental_snapshot(
             GitChange::Deleted { path } => {
                 if delete_expanded_gitlink_paths(
                     &mut build,
-                    registration,
-                    selector,
+                    &parse_context,
                     &base_entries,
                     &base_source_layout,
                     &path,
@@ -651,8 +658,7 @@ fn build_incremental_snapshot(
             GitChange::Renamed { old_path, new_path } => {
                 if delete_expanded_gitlink_paths(
                     &mut build,
-                    registration,
-                    selector,
+                    &parse_context,
                     &base_entries,
                     &base_source_layout,
                     &old_path,
@@ -752,13 +758,20 @@ fn parse_expanded_gitlink_change(
     };
     let expanded_scope_overlaps =
         |path: &str| path_scope_overlaps(path, context.registration, context.selector);
+    let child_filters = |path: &str| {
+        scope::submodule_child_scope_filters(path, context.registration, context.selector)
+    };
     let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
         context.root,
         path,
         context.base_commit,
         &build.commit,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
-        &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &expanded_scope_overlaps),
+        &source_gitlink::GitlinkPathSelector::new_with_child_filters(
+            &include_expanded_path,
+            &expanded_scope_overlaps,
+            &child_filters,
+        ),
     )?
     else {
         return Ok(false);
@@ -810,7 +823,8 @@ fn parse_expanded_gitlink_paths(
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
         &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &include_expanded_path),
     )?;
-    let expanded = !source_gitlink_paths::expanded_paths_under(entries, path).is_empty();
+    let expanded = !source_gitlink_paths::expanded_paths_under(entries, path).is_empty()
+        || source_gitlink::gitlink_commit_at_tree(context.root, &build.commit, path)?.is_some();
     if paths.is_empty() {
         return Ok(expanded);
     }
@@ -823,23 +837,63 @@ fn parse_expanded_gitlink_paths(
 
 fn delete_expanded_gitlink_paths(
     build: &mut SnapshotBuild,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
+    context: &ChangedPathParseContext<'_>,
     entries: &[changes::GitTreeEntry],
     source_layout: &scope::SourceLayoutDiscovery,
     path: &str,
 ) -> Result<bool, CodeIndexError> {
-    let include_expanded_path =
-        |path: &str| path_is_selected_with_layout(path, registration, selector, source_layout);
+    let include_expanded_path = |path: &str| {
+        path_is_selected_with_layout(path, context.registration, context.selector, source_layout)
+    };
     let paths = source_gitlink_paths::bounded_expanded_paths_under_with_selector(
         entries,
         path,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
         &source_gitlink::GitlinkPathSelector::new(&include_expanded_path, &include_expanded_path),
     )?;
-    let expanded = !source_gitlink_paths::expanded_paths_under(entries, path).is_empty();
+    let expanded = !source_gitlink_paths::expanded_paths_under(entries, path).is_empty()
+        || source_gitlink::gitlink_commit_at_tree(context.root, context.base_commit, path)?
+            .is_some();
     if paths.is_empty() {
+        if delete_previous_paths_under(build, context, source_layout, path)? {
+            return Ok(true);
+        }
         return Ok(expanded);
+    }
+    build.deleted_paths.extend(paths);
+
+    Ok(true)
+}
+
+fn delete_previous_paths_under(
+    build: &mut SnapshotBuild,
+    context: &ChangedPathParseContext<'_>,
+    source_layout: &scope::SourceLayoutDiscovery,
+    path: &str,
+) -> Result<bool, CodeIndexError> {
+    let prefix = format!("{}/", path.trim_end_matches('/'));
+    let paths = context
+        .previous_hashes
+        .keys()
+        .filter(|previous_path| previous_path.starts_with(&prefix))
+        .filter(|previous_path| {
+            path_is_selected_with_layout(
+                previous_path,
+                context.registration,
+                context.selector,
+                source_layout,
+            )
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if paths.len() > MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "gitlink path {path} expands to {} files; run a full code index so the work is checkpointed and batched",
+            paths.len()
+        )));
+    }
+    if paths.is_empty() {
+        return Ok(false);
     }
     build.deleted_paths.extend(paths);
 

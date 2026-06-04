@@ -52,12 +52,31 @@ pub(super) fn bounded_expanded_paths_under_with_selector(
         .into_iter()
         .filter(|path| selector.includes(path))
         .collect::<BTreeSet<_>>();
-    if paths.len() > max_paths {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "gitlink path {path} expands to {} files; run a full code index so the work is checkpointed and batched",
-            paths.len()
-        )));
-    }
+    ensure_gitlink_expansion_budget(path, paths.len(), max_paths)?;
 
     Ok(paths)
+}
+
+pub(super) fn ensure_gitlink_expansion_budget(
+    path: &str,
+    expanded_count: usize,
+    max_paths: usize,
+) -> Result<(), CodeIndexError> {
+    if expanded_count <= max_paths {
+        return Ok(());
+    }
+
+    Err(CodeIndexError::InvalidInput(format!(
+        "gitlink path {path} expands to {expanded_count} files; run a full code index so the work is checkpointed and batched"
+    )))
+}
+
+pub(super) fn submodule_expansion_is_unavailable(error: &CodeIndexError) -> bool {
+    match error {
+        CodeIndexError::InvalidInput(message) => {
+            message.contains("submodule git dir") && message.contains("unavailable")
+        }
+        CodeIndexError::Git { args, .. } => args.iter().any(|arg| arg == "ls-tree"),
+        _ => false,
+    }
 }

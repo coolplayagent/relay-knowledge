@@ -6,7 +6,9 @@ use super::{
         git_dir_bytes, submodule_git_dir, submodule_git_dir_from_git_dir, submodule_worktree_root,
     },
     git::git_bytes,
-    source_gitlink::{git_root_has_commit, git_tree_entry, git_tree_entry_from_git_dir},
+    source_gitlink_git::{
+        git_root_has_commit, git_tree_entry, git_tree_entry_from_git_dir, safe_relative_path,
+    },
     source_gitlink_paths::{GitlinkTarget, GitlinkTargetLocation},
 };
 
@@ -114,7 +116,7 @@ fn gitlink_target_for_path(
     commit: &str,
     path: &str,
 ) -> Result<GitlinkTarget, CodeIndexError> {
-    if !super::source_gitlink::safe_relative_path(path) {
+    if !safe_relative_path(path) {
         return Err(CodeIndexError::InvalidInput(format!(
             "unsafe repository source path '{path}'"
         )));
@@ -157,7 +159,7 @@ fn gitlink_target_for_git_dir_path(
     commit: &str,
     path: &str,
 ) -> Result<GitlinkTarget, CodeIndexError> {
-    if !super::source_gitlink::safe_relative_path(path) {
+    if !safe_relative_path(path) {
         return Err(CodeIndexError::InvalidInput(format!(
             "unsafe repository source path '{path}'"
         )));

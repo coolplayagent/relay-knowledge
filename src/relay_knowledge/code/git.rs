@@ -122,8 +122,12 @@ pub(super) fn git_bytes<const N: usize>(
     root: &Path,
     args: [&str; N],
 ) -> Result<Vec<u8>, CodeIndexError> {
-    record_git_show_call(root, &args);
-    record_git_ls_tree_full_scan_call(root, &args);
+    git_bytes_slice(root, &args)
+}
+
+pub(super) fn git_bytes_slice(root: &Path, args: &[&str]) -> Result<Vec<u8>, CodeIndexError> {
+    record_git_show_call(root, args);
+    record_git_ls_tree_full_scan_call(root, args);
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -139,7 +143,7 @@ pub(super) fn git_bytes<const N: usize>(
     })
 }
 
-fn record_git_show_call<const N: usize>(_root: &Path, _args: &[&str; N]) {
+fn record_git_show_call(_root: &Path, _args: &[&str]) {
     #[cfg(test)]
     {
         if _args.first().copied() != Some("show") {
@@ -156,7 +160,7 @@ fn record_git_show_call<const N: usize>(_root: &Path, _args: &[&str; N]) {
     }
 }
 
-fn record_git_ls_tree_full_scan_call<const N: usize>(_root: &Path, _args: &[&str; N]) {
+fn record_git_ls_tree_full_scan_call(_root: &Path, _args: &[&str]) {
     #[cfg(test)]
     {
         if _args.first().copied() != Some("ls-tree")

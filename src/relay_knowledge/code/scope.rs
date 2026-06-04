@@ -641,6 +641,54 @@ pub(super) fn intersect_path_filters(left: &[String], right: &[String]) -> Optio
     (!intersections.is_empty()).then_some(intersections)
 }
 
+pub(super) fn submodule_child_scope_filters(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> Option<Vec<String>> {
+    let filters = intersect_path_filters(&registration.path_filters, &selector.path_filters)?;
+    if filters.is_empty() {
+        return Some(Vec::new());
+    }
+    let path = normalize_scope_path(path);
+    if path.is_empty() {
+        return None;
+    }
+    let child_prefix = format!("{path}/");
+    let mut child_filters = Vec::new();
+    let mut parent_scope_covers_submodule = false;
+    for filter in filters {
+        let filter = normalize_scope_path(&filter);
+        if filter.is_empty()
+            || filter == "."
+            || filter == path
+            || path.starts_with(&format!("{filter}/"))
+        {
+            parent_scope_covers_submodule = true;
+            continue;
+        }
+        if let Some(child_filter) = filter.strip_prefix(&child_prefix)
+            && !child_filter.is_empty()
+        {
+            child_filters.push(child_filter.to_owned());
+        }
+    }
+    if child_filters.is_empty() && !parent_scope_covers_submodule {
+        return None;
+    }
+    child_filters.sort();
+    child_filters.dedup();
+
+    Some(child_filters)
+}
+
+fn normalize_scope_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_owned()
+}
+
 fn normalized_path_filters(filters: &[String]) -> Vec<String> {
     filters
         .iter()

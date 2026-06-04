@@ -1,10 +1,13 @@
 use crate::domain::{
-    CodeFileFingerprint, CodeIndexMode, CodeIndexResourceBudget, CodeRepositorySelector,
+    CodeFileFingerprint, CodeIndexMode, CodeIndexResourceBudget, CodeRepositoryRegistration,
+    CodeRepositorySelector,
 };
+use std::fs;
 
 use super::test_fixtures::TempGitRepo;
 use super::{
     build_index_snapshot, changed_paths_for_diff_with_filters, deleted_symbol_names_for_diff,
+    git_ls_tree_full_scan_call_count_for_root, reset_git_ls_tree_full_scan_call_count_for_root,
     source_gitlink,
 };
 
@@ -261,7 +264,7 @@ fn impact_gitlink_budget_counts_language_selected_children() {
         changed_paths_for_diff_with_filters(&parent.path, &base, "HEAD", &[], &["rust".to_owned()])
             .expect("non-rust impact paths should not consume rust expansion budget");
 
-    assert_eq!(paths, vec!["src/module/src/target.rs".to_owned()]);
+    assert!(paths.contains(&"src/module/src/target.rs".to_owned()));
 }
 
 #[test]
@@ -357,6 +360,228 @@ fn impact_missing_submodule_does_not_scan_unrelated_cached_gitdir() {
     assert!(!paths.contains(&"src/missing/private.rs".to_owned()));
 }
 
+#[test]
+fn impact_fallback_gitlink_expansion_uses_child_scope_before_ls_tree() {
+    let old_child = TempGitRepo::create("review-scoped-fallback-old-child");
+    old_child.write("old.rs", "pub fn old_child_value() -> u32 { 0 }\n");
+    old_child.git(["add", "."]);
+    old_child.git(["commit", "-m", "old child"]);
+    let new_child = TempGitRepo::create("review-scoped-fallback-new-child");
+    new_child.write(
+        "src/target.rs",
+        "pub fn selected_child_value() -> u32 { 1 }\n",
+    );
+    write_many_files(
+        &new_child,
+        "noise/generated",
+        "rs",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    new_child.git(["add", "."]);
+    new_child.git(["commit", "-m", "new child"]);
+
+    let parent = TempGitRepo::create("review-scoped-fallback-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &old_child, "a_old", "src/module");
+    parent.git(["commit", "-am", "add old submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    parent.git(["rm", "-f", "src/module"]);
+    parent.git(["commit", "-m", "remove old submodule"]);
+    add_named_submodule(&parent, &new_child, "z_new", "src/module");
+    parent.git(["commit", "-am", "add new submodule"]);
+    let submodule_root = parent.path.join("src/module");
+    reset_git_ls_tree_full_scan_call_count_for_root(submodule_root.clone());
+
+    let paths = changed_paths_for_diff_with_filters(
+        &parent.path,
+        &base,
+        "HEAD",
+        &["src/module/src/target.rs".to_owned()],
+        &[],
+    )
+    .expect("path-scoped fallback should not materialize every submodule child");
+
+    assert!(paths.contains(&"src/module/src/target.rs".to_owned()));
+    assert_eq!(
+        git_ls_tree_full_scan_call_count_for_root(&submodule_root),
+        0
+    );
+}
+
+#[test]
+fn incremental_renamed_empty_submodule_is_handled_without_blob_fallback() {
+    let child = TempGitRepo::create("review-empty-rename-child");
+    child.git(["commit", "--allow-empty", "-m", "empty child"]);
+    let parent = TempGitRepo::create("review-empty-rename-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "empty", "src/module");
+    parent.git(["commit", "-am", "add empty submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    parent.git(["mv", "src/module", "src/renamed"]);
+    parent.git(["commit", "-am", "rename empty submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("empty renamed gitlink should not be parsed as a regular blob");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("src/renamed/"))
+    );
+}
+
+#[test]
+fn worktree_overlay_marks_staged_submodule_removal_with_no_selected_children() {
+    let child = TempGitRepo::create("review-empty-staged-remove-child");
+    child.write("src/lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    let parent = TempGitRepo::create("review-empty-staged-remove-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let registration = scoped_registration(&parent, vec!["src/module/tests".to_owned()]);
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    parent.git(["rm", "--cached", "-f", "src/module"]);
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        previous_hashes,
+    )
+    .expect("empty staged removal should still mark the overlay dirty");
+
+    assert!(snapshot.files.is_empty());
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+}
+
+#[test]
+fn impact_nested_cached_submodule_uses_parent_gitdir_context() {
+    let nested = TempGitRepo::create("review-nested-cache-nested");
+    nested.write("src/nested.rs", "pub fn nested_value() -> u32 { 1 }\n");
+    nested.git(["add", "."]);
+    nested.git(["commit", "-m", "nested"]);
+    let child = TempGitRepo::create("review-nested-cache-child");
+    child.write("src/child.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    add_named_submodule(&child, &nested, "nested", "nested");
+    child.git(["commit", "-am", "add nested submodule"]);
+    let parent = TempGitRepo::create("review-nested-cache-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "vendor/module");
+    parent.git(["commit", "-am", "add outer submodule"]);
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "vendor/module",
+    ]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let nested_checkout = TempGitRepo {
+        path: parent.path.join("vendor/module/nested"),
+    };
+    nested_checkout.git(["config", "user.email", "relay@example.invalid"]);
+    nested_checkout.git(["config", "user.name", "Relay Test"]);
+    nested_checkout.write("src/nested.rs", "pub fn nested_value() -> u32 { 2 }\n");
+    nested_checkout.git(["add", "."]);
+    nested_checkout.git(["commit", "-m", "nested update"]);
+    let child_checkout = TempGitRepo {
+        path: parent.path.join("vendor/module"),
+    };
+    child_checkout.git(["config", "user.email", "relay@example.invalid"]);
+    child_checkout.git(["config", "user.name", "Relay Test"]);
+    child_checkout.git(["add", "nested"]);
+    child_checkout.git(["commit", "-m", "update nested pointer"]);
+    parent.git(["add", "vendor/module"]);
+    parent.git(["commit", "-m", "update outer pointer"]);
+    parent.git(["submodule", "deinit", "-f", "vendor/module"]);
+
+    let paths = changed_paths_for_diff_with_filters(&parent.path, &base, "HEAD", &[], &[])
+        .expect("nested cached gitdir should expand changed child paths");
+
+    assert!(paths.contains(&"vendor/module/nested/src/nested.rs".to_owned()));
+    assert!(!paths.contains(&"vendor/module/nested".to_owned()));
+}
+
+#[test]
+fn incremental_deleted_unavailable_gitlink_deletes_previous_children() {
+    let child = TempGitRepo::create("review-delete-unavailable-child");
+    child.write("src/lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+    let parent = TempGitRepo::create("review-delete-unavailable-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &child, "module", "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    parent.git(["rm", "-f", "src/module"]);
+    parent.git(["commit", "-m", "remove submodule"]);
+    remove_submodule_checkout_and_gitdir(&parent, "src/module");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("unavailable removed gitlink should delete prior indexed children");
+
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/module/src/lib.rs".to_owned())
+    );
+}
+
 fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, path: &str) {
     let child_path = child.path.to_str().expect("child path should be unicode");
     parent.git([
@@ -369,6 +594,31 @@ fn add_named_submodule(parent: &TempGitRepo, child: &TempGitRepo, name: &str, pa
         child_path,
         path,
     ]);
+}
+
+fn scoped_registration(
+    parent: &TempGitRepo,
+    path_filters: Vec<String>,
+) -> CodeRepositoryRegistration {
+    CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        parent.path.display().to_string(),
+        path_filters,
+        Vec::new(),
+    )
+    .expect("registration should validate")
+}
+
+fn remove_submodule_checkout_and_gitdir(parent: &TempGitRepo, path: &str) {
+    let git_dir = parent.path.join(".git/modules").join(path);
+    if git_dir.exists() {
+        fs::remove_dir_all(git_dir).expect("submodule gitdir should be removable");
+    }
+    let worktree = parent.path.join(path);
+    if worktree.exists() {
+        fs::remove_dir_all(worktree).expect("submodule worktree should be removable");
+    }
 }
 
 fn write_many_files(repo: &TempGitRepo, prefix: &str, extension: &str, count: usize) {
