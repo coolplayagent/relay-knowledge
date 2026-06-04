@@ -45,3 +45,29 @@ fn parses_service_run_with_web_and_mcp() {
         }
     );
 }
+
+#[test]
+fn environment_remote_base_url_only_selects_supported_repo_commands() {
+    let env_remote = Some("http://127.0.0.1:8791".to_owned());
+    let status = CliCommand::parse(["status"]).expect("status should parse");
+    let repo_status =
+        CliCommand::parse(["repo", "status", "org/repo"]).expect("repo status should parse");
+    let explicit_status = CliCommand::parse(["--remote", "http://127.0.0.1:8791", "status"])
+        .expect("explicit remote status should parse");
+
+    assert_eq!(remote_selection(&status, env_remote.clone()), None);
+    assert_eq!(
+        remote_selection(&repo_status, env_remote),
+        Some(RemoteSelection {
+            base_url: "http://127.0.0.1:8791".to_owned(),
+            explicit: false,
+        })
+    );
+    assert_eq!(
+        remote_selection(&explicit_status, None),
+        Some(RemoteSelection {
+            base_url: "http://127.0.0.1:8791".to_owned(),
+            explicit: true,
+        })
+    );
+}

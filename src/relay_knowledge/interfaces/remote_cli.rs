@@ -18,6 +18,18 @@ use super::{
     repo_cli::{self, RepoCommand},
 };
 
+pub(super) fn supports(action: &CliAction) -> bool {
+    matches!(
+        action,
+        CliAction::Repo(
+            RepoCommand::Index { .. }
+                | RepoCommand::ScopePreview { .. }
+                | RepoCommand::Query { .. }
+                | RepoCommand::Status { .. }
+        )
+    )
+}
+
 pub(super) async fn run_remote(
     network: &NetworkEnvOverrides,
     base_url: &str,
@@ -200,10 +212,10 @@ impl RemoteCliClient {
         T: Serialize + ?Sized,
         R: DeserializeOwned,
     {
-        let path = repository_path(alias, suffix, self.format)?;
+        let url = repository_url(&self.base_url, alias, suffix, self.format)?;
         let response = self
             .client
-            .post(self.endpoint(&path))
+            .post(url)
             .header("x-relay-request-id", &self.context.request_id)
             .header("x-relay-trace-id", &self.context.trace_id)
             .json(request)
@@ -218,9 +230,7 @@ impl RemoteCliClient {
     where
         R: DeserializeOwned,
     {
-        let path = repository_path(alias, "status", self.format)?;
-        let mut url = reqwest::Url::parse(&self.endpoint(&path))
-            .map_err(|error| invalid_remote_url(error.to_string(), self.format))?;
+        let mut url = repository_url(&self.base_url, alias, "status", self.format)?;
         url.query_pairs_mut().append_pair("ref", ref_selector);
         let response = self
             .client
@@ -232,10 +242,6 @@ impl RemoteCliClient {
             .map_err(|error| transport_error(error, self.format))?;
 
         decode_response(response, self.format).await
-    }
-
-    fn endpoint(&self, path: &str) -> String {
-        format!("{}/{}", self.base_url, path.trim_start_matches('/'))
     }
 }
 
@@ -259,15 +265,38 @@ fn normalize_base_url(value: &str, format: OutputFormat) -> Result<String, CliEr
     Ok(trimmed.to_owned())
 }
 
-fn repository_path(alias: &str, suffix: &str, format: OutputFormat) -> Result<String, CliError> {
-    if alias.trim().is_empty() || alias.contains(['/', '?', '#']) {
+fn repository_url(
+    base_url: &str,
+    alias: &str,
+    suffix: &str,
+    format: OutputFormat,
+) -> Result<reqwest::Url, CliError> {
+    let alias = alias.trim();
+    if alias.is_empty() {
         return Err(CliError::invalid_api_argument(
-            "remote repository alias must be a non-empty URL path segment",
+            "remote repository alias must not be empty",
             format,
         ));
     }
 
-    Ok(format!("api/v1/code/repositories/{alias}/{suffix}"))
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| invalid_remote_url(error.to_string(), format))?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|_| {
+            invalid_remote_url(
+                "remote base URL cannot be a base for path segments".to_owned(),
+                format,
+            )
+        })?;
+        for segment in ["api", "v1", "code", "repositories", alias] {
+            segments.push(segment);
+        }
+        for segment in suffix.split('/') {
+            segments.push(segment);
+        }
+    }
+
+    Ok(url)
 }
 
 async fn decode_response<R>(

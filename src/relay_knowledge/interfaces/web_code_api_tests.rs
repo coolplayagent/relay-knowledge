@@ -64,6 +64,27 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     .await;
     assert_eq!(preview["preview"]["selected_file_count"], 1);
 
+    let incremental = CodeIndexRequest {
+        repository: selector.clone(),
+        mode: CodeIndexMode::incremental("HEAD~1", "HEAD").expect("refs should validate"),
+        freshness_policy: FreshnessPolicy::AllowStale,
+    };
+    let rejected_incremental = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/index",
+        Some(json!(incremental)),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(rejected_incremental["error_kind"], "invalid_argument");
+    assert!(
+        rejected_incremental["message"]
+            .as_str()
+            .expect("message should render")
+            .contains("full index mode")
+    );
+
     let index = request_json(
         router.clone(),
         "POST",
@@ -92,6 +113,50 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     .await;
     assert_eq!(status["status"]["alias"], "fixture");
     assert_eq!(status["status"]["indexed_file_count"], 1);
+
+    let blank_query = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/query",
+        Some(json!({
+            "query": " ",
+            "repository": selector.clone(),
+            "code_query_kind": "definition",
+            "limit": 5,
+            "freshness_policy": "allow_stale"
+        })),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(blank_query["error_kind"], "invalid_argument");
+    assert!(
+        blank_query["message"]
+            .as_str()
+            .expect("message should render")
+            .contains("query: must not be empty")
+    );
+
+    let zero_limit = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/query",
+        Some(json!({
+            "query": "retry_policy",
+            "repository": selector.clone(),
+            "code_query_kind": "definition",
+            "limit": 0,
+            "freshness_policy": "allow_stale"
+        })),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(zero_limit["error_kind"], "invalid_argument");
+    assert!(
+        zero_limit["message"]
+            .as_str()
+            .expect("message should render")
+            .contains("limit: must be greater than zero")
+    );
 
     let query_request = CodeRetrievalRequest::new(
         "retry_policy",

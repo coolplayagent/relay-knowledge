@@ -618,27 +618,24 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
     let environment = EnvironmentConfig::from_process()
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
     let context = RequestContext::for_interface(InterfaceKind::Cli);
-    let remote_base_url = command
-        .remote_base_url
-        .clone()
-        .or_else(|| environment.remote_cli.base_url.clone());
-    if let Some(base_url) = remote_base_url {
-        return remote_cli::run_remote(
+    if let Some(remote) = remote_selection(&command, environment.remote_cli.base_url.clone()) {
+        let remote_output = remote_cli::run_remote(
             &environment.network,
-            &base_url,
+            &remote.base_url,
             &command.action,
-            context,
+            context.clone(),
             command.format,
         )
-        .await
-        .and_then(|output| {
-            output.ok_or_else(|| {
-                CliError::ApiFailed(
-                    "remote CLI mode supports repo index, repo scope preview, repo status, and repo query; unset RELAY_KNOWLEDGE_REMOTE_BASE_URL to run this command locally"
-                        .to_owned(),
-                )
-            })
-        });
+        .await?;
+        if let Some(output) = remote_output {
+            return Ok(output);
+        }
+        if remote.explicit {
+            return Err(CliError::ApiFailed(
+                "remote CLI mode supports repo index, repo scope preview, repo status, and repo query"
+                    .to_owned(),
+            ));
+        }
     }
 
     let service = RelayKnowledgeService::from_environment(&environment)
@@ -646,6 +643,29 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
 
     run_with_service(&service, command, context).await
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteSelection {
+    base_url: String,
+    explicit: bool,
+}
+
+fn remote_selection(command: &CliCommand, env_base_url: Option<String>) -> Option<RemoteSelection> {
+    if let Some(base_url) = command.remote_base_url.clone() {
+        return Some(RemoteSelection {
+            base_url,
+            explicit: true,
+        });
+    }
+    if remote_cli::supports(&command.action) {
+        return env_base_url.map(|base_url| RemoteSelection {
+            base_url,
+            explicit: false,
+        });
+    }
+
+    None
 }
 
 /// Runs a parsed CLI command with an already composed service.

@@ -38,9 +38,10 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
         let mut buffer = vec![0; 4096];
         let count = stream.read(&mut buffer).await.expect("request should read");
         let request = String::from_utf8_lossy(&buffer[..count]);
-        assert!(request.starts_with("POST /api/v1/code/repositories/fixture/query HTTP/1.1"));
+        assert!(request.starts_with("POST /api/v1/code/repositories/org%2Frepo/query HTTP/1.1"));
         assert!(request.contains("x-relay-request-id: req-remote-query"));
         assert!(request.contains("\"query\":\"retry_policy\""));
+        assert!(request.contains("\"repository\":\"org/repo\""));
         let response = json!({
             "metadata": {
                 "trace_id": "trace-remote-query",
@@ -50,8 +51,8 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
             },
             "scope": {
                 "scope_id": "git_snapshot:0000000000000001",
-                "repository_id": "repo:fixture",
-                "alias": "fixture",
+                "repository_id": "repo:org/repo",
+                "alias": "org/repo",
                 "requested_ref": "HEAD",
                 "resolved_commit_sha": "abc",
                 "tree_hash": "tree",
@@ -63,7 +64,7 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
             "request": {
                 "query": "retry_policy",
                 "repository": {
-                    "repository": "fixture",
+                    "repository": "org/repo",
                     "ref_selector": "HEAD",
                     "path_filters": [],
                     "language_filters": []
@@ -89,7 +90,7 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
             .expect("response body should write");
     });
     let action = CliAction::Repo(repo_cli::RepoCommand::Query {
-        alias: "fixture".to_owned(),
+        alias: "org/repo".to_owned(),
         query: "retry_policy".to_owned(),
         kind: CodeQueryKind::Definition,
         limit: 5,
