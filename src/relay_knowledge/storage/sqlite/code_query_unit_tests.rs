@@ -550,6 +550,28 @@ fn symbol_query_bonus_prefers_common_chunk_conversion_adapters() {
     );
 
     assert!(adapter_bonus > type_guard_bonus, "{adapter_bonus}");
+
+    let provider_event_bonus = symbol_query_bonus(
+        "shared provider events transform response parts",
+        "fromProviderEvent",
+        "provider.fromProviderEvent",
+        "export function fromProviderEvent(event: SharedProviderEvent): ResponsePart {",
+        "repo://provider/fromProviderEvent",
+        &hybrid,
+    );
+    let provider_guard_bonus = symbol_query_bonus(
+        "shared provider events transform response parts",
+        "isProviderEvent",
+        "provider.isProviderEvent",
+        "function isProviderEvent(event: unknown): event is SharedProviderEvent {",
+        "repo://provider/isProviderEvent",
+        &hybrid,
+    );
+
+    assert!(
+        provider_event_bonus > provider_guard_bonus,
+        "{provider_event_bonus}"
+    );
 }
 
 #[test]

@@ -22,6 +22,7 @@ struct AmbiguousCalleeContext {
     callee_name: String,
     path: String,
     language_id: String,
+    line_range: RepositoryCodeRange,
     target_hint: Option<String>,
     caller_name: Option<String>,
     caller_signature: Option<String>,
@@ -139,12 +140,16 @@ fn ambiguous_callee_contexts(rows: &[CallRow]) -> Vec<AmbiguousCalleeContext> {
             context.callee_name == row.callee_name
                 && context.path == row.path
                 && context.caller_name == row.caller_name
+                && context.target_hint == row.target_hint
+                && context.line_range.start == row.line_range.start
+                && context.line_range.end == row.line_range.end
         });
         if !duplicate {
             contexts.push(AmbiguousCalleeContext {
                 callee_name: row.callee_name.clone(),
                 path: row.path.clone(),
                 language_id: row.language_id.clone(),
+                line_range: row.line_range.clone(),
                 target_hint: row.target_hint.clone(),
                 caller_name: row.caller_name.clone(),
                 caller_signature: row.caller_signature.clone(),
@@ -779,17 +784,67 @@ mod tests {
         assert!(ambiguous_callee_context_score(&candidate, &context) > 0.0);
     }
 
+    #[test]
+    fn ambiguous_callee_contexts_keep_distinct_target_hints() {
+        let contexts = ambiguous_callee_contexts(&[
+            call_row("handle", Some("primary.Service.handle"), 10),
+            call_row("handle", Some("fallback.Service.handle"), 11),
+            call_row("handle", Some("primary.Service.handle"), 10),
+        ]);
+
+        assert_eq!(contexts.len(), 2);
+        assert!(
+            contexts
+                .iter()
+                .any(|context| context.target_hint.as_deref() == Some("primary.Service.handle"))
+        );
+        assert!(
+            contexts
+                .iter()
+                .any(|context| context.target_hint.as_deref() == Some("fallback.Service.handle"))
+        );
+    }
+
     fn context(path: &str, target_hint: Option<&str>) -> AmbiguousCalleeContext {
         AmbiguousCalleeContext {
             callee_name: "handle".to_owned(),
             path: path.to_owned(),
             language_id: "java".to_owned(),
+            line_range: range(10, 10),
             target_hint: target_hint.map(str::to_owned),
             caller_name: Some("dispatch".to_owned()),
             caller_signature: Some("void dispatch(Service service)".to_owned()),
             caller_excerpt: Some("return service.handle(payload);".to_owned()),
             caller_canonical_symbol_id: Some("repo://repo/ServiceFactory.dispatch".to_owned()),
         }
+    }
+
+    fn call_row(callee_name: &str, target_hint: Option<&str>, line: u32) -> CallRow {
+        CallRow {
+            file_id: "file".to_owned(),
+            path: "src/main/java/example/ServiceFactory.java".to_owned(),
+            language_id: "java".to_owned(),
+            caller_symbol_snapshot_id: Some("caller".to_owned()),
+            caller_name: Some("dispatch".to_owned()),
+            callee_symbol_snapshot_id: None,
+            callee_name: callee_name.to_owned(),
+            line_range: range(line, line),
+            caller_line_range: Some(range(1, 20)),
+            target_hint: target_hint.map(str::to_owned),
+            resolution_state: "ambiguous".to_owned(),
+            confidence_basis_points: 5_000,
+            confidence_tier: "ambiguous".to_owned(),
+            caller_canonical_symbol_id: Some("repo://repo/ServiceFactory.dispatch".to_owned()),
+            callee_canonical_symbol_id: None,
+            caller_signature: Some("void dispatch(Service primary, Service fallback)".to_owned()),
+            callee_signature: None,
+            caller_excerpt: Some("primary.handle(payload); fallback.handle(payload);".to_owned()),
+            callee_excerpt: None,
+        }
+    }
+
+    fn range(start: u32, end: u32) -> RepositoryCodeRange {
+        RepositoryCodeRange { start, end }
     }
 
     fn candidate(path: &str, body: &str) -> CalleeImplementationCandidate {

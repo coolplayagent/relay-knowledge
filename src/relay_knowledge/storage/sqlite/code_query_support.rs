@@ -3,6 +3,8 @@ use rusqlite::types::Value;
 use super::code_query_identifiers::identifier_terms_equivalent;
 use crate::domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest};
 
+#[path = "code_query_conversion_scoring.rs"]
+mod code_query_conversion_scoring;
 #[path = "code_query_declaration_scoring.rs"]
 mod code_query_declaration_scoring;
 #[path = "code_query_filters.rs"]
@@ -10,6 +12,7 @@ mod code_query_filters;
 #[path = "code_query_fts.rs"]
 mod code_query_fts;
 
+use code_query_conversion_scoring::conversion_symbol_bonus;
 pub(super) use code_query_declaration_scoring::declaration_chunk_bonus;
 pub(super) use code_query_filters::*;
 pub(super) use code_query_fts::{
@@ -392,7 +395,7 @@ pub(super) fn symbol_query_bonus(
 ) -> f64 {
     let name_bonus = symbol_name_query_bonus(query, name, request)
         + workflow_connection_lifecycle_symbol_bonus(query, name, signature, request)
-        + common_chunk_conversion_symbol_bonus(query, name, signature, request);
+        + conversion_symbol_bonus(query, name, signature, request);
     if !matches!(
         request.code_query_kind,
         CodeQueryKind::Definition | CodeQueryKind::Symbol | CodeQueryKind::Hybrid
@@ -459,59 +462,6 @@ fn workflow_connection_lifecycle_symbol_bonus(
     } else {
         0.0
     }
-}
-
-fn common_chunk_conversion_symbol_bonus(
-    query: &str,
-    name: &str,
-    signature: &str,
-    request: &CodeRetrievalRequest,
-) -> f64 {
-    if request.code_query_kind != CodeQueryKind::Hybrid {
-        return 0.0;
-    }
-    let query_terms = identifier_search_tokens(query);
-    let has_conversion_intent = query_terms.iter().any(|term| {
-        matches!(
-            term.as_str(),
-            "convert" | "conversion" | "format" | "formats" | "transform" | "translate"
-        )
-    });
-    if !has_conversion_intent
-        || !query_terms.iter().any(|term| term == "common")
-        || !query_terms.iter().any(|term| term == "chunk")
-    {
-        return 0.0;
-    }
-
-    let name_terms = identifier_search_tokens(name);
-    if !name_terms.iter().any(|term| term == "chunk")
-        || !name_terms
-            .iter()
-            .any(|term| matches!(term.as_str(), "convert" | "from" | "to"))
-    {
-        return 0.0;
-    }
-    let signature_terms = identifier_search_tokens(signature);
-    let adapts_common_chunk = signature_terms.iter().any(|term| term == "common")
-        && signature_terms.iter().any(|term| term == "chunk");
-    if !adapts_common_chunk {
-        return 0.0;
-    }
-
-    if name_terms.iter().any(|term| term == "from") && signature_returns_common_chunk(signature) {
-        3.6
-    } else {
-        2.0
-    }
-}
-
-fn signature_returns_common_chunk(signature: &str) -> bool {
-    signature
-        .to_ascii_lowercase()
-        .split_whitespace()
-        .collect::<String>()
-        .contains("):commonchunk")
 }
 
 pub(super) fn scoped_identity_query_bonus(

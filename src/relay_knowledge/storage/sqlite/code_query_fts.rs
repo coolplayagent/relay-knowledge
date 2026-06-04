@@ -167,7 +167,12 @@ pub(in crate::storage::sqlite::code::code_query) fn focused_hybrid_chunk_fts_mat
 pub(in crate::storage::sqlite::code::code_query) fn lifecycle_hybrid_chunk_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let terms = dedupe_terms(super::fts_query_terms(query));
+    let terms = dedupe_terms(
+        super::fts_query_terms(query)
+            .into_iter()
+            .map(|term| term.to_ascii_lowercase())
+            .collect(),
+    );
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return None;
     }
@@ -850,6 +855,13 @@ mod tests {
         assert_eq!(
             lifecycle_hybrid_chunk_fts_match_query(
                 "OpenAI Chat protocol sse tool call delta lifecycle finish events"
+            )
+            .as_deref(),
+            Some("\"delta\" \"finish\"")
+        );
+        assert_eq!(
+            lifecycle_hybrid_chunk_fts_match_query(
+                "OpenAI Chat protocol SSE Tool Call Delta Lifecycle Finish Events"
             )
             .as_deref(),
             Some("\"delta\" \"finish\"")
