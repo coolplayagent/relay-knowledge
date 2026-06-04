@@ -1,5 +1,6 @@
 use super::test_fixtures::TempGitRepo;
 use super::*;
+use crate::domain::CodeIndexResourceBudget;
 use std::fs;
 
 #[test]
@@ -306,7 +307,7 @@ fn worktree_overlay_ignores_out_of_language_dangling_symlinks() {
 }
 
 #[test]
-fn worktree_overlay_skips_modified_submodule_directories() {
+fn worktree_overlay_indexes_dirty_submodule_worktree_without_head_change() {
     let source = TempGitRepo::create("overlay-submodule-source");
     source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
     source.git(["add", "."]);
@@ -327,7 +328,7 @@ fn worktree_overlay_skips_modified_submodule_directories() {
     repo.git(["commit", "-am", "add submodule"]);
     fs::write(
         repo.path.join("src/submodule/lib.rs"),
-        "fn submodule_value() -> u32 { 1 }\n",
+        "fn dirty_submodule_value() -> u32 { 1 }\n",
     )
     .expect("submodule worktree should be modified");
 
@@ -337,16 +338,467 @@ fn worktree_overlay_skips_modified_submodule_directories() {
         CodeIndexMode::WorktreeOverlay,
         Vec::new(),
     )
-    .expect("overlay should not recurse into modified submodules");
+    .expect("overlay should index dirty submodule worktree content");
 
+    assert!(!snapshot.full_replace);
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
     assert!(
         snapshot
             .files
             .iter()
-            .all(|file| !file.path.starts_with("src/submodule/"))
+            .any(|file| file.path == "src/submodule/lib.rs")
     );
-    assert!(snapshot.full_replace);
-    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "dirty_submodule_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_indexes_staged_submodule_gitlink_update() {
+    let source = TempGitRepo::create("overlay-staged-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-staged-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("lib.rs", "fn staged_submodule_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "submodule update"]);
+    repo.git(["add", "src/submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should index staged submodule gitlink updates");
+
+    assert!(!snapshot.full_replace);
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/submodule/lib.rs")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "staged_submodule_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_indexes_unstaged_submodule_gitlink_update() {
+    let source = TempGitRepo::create("overlay-unstaged-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-unstaged-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("lib.rs", "fn unstaged_submodule_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "submodule update"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should index unstaged submodule gitlink updates");
+
+    assert!(!snapshot.full_replace);
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/submodule/lib.rs")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "unstaged_submodule_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_prefers_unstaged_submodule_head_over_staged_gitlink() {
+    let source = TempGitRepo::create("overlay-mm-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-mm-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("lib.rs", "fn staged_submodule_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "staged submodule update"]);
+    repo.git(["add", "src/submodule"]);
+    submodule.write("lib.rs", "fn worktree_submodule_value() -> u32 { 2 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "worktree submodule update"]);
+    let status = repo.git_text(["status", "--porcelain=v1", "--", "src/submodule"]);
+    assert!(status.starts_with("MM "), "{status}");
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should prefer checked-out submodule HEAD over staged gitlink");
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "worktree_submodule_value")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .all(|symbol| symbol.name != "staged_submodule_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_bounds_submodule_entries_after_scope_filtering() {
+    let source = TempGitRepo::create("overlay-scoped-bound-source");
+    source.write("src/target.rs", "pub fn scoped_target() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-scoped-bound-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "vendor/module",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("vendor/module"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    write_many_rust_files(
+        &submodule,
+        "noise",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    submodule.write("src/target.rs", "pub fn scoped_target() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "update selected path"]);
+    repo.git(["add", "vendor/module"]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec!["vendor/module/src/target.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should bound submodule expansion after path filtering");
+
+    assert_eq!(snapshot.files.len(), 1);
+    assert_eq!(snapshot.files[0].path, "vendor/module/src/target.rs");
+}
+
+#[test]
+fn worktree_overlay_indexes_staged_submodule_gitlink_update_after_deinit() {
+    let source = TempGitRepo::create("overlay-staged-deinit-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-staged-deinit-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write(
+        "lib.rs",
+        "fn staged_deinit_submodule_value() -> u32 { 1 }\n",
+    );
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "submodule update"]);
+    repo.git(["add", "src/submodule"]);
+    repo.git(["submodule", "deinit", "-f", "src/submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should index staged submodule gitlinks after deinit");
+
+    assert!(!snapshot.full_replace);
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/submodule/lib.rs")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "staged_deinit_submodule_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_deletes_old_file_for_staged_file_to_submodule_replacement() {
+    let source = TempGitRepo::create("overlay-file-to-submodule-source");
+    source.write("lib.rs", "fn replacement_submodule_value() -> u32 { 1 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-file-to-submodule-parent");
+    repo.write("src/plugin.rs", "fn old_plugin() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.git(["rm", "src/plugin.rs"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/plugin.rs",
+    ]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should index staged file to submodule replacements");
+
+    assert!(snapshot.deleted_paths.contains(&"src/plugin.rs".to_owned()));
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/plugin.rs/lib.rs")
+    );
+}
+
+#[test]
+fn worktree_overlay_deletes_old_submodule_children_for_staged_submodule_to_file_replacement() {
+    let source = TempGitRepo::create("overlay-submodule-to-file-source");
+    source.write("lib.rs", "fn old_submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-submodule-to-file-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/plugin.rs",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    repo.git(["rm", "-f", "src/plugin.rs"]);
+    repo.write(
+        "src/plugin.rs",
+        "fn replacement_file_value() -> u32 { 1 }\n",
+    );
+    repo.git(["add", "src/plugin.rs"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should index staged submodule to file replacements");
+
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/plugin.rs/lib.rs".to_owned())
+    );
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/plugin.rs")
+    );
+}
+
+#[test]
+fn worktree_overlay_expands_deleted_source_for_staged_submodule_renames() {
+    let source = TempGitRepo::create("overlay-rename-submodule-source");
+    source.write("lib.rs", "fn renamed_submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-rename-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/old_module",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    repo.git(["mv", "src/old_module", "src/new_module"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should expand staged submodule rename deletions");
+
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/old_module/lib.rs".to_owned())
+    );
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/new_module/lib.rs")
+    );
+}
+
+#[test]
+fn worktree_overlay_expands_staged_submodule_deletions() {
+    let source = TempGitRepo::create("overlay-delete-submodule-source");
+    source.write("lib.rs", "fn deleted_submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-delete-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    repo.git(["rm", "-f", "src/submodule"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should expand staged submodule deletions");
+
+    assert!(!snapshot.full_replace);
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/submodule/lib.rs".to_owned())
+    );
+    assert!(!snapshot.deleted_paths.contains(&"src/submodule".to_owned()));
 }
 
 #[test]
@@ -426,4 +878,13 @@ fn worktree_overlay_records_rename_source_deletions() {
 
     assert_eq!(snapshot.deleted_paths, ["src/old.rs"]);
     assert!(snapshot.files.iter().any(|file| file.path == "src/new.rs"));
+}
+
+fn write_many_rust_files(repo: &TempGitRepo, directory: &str, count: usize) {
+    for index in 0..count {
+        repo.write(
+            &format!("{directory}/file_{index}.rs"),
+            &format!("pub fn noise_{index}() -> u32 {{ {index} }}\n"),
+        );
+    }
 }

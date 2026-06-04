@@ -128,14 +128,7 @@ fn scoped_source_snapshot_inner(
     ref_selector: &str,
     allow_filesystem_ref: bool,
 ) -> Result<ScopedSourceSnapshot, CodeIndexError> {
-    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-        &registration.language_filters,
-        &selector.language_filters,
-    );
+    let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let snapshot =
         source_snapshot_for_scope(root, ref_selector, filesystem_policy, allow_filesystem_ref)?;
     let source_layout = discover_source_layout(&snapshot.entries);
@@ -191,6 +184,23 @@ fn source_snapshot_for_scope(
     source_snapshot(root, ref_selector, filesystem_policy)
 }
 
+pub(super) fn filesystem_policy_for_selector(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> FileSystemScanPolicy {
+    let filters = intersect_path_filters(&registration.path_filters, &selector.path_filters);
+    let policy = FileSystemScanPolicy::from_path_and_language_filters(
+        filters.as_deref().unwrap_or(&[]),
+        &registration.language_filters,
+        &selector.language_filters,
+    );
+    if filters.is_none() {
+        policy.with_denied_path_scope()
+    } else {
+        policy
+    }
+}
+
 fn registration_allows_filesystem_ref(
     registration: &CodeRepositoryRegistration,
     root: &std::path::Path,
@@ -232,14 +242,7 @@ pub fn preview_repository_scope(
     selector: &CodeRepositorySelector,
 ) -> Result<CodeRepositoryScopePreview, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
-    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-        &registration.language_filters,
-        &selector.language_filters,
-    );
+    let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let allow_filesystem_ref =
         registration_allows_filesystem_ref(registration, &root, &selector.ref_selector)?;
     let snapshot = source_snapshot_for_scope(
@@ -357,14 +360,7 @@ pub fn partition_changed_paths_for_selector(
         });
     }
     let root = PathBuf::from(&registration.root_path);
-    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-        &registration.language_filters,
-        &selector.language_filters,
-    );
+    let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let (source_layout, source_kind) = if source_commit_is_filesystem(&selector.ref_selector) {
         let snapshot =
             scoped_source_snapshot(registration, selector, &root, &selector.ref_selector)?;
@@ -401,6 +397,7 @@ pub fn partition_changed_paths_for_selector(
     })
 }
 
+#[cfg(test)]
 pub(super) fn path_is_selected(
     path: &str,
     registration: &CodeRepositoryRegistration,
@@ -418,6 +415,7 @@ pub(super) fn path_is_selected_with_layout(
     selection_exclusion_reason_with_layout(path, registration, selector, source_layout).is_none()
 }
 
+#[cfg(test)]
 pub(super) fn selection_exclusion_reason(
     path: &str,
     registration: &CodeRepositoryRegistration,
@@ -561,6 +559,25 @@ pub(super) fn effective_index_path_filters_for_layouts(
     filters
 }
 
+pub(super) fn effective_path_filter_intersections_for_layouts(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    source_layouts: &[&SourceLayoutDiscovery],
+) -> Option<Vec<String>> {
+    let mut filters = normalized_path_filters(&registration.path_filters);
+    if registration_scope_can_discover_source_roots(&registration.path_filters) {
+        for source_layout in source_layouts {
+            for root in &source_layout.source_roots {
+                if selector_filter_allows_root(root, &selector.path_filters) {
+                    push_filter_if_uncovered(&mut filters, root);
+                }
+            }
+        }
+    }
+
+    intersect_path_filters(&filters, &selector.path_filters)
+}
+
 fn filesystem_default_scope_excludes(
     path: &str,
     registration: &CodeRepositoryRegistration,
@@ -619,6 +636,102 @@ fn merged_path_filters(left: &[String], right: &[String]) -> Vec<String> {
     }
 
     merged
+}
+
+pub(super) fn intersect_path_filters(left: &[String], right: &[String]) -> Option<Vec<String>> {
+    let left = normalized_path_filters(left);
+    let right = normalized_path_filters(right);
+    if left.is_empty() {
+        return Some(right);
+    }
+    if right.is_empty() {
+        return Some(left);
+    }
+
+    let mut intersections = Vec::new();
+    for left_filter in &left {
+        for right_filter in &right {
+            if path_filter_covers(left_filter, right_filter) {
+                push_filter_if_missing(&mut intersections, right_filter);
+            } else if path_filter_covers(right_filter, left_filter) {
+                push_filter_if_missing(&mut intersections, left_filter);
+            }
+        }
+    }
+
+    (!intersections.is_empty()).then_some(intersections)
+}
+
+pub(super) fn submodule_child_scope_filters(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> Option<Vec<String>> {
+    let filters = intersect_path_filters(&registration.path_filters, &selector.path_filters)?;
+    submodule_child_scope_filters_from_filters(path, &filters)
+}
+
+pub(super) fn submodule_child_scope_filters_from_filters(
+    path: &str,
+    filters: &[String],
+) -> Option<Vec<String>> {
+    if filters.is_empty() {
+        return Some(Vec::new());
+    }
+    let path = normalize_scope_path(path);
+    if path.is_empty() {
+        return None;
+    }
+    let child_prefix = format!("{path}/");
+    let mut child_filters = Vec::new();
+    let mut parent_scope_covers_submodule = false;
+    for filter in filters {
+        let filter = normalize_scope_path(filter);
+        if filter.is_empty()
+            || filter == "."
+            || filter == path
+            || path.starts_with(&format!("{filter}/"))
+        {
+            parent_scope_covers_submodule = true;
+            continue;
+        }
+        if let Some(child_filter) = filter.strip_prefix(&child_prefix)
+            && !child_filter.is_empty()
+        {
+            child_filters.push(child_filter.to_owned());
+        }
+    }
+    if parent_scope_covers_submodule {
+        return Some(Vec::new());
+    }
+    if child_filters.is_empty() && !parent_scope_covers_submodule {
+        return None;
+    }
+    child_filters.sort();
+    child_filters.dedup();
+
+    Some(child_filters)
+}
+
+fn normalize_scope_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_owned()
+}
+
+fn normalized_path_filters(filters: &[String]) -> Vec<String> {
+    filters
+        .iter()
+        .map(|filter| normalize_path_filter(filter).to_owned())
+        .filter(|filter| !filter.is_empty())
+        .collect()
+}
+
+fn push_filter_if_missing(filters: &mut Vec<String>, filter: &str) {
+    if !filters.iter().any(|existing| existing == filter) {
+        filters.push(filter.to_owned());
+    }
 }
 
 fn push_filter_if_uncovered(filters: &mut Vec<String>, root: &str) {
@@ -684,6 +797,10 @@ pub(super) fn path_scope_overlaps(
 ) -> bool {
     path_filter_overlaps(path, &registration.path_filters)
         && path_filter_overlaps(path, &selector.path_filters)
+}
+
+pub(super) fn path_overlaps_any_filter(path: &str, filters: &[String]) -> bool {
+    path_filter_overlaps(path, filters)
 }
 
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {

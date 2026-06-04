@@ -8,11 +8,12 @@ use super::{
     parser::parse_indexed_file,
     scope::{
         discover_source_layout, effective_index_path_filters_for_layouts,
-        scoped_source_snapshot_for_filters, selection_exclusion_reason_for_source,
+        filesystem_policy_for_selector, scoped_source_snapshot_for_filters,
+        selection_exclusion_reason_for_source,
     },
     snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
     source::{
-        FileSystemScanPolicy, RepositorySourceKind, ensure_filesystem_blobs_match_content_hashes,
+        RepositorySourceKind, ensure_filesystem_blobs_match_content_hashes,
         filesystem_content_hashes_for_paths, filesystem_source_snapshot,
         filesystem_tree_hash_from_path_hashes, source_commit_is_filesystem, source_snapshot,
         source_snapshot_bytes,
@@ -51,14 +52,7 @@ pub(super) fn build_filesystem_delta_snapshot(
     previous_hashes: &BTreeMap<String, String>,
     base_resolved_commit_sha: Option<&str>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
-    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
-        registration
-            .path_filters
-            .iter()
-            .chain(selector.path_filters.iter()),
-        &registration.language_filters,
-        &selector.language_filters,
-    );
+    let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let base_commit = base_resolved_commit_sha.ok_or_else(|| {
         CodeIndexError::InvalidInput(format!(
             "code repository '{}' filesystem incremental snapshot requires a previous resolved base commit",

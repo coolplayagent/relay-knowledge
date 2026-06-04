@@ -6,10 +6,54 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+use std::sync::Mutex;
+
 use super::CodeIndexError;
 
 const GIT_CAT_FILE_BATCH_TIMEOUT: Duration = Duration::from_secs(120);
 const GIT_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+#[cfg(test)]
+static GIT_SHOW_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
+#[cfg(test)]
+static GIT_LS_TREE_FULL_SCAN_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
+
+#[cfg(test)]
+pub(crate) fn reset_git_show_call_count_for_root(root: PathBuf) {
+    *GIT_SHOW_OBSERVER
+        .lock()
+        .expect("git show observer should lock") = Some((root, 0));
+}
+
+#[cfg(test)]
+pub(crate) fn git_show_call_count_for_root(root: &Path) -> usize {
+    GIT_SHOW_OBSERVER
+        .lock()
+        .expect("git show observer should lock")
+        .as_ref()
+        .filter(|(observed_root, _)| observed_root == root)
+        .map(|(_, count)| *count)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_git_ls_tree_full_scan_call_count_for_root(root: PathBuf) {
+    *GIT_LS_TREE_FULL_SCAN_OBSERVER
+        .lock()
+        .expect("git ls-tree observer should lock") = Some((root, 0));
+}
+
+#[cfg(test)]
+pub(crate) fn git_ls_tree_full_scan_call_count_for_root(root: &Path) -> usize {
+    GIT_LS_TREE_FULL_SCAN_OBSERVER
+        .lock()
+        .expect("git ls-tree observer should lock")
+        .as_ref()
+        .filter(|(observed_root, _)| observed_root == root)
+        .map(|(_, count)| *count)
+        .unwrap_or(0)
+}
 
 pub(super) fn resolve_git_root(path: &Path) -> Result<PathBuf, CodeIndexError> {
     let output = Command::new("git")
@@ -78,6 +122,12 @@ pub(super) fn git_bytes<const N: usize>(
     root: &Path,
     args: [&str; N],
 ) -> Result<Vec<u8>, CodeIndexError> {
+    git_bytes_slice(root, &args)
+}
+
+pub(super) fn git_bytes_slice(root: &Path, args: &[&str]) -> Result<Vec<u8>, CodeIndexError> {
+    record_git_show_call(root, args);
+    record_git_ls_tree_full_scan_call(root, args);
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -91,6 +141,43 @@ pub(super) fn git_bytes<const N: usize>(
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
     })
+}
+
+fn record_git_show_call(_root: &Path, _args: &[&str]) {
+    #[cfg(test)]
+    {
+        if _args.first().copied() != Some("show") {
+            return;
+        }
+        if let Some((observed_root, count)) = GIT_SHOW_OBSERVER
+            .lock()
+            .expect("git show observer should lock")
+            .as_mut()
+            && observed_root == _root
+        {
+            *count += 1;
+        }
+    }
+}
+
+fn record_git_ls_tree_full_scan_call(_root: &Path, _args: &[&str]) {
+    #[cfg(test)]
+    {
+        if _args.first().copied() != Some("ls-tree")
+            || !_args.contains(&"-r")
+            || _args.contains(&"--")
+        {
+            return;
+        }
+        if let Some((observed_root, count)) = GIT_LS_TREE_FULL_SCAN_OBSERVER
+            .lock()
+            .expect("git ls-tree observer should lock")
+            .as_mut()
+            && observed_root == _root
+        {
+            *count += 1;
+        }
+    }
 }
 
 pub(super) fn git_batch_blobs(

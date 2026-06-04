@@ -1,0 +1,999 @@
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
+
+use crate::domain::{CodeIndexSnapshot, CodeRepositoryRegistration, CodeRepositorySelector};
+
+use super::{
+    CodeIndexError, MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS, changes,
+    filesystem_delta::build_filesystem_delta_snapshot,
+    full_snapshot::build_full_snapshot,
+    git::{git_bytes, resolve_ref},
+    ids::{stable_content_hash, stable_hash64},
+    parser::parse_indexed_file,
+    scope,
+    snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
+    source::{source_commit_is_filesystem, source_kind},
+    source_gitlink,
+};
+
+const WORKTREE_UNTRACKED_BROAD_SEGMENTS: &[&str] = &[
+    ".cache",
+    ".next",
+    ".nuxt",
+    ".parcel-cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+    "third_party",
+    "vendor",
+    "venv",
+];
+
+pub(super) fn build_worktree_overlay_snapshot(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    root: &Path,
+    previous_hashes: &BTreeMap<String, String>,
+    base_resolved_commit_sha: Option<&str>,
+) -> Result<CodeIndexSnapshot, CodeIndexError> {
+    if source_commit_is_filesystem(&selector.ref_selector)
+        || base_resolved_commit_sha.is_some_and(source_commit_is_filesystem)
+        || source_kind(root)?.is_filesystem()
+    {
+        return build_filesystem_delta_snapshot(
+            registration,
+            selector,
+            root,
+            &selector.ref_selector,
+            previous_hashes,
+            base_resolved_commit_sha,
+        );
+    }
+    let commit = resolve_ref(root, &selector.ref_selector)?;
+    let head_commit = resolve_ref(root, "HEAD")?;
+    if commit != head_commit {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "worktree overlay ref '{}' resolves to {}, but checked-out HEAD is {}",
+            selector.ref_selector, commit, head_commit
+        )));
+    }
+    let status = git_bytes(
+        root,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+    let changes = changes::worktree_changed_paths(&status);
+    if changes.is_empty() {
+        return build_full_snapshot(registration, selector, root);
+    }
+    let overlay_scope = WorktreeOverlayScope::new(registration, selector, previous_hashes);
+    let mut overlay_hash_input = Vec::new();
+    let mut deleted_paths = Vec::new();
+    let mut files_to_parse = Vec::new();
+    let mut skipped_unchanged_count = 0;
+    for change in &changes {
+        if let Some(deleted_path) = &change.deleted_source {
+            let deleted_gitlink = if overlay_scope.overlaps(deleted_path) {
+                let mut recorder = WorktreeOverlayRecorder {
+                    scope: &overlay_scope,
+                    previous_hashes,
+                    overlay_hash_input: &mut overlay_hash_input,
+                    deleted_paths: &mut deleted_paths,
+                    files_to_parse: &mut files_to_parse,
+                    skipped_unchanged_count: &mut skipped_unchanged_count,
+                };
+                record_deleted_gitlink_overlay(root, &commit, deleted_path, &mut recorder)?
+            } else {
+                false
+            };
+            if !deleted_gitlink && overlay_scope.selected(deleted_path) {
+                record_worktree_deleted_path(
+                    deleted_path,
+                    &mut overlay_hash_input,
+                    &mut deleted_paths,
+                );
+            }
+        }
+        let path = &change.path;
+        if !overlay_scope.overlaps(path) {
+            continue;
+        }
+        if change.is_untracked() && !overlay_scope.untracked_selected(path) {
+            continue;
+        }
+        {
+            let mut recorder = WorktreeOverlayRecorder {
+                scope: &overlay_scope,
+                previous_hashes,
+                overlay_hash_input: &mut overlay_hash_input,
+                deleted_paths: &mut deleted_paths,
+                files_to_parse: &mut files_to_parse,
+                skipped_unchanged_count: &mut skipped_unchanged_count,
+            };
+            if record_staged_gitlink_overlay(change, root, &commit, &mut recorder)? {
+                continue;
+            }
+        }
+        let full_path = root.join(path);
+        let metadata = match fs::symlink_metadata(&full_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let mut recorder = WorktreeOverlayRecorder {
+                    scope: &overlay_scope,
+                    previous_hashes,
+                    overlay_hash_input: &mut overlay_hash_input,
+                    deleted_paths: &mut deleted_paths,
+                    files_to_parse: &mut files_to_parse,
+                    skipped_unchanged_count: &mut skipped_unchanged_count,
+                };
+                if record_deleted_gitlink_overlay(root, &commit, path, &mut recorder)? {
+                    continue;
+                } else if overlay_scope.selected(path) {
+                    record_worktree_deleted_path(path, &mut overlay_hash_input, &mut deleted_paths);
+                }
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            if overlay_scope.selected(path) {
+                record_worktree_status_marker(path, &mut overlay_hash_input);
+            }
+            continue;
+        }
+        if file_type.is_dir() {
+            if contains_git_metadata(root, Path::new(path))? {
+                let mut recorder = WorktreeOverlayRecorder {
+                    scope: &overlay_scope,
+                    previous_hashes,
+                    overlay_hash_input: &mut overlay_hash_input,
+                    deleted_paths: &mut deleted_paths,
+                    files_to_parse: &mut files_to_parse,
+                    skipped_unchanged_count: &mut skipped_unchanged_count,
+                };
+                record_unstaged_gitlink_overlay(root, &commit, path, &mut recorder)?;
+                continue;
+            }
+            if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
+                if overlay_scope.selected(path) {
+                    record_worktree_status_marker(path, &mut overlay_hash_input);
+                }
+                continue;
+            }
+            for nested_path in worktree_directory_files(root, path)? {
+                if overlay_scope.untracked_selected(&nested_path) {
+                    record_worktree_file(
+                        root,
+                        &nested_path,
+                        previous_hashes,
+                        &mut overlay_hash_input,
+                        &mut files_to_parse,
+                        &mut skipped_unchanged_count,
+                    )?;
+                }
+            }
+            continue;
+        }
+        if !file_type.is_file() {
+            if overlay_scope.selected(path) {
+                record_worktree_status_marker(path, &mut overlay_hash_input);
+            }
+            continue;
+        }
+        if overlay_scope.selected(path) {
+            record_worktree_file(
+                root,
+                path,
+                previous_hashes,
+                &mut overlay_hash_input,
+                &mut files_to_parse,
+                &mut skipped_unchanged_count,
+            )?;
+        }
+    }
+    if overlay_hash_input.is_empty() {
+        return build_full_snapshot(registration, selector, root);
+    }
+
+    let overlay_hash = format!("{:016x}", stable_hash64(&overlay_hash_input));
+    let tree_hash = format!("worktree:{overlay_hash}");
+    let overlay_commit = format!("worktree:{commit}:{overlay_hash}");
+    let language_filters =
+        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let mut build = SnapshotBuild::new_with_scope_filters(
+        registration,
+        overlay_commit,
+        tree_hash,
+        SnapshotScopeFilters {
+            path_filters: overlay_scope.path_filters.clone(),
+            language_filters,
+        },
+        false,
+        changes.len(),
+        skipped_unchanged_count,
+    );
+    build.base_resolved_commit_sha = Some(commit);
+    build.deleted_paths = deleted_paths;
+
+    for (path, bytes) in files_to_parse {
+        parse_indexed_file(&mut build, &path, &bytes)?;
+    }
+
+    Ok(build.finish())
+}
+
+struct WorktreeOverlayScope<'a> {
+    registration: &'a CodeRepositoryRegistration,
+    selector: &'a CodeRepositorySelector,
+    source_layout: scope::SourceLayoutDiscovery,
+    path_filters: Vec<String>,
+    selection_path_filters: Option<Vec<String>>,
+}
+
+impl<'a> WorktreeOverlayScope<'a> {
+    fn new(
+        registration: &'a CodeRepositoryRegistration,
+        selector: &'a CodeRepositorySelector,
+        previous_hashes: &BTreeMap<String, String>,
+    ) -> Self {
+        let previous_entries = previous_hashes
+            .keys()
+            .map(|path| changes::GitTreeEntry {
+                path: path.clone(),
+                byte_count: 0,
+            })
+            .collect::<Vec<_>>();
+        let source_layout = scope::discover_source_layout(&previous_entries);
+        let path_filters = scope::effective_index_path_filters_for_layouts(
+            registration,
+            selector,
+            &[&source_layout],
+        );
+        let selection_path_filters = scope::effective_path_filter_intersections_for_layouts(
+            registration,
+            selector,
+            &[&source_layout],
+        );
+        Self {
+            registration,
+            selector,
+            source_layout,
+            path_filters,
+            selection_path_filters,
+        }
+    }
+
+    fn selected(&self, path: &str) -> bool {
+        scope::path_is_selected_with_layout(
+            path,
+            self.registration,
+            self.selector,
+            &self.source_layout,
+        )
+    }
+
+    fn overlaps(&self, path: &str) -> bool {
+        self.selection_path_filters
+            .as_ref()
+            .is_some_and(|filters| scope::path_overlaps_any_filter(path, filters))
+    }
+
+    fn untracked_selected(&self, path: &str) -> bool {
+        self.selected(path)
+            && (!worktree_untracked_path_contains_broad_segment(path)
+                || explicit_worktree_path_filter_covers(path, self.registration, self.selector))
+    }
+}
+
+fn worktree_untracked_path_contains_broad_segment(path: &str) -> bool {
+    normalize_worktree_path(path)
+        .split('/')
+        .any(|segment| WORKTREE_UNTRACKED_BROAD_SEGMENTS.contains(&segment))
+}
+
+fn explicit_worktree_path_filter_covers(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    registration
+        .path_filters
+        .iter()
+        .chain(selector.path_filters.iter())
+        .any(|filter| explicit_worktree_filter_matches_path(path, filter))
+}
+
+fn explicit_worktree_filter_matches_path(path: &str, filter: &str) -> bool {
+    let path = normalize_worktree_path(path);
+    let filter = normalize_worktree_path(filter);
+    if filter.is_empty() || filter == "." {
+        return false;
+    }
+
+    path == filter
+        || path.starts_with(&format!("{filter}/"))
+        || filter.starts_with(&format!("{path}/"))
+}
+
+fn normalize_worktree_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_owned()
+}
+
+fn record_worktree_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {
+    overlay_hash_input.extend_from_slice(b"S\0");
+    overlay_hash_input.extend_from_slice(path.as_bytes());
+    overlay_hash_input.push(0);
+}
+
+fn record_worktree_deleted_path(
+    path: &str,
+    overlay_hash_input: &mut Vec<u8>,
+    deleted_paths: &mut Vec<String>,
+) {
+    overlay_hash_input.extend_from_slice(b"D\0");
+    overlay_hash_input.extend_from_slice(path.as_bytes());
+    overlay_hash_input.push(0);
+    deleted_paths.push(path.to_owned());
+}
+
+fn record_previous_gitlink_child_deletions(
+    path: &str,
+    previous_hashes: &BTreeMap<String, String>,
+    scope: &WorktreeOverlayScope<'_>,
+    retained_paths: &BTreeSet<String>,
+    overlay_hash_input: &mut Vec<u8>,
+    deleted_paths: &mut Vec<String>,
+) -> Result<bool, CodeIndexError> {
+    let prefix = format!("{}/", path.trim_end_matches('/'));
+    let paths = previous_hashes
+        .keys()
+        .filter(|previous_path| previous_path.starts_with(&prefix))
+        .filter(|previous_path| !retained_paths.contains(*previous_path))
+        .filter(|previous_path| scope.selected(previous_path))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    source_gitlink::ensure_gitlink_expansion_budget(
+        path,
+        paths.len(),
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    )?;
+    for path in &paths {
+        record_worktree_deleted_path(path, overlay_hash_input, deleted_paths);
+    }
+
+    Ok(!paths.is_empty())
+}
+
+fn record_worktree_file(
+    root: &Path,
+    path: &str,
+    previous_hashes: &BTreeMap<String, String>,
+    overlay_hash_input: &mut Vec<u8>,
+    files_to_parse: &mut Vec<(String, Vec<u8>)>,
+    skipped_unchanged_count: &mut usize,
+) -> Result<(), CodeIndexError> {
+    record_worktree_file_as(
+        root,
+        path,
+        path,
+        previous_hashes,
+        overlay_hash_input,
+        files_to_parse,
+        skipped_unchanged_count,
+    )
+}
+
+fn record_worktree_file_as(
+    root: &Path,
+    source_path: &str,
+    indexed_path: &str,
+    previous_hashes: &BTreeMap<String, String>,
+    overlay_hash_input: &mut Vec<u8>,
+    files_to_parse: &mut Vec<(String, Vec<u8>)>,
+    skipped_unchanged_count: &mut usize,
+) -> Result<(), CodeIndexError> {
+    let bytes = fs::read(root.join(source_path))?;
+    let blob_hash = stable_content_hash(&bytes);
+    overlay_hash_input.extend_from_slice(b"F\0");
+    overlay_hash_input.extend_from_slice(indexed_path.as_bytes());
+    overlay_hash_input.push(0);
+    overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
+    overlay_hash_input.push(0);
+    if previous_hashes.get(indexed_path) == Some(&blob_hash) {
+        *skipped_unchanged_count += 1;
+        return Ok(());
+    }
+    files_to_parse.retain(|(path, _)| path != indexed_path);
+    files_to_parse.push((indexed_path.to_owned(), bytes));
+
+    Ok(())
+}
+
+fn record_deleted_gitlink_overlay(
+    root: &Path,
+    base_commit: &str,
+    path: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<bool, CodeIndexError> {
+    let Some(base_gitlink_commit) =
+        source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?
+    else {
+        return Ok(false);
+    };
+    let entries = bounded_submodule_path_entries(
+        root,
+        path,
+        Some(base_commit),
+        &base_gitlink_commit,
+        recorder.scope,
+    )?;
+    if entries.is_empty() {
+        let retained_paths = BTreeSet::new();
+        let recorded = record_previous_gitlink_child_deletions(
+            path,
+            recorder.previous_hashes,
+            recorder.scope,
+            &retained_paths,
+            recorder.overlay_hash_input,
+            recorder.deleted_paths,
+        )?;
+        if !recorded && submodule_path_scope_overlaps(path, recorder.scope) {
+            record_worktree_status_marker(path, recorder.overlay_hash_input);
+        }
+        return Ok(true);
+    }
+    for entry in entries {
+        if recorder.path_is_selected(&entry.parent_path) {
+            recorder.record_deleted_path(&entry.parent_path);
+        }
+    }
+
+    Ok(true)
+}
+
+struct WorktreeOverlayRecorder<'a> {
+    scope: &'a WorktreeOverlayScope<'a>,
+    previous_hashes: &'a BTreeMap<String, String>,
+    overlay_hash_input: &'a mut Vec<u8>,
+    deleted_paths: &'a mut Vec<String>,
+    files_to_parse: &'a mut Vec<(String, Vec<u8>)>,
+    skipped_unchanged_count: &'a mut usize,
+}
+
+impl WorktreeOverlayRecorder<'_> {
+    fn path_is_selected(&self, path: &str) -> bool {
+        self.scope.selected(path)
+    }
+
+    fn path_scope_overlaps(&self, path: &str) -> bool {
+        self.scope.overlaps(path)
+    }
+
+    fn untracked_path_is_selected(&self, path: &str) -> bool {
+        self.scope.untracked_selected(path)
+    }
+
+    fn record_deleted_path(&mut self, path: &str) {
+        record_worktree_deleted_path(path, self.overlay_hash_input, self.deleted_paths);
+    }
+
+    fn record_gitlink_file(
+        &mut self,
+        root: &Path,
+        submodule_path: &str,
+        commit: &str,
+        entry: &source_gitlink::SubmodulePathEntry,
+    ) -> Result<(), CodeIndexError> {
+        let bytes =
+            source_gitlink::submodule_entry_bytes(root, submodule_path, commit, &entry.child_path)?;
+        let blob_hash = stable_content_hash(&bytes);
+        self.overlay_hash_input.extend_from_slice(b"F\0");
+        self.overlay_hash_input
+            .extend_from_slice(entry.parent_path.as_bytes());
+        self.overlay_hash_input.push(0);
+        self.overlay_hash_input
+            .extend_from_slice(blob_hash.as_bytes());
+        self.overlay_hash_input.push(0);
+        if self.previous_hashes.get(&entry.parent_path) == Some(&blob_hash) {
+            *self.skipped_unchanged_count += 1;
+            return Ok(());
+        }
+        self.files_to_parse.push((entry.parent_path.clone(), bytes));
+
+        Ok(())
+    }
+}
+
+fn record_staged_gitlink_overlay(
+    change: &changes::WorktreePathChange,
+    root: &Path,
+    base_commit: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<bool, CodeIndexError> {
+    if !change.has_index_change() {
+        return Ok(false);
+    }
+    let path = &change.path;
+    let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
+    let Some(staged_kind) = staged_path_kind(root, path)? else {
+        if let Some(base_gitlink_commit) = base_gitlink {
+            record_base_gitlink_child_deletions(
+                root,
+                path,
+                base_commit,
+                &base_gitlink_commit,
+                recorder,
+            )?;
+            return Ok(true);
+        }
+        return Ok(false);
+    };
+    let StagedPathKind::Gitlink(staged_commit) = staged_kind else {
+        if let Some(base_gitlink_commit) = base_gitlink {
+            record_base_gitlink_child_deletions(
+                root,
+                path,
+                base_commit,
+                &base_gitlink_commit,
+                recorder,
+            )?;
+        }
+        return Ok(false);
+    };
+
+    if change.has_worktree_change()
+        && let Some(worktree_commit) = submodule_worktree_head(root, path)?
+        && worktree_commit != staged_commit
+    {
+        record_gitlink_commit_overlay(root, base_commit, path, &worktree_commit, recorder)?;
+        record_dirty_submodule_worktree_overlay(root, path, path, recorder)?;
+        return Ok(true);
+    }
+
+    record_gitlink_commit_overlay(root, base_commit, path, &staged_commit, recorder)?;
+    if change.has_worktree_change() {
+        record_dirty_submodule_worktree_overlay(root, path, path, recorder)?;
+    }
+
+    Ok(true)
+}
+
+fn record_gitlink_commit_overlay(
+    root: &Path,
+    base_commit: &str,
+    path: &str,
+    gitlink_commit: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
+    let staged_entries =
+        bounded_submodule_path_entries(root, path, None, gitlink_commit, recorder.scope)?;
+    let staged_entries_are_empty = staged_entries.is_empty();
+    if let Some(base_gitlink_commit) = base_gitlink {
+        let staged_paths = staged_entries
+            .iter()
+            .map(|entry| entry.parent_path.clone())
+            .collect::<BTreeSet<_>>();
+        record_missing_base_gitlink_child_deletions(
+            root,
+            path,
+            base_commit,
+            &base_gitlink_commit,
+            &staged_paths,
+            recorder,
+        )?;
+    } else if base_path_exists(root, base_commit, path)? && recorder.path_is_selected(path) {
+        recorder.record_deleted_path(path);
+    }
+
+    if staged_entries_are_empty && submodule_path_scope_overlaps(path, recorder.scope) {
+        record_worktree_status_marker(path, recorder.overlay_hash_input);
+    }
+    for entry in staged_entries {
+        recorder.record_gitlink_file(root, path, gitlink_commit, &entry)?;
+    }
+
+    Ok(())
+}
+
+fn record_unstaged_gitlink_overlay(
+    root: &Path,
+    base_commit: &str,
+    path: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<bool, CodeIndexError> {
+    let Some(base_gitlink_commit) =
+        source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?
+    else {
+        return Ok(false);
+    };
+    let Some(worktree_commit) = submodule_worktree_head(root, path)? else {
+        return Ok(false);
+    };
+    if worktree_commit == base_gitlink_commit {
+        return record_dirty_submodule_worktree_overlay(root, path, path, recorder);
+    }
+
+    let worktree_entries =
+        bounded_submodule_path_entries(root, path, None, &worktree_commit, recorder.scope)?;
+    let worktree_entries_are_empty = worktree_entries.is_empty();
+    let worktree_paths = worktree_entries
+        .iter()
+        .map(|entry| entry.parent_path.clone())
+        .collect::<BTreeSet<_>>();
+    record_missing_base_gitlink_child_deletions(
+        root,
+        path,
+        base_commit,
+        &base_gitlink_commit,
+        &worktree_paths,
+        recorder,
+    )?;
+    if worktree_entries_are_empty && submodule_path_scope_overlaps(path, recorder.scope) {
+        record_worktree_status_marker(path, recorder.overlay_hash_input);
+    }
+    for entry in worktree_entries {
+        recorder.record_gitlink_file(root, path, &worktree_commit, &entry)?;
+    }
+    record_dirty_submodule_worktree_overlay(root, path, path, recorder)?;
+
+    Ok(true)
+}
+
+fn record_dirty_submodule_worktree_overlay(
+    root: &Path,
+    path: &str,
+    indexed_path: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<bool, CodeIndexError> {
+    let submodule_root = match source_gitlink::submodule_root(root, path) {
+        Ok(submodule_root) => submodule_root,
+        Err(_) => return Ok(false),
+    };
+    let status = git_bytes(
+        &submodule_root,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+    let changes = changes::worktree_changed_paths(&status);
+    if changes.is_empty() {
+        return Ok(false);
+    }
+    for change in &changes {
+        if let Some(deleted_path) = &change.deleted_source {
+            let parent_deleted_path = submodule_worktree_parent_path(indexed_path, deleted_path);
+            if recorder.path_is_selected(&parent_deleted_path) {
+                recorder.record_deleted_path(&parent_deleted_path);
+            }
+        }
+        let parent_path = submodule_worktree_parent_path(indexed_path, &change.path);
+        if !recorder.path_scope_overlaps(&parent_path) {
+            continue;
+        }
+        if change.is_untracked() && !recorder.untracked_path_is_selected(&parent_path) {
+            continue;
+        }
+        record_dirty_submodule_path(
+            &submodule_root,
+            indexed_path,
+            &change.path,
+            &parent_path,
+            change,
+            recorder,
+        )?;
+    }
+
+    Ok(true)
+}
+
+fn record_dirty_submodule_path(
+    submodule_root: &Path,
+    submodule_path: &str,
+    child_path: &str,
+    parent_path: &str,
+    change: &changes::WorktreePathChange,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    let metadata = match fs::symlink_metadata(submodule_root.join(child_path)) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if recorder.path_is_selected(parent_path) {
+                recorder.record_deleted_path(parent_path);
+            }
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_file() && recorder.path_is_selected(parent_path) {
+        return record_worktree_file_as(
+            submodule_root,
+            child_path,
+            parent_path,
+            recorder.previous_hashes,
+            recorder.overlay_hash_input,
+            recorder.files_to_parse,
+            recorder.skipped_unchanged_count,
+        );
+    }
+    if file_type.is_dir() && contains_git_metadata(submodule_root, Path::new(child_path))? {
+        if record_dirty_submodule_worktree_overlay(
+            submodule_root,
+            child_path,
+            parent_path,
+            recorder,
+        )? {
+            return Ok(());
+        }
+    } else if file_type.is_dir()
+        && change.is_untracked()
+        && worktree_directory_is_expandable(submodule_root, child_path)?
+    {
+        for nested_path in worktree_directory_files(submodule_root, child_path)? {
+            let parent_nested_path = submodule_worktree_parent_path(submodule_path, &nested_path);
+            if recorder.untracked_path_is_selected(&parent_nested_path) {
+                record_worktree_file_as(
+                    submodule_root,
+                    &nested_path,
+                    &parent_nested_path,
+                    recorder.previous_hashes,
+                    recorder.overlay_hash_input,
+                    recorder.files_to_parse,
+                    recorder.skipped_unchanged_count,
+                )?;
+            }
+        }
+    } else if recorder.path_scope_overlaps(parent_path) {
+        record_worktree_status_marker(parent_path, recorder.overlay_hash_input);
+    }
+
+    Ok(())
+}
+
+fn submodule_worktree_parent_path(parent_path: &str, child_path: &str) -> String {
+    format!("{}/{}", parent_path.trim_end_matches('/'), child_path)
+}
+
+fn submodule_worktree_head(root: &Path, path: &str) -> Result<Option<String>, CodeIndexError> {
+    let submodule_root = match source_gitlink::submodule_root(root, path) {
+        Ok(submodule_root) => submodule_root,
+        Err(_) => return Ok(None),
+    };
+
+    resolve_ref(&submodule_root, "HEAD").map(Some)
+}
+
+enum StagedPathKind {
+    Gitlink(String),
+    Regular,
+}
+
+fn staged_path_kind(root: &Path, path: &str) -> Result<Option<StagedPathKind>, CodeIndexError> {
+    let bytes = git_bytes(root, ["ls-files", "-s", "-z", "--", path])?;
+    let Some(record) = bytes
+        .split(|byte| *byte == 0)
+        .find(|record| !record.is_empty())
+    else {
+        return Ok(None);
+    };
+    let record = String::from_utf8_lossy(record);
+    let Some((metadata, _)) = record.split_once('\t') else {
+        return Ok(None);
+    };
+    let fields = metadata.split_whitespace().collect::<Vec<_>>();
+    if fields.first().copied() != Some("160000") {
+        return Ok(Some(StagedPathKind::Regular));
+    }
+
+    Ok(fields
+        .get(1)
+        .map(|object| StagedPathKind::Gitlink((*object).to_owned())))
+}
+
+fn record_base_gitlink_child_deletions(
+    root: &Path,
+    path: &str,
+    base_commit: &str,
+    base_gitlink_commit: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    let mut recorded = false;
+    for entry in bounded_submodule_path_entries(
+        root,
+        path,
+        Some(base_commit),
+        base_gitlink_commit,
+        recorder.scope,
+    )? {
+        recorder.record_deleted_path(&entry.parent_path);
+        recorded = true;
+    }
+    if !recorded {
+        let retained_paths = BTreeSet::new();
+        recorded = record_previous_gitlink_child_deletions(
+            path,
+            recorder.previous_hashes,
+            recorder.scope,
+            &retained_paths,
+            recorder.overlay_hash_input,
+            recorder.deleted_paths,
+        )?;
+    }
+    if !recorded && submodule_path_scope_overlaps(path, recorder.scope) {
+        record_worktree_status_marker(path, recorder.overlay_hash_input);
+    }
+
+    Ok(())
+}
+
+fn record_missing_base_gitlink_child_deletions(
+    root: &Path,
+    path: &str,
+    base_commit: &str,
+    base_gitlink_commit: &str,
+    staged_paths: &BTreeSet<String>,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    let mut recorded = false;
+    for entry in bounded_submodule_path_entries(
+        root,
+        path,
+        Some(base_commit),
+        base_gitlink_commit,
+        recorder.scope,
+    )? {
+        if !staged_paths.contains(&entry.parent_path) {
+            recorder.record_deleted_path(&entry.parent_path);
+            recorded = true;
+        }
+    }
+    if !recorded {
+        recorded = record_previous_gitlink_child_deletions(
+            path,
+            recorder.previous_hashes,
+            recorder.scope,
+            staged_paths,
+            recorder.overlay_hash_input,
+            recorder.deleted_paths,
+        )?;
+    }
+    if !recorded && submodule_path_scope_overlaps(path, recorder.scope) {
+        record_worktree_status_marker(path, recorder.overlay_hash_input);
+    }
+
+    Ok(())
+}
+
+fn base_path_exists(root: &Path, base_commit: &str, path: &str) -> Result<bool, CodeIndexError> {
+    git_object_kind(root, base_commit, path).map(|kind| kind.is_some())
+}
+
+fn git_object_kind(
+    root: &Path,
+    commit: &str,
+    path: &str,
+) -> Result<Option<String>, CodeIndexError> {
+    match git_bytes(root, ["cat-file", "-t", &format!("{commit}:{path}")]) {
+        Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).trim().to_owned())),
+        Err(_) => Ok(None),
+    }
+}
+
+fn bounded_submodule_path_entries(
+    root: &Path,
+    path: &str,
+    parent_commit: Option<&str>,
+    commit: &str,
+    scope: &WorktreeOverlayScope<'_>,
+) -> Result<Vec<source_gitlink::SubmodulePathEntry>, CodeIndexError> {
+    let Some(selection_filters) = scope.selection_path_filters.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let Some(child_filters) =
+        scope::submodule_child_scope_filters_from_filters(path, selection_filters)
+    else {
+        return Ok(Vec::new());
+    };
+    let entries = match source_gitlink::submodule_path_entries_with_child_filters(
+        root,
+        path,
+        parent_commit,
+        commit,
+        &child_filters,
+    ) {
+        Ok(entries) => entries,
+        Err(error) if source_gitlink::submodule_expansion_is_unavailable(&error) => Vec::new(),
+        Err(error) => return Err(error),
+    };
+    let selected_entries = entries
+        .into_iter()
+        .filter(|entry| scope.selected(&entry.parent_path))
+        .collect::<Vec<_>>();
+    if selected_entries.len() > MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "gitlink path {path} expands to {} files; run a full code index so the work is checkpointed and batched",
+            selected_entries.len()
+        )));
+    }
+
+    Ok(selected_entries)
+}
+
+fn submodule_path_scope_overlaps(path: &str, scope: &WorktreeOverlayScope<'_>) -> bool {
+    scope
+        .selection_path_filters
+        .as_ref()
+        .is_some_and(|filters| {
+            scope::submodule_child_scope_filters_from_filters(path, filters).is_some()
+        })
+}
+
+fn worktree_directory_files(
+    root: &Path,
+    relative_dir: &str,
+) -> Result<Vec<String>, CodeIndexError> {
+    if !worktree_directory_is_expandable(root, relative_dir)? {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    collect_worktree_directory_files(root, Path::new(relative_dir), &mut files)?;
+    files.sort();
+
+    Ok(files)
+}
+
+fn worktree_directory_is_expandable(
+    root: &Path,
+    relative_dir: &str,
+) -> Result<bool, CodeIndexError> {
+    let full_path = root.join(relative_dir);
+    let metadata = fs::symlink_metadata(&full_path)?;
+    if !metadata.file_type().is_dir() {
+        return Ok(false);
+    }
+
+    Ok(!contains_git_metadata(root, Path::new(relative_dir))?)
+}
+
+fn contains_git_metadata(root: &Path, relative: &Path) -> Result<bool, CodeIndexError> {
+    match fs::symlink_metadata(root.join(relative).join(".git")) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn collect_worktree_directory_files(
+    root: &Path,
+    relative: &Path,
+    files: &mut Vec<String>,
+) -> Result<(), CodeIndexError> {
+    for entry in fs::read_dir(root.join(relative))? {
+        let entry = entry?;
+        let path = relative.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            if entry.file_name() == ".git" || contains_git_metadata(root, &path)? {
+                continue;
+            }
+            collect_worktree_directory_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            files.push(path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+
+    Ok(())
+}
