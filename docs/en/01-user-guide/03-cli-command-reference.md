@@ -118,6 +118,7 @@ relay-knowledge service doctor
 relay-knowledge service plan install|uninstall
 relay-knowledge service definition write
 relay-knowledge service operator status|pause|resume
+relay-knowledge service worker run [--task-id <id>]
 relay-knowledge service run [--web] [--mcp streamable-http]
 relay-knowledge setup doctor
 relay-knowledge setup profile local|agent-readonly|service|external-embedding
@@ -125,7 +126,7 @@ relay-knowledge version
 relay-knowledge version check
 ```
 
-Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. Non-interactive agents can run `repo index-worker --task-id <id> --format json` as an explicit single-shot drain command for queued or retrying tasks; `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running. `repo index <alias> --reset --format json` clears unfinished task leases for the repository without deleting completed indexed scopes or reviving terminal dead-letter history. Index writes use one live writer per repository; queries, reports, graph reads, file queries, and health diagnostics use bounded read-only connections to read committed snapshots where SQLite WAL permits it.
+Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. Non-interactive agents can run `repo index-worker --task-id <id> --format json` as an explicit single-shot drain command for queued or retrying tasks; `service worker run [--task-id <id>] --format json` is the split-worker preview entrypoint and claims at most one durable code-index task, completing or failing it through task id, lease owner, and attempt count checks; `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running. `repo index <alias> --reset --format json` clears unfinished task leases for the repository without deleting completed indexed scopes or reviving terminal dead-letter history. Index writes use one live writer per repository; queries, reports, graph reads, file queries, and health diagnostics use bounded read-only connections to read committed snapshots where SQLite WAL permits it.
 
 `repo remove <alias>` deletes the registered repository behind that alias from relay-knowledge runtime state, including all aliases for the repository id, code index scopes, code-index tasks, repository-set membership, repository-set overlays, and software projection rows. It does not delete files from the source repository on disk. Removal is rejected while the repository still has a running code-index task lease; after a successful remove, the same path or alias can be registered again.
 

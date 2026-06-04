@@ -4,13 +4,13 @@ use serde::Serialize;
 
 use crate::{
     api::{
-        AgentProtocolStatus, ApiError, ApiMetadata, EmbeddingProviderProbeResponse,
-        GRAPH_CANVAS_MAX_LIMIT, GraphCanvasEdge, GraphCanvasKind, GraphCanvasNode,
-        GraphCanvasRequest, GraphCanvasResponse, GraphCanvasSummary, GraphInspectionRequest,
-        GraphInspectionResponse, HealthResponse, HybridRetrievalRequest, HybridRetrievalResponse,
-        IndexRefreshRequest, IndexRefreshResponse, IngestRequest, IngestResponse,
-        MultimodalExtractionRequest, MultimodalExtractionResponse, ProjectStatusResponse,
-        RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
+        AgentProtocolStatus, ApiError, ApiMetadata, CodeIndexWorkerRunRequest,
+        CodeIndexWorkerRunResponse, EmbeddingProviderProbeResponse, GRAPH_CANVAS_MAX_LIMIT,
+        GraphCanvasEdge, GraphCanvasKind, GraphCanvasNode, GraphCanvasRequest, GraphCanvasResponse,
+        GraphCanvasSummary, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
+        HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
+        IngestRequest, IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
+        ProjectStatusResponse, RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
         AuditStatus, CodeParseStatusCounts, CodeRepositoryTotals, ContextGraphPath,
@@ -702,6 +702,7 @@ impl RelayKnowledgeService {
             .join(service_definition_filename())
             .display()
             .to_string();
+        let storage = self.storage_topology_diagnostics().await;
         let operator = store
             .service_operator_status()
             .await
@@ -728,6 +729,7 @@ impl RelayKnowledgeService {
             background_enabled: operator.state != crate::domain::ServiceOperatorState::Disabled,
             silent_updates_enabled: operator.silent_updates_enabled,
             service_definition_path,
+            storage,
             index_refresh,
             file_index,
             agent_protocols: agent_protocol_status(&self.runtime),
@@ -745,6 +747,29 @@ impl RelayKnowledgeService {
 
     pub(super) async fn store(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
         self.storage.get().await
+    }
+
+    /// Runs one split-worker preview code-index attempt through durable task leases.
+    pub async fn run_code_index_worker_preview(
+        &self,
+        request: CodeIndexWorkerRunRequest,
+        context: RequestContext,
+    ) -> Result<CodeIndexWorkerRunResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let task = self
+            .run_code_index_task_once(request.task_id, context.clone())
+            .await?;
+
+        Ok(CodeIndexWorkerRunResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            worker_kind: "code_index".to_owned(),
+            claimed: task.is_some(),
+            task,
+        })
     }
 
     /// Returns the persistent agent audit log path resolved by the path boundary.
@@ -887,6 +912,7 @@ fn service_definition_filename() -> &'static str {
 
 mod health;
 pub(crate) mod knowledge_map;
+mod storage_diagnostics;
 mod storage_provider;
 
 #[cfg(test)]

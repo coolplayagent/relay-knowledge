@@ -32,9 +32,11 @@ target/release/relay-knowledge service run --web --mcp streamable-http
 
 `service run` runs the startup index reconciler before accepting resident adapter requests when possible, then acts as the resident master for durable code-index and repository-set overlay refresh workers. The master owns configuration, startup lease recovery, bounded worker pool startup, queue supervision, and graceful shutdown. Code-index workers only claim leased tasks and execute bounded batches. The code-index pool defaults to 2 workers, is configured with `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT`, and is capped at 8. Without MCP or Web enabled, the command still waits as a foreground service for a shutdown signal.
 
-Use `relay-knowledge service status --format json` to inspect `code_index_workers`: configured worker count, active worker slots, queue depth, queued/running/retrying/dead-letter task counts, running leases, and last error. These diagnostics explain whether the master is idle, saturated, retrying work, or waiting for another repository writer lease.
+Use `relay-knowledge service status --format json` to inspect `storage` and `code_index_workers`. `storage` reports the current topology, primary database path, `partitioned_sqlite` shard directory, active/staged/missing shard counts, runtime state paths, and missing-shard degraded reasons. `code_index_workers` reports configured worker count, active worker slots, queue depth, queued/running/retrying/dead-letter task counts, running leases, and last error. These diagnostics explain whether the master is idle, saturated, retrying work, waiting for another repository writer lease, or missing partitioned data-plane shard files.
 
 HTTP `/api/health` and CLI `health` are liveness-safe entrypoints: they take a short-budget read-only snapshot, do not queue index refresh work, and do not wait for large repository indexing to finish. If the storage read lane is busy, health returns a cached or minimal degraded response with `storage_busy`, stale metadata, or a degraded reason. Normal code queries are not excluded by this behavior; `allow-stale` queries read the latest compatible completed committed scope while the target ref and filters are still indexing, and `wait-until-fresh` is the mode that requires the target scope to be finalized.
+
+Stable external control-plane HTTP remains preview-scoped and currently exposes only read-only routes: `/api/v1/control/status`, `/api/v1/control/health`, `/api/v1/control/service/status`, and `/api/v1/control/storage/topology`. These routes reuse the shared API types used by CLI/Web/MCP and do not synchronously run indexing, migrations, or shard repair.
 
 ## 9.2 Service Run in Web
 
@@ -54,6 +56,8 @@ Linux returns a systemd user service plan, macOS returns a launchd plist plan, a
 
 When `partitioned_sqlite` is enabled, service doctor, backup, migration, and uninstall confirmation must cover both the primary database and the `stores/repositories/` shard directory. Moving only the primary database leaves code facts invisible and is not a successful migration or rollback.
 
+`service plan install|uninstall --format json` includes `runtime_state_paths` for the primary database, config, state, log, and cache paths. With `partitioned_sqlite`, it also includes the shard directory and adds a `warnings` entry that backup, migration, rollback, and uninstall confirmation must cover both the primary database and shard directory.
+
 ## 9.4 Silent Update Operator
 
 View, pause, or resume the background update operator:
@@ -66,7 +70,11 @@ relay-knowledge service operator resume
 
 Silent updates must be user-configurable, observable, and reversible. They may refresh graph data and derived indexes only within authorized scopes, and they expose freshness, stale, paused, degraded, and failure states.
 
-## 9.5 Running Guidance
+## 9.5 Split Worker Preview
+
+`relay-knowledge service worker run [--task-id <id>] --format json` is the preview entrypoint for process-level split workers. It claims at most one durable code-index task, runs only after holding an attempt-scoped lease, and completes or fails through the same storage contract. If no task is claimed, the lease has expired, or the attempt does not match, it cannot write a successful result. This command does not replace the platform service manager and does not provide an unmanaged background loop.
+
+## 9.6 Running Guidance
 
 For short development checks, prefer foreground commands or `run.sh`:
 

@@ -115,6 +115,7 @@ relay-knowledge service doctor
 relay-knowledge service plan install|uninstall
 relay-knowledge service definition write
 relay-knowledge service operator status|pause|resume
+relay-knowledge service worker run [--task-id <id>]
 relay-knowledge service run [--web] [--mcp streamable-http]
 relay-knowledge setup doctor
 relay-knowledge setup profile local|agent-readonly|service|external-embedding
@@ -122,7 +123,7 @@ relay-knowledge version
 relay-knowledge version check
 ```
 
-冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
+冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；`service worker run [--task-id <id>] --format json` 是 split-worker preview 入口，只 claim 一个 durable code-index task，并通过 task id、lease owner 和 attempt count 完成或失败该任务；`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
 
 `repo remove <alias>` 会从 relay-knowledge 运行时状态中删除该 alias 指向的整个注册仓库，包括该 repository id 的全部 alias、代码索引 scope、code-index task、repository-set 成员关系、repository-set overlay 和软件全域投影行。它不会删除磁盘上的源码仓库。如果仓库仍有 running code-index task lease，删除会被拒绝；删除成功后，同一路径或 alias 可以重新注册。
 

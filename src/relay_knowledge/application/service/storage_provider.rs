@@ -8,7 +8,7 @@ use crate::{
     paths::RuntimePaths,
     storage::{
         KnowledgeStore, PartitionedSqliteKnowledgeStore, SqliteGraphStore, StorageError,
-        StorageTopology,
+        StorageTopology, StorageTopologySnapshot,
     },
 };
 
@@ -69,6 +69,24 @@ impl StorageProvider {
             Ok(store)
         })
         .await?
+    }
+
+    pub(in crate::application) async fn topology_snapshot(
+        &self,
+    ) -> Result<StorageTopologySnapshot, StorageError> {
+        let Some(config) = self.config.clone() else {
+            return Ok(StorageTopologySnapshot::default());
+        };
+        match config.topology {
+            StorageTopology::SingleSqlite => Ok(StorageTopologySnapshot::default()),
+            StorageTopology::PartitionedSqlite => {
+                let store = tokio::task::spawn_blocking(move || {
+                    PartitionedSqliteKnowledgeStore::open(config.database_path, config.paths)
+                })
+                .await??;
+                store.topology_snapshot().await
+            }
+        }
     }
 }
 

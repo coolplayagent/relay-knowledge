@@ -58,6 +58,10 @@ fn router_with_assets(
         .route("/api/project/status", get(project_status))
         .route("/api/health", get(health))
         .route("/api/service/status", get(service_status))
+        .route("/api/v1/control/status", get(project_status))
+        .route("/api/v1/control/health", get(health))
+        .route("/api/v1/control/service/status", get(service_status))
+        .route("/api/v1/control/storage/topology", get(storage_topology))
         .route("/api/web/graph/canvas", get(graph_canvas))
         .route("/api/web/operations/execute", post(execute_operation))
         .merge(web_model_config::routes())
@@ -93,6 +97,17 @@ async fn service_status(State(state): State<WebState>) -> Response {
     match state
         .service
         .service_status(RequestContext::for_interface(InterfaceKind::Web))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn storage_topology(State(state): State<WebState>) -> Response {
+    match state
+        .service
+        .storage_topology_status(RequestContext::for_interface(InterfaceKind::Web))
         .await
     {
         Ok(response) => Json(response).into_response(),

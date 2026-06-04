@@ -170,9 +170,13 @@ where
                 .unwrap_or(0)
         ),
         "service.status" => format!(
-            "service={} mode={}",
+            "service={} mode={} storage={} missing_shards={}",
             value["service_name"].as_str().unwrap_or("relay-knowledge"),
-            value["mode"].as_str().unwrap_or("disabled")
+            value["mode"].as_str().unwrap_or("disabled"),
+            value["storage"]["topology"].as_str().unwrap_or("unknown"),
+            value["storage"]["missing_shard_count"]
+                .as_u64()
+                .unwrap_or(0)
         ),
         "code.repo.index" => {
             if let Some(task) = value["task"].as_object() {
@@ -280,6 +284,12 @@ where
                 value["operator"]["state"].as_str().unwrap_or("disabled")
             )
         }
+        "service.worker.run" => format!(
+            "worker={} claimed={} task_state={}",
+            value["worker_kind"].as_str().unwrap_or("code_index"),
+            value["claimed"].as_bool().unwrap_or(false),
+            value["task"]["state"].as_str().unwrap_or("none")
+        ),
         "setup.doctor" => format!(
             "setup_configuration_ready={} live_health_checked={} checks={} actions={}",
             value["configuration_ready"].as_bool().unwrap_or(false),

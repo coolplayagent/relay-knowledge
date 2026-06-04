@@ -2,7 +2,7 @@
 
 [English](../../en/06-verification/10-service-deployment-control-data-plane-2026-06-04.md) | [中文](../../zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md)
 
-> Document version: 1.0
+> Document version: 1.1
 > Prepared: 2026-06-04
 > Scope: GitHub issue #250, Book 3 Chapter 22, related architecture chapters, resident service user guide, README files, and this documentation sync record.
 
@@ -11,7 +11,7 @@
 - Added Book 3 Chapter 22, "Service Deployment, Control Plane, and Data Plane."
 - Turned issue #250 service deployment goals into the `embedded_cli`, `resident_single_process`, `resident_partitioned_sqlite`, and future `split_worker_preview` topologies.
 - Synchronized storage, unified API, background service, installation/upgrade, resident service, and top-level README guidance so control-plane APIs, data-plane shards, split-worker leases, and backup/migration/uninstall boundaries are explicit.
-- This change modifies documentation only; it does not change Rust APIs, CLI behavior, configuration, runtime behavior, test fixtures, or release flow.
+- Follow-up implementation adds storage topology diagnostics to `service status`/`health`, read-only `/api/v1/control/*` preview routes, `service plan` runtime state paths and warnings, and the `service worker run [--task-id <id>]` split-worker preview CLI.
 
 ## 2. Source Verification
 
@@ -33,10 +33,12 @@ Recommended verification commands:
 ```bash
 rg -n "第 22 章|Chapter 22|22-service-deployment-control-data-plane|B.10" docs README.md README.zh-CN.md
 rg -n "split_worker_preview|resident_partitioned_sqlite|control plane|data plane" docs/zh docs/en README.md README.zh-CN.md
+rg -n "/api/v1/control|service worker run|runtime_state_paths|missing_shard_count" src docs/zh docs/en
 wc -l docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/en/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md \
   docs/en/06-verification/10-service-deployment-control-data-plane-2026-06-04.md
+cargo test --all-targets --all-features
 ```
 
-`cargo test` is not required for this documentation refresh because no code, configuration, or test behavior changed.
+Rust implementation changes must pass focused storage/service/Web/CLI tests and the full `cargo test --all-targets --all-features` gate.

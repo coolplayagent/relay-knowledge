@@ -61,7 +61,7 @@ v1 支持并文档化四种拓扑：
 - repository register/index/status/report/set overlay refresh。
 - audit、authorization identity、request id、trace id、QoS admission 和 overload decision。
 
-新增控制面接口必须先定义共享 `api` request/response 类型和 application service 方法，再映射到 CLI、Web、MCP 或 HTTP route。接口层不得复制业务逻辑、直接读取 storage catalog、直接续租 worker task，或绕过 QoS。
+新增控制面接口必须先定义共享 `api` request/response 类型和 application service 方法，再映射到 CLI、Web、MCP 或 HTTP route。接口层不得复制业务逻辑、直接读取 storage catalog、直接续租 worker task，或绕过 QoS。当前只读控制面 HTTP preview 暴露 `/api/v1/control/status`、`/api/v1/control/health`、`/api/v1/control/service/status` 和 `/api/v1/control/storage/topology`。
 
 ## 5. 数据面职责
 
@@ -86,15 +86,15 @@ v1 支持并文档化四种拓扑：
 
 ## 7. API 扩展契约
 
-控制面 HTTP route 使用 `/api/*`，同源 Web 操作继续使用 `/api/web/operations/execute`。未来若引入稳定外部控制面 API，必须版本化为 `/api/v1/control/*` 或等价命名，并保持 CLI JSON、Web、MCP tool 的语义兼容。
+控制面 HTTP route 使用 `/api/*`，同源 Web 操作继续使用 `/api/web/operations/execute`。外部控制面 API 使用 `/api/v1/control/*` 或等价命名；当前 preview 只开放只读 status、health、service status 和 storage topology diagnostics，并保持 CLI JSON、Web、MCP tool 的语义兼容。
 
 API response 必须包含 metadata、warnings/degraded state、freshness/truncation、stable error kind 和 trace context。长任务只返回 task handle、checkpoint 和可查询 status；不能同步执行无界索引、无界扫描、外部 provider 大批量调用或 shard 迁移。
 
 ## 8. 验收标准
 
 - `single_sqlite` 拒绝打开已有 active shard catalog 的 runtime database。
-- `partitioned_sqlite` 的 doctor、backup、migration、uninstall plan 同时覆盖控制库和 shard 目录。
-- split worker 无法在未 claim task、lease 过期或 attempt 不匹配时 complete/fail/write。
+- `partitioned_sqlite` 的 doctor/status、backup、migration、uninstall plan 同时覆盖控制库和 shard 目录，并通过 storage diagnostics 暴露 active/staged/missing shard 计数。
+- split worker preview 通过 `service worker run [--task-id <id>]` claim durable code-index task；未 claim、lease 过期或 attempt 不匹配时无法 complete/fail/write。
 - `health`、`service status` 和 Web diagnostics 在数据面繁忙时仍返回 bounded degraded 状态。
 - 新 graph/vector/event/workflow adapter 只作为实现细节进入 storage、retrieval、net 或 worker boundary，不改变 domain/API 语义。
 

@@ -27,7 +27,7 @@
 
 Installer 或安装脚本支持：版本选择、安装目录选择、dry run、校验和验证、service definition 生成、失败回滚和 uninstall plan。默认不会把数据写入 release 解压目录。
 
-服务化部署安装体验必须显式说明拓扑：`embedded_cli` 不安装常驻服务，`resident_single_process` 安装一个平台 service，`resident_partitioned_sqlite` 还要把 shard 目录纳入备份/迁移/卸载确认，未来 `split_worker_preview` 必须分别生成控制服务和 worker 服务定义并说明每个进程的权限、环境变量、日志和 shutdown 行为。
+服务化部署安装体验必须显式说明拓扑：`embedded_cli` 不安装常驻服务，`resident_single_process` 安装一个平台 service，`resident_partitioned_sqlite` 还要把 shard 目录纳入备份/迁移/卸载确认。`service plan install|uninstall --format json` 必须在 `runtime_state_paths` 和 `warnings` 中列出主库、配置/状态/日志/缓存路径，以及 partitioned 模式下的 shard 目录覆盖要求；未来 `split_worker_preview` 必须分别生成控制服务和 worker 服务定义并说明每个进程的权限、环境变量、日志和 shutdown 行为。
 
 精确代码源码兜底由产品内部实现，运行时不能依赖 `rg`。面向 agent 的 setup 说明可以提到使用有界 `rg` 或 `grep -RIn` 做人工检查工具，但安装器不能把递归 grep 作为 service 依赖，也不能把它当成已索引查询行为的替代品。
 

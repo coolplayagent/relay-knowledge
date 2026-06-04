@@ -88,6 +88,22 @@ async fn serves_project_health_and_service_status_apis() {
 }
 
 #[tokio::test]
+async fn serves_versioned_control_plane_read_apis() {
+    let router = test_router("control-api").await;
+
+    let project = get_json(router.clone(), "/api/v1/control/status").await;
+    let health = get_json(router.clone(), "/api/v1/control/health").await;
+    let service = get_json(router.clone(), "/api/v1/control/service/status").await;
+    let storage = get_json(router, "/api/v1/control/storage/topology").await;
+
+    assert_eq!(project["project_name"], "relay-knowledge");
+    assert_eq!(health["healthy"], true);
+    assert_eq!(service["service_name"], "relay-knowledge");
+    assert_eq!(storage["storage"]["topology"], "single_sqlite");
+    assert_eq!(storage["storage"]["missing_shard_count"], 0);
+}
+
+#[tokio::test]
 async fn serves_model_provider_config_apis() {
     let router = test_router("model-config").await;
     let profiles = get_json(router.clone(), "/api/configs/model/profiles").await;

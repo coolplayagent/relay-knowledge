@@ -32,9 +32,11 @@ target/release/relay-knowledge service run --web --mcp streamable-http
 
 `service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务，然后作为 resident master 管理持久化 code-index 和 repository-set overlay refresh worker。Master 拥有配置、启动 lease 恢复、有界 worker pool 启动、队列监督和优雅关闭；code-index worker 只 claim 带 lease 的任务并执行有界 batch。Code-index pool 默认并发为 2，通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 配置，并按上限 clamp 到 8。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
 
-使用 `relay-knowledge service status --format json` 查看 `code_index_workers`：configured worker count、active worker slots、queue depth、queued/running/retrying/dead-letter task counts、running leases 和 last error。这些诊断可以解释 master 是空闲、饱和、正在重试，还是正在等待另一个 repository writer lease。
+使用 `relay-knowledge service status --format json` 查看 `storage` 和 `code_index_workers`。`storage` 返回当前 topology、主库路径、`partitioned_sqlite` shard 目录、active/staged/missing shard 计数、runtime state paths 和缺失 shard degraded reason；`code_index_workers` 返回 configured worker count、active worker slots、queue depth、queued/running/retrying/dead-letter task counts、running leases 和 last error。这些诊断可以解释 master 是空闲、饱和、正在重试、等待另一个 repository writer lease，还是 partitioned 数据面缺少 shard 文件。
 
 HTTP `/api/health` 和 CLI `health` 是 liveness-safe 入口：它只做短预算只读快照，不会排队 index refresh，也不会等待大型 repository indexing 完成。存储读通道繁忙时，health 会返回 cached 或最小 degraded 响应，并用 `storage_busy`、stale metadata 或 degraded reason 暴露压力。普通代码查询不会因此被排除；`allow-stale` 查询在目标 ref 和 filters 正在索引时读取最新兼容的已完成 committed scope，`wait-until-fresh` 查询才要求目标 scope 已 finalize。
+
+稳定外部控制面仍保持 preview 范围，当前只提供只读 HTTP route：`/api/v1/control/status`、`/api/v1/control/health`、`/api/v1/control/service/status` 和 `/api/v1/control/storage/topology`。这些 route 复用 CLI/Web/MCP 的共享 API 类型，不同步执行索引、迁移或 shard 修复。
 
 ## 9.2 Web 中的 Service Run
 
@@ -54,6 +56,8 @@ Linux 输出 systemd user service 计划，macOS 输出 launchd plist 计划，W
 
 启用 `partitioned_sqlite` 时，service doctor、备份、迁移和卸载确认必须同时覆盖主数据库和 `stores/repositories/` shard 目录。只移动主数据库会让代码事实不可见，不能被视为成功迁移或回滚。
 
+`service plan install|uninstall --format json` 的 `runtime_state_paths` 会列出主库、配置、状态、日志、缓存路径；启用 `partitioned_sqlite` 时还会列出 shard 目录，并在 `warnings` 中提示备份、迁移、回滚和卸载确认必须覆盖主库与 shard 目录。
+
 ## 9.4 Silent Update Operator
 
 查看、暂停或恢复后台更新 operator:
@@ -66,7 +70,11 @@ relay-knowledge service operator resume
 
 Silent updates 必须用户可配置、可观测、可逆。它们只能在授权 scope 内刷新图数据和派生索引，并暴露 freshness、stale、paused、degraded 和 failure 状态。
 
-## 9.5 运行建议
+## 9.5 Split Worker Preview
+
+`relay-knowledge service worker run [--task-id <id>] --format json` 是进程级 split worker 的 preview 入口。它一次最多 claim 一个 durable code-index task，持有 attempt-scoped lease 后执行，并通过同一个 storage contract complete 或 fail；未 claim、lease 过期或 attempt 不匹配时不会写入成功结果。该命令不替代平台 service manager，也不提供未受管后台循环。
+
+## 9.6 运行建议
 
 开发机临时验证优先使用前台命令或 `run.sh`:
 

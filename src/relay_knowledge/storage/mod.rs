@@ -76,6 +76,24 @@ impl StorageTopology {
     }
 }
 
+/// Runtime storage topology snapshot surfaced through service diagnostics.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageTopologySnapshot {
+    pub shards: Vec<StorageShardCatalogEntry>,
+}
+
+/// One repository shard entry from the partitioned SQLite catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageShardCatalogEntry {
+    pub repository_id: String,
+    pub state: String,
+    pub shard_locator: String,
+    pub resolved_path: String,
+    pub source_scope_count: usize,
+    pub exists: bool,
+    pub updated_at_ms: u64,
+}
+
 /// Graph fact persistence and query contract.
 pub trait GraphStore: Send + Sync {
     fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt>;

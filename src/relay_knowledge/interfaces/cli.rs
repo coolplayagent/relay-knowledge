@@ -188,6 +188,7 @@ fn option_consumes_value(option: &str) -> bool {
             | "--by"
             | "--reason"
             | "--operation"
+            | "--task-id"
             | "--input"
             | "--root"
             | "--scope"
@@ -294,6 +295,9 @@ pub enum CliAction {
     ServiceOperatorStatus,
     ServiceOperatorPause,
     ServiceOperatorResume,
+    ServiceWorkerRun {
+        task_id: Option<String>,
+    },
     ServiceRun {
         mcp: ServiceMcpTransport,
         web: bool,
@@ -769,6 +773,7 @@ pub async fn run_with_service(
         | CliAction::ServiceOperatorStatus
         | CliAction::ServiceOperatorPause
         | CliAction::ServiceOperatorResume
+        | CliAction::ServiceWorkerRun { .. }
         | CliAction::SetupDoctor
         | CliAction::SetupProfile { .. } => Err(CliError::ApiFailed(
             "operational command was not handled by the service adapter".to_owned(),

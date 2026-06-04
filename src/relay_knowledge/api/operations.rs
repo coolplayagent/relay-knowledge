@@ -419,6 +419,7 @@ pub struct ServiceStatusResponse {
     pub background_enabled: bool,
     pub silent_updates_enabled: bool,
     pub service_definition_path: String,
+    pub storage: StorageTopologyDiagnostics,
     pub index_refresh: IndexRefreshDiagnostics,
     pub file_index: crate::storage::FileIndexDiagnostics,
     pub agent_protocols: AgentProtocolStatus,
@@ -427,6 +428,44 @@ pub struct ServiceStatusResponse {
     pub code_index_workers: CodeIndexWorkerStatus,
     pub proposal_backlog: usize,
     pub audit_sink: AuditSinkStatus,
+}
+
+/// Storage topology and shard-catalog diagnostics surfaced by the control plane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageTopologyDiagnostics {
+    pub topology: String,
+    pub control_database_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_shards_dir: Option<String>,
+    pub shard_catalog_active: bool,
+    pub active_shard_count: usize,
+    pub staged_shard_count: usize,
+    pub missing_shard_count: usize,
+    pub runtime_state_paths: Vec<String>,
+    pub shards: Vec<StorageShardDiagnostics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
+/// One partitioned SQLite shard reported through storage diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageShardDiagnostics {
+    pub repository_id: String,
+    pub state: String,
+    pub shard_locator: String,
+    pub resolved_path: String,
+    pub source_scope_count: usize,
+    pub exists: bool,
+    pub updated_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
+/// Control-plane storage topology response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageTopologyResponse {
+    pub metadata: ApiMetadata,
+    pub storage: StorageTopologyDiagnostics,
 }
 
 /// Master-worker diagnostics for repository code indexing.
@@ -506,6 +545,23 @@ pub struct WorkerRunResponse {
     pub workers: Vec<WorkerStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
+}
+
+/// Preview split-worker request for one durable code-index task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexWorkerRunRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+}
+
+/// Preview split-worker result for one durable code-index task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexWorkerRunResponse {
+    pub metadata: ApiMetadata,
+    pub worker_kind: String,
+    pub claimed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<CodeIndexTaskRecord>,
 }
 
 /// Proposal list filter.
@@ -614,6 +670,7 @@ pub struct HealthResponse {
     pub healthy: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
+    pub storage: StorageTopologyDiagnostics,
     pub graph: GraphInspection,
     pub repository_code_totals: CodeRepositoryTotals,
     pub indexes: Vec<IndexStatus>,

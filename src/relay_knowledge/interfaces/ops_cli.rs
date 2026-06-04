@@ -1,7 +1,8 @@
 use crate::{
     api::{
-        AuditQueryApiRequest, ProposalDecisionApiRequest, ProposalListApiRequest, RequestContext,
-        ServicePlanRequest, WorkerRunRequest, WorkerStatusRequest,
+        AuditQueryApiRequest, CodeIndexWorkerRunRequest, ProposalDecisionApiRequest,
+        ProposalListApiRequest, RequestContext, ServicePlanRequest, WorkerRunRequest,
+        WorkerStatusRequest,
     },
     application::RelayKnowledgeService,
     domain::{ProposalState, ServiceManagerAction, ServiceOperatorState, WorkerKind},
@@ -214,6 +215,19 @@ pub(super) async fn run_operational_action(
                 format,
             )?
         }
+        CliAction::ServiceWorkerRun { task_id } => {
+            let response = service
+                .run_code_index_worker_preview(CodeIndexWorkerRunRequest { task_id }, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "service.worker.run",
+                response.metadata.clone(),
+                &response,
+                format,
+            )?
+        }
         _ => return Ok(None),
     };
 
@@ -317,6 +331,9 @@ pub(super) fn parse_service(tokens: &[String]) -> Result<CliAction, CliError> {
             None => Err(CliError::MissingValue("status|pause|resume")),
         };
     }
+    if tokens.first().map(String::as_str) == Some("worker") {
+        return parse_service_worker(&tokens[1..]);
+    }
     if tokens.first().map(String::as_str) == Some("run") {
         return parse_service_run(&tokens[1..]);
     }
@@ -405,6 +422,30 @@ fn parse_proposal_decision(
             reason,
         },
     })
+}
+
+fn parse_service_worker(tokens: &[String]) -> Result<CliAction, CliError> {
+    if tokens.first().map(String::as_str) != Some("run") {
+        return Err(CliError::UnexpectedArgument(
+            tokens
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "worker".to_owned()),
+        ));
+    }
+    let mut task_id = None;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--task-id" => {
+                task_id = Some(value_after(tokens, index, "--task-id")?);
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(CliAction::ServiceWorkerRun { task_id })
 }
 
 fn parse_service_run(tokens: &[String]) -> Result<CliAction, CliError> {

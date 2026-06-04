@@ -2,7 +2,7 @@
 
 [中文](../../zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md) | [English](../../en/06-verification/10-service-deployment-control-data-plane-2026-06-04.md)
 
-> 文档版本: 1.0
+> 文档版本: 1.1
 > 编制日期: 2026-06-04
 > 范围: GitHub issue #250、第三卷第 22 章、相关架构章节、常驻服务用户指南、README 和本次文档同步记录。
 
@@ -11,7 +11,7 @@
 - 新增第三卷第 22 章《服务化部署、控制面与数据面分离》。
 - 将 issue #250 的服务化部署目标落成 `embedded_cli`、`resident_single_process`、`resident_partitioned_sqlite` 和未来 `split_worker_preview` 拓扑。
 - 同步存储、统一 API、后台服务、安装升级、常驻服务和顶层 README，明确控制面 API、数据面 shard、split worker lease、备份/迁移/卸载边界。
-- 本次变更只修改文档，不改变 Rust API、CLI 行为、配置、运行时、测试夹具或发布流程。
+- 后续实现补齐 `service status`/`health` 的 storage topology diagnostics、只读 `/api/v1/control/*` preview route、`service plan` runtime state path/warning、以及 `service worker run [--task-id <id>]` split-worker preview CLI。
 
 ## 2. 来源核验
 
@@ -33,10 +33,12 @@
 ```bash
 rg -n "第 22 章|Chapter 22|22-service-deployment-control-data-plane|B.10" docs README.md README.zh-CN.md
 rg -n "split_worker_preview|resident_partitioned_sqlite|控制面|data plane" docs/zh docs/en README.md README.zh-CN.md
+rg -n "/api/v1/control|service worker run|runtime_state_paths|missing_shard_count" src docs/zh docs/en
 wc -l docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/en/03-architecture-specs/22-service-deployment-control-data-plane.md \
   docs/zh/06-verification/10-service-deployment-control-data-plane-2026-06-04.md \
   docs/en/06-verification/10-service-deployment-control-data-plane-2026-06-04.md
+cargo test --all-targets --all-features
 ```
 
-`cargo test` 不属于本次文档刷新必要验证项，因为没有代码、配置或测试行为变化。
+Rust 实现变更必须通过 focused storage/service/Web/CLI 测试和全量 `cargo test --all-targets --all-features`。

@@ -586,6 +586,38 @@ async fn partitioned_sqlite_totals_report_missing_active_shards() {
 }
 
 #[tokio::test]
+async fn partitioned_sqlite_topology_snapshot_reports_missing_active_shards() {
+    let paths = runtime_paths();
+    let control_path = paths.database_file();
+    let shard_path = paths.repository_shard_database_file("repo-alpha");
+    {
+        let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths.clone())
+            .expect("store opens");
+        store
+            .upsert_code_repository(registration("repo-alpha", "alpha"))
+            .await
+            .expect("alpha registers");
+        store
+            .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
+            .await
+            .expect("alpha indexes");
+    }
+    fs::remove_file(&shard_path).expect("shard file is removed");
+    let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store reopens");
+    let snapshot = store
+        .topology_snapshot()
+        .await
+        .expect("topology diagnostics should load");
+
+    assert_eq!(snapshot.shards.len(), 1);
+    assert_eq!(snapshot.shards[0].repository_id, "repo-alpha");
+    assert_eq!(snapshot.shards[0].state, "active");
+    assert_eq!(snapshot.shards[0].source_scope_count, 1);
+    assert!(!snapshot.shards[0].exists);
+    assert!(snapshot.shards[0].resolved_path.contains("repositories"));
+}
+
+#[tokio::test]
 async fn partitioned_sqlite_remove_missing_shard_does_not_delete_control_repository() {
     let paths = runtime_paths();
     let control_path = paths.database_file();
