@@ -117,6 +117,32 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
     server.await.expect("server task should finish");
 }
 
+#[tokio::test]
+async fn remote_index_reset_and_worker_are_rejected_without_local_fallback() {
+    for action in [
+        CliAction::Repo(repo_cli::RepoCommand::IndexReset {
+            alias: "fixture".to_owned(),
+        }),
+        CliAction::Repo(repo_cli::RepoCommand::IndexWorker { task_id: None }),
+    ] {
+        let error = remote_cli::run_remote(
+            &NetworkEnvOverrides::default(),
+            "http://127.0.0.1:1",
+            &action,
+            context("remote-maintenance"),
+            OutputFormat::Json,
+        )
+        .await
+        .expect_err("remote maintenance should be rejected before transport");
+
+        assert!(
+            error
+                .to_string()
+                .contains("run maintenance on the service host")
+        );
+    }
+}
+
 fn context(name: &str) -> RequestContext {
     RequestContext::with_ids(
         InterfaceKind::Cli,

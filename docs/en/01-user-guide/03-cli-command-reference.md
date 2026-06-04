@@ -6,7 +6,7 @@ This chapter is an executable command index. Workflow details live in later chap
 
 When `--format json` or `--format streaming-json` is requested, parse diagnostics and runtime API failures written to stderr are JSON. Runtime API failures use the stable API error shape with `error_kind`, `message`, and optional `metadata`; text and markdown formats keep human-readable stderr messages.
 
-To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode currently covers only `repo index`, `repo scope preview`, `repo status`, and `repo query` for repositories already registered on the service host; other commands do not implicitly write local runtime storage.
+To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode currently covers only `repo index`, `repo scope preview`, `repo status`, and `repo query` for repositories already registered on the service host. `repo index --reset` and `repo index-worker` are rejected while remote mode is selected and must be run on the service host; unrelated local commands such as `status` and `health` keep using local runtime state when only the environment variable is set.
 
 ## 3.1 Common Status Commands
 

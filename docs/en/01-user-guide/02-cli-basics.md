@@ -12,7 +12,7 @@ The CLI uses git-style subcommands. Global `--format` and `--remote <base-url>` 
 relay-knowledge [command] [command options] [--remote <base-url>] [--format text|json|markdown|streaming-json]
 ```
 
-`--remote` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL` sends supported code repository index, scope preview, status, and query commands to the resident service HTTP API instead of opening local runtime storage. Remote mode does not run `repo index-worker`; index tasks are drained by the bounded worker pool in the remote `service run --web` process.
+`--remote` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL` sends supported code repository index, scope preview, status, and query commands to the resident service HTTP API instead of opening local runtime storage. Remote mode does not run `repo index-worker`; index tasks are drained by the bounded worker pool in the remote `service run --web` process. Remote-selected `repo index --reset` and `repo index-worker` commands are rejected so maintenance cannot accidentally clear or drain local state.
 
 Calling the binary without a subcommand is equivalent to `status`. Help examples:
 

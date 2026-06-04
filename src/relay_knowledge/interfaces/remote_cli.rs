@@ -30,6 +30,13 @@ pub(super) fn supports(action: &CliAction) -> bool {
     )
 }
 
+pub(super) fn blocks_local_fallback(action: &CliAction) -> bool {
+    matches!(
+        action,
+        CliAction::Repo(RepoCommand::IndexReset { .. } | RepoCommand::IndexWorker { .. })
+    )
+}
+
 pub(super) async fn run_remote(
     network: &NetworkEnvOverrides,
     base_url: &str,
@@ -169,6 +176,12 @@ pub(super) async fn run_remote(
                 format,
             )
             .map(Some)
+        }
+        RepoCommand::IndexReset { .. } | RepoCommand::IndexWorker { .. } => {
+            Err(CliError::ApiFailed(
+                "remote CLI mode does not support repo index reset or repo index-worker; run maintenance on the service host"
+                    .to_owned(),
+            ))
         }
         _ => Ok(None),
     }

@@ -658,7 +658,7 @@ fn remote_selection(command: &CliCommand, env_base_url: Option<String>) -> Optio
             explicit: true,
         });
     }
-    if remote_cli::supports(&command.action) {
+    if remote_cli::supports(&command.action) || remote_cli::blocks_local_fallback(&command.action) {
         return env_base_url.map(|base_url| RemoteSelection {
             base_url,
             explicit: false,

@@ -327,7 +327,9 @@ Local CLIs can query a deployed resident service with `--remote <base-url>` or
 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote repository index commands submit
 durable tasks to the service and return task/status/checkpoint JSON; the remote
 `service run --web` worker pool drains those tasks rather than the local CLI
-running `repo index-worker`.
+running `repo index-worker`. Remote maintenance commands such as
+`repo index --reset` and `repo index-worker` are rejected by a remote-selected
+CLI and must be run on the service host.
 
 Distinct task fingerprints are queued and leased independently, while identical
 full-index fingerprints reuse the active task.
