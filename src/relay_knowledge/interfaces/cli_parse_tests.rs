@@ -59,6 +59,11 @@ fn environment_remote_base_url_only_selects_supported_repo_commands() {
     let explicit_status = CliCommand::parse(["--remote", "http://127.0.0.1:8791", "status"])
         .expect("explicit remote status should parse");
 
+    assert!(!remote_environment_needed(&status));
+    assert!(remote_environment_needed(&repo_status));
+    assert!(remote_environment_needed(&repo_reset));
+    assert!(remote_environment_needed(&repo_worker));
+    assert!(remote_environment_needed(&explicit_status));
     assert_eq!(remote_selection(&status, env_remote.clone()), None);
     assert_eq!(
         remote_selection(&repo_status, env_remote),

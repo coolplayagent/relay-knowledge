@@ -116,3 +116,40 @@ fn parses_platform_and_relay_overrides() {
         Some("test".to_owned())
     );
 }
+
+#[test]
+fn remote_cli_subset_ignores_unrelated_invalid_local_overrides() {
+    let pairs = [
+        (RELAY_KNOWLEDGE_REMOTE_BASE_URL, "https://relay.example"),
+        (RELAY_KNOWLEDGE_DATA_DIR, ""),
+        (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "0"),
+        (RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS, "32"),
+    ];
+    let remote = RemoteCliEnvironmentConfig::from_pairs(PlatformKind::Unix, pairs)
+        .expect("remote subset should ignore unrelated local settings");
+
+    assert_eq!(
+        remote.remote_cli.base_url,
+        Some("https://relay.example".to_owned())
+    );
+    assert_eq!(remote.network.qos_max_connections, Some(32));
+
+    let error = EnvironmentConfig::from_pairs(PlatformKind::Unix, pairs)
+        .expect_err("full environment should still reject local settings");
+    assert_eq!(error.variable, RELAY_KNOWLEDGE_DATA_DIR);
+}
+
+#[test]
+fn remote_cli_subset_validates_network_overrides() {
+    let error = RemoteCliEnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            (RELAY_KNOWLEDGE_REMOTE_BASE_URL, "https://relay.example"),
+            (RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS, "0"),
+        ],
+    )
+    .expect_err("remote subset should validate network settings");
+
+    assert_eq!(error.variable, RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS);
+    assert_eq!(error.kind, EnvErrorKind::ZeroValue);
+}

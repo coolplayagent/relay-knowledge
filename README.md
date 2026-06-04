@@ -329,7 +329,9 @@ durable tasks to the service and return task/status/checkpoint JSON; the remote
 `service run --web` worker pool drains those tasks rather than the local CLI
 running `repo index-worker`. Remote maintenance commands such as
 `repo index --reset` and `repo index-worker` are rejected by a remote-selected
-CLI and must be run on the service host.
+CLI and must be run on the service host. Remote dispatch validates the remote
+URL and outbound network settings before HTTP; unrelated local runtime and
+retrieval settings are validated only when a command falls back to local state.
 
 Distinct task fingerprints are queued and leased independently, while identical
 full-index fingerprints reuse the active task.

@@ -36,7 +36,7 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
-    env::EnvironmentConfig,
+    env::{EnvironmentConfig, RemoteCliEnvironmentConfig},
 };
 
 use cli_render::{render_project_status, render_response, serialize_line};
@@ -615,9 +615,28 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
         return map_cli::run_map(map_command, context, command.format).await;
     }
 
+    let context = RequestContext::for_interface(InterfaceKind::Cli);
+    if remote_environment_needed(&command) {
+        let remote_environment = RemoteCliEnvironmentConfig::from_process()
+            .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
+        if let Some(remote) = remote_selection(&command, remote_environment.remote_cli.base_url) {
+            let remote_output = remote_cli::run_remote(
+                &remote_environment.network,
+                &remote.base_url,
+                &command.action,
+                context.clone(),
+                command.format,
+            )
+            .await?;
+            if let Some(output) = remote_output {
+                return Ok(output);
+            }
+            return Err(remote_unsupported_error());
+        }
+    }
+
     let environment = EnvironmentConfig::from_process()
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
-    let context = RequestContext::for_interface(InterfaceKind::Cli);
     if let Some(remote) = remote_selection(&command, environment.remote_cli.base_url.clone()) {
         let remote_output = remote_cli::run_remote(
             &environment.network,
@@ -630,12 +649,7 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
         if let Some(output) = remote_output {
             return Ok(output);
         }
-        if remote.explicit {
-            return Err(CliError::ApiFailed(
-                "remote CLI mode supports repo index, repo scope preview, repo status, and repo query"
-                    .to_owned(),
-            ));
-        }
+        return Err(remote_unsupported_error());
     }
 
     let service = RelayKnowledgeService::from_environment(&environment)
@@ -643,6 +657,13 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
 
     run_with_service(&service, command, context).await
+}
+
+fn remote_unsupported_error() -> CliError {
+    CliError::ApiFailed(
+        "remote CLI mode supports repo index, repo scope preview, repo status, and repo query"
+            .to_owned(),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -666,6 +687,12 @@ fn remote_selection(command: &CliCommand, env_base_url: Option<String>) -> Optio
     }
 
     None
+}
+
+fn remote_environment_needed(command: &CliCommand) -> bool {
+    command.remote_base_url.is_some()
+        || remote_cli::supports(&command.action)
+        || remote_cli::blocks_local_fallback(&command.action)
 }
 
 /// Runs a parsed CLI command with an already composed service.

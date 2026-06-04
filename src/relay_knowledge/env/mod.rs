@@ -293,6 +293,35 @@ pub struct EnvironmentConfig {
     pub storage_topology: Option<String>,
 }
 
+/// Environment subset needed before a remote CLI command can dispatch over HTTP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteCliEnvironmentConfig {
+    pub network: NetworkEnvOverrides,
+    pub remote_cli: RemoteCliEnvOverrides,
+}
+
+impl RemoteCliEnvironmentConfig {
+    /// Reads the current process environment for remote CLI dispatch only.
+    pub fn from_process() -> Result<Self, EnvError> {
+        Self::from_pairs(PlatformKind::current(), process_env::vars_os())
+    }
+
+    /// Parses a deterministic remote CLI environment snapshot.
+    pub fn from_pairs<I, K, V>(platform: PlatformKind, pairs: I) -> Result<Self, EnvError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<OsString>,
+        V: Into<OsString>,
+    {
+        let values = values_from_pairs(platform, pairs);
+
+        Ok(Self {
+            network: parse_network_overrides(&values)?,
+            remote_cli: parse_remote_cli_overrides(&values)?,
+        })
+    }
+}
+
 impl EnvironmentConfig {
     /// Reads and validates the current process environment.
     pub fn from_process() -> Result<Self, EnvError> {
@@ -306,10 +335,7 @@ impl EnvironmentConfig {
         K: Into<OsString>,
         V: Into<OsString>,
     {
-        let values = pairs
-            .into_iter()
-            .map(|(key, value)| (normalize_key(platform, key.into()), value.into()))
-            .collect::<HashMap<_, _>>();
+        let values = values_from_pairs(platform, pairs);
         let temp_variables: &[&'static str] = if platform == PlatformKind::Windows {
             &[TEMP, TMP, TMPDIR]
         } else {
@@ -340,49 +366,8 @@ impl EnvironmentConfig {
                 runtime_dir: path_var(&values, RELAY_KNOWLEDGE_RUNTIME_DIR)?,
                 service_dir: path_var(&values, RELAY_KNOWLEDGE_SERVICE_DIR)?,
             },
-            network: NetworkEnvOverrides {
-                http_bind: string_var(&values, RELAY_KNOWLEDGE_HTTP_BIND)?,
-                http_request_timeout_ms: positive_u64_var(
-                    &values,
-                    RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS,
-                )?,
-                http_shutdown_timeout_ms: positive_u64_var(
-                    &values,
-                    RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS,
-                )?,
-                http_max_body_bytes: positive_u64_var(
-                    &values,
-                    RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES,
-                )?,
-                proxy: first_string_var(
-                    &values,
-                    &[
-                        HTTPS_PROXY,
-                        HTTPS_PROXY_LOWER,
-                        HTTP_PROXY,
-                        HTTP_PROXY_LOWER,
-                        ALL_PROXY,
-                        ALL_PROXY_LOWER,
-                    ],
-                )?,
-                no_proxy: first_string_var(&values, &[NO_PROXY, NO_PROXY_LOWER])?,
-                ssl_verify: first_bool_var(&values, &[SSL_VERIFY, SSL_VERIFY_LOWER])?,
-                qos_max_connections: positive_usize_var(
-                    &values,
-                    RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS,
-                )?,
-                qos_max_in_flight_requests: positive_usize_var(
-                    &values,
-                    RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS,
-                )?,
-                qos_max_queue_depth: positive_usize_var(
-                    &values,
-                    RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH,
-                )?,
-            },
-            remote_cli: RemoteCliEnvOverrides {
-                base_url: string_var(&values, RELAY_KNOWLEDGE_REMOTE_BASE_URL)?,
-            },
+            network: parse_network_overrides(&values)?,
+            remote_cli: parse_remote_cli_overrides(&values)?,
             agent: AgentEnvOverrides {
                 mcp_streamable_http_enabled: bool_var(
                     &values,
@@ -505,6 +490,59 @@ impl EnvironmentConfig {
             storage_topology: string_var(&values, RELAY_KNOWLEDGE_STORAGE_TOPOLOGY)?,
         })
     }
+}
+
+fn values_from_pairs<I, K, V>(platform: PlatformKind, pairs: I) -> HashMap<OsString, OsString>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: Into<OsString>,
+    V: Into<OsString>,
+{
+    pairs
+        .into_iter()
+        .map(|(key, value)| (normalize_key(platform, key.into()), value.into()))
+        .collect()
+}
+
+fn parse_network_overrides(
+    values: &HashMap<OsString, OsString>,
+) -> Result<NetworkEnvOverrides, EnvError> {
+    Ok(NetworkEnvOverrides {
+        http_bind: string_var(values, RELAY_KNOWLEDGE_HTTP_BIND)?,
+        http_request_timeout_ms: positive_u64_var(values, RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS)?,
+        http_shutdown_timeout_ms: positive_u64_var(
+            values,
+            RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS,
+        )?,
+        http_max_body_bytes: positive_u64_var(values, RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES)?,
+        proxy: first_string_var(
+            values,
+            &[
+                HTTPS_PROXY,
+                HTTPS_PROXY_LOWER,
+                HTTP_PROXY,
+                HTTP_PROXY_LOWER,
+                ALL_PROXY,
+                ALL_PROXY_LOWER,
+            ],
+        )?,
+        no_proxy: first_string_var(values, &[NO_PROXY, NO_PROXY_LOWER])?,
+        ssl_verify: first_bool_var(values, &[SSL_VERIFY, SSL_VERIFY_LOWER])?,
+        qos_max_connections: positive_usize_var(values, RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS)?,
+        qos_max_in_flight_requests: positive_usize_var(
+            values,
+            RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS,
+        )?,
+        qos_max_queue_depth: positive_usize_var(values, RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH)?,
+    })
+}
+
+fn parse_remote_cli_overrides(
+    values: &HashMap<OsString, OsString>,
+) -> Result<RemoteCliEnvOverrides, EnvError> {
+    Ok(RemoteCliEnvOverrides {
+        base_url: string_var(values, RELAY_KNOWLEDGE_REMOTE_BASE_URL)?,
+    })
 }
 
 fn normalize_key(platform: PlatformKind, key: OsString) -> OsString {
