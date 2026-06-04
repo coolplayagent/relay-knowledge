@@ -17,8 +17,9 @@ pub use context::{InterfaceKind, RequestContext};
 pub use error::{ApiError, ErrorKind};
 pub use metadata::ApiMetadata;
 pub use operations::{
-    AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeRepositoryFeatureFlagsResponse,
-    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeIndexWorkerStatus,
+    CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
+    CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest,
     CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse, CodeRepositoryReportResponse,
     CodeRepositoryScopeMetadata, CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,

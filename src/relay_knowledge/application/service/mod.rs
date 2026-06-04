@@ -710,6 +710,7 @@ impl RelayKnowledgeService {
             store.worker_statuses().await.map_err(storage_api_error)?,
             &self.runtime.workers,
         );
+        let code_index_workers = self.code_index_worker_status(&store).await?;
         let proposal_backlog = store
             .list_proposals(ProposalListRequest {
                 state: Some(ProposalState::Proposed),
@@ -732,6 +733,7 @@ impl RelayKnowledgeService {
             agent_protocols: agent_protocol_status(&self.runtime),
             operator,
             workers,
+            code_index_workers,
             proposal_backlog,
             audit_sink: crate::api::AuditSinkStatus {
                 durable: true,

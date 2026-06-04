@@ -3,7 +3,7 @@
 [中文](../../zh/03-architecture-specs/01-architecture-vision-and-algorithm-map.md) | [English](../../en/03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
 
 > 文档版本: 2.1
-> 编制日期: 2026-05-28
+> 编制日期: 2026-06-04
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -32,7 +32,8 @@ Application Services: policy, orchestration, freshness, budgets
         +--> Retrieval: BM25, semantic, vector, graph expansion, rerank
         +--> Indexing: mutation log consumers and scoped read models
         +--> Storage: graph facts, evidence, versions, mutation log
-        +--> Background Workers: parsing, OCR, embedding, recovery
+        +--> Resident Master: lifecycle, recovery, queue supervision, shutdown
+        +--> Worker Pools: leased code indexing, parsing, OCR, embedding, recovery
         +--> Observability: logs, metrics, traces, diagnostics
         |
         v
@@ -40,6 +41,8 @@ Domain Model: source scope, evidence, facts, code graph, errors
 ```
 
 依赖方向必须单向向内。任何 UI、协议 adapter 或 worker 都不能直接访问 SQLite、tree-sitter parser、embedding client 或 index writer；它们只能请求应用服务执行受预算、权限和 freshness policy 约束的工作。
+
+常驻服务对重型后台工作采用 nginx-style master-worker 形态：master 解析配置、启动有界 worker pool、恢复过期或孤儿 lease、暴露诊断并协调优雅关闭；worker 只能通过 application service claim durable task，持有 attempt-scoped lease，续租，执行有界 batch，并上报完成或失败。相对当前分散的后台能力，这种结构把并发语义显式化：不同仓库可以并行索引，同一仓库仍最多一个 live writer，普通查询继续通过有界只读路径读取 committed snapshot，而不是等待 full-index work。
 
 `src/relay_knowledge/domain` 源码树按高内聚领域职责组织，同时保持
 `crate::domain::{...}` 的 crate 级 API 稳定：`core/` 负责 source scope、graph

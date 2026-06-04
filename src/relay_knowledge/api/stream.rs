@@ -113,6 +113,7 @@ mod tests {
                 worker_vision_endpoint_configured: false,
                 worker_extractor_endpoint_configured: false,
                 worker_max_in_flight: 2,
+                code_index_max_in_flight: 2,
                 silent_updates_enabled: false,
                 file_index_enabled: false,
                 file_index_root_count: 0,

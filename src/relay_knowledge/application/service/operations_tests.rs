@@ -8,10 +8,14 @@ use crate::{
     },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        EvidenceModality, ProposalState, ServiceManagerAction, ServiceOperatorState, WorkerKind,
+        CodeIndexMode, CodeIndexResourceBudget, CodeRepositoryRegistration, EvidenceModality,
+        ProposalState, ServiceManagerAction, ServiceOperatorState, WorkerKind,
     },
     env::{EnvironmentConfig, PlatformKind},
-    storage::{KnowledgeStore, SqliteGraphStore},
+    storage::{
+        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore, KnowledgeStore,
+        SqliteGraphStore,
+    },
 };
 
 #[tokio::test]
@@ -72,6 +76,175 @@ async fn service_status_hides_mcp_subcapabilities_when_mcp_runtime_is_disabled()
     assert!(!response.agent_protocols.mcp_streamable_http_enabled);
     assert!(!response.agent_protocols.mcp_resources_enabled);
     assert!(!response.agent_protocols.mcp_prompts_enabled);
+}
+
+#[tokio::test]
+async fn service_status_reports_code_index_master_worker_diagnostics() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let running = store
+        .queue_code_index_task(code_index_seed("fp-running", "scope-running", 10))
+        .await
+        .expect("running task should queue");
+    store
+        .queue_code_index_task(code_index_seed("fp-queued", "scope-queued", 11))
+        .await
+        .expect("queued task should persist");
+    store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(running.task_id),
+            lease_owner: "worker-a".to_owned(),
+            lease_duration_ms: 600_000,
+            max_attempts: 3,
+            now_ms: current_time_millis(),
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should claim");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT", "4"),
+        ],
+    )
+    .expect("environment should parse");
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+    let service =
+        RelayKnowledgeService::with_store(runtime, store.clone() as Arc<dyn KnowledgeStore>);
+
+    let status = service
+        .service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-code-index-workers",
+            "trace-code-index-workers",
+        ))
+        .await
+        .expect("service status should load");
+    let project = service
+        .project_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-project",
+            "trace-project",
+        ))
+        .await
+        .expect("project status should load");
+
+    assert_eq!(status.code_index_workers.configured_worker_count, 4);
+    assert_eq!(status.code_index_workers.active_worker_slots, 3);
+    assert_eq!(status.code_index_workers.queue_depth, 1);
+    assert_eq!(status.code_index_workers.queued_task_count, 1);
+    assert_eq!(status.code_index_workers.running_task_count, 1);
+    assert_eq!(status.code_index_workers.running_lease_count, 1);
+    assert_eq!(project.runtime.code_index_max_in_flight, 4);
+}
+
+#[tokio::test]
+async fn service_status_recovers_expired_code_index_leases_before_diagnostics() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let expired = store
+        .queue_code_index_task(code_index_seed("fp-expired", "scope-expired", 10))
+        .await
+        .expect("expired task should queue");
+    store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(expired.task_id),
+            lease_owner: "worker-expired".to_owned(),
+            lease_duration_ms: 1,
+            max_attempts: 3,
+            now_ms: 20,
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should claim");
+    let service = RelayKnowledgeService::with_store(
+        runtime().await,
+        store.clone() as Arc<dyn KnowledgeStore>,
+    );
+
+    let status = service
+        .service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-expired-code-index-workers",
+            "trace-expired-code-index-workers",
+        ))
+        .await
+        .expect("service status should load");
+
+    assert_eq!(status.code_index_workers.running_task_count, 0);
+    assert_eq!(status.code_index_workers.running_lease_count, 0);
+    assert_eq!(status.code_index_workers.retrying_task_count, 1);
+    assert_eq!(status.code_index_workers.queue_depth, 1);
+    assert_eq!(
+        status.code_index_workers.last_error.as_deref(),
+        Some("code index task lease expired")
+    );
+}
+
+#[tokio::test]
+async fn service_status_recovers_orphaned_code_index_leases_before_diagnostics() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let orphaned = store
+        .queue_code_index_task(code_index_seed("fp-orphaned", "scope-orphaned", 10))
+        .await
+        .expect("orphaned task should queue");
+    store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(orphaned.task_id),
+            lease_owner: format!("code-index-worker-{}", u32::MAX),
+            lease_duration_ms: 600_000,
+            max_attempts: 3,
+            now_ms: current_time_millis(),
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should claim");
+    let service = RelayKnowledgeService::with_store(
+        runtime().await,
+        store.clone() as Arc<dyn KnowledgeStore>,
+    );
+
+    let status = service
+        .service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-orphaned-code-index-workers",
+            "trace-orphaned-code-index-workers",
+        ))
+        .await
+        .expect("service status should load");
+
+    assert_eq!(status.code_index_workers.running_task_count, 0);
+    assert_eq!(status.code_index_workers.running_lease_count, 0);
+    assert_eq!(status.code_index_workers.retrying_task_count, 1);
+    assert_eq!(status.code_index_workers.queue_depth, 1);
+    assert_eq!(
+        status.code_index_workers.last_error.as_deref(),
+        Some("code index task lease owner process is not running")
+    );
 }
 
 #[tokio::test]
@@ -280,6 +453,10 @@ async fn extractor_worker_structured_facts_remain_proposed_with_provenance() {
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    RelayKnowledgeService::with_store(runtime().await, store as Arc<dyn KnowledgeStore>)
+}
+
+async fn runtime() -> RuntimeConfiguration {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
@@ -289,11 +466,9 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
         ],
     )
     .expect("environment should parse");
-    let runtime = RuntimeConfiguration::from_environment(&environment)
+    RuntimeConfiguration::from_environment(&environment)
         .await
-        .expect("runtime should compose");
-
-    RelayKnowledgeService::with_store(runtime, store as Arc<dyn KnowledgeStore>)
+        .expect("runtime should compose")
 }
 
 async fn service_with_worker_endpoint(endpoint: &str) -> RelayKnowledgeService {
@@ -315,6 +490,14 @@ async fn service_with_worker_endpoint(endpoint: &str) -> RelayKnowledgeService {
     RelayKnowledgeService::with_store(runtime, store as Arc<dyn KnowledgeStore>)
 }
 
+fn current_time_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
 fn ingest_request(evidence: Vec<IngestEvidence>) -> IngestRequest {
     IngestRequest {
         source_scope: "docs".to_owned(),
@@ -322,6 +505,24 @@ fn ingest_request(evidence: Vec<IngestEvidence>) -> IngestRequest {
         relations: Vec::new(),
         claims: Vec::new(),
         events: Vec::new(),
+    }
+}
+
+fn code_index_seed(fingerprint: &str, source_scope: &str, now_ms: u64) -> CodeIndexTaskSeed {
+    CodeIndexTaskSeed {
+        repository_id: "repo".to_owned(),
+        alias: "fixture".to_owned(),
+        ref_selector: "HEAD".to_owned(),
+        resolved_commit_sha: format!("commit-{source_scope}"),
+        tree_hash: format!("tree-{source_scope}"),
+        source_scope: source_scope.to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        mode: CodeIndexMode::Full,
+        input_fingerprint: fingerprint.to_owned(),
+        resource_budget: CodeIndexResourceBudget::default(),
+        payload_json: "{}".to_owned(),
+        now_ms,
     }
 }
 

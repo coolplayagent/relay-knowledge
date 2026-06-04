@@ -3,11 +3,12 @@
 use crate::domain::{
     CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
     CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
-    CodeIndexTaskRecord, CodeRepositoryCrossEdge, CodeRepositoryRegistration,
-    CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositorySet, CodeRepositorySetMember,
-    CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus,
-    CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
-    CodeScopeRetentionSummary, SoftwareGlobalProjection, SoftwareGlobalRequest,
+    CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeRepositoryCrossEdge,
+    CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
+    CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
+    CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
+    CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
+    SoftwareGlobalProjection, SoftwareGlobalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -295,6 +296,10 @@ pub trait CodeRepositoryStore: Send + Sync {
         &self,
         repository_id: String,
     ) -> StorageFuture<'_, Option<CodeIndexTaskRecord>>;
+
+    fn code_index_task_queue_status(&self) -> StorageFuture<'_, CodeIndexTaskQueueStatus> {
+        Box::pin(async { Ok(CodeIndexTaskQueueStatus::default()) })
+    }
 
     fn code_index_checkpoint(
         &self,

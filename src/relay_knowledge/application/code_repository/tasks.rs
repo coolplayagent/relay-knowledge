@@ -1,5 +1,8 @@
 use crate::{
-    api::{ApiError, ApiMetadata, CodeRepositoryIndexResetResponse, RequestContext},
+    api::{
+        ApiError, ApiMetadata, CodeIndexWorkerStatus, CodeRepositoryIndexResetResponse,
+        RequestContext,
+    },
     application::service::RelayKnowledgeService,
 };
 
@@ -52,5 +55,21 @@ impl RelayKnowledgeService {
         recover_orphaned_code_index_task_leases(&store, now_millis())
             .await
             .map(|_| ())
+    }
+
+    pub(crate) async fn code_index_worker_status(
+        &self,
+        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    ) -> Result<CodeIndexWorkerStatus, ApiError> {
+        recover_orphaned_code_index_task_leases(store, now_millis()).await?;
+        let queue = store
+            .code_index_task_queue_status()
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(CodeIndexWorkerStatus::from_queue(
+            self.runtime.workers.code_index_max_in_flight,
+            queue,
+        ))
     }
 }

@@ -10,7 +10,7 @@
 
 `relay-knowledge` 的服务化部署路线是 SQLite-first 的控制面/数据面分离，而不是立即引入外部图数据库、消息队列或 Kubernetes operator。v1 继续保持本地零依赖和单二进制体验，同时把现有 `service run`、HTTP `/api/*`、MCP、QoS、持久 worker 队列、operator 状态和 `partitioned_sqlite` 明确为可演进的服务化底座。
 
-控制面拥有配置、权限、API、任务租约、审计、运行状态、拓扑 catalog、升级/回滚和诊断。数据面拥有图事实、代码事实、派生索引、查询执行和仓库 shard。所有接口必须通过 application service 和 storage trait 进入，不能让 Web、MCP、CLI 或 worker 直接访问 SQLite shard、外部后端或索引文件。
+控制面拥有配置、权限、API、任务租约、审计、运行状态、拓扑 catalog、升级/回滚、诊断，以及监督有界 worker pool 的 resident master。数据面拥有图事实、代码事实、派生索引、查询执行和仓库 shard。所有接口必须通过 application service 和 storage trait 进入，不能让 Web、MCP、CLI 或 worker 直接访问 SQLite shard、外部后端或索引文件。
 
 ## 2. 竞品技术结论
 
@@ -43,7 +43,7 @@ v1 支持并文档化四种拓扑：
 | 拓扑 | 控制面 | 数据面 | 用途 |
 | --- | --- | --- | --- |
 | `embedded_cli` | CLI 进程内 application service | `single_sqlite` | 临时命令、测试、开发机一次性操作 |
-| `resident_single_process` | `service run` HTTP/Web/MCP/operator/worker | `single_sqlite` | 默认常驻服务，最小运维成本 |
+| `resident_single_process` | `service run` HTTP/Web/MCP/operator/master-worker pools | `single_sqlite` | 默认常驻服务，最小运维成本 |
 | `resident_partitioned_sqlite` | 主 SQLite 控制库 | 每仓库 SQLite shard | 大仓库和多仓库本地扩展 |
 | `split_worker_preview` | 常驻控制服务 | 独立 worker 进程 claim task 后工作 | 未来进程级扩展，禁止无 lease 写入 |
 
@@ -56,6 +56,7 @@ v1 支持并文档化四种拓扑：
 - runtime/config/status/health/doctor，不执行长任务、不阻塞查询热路径。
 - service manager plan、definition write、operator pause/resume/status。
 - worker task queue、lease、retry、dead-letter、checkpoint、progress 和 reset。
+- code-index master-worker 诊断，包括 configured workers、active worker slots、queue depth、running leases、retry/dead-letter state。
 - storage topology、shard catalog、backup/migration/rollback/uninstall diagnostics。
 - repository register/index/status/report/set overlay refresh。
 - audit、authorization identity、request id、trace id、QoS admission 和 overload decision。

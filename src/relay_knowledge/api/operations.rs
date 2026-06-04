@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactPathGroups, CodeImpactRequest,
-        CodeIndexCheckpoint, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryRegistration,
-        CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositoryScopePreview,
-        CodeRepositorySelector, CodeRepositorySet, CodeRepositorySetAddMemberRequest,
-        CodeRepositorySetCreateRequest, CodeRepositorySetMember, CodeRepositorySetQueryHit,
-        CodeRepositorySetQueryRequest, CodeRepositorySetRefreshSummary,
+        CodeIndexCheckpoint, CodeIndexSummary, CodeIndexTaskQueueStatus, CodeIndexTaskRecord,
+        CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
+        CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositorySet,
+        CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest, CodeRepositorySetMember,
+        CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest, CodeRepositorySetRefreshSummary,
         CodeRepositorySetRefreshTaskRecord, CodeRepositorySetRemoveMemberRequest,
         CodeRepositorySetStatus, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
         CodeRetrievalRequest, CodeScopeRetentionSummary, CommitReceipt, ConfidenceScore,
@@ -424,8 +424,45 @@ pub struct ServiceStatusResponse {
     pub agent_protocols: AgentProtocolStatus,
     pub operator: ServiceOperatorStatus,
     pub workers: Vec<WorkerStatus>,
+    pub code_index_workers: CodeIndexWorkerStatus,
     pub proposal_backlog: usize,
     pub audit_sink: AuditSinkStatus,
+}
+
+/// Master-worker diagnostics for repository code indexing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexWorkerStatus {
+    pub configured_worker_count: usize,
+    pub active_worker_slots: usize,
+    pub queue_depth: usize,
+    pub queued_task_count: usize,
+    pub running_task_count: usize,
+    pub retrying_task_count: usize,
+    pub dead_letter_task_count: usize,
+    pub running_lease_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+impl CodeIndexWorkerStatus {
+    /// Overlays resident master runtime configuration onto durable task queue state.
+    pub fn from_queue(configured_worker_count: usize, queue: CodeIndexTaskQueueStatus) -> Self {
+        let queue_depth = queue
+            .queued_task_count
+            .saturating_add(queue.retrying_task_count);
+
+        Self {
+            configured_worker_count,
+            active_worker_slots: configured_worker_count.saturating_sub(queue.running_task_count),
+            queue_depth,
+            queued_task_count: queue.queued_task_count,
+            running_task_count: queue.running_task_count,
+            retrying_task_count: queue.retrying_task_count,
+            dead_letter_task_count: queue.dead_letter_task_count,
+            running_lease_count: queue.running_lease_count,
+            last_error: queue.last_error,
+        }
+    }
 }
 
 /// Durable audit sink health surfaced in service diagnostics.
