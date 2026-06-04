@@ -6,35 +6,20 @@ use std::{
 use super::{
     CodeIndexError,
     changes::{
-        GitChange, GitTreeEntry, TrackedEntryScope, diff_changes, git_dir_bytes,
-        parse_name_status_z, submodule_git_dir, submodule_git_dir_from_git_dir,
-        submodule_worktree_root, tracked_entries, tracked_entries_from_git_dir_with_scope,
-        tracked_entries_with_scope,
+        GitChange, TrackedEntryScope, diff_changes, git_dir_bytes, parse_name_status_z,
+        submodule_git_dir, submodule_git_dir_from_git_dir, submodule_worktree_root,
+        tracked_entries_from_git_dir_with_scope, tracked_entries_with_scope,
     },
     git::git_bytes,
-    source_gitlink_paths::bounded_expanded_paths_under_with_selector,
 };
 
 pub(super) use super::source_gitlink_paths::{
-    GitlinkPathExpansion, SubmoduleChangedPathSets, SubmodulePathEntry,
-    bounded_expanded_paths_under,
+    GitlinkPathExpansion, GitlinkTarget, GitlinkTargetLocation, SubmoduleChangedPathSets,
+    SubmodulePathEntry, bounded_expanded_paths_under,
 };
 pub(super) use super::source_gitlink_selector::GitlinkPathSelector;
 
 const MAX_NESTED_GITLINK_DIFF_DEPTH: usize = 8;
-
-#[derive(Debug)]
-struct GitlinkTarget {
-    location: GitlinkTargetLocation,
-    commit: String,
-    path: String,
-}
-
-#[derive(Debug)]
-enum GitlinkTargetLocation {
-    Worktree(PathBuf),
-    GitDir(PathBuf),
-}
 
 pub(super) fn submodule_bytes(
     root: &Path,
@@ -77,8 +62,6 @@ pub(super) struct GitlinkImpactExpander<'a> {
     root: &'a Path,
     base_commit: String,
     head_commit: String,
-    base_entries: Option<Vec<GitTreeEntry>>,
-    head_entries: Option<Vec<GitTreeEntry>>,
     max_paths: usize,
 }
 
@@ -93,8 +76,6 @@ impl<'a> GitlinkImpactExpander<'a> {
             root,
             base_commit,
             head_commit,
-            base_entries: None,
-            head_entries: None,
             max_paths,
         }
     }
@@ -106,15 +87,19 @@ impl<'a> GitlinkImpactExpander<'a> {
         include_head: bool,
         selector: &GitlinkPathSelector<'_>,
     ) -> Result<Option<Vec<String>>, CodeIndexError> {
-        let base_is_gitlink =
-            include_base && gitlink_commit_at_tree(self.root, &self.base_commit, path)?.is_some();
-        let head_is_gitlink =
-            include_head && gitlink_commit_at_tree(self.root, &self.head_commit, path)?.is_some();
-        if !base_is_gitlink && !head_is_gitlink {
+        let base_gitlink = include_base
+            .then(|| gitlink_commit_at_tree(self.root, &self.base_commit, path))
+            .transpose()?
+            .flatten();
+        let head_gitlink = include_head
+            .then(|| gitlink_commit_at_tree(self.root, &self.head_commit, path))
+            .transpose()?
+            .flatten();
+        if base_gitlink.is_none() && head_gitlink.is_none() {
             return Ok(None);
         }
-        if base_is_gitlink
-            && head_is_gitlink
+        if base_gitlink.is_some()
+            && head_gitlink.is_some()
             && let Some(paths) = changed_submodule_paths_for_parent_commits(
                 self.root,
                 path,
@@ -128,43 +113,29 @@ impl<'a> GitlinkImpactExpander<'a> {
         }
 
         let max_paths = self.max_paths;
-        let base_paths = if base_is_gitlink {
-            let base_entries = self.base_entries()?;
-            bounded_expanded_paths_under_with_selector(base_entries, path, max_paths, selector)?
-        } else {
-            BTreeSet::new()
+        let base_paths = match &base_gitlink {
+            Some(commit) => {
+                bounded_submodule_parent_paths(self.root, path, commit, max_paths, selector)?
+            }
+            None => BTreeSet::new(),
         };
-        let head_paths = if head_is_gitlink {
-            let head_entries = self.head_entries()?;
-            bounded_expanded_paths_under_with_selector(head_entries, path, max_paths, selector)?
-        } else {
-            BTreeSet::new()
+        let head_paths = match &head_gitlink {
+            Some(commit) => {
+                bounded_submodule_parent_paths(self.root, path, commit, max_paths, selector)?
+            }
+            None => BTreeSet::new(),
         };
         let mut paths = base_paths.union(&head_paths).cloned().collect::<Vec<_>>();
-        if include_base && !base_is_gitlink && selector.includes(path) {
+        if include_base && base_gitlink.is_none() && selector.includes(path) {
             paths.push(path.to_owned());
         }
-        if include_head && !head_is_gitlink && selector.includes(path) {
+        if include_head && head_gitlink.is_none() && selector.includes(path) {
             paths.push(path.to_owned());
         }
         paths.sort();
         paths.dedup();
 
         Ok(Some(paths))
-    }
-
-    fn base_entries(&mut self) -> Result<&[GitTreeEntry], CodeIndexError> {
-        if self.base_entries.is_none() {
-            self.base_entries = Some(tracked_entries(self.root, &self.base_commit)?);
-        }
-        Ok(self.base_entries.as_deref().unwrap_or(&[]))
-    }
-
-    fn head_entries(&mut self) -> Result<&[GitTreeEntry], CodeIndexError> {
-        if self.head_entries.is_none() {
-            self.head_entries = Some(tracked_entries(self.root, &self.head_commit)?);
-        }
-        Ok(self.head_entries.as_deref().unwrap_or(&[]))
     }
 }
 
@@ -869,8 +840,10 @@ fn gitlink_target_for_path(
             continue;
         }
         let location = match submodule_worktree_root(root, &prefix) {
-            Ok(submodule_root) => GitlinkTargetLocation::Worktree(submodule_root),
-            Err(_) => GitlinkTargetLocation::GitDir(submodule_git_dir(
+            Ok(submodule_root) if git_root_has_commit(&submodule_root, &entry.object) => {
+                GitlinkTargetLocation::Worktree(submodule_root)
+            }
+            _ => GitlinkTargetLocation::GitDir(submodule_git_dir(
                 root,
                 &prefix,
                 Some(commit),
@@ -888,6 +861,10 @@ fn gitlink_target_for_path(
     Err(CodeIndexError::InvalidInput(format!(
         "repository source path {path} is not a checked-out submodule path"
     )))
+}
+
+fn git_root_has_commit(root: &Path, commit: &str) -> bool {
+    git_bytes(root, ["cat-file", "-e", &format!("{commit}^{{commit}}")]).is_ok()
 }
 
 fn gitlink_target_for_git_dir_path(

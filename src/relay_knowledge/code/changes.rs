@@ -37,6 +37,7 @@ pub(crate) fn tracked_entries_call_count_for_root(root: &Path) -> usize {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 pub(super) fn tracked_entries(
     root: &Path,
     commit: &str,

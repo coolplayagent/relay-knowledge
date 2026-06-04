@@ -333,6 +333,12 @@ fn record_deleted_gitlink_overlay(
     };
     let entries =
         bounded_submodule_path_entries(root, path, &base_gitlink_commit, registration, selector)?;
+    if entries.is_empty() {
+        if scope::path_scope_overlaps(path, registration, selector) {
+            record_worktree_status_marker(path, overlay_hash_input);
+        }
+        return Ok(true);
+    }
     for entry in entries {
         if scope::path_is_selected(&entry.parent_path, registration, selector) {
             record_worktree_deleted_path(&entry.parent_path, overlay_hash_input, deleted_paths);
@@ -402,10 +408,14 @@ fn record_staged_gitlink_overlay(
         return Ok(false);
     }
     let path = &change.path;
+    let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
     let Some(staged_kind) = staged_path_kind(root, path)? else {
+        if let Some(base_gitlink_commit) = base_gitlink {
+            record_base_gitlink_child_deletions(root, path, &base_gitlink_commit, recorder)?;
+            return Ok(true);
+        }
         return Ok(false);
     };
-    let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
     let StagedPathKind::Gitlink(staged_commit) = staged_kind else {
         if let Some(base_gitlink_commit) = base_gitlink {
             record_base_gitlink_child_deletions(root, path, &base_gitlink_commit, recorder)?;

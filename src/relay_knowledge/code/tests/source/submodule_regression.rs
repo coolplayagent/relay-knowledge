@@ -332,6 +332,85 @@ fn worktree_overlay_deletes_base_children_for_unavailable_staged_gitlink() {
 }
 
 #[test]
+fn worktree_overlay_records_marker_for_unavailable_deleted_gitlink() {
+    let child = TempGitRepo::create("overlay-unavailable-delete-child");
+    child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("overlay-unavailable-delete-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    remove_submodule_checkout_and_gitdir(&parent, "src/module");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        previous_hashes,
+    )
+    .expect("worktree overlay should record unavailable gitlink deletion");
+
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("src/module/"))
+    );
+}
+
+#[test]
+fn worktree_overlay_deletes_children_for_cached_submodule_removal() {
+    let child = TempGitRepo::create("overlay-cached-remove-child");
+    child.write("lib.rs", "pub fn child_value() -> u32 { 1 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("overlay-cached-remove-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "src/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let registration = parent.registration();
+    let selector = parent.selector();
+    let previous_hashes = snapshot_fingerprints(build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    ));
+    parent.git(["rm", "--cached", "-f", "src/module"]);
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        previous_hashes,
+    )
+    .expect("cached submodule removal should delete indexed children");
+
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(
+        snapshot
+            .deleted_paths
+            .contains(&"src/module/lib.rs".to_owned())
+    );
+}
+
+#[test]
 fn configured_submodule_gitdir_must_contain_requested_commit() {
     let old_child = TempGitRepo::create("named-gitdir-old-child");
     old_child.write("old.rs", "pub fn old_child_value() -> u32 { 1 }\n");
@@ -406,6 +485,79 @@ fn tracked_entries_fall_back_to_gitdir_when_worktree_lacks_historical_commit() {
             .iter()
             .all(|entry| entry.path != "src/module/new.rs")
     );
+}
+
+#[test]
+fn full_snapshot_reads_cached_gitdir_when_worktree_lacks_historical_commit() {
+    let old_child = TempGitRepo::create("blob-fallback-old-child");
+    old_child.write("old.rs", "pub fn old_child_value() -> u32 { 1 }\n");
+    old_child.git(["add", "."]);
+    old_child.git(["commit", "-m", "old child"]);
+    let new_child = TempGitRepo::create("blob-fallback-new-child");
+    new_child.write("new.rs", "pub fn new_child_value() -> u32 { 1 }\n");
+    new_child.git(["add", "."]);
+    new_child.git(["commit", "-m", "new child"]);
+
+    let parent = TempGitRepo::create("blob-fallback-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_named_submodule(&parent, &old_child, "a_old", "src/module");
+    parent.git(["commit", "-am", "add old submodule"]);
+    let old_parent_commit = parent.git_text(["rev-parse", "HEAD"]);
+    parent.git(["rm", "-f", "src/module"]);
+    parent.git(["commit", "-m", "remove old submodule"]);
+    add_named_submodule(&parent, &new_child, "z_new", "src/module");
+    parent.git(["commit", "-am", "add new submodule"]);
+    let selector = CodeRepositorySelector::new("alias", &old_parent_commit, Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let snapshot = build_index_snapshot(
+        &parent.registration(),
+        &selector,
+        CodeIndexMode::Full,
+        Vec::new(),
+    )
+    .expect("historical snapshot should read blobs from cached gitdir");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/module/old.rs")
+    );
+}
+
+#[test]
+fn impact_type_change_expands_only_changed_submodule_path() {
+    let replacement_child = TempGitRepo::create("one-sided-impact-child");
+    replacement_child.write("lib.rs", "pub fn replacement_value() -> u32 { 1 }\n");
+    replacement_child.git(["add", "."]);
+    replacement_child.git(["commit", "-m", "replacement child"]);
+    let unrelated_child = TempGitRepo::create("one-sided-impact-unrelated");
+    unrelated_child.write("other.rs", "pub fn unrelated_value() -> u32 { 1 }\n");
+    unrelated_child.git(["add", "."]);
+    unrelated_child.git(["commit", "-m", "unrelated child"]);
+
+    let parent = TempGitRepo::create("one-sided-impact-parent");
+    parent.write("src/plugin.rs", "pub fn old_plugin() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &unrelated_child, "vendor/other");
+    parent.git(["commit", "-am", "add unrelated submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let unrelated_root = parent.path.join("vendor/other");
+    reset_tracked_entries_call_count_for_root(unrelated_root.clone());
+    parent.git(["rm", "src/plugin.rs"]);
+    add_submodule(&parent, &replacement_child, "src/plugin.rs");
+    parent.git(["commit", "-m", "replace file with submodule"]);
+
+    let paths = changed_paths_for_diff(&parent.path, &base, "HEAD")
+        .expect("impact paths should expand one-sided gitlink type changes");
+
+    assert!(paths.contains(&"src/plugin.rs".to_owned()));
+    assert!(paths.contains(&"src/plugin.rs/lib.rs".to_owned()));
+    assert_eq!(tracked_entries_call_count_for_root(&unrelated_root), 0);
 }
 
 #[test]

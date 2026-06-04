@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use super::{CodeIndexError, changes::GitTreeEntry, source_gitlink_selector::GitlinkPathSelector};
 
@@ -18,6 +18,19 @@ pub(super) struct GitlinkPathExpansion {
     pub(super) head_is_gitlink: bool,
     pub(super) base_paths: BTreeSet<String>,
     pub(super) head_paths: BTreeSet<String>,
+}
+
+#[derive(Debug)]
+pub(super) struct GitlinkTarget {
+    pub(super) location: GitlinkTargetLocation,
+    pub(super) commit: String,
+    pub(super) path: String,
+}
+
+#[derive(Debug)]
+pub(super) enum GitlinkTargetLocation {
+    Worktree(PathBuf),
+    GitDir(PathBuf),
 }
 
 pub(super) fn expanded_paths_under(entries: &[GitTreeEntry], path: &str) -> BTreeSet<String> {
