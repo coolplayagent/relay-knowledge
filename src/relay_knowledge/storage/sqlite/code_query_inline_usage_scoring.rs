@@ -1,7 +1,10 @@
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
-use super::code_query_path_ranking::{
-    path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
+use super::{
+    code_query_hybrid_planning::workflow_language_scope_matches,
+    code_query_path_ranking::{
+        path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
+    },
 };
 
 pub(super) fn language_scoped_inline_usage_chunk_bonus(
@@ -9,11 +12,13 @@ pub(super) fn language_scoped_inline_usage_chunk_bonus(
     query: &str,
     content: &str,
     path: &str,
+    language_id: &str,
     request: &CodeRetrievalRequest,
 ) -> f64 {
     if base_score <= 0.0
         || request.code_query_kind != CodeQueryKind::Hybrid
         || !query_has_language_scoped_inline_intent(query)
+        || !query_language_scope_matches_hit(query, language_id)
         || (path_looks_like_test_or_benchmark(path) && !query_mentions_test_or_benchmark(query))
         || !content_has_inline_invocation(content)
     {
@@ -48,6 +53,12 @@ fn query_has_language_scoped_inline_intent(query: &str) -> bool {
     })
 }
 
+fn query_language_scope_matches_hit(query: &str, language_id: &str) -> bool {
+    query_terms(query)
+        .iter()
+        .any(|term| workflow_language_scope_matches(language_id, term))
+}
+
 fn content_has_inline_invocation(content: &str) -> bool {
     let lower = content.to_ascii_lowercase();
     (content.contains("->") || content.contains("=>") || content.contains('|'))
@@ -80,6 +91,7 @@ mod tests {
             &request.query,
             "fun run(values: List<String>) = values.map { value -> client.newCall(value) }",
             "src/main/kotlin/example/Pipeline.kt",
+            "kotlin",
             &request,
         );
 
@@ -95,6 +107,7 @@ mod tests {
                 &request.query,
                 "values.map { value -> client.newCall(value) }",
                 "src/main/kotlin/example/Pipeline.kt",
+                "kotlin",
                 &request,
             ),
             0.0
@@ -107,7 +120,25 @@ mod tests {
                 &test_request.query,
                 "values.map { value -> client.newCall(value) }",
                 "tests/FakeClient.kt",
+                "kotlin",
                 &test_request,
+            ),
+            0.0
+        );
+    }
+
+    #[test]
+    fn inline_usage_bonus_requires_hit_language_to_match_query_language() {
+        let request = hybrid_request("kotlin lambda request handler timeout default trim");
+
+        assert_eq!(
+            language_scoped_inline_usage_chunk_bonus(
+                2.0,
+                &request.query,
+                "values.map(value => client.newCall(value))",
+                "src/main/typescript/example/pipeline.ts",
+                "typescript",
+                &request,
             ),
             0.0
         );

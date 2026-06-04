@@ -1,4 +1,7 @@
-use super::super::code_query_identifiers::identifier_terms_equivalent;
+use super::super::{
+    code_query_conversion_terms::conversion_action_term,
+    code_query_identifiers::identifier_terms_equivalent,
+};
 use super::identifier_search_tokens;
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
@@ -47,24 +50,6 @@ pub(super) fn conversion_symbol_bonus(
     } else {
         2.0
     }
-}
-
-fn conversion_action_term(term: &str) -> bool {
-    matches!(
-        term,
-        "adapt"
-            | "adapts"
-            | "convert"
-            | "conversion"
-            | "format"
-            | "formats"
-            | "map"
-            | "maps"
-            | "normalize"
-            | "normalized"
-            | "transform"
-            | "translate"
-    )
 }
 
 fn conversion_symbol_name_action_term(term: &str) -> bool {

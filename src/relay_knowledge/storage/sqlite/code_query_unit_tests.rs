@@ -318,6 +318,7 @@ fn declaration_chunk_bonus_preserves_interface_boost() {
 fn declaration_chunk_bonus_accepts_mixin_and_parenthesized_inheritance_surfaces() {
     let ruby_terms = query_terms("module mixin controller runtime normalize event dispatch");
     let python_terms = query_terms("service overload exception subclass normalize payload");
+    let interface_terms = query_terms("interfaces cache lookup adapter surface");
 
     assert_eq!(
         declaration_chunk_bonus(
@@ -332,6 +333,13 @@ fn declaration_chunk_bonus_accepts_mixin_and_parenthesized_inheritance_surfaces(
             "class OverloadedServiceError(ServiceError):\n    pass",
         ),
         2.75
+    );
+    assert_eq!(
+        declaration_chunk_bonus(
+            &interface_terms,
+            "interface CacheAdapter {\n  lookup(key: string): CacheEntry\n}",
+        ),
+        4.75
     );
 }
 

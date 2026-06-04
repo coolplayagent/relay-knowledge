@@ -21,7 +21,11 @@ pub(in crate::storage::sqlite::code::code_query) fn declaration_chunk_bonus(
             .take(2)
             .count()
     };
-    if !abstract_interface && declaration_lines < 2 && !relationship_declaration {
+    if !abstract_interface
+        && declaration_lines < 2
+        && !relationship_declaration
+        && !mixin_definition
+    {
         return 0.0;
     }
 
@@ -32,7 +36,8 @@ pub(in crate::storage::sqlite::code::code_query) fn declaration_chunk_bonus(
             term.len() >= 3
                 && (identifier_field_matches_token(content, term)
                     || lower_content.contains(term.as_str())
-                    || (relationship_declaration && declaration_intent_term_matches(content, term)))
+                    || ((relationship_declaration || mixin_definition)
+                        && declaration_intent_term_matches(content, term)))
         })
         .count();
     if matched_terms < 3 {
@@ -84,6 +89,7 @@ fn type_relationship_intent(term: &str) -> bool {
             | "inherited"
             | "inherits"
             | "interface"
+            | "interfaces"
             | "mixin"
             | "mixins"
             | "module"

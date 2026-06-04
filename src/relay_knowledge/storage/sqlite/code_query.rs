@@ -21,6 +21,8 @@ mod code_query_call_target_ranking;
 mod code_query_caller_context_scoring;
 #[path = "code_query_calls.rs"]
 mod code_query_calls;
+#[path = "code_query_conversion_terms.rs"]
+mod code_query_conversion_terms;
 #[path = "code_query_designated_initializer_scoring.rs"]
 mod code_query_designated_initializer_scoring;
 #[path = "code_query_excerpts.rs"]
@@ -846,6 +848,7 @@ fn search_chunks_with_fts_query(
                 &request.query,
                 &row.content,
                 &row.path,
+                &row.language_id,
                 request,
             )
             + source_definition_body_chunk_bonus(

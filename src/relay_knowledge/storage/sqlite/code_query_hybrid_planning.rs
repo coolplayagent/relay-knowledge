@@ -2,6 +2,7 @@ use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
 use super::{
     code_query_api_identities,
+    code_query_conversion_terms::conversion_action_term,
     code_query_support::{query_is_single_symbol_identity, query_terms},
 };
 
@@ -154,17 +155,23 @@ pub(super) fn hybrid_query_has_declaration_expansion_intent(query: &str) -> bool
 }
 
 pub(super) fn hybrid_query_has_conversion_expansion_intent(query: &str) -> bool {
-    let terms = hybrid_sequence_terms(query);
-    let has_conversion = terms.iter().any(|term| {
-        matches!(
-            term.as_str(),
-            "convert" | "conversion" | "format" | "formats" | "transform" | "translate"
-        )
-    });
+    let raw_terms = query_terms(query);
+    let terms = hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str));
+    let has_conversion = raw_terms.iter().any(|term| conversion_action_term(term));
     let has_chunk_or_common_surface = terms.iter().any(|term| {
         matches!(
             term.as_str(),
-            "chunk" | "chunks" | "common" | "provider" | "providers" | "responses"
+            "chunk"
+                | "chunks"
+                | "common"
+                | "event"
+                | "events"
+                | "part"
+                | "parts"
+                | "provider"
+                | "providers"
+                | "response"
+                | "responses"
         )
     });
 
@@ -478,4 +485,21 @@ fn term_has_alpha_digit_mix(term: &str) -> bool {
     }
 
     has_alpha && has_digit
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conversion_expansion_intent_accepts_scored_conversion_verbs() {
+        for verb in ["adapt", "map", "normalize"] {
+            assert!(
+                hybrid_query_has_conversion_expansion_intent(&format!(
+                    "provider response parts {verb} shared event"
+                )),
+                "{verb} should request conversion expansion"
+            );
+        }
+    }
 }
