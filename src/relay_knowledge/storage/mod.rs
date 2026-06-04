@@ -258,6 +258,10 @@ pub trait IndexStore: Send + Sync {
         Box::pin(async { Ok(Vec::new()) })
     }
 
+    fn proposal_count(&self, _state: Option<ProposalState>) -> StorageFuture<'_, usize> {
+        Box::pin(async { Ok(0) })
+    }
+
     fn proposal_by_id(&self, _proposal_id: String) -> StorageFuture<'_, Option<ProposalRecord>> {
         Box::pin(async { Ok(None) })
     }

@@ -7,7 +7,9 @@ use std::{
 };
 
 use relay_knowledge::{
-    api::{CodeRepositoryRegisterRequest, InterfaceKind, RequestContext},
+    api::{
+        CodeIndexWorkerRunRequest, CodeRepositoryRegisterRequest, InterfaceKind, RequestContext,
+    },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
         CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
@@ -79,14 +81,30 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
     assert_ne!(moved_task.task_id, task.task_id);
     assert_eq!(moved_task.resolved_commit_sha, moved_commit);
 
-    let completed = service
-        .run_code_index_task_once(Some(task.task_id.clone()), context("run-background-index"))
+    let completed_response = service
+        .run_code_index_worker_preview(
+            CodeIndexWorkerRunRequest {
+                task_id: Some(task.task_id.clone()),
+            },
+            context("run-background-index"),
+        )
         .await
-        .expect("worker should run")
+        .expect("worker preview should run");
+    let completed = completed_response
+        .task
+        .as_ref()
         .expect("worker should claim task");
+    let after_completed = service
+        .project_status(context("status-after-background-index"))
+        .await
+        .expect("project status should load");
 
     assert_eq!(completed.task_id, task.task_id);
     assert_eq!(completed.state, CodeIndexTaskState::Succeeded);
+    assert_eq!(
+        completed_response.metadata.graph_version,
+        after_completed.metadata.graph_version
+    );
     let hits = query_ref(
         &service,
         "background_policy",

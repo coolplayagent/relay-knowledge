@@ -691,13 +691,13 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeIndexWorkerRunResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
+        let task = self
+            .run_code_index_task_once(request.task_id, context.clone())
+            .await?;
         let graph_version = store
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let task = self
-            .run_code_index_task_once(request.task_id, context.clone())
-            .await?;
 
         Ok(CodeIndexWorkerRunResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),

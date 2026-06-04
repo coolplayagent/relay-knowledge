@@ -5,7 +5,7 @@ use crate::{
     },
     domain::{CodeIndexTaskQueueStatus, GraphVersion, ProposalState, ServiceOperatorState},
     project::PROJECT_NAME,
-    storage::{FileIndexDiagnostics, IndexRefreshDiagnostics, ProposalListRequest},
+    storage::{FileIndexDiagnostics, IndexRefreshDiagnostics},
 };
 
 use super::{
@@ -88,13 +88,9 @@ impl RelayKnowledgeService {
             }
         };
         let proposal_backlog = store
-            .list_proposals(ProposalListRequest {
-                state: Some(ProposalState::Proposed),
-                limit: usize::MAX,
-            })
+            .proposal_count(Some(ProposalState::Proposed))
             .await
-            .map_err(storage_api_error)?
-            .len();
+            .map_err(storage_api_error)?;
         let audit_event_count = store.audit_event_count().await.map_err(storage_api_error)?;
 
         Ok(self.service_status_response(ServiceStatusParts {

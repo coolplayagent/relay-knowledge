@@ -167,6 +167,13 @@ impl IndexStore for SqliteGraphStore {
         self.run_read(move |connection| operations::list_proposals(connection, request))
     }
 
+    fn proposal_count(
+        &self,
+        state: Option<crate::domain::ProposalState>,
+    ) -> StorageFuture<'_, usize> {
+        self.run_read(move |connection| operations::proposal_count(connection, state))
+    }
+
     fn proposal_by_id(
         &self,
         proposal_id: String,

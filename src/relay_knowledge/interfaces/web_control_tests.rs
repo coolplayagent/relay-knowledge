@@ -2,8 +2,9 @@ use super::*;
 use axum::{body::to_bytes, http::Request};
 use serde_json::Value;
 use std::{
+    fs,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
 
@@ -80,6 +81,47 @@ async fn cold_control_status_and_topology_do_not_open_partitioned_storage() {
     assert_eq!(service_status["storage"]["topology"], "partitioned_sqlite");
     assert_eq!(topology["storage"]["topology"], "partitioned_sqlite");
     assert!(!database_path.exists());
+}
+
+#[tokio::test]
+async fn cold_control_health_and_topology_bound_busy_catalog_probe() {
+    let environment = partitioned_control_test_environment("busy-control-catalog");
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+    let database_path = runtime.paths.database_file();
+    fs::create_dir_all(
+        database_path
+            .parent()
+            .expect("database path should have a parent"),
+    )
+    .expect("database directory should exist");
+    let locked = rusqlite::Connection::open(&database_path).expect("control database should open");
+    locked
+        .execute_batch("BEGIN EXCLUSIVE;")
+        .expect("exclusive transaction should lock catalog reads");
+    let router = router(
+        RelayKnowledgeService::new(runtime),
+        crate::net::http::DEFAULT_MAX_BODY_BYTES,
+    );
+    let started = Instant::now();
+
+    let health = get_json(router.clone(), "/api/v1/control/health").await;
+    let topology = get_json(router, "/api/v1/control/storage/topology").await;
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "control probes should not wait for the normal SQLite busy timeout"
+    );
+    assert_eq!(health["healthy"], false);
+    assert!(
+        health["degraded_reason"].as_str().is_some(),
+        "health should surface a degraded reason"
+    );
+    assert!(
+        topology["storage"]["degraded_reason"].as_str().is_some(),
+        "topology should surface a degraded reason"
+    );
 }
 
 #[tokio::test]

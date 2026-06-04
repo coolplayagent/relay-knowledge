@@ -58,11 +58,23 @@ impl RelayKnowledgeService {
             return self.health(context).await;
         }
 
-        Ok(self.storage_free_health(context).await)
+        match tokio::time::timeout(
+            HEALTH_STORAGE_BUDGET,
+            self.storage_free_health(context.clone()),
+        )
+        .await
+        {
+            Ok(response) => Ok(response),
+            Err(_) => Ok(self
+                .degraded_cached_health(context, "storage_busy: cold health snapshot timed out")
+                .await),
+        }
     }
 
     async fn storage_free_health(&self, context: RequestContext) -> HealthResponse {
-        let storage = self.storage_topology_diagnostics().await;
+        let storage = self
+            .storage_topology_diagnostics_with_budget(HEALTH_STORAGE_BUDGET)
+            .await;
         let degraded_reason = storage.degraded_reason.clone();
 
         HealthResponse {

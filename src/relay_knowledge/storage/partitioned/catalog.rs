@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -15,6 +15,8 @@ use crate::{
         sqlite::configure_connection,
     },
 };
+
+const CATALOG_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 pub(super) struct SqliteShardCatalog {
@@ -512,6 +514,7 @@ fn open_catalog_connection(control_path: &Path) -> Result<Connection, StorageErr
 fn open_catalog_readonly_connection(control_path: &Path) -> Result<Connection, StorageError> {
     let connection = Connection::open_with_flags(control_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     configure_connection(&connection)?;
+    connection.busy_timeout(CATALOG_READ_BUSY_TIMEOUT)?;
     Ok(connection)
 }
 

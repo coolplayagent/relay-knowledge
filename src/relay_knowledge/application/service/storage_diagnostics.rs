@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{
     api::{
         ApiError, ApiMetadata, RequestContext, StorageShardDiagnostics, StorageTopologyDiagnostics,
@@ -8,14 +10,28 @@ use crate::{
     storage::StorageTopologySnapshot,
 };
 
+const STORAGE_TOPOLOGY_BUDGET: Duration = Duration::from_millis(500);
+
 impl RelayKnowledgeService {
     /// Returns storage topology diagnostics without exposing concrete storage handles.
     pub async fn storage_topology_diagnostics(&self) -> StorageTopologyDiagnostics {
-        match self.storage.topology_snapshot().await {
-            Ok(snapshot) => self.storage_diagnostics_from_snapshot(snapshot, None),
-            Err(error) => self.storage_diagnostics_from_snapshot(
+        self.storage_topology_diagnostics_with_budget(STORAGE_TOPOLOGY_BUDGET)
+            .await
+    }
+
+    pub(super) async fn storage_topology_diagnostics_with_budget(
+        &self,
+        budget: Duration,
+    ) -> StorageTopologyDiagnostics {
+        match tokio::time::timeout(budget, self.storage.topology_snapshot()).await {
+            Ok(Ok(snapshot)) => self.storage_diagnostics_from_snapshot(snapshot, None),
+            Ok(Err(error)) => self.storage_diagnostics_from_snapshot(
                 StorageTopologySnapshot::default(),
                 Some(error.to_string()),
+            ),
+            Err(_) => self.storage_diagnostics_from_snapshot(
+                StorageTopologySnapshot::default(),
+                Some("storage_topology_busy: topology snapshot timed out".to_owned()),
             ),
         }
     }
