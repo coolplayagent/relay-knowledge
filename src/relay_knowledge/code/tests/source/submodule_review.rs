@@ -598,12 +598,6 @@ fn full_snapshot_scoped_submodule_child_uses_pathspec_after_recursion() {
         "src/target.rs",
         "pub fn selected_child_value() -> u32 { 1 }\n",
     );
-    write_many_files(
-        &child,
-        "noise/generated",
-        "rs",
-        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
-    );
     child.git(["add", "."]);
     child.git(["commit", "-m", "child"]);
     let parent = TempGitRepo::create("review-full-pathspec-parent");
@@ -612,6 +606,17 @@ fn full_snapshot_scoped_submodule_child_uses_pathspec_after_recursion() {
     parent.git(["commit", "-m", "parent"]);
     add_named_submodule(&parent, &child, "module", "vendor/module");
     parent.git(["commit", "-am", "add submodule"]);
+    let submodule = checked_out_submodule(&parent, "vendor/module");
+    write_many_files(
+        &submodule,
+        "noise/generated",
+        "rs",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "large unselected surface"]);
+    parent.git(["add", "vendor/module"]);
+    parent.git(["commit", "-m", "update submodule noise"]);
     let submodule_root = parent.path.join("vendor/module");
     reset_git_ls_tree_full_scan_call_count_for_root(submodule_root.clone());
     let registration = scoped_registration(&parent, vec!["vendor/module/src/target.rs".to_owned()]);
