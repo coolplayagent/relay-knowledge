@@ -157,7 +157,9 @@ pub(super) fn hybrid_query_has_declaration_expansion_intent(query: &str) -> bool
 pub(super) fn hybrid_query_has_conversion_expansion_intent(query: &str) -> bool {
     let raw_terms = query_terms(query);
     let terms = hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str));
-    let has_conversion = raw_terms.iter().any(|term| conversion_action_term(term));
+    let has_conversion = raw_terms
+        .iter()
+        .any(|term| conversion_action_term(&term.to_ascii_lowercase()));
     let has_chunk_or_common_surface = terms.iter().any(|term| {
         matches!(
             term.as_str(),
@@ -499,6 +501,16 @@ mod tests {
                     "provider response parts {verb} shared event"
                 )),
                 "{verb} should request conversion expansion"
+            );
+        }
+    }
+
+    #[test]
+    fn conversion_expansion_intent_accepts_cased_conversion_verbs() {
+        for query in ["Convert Common Chunk", "Map Provider Response Parts"] {
+            assert!(
+                hybrid_query_has_conversion_expansion_intent(query),
+                "{query} should request conversion expansion"
             );
         }
     }
