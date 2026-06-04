@@ -331,7 +331,8 @@ fn record_deleted_gitlink_overlay(
     else {
         return Ok(false);
     };
-    let entries = bounded_submodule_path_entries(root, path, &base_gitlink_commit)?;
+    let entries =
+        bounded_submodule_path_entries(root, path, &base_gitlink_commit, registration, selector)?;
     for entry in entries {
         if scope::path_is_selected(&entry.parent_path, registration, selector) {
             record_worktree_deleted_path(&entry.parent_path, overlay_hash_input, deleted_paths);
@@ -407,7 +408,35 @@ fn record_staged_gitlink_overlay(
         }
         return Ok(false);
     };
-    let staged_entries = bounded_submodule_path_entries(root, path, &staged_commit)?;
+
+    if change.has_worktree_change()
+        && let Some(worktree_commit) = submodule_worktree_head(root, path)?
+        && worktree_commit != staged_commit
+    {
+        record_gitlink_commit_overlay(root, base_commit, path, &worktree_commit, recorder)?;
+        return Ok(true);
+    }
+
+    record_gitlink_commit_overlay(root, base_commit, path, &staged_commit, recorder)?;
+
+    Ok(true)
+}
+
+fn record_gitlink_commit_overlay(
+    root: &Path,
+    base_commit: &str,
+    path: &str,
+    gitlink_commit: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
+    let staged_entries = bounded_submodule_path_entries(
+        root,
+        path,
+        gitlink_commit,
+        recorder.registration,
+        recorder.selector,
+    )?;
     if let Some(base_gitlink_commit) = base_gitlink {
         let staged_paths = staged_entries
             .iter()
@@ -425,12 +454,10 @@ fn record_staged_gitlink_overlay(
     }
 
     for entry in staged_entries {
-        if recorder.path_is_selected(&entry.parent_path) {
-            recorder.record_gitlink_file(root, path, &staged_commit, &entry)?;
-        }
+        recorder.record_gitlink_file(root, path, gitlink_commit, &entry)?;
     }
 
-    Ok(true)
+    Ok(())
 }
 
 fn record_unstaged_gitlink_overlay(
@@ -451,7 +478,13 @@ fn record_unstaged_gitlink_overlay(
         return Ok(false);
     }
 
-    let worktree_entries = bounded_submodule_path_entries(root, path, &worktree_commit)?;
+    let worktree_entries = bounded_submodule_path_entries(
+        root,
+        path,
+        &worktree_commit,
+        recorder.registration,
+        recorder.selector,
+    )?;
     let worktree_paths = worktree_entries
         .iter()
         .map(|entry| entry.parent_path.clone())
@@ -464,9 +497,7 @@ fn record_unstaged_gitlink_overlay(
         recorder,
     )?;
     for entry in worktree_entries {
-        if recorder.path_is_selected(&entry.parent_path) {
-            recorder.record_gitlink_file(root, path, &worktree_commit, &entry)?;
-        }
+        recorder.record_gitlink_file(root, path, &worktree_commit, &entry)?;
     }
 
     Ok(true)
@@ -514,10 +545,14 @@ fn record_base_gitlink_child_deletions(
     base_gitlink_commit: &str,
     recorder: &mut WorktreeOverlayRecorder<'_>,
 ) -> Result<(), CodeIndexError> {
-    for entry in bounded_submodule_path_entries(root, path, base_gitlink_commit)? {
-        if recorder.path_is_selected(&entry.parent_path) {
-            recorder.record_deleted_path(&entry.parent_path);
-        }
+    for entry in bounded_submodule_path_entries(
+        root,
+        path,
+        base_gitlink_commit,
+        recorder.registration,
+        recorder.selector,
+    )? {
+        recorder.record_deleted_path(&entry.parent_path);
     }
 
     Ok(())
@@ -530,10 +565,14 @@ fn record_missing_base_gitlink_child_deletions(
     staged_paths: &BTreeSet<String>,
     recorder: &mut WorktreeOverlayRecorder<'_>,
 ) -> Result<(), CodeIndexError> {
-    for entry in bounded_submodule_path_entries(root, path, base_gitlink_commit)? {
-        if !staged_paths.contains(&entry.parent_path)
-            && recorder.path_is_selected(&entry.parent_path)
-        {
+    for entry in bounded_submodule_path_entries(
+        root,
+        path,
+        base_gitlink_commit,
+        recorder.registration,
+        recorder.selector,
+    )? {
+        if !staged_paths.contains(&entry.parent_path) {
             recorder.record_deleted_path(&entry.parent_path);
         }
     }
@@ -560,16 +599,69 @@ fn bounded_submodule_path_entries(
     root: &Path,
     path: &str,
     commit: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
 ) -> Result<Vec<source_gitlink::SubmodulePathEntry>, CodeIndexError> {
-    let entries = source_gitlink::submodule_path_entries(root, path, commit)?;
-    if entries.len() > MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS {
+    let child_filters = submodule_child_scope_filters(path, registration, selector);
+    let entries = source_gitlink::submodule_path_entries_with_child_filters(
+        root,
+        path,
+        commit,
+        &child_filters,
+    )?;
+    let selected_entries = entries
+        .into_iter()
+        .filter(|entry| scope::path_is_selected(&entry.parent_path, registration, selector))
+        .collect::<Vec<_>>();
+    if selected_entries.len() > MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS {
         return Err(CodeIndexError::InvalidInput(format!(
             "gitlink path {path} expands to {} files; run a full code index so the work is checkpointed and batched",
-            entries.len()
+            selected_entries.len()
         )));
     }
 
-    Ok(entries)
+    Ok(selected_entries)
+}
+
+fn submodule_child_scope_filters(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> Vec<String> {
+    let mut child_filters = Vec::new();
+    append_submodule_child_scope_filters(path, &registration.path_filters, &mut child_filters);
+    append_submodule_child_scope_filters(path, &selector.path_filters, &mut child_filters);
+    child_filters.sort();
+    child_filters.dedup();
+
+    child_filters
+}
+
+fn append_submodule_child_scope_filters(
+    path: &str,
+    filters: &[String],
+    child_filters: &mut Vec<String>,
+) {
+    let path = normalize_worktree_path(path);
+    if path.is_empty() {
+        return;
+    }
+    let child_prefix = format!("{path}/");
+    for filter in filters {
+        let filter = normalize_worktree_path(filter);
+        if filter.is_empty()
+            || filter == "."
+            || filter == path
+            || path.starts_with(&format!("{filter}/"))
+        {
+            continue;
+        }
+        if let Some(child_filter) = filter.strip_prefix(&child_prefix)
+            && !child_filter.is_empty()
+        {
+            child_filters.push(child_filter.to_owned());
+        }
+    }
 }
 
 fn worktree_directory_files(

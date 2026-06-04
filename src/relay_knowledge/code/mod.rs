@@ -25,6 +25,8 @@ mod snapshot;
 mod source;
 mod source_declarations;
 mod source_gitlink;
+mod source_gitlink_paths;
+mod source_gitlink_selector;
 mod source_paths;
 pub(crate) mod source_roots;
 mod worktree_overlay;
@@ -444,6 +446,10 @@ fn push_scoped_expanded_impact_paths_or_original(
         request.path,
         request.include_base,
         request.include_head,
+        &source_gitlink::GitlinkPathSelector::new(
+            &|path| impact_path_scope_overlaps(path, request.path_filters),
+            &|path| impact_path_scope_overlaps(path, request.path_filters),
+        ),
     )? {
         Some(expanded) if !expanded.is_empty() => request.paths.extend(expanded),
         _ => request.paths.push(request.path.to_owned()),
@@ -583,6 +589,10 @@ fn append_deleted_symbol_names_for_gitlink_update(
         context.base_commit,
         head_commit,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+        &source_gitlink::GitlinkPathSelector::new(
+            &|path| path_scope_overlaps(path, context.registration, context.selector),
+            &|path| path_scope_overlaps(path, context.registration, context.selector),
+        ),
     )?
     else {
         return Ok(());
@@ -847,6 +857,10 @@ fn parse_expanded_gitlink_change(
         context.base_commit,
         &build.commit,
         MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+        &source_gitlink::GitlinkPathSelector::new(
+            &|path| path_scope_overlaps(path, context.registration, context.selector),
+            &|path| path_scope_overlaps(path, context.registration, context.selector),
+        ),
     )?
     else {
         return Ok(false);

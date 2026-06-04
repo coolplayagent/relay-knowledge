@@ -1,5 +1,6 @@
 use super::test_fixtures::TempGitRepo;
 use super::*;
+use crate::domain::CodeIndexResourceBudget;
 use std::fs;
 
 #[test]
@@ -457,6 +458,118 @@ fn worktree_overlay_indexes_unstaged_submodule_gitlink_update() {
 }
 
 #[test]
+fn worktree_overlay_prefers_unstaged_submodule_head_over_staged_gitlink() {
+    let source = TempGitRepo::create("overlay-mm-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-mm-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("src/submodule"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("lib.rs", "fn staged_submodule_value() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "staged submodule update"]);
+    repo.git(["add", "src/submodule"]);
+    submodule.write("lib.rs", "fn worktree_submodule_value() -> u32 { 2 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "worktree submodule update"]);
+    let status = repo.git_text(["status", "--porcelain=v1", "--", "src/submodule"]);
+    assert!(status.starts_with("MM "), "{status}");
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should prefer checked-out submodule HEAD over staged gitlink");
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "worktree_submodule_value")
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .all(|symbol| symbol.name != "staged_submodule_value")
+    );
+}
+
+#[test]
+fn worktree_overlay_bounds_submodule_entries_after_scope_filtering() {
+    let source = TempGitRepo::create("overlay-scoped-bound-source");
+    write_many_rust_files(
+        &source,
+        "noise",
+        CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1,
+    );
+    source.write("src/target.rs", "pub fn scoped_target() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-scoped-bound-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "vendor/module",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    let submodule = TempGitRepo {
+        path: repo.path.join("vendor/module"),
+    };
+    submodule.git(["config", "user.email", "relay@example.invalid"]);
+    submodule.git(["config", "user.name", "Relay Test"]);
+    submodule.write("src/target.rs", "pub fn scoped_target() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "update selected path"]);
+    repo.git(["add", "vendor/module"]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec!["vendor/module/src/target.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should bound submodule expansion after path filtering");
+
+    assert_eq!(snapshot.files.len(), 1);
+    assert_eq!(snapshot.files[0].path, "vendor/module/src/target.rs");
+}
+
+#[test]
 fn worktree_overlay_indexes_staged_submodule_gitlink_update_after_deinit() {
     let source = TempGitRepo::create("overlay-staged-deinit-submodule-source");
     source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
@@ -759,4 +872,13 @@ fn worktree_overlay_records_rename_source_deletions() {
 
     assert_eq!(snapshot.deleted_paths, ["src/old.rs"]);
     assert!(snapshot.files.iter().any(|file| file.path == "src/new.rs"));
+}
+
+fn write_many_rust_files(repo: &TempGitRepo, directory: &str, count: usize) {
+    for index in 0..count {
+        repo.write(
+            &format!("{directory}/file_{index}.rs"),
+            &format!("pub fn noise_{index}() -> u32 {{ {index} }}\n"),
+        );
+    }
 }

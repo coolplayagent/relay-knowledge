@@ -3,7 +3,7 @@ use std::{fs, process::Command};
 
 use super::{
     build_index_snapshot, changed_paths_for_diff, resolve_repository_snapshot_with_path_filters,
-    test_fixtures::TempGitRepo,
+    source_gitlink, test_fixtures::TempGitRepo,
 };
 
 #[test]
@@ -80,6 +80,62 @@ fn impact_type_change_from_submodule_to_file_includes_regular_path() {
 
     assert!(paths.contains(&"src/plugin.rs".to_owned()));
     assert!(paths.contains(&"src/plugin.rs/lib.rs".to_owned()));
+}
+
+#[test]
+fn scoped_submodule_diff_bounds_after_child_filtering() {
+    let child = TempGitRepo::create("diff-scoped-bound-child");
+    child.write("noise/one.rs", "pub fn noise_one() -> u32 { 0 }\n");
+    child.write("noise/two.rs", "pub fn noise_two() -> u32 { 0 }\n");
+    child.write("src/target.rs", "pub fn scoped_target() -> u32 { 0 }\n");
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child"]);
+
+    let parent = TempGitRepo::create("diff-scoped-bound-parent");
+    parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "parent"]);
+    add_submodule(&parent, &child, "vendor/module");
+    parent.git(["commit", "-am", "add submodule"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+
+    let submodule = TempGitRepo {
+        path: parent.path.join("vendor/module"),
+    };
+    git_in(
+        &submodule.path,
+        ["config", "user.email", "relay@example.invalid"],
+    );
+    git_in(&submodule.path, ["config", "user.name", "Relay Test"]);
+    submodule.write("noise/one.rs", "pub fn noise_one() -> u32 { 1 }\n");
+    submodule.write("noise/two.rs", "pub fn noise_two() -> u32 { 1 }\n");
+    submodule.write("src/target.rs", "pub fn scoped_target() -> u32 { 1 }\n");
+    submodule.git(["add", "."]);
+    submodule.git(["commit", "-m", "large child update"]);
+    parent.git(["add", "vendor/module"]);
+    parent.git(["commit", "-m", "update submodule"]);
+
+    let selector = source_gitlink::GitlinkPathSelector::new(
+        &|path| path == "vendor/module/src/target.rs",
+        &|path| {
+            path == "vendor/module"
+                || path == "vendor/module/src/target.rs"
+                || "vendor/module/src/target.rs".starts_with(&format!("{path}/"))
+        },
+    );
+    let expansion = source_gitlink::changed_gitlink_path_expansion(
+        &parent.path,
+        "vendor/module",
+        &base,
+        "HEAD",
+        2,
+        &selector,
+    )
+    .expect("scoped submodule diff should not count unrelated child paths")
+    .expect("submodule update should expand");
+
+    assert_eq!(expansion.head_paths.len(), 1);
+    assert!(expansion.head_paths.contains("vendor/module/src/target.rs"));
 }
 
 fn snapshot_fingerprints(

@@ -70,12 +70,14 @@ pub(super) struct GitTrackedEntries {
 #[derive(Debug, Clone, Default)]
 pub(super) struct TrackedEntryScope {
     path_filters: Vec<String>,
+    filter_entries: bool,
 }
 
 impl TrackedEntryScope {
     pub(super) fn all() -> Self {
         Self {
             path_filters: Vec::new(),
+            filter_entries: false,
         }
     }
 
@@ -86,6 +88,20 @@ impl TrackedEntryScope {
                 .map(|filter| normalize_path_filter(filter).to_owned())
                 .filter(|filter| !filter.is_empty())
                 .collect(),
+            filter_entries: false,
+        }
+    }
+
+    pub(super) fn from_entry_path_filters<'a>(
+        filters: impl IntoIterator<Item = &'a String>,
+    ) -> Self {
+        Self {
+            path_filters: filters
+                .into_iter()
+                .map(|filter| normalize_path_filter(filter).to_owned())
+                .filter(|filter| !filter.is_empty())
+                .collect(),
+            filter_entries: true,
         }
     }
 
@@ -95,6 +111,15 @@ impl TrackedEntryScope {
                 .path_filters
                 .iter()
                 .any(|filter| path_overlaps_filter(path, filter))
+    }
+
+    fn allows_entry(&self, path: &str) -> bool {
+        !self.filter_entries
+            || self.path_filters.is_empty()
+            || self
+                .path_filters
+                .iter()
+                .any(|filter| path_matches_filter(path, filter))
     }
 }
 
@@ -140,7 +165,9 @@ fn tracked_entries_inner(
         };
         let fields = metadata.split_whitespace().collect::<Vec<_>>();
         match fields.get(1).copied() {
-            Some("blob") => push_blob_entry(prefix, path, &fields, &mut state.entries),
+            Some("blob") if scope.allows_entry(&format!("{prefix}{path}")) => {
+                push_blob_entry(prefix, path, &fields, &mut state.entries);
+            }
             Some("commit")
                 if depth < MAX_SUBMODULE_EXPANSION_DEPTH
                     && scope.allows_submodule_expansion(&format!("{prefix}{path}")) =>
@@ -261,28 +288,13 @@ pub(super) fn submodule_worktree_root(root: &Path, path: &str) -> Result<PathBuf
     Ok(resolved)
 }
 
-pub(super) fn tracked_entries_from_git_dir(
+pub(super) fn tracked_entries_from_git_dir_with_scope(
     git_dir: &Path,
     commit: &str,
-) -> Result<Vec<GitTreeEntry>, CodeIndexError> {
-    tracked_entries_from_git_dir_with_prefix(git_dir, commit, "")
-}
-
-fn tracked_entries_from_git_dir_with_prefix(
-    git_dir: &Path,
-    commit: &str,
-    prefix: &str,
+    scope: &TrackedEntryScope,
 ) -> Result<Vec<GitTreeEntry>, CodeIndexError> {
     let mut visited = BTreeSet::new();
-    Ok(tracked_entries_from_git_dir_inner(
-        git_dir,
-        commit,
-        prefix,
-        0,
-        &mut visited,
-        &TrackedEntryScope::all(),
-    )?
-    .entries)
+    Ok(tracked_entries_from_git_dir_inner(git_dir, commit, "", 0, &mut visited, scope)?.entries)
 }
 
 fn tracked_entries_from_git_dir_inner(
@@ -314,7 +326,9 @@ fn tracked_entries_from_git_dir_inner(
         };
         let fields = metadata.split_whitespace().collect::<Vec<_>>();
         match fields.get(1).copied() {
-            Some("blob") => push_blob_entry(prefix, path, &fields, &mut state.entries),
+            Some("blob") if scope.allows_entry(&format!("{prefix}{path}")) => {
+                push_blob_entry(prefix, path, &fields, &mut state.entries);
+            }
             Some("commit")
                 if depth < MAX_SUBMODULE_EXPANSION_DEPTH
                     && scope.allows_submodule_expansion(&format!("{prefix}{path}")) =>
@@ -767,6 +781,16 @@ fn path_overlaps_filter(path: &str, filter: &str) -> bool {
             || filter.starts_with(&format!("{path}/")))
 }
 
+fn path_matches_filter(path: &str, filter: &str) -> bool {
+    let path = normalize_path_filter(path);
+    let filter = normalize_path_filter(filter);
+    if filter == "." {
+        return true;
+    }
+
+    !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct GitTreeEntry {
     pub(super) path: String,
@@ -870,6 +894,13 @@ impl WorktreePathChange {
         self.status
             .as_bytes()
             .first()
+            .is_some_and(|status| *status != b' ' && *status != b'?')
+    }
+
+    pub(super) fn has_worktree_change(&self) -> bool {
+        self.status
+            .as_bytes()
+            .get(1)
             .is_some_and(|status| *status != b' ' && *status != b'?')
     }
 }
