@@ -125,6 +125,10 @@ mod code_metadata_tests;
 mod code_tasks_tests;
 
 #[cfg(test)]
+#[path = "code_tasks_status_tests.rs"]
+mod code_tasks_status_tests;
+
+#[cfg(test)]
 #[path = "code_tasks_lease_tests.rs"]
 mod code_tasks_lease_tests;
 
@@ -325,6 +329,12 @@ impl CodeRepositoryStore for SqliteGraphStore {
         repository_id: String,
     ) -> StorageFuture<'_, Option<crate::domain::CodeIndexTaskRecord>> {
         self.run_read(move |connection| code_tasks::active_task(connection, &repository_id))
+    }
+
+    fn code_index_task_queue_status(
+        &self,
+    ) -> StorageFuture<'_, crate::domain::CodeIndexTaskQueueStatus> {
+        self.run_read(code_tasks::queue_status)
     }
 
     fn code_index_checkpoint(

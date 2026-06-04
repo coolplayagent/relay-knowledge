@@ -10,7 +10,7 @@
 
 The `relay-knowledge` service deployment path is SQLite-first control-plane/data-plane separation, not an immediate dependency on external graph databases, message queues, or a Kubernetes operator. v1 preserves the local-first single-binary experience while making the current `service run`, HTTP `/api/*`, MCP, QoS, durable worker queues, operator state, and `partitioned_sqlite` topology the explicit service foundation.
 
-The control plane owns configuration, authorization, APIs, task leases, audit, runtime status, topology catalogs, upgrade/rollback, and diagnostics. The data plane owns graph facts, code facts, derived indexes, query execution, and repository shards. Every interface must enter through application services and storage traits; Web, MCP, CLI, and workers must not directly access SQLite shards, external backends, or index files.
+The control plane owns configuration, authorization, APIs, task leases, audit, runtime status, topology catalogs, upgrade/rollback, diagnostics, and the resident master that supervises bounded worker pools. The data plane owns graph facts, code facts, derived indexes, query execution, and repository shards. Every interface must enter through application services and storage traits; Web, MCP, CLI, and workers must not directly access SQLite shards, external backends, or index files.
 
 ## 2. Competitive Technology Findings
 
@@ -43,7 +43,7 @@ v1 supports and documents four topologies:
 | Topology | Control plane | Data plane | Use case |
 | --- | --- | --- | --- |
 | `embedded_cli` | Application service inside the CLI process | `single_sqlite` | Temporary commands, tests, one-shot developer operations |
-| `resident_single_process` | `service run` HTTP/Web/MCP/operator/worker | `single_sqlite` | Default resident service with minimal operations cost |
+| `resident_single_process` | `service run` HTTP/Web/MCP/operator/master-worker pools | `single_sqlite` | Default resident service with minimal operations cost |
 | `resident_partitioned_sqlite` | Primary SQLite control database | Per-repository SQLite shards | Local scaling for large and multi-repository workloads |
 | `split_worker_preview` | Resident control service | Independent worker processes claim tasks before work | Future process-level scale-out; writes without leases are forbidden |
 
@@ -56,6 +56,7 @@ Control-plane APIs must cover:
 - runtime/config/status/health/doctor without running long tasks or blocking query hot paths.
 - service manager plan, definition write, operator pause/resume/status.
 - worker task queue, lease, retry, dead-letter, checkpoint, progress, and reset.
+- code-index master-worker diagnostics, including configured workers, active worker slots, queue depth, running leases, and retry/dead-letter state.
 - storage topology, shard catalog, backup/migration/rollback/uninstall diagnostics.
 - repository register/index/status/report/set overlay refresh.
 - audit, authorization identity, request id, trace id, QoS admission, and overload decisions.

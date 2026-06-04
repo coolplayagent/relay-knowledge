@@ -31,6 +31,7 @@ pub struct RuntimeStatus {
     pub worker_vision_endpoint_configured: bool,
     pub worker_extractor_endpoint_configured: bool,
     pub worker_max_in_flight: usize,
+    pub code_index_max_in_flight: usize,
     pub silent_updates_enabled: bool,
     pub file_index_enabled: bool,
     pub file_index_root_count: usize,

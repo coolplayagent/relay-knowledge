@@ -31,6 +31,7 @@ export type RuntimeStatus = {
   worker_vision_endpoint_configured: boolean;
   worker_extractor_endpoint_configured: boolean;
   worker_max_in_flight: number;
+  code_index_max_in_flight: number;
   silent_updates_enabled: boolean;
   semantic_backend_mode: "local" | "external" | "disabled";
   vector_backend_mode: "local" | "external" | "disabled";
@@ -399,12 +400,25 @@ export type ServiceStatusResponse = {
   };
   operator: ServiceOperatorStatus;
   workers: WorkerStatus[];
+  code_index_workers: CodeIndexWorkerStatus;
   proposal_backlog: number;
   audit_sink: {
     durable: boolean;
     event_count: number;
     last_error?: string;
   };
+};
+
+export type CodeIndexWorkerStatus = {
+  configured_worker_count: number;
+  active_worker_slots: number;
+  queue_depth: number;
+  queued_task_count: number;
+  running_task_count: number;
+  retrying_task_count: number;
+  dead_letter_task_count: number;
+  running_lease_count: number;
+  last_error?: string;
 };
 
 export type GraphCanvasKind = "knowledge" | "code" | "mixed";

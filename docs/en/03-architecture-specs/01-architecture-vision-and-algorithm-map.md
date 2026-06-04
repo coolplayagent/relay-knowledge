@@ -3,7 +3,7 @@
 [English](../../en/03-architecture-specs/01-architecture-vision-and-algorithm-map.md) | [中文](../../zh/03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
 
 > Document version: 2.1
-> Date: 2026-05-28
+> Date: 2026-06-04
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -32,7 +32,8 @@ Application Services: policy, orchestration, freshness, budgets
         +--> Retrieval: BM25, semantic, vector, graph expansion, rerank
         +--> Indexing: mutation log consumers and scoped read models
         +--> Storage: graph facts, evidence, versions, mutation log
-        +--> Background Workers: parsing, OCR, embedding, recovery
+        +--> Resident Master: lifecycle, recovery, queue supervision, shutdown
+        +--> Worker Pools: leased code indexing, parsing, OCR, embedding, recovery
         +--> Observability: logs, metrics, traces, diagnostics
         |
         v
@@ -40,6 +41,8 @@ Domain Model: source scope, evidence, facts, code graph, errors
 ```
 
 Dependencies move inward only. UI surfaces, protocol adapters, and workers must not directly access SQLite, tree-sitter parsers, embedding clients, or index writers; they request application services that enforce budgets, authorization, and freshness policy.
+
+The resident service uses an nginx-style master-worker shape for heavy background work: the master resolves configuration, starts bounded worker pools, recovers expired or orphaned leases, exposes diagnostics, and coordinates graceful shutdown; workers only claim durable tasks through application services, hold attempt-scoped leases, renew them, execute bounded batches, and report completion or failure. This improves the current local-first runtime by making concurrency explicit: different repositories can index in parallel, one repository still has at most one live writer, and read queries continue to use committed snapshots through bounded read paths instead of waiting for full-index work.
 
 The `src/relay_knowledge/domain` source tree is organized by cohesive domain
 responsibility while keeping the crate-level `crate::domain::{...}` API stable:

@@ -30,7 +30,9 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
 target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
-`service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务，然后用有界常驻 worker 消费持久化 code-index 队列和 repository-set overlay refresh 队列。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
+`service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务，然后作为 resident master 管理持久化 code-index 和 repository-set overlay refresh worker。Master 拥有配置、启动 lease 恢复、有界 worker pool 启动、队列监督和优雅关闭；code-index worker 只 claim 带 lease 的任务并执行有界 batch。Code-index pool 默认并发为 2，通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 配置，并按上限 clamp 到 8。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
+
+使用 `relay-knowledge service status --format json` 查看 `code_index_workers`：configured worker count、active worker slots、queue depth、queued/running/retrying/dead-letter task counts、running leases 和 last error。这些诊断可以解释 master 是空闲、饱和、正在重试，还是正在等待另一个 repository writer lease。
 
 HTTP `/api/health` 和 CLI `health` 是 liveness-safe 入口：它只做短预算只读快照，不会排队 index refresh，也不会等待大型 repository indexing 完成。存储读通道繁忙时，health 会返回 cached 或最小 degraded 响应，并用 `storage_busy`、stale metadata 或 degraded reason 暴露压力。普通代码查询不会因此被排除；`allow-stale` 查询在目标 ref 和 filters 正在索引时读取最新兼容的已完成 committed scope，`wait-until-fresh` 查询才要求目标 scope 已 finalize。
 

@@ -369,6 +369,11 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         self.control.active_code_index_task(repository_id)
     }
 
+    fn code_index_task_queue_status(
+        &self,
+    ) -> StorageFuture<'_, crate::domain::CodeIndexTaskQueueStatus> {
+        self.control.code_index_task_queue_status()
+    }
     fn code_index_checkpoint(
         &self,
         source_scope: String,

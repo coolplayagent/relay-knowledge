@@ -30,7 +30,9 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
 target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
-`service run` runs the startup index reconciler before accepting resident adapter requests when possible, then drains the durable code-index queue and repository-set overlay refresh queue with bounded resident workers. Without MCP or Web enabled, the command still waits as a foreground service for a shutdown signal.
+`service run` runs the startup index reconciler before accepting resident adapter requests when possible, then acts as the resident master for durable code-index and repository-set overlay refresh workers. The master owns configuration, startup lease recovery, bounded worker pool startup, queue supervision, and graceful shutdown. Code-index workers only claim leased tasks and execute bounded batches. The code-index pool defaults to 2 workers, is configured with `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT`, and is capped at 8. Without MCP or Web enabled, the command still waits as a foreground service for a shutdown signal.
+
+Use `relay-knowledge service status --format json` to inspect `code_index_workers`: configured worker count, active worker slots, queue depth, queued/running/retrying/dead-letter task counts, running leases, and last error. These diagnostics explain whether the master is idle, saturated, retrying work, or waiting for another repository writer lease.
 
 HTTP `/api/health` and CLI `health` are liveness-safe entrypoints: they take a short-budget read-only snapshot, do not queue index refresh work, and do not wait for large repository indexing to finish. If the storage read lane is busy, health returns a cached or minimal degraded response with `storage_busy`, stale metadata, or a degraded reason. Normal code queries are not excluded by this behavior; `allow-stale` queries read the latest compatible completed committed scope while the target ref and filters are still indexing, and `wait-until-fresh` is the mode that requires the target scope to be finalized.
 

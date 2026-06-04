@@ -736,6 +736,18 @@ pub struct CodeIndexTaskRecord {
     pub updated_at_ms: u64,
 }
 
+/// Aggregated durable queue state for background code-index tasks.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexTaskQueueStatus {
+    pub queued_task_count: usize,
+    pub running_task_count: usize,
+    pub retrying_task_count: usize,
+    pub dead_letter_task_count: usize,
+    pub running_lease_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
 /// Scope retention result after pruning old repository snapshots.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeScopeRetentionSummary {
