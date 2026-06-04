@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/17-background-service-recovery-and-self-healing.md) | [English](../../en/03-architecture-specs/17-background-service-recovery-and-self-healing.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 文档版本: 2.1
+> 编制日期: 2026-06-04
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -20,9 +20,13 @@
 
 CLI 可以生成服务定义和执行 doctor，但不应伪装成后台常驻管理器。
 
+服务化部署支持 `resident_single_process` 和未来 `split_worker_preview`。单进程模式中控制面 API、startup reconciler、operator 和 worker 同进程运行；split worker 模式只允许独立 worker 从控制面 claim 持久 task 后工作，不能自建调度循环、直接读写 shard、跳过 QoS 或绕过 application service。
+
 ## 3. 工作队列
 
 所有后台任务都有 kind、scope、priority、budget、attempt、lease owner、lease expiry、target graph version、payload hash 和 last error。队列容量是硬上限；入队失败返回 overload/retryable error。
+
+跨进程 worker 的 lease 是数据面写入授权。worker 在未持有有效 lease、lease 过期、attempt count 不匹配、task 被 reset、task 被接管或 task 进入 dead-letter 后，不能 complete、fail、续租或提交数据面写入。控制面 status 必须能解释 active/running/retrying/dead-letter 的来源，不能用进程存在性推断任务成功。
 
 ## 4. Reconciler
 
@@ -55,6 +59,7 @@ Overload 处理遵循 SRE 和 adaptive concurrency 原则：当队列、IO、CPU
 - dead-letter task 不被诊断路径自动复活。
 - 后台 CPU/IO-heavy work 不阻塞 health liveness 和查询热路径。
 - watcher lag、scan backlog、cursor invalidation 和 overload decision 可在 health/service doctor 中解释。
+- split worker 部署保持 durable task lease、bounded retry/backoff、checkpoint replay、dead-letter isolation 和 per-repository active writer 约束。
 
 ---
 

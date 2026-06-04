@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/07-storage-engine-and-mutation-log.md) | [English](../../en/03-architecture-specs/07-storage-engine-and-mutation-log.md)
 
-> 文档版本: 2.1
-> 编制日期: 2026-06-03
+> 文档版本: 2.2
+> 编制日期: 2026-06-04
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -23,6 +23,8 @@ Storage Facade: GraphStore, MutationLogStore, IndexStore, CodeGraphStore
 ```
 
 `domain` 不依赖 SQL 或连接池；`retrieval` 不绕过 storage facade；`interfaces` 不复制存储逻辑。
+
+在服务化部署中，主运行时数据库是控制面状态机，负责 task、lease、audit、operator、topology catalog、repository membership 和诊断；代码事实 shard、派生索引和外部后端是数据面实现。控制面和数据面可以物理分离，但调用边界仍必须是 application service 和 storage facade，不能让接口层或 worker 直接访问具体后端。
 
 ## 3. 写入事务
 
@@ -53,7 +55,7 @@ SQLite 操作可以是同步驱动，但必须通过 blocking worker、专用连
 
 ## 6. SQLite 存储拓扑
 
-默认拓扑是 `single_sqlite`：所有图事实、mutation log、worker 状态、审计、文件索引和代码仓库事实共享同一运行时数据库。可选拓扑 `partitioned_sqlite` 使用同一 storage trait contract，但把全局控制状态保留在主数据库，并把每个代码仓库的文件、符号、引用、chunk、checkpoint 和 scope 查询路由到独立 SQLite shard。shard 文件必须由 `paths` 生成，位于运行时数据目录下的 `stores/repositories/<safe-id-hash>/code.sqlite`，不能写入源码仓库、当前工作目录或 release 解压目录。
+默认拓扑是 `single_sqlite`：所有图事实、mutation log、worker 状态、审计、文件索引和代码仓库事实共享同一运行时数据库。可选拓扑 `partitioned_sqlite` 是 v1 数据面扩展实现：它使用同一 storage trait contract，把全局控制状态保留在主数据库，并把每个代码仓库的文件、符号、引用、chunk、checkpoint 和 scope 查询路由到独立 SQLite shard。shard 文件必须由 `paths` 生成，位于运行时数据目录下的 `stores/repositories/<safe-id-hash>/code.sqlite`，不能写入源码仓库、当前工作目录或 release 解压目录。
 
 分片拓扑中的 durable task、lease、dead-letter、审计、图事实和 repository set membership 仍由控制库负责，保证最多一个 active writer task per repository 的约束不被绕过。跨仓 overlay refresh 在实现跨 shard import/export 聚合前必须显式返回不可用，不能伪造 fresh 状态或复制基础代码事实到控制库。
 
@@ -65,7 +67,7 @@ scope 迁移到 shard 时必须同时保留该 scope 的代码事实、checkpoin
 
 ## 7. 后端演进
 
-未来图数据库 adapter 必须实现同一 contract tests。新后端不能改变 domain fact model、mutation log 语义或 freshness contract；只能改变持久化和查询原语的实现。
+未来图数据库、向量数据库、复制 SQLite 或远程存储 adapter 必须实现同一 contract tests。新后端不能改变 domain fact model、mutation log 语义、freshness contract、degraded reason 或 stable error kind；只能改变持久化、分片、索引和查询原语的实现。
 
 ## 8. 验收标准
 
@@ -73,6 +75,7 @@ scope 迁移到 shard 时必须同时保留该 scope 的代码事实、checkpoin
 - 索引失败不会回滚图写入，但会产生 stale/degraded 诊断。
 - SQLite 专用优化不泄漏到 domain、api 或 interface 类型。
 - 分片拓扑不能绕过 durable task lease、bounded retry/backoff、checkpoint replay 或 per-repository writer 约束。
+- 控制面/数据面分离部署不能让 worker、Web、MCP 或 CLI 绕过 storage facade 直接读写 shard 或外部后端。
 
 ---
 

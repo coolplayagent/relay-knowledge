@@ -77,6 +77,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 19: Installation, Release, and Upgrade](03-architecture-specs/19-installation-release-and-upgrade.md)
 - [Chapter 20: Multi-Repository Code Graph Overlay](03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 - [Chapter 21: Software Global Domain Modeling Architecture](03-architecture-specs/21-software-global-domain-modeling.md)
+- [Chapter 22: Service Deployment, Control Plane, and Data Plane](03-architecture-specs/22-service-deployment-control-data-plane.md)
 
 ## Book 4: Research
 
@@ -110,3 +111,4 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Appendix B.7: Grep Fallback Documentation Refresh Audit 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md): chapter sync record for code retrieval exact-text fallback.
 - [Appendix B.8: Software Global Modeling Documentation Refresh Audit 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md): verification record for the software global modeling research and architecture archive.
 - [Appendix B.9: Software Global, CodeGraph, and Search Everything Research Documentation Refresh Audit 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md): chapter 11 research and bookshelf index sync record.
+- [Appendix B.10: Service Deployment, Control Plane, and Data Plane Documentation Refresh Audit 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md): issue #250 service deployment plan and architecture index sync record.

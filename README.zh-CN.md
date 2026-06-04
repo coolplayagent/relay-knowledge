@@ -65,6 +65,7 @@ clawhub publish skills/relay-knowledge-cli \
 - 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots，并用 SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
 - 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
 - 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
+- 服务化部署：文档化 `embedded_cli`、`resident_single_process`、`resident_partitioned_sqlite` 和未来 split worker 的控制面/数据面边界。
 - Agent 接入：通过共享应用服务暴露 MCP Streamable HTTP 和本地 ACP 适配器，并带有作用域策略、QoS 准入、取消、资源/提示、持久审计元数据和 OTLP 准备的 agent 指标。
 - 可观测性：常驻服务模式支持真实 OTLP HTTP/protobuf 跟踪和指标导出；Collector 导出失败时提供本地诊断。
 - Web 工作区：Rust HTTP 服务可在同一端口提供静态 Web 诊断、分类后的 agent/model 设置、持久化模型 provider profile、操作组合器、`/api/*` 和可选 MCP 端点。
@@ -173,6 +174,7 @@ SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 
 
 默认存储拓扑是 `single_sqlite`。设置
 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` 后，全局控制状态仍写入主运行时数据库，代码仓库事实、checkpoint 和按 scope 的代码查询会路由到运行时数据目录下的每仓库 SQLite shard。多仓 `repo-set` overlay refresh 在跨 shard import/export 聚合实现前仍要求 `single_sqlite`。
+控制面继续拥有 task lease、audit、operator、topology catalog 和诊断；数据面 shard 只执行被共享应用服务授权和预算约束的读写。完整方案见 [服务化部署、控制面与数据面分离](docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md)。
 
 存储契约包含 v1 代码图数据面。tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。
 

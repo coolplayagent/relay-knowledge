@@ -4,6 +4,8 @@
 
 The resident service hosts Web, API, MCP, the startup reconciler, and operational entry points. Development machines can run it in the foreground; long-running background operation must use the platform service manager.
 
+Current service topologies are `embedded_cli`, `resident_single_process`, and `resident_partitioned_sqlite`. The first two use one runtime database; with `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite`, control state remains in the primary database while code-repository data moves into per-repository shards. Future split workers may run only after claiming durable tasks through the control plane; unmanaged background loops are not supported.
+
 ## 9.1 Foreground Service
 
 Start MCP Streamable HTTP:
@@ -47,6 +49,8 @@ relay-knowledge service definition write --format json
 ```
 
 Linux returns a systemd user service plan, macOS returns a launchd plist plan, and Windows returns service XML/PowerShell planning output. Runtime state, graph databases, indexes, audit, and worker queues still use platform data/state/log/cache directories resolved by `paths`; they are not written to the release extraction directory.
+
+When `partitioned_sqlite` is enabled, service doctor, backup, migration, and uninstall confirmation must cover both the primary database and the `stores/repositories/` shard directory. Moving only the primary database leaves code facts invisible and is not a successful migration or rollback.
 
 ## 9.4 Silent Update Operator
 
