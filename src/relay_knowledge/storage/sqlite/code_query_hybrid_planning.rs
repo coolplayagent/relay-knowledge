@@ -123,6 +123,63 @@ pub(super) fn hybrid_sequence_terms(query: &str) -> Vec<String> {
     hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str))
 }
 
+pub(super) fn hybrid_query_has_declaration_expansion_intent(query: &str) -> bool {
+    hybrid_sequence_terms(query).iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "class"
+                | "classes"
+                | "exception"
+                | "exceptions"
+                | "extends"
+                | "implement"
+                | "implements"
+                | "inherit"
+                | "inheritance"
+                | "inherits"
+                | "interface"
+                | "interfaces"
+                | "mixin"
+                | "mixins"
+                | "module"
+                | "modules"
+                | "protocol"
+                | "protocols"
+                | "subclass"
+                | "subclasses"
+                | "trait"
+                | "traits"
+        )
+    })
+}
+
+pub(super) fn hybrid_query_has_conversion_expansion_intent(query: &str) -> bool {
+    let terms = hybrid_sequence_terms(query);
+    let has_conversion = terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "convert" | "conversion" | "format" | "formats" | "transform" | "translate"
+        )
+    });
+    let has_chunk_or_common_surface = terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "chunk" | "chunks" | "common" | "provider" | "providers" | "responses"
+        )
+    });
+
+    has_conversion && has_chunk_or_common_surface
+}
+
+pub(super) fn hybrid_query_has_inline_expansion_intent(query: &str) -> bool {
+    hybrid_sequence_terms(query).iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "callback" | "callbacks" | "closure" | "closures" | "lambda" | "lambdas"
+        )
+    })
+}
+
 pub(super) fn workflow_language_scope_matches(language_id: &str, scope: &str) -> bool {
     workflow_language_family(language_id).is_some_and(|language_scope| language_scope == scope)
 }

@@ -18,7 +18,8 @@ use super::{
     code_query_line_ranges::{SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, symbol_result_line_range},
     code_query_path_ranking::{
         path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
-        symbol_declaration_surface_path_bonus, symbol_test_path_penalty,
+        symbol_declaration_surface_path_bonus, symbol_implementation_path_bonus,
+        symbol_test_path_penalty,
     },
     code_query_rows::SymbolRow,
     code_query_support::*,
@@ -558,6 +559,7 @@ fn symbol_rows_to_hits(
                     + 2.0
                     + symbol_kind_bonus(&row.kind, request)
                     + symbol_declaration_surface_path_bonus(score, &row.kind, &row.path, request)
+                    + symbol_implementation_path_bonus(score, &row.signature, &row.path, request)
                     + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
                 let line_range = symbol_result_line_range(&row);
                 let excerpt = symbol_excerpt(

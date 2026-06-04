@@ -3,17 +3,21 @@ use rusqlite::types::Value;
 use super::code_query_identifiers::identifier_terms_equivalent;
 use crate::domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest};
 
+#[path = "code_query_declaration_scoring.rs"]
+mod code_query_declaration_scoring;
 #[path = "code_query_filters.rs"]
 mod code_query_filters;
 #[path = "code_query_fts.rs"]
 mod code_query_fts;
 
+pub(super) use code_query_declaration_scoring::declaration_chunk_bonus;
 pub(super) use code_query_filters::*;
 pub(super) use code_query_fts::{
     compound_hybrid_chunk_fts_match_query, direct_hybrid_chunk_fts_match_query,
     focused_hybrid_chunk_fts_match_query, focused_symbol_fts_match_query, fts_match_query,
-    hybrid_chunk_fts_match_query, strict_hybrid_chunk_fts_match_query,
-    structured_hybrid_chunk_fts_match_query, symbol_fts_match_query,
+    hybrid_chunk_fts_match_query, lifecycle_hybrid_chunk_fts_match_query,
+    strict_hybrid_chunk_fts_match_query, structured_hybrid_chunk_fts_match_query,
+    symbol_fts_match_query,
 };
 
 #[cfg(test)]
@@ -286,112 +290,6 @@ pub(super) fn score_text<'field>(
     ScoreQuery::new(query).score(fields)
 }
 
-pub(super) fn declaration_chunk_bonus(terms: &[String], content: &str) -> f64 {
-    let abstract_interface = terms.iter().any(|term| term == "interface")
-        && content.contains("virtual ")
-        && (content.contains("= 0;") || content.contains("=0;"));
-    let relationship_declaration = terms.iter().any(|term| type_relationship_intent(term))
-        && content_has_type_relationship_declaration(content);
-    let declaration_lines = if abstract_interface {
-        0
-    } else {
-        content
-            .lines()
-            .map(str::trim)
-            .filter(|line| declaration_line_is_prototype(line))
-            .take(2)
-            .count()
-    };
-    if !abstract_interface && declaration_lines < 2 && !relationship_declaration {
-        return 0.0;
-    }
-
-    let lower_content = content.to_lowercase();
-    let matched_terms = terms
-        .iter()
-        .filter(|term| {
-            term.len() >= 3
-                && (identifier_field_matches_token(content, term)
-                    || lower_content.contains(term.as_str()))
-        })
-        .count();
-    if matched_terms < 3 {
-        return 0.0;
-    }
-
-    if abstract_interface {
-        3.0
-    } else if relationship_declaration {
-        2.75
-    } else if declaration_lines >= 2 {
-        2.0
-    } else {
-        0.0
-    }
-}
-
-fn type_relationship_intent(term: &str) -> bool {
-    matches!(
-        term,
-        "derive"
-            | "derived"
-            | "extend"
-            | "extends"
-            | "implement"
-            | "implements"
-            | "inherit"
-            | "inheritance"
-            | "inherited"
-            | "inherits"
-            | "override"
-            | "overrides"
-            | "overriding"
-            | "subclass"
-            | "subclasses"
-    )
-}
-
-fn content_has_type_relationship_declaration(content: &str) -> bool {
-    content.lines().map(str::trim).any(|line| {
-        if line.starts_with("//") || line.starts_with('*') {
-            return false;
-        }
-        let type_declaration = line
-            .split(|character: char| character.is_whitespace() || matches!(character, '{' | '('))
-            .filter(|word| !word.is_empty())
-            .take(4)
-            .any(|word| matches!(word, "class" | "struct" | "interface"));
-        type_declaration
-            && (line.contains(" : ")
-                || line.contains(": public ")
-                || line.contains(": protected ")
-                || line.contains(": private ")
-                || line.contains(" extends ")
-                || line.contains(" implements "))
-    })
-}
-
-fn declaration_line_is_prototype(line: &str) -> bool {
-    line.ends_with(';')
-        && line.contains('(')
-        && !line.contains("->")
-        && !line.contains('.')
-        && !line.starts_with("return ")
-}
-
-fn identifier_field_matches_token(field: &str, token: &str) -> bool {
-    identifier_tokens(field).any(|candidate| {
-        identifier_terms_equivalent(candidate, token)
-            || candidate
-                .split('_')
-                .filter(|part| !part.is_empty())
-                .any(|part| identifier_terms_equivalent(part, token))
-            || camel_case_terms(candidate)
-                .iter()
-                .any(|part| identifier_terms_equivalent(part, token))
-    })
-}
-
 pub(super) fn score_exact_path(query: &str, path: &str) -> f64 {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -471,6 +369,19 @@ fn partial_symbol_name_query_bonus(query_terms: &[String], name_tokens: &[String
     }
 }
 
+fn identifier_field_matches_token(field: &str, token: &str) -> bool {
+    identifier_tokens(field).any(|candidate| {
+        identifier_terms_equivalent(candidate, token)
+            || candidate
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .any(|part| identifier_terms_equivalent(part, token))
+            || camel_case_terms(candidate)
+                .iter()
+                .any(|part| identifier_terms_equivalent(part, token))
+    })
+}
+
 pub(super) fn symbol_query_bonus(
     query: &str,
     name: &str,
@@ -479,7 +390,9 @@ pub(super) fn symbol_query_bonus(
     canonical_symbol_id: &str,
     request: &CodeRetrievalRequest,
 ) -> f64 {
-    let name_bonus = symbol_name_query_bonus(query, name, request);
+    let name_bonus = symbol_name_query_bonus(query, name, request)
+        + workflow_connection_lifecycle_symbol_bonus(query, name, signature, request)
+        + common_chunk_conversion_symbol_bonus(query, name, signature, request);
     if !matches!(
         request.code_query_kind,
         CodeQueryKind::Definition | CodeQueryKind::Symbol | CodeQueryKind::Hybrid
@@ -497,6 +410,108 @@ pub(super) fn symbol_query_bonus(
     } else {
         name_bonus
     }
+}
+
+fn workflow_connection_lifecycle_symbol_bonus(
+    query: &str,
+    name: &str,
+    signature: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Hybrid {
+        return 0.0;
+    }
+    let query_terms = identifier_search_tokens(query);
+    let has_stream_lifecycle_intent = query_terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "connect" | "connection" | "event" | "reconnect" | "run" | "source" | "stream"
+        )
+    }) && query_terms
+        .iter()
+        .filter(|term| matches!(term.as_str(), "event" | "run" | "source" | "stream"))
+        .count()
+        >= 2;
+    if !has_stream_lifecycle_intent {
+        return 0.0;
+    }
+
+    let mut symbol_terms = identifier_search_tokens(name);
+    symbol_terms.extend(identifier_search_tokens(signature));
+    symbol_terms.sort();
+    symbol_terms.dedup();
+    let has_lifecycle_opener = symbol_terms
+        .iter()
+        .any(|term| matches!(term.as_str(), "connect" | "open" | "reconnect"));
+    if !has_lifecycle_opener {
+        return 0.0;
+    }
+
+    let matched_workflow_terms = ["connection", "event", "run", "source", "stream"]
+        .iter()
+        .filter(|term| {
+            query_terms.iter().any(|query_term| query_term == **term)
+                && symbol_terms.iter().any(|symbol_term| symbol_term == **term)
+        })
+        .count();
+    if matched_workflow_terms >= 2 {
+        3.25
+    } else {
+        0.0
+    }
+}
+
+fn common_chunk_conversion_symbol_bonus(
+    query: &str,
+    name: &str,
+    signature: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Hybrid {
+        return 0.0;
+    }
+    let query_terms = identifier_search_tokens(query);
+    let has_conversion_intent = query_terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "convert" | "conversion" | "format" | "formats" | "transform" | "translate"
+        )
+    });
+    if !has_conversion_intent
+        || !query_terms.iter().any(|term| term == "common")
+        || !query_terms.iter().any(|term| term == "chunk")
+    {
+        return 0.0;
+    }
+
+    let name_terms = identifier_search_tokens(name);
+    if !name_terms.iter().any(|term| term == "chunk")
+        || !name_terms
+            .iter()
+            .any(|term| matches!(term.as_str(), "convert" | "from" | "to"))
+    {
+        return 0.0;
+    }
+    let signature_terms = identifier_search_tokens(signature);
+    let adapts_common_chunk = signature_terms.iter().any(|term| term == "common")
+        && signature_terms.iter().any(|term| term == "chunk");
+    if !adapts_common_chunk {
+        return 0.0;
+    }
+
+    if name_terms.iter().any(|term| term == "from") && signature_returns_common_chunk(signature) {
+        3.6
+    } else {
+        2.0
+    }
+}
+
+fn signature_returns_common_chunk(signature: &str) -> bool {
+    signature
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<String>()
+        .contains("):commonchunk")
 }
 
 pub(super) fn scoped_identity_query_bonus(
@@ -576,9 +591,20 @@ fn scoped_query_terms(query: &str) -> Option<Vec<String>> {
 
 fn contains_scoped_terms(field: &str, query_terms: &[String]) -> bool {
     let field_terms = scoped_terms(field);
-    field_terms
-        .windows(query_terms.len())
-        .any(|window| window == query_terms)
+    let mut next_query_index = 0usize;
+    for field_term in field_terms {
+        if query_terms
+            .get(next_query_index)
+            .is_some_and(|query_term| field_term == *query_term)
+        {
+            next_query_index += 1;
+            if next_query_index == query_terms.len() {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn scoped_terms(value: &str) -> Vec<String> {
@@ -680,7 +706,7 @@ pub(super) fn same_named_caller_penalty(
     let caller = compact_identifier(&caller_leaf);
     let callee = compact_identifier(&callee_leaf);
     if !caller.is_empty() && caller == callee {
-        -2.0
+        -2.5
     } else {
         0.0
     }

@@ -20,6 +20,7 @@ const COMPOUND_HYBRID_CHUNK_MIN_TERM_LEN: usize = 4;
 const COMPOUND_HYBRID_CHUNK_MAX_TERMS: usize = 8;
 const COMPOUND_HYBRID_CHUNK_PAIR_DISTANCE: usize = 1;
 const FOCUSED_SYMBOL_MAX_TERMS: usize = 3;
+const FOCUSED_SYMBOL_MAX_WORKFLOW_TERMS: usize = 2;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::fts_query_terms(query), " ", true)
@@ -58,13 +59,37 @@ pub(in crate::storage::sqlite::code::code_query) fn focused_symbol_fts_match_que
             .then_with(|| left.2.cmp(&right.2))
             .then_with(|| left.3.cmp(right.3))
     });
-    let recall_terms = ranked
+    let mut recall_terms = ranked
         .into_iter()
         .map(|(_, _, _, term)| term.to_owned())
         .take(FOCUSED_SYMBOL_MAX_TERMS)
         .collect::<Vec<_>>();
+    append_focused_symbol_workflow_terms(&terms, &mut recall_terms);
 
     (recall_terms.len() >= 2).then(|| fts_match_query_with_operator(&recall_terms, " OR ", false))
+}
+
+fn append_focused_symbol_workflow_terms(terms: &[String], recall_terms: &mut Vec<String>) {
+    let mut appended = 0usize;
+    for term in terms {
+        if appended >= FOCUSED_SYMBOL_MAX_WORKFLOW_TERMS {
+            break;
+        }
+        if focused_symbol_workflow_term(term) {
+            let before = recall_terms.len();
+            push_case_insensitive_unique_term(recall_terms, term);
+            if recall_terms.len() > before {
+                appended += 1;
+            }
+        }
+    }
+}
+
+fn focused_symbol_workflow_term(term: &str) -> bool {
+    matches!(
+        term.to_ascii_lowercase().as_str(),
+        "connect" | "connection" | "event" | "run" | "source" | "stream"
+    )
 }
 
 fn focused_symbol_generic_term(term: &str) -> bool {
@@ -137,6 +162,46 @@ pub(in crate::storage::sqlite::code::code_query) fn focused_hybrid_chunk_fts_mat
     }
 
     (!groups.is_empty()).then(|| groups.join(" OR "))
+}
+
+pub(in crate::storage::sqlite::code::code_query) fn lifecycle_hybrid_chunk_fts_match_query(
+    query: &str,
+) -> Option<String> {
+    let terms = dedupe_terms(super::fts_query_terms(query));
+    if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
+        return None;
+    }
+    if !terms
+        .iter()
+        .any(|term| matches!(term.as_str(), "finish" | "finalize" | "finalized"))
+    {
+        return None;
+    }
+    let has_tool_call_intent = terms
+        .iter()
+        .any(|term| matches!(term.as_str(), "tool" | "tools"))
+        && terms
+            .iter()
+            .any(|term| matches!(term.as_str(), "call" | "calls"));
+    let has_lifecycle_intent = terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "delta" | "event" | "events" | "lifecycle" | "stream"
+        )
+    });
+    if !has_tool_call_intent || !has_lifecycle_intent {
+        return None;
+    }
+
+    let anchor = if terms.iter().any(|term| term == "delta") {
+        "delta"
+    } else if terms.iter().any(|term| term == "tool") {
+        "tool"
+    } else {
+        "lifecycle"
+    };
+    let recall_terms = vec![anchor.to_owned(), "finish".to_owned()];
+    Some(fts_match_query_with_operator(&recall_terms, " ", false))
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn structured_hybrid_chunk_fts_match_query(
@@ -727,6 +792,17 @@ mod tests {
     }
 
     #[test]
+    fn focused_symbol_fts_query_keeps_workflow_identity_terms() {
+        let fts_query = focused_symbol_fts_match_query(
+            "background stream discovery reconcile multiplex run event source reconnect",
+        )
+        .expect("focused symbol query should be planned");
+
+        assert!(fts_query.contains("\"stream\""));
+        assert!(fts_query.contains("\"run\""));
+    }
+
+    #[test]
     fn focused_hybrid_chunk_fts_query_uses_bounded_neighbor_pairs() {
         let fts_query = focused_hybrid_chunk_fts_match_query(
             "typed arrow payload projector trim provider record",
@@ -754,6 +830,19 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn lifecycle_hybrid_chunk_fts_query_recalls_tool_finalization_flow() {
+        assert_eq!(
+            lifecycle_hybrid_chunk_fts_match_query(
+                "OpenAI Chat protocol sse tool call delta lifecycle finish events"
+            )
+            .as_deref(),
+            Some("\"delta\" \"finish\"")
+        );
+        assert!(lifecycle_hybrid_chunk_fts_match_query("protocol lifecycle events").is_none());
+        assert!(lifecycle_hybrid_chunk_fts_match_query("tool call setup delta events").is_none());
     }
 
     #[test]

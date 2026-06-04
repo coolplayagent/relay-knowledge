@@ -75,6 +75,7 @@ auto append_event = [&cache, &pipeline](const PipelineEvent& event) {
 total += append_event(event);
 "#,
         ),
+        None,
         "RunPipeline",
         "append_event",
     );
@@ -107,6 +108,7 @@ int rk_dispatch_read(struct rk_driver_ops *ops) {
 }
 "#,
         ),
+        None,
         "rk_dispatch_read",
         "rk_validate_device",
     );
@@ -116,6 +118,120 @@ int rk_dispatch_read(struct rk_driver_ops *ops) {
     assert!(excerpt.contains("ops->read(dev, buffer, length)"));
     assert!(!excerpt.contains("rk_unlock_device(dev)"));
     assert!(!excerpt.contains("return result"));
+}
+
+#[test]
+fn callee_excerpt_includes_preceding_control_context() {
+    let excerpt = callee_excerpt(
+        Some(
+            r#"
+rk_install_main() {
+  local command="${1:-install}"
+  case "$command" in
+    install) rk_runtime_dispatch "install" ;;
+    doctor) rk_runtime_dispatch "doctor" ;;
+    *) rk_missing_command "$command" ;;
+  esac
+}
+"#,
+        ),
+        None,
+        "rk_install_main",
+        "rk_runtime_dispatch",
+    );
+
+    assert!(excerpt.contains("case \"$command\" in"), "{excerpt}");
+    assert!(
+        excerpt.contains("rk_runtime_dispatch \"install\""),
+        "{excerpt}"
+    );
+    assert!(
+        excerpt.contains("rk_missing_command \"$command\""),
+        "{excerpt}"
+    );
+}
+
+#[test]
+fn callee_excerpt_appends_resolved_callee_body_context() {
+    let excerpt = callee_excerpt(
+        Some(
+            r#"
+public String dispatch(String value) {
+    Function<String, String> transformer = ignored -> create().handle(value);
+    return transformer.apply(value);
+}
+"#,
+        ),
+        Some(
+            r#"
+public String handle(String value) {
+    return normalize(value).trim();
+}
+"#,
+        ),
+        "dispatch",
+        "handle",
+    );
+
+    assert!(excerpt.contains("create().handle(value)"), "{excerpt}");
+    assert!(excerpt.contains("normalize(value).trim()"), "{excerpt}");
+}
+
+#[test]
+fn callee_excerpt_keeps_deeper_resolved_body_calls_within_bound() {
+    let excerpt = callee_excerpt(
+        Some(
+            r#"
+Status InternalGet(const Slice& key) {
+    return BlockReader(table, key);
+}
+"#,
+        ),
+        Some(
+            r#"
+Iterator* BlockReader(void* arg, const ReadOptions& options, const Slice& index_value) {
+    Table* table = reinterpret_cast<Table*>(arg);
+    BlockContents contents;
+    Slice handle = index_value;
+    bool may_cache = options.fill_cache;
+    Cache::Handle* cache_handle = nullptr;
+    Block* block = nullptr;
+    Status s;
+    if (cache_handle == nullptr) {
+        s = ReadBlock(table->rep_->file.get(), options, handle, &contents);
+    }
+    if (s.ok()) {
+        block = new Block(contents);
+    }
+    return block->NewIterator(table->rep_->options.comparator);
+    int padding_one = 1;
+    int padding_two = 2;
+    int padding_three = 3;
+    int padding_four = 4;
+    int padding_five = 5;
+    int padding_six = 6;
+    int padding_seven = 7;
+    int padding_eight = 8;
+    int padding_nine = 9;
+    int padding_ten = 10;
+    int padding_eleven = 11;
+    int padding_twelve = 12;
+    int padding_thirteen = 13;
+    int padding_fourteen = 14;
+    int padding_fifteen = 15;
+    int padding_sixteen = 16;
+    int padding_seventeen = 17;
+    unreachable_cleanup();
+    return nullptr;
+}
+"#,
+        ),
+        "Table::InternalGet",
+        "BlockReader",
+    );
+
+    assert!(excerpt.contains("ReadBlock("), "{excerpt}");
+    assert!(!excerpt.contains("unreachable_cleanup"), "{excerpt}");
 }
 
 #[test]

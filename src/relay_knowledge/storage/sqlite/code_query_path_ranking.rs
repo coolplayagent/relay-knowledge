@@ -57,7 +57,7 @@ pub(super) fn call_site_test_path_penalty(
         return 0.0;
     }
 
-    -0.35
+    -0.75
 }
 
 pub(super) fn call_site_example_path_penalty(
@@ -332,6 +332,25 @@ pub(super) fn symbol_declaration_surface_path_bonus(
     } else {
         0.0
     }
+}
+
+pub(super) fn symbol_implementation_path_bonus(
+    base_score: f64,
+    signature: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0
+        || request.code_query_kind != CodeQueryKind::Definition
+        || path_looks_like_test_or_benchmark(path)
+        || file_name_has_header_extension(path.rsplit('/').next().unwrap_or(path))
+        || !signature.contains('{')
+        || !signature.contains("::")
+    {
+        return 0.0;
+    }
+
+    0.35
 }
 
 pub(super) fn import_test_path_penalty(
@@ -662,11 +681,11 @@ mod tests {
 
         assert_eq!(
             call_site_test_path_penalty(4.0, "table/filter_block_test.cc", &callers, false),
-            -0.35
+            -0.75
         );
         assert_eq!(
             call_site_test_path_penalty(4.0, "util/bloom_test.cc", &callees, false),
-            -0.35
+            -0.75
         );
         assert_eq!(
             call_site_test_path_penalty(4.0, "table/table.cc", &callers, false),

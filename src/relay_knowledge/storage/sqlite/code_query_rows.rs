@@ -53,6 +53,7 @@ pub(super) struct CallRow {
     pub(super) caller_signature: Option<String>,
     pub(super) callee_signature: Option<String>,
     pub(super) caller_excerpt: Option<String>,
+    pub(super) callee_excerpt: Option<String>,
 }
 
 pub(super) struct ImportRow {

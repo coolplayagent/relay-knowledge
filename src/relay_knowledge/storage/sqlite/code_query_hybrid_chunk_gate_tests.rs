@@ -142,6 +142,29 @@ fn hybrid_chunk_gate_keeps_graph_expansion_for_sparse_or_fallback_hits() {
 }
 
 #[test]
+fn hybrid_chunk_gate_keeps_inline_lambda_intent_for_broad_expansion() {
+    let request = hybrid_gate_request("kotlin lambda request handler timeout default trim", 12);
+    let hits = vec![
+        chunk_gate_hit_with_language(
+            "kotlin",
+            "fun defaultHandler(): RequestHandler = { value -> value.trim() }",
+        ),
+        chunk_gate_hit_with_language(
+            "kotlin",
+            "fun withTimeout(timeout: Duration): SyntaxClient = SyntaxClient { value -> value }",
+        ),
+        chunk_gate_hit_with_language(
+            "kotlin",
+            "class SyntaxClient(private val handler: RequestHandler = defaultHandler())",
+        ),
+    ];
+
+    assert!(!hybrid_chunk_results_can_answer_without_graph_expansion(
+        &request, &hits
+    ));
+}
+
+#[test]
 fn hybrid_direct_gate_accepts_dense_non_fallback_symbol_evidence() {
     let request = hybrid_gate_request("Recover descriptor save_manifest VersionEdit", 10);
 

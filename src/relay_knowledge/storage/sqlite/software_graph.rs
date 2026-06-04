@@ -611,6 +611,15 @@ pub(super) fn relationships_for_scope(
                 WHEN 'locked' THEN 4
                 ELSE 5
             END ASC,
+            CASE files.file_role
+                WHEN 'dependency_manifest' THEN 0
+                WHEN 'build_manifest' THEN 1
+                WHEN 'deployment' THEN 2
+                WHEN 'source' THEN 3
+                WHEN 'configuration' THEN 4
+                WHEN 'documentation' THEN 5
+                ELSE 6
+            END ASC,
             relationships.confidence_basis_points DESC,
             relationships.evidence_path ASC,
             relationships.evidence_line_start ASC
