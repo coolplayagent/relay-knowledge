@@ -2,8 +2,8 @@
 
 [English](../../en/04-research/README.md) | [中文](../../zh/04-research/README.md)
 
-> Document version: 1.0
-> Prepared: 2026-05-17
+> Document version: 1.1
+> Prepared: 2026-06-05
 > Scope: research sources, research goals, competitive positioning, scenario fit, and forward roadmap.
 
 `04-research` is the forward-looking decision layer for `relay-knowledge`, not a passive archive. Each research note should make four things explicit: why the sources are credible, which product scenario the research serves, what should be adopted or avoided, and which capabilities can become durable competitive strengths.
@@ -23,6 +23,7 @@
 | Papers and surveys | KG construction, KG refinement, RAG, GraphRAG, KGE, HybridRAG | Identify algorithm boundaries, quality risks, and long-term direction | Convert only into testable architecture principles |
 | Search, database, and systems engineering | Lucene/BM25, Vespa/OpenSearch, Everything, plocate, Zoekt, RocksDB, Zanzibar, TAO, SRE | Validate high-performance indexing, permission filtering, background recovery, overload protection, and observability practices | Adopt general mechanisms without taking external desktop-search or cloud-service dependencies |
 | Open-source implementations and engineering cases | ai-knowledge-graph, Tree-sitter, Codebase-Memory, GitHub code navigation | Validate pipeline, parsing, indexing, and agent-access feasibility | Adopt capability semantics, not script boundaries |
+| Community and adoption signals | X.com, Reddit, Trendshift, GitHub discussions | Discover real pain points, product language, adoption heat, skepticism, and supply-chain risk | Use only for demand discovery and heat; performance or correctness must be verified through papers, code, benchmarks, or official docs |
 | Project-internal material | architecture specs, capability docs, relay-teams benchmarks, self-iteration records | Compare current implementation with gaps and priorities | Use as implementation constraints and acceptance baselines |
 
 Core primary-source entry points:
@@ -36,6 +37,8 @@ Core primary-source entry points:
 - Everything indexes: <https://www.voidtools.com/support/everything/indexes>
 - plocate: <https://plocate.sesse.net/>
 - Sourcegraph/Zoekt: <https://github.com/sourcegraph/zoekt>
+- 2026 CodeGraph/Understand Anything X trend captures: <https://trendshift.io/repositories/26949>, <https://trendshift.io/repositories/23482>
+- 2026 CodeGraph/Graphify/Understand Anything Reddit discussions: <https://www.reddit.com/r/ClaudeAI/comments/1rp6pkr/i_built_an_mcp_server_that_gives_claude_code_a/>, <https://www.reddit.com/r/ClaudeAI/comments/1ss28rj/i_built_a_graphify_skill_for_claude_code_that/>, <https://www.reddit.com/r/ClaudeCode/comments/1ttwyr0/understand_anything_vs_graphify_experience_and/>
 
 ## Competitive Focus
 
@@ -58,4 +61,4 @@ Core primary-source entry points:
 - [Chapter 8: Competitive, High-Performance, and Local File Retrieval Research 2026](08-competitive-performance-research-2026.md): extracts optimization guidance from GraphRAG, hybrid search, vector indexing, code search, local file retrieval, graph storage, and SRE practice.
 - [Chapter 9: GitNexus Feature and UI Implementation Research 2026](09-gitnexus-reference-analysis-2026.md): analyzes GitNexus CLI/MCP/HTTP backend, code graph, Web graph UI, agent workflows, and future improvement points.
 - [Chapter 10: Software Global Domain Modeling Research 2026](10-software-global-domain-modeling-research-2026.md): extracts a global modeling route from software engineering KGs, code KGs, SBOMs, SDK/dependency versions, dynamic graphs, and code generation research.
-- [Chapter 11: Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](11-software-global-codegraph-search-everything-comparison-2026.md): compares 2026 open-source systems and papers across global modeling, code graphs, deterministic Code RAG, and search-everything retrieval.
+- [Chapter 11: Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](11-software-global-codegraph-search-everything-comparison-2026.md): compares 2026 arXiv, X.com, Reddit, and open-source sources across global modeling, code graphs, Agentic GraphRAG, deterministic Code RAG, search-everything retrieval, and source-backed competitive feature issues.

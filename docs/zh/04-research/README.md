@@ -2,8 +2,8 @@
 
 [中文](../../zh/04-research/README.md) | [English](../../en/04-research/README.md)
 
-> 文档版本: 1.0
-> 编制日期: 2026-05-17
+> 文档版本: 1.1
+> 编制日期: 2026-06-05
 > 范围: 研究来源、研究目标、竞争力判断、场景化落地和前瞻路线。
 
 `04-research` 不是资料归档目录，而是 `relay-knowledge` 的前瞻判断层。研究结论必须回答四个问题: 来源是否可信，目标是否服务产品场景，外部经验如何取长补短，以及哪些能力会形成未来竞争力。
@@ -23,6 +23,7 @@
 | 论文与综述 | KG construction、KG refinement、RAG、GraphRAG、KGE、HybridRAG | 判断算法边界、质量风险和长期路线 | 只转化为可测试的架构原则 |
 | 搜索、数据库与系统工程 | Lucene/BM25、Vespa/OpenSearch、Everything、plocate、Zoekt、RocksDB、Zanzibar、TAO、SRE | 验证高性能索引、权限过滤、后台恢复、过载保护和可观测性做法 | 采用通用机制，不绑定外部桌面搜索或云服务依赖 |
 | 开源实现与工程案例 | ai-knowledge-graph、Tree-sitter、Codebase-Memory、GitHub code navigation | 验证 pipeline、解析、索引和 Agent 接入可行性 | 采用能力语义，不照搬脚本边界 |
+| 社区与采用信号 | X.com、Reddit、Trendshift、GitHub 讨论区 | 发现真实痛点、产品语言、采用热度、质疑点和供应链风险 | 只作为需求发现和热度信号，性能或正确性必须回到论文、代码、基准或官方文档验证 |
 | 项目内部材料 | 架构规格、能力说明、relay-teams 基准、自迭代记录 | 对照当前实现、关闭差距和安排优先级 | 作为落地约束和验收基线 |
 
 核心一手来源入口:
@@ -36,6 +37,8 @@
 - Everything indexes: <https://www.voidtools.com/support/everything/indexes>
 - plocate: <https://plocate.sesse.net/>
 - Sourcegraph/Zoekt: <https://github.com/sourcegraph/zoekt>
+- 2026 CodeGraph/Understand Anything X 趋势捕获: <https://trendshift.io/repositories/26949>, <https://trendshift.io/repositories/23482>
+- 2026 CodeGraph/Graphify/Understand Anything Reddit 讨论入口: <https://www.reddit.com/r/ClaudeAI/comments/1rp6pkr/i_built_an_mcp_server_that_gives_claude_code_a/>, <https://www.reddit.com/r/ClaudeAI/comments/1ss28rj/i_built_a_graphify_skill_for_claude_code_that/>, <https://www.reddit.com/r/ClaudeCode/comments/1ttwyr0/understand_anything_vs_graphify_experience_and/>
 
 ## 关键竞争力
 
@@ -58,4 +61,4 @@
 - [第 8 章 竞争力、高性能与本机文件检索研究 2026](08-competitive-performance-research-2026.md): 从 GraphRAG、混合搜索、向量索引、代码搜索、本机文件检索、图存储和 SRE 实践中提炼优化建议。
 - [第 9 章 GitNexus 功能与界面实现研究 2026](09-gitnexus-reference-analysis-2026.md): 分析 GitNexus 的 CLI/MCP/HTTP 后端、代码图谱、Web 图谱界面、Agent 工作流和后续改进点。
 - [第 10 章 软件全域建模研究 2026](10-software-global-domain-modeling-research-2026.md): 从软件工程 KG、代码知识图、SBOM、SDK/依赖版本、动态图谱和代码生成研究中提炼全域建模路线。
-- [第 11 章 软件全域建模、CodeGraph 与 Search Everything 对比研究 2026](11-software-global-codegraph-search-everything-comparison-2026.md): 对比 2026 年开源软件和论文在全域建模、代码图谱、确定性 Code RAG 和全域搜索上的路线。
+- [第 11 章 软件全域建模、CodeGraph 与 Search Everything 对比研究 2026](11-software-global-codegraph-search-everything-comparison-2026.md): 基于 2026 年 arXiv、X.com、Reddit 和开源项目，对全域建模、代码图谱、Agentic GraphRAG、确定性 Code RAG、全域搜索和已提竞品特性 issue 做来源可追溯的对比。
