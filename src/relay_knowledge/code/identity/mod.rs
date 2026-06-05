@@ -265,12 +265,12 @@ fn resolved_with_hint(
 }
 
 #[cfg(test)]
-#[path = "import_resolution_tests.rs"]
+#[path = "tests/import_resolution.rs"]
 mod import_resolution_tests;
 
 #[cfg(test)]
-#[path = "import_resolution_language_tests.rs"]
+#[path = "tests/import_resolution_language.rs"]
 mod import_resolution_language_tests;
 #[cfg(test)]
-#[path = "import_resolution_review_tests.rs"]
+#[path = "tests/import_resolution_review.rs"]
 mod import_resolution_review_tests;

@@ -1,5 +1,5 @@
 use super::{FeatureFlagFileInput, env_keys, extract_feature_flags};
-use crate::code::configuration::{ConfigFact, ConfigRange, ConfigValueKind};
+use crate::code::config_files::{ConfigFact, ConfigRange, ConfigValueKind};
 
 fn input(content: &str) -> FeatureFlagFileInput<'_> {
     FeatureFlagFileInput {

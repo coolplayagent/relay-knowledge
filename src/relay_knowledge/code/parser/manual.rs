@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use crate::code::configuration::{self, ConfigFact, ConfigReference};
+use crate::code::config_files::{self, ConfigFact, ConfigReference};
 
 use super::{
     super::CodeIndexError,
@@ -87,8 +87,8 @@ pub(super) fn collect_manual_nodes(
     Ok(())
 }
 
-impl From<configuration::ConfigRange> for SyntaxRange {
-    fn from(range: configuration::ConfigRange) -> Self {
+impl From<config_files::ConfigRange> for SyntaxRange {
+    fn from(range: config_files::ConfigRange) -> Self {
         Self {
             byte_start: range.byte_start,
             byte_end: range.byte_end,

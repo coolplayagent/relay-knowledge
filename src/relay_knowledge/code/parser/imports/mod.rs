@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use tree_sitter::Node;
 
 use crate::{
-    code::configuration,
+    code::config_files,
     domain::{CodeImportRecord, RepositoryCodeRange},
 };
 
@@ -172,7 +172,7 @@ impl<'a> ImportCollector<'a> {
         language_id: &str,
         content: &str,
     ) -> Result<(), CodeIndexError> {
-        for import in configuration::structured_imports(self.path, language_id, content) {
+        for import in config_files::structured_imports(self.path, language_id, content) {
             let range = SyntaxRange {
                 byte_start: import.range.byte_start,
                 byte_end: import.range.byte_end,
