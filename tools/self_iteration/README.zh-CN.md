@@ -35,6 +35,109 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 ./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
 ```
 
+## 命令行参数参考
+
+语法：
+
+```bash
+./self-iterate.sh [mode] [options]
+tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
+```
+
+模式：
+
+| 模式 | 默认 | 行为 |
+| --- | --- | --- |
+| `loop` | 是 | 持续生成候选，直到循环限制触发；被采纳的候选由 harness 创建 commit。 |
+| `once` | 否 | 只运行一轮生成和评估。 |
+| `evaluate` | 否 | 不调用 Codex、不创建 commit，只给当前 diff 打分。 |
+| `chart` | 否 | 导出 `.git/relay-knowledge-self-iteration/score-v2.csv` 和 `score-v2.svg`。 |
+
+通用参数：
+
+| 参数 | 取值 / 默认值 | 作用 |
+| --- | --- | --- |
+| `--workspace PATH` | 启动脚本设为仓库根目录 | 传给 Codex 和评估器的工作区。 |
+| `--strategy VALUE` | `single`；别名：`unattended-layered`、`unattended_layered`、`layered` | 选择普通单轮循环或长周期无人值守分层策略。 |
+| `--profile VALUE` | `fast`；取值：`smoke`、`fast`、`full`、`exhaustive` | 选择质量门禁和评估 workload。 |
+| `--categories LIST` | 未设置；取值：`foundational`、`competitive`、`semantic_vector`、`file_fixtures`、`repository_sets`、`research_judge`、`performance`、`all` | 聚焦一个或多个评分族，同时保留底线护栏。 |
+| `--exclude-categories LIST` | 未设置；同 `--categories`，支持 `judge`、`semantic-vector`、`repo_sets` 等别名 | 在 `all` 展开后移除指定类别；如果移除后为空则失败。 |
+| `--max-iterations N` | 未设置 | 循环最多运行 N 轮。 |
+| `--stop-after-accepted N` | 普通策略未设置；无人值守默认 `8` | 采纳 N 个 commit 后停止。 |
+| `--sleep-seconds N` | `5` | 普通循环轮次之间的等待时间；未单独覆盖时也会设置无人值守 cycle sleep。 |
+| `--cycle-sleep-seconds N` | 无人值守默认 `120` | 无人值守 cycle 之间的等待时间。 |
+| `--commit-message TEXT` | 根据分数生成 | 覆盖采纳候选的 commit subject。 |
+| `--dry-run-codex` | false | 生成 prompt 并记录 dry generation，不真正调用 Codex。 |
+| `--keep-workdirs` | false | 保留每轮 evaluation home，不清理临时 home。 |
+| `--use-current-candidate` | false | 跳过 Codex，直接评估当前工作树 diff。 |
+| `--fail-fast` | false | 首个迭代错误直接返回，而不是继续等循环限制。 |
+
+Codex 生成参数：
+
+| 参数 | 取值 / 默认值 | 作用 |
+| --- | --- | --- |
+| `--yolo` | false；启动脚本默认传入 | 映射到非交互 Codex approvals 和 `danger-full-access` sandbox。 |
+| `--model MODEL` | `gpt-5.5` | 候选生成使用的 Codex 模型。 |
+| `--codex-reasoning-effort VALUE` | `xhigh`；取值：`low`、`medium`、`high`、`xhigh` | 设置 `model_reasoning_effort`。 |
+| `--codex-profile NAME` | 未设置 | 向 Codex 传入 `-p NAME`。 |
+| `--codex-path PATH` | `codex` | Codex 可执行文件路径。 |
+| `--codex-timeout-seconds N` | `3600` | 候选生成超时时间。 |
+
+评估与并发参数：
+
+| 参数 | 取值 / 默认值 | 作用 |
+| --- | --- | --- |
+| `--command-timeout-seconds N` | `900` | 评估子进程和产品 CLI 命令超时时间。 |
+| `--jobs auto|N` | `auto` | 全局 command limiter；`auto` 使用可用 CPU 数或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS`。 |
+| `--repo-jobs auto|N` | `auto` | 仓库级并发；`auto` 使用可用 CPU 数的一半。 |
+| `--query-jobs auto|N` | `auto` | 查询子进程并发；`auto` 使用可用 CPU 数。 |
+
+无人值守分层参数：
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--max-wall-clock-hours N` | `36` | 无人值守总运行时长上限。 |
+| `--explore-timeout-seconds N` | `900` | 短 explore Codex 尝试超时时间。 |
+| `--macro-explore-timeout-seconds N` | `2700` | macro mutation 尝试超时时间。 |
+| `--max-explore-attempts-per-cycle N` | `3` | 一个 cycle 内短 explore 的重试次数。 |
+| `--max-consecutive-empty-candidates N` | `8` | 连续无 diff 生成达到上限后停止。 |
+| `--max-consecutive-promotion-failures N` | `10` | 连续 screen/validate 失败达到上限后停止。 |
+| `--macro-after-competitive-failures N` | `4` | competitive 连续失败后触发 macro mutation。 |
+| `--macro-after-empty-candidates N` | `6` | 连续空候选后触发 macro mutation。 |
+| `--cooldown-after-accept-seconds N` | `300` | 无人值守采纳 commit 后等待时间。 |
+| `--cooldown-after-timeout-seconds N` | `900` | Codex timeout 后等待时间。 |
+| `--deep-check-interval-accepts N` | `6` | 采纳达到该数量后运行 deeper validation。 |
+| `--deep-check-interval-hours N` | `12` | 达到该小时间隔后运行 deeper validation。 |
+
+环境变量：
+
+| 变量 | 作用 |
+| --- | --- |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_RELEASE=1` | 让 `self-iterate.sh` 构建并运行 release harness binary。 |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` | 只覆盖 `--jobs auto` 的全局并发默认值。 |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS` | 逗号分隔的 fast profile 仓库子集。 |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT` | fast profile 每仓 case 数量上限。 |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS` | 逗号分隔的 fast repository-set 子集。 |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT` | fast profile 每个 repository-set 的 case 数量上限。 |
+| `RELAY_KNOWLEDGE_JUDGE_BACKEND` | `http`、`openai`、`openai_compatible`、`api`、`llm`、`cli`、`opencode`、`agent`、`none`；禁用别名：`off`、`disabled`、`skip`、`false`。 |
+| `RELAY_KNOWLEDGE_JUDGE_BASE_URL`、`RELAY_KNOWLEDGE_JUDGE_API_KEY`、`RELAY_KNOWLEDGE_JUDGE_MODEL` | OpenAI-compatible HTTP judge 配置。 |
+| `RELAY_KNOWLEDGE_JUDGE_COMMAND` | CLI judge 命令模板；别名：`RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND`、`RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`。 |
+| `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS` | judge 通用超时时间，默认 `120`。 |
+
+可复制示例：
+
+```bash
+./self-iterate.sh once --profile fast
+./self-iterate.sh evaluate --use-current-candidate --profile fast
+./self-iterate.sh once --profile fast --categories semantic_vector
+./self-iterate.sh once --profile full --categories all --exclude-categories research_judge
+./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
+RELAY_KNOWLEDGE_JUDGE_BACKEND=none ./self-iterate.sh once --profile full --categories research_judge
+RELAY_KNOWLEDGE_JUDGE_BACKEND=http RELAY_KNOWLEDGE_JUDGE_BASE_URL=http://localhost:11434/v1 RELAY_KNOWLEDGE_JUDGE_API_KEY=local RELAY_KNOWLEDGE_JUDGE_MODEL=judge-model ./self-iterate.sh once --profile full --categories research_judge
+RELAY_KNOWLEDGE_JUDGE_COMMAND='opencode run "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." --file {prompt_file}' ./self-iterate.sh once --profile full --categories research_judge
+./self-iterate.sh chart
+```
+
 ## 进度日志
 
 harness 会把实时进度写到 stderr，统一使用 `[self-iterate]` 前缀。每个子进程都会输出
@@ -97,7 +200,7 @@ v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/r
 
 每个 cycle 先用 `smoke` profile 做短探索，按 `competitive -> semantic_vector -> performance -> repository_sets` 轮转 category。Codex 只在 explore 层运行；候选通过 smoke screen 后，复用同一个 patch 进入同 category 的 `fast` validate，只有 validate 通过才进入既有 accept/commit 路径。这样不会为了同一个候选重复调用 Codex。
 
-当短探索持续没有产出时，策略会升级到竞争力能力的 `macro_explore`。触发条件包括 repeated competitive promotion failure、连续 empty candidate，或当前 competitive capability 相对 best accepted focused baseline 出现超过阈值的差距。macro prompt 会注入 `cases.json` 中 `research_judge_suite.competitive_feature_targets` 和 `implementation_guardrails`，要求 Codex 做 ranking、indexing、relationship extraction、query planning、context construction 或 retrieval evidence 这类较大的泛化改进，同时继续禁止 fixture/query/path/symbol 特化枚举。
+当短探索持续没有产出时，策略会升级到竞争力能力的 `macro_explore`。触发条件包括 repeated competitive promotion failure、连续 empty candidate，或当前 competitive capability 相对 best accepted focused baseline 出现超过阈值的差距。macro prompt 使用有边界的 biological mutation profile：注入当前能力快照、`cases.json` 中 `research_judge_suite.competitive_feature_targets` 和 `implementation_guardrails`，要求 Codex 做 ranking、indexing、relationship extraction、query planning、context construction 或 retrieval evidence 这类较大的泛化改进。候选最终说明必须写清 mutation hypothesis、affected subsystem、expected capability jump 和 regression containment，同时继续禁止 fixture/query/path/symbol 特化枚举。
 
 运行状态写入 `.git/relay-knowledge-self-iteration/unattended-state-v2.json`，用于崩溃后恢复 category rotation、失败计数、accepted 计数和 deep-check 调度。分层 run history 会额外记录 `strategy`、`layer`、`parent_run_id`、`promoted_from_run_id`、`macro_trigger`、`promotion_decision` 和 wall-clock 字段。传入 `--use-current-candidate` 时会跳过 Codex，直接从当前 diff 的 smoke screen 和 fast validate 开始。
 
@@ -124,18 +227,22 @@ foundational_capability * 0.17
 + stability * 0.19
 ```
 
-这个策略有意提高 research 质量和性能对采纳分数的影响，同时继续通过回退检查保护其他目标。
+这些公式先得到 `base_score`。持久化的 `score` 是
+`min(1.0, base_score + capability_ceiling_bonus)`。动态天花板 bonus 上限为
+`0.06`，并且只使用 latest matching workload run 或同 profile best accepted run 中真实存在的 baseline component 字段。它会按距离 `1.0` 的剩余空间归一化奖励 competitive capability、semantic/vector quality、当前 run 产生 key performance metrics 时的 performance，以及当前存在 judge 分数时的 research_judge 进步。缺少 judge 输出不会产生 research bonus；该 bonus 也不能绕过失败 gate、缺失 diff 或受保护目标回退。
 
-research judge 用于判断研究对齐、架构合理性、可靠性推理、性能泛化、实现可操作性和是否存在 fixture 特化。它可以通过 OpenAI-compatible HTTP endpoint 运行，也可以通过开放 coding agent CLI 运行，例如 `opencode`、`relay-teams`、`codex`、`cc` 或 `copilot`。未提供 judge backend 或 HTTP 配置时，CLI judge 默认使用 `opencode`。所有 judge 覆盖配置都来自运行时环境变量：
+这个策略有意让 research 质量、竞争力能力和性能在当前 baseline 已经较强时仍有继续复合增长空间，同时继续通过回退检查保护其他目标。
 
-`cases.json` 也可以配置 judge workload。`documents` 选择有界的 02/03/04 文档片段，`competitive_feature_targets` 列出候选补丁应推进的研究竞争力能力，`implementation_guardrails` 列出反 fixture 特化、async 边界、freshness/version 证据和同变更文档更新等不可放松约束。
+research judge 用于判断研究对齐、竞争优势、架构合理性、性能泛化、实现可操作性、是否存在 fixture 特化以及 judge evidence quality。它必须返回严格 JSON，字段包括 `passed`、`confidence`、`overall_score`、`scores`、`summary`、`evidence`、`risks`、`recommended_cases`、`capability_delta` 和 `research_gaps`；每个配置的 rubric dimension 都必须出现在 `scores` 中并达到 `min_dimension_score`。它可以通过 OpenAI-compatible HTTP endpoint 运行，也可以通过开放 coding agent CLI 运行，例如 `opencode`、`relay-teams`、`codex`、`cc` 或 `copilot`。未提供 judge backend 或 HTTP 配置时，CLI judge 默认使用 `opencode`。所有 judge 覆盖配置都来自运行时环境变量：
+
+`cases.json` 也可以配置 judge workload。`documents` 选择有界的 02/03/04 文档片段，`competitive_feature_targets` 列出候选补丁应推进的研究竞争力能力，`rubric_dimensions` 和 `min_dimension_score` 定义严格评分维度，`implementation_guardrails` 列出反 fixture 特化、async 边界、freshness/version 证据和同变更文档更新等不可放松约束。
 
 - `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli|opencode|none`；`opencode` 是 CLI alias，未设置自定义命令时使用默认 opencode 命令
 - HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`、`RELAY_KNOWLEDGE_JUDGE_API_KEY`、`RELAY_KNOWLEDGE_JUDGE_MODEL`；独立 harness 用 `curl` 发起请求，API key 只从环境变量读取，不写入报告
 - CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`，也支持别名 `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` 和 `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`；未设置时默认命令为 `opencode run "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." --file {prompt_file}`
 - 通用 timeout: `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS`
 
-自定义 CLI command 默认通过 stdin 接收 judge prompt；命令模板也可以使用 `{workspace}`、`{prompt_file}` 或 `{prompt}` 占位符。harness 要求 HTTP 或 CLI judge 返回严格 JSON。设置 `RELAY_KNOWLEDGE_JUDGE_BACKEND=none` 时仍选择 suite 但记录 `judge_skipped`；`off`、`disabled`、`skip` 和 `false` 也作为禁用别名。需要完全不运行 suite 时使用 `--exclude-categories research_judge`。显式配置但缺少必需环境变量、返回非法 JSON、低置信度、低总分或低 anti-fixture-special-casing 分数时会拒绝候选。
+自定义 CLI command 默认通过 stdin 接收 judge prompt；命令模板也可以使用 `{workspace}`、`{prompt_file}` 或 `{prompt}` 占位符。harness 要求 HTTP 或 CLI judge 返回严格 JSON。设置 `RELAY_KNOWLEDGE_JUDGE_BACKEND=none` 时仍选择 suite 但记录 `judge_skipped`；`off`、`disabled`、`skip` 和 `false` 也作为禁用别名。需要完全不运行 suite 时使用 `--exclude-categories research_judge`。显式配置但缺少必需环境变量、返回非法 JSON、低置信度、低总分、低 anti-fixture-special-casing 分数、缺失维度分数或必需维度分数过低时会拒绝候选。
 
 case objective 是连续质量分，不是通过率计数。case 在 rank 1 通过时从
 `1.0` 起算；rank `N > 1` 即使仍在该 case 的 `max_rank` 采纳阈值内，也只从
