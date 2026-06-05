@@ -6,6 +6,11 @@
 
 目录职责固定如下：`01-user-guide` 只放可执行用户流程；`02-capabilities` 只描述当前已实现能力；`03-architecture-specs` 保留硬约束、接口边界和前瞻产品要求；`04-research` 保留带日期的研究和差距分析；`05-benchmarks` 放基准与优化记录；`06-verification` 放验证、审计和文档新鲜度记录。各卷正文文件使用两位章节号前缀；`README.md` 是卷首目录，在阅读路径中作为第 0 章。
 
+发版准备时，先读根 README、第 1 章安装流程、第 19 章安装/发布架构契约，以及最新的
+[文档发版准备审计](06-verification/11-documentation-release-readiness-2026-06-05.md)。
+中文卷目前保留若干尚未翻译成英文的基准和验证记录；英文目录会显式标注这些中文-only
+记录，避免发布导航静默缺项。
+
 ## 第一卷：用户手册
 
 - [第 0 章 使用指南总览](01-user-guide/README.md)：安装、CLI、知识图谱、代码仓库图谱、Web、Agent 接入、常驻服务、后台任务、可观测性、排障和高级配置的主入口。
@@ -88,6 +93,14 @@
 - [附录 A.3 relay-teams 优化研究 2026-05-14](05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
 - [附录 A.4 自迭代已采纳优化记录](05-benchmarks/04-self-iteration-accepted-optimizations.md)
 - [附录 A.5 竞争力与高性能基准目标 2026-05-17](05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
+- [附录 A.6 C/C++ 语法型自迭代测评集 2026-05-20](05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
+- [附录 A.7 多语言语法型自迭代测评集 2026-05-21](05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md)
+- [附录 A.8 代码索引事实版本化](05-benchmarks/08-code-index-fact-versioning.md)
+- [附录 A.9 代码查询排序基础门禁](05-benchmarks/09-code-query-ranking-foundational.md)
+- [附录 A.10 profile 全量性能与 source surface 2026-06-04](05-benchmarks/10-profile-all-performance-source-surface-2026-06-04.md)
+
+附录 A.4 的历史归档文件保留在同目录，用于比较自迭代记录在 2026-05-17、2026-05-24
+和 2026-05-31 的快照；主阅读路径使用当前 A.4 页面。
 
 ## 附录 B：验证记录
 
@@ -101,3 +114,4 @@
 - [附录 B.8 软件全域建模文档刷新审计 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md)：软件全域建模研究与架构归档验证记录。
 - [附录 B.9 软件全域、CodeGraph 与 Search Everything 研究文档刷新审计 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md)：第 11 章研究与书籍目录同步记录。
 - [附录 B.10 服务化部署、控制面与数据面分离文档刷新审计 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md)：issue #250 服务化部署方案和架构目录同步记录。
+- [附录 B.11 文档发版准备审计 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md)：发版导航、文件清单、本地链接检查和文档-only 改动边界。

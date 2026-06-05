@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 2.5
-> 编制日期: 2026-06-04
+> 文档版本: 2.6
+> 编制日期: 2026-06-05
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -60,12 +60,26 @@ preflight doctor
 
 `relay-knowledge version check` 是只读诊断入口，输出当前版本、最新稳定版本、来源、release URL 和诊断信息。实际升级仍必须由用户、installer 或包管理器显式执行，并继续遵守 preflight、checkpoint、service restart 和 post-upgrade doctor 流程。
 
-## 6. 验收标准
+## 6. 发版文档准备
+
+推送 release tag 前，release owner 需要检查用户和运维最先阅读到的文档面：
+
+- 根目录 `README.md` 与 `README.zh-CN.md` 说明当前版本的安装渠道、内置 CLI
+  skill 产物和质量门禁。
+- `docs/README.md`、`docs/en/README.md` 和 `docs/zh/README.md` 列出当前书籍结构、近期基准/验证记录，以及尚待翻译的中文-only 记录。
+- 第 1 章安装说明和本章发布契约在运行时目录、service manager 托管、版本检测、回滚和卸载行为上保持一致。
+- `06-verification` 下有带日期的记录，说明文档文件清单、本地链接检查、文件长度检查，以及在未刻意修改产品行为时本次改动是 documentation-only。
+
+文档刷新不能把 release 命令写成会暗示不存在的产物、不支持的包管理器、未受管 service loop
+或自动静默升级。
+
+## 7. 验收标准
 
 - Release artifact、checksum、版本号和文档能互相对应。
 - Linux GNU release 二进制和 skill Linux x64 内置 asset 不得依赖高于 2.31 的 `GLIBC_*` 符号。
 - GitHub Release 将 CLI skill archive 纳入 `checksums.txt`，archive 内含 skill `README.md`、Linux x64 和 Windows x64 asset 二进制；启用 ClawHub 发布时使用同一个 crate 版本和生成后的 asset 布局。
 - CLI 能说明稳定新版本可用，JSON 输出保持机器可读且普通命令不会自动安装新版。
+- 面向 release 的文档有带日期的 `06-verification` 审计，覆盖导航、清单、链接检查和 documentation-only 改动边界。
 - service install 使用 systemd、launchd 或 Windows Service，而非 unmanaged loop。
 - uninstall 清理二进制和服务定义，但保留或按用户确认处理 runtime data。
 - 分片 SQLite 拓扑的 shard 目录参与 backup、migration、doctor 和 uninstall 确认。

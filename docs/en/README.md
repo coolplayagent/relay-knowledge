@@ -19,6 +19,12 @@ stores validation, audit, and documentation freshness records. Content files
 inside numbered volumes use a two-digit chapter prefix; `README.md` files are
 volume covers and count as chapter 0 when they appear in a reading path.
 
+For release preparation, start with the root README, Chapter 1 installation
+workflow, Chapter 19 installation/release architecture contract, and the latest
+[documentation release-readiness audit](06-verification/11-documentation-release-readiness-2026-06-05.md).
+The Chinese edition currently includes several benchmark and verification
+records that are intentionally listed below as Chinese-only until translated.
+
 ## Book 1: User Guide
 
 - [Chapter 0: User Guide Overview](01-user-guide/README.md): install, CLI, knowledge graphs, code repository graphs, Web, agent access, resident service operation, background tasks, observability, troubleshooting, and advanced configuration.
@@ -101,6 +107,13 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Appendix A.3: relay-teams Optimization Study 2026-05-14](05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
 - [Appendix A.4: Self-Iteration Accepted Optimization Records](05-benchmarks/04-self-iteration-accepted-optimizations.md)
 - [Appendix A.5: Competitive and High-Performance Benchmark Targets 2026-05-17](05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
+- [Appendix A.6: C/C++ Syntax Self-Iteration Evaluation Set 2026-05-20](05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
+- [Appendix A.7: Multilingual Syntax Self-Iteration Evaluation Set 2026-05-21](05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md)
+
+Chinese-only benchmark addenda pending English translation:
+[Appendix A.8](../zh/05-benchmarks/08-code-index-fact-versioning.md),
+[Appendix A.9](../zh/05-benchmarks/09-code-query-ranking-foundational.md), and
+[Appendix A.10](../zh/05-benchmarks/10-profile-all-performance-source-surface-2026-06-04.md).
 
 ## Appendix B: Verification
 
@@ -112,3 +125,8 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Appendix B.8: Software Global Modeling Documentation Refresh Audit 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md): verification record for the software global modeling research and architecture archive.
 - [Appendix B.9: Software Global, CodeGraph, and Search Everything Research Documentation Refresh Audit 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md): chapter 11 research and bookshelf index sync record.
 - [Appendix B.10: Service Deployment, Control Plane, and Data Plane Documentation Refresh Audit 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md): issue #250 service deployment plan and architecture index sync record.
+- [Appendix B.11: Documentation Release Readiness Audit 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md): release navigation, file inventory, local link checking, and documentation-only change boundaries.
+
+Chinese-only verification records pending English translation:
+[Appendix B.5](../zh/06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md) and
+[Appendix B.6](../zh/06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md).

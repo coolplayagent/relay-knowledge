@@ -1,6 +1,6 @@
 schema_version: 1
-map_version: 3
-updated_at: unix:1780532533
+map_version: 4
+updated_at: unix:1780636178
 topics:
 - id: architecture
   title: Architecture knowledge
@@ -11,6 +11,9 @@ topics:
 - id: cli
   title: CLI knowledge
   description: CLI command reference and agent workflow guidance.
+- id: release-documentation
+  title: Release documentation knowledge
+  description: Release-readiness documentation, navigation, and validation records.
 sources:
 - id: architecture-hard-constraints
   topic: architecture
@@ -62,6 +65,16 @@ sources:
   status: active
   version: 1
   description: Agent workflow for maintaining the knowledge map through CLI commands.
+- id: documentation-release-readiness-2026-06-05
+  topic: release-documentation
+  kind: doc
+  uri: docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Release-readiness documentation refresh audit and validation record.
 routes:
 - topic: architecture
   source_order:
@@ -77,7 +90,15 @@ routes:
   - cli-command-reference
   - cli-skill-workflows
   fallback: bounded-search
+- topic: release-documentation
+  source_order:
+  - documentation-release-readiness-2026-06-05
+  fallback: bounded-search
 history:
+- version: 4
+  action: update
+  actor: codex
+  summary: Added release-readiness documentation audit route.
 - version: 3
   action: update
   actor: codex

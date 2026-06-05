@@ -28,3 +28,26 @@ Documentation refresh audits belong in `06-verification`, not in
 `02-capabilities`, because they prove documentation freshness rather than
 describe a user-facing capability. Root-level legacy document paths were removed.
 New links should point directly to either `docs/zh/` or `docs/en/`.
+
+## Release Readiness Path
+
+Before tagging a new release, read the documentation in this order:
+
+1. Root release entry points: [`README.md`](../README.md) and
+   [`README.zh-CN.md`](../README.zh-CN.md).
+2. User installation workflow:
+   [`docs/en/01-user-guide/01-install-and-runtime.md`](./en/01-user-guide/01-install-and-runtime.md)
+   and
+   [`docs/zh/01-user-guide/01-install-and-runtime.md`](./zh/01-user-guide/01-install-and-runtime.md).
+3. Release architecture contract:
+   [`docs/en/03-architecture-specs/19-installation-release-and-upgrade.md`](./en/03-architecture-specs/19-installation-release-and-upgrade.md)
+   and
+   [`docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md`](./zh/03-architecture-specs/19-installation-release-and-upgrade.md).
+4. Latest documentation audit:
+   [`docs/en/06-verification/11-documentation-release-readiness-2026-06-05.md`](./en/06-verification/11-documentation-release-readiness-2026-06-05.md)
+   and
+   [`docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md`](./zh/06-verification/11-documentation-release-readiness-2026-06-05.md).
+
+The Chinese edition currently carries a few benchmark and verification records
+that do not yet have English translations. English indexes call out those
+Chinese-only records instead of silently omitting them from release navigation.
