@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1780645380018333834-vector-token-signature-admission
+- 算法/架构：Vector derived read-model candidate admission 在原有 content/path/entity label bounded LIKE gate 之外，左连接同 document 的 semantic token signature，并把其中的 normalized JSON token 作为额外候选 gate；因此已经参与本地 vector hash 的 CamelCase/snake_case 拆分词与首字母缩写，即使不是原始文本中的连续子串，也能进入 vector cosine 评分。
+- 不变量/预期影响/风险：不改变 SQLite schema、tokenizer、vector hash、cosine/vector scoring、RRF/rerank、candidate 上限、scope/version filter、BM25、graph evidence、code graph、source `text_fallback`、repo-set overlay、provider/env、任务 lease/checkpoint、安装发布或 harness；semantic token row 缺失时仍保留原 content/path/label gate。预期改善图谱 evidence 只有结构化 entity label 暴露 API/概念身份时的 vector source coverage。风险是 vector 查询多一次同主键 left join 和一个有界 JSON-token LIKE，受 acronym regression test、既有 identifier-part semantic/vector tests 和 candidate cap 控制。
+- 策略关联：建立在已采纳的 derived semantic/vector candidate-term planning 与 identifier-aware retrieval 之上，把已有 normalized read model evidence 用作通用候选准入，不枚举 query、case id、仓库、路径、符号或 fixture 字符串，也不扩大 grep/source fallback 或削弱 protected foundational、competitive、semantic/vector 与 stability floors。
 ## 候选优化说明：run-1780401183-hybrid-api-direct-coverage-gate
 - 算法/架构：Hybrid direct-evidence gate 在单个 dense chunk/symbol 命中之外，允许多条 direct Symbol+Definition 命中共同覆盖 query 中抽取出的 bounded API identity facets；只有所有 facets 都由当前 indexed scope 的 canonical symbol 覆盖、请求 limit 足以返回这些 facets、且 query 没有 callers/callees/references/imports 等 graph expansion intent 时，才在 Hybrid 协调层跳过 References、Calls 与 Imports 扩展。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate limit、ranking score、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net、QoS、任务 lease/checkpoint、安装发布或 harness；预期减少 Temporal/Go、SDK/workflow 和多仓 API-sequence Hybrid 查询在 direct symbol evidence 已足够时的 graph fanout、SQL 往返和 p95 抖动。风险是带有额外自然语言上下文的 API 查询更早停在 symbol surface，受 graph-intent guard、limit coverage guard、scoped canonical-symbol match 和 direct-gate 单测控制。
@@ -917,41 +921,7 @@
 - invariants: 不改变生产 HTTP/QoS runtime、SQLite、code retrieval、semantic/vector、provider/env、judge、安装发布或 CLI/API 行为；只修正测试同步条件。
 ## 20260517 early detailed entries
 - archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260517.md` to keep each tracked documentation file below the 1000-line hard limit.
-## 20260517T070951Z
-- score: 0.985604; cases: 35/35 passed; summary: provider/ranking docs and symbol excerpt improvements raised competitive accuracy; latency degradations remain in memory details.
-## 20260517T072446Z
-- score: 0.995374; cases: 35/35 passed; summary: code query path ranking generalized caller/callee source-path intent and improved competitive accuracy/performance, with build/test latency degradations preserved in memory.
-## 20260517T094216Z
-- score: 0.972063; cases: 36/36 passed; summary: Go/import identity, import target lookup, and parser/finalize updates expanded competitive repository coverage without recorded deterministic degradations.
-## 20260517T101427Z
-- score: 0.973723; cases: 36/36 passed; summary: Java import identity and target lookup improved research judge slightly while recording build/test and large-repo latency degradations in memory.
-## 20260517T102845Z
-- score: 0.9769; cases: 36/36 passed; summary: import target lookup refinements improved research judge and repo latency, with build/clippy/provider probe degradations preserved in memory.
-## 20260517T105538Z
-- score: 0.978502; cases: 36/36 passed; summary: code query support changes improved score, research judge, and relay-teams/LevelDB latency while preserving performance regressions in memory.
-## 20260517T113610Z
-- score: 0.979868; cases: 36/36 passed; summary: semantic/vector identifier-aware retrieval restored foundational accuracy and research judge quality, with performance regressions preserved in memory details.
-## 20260517T115627Z
-- score: 0.97996; cases: 36/36 passed; summary: semantic/vector read-model cache reuse preserved score while improving judge and local gate timings.
-## 20260517T122624Z
-- score: 0.978379; cases: 36/36 passed; summary: code query score-text saturation improved protected repo capability and performance without recorded degradations.
-## 20260517T134401Z
-- score: 0.976945 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.936811, stability=1.0); cases: 36/36 passed.
-- summary: code query ranking/support changes improved research_judge while recording performance degradations that remain protected context in memory.
-## 20260517T140829Z
-- score: 0.97451 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.86, performance=0.943869, stability=1.0); cases: 36/36 passed.
-- summary: identifier-aware semantic/vector retrieval improved research_judge and provider probe behavior; performance degradations remain protected context in progressive memory and patch memory.
-## 20260517T171331Z
-- score: 0.924213 (foundational=0.888889, competitive=0.857143, accuracy=0.873016, semantic_vector=1.0, research_judge=0.88, performance=0.958586, stability=1.0); cases: 32/36 passed.
-- summary: CLI repo index inline worker removed the `repo index` then `repo query --freshness wait-until-fresh` race; latency degradations remain protected context in memory.
-## 20260517T184611Z
-- score: 0.971201; cases: 36/36 passed; summary: bounded symbol/call line context restored foundational, competitive, accuracy, stability, and research judge by expanding only already-scored hits with indexed adjacent-symbol lookup.
-## 20260517T190803Z
-- score: 0.972277; cases: 36/36 passed; summary: request-scoped code query token reuse improved total score and research judge while preserving repository and semantic/vector floors.
-## 20260517T204108Z
-- score: 0.964715; cases: 36/36 passed; summary: prompt gate filtering stopped superseded quality failures from dominating follow-up candidates; current latency degradations remain protected memory context.
-## 20260517T210331Z
-- score: 0.971793; cases: 36/36 passed; summary: identifier token cache improvements lifted performance and research judge while preserving repository and semantic/vector floors.
+- compacted summary: `20260517T070951Z` through `20260517T210331Z` provider/ranking, import target lookup, semantic/vector identifier-aware retrieval, read-model cache reuse, code-query scoring/support, CLI index race repair, bounded line context, request token reuse, prompt filtering, and identifier token cache records are archived in the 20260517 archive and progressive memory; the primary log keeps this compact pointer to preserve the tracked-file line cap.
 ## 20260517T212719Z-to-run-1779619958 archived
 - archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260531.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves compacted summaries for accepted retrieval/ranking, parser, indexing, repository-set, source fallback, semantic/vector, and Hybrid chunk-gate records from `20260517T212719Z` through `run-1779619958`.
 
@@ -996,3 +966,17 @@
 ## 2026-06-03 exact-symbol-miss, read-model outage, and fact-version scan
 - 算法/架构：Symbol/Definition 单标识符查询先执行精确 `name = ?` lookup；若未饱和且无直接命中，直接返回空结果，不再启动宽 FTS 证明负例。Hybrid chunk-first 在 FTS/read-model 暂时不可用时可用既有 graph/API identity rows 或 bounded symbol-table LIKE 候选继续返回有 `degraded_reason` 的结构化命中，source fallback 对无 indexed hit、无 path anchor 的精确定义 miss 直接退出，SQLite read pool busy timeout 降为固定短等待；`latest_repository_scope_status` 扫描候选时同步验证 `code_snapshot_expected_scope_id`，跳过 legacy fact-version scope 后继续寻找 current scope。自迭代 harness 评分同步升级为 `base_score + capability_ceiling_bonus` 的动态天花板策略，macro explore prompt 改为有边界 biological mutation，research judge 要求完整维度 JSON 和 `min_dimension_score`。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 写入、candidate 上限、任务 lease/checkpoint、repo-set overlay、semantic/vector read model、env/paths/net、QoS 或安装发布；Hybrid 仍只在 bounded candidates 与 dense evidence gate 下提前返回，Symbol/Definition 精确 kind 与无锚点 source fallback 不再用宽文本召回补空。自迭代策略变更只影响独立 `tools/self_iteration` harness、cases 与文档，保留 failed gate、missing diff、受保护目标回退和 anti-fixture 约束；预期让高基线阶段的 competitive/research/performance 突破继续产生有界采纳信号，并让 LLM judge 输出可审计维度证据。风险是 judge 配置不完整时更早失败，受 self-iteration unit tests、README 参数覆盖测试和 judge dimension tests 控制。
+
+## run-1780646058817570176-validate
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1780645380018333834-explore.patch`
+- score: 1.000000 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.993317, stability=1.000000)
+- cases: 62/62 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/graph_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=4835ms; self_iteration_cargo_fmt_check_ms=463ms; linux_glibc_compatibility_policy_ms=161ms; skill_metadata_policy_cases_ms=322ms; cargo_build_debug_ms=31774ms; self_iteration_cargo_check_ms=685ms; code_index_recovery_cases_ms=8897ms; code_index_sqlite_lock_cases_ms=8771ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
