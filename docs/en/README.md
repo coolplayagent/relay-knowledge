@@ -126,6 +126,7 @@ Chinese-only benchmark addenda pending English translation:
 - [Appendix B.9: Software Global, CodeGraph, and Search Everything Research Documentation Refresh Audit 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md): chapter 11 research and bookshelf index sync record.
 - [Appendix B.10: Service Deployment, Control Plane, and Data Plane Documentation Refresh Audit 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md): issue #250 service deployment plan and architecture index sync record.
 - [Appendix B.11: Documentation Release Readiness Audit 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md): release navigation, file inventory, local link checking, and documentation-only change boundaries.
+- [Appendix B.12: Graph Database, Knowledge Graph, and CodeGraph Deep Research Archive 2026-06-05](06-verification/12-graph-database-codegraph-deep-research-archive-2026-06-05.md): arXiv, X.com, Reddit, and open-source source ledger, research artifacts, competitive feature issues, and validation state archive.
 
 Chinese-only verification records pending English translation:
 [Appendix B.5](../zh/06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md) and

@@ -115,3 +115,4 @@
 - [附录 B.9 软件全域、CodeGraph 与 Search Everything 研究文档刷新审计 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md)：第 11 章研究与书籍目录同步记录。
 - [附录 B.10 服务化部署、控制面与数据面分离文档刷新审计 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md)：issue #250 服务化部署方案和架构目录同步记录。
 - [附录 B.11 文档发版准备审计 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md)：发版导航、文件清单、本地链接检查和文档-only 改动边界。
+- [附录 B.12 图数据库、知识图谱与 CodeGraph 深度研究归档 2026-06-05](06-verification/12-graph-database-codegraph-deep-research-archive-2026-06-05.md)：arXiv、X.com、Reddit 和开源来源清单、研究产物、竞品特性 issue 与验证状态归档。
