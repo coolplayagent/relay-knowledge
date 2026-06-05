@@ -332,6 +332,25 @@ relay-knowledge query --help
 relay-knowledge query -- --help
 ```
 
+#### Kind 参考
+
+`--kind` 的取值是命令本地的。同一个 flag 名称不代表不同命令共享同一组取值：
+
+- `repo query --kind` 和 `repo-set query --kind` 用来选择代码检索意图：
+  `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、
+  `imports` 或 `sbom`。影响分析使用 `repo impact`，feature flag 使用
+  `repo feature-flags`，不要为它们发明新的 query kind。
+- `repo software --kind` 用来选择仓库级软件图谱切片：`dependencies`、
+  `sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design` 或
+  `all`。
+- `index refresh --kind` 用来选择派生检索索引族：`bm25`、`semantic` 或
+  `vector`；省略 `--kind` 表示请求刷新全部受支持的索引族。
+- `worker status|run-once --kind` 用来选择后台 worker 家族：
+  `embedding`、`ocr`、`vision` 或 `extractor`。
+- `map source add|update --kind` 用来标记 knowledge-map source 类别：
+  `repo`、`file`、`doc`、`config`、`db`、`ci`、`runtime`、`wiki` 或
+  `monitoring`。
+
 CLI 参数含义是公开契约的一部分。Skills 和其它 LLM 工具在发出命令前应先读取
 `relay-knowledge help --format json`；该输出会描述每条 command path、operation、读写影响、必填参数、默认值、允许值、可重复性、示例和注意事项。
 

@@ -618,6 +618,27 @@ relay-knowledge query --help
 relay-knowledge query -- --help
 ```
 
+#### Kind Reference
+
+`--kind` values are command-local. Do not reuse a value from one command family
+in another command just because the flag name is the same:
+
+- `repo query --kind` and `repo-set query --kind` select code retrieval intent:
+  `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`,
+  `imports`, or `sbom`. Use `repo impact` for impact analysis and
+  `repo feature-flags` for feature flags instead of inventing query kinds.
+- `repo software --kind` selects repository-wide software graph slices:
+  `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`,
+  `design`, or `all`.
+- `index refresh --kind` selects derived retrieval index families: `bm25`,
+  `semantic`, or `vector`. Omitting `--kind` requests every supported index
+  family.
+- `worker status|run-once --kind` selects background worker families:
+  `embedding`, `ocr`, `vision`, or `extractor`.
+- `map source add|update --kind` labels knowledge-map source categories:
+  `repo`, `file`, `doc`, `config`, `db`, `ci`, `runtime`, `wiki`, or
+  `monitoring`.
+
 CLI parameter meaning is part of the public contract. Skills and other LLM tools
 should inspect `relay-knowledge help --format json` before issuing commands. It
 describes each command path, operation, read/write effect, required parameters,
