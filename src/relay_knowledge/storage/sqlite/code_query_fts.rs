@@ -65,6 +65,7 @@ pub(in crate::storage::sqlite::code::code_query) fn focused_symbol_fts_match_que
         .take(FOCUSED_SYMBOL_MAX_TERMS)
         .collect::<Vec<_>>();
     append_focused_symbol_workflow_terms(&terms, &mut recall_terms);
+    append_type_surface_companion_terms(&terms, &mut recall_terms);
 
     (recall_terms.len() >= 2).then(|| fts_match_query_with_operator(&recall_terms, " OR ", false))
 }
@@ -235,13 +236,39 @@ fn lifecycle_recall_match_query(anchor: &str, finalization_terms: &[String]) -> 
 pub(in crate::storage::sqlite::code::code_query) fn structured_hybrid_chunk_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let terms = dedupe_terms(super::fts_query_terms(query))
+    let query_terms = dedupe_terms(super::fts_query_terms(query));
+    let mut terms = query_terms
         .into_iter()
         .filter(|term| identifier_term_has_recall_structure(term))
         .take(MAX_HYBRID_CHUNK_RECALL_ANCHORS)
         .collect::<Vec<_>>();
+    append_type_surface_companion_terms(&dedupe_terms(super::fts_query_terms(query)), &mut terms);
 
     (!terms.is_empty()).then(|| fts_match_query_with_operator(&terms, " OR ", false))
+}
+
+fn append_type_surface_companion_terms(query_terms: &[String], recall_terms: &mut Vec<String>) {
+    if recall_terms.is_empty()
+        || !query_terms
+            .iter()
+            .any(|term| term.eq_ignore_ascii_case("type"))
+    {
+        return;
+    }
+
+    let mut appended = 0usize;
+    for companion in ["component", "metadata"] {
+        if appended >= 2 {
+            break;
+        }
+        if query_terms
+            .iter()
+            .any(|term| term.eq_ignore_ascii_case(companion))
+        {
+            push_case_insensitive_unique_term(recall_terms, &format!("{companion} Type"));
+            appended += 1;
+        }
+    }
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn compound_hybrid_chunk_fts_match_query(
@@ -284,8 +311,10 @@ fn hybrid_chunk_fts_match_query_with_compound(
     query: &str,
     include_compound_identifiers: bool,
 ) -> String {
-    let terms = dedupe_terms(super::fts_query_terms(query));
+    let mut terms = dedupe_terms(super::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
+        let query_terms = terms.clone();
+        append_type_surface_companion_terms(&query_terms, &mut terms);
         return fts_match_query_with_operator(&terms, " OR ", include_compound_identifiers);
     }
 
@@ -324,7 +353,12 @@ fn fts_match_query_with_operator(
         .collect::<Vec<_>>()
         .join(operator);
     let alternatives = if include_compound_identifiers {
-        compound_identifier_fts_terms(terms)
+        let compound_terms = terms
+            .iter()
+            .filter(|term| compound_identifier_source_term(term))
+            .cloned()
+            .collect::<Vec<_>>();
+        compound_identifier_fts_terms(&compound_terms)
     } else {
         Vec::new()
     };
@@ -363,7 +397,9 @@ fn dedupe_terms(terms: Vec<String>) -> Vec<String> {
 
 fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
     if api_dense_hybrid_query(terms) {
-        return high_signal_hybrid_chunk_recall_terms(terms);
+        let mut recall_terms = high_signal_hybrid_chunk_recall_terms(terms);
+        append_type_surface_companion_terms(terms, &mut recall_terms);
+        return recall_terms;
     }
 
     let mut recall_terms = leading_hybrid_chunk_recall_anchors(terms);
@@ -388,6 +424,7 @@ fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
         }
         push_case_insensitive_unique_term(&mut recall_terms, term);
     }
+    append_type_surface_companion_terms(terms, &mut recall_terms);
 
     recall_terms
 }
@@ -684,6 +721,11 @@ fn compound_identifier_fts_terms(terms: &[String]) -> Vec<String> {
     alternatives
 }
 
+fn compound_identifier_source_term(term: &str) -> bool {
+    term.chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
 fn compound_identifier_parts(terms: &[String]) -> Option<Vec<String>> {
     let mut parts = Vec::new();
     for term in terms {
@@ -732,208 +774,5 @@ fn push_compound_identifier_alternative(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hybrid_chunk_fts_query_uses_bounded_identifier_anchors() {
-        let query = "client.Open LoadDefaultOptions workflow client retry timeout";
-        let fts_query = hybrid_chunk_fts_match_query(query);
-
-        assert!(fts_query.contains("\"LoadDefaultOptions\""));
-        assert!(fts_query.contains("\"workflow\""));
-        assert!(!fts_query.contains("\"Open\""));
-        assert_eq!(fts_query.matches("\"client\"").count(), 1);
-        assert!(
-            fts_query.matches(" OR ").count()
-                <= MAX_COMPOUND_FTS_ALTERNATIVES + MAX_HYBRID_CHUNK_RECALL_TERMS
-        );
-    }
-
-    #[test]
-    fn fts_query_terms_are_deduplicated_before_planning() {
-        assert_eq!(
-            hybrid_chunk_fts_match_query("cache cache Lookup Insert"),
-            "(\"cache\" OR \"Lookup\" OR \"Insert\") OR \"cachelookupinsert\" OR \"cache_lookup_insert\""
-        );
-    }
-
-    #[test]
-    fn hybrid_chunk_fts_query_keeps_leading_lowercase_intent_terms() {
-        let fts_query = hybrid_chunk_fts_match_query(
-            "operation table read callback dispatch designated initializer",
-        );
-
-        for term in ["operation", "table", "read", "designated", "initializer"] {
-            assert!(fts_query.contains(&format!("\"{term}\"")));
-        }
-    }
-
-    #[test]
-    fn hybrid_chunk_fts_query_uses_high_signal_terms_for_api_dense_queries() {
-        let fts_query = hybrid_chunk_fts_match_query(
-            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
-        );
-
-        for term in ["RegisterWorkflow", "RegisterActivity", "InterruptCh"] {
-            assert!(fts_query.contains(&format!("\"{term}\"")));
-        }
-        for term in ["worker", "task", "queue"] {
-            assert!(!fts_query.contains(&format!("\"{term}\"")));
-        }
-    }
-
-    #[test]
-    fn hybrid_chunk_fts_query_limits_broad_context_terms_for_api_dense_queries() {
-        let fts_query = hybrid_chunk_fts_match_query(
-            "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
-        );
-
-        assert!(fts_query.contains("\"MustLoadDefaultClientOptions\""));
-        assert!(fts_query.contains("\"envconfig\""));
-        assert!(!fts_query.contains("\"workflow\""));
-        assert!(!fts_query.contains("\"client\""));
-    }
-
-    #[test]
-    fn direct_hybrid_chunk_fts_query_omits_compound_alternatives() {
-        assert_eq!(
-            direct_hybrid_chunk_fts_match_query("cache cache Lookup Insert"),
-            "\"cache\" OR \"Lookup\" OR \"Insert\""
-        );
-        assert!(
-            !direct_hybrid_chunk_fts_match_query("checkpoint metadata version constant")
-                .contains("\"checkpointmetadataversionconstant\"")
-        );
-    }
-
-    #[test]
-    fn focused_symbol_fts_query_uses_bounded_high_signal_terms() {
-        assert_eq!(
-            focused_symbol_fts_match_query(
-                "NoDestructor variadic constructor template instance type"
-            )
-            .as_deref(),
-            Some("\"NoDestructor\" OR \"constructor\" OR \"variadic\"")
-        );
-        assert!(focused_symbol_fts_match_query("NoDestructor constructor").is_none());
-    }
-
-    #[test]
-    fn focused_symbol_fts_query_keeps_workflow_identity_terms() {
-        let fts_query = focused_symbol_fts_match_query(
-            "background stream discovery reconcile multiplex run event source reconnect",
-        )
-        .expect("focused symbol query should be planned");
-
-        assert!(fts_query.contains("\"stream\""));
-        assert!(fts_query.contains("\"run\""));
-    }
-
-    #[test]
-    fn focused_hybrid_chunk_fts_query_uses_bounded_neighbor_pairs() {
-        let fts_query = focused_hybrid_chunk_fts_match_query(
-            "typed arrow payload projector trim provider record",
-        )
-        .expect("focused hybrid query should be planned");
-
-        assert!(fts_query.contains("(\"payload\" \"projector\")"));
-        assert!(fts_query.contains("(\"payload\" \"trim\")"));
-        assert!(fts_query.contains("(\"payload\" \"provider\")"));
-        assert!(fts_query.contains("(\"provider\" \"record\")"));
-        assert!(!fts_query.contains("\"payload\" OR \"projector\""));
-    }
-
-    #[test]
-    fn focused_hybrid_chunk_fts_query_skips_structured_identifier_terms() {
-        assert!(
-            focused_hybrid_chunk_fts_match_query(
-                "EvalCheckpointStore signature mismatch append result"
-            )
-            .is_none()
-        );
-        assert!(
-            focused_hybrid_chunk_fts_match_query(
-                "external session workflow TypeScript client openExternalSession"
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn lifecycle_hybrid_chunk_fts_query_recalls_tool_finalization_flow() {
-        assert_eq!(
-            lifecycle_hybrid_chunk_fts_match_query(
-                "OpenAI Chat protocol sse tool call delta lifecycle finish events"
-            )
-            .as_deref(),
-            Some("\"delta\" \"finish\"")
-        );
-        assert_eq!(
-            lifecycle_hybrid_chunk_fts_match_query(
-                "OpenAI Chat protocol SSE Tool Call Delta Lifecycle Finish Events"
-            )
-            .as_deref(),
-            Some("\"delta\" \"finish\"")
-        );
-        assert_eq!(
-            lifecycle_hybrid_chunk_fts_match_query(
-                "OpenAI Chat protocol sse tool call delta lifecycle finalize events"
-            )
-            .as_deref(),
-            Some("\"delta\" \"finalize\"")
-        );
-        assert_eq!(
-            lifecycle_hybrid_chunk_fts_match_query(
-                "OpenAI Chat protocol sse tool call delta lifecycle finalized events"
-            )
-            .as_deref(),
-            Some("\"delta\" \"finalized\"")
-        );
-        assert_eq!(
-            lifecycle_hybrid_chunk_fts_match_query(
-                "OpenAI Chat protocol sse tool call delta lifecycle finished events"
-            )
-            .as_deref(),
-            Some("\"delta\" \"finish\" OR \"delta\" \"finished\"")
-        );
-        assert!(lifecycle_hybrid_chunk_fts_match_query("protocol lifecycle events").is_none());
-        assert!(lifecycle_hybrid_chunk_fts_match_query("tool call setup delta events").is_none());
-    }
-
-    #[test]
-    fn structured_hybrid_chunk_fts_query_uses_identifier_terms_only() {
-        assert_eq!(
-            structured_hybrid_chunk_fts_match_query(
-                "external session workflow TypeScript client openExternalSession"
-            )
-            .as_deref(),
-            Some("\"openExternalSession\"")
-        );
-        assert!(structured_hybrid_chunk_fts_match_query("plain workflow query").is_none());
-    }
-
-    #[test]
-    fn compound_hybrid_chunk_fts_query_uses_bounded_adjacent_identifier_pairs() {
-        let fts_query = compound_hybrid_chunk_fts_match_query(
-            "tsx provider panel effect run provider envelope payload",
-        )
-        .expect("compound hybrid query should be planned");
-
-        assert!(fts_query.contains("\"providerpanel\""));
-        assert!(fts_query.contains("\"provider_panel\""));
-        assert!(fts_query.contains("\"envelopepayload\""));
-        assert!(!fts_query.contains("\"providerpaneleffect\""));
-    }
-
-    #[test]
-    fn compound_hybrid_chunk_fts_query_recalls_type_identifier_pairs() {
-        let fts_query = compound_hybrid_chunk_fts_match_query(
-            "typed arrow payload projector trim provider record",
-        )
-        .expect("compound hybrid query should be planned");
-
-        assert!(fts_query.contains("\"payloadprojector\""));
-        assert!(fts_query.contains("\"payload_projector\""));
-    }
-}
+#[path = "code_query_fts_tests.rs"]
+mod tests;

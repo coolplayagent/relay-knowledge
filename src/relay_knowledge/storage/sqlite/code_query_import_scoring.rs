@@ -14,7 +14,7 @@ pub(super) fn import_line_priority(base_score: f64, line_start: u32, query: &str
     let weight = if (query.starts_with("./") || query.starts_with("../"))
         && !query_contains_file_extension(query)
     {
-        5.0
+        5.25
     } else {
         1.0
     };
