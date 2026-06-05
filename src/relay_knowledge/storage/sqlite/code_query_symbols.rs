@@ -548,6 +548,7 @@ fn symbol_rows_to_hits(
                     &row.signature,
                     &row.canonical_symbol_id,
                 )
+                + scoped_member_identity_bonus(exact_identity.as_ref(), &row, request)
                 + type_symbol_identity_bonus(exact_identity.as_ref(), &row, request)
                 + typed_function_value_surface_bonus(
                     &row,
@@ -636,6 +637,33 @@ fn type_symbol_identity_bonus(
         &row.canonical_symbol_id,
     ) {
         0.55
+    } else {
+        0.0
+    }
+}
+
+fn scoped_member_identity_bonus(
+    identity: Option<&SymbolIdentityQuery>,
+    row: &SymbolRow,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Definition | CodeQueryKind::Symbol
+    ) || type_symbol_kind(&row.kind)
+    {
+        return 0.0;
+    }
+    let Some(identity) = identity.filter(|identity| identity.is_scoped()) else {
+        return 0.0;
+    };
+    if identity.matches_symbol(
+        &row.name,
+        &row.qualified_name,
+        &row.signature,
+        &row.canonical_symbol_id,
+    ) {
+        2.25
     } else {
         0.0
     }

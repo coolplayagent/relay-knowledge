@@ -3,6 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
+use super::domain_affinity::priority_domain_affinity_bonus;
 use super::identity_coverage::select_identity_coverage_results;
 use crate::domain::{
     CodeRepositoryCrossEdge, CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit,
@@ -222,6 +223,7 @@ pub(super) fn per_member_candidate_limit(limit: usize, member_count: usize) -> u
 }
 
 pub(super) fn repository_set_score(
+    query: &str,
     hit: &CodeRetrievalHit,
     member: &CodeRepositorySetMemberStatus,
     overlay_evidence: &[CodeRepositoryCrossEdge],
@@ -237,7 +239,8 @@ pub(super) fn repository_set_score(
         .map(|edge| f64::from(edge.confidence_basis_points) / 10_000.0)
         .fold(0.0, f64::max);
 
-    hit.score + priority_bonus + edge_bonus - freshness_penalty
+    hit.score + priority_bonus + edge_bonus + priority_domain_affinity_bonus(query, hit, member)
+        - freshness_penalty
 }
 
 pub(super) fn apply_bridge_support_bonus(results: &mut [CodeRepositorySetQueryHit]) {
@@ -701,9 +704,10 @@ mod tests {
             r#"{"from_path":"src/service.rs"}"#,
             9_000,
         )];
-        assert!(repository_set_score(&base_hit, &member, &evidence) > base_hit.score);
+        assert!(repository_set_score("", &base_hit, &member, &evidence) > base_hit.score);
         assert!(
             repository_set_score(
+                "",
                 &hit("repo-a", "scope-app", "src/client.rs", 1, 0.75, true),
                 &member,
                 &[]
@@ -763,12 +767,12 @@ mod tests {
         )];
 
         assert!(
-            repository_set_score(&preferred_hit, &preferred, &evidence)
-                > repository_set_score(&dependency_hit, &dependency, &[])
+            repository_set_score("", &preferred_hit, &preferred, &evidence)
+                > repository_set_score("", &dependency_hit, &dependency, &[])
         );
         assert!(
-            repository_set_score(&preferred_hit, &preferred, &[])
-                < repository_set_score(&dependency_hit, &dependency, &[])
+            repository_set_score("", &preferred_hit, &preferred, &[])
+                < repository_set_score("", &dependency_hit, &dependency, &[])
         );
         let mut ambiguous_package = evidence[0].clone();
         ambiguous_package.resolution_state = "ambiguous".to_owned();

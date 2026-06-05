@@ -1,3 +1,4 @@
+mod domain_affinity;
 mod identity_coverage;
 mod lifecycle;
 mod member_freshness;

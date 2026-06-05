@@ -4,6 +4,7 @@ use crate::{
         CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
         RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
 };
@@ -68,34 +69,65 @@ async fn extensionless_relative_import_queries_rank_early_direct_import_site() {
     let matching_path = "packages/http-recorder/src/matching.ts";
     let redactor_path = "packages/http-recorder/src/redactor.ts";
     let cassette_path = "packages/http-recorder/src/cassette.ts";
-    let mut matching_import = import(
+    let redaction_path = "packages/http-recorder/src/redaction.ts";
+    let mut matching_import = import_with_target(
         "matching-redaction",
         "matching-file",
         matching_path,
         "import { REDACTED, secretFindings } from \"./redaction\"",
+        redaction_path,
     );
     matching_import.line_range = range(2, 2);
-    let mut redactor_import = import(
+    let mut redactor_import = import_with_target(
         "redactor-redaction",
         "redactor-file",
         redactor_path,
         "import { redactHeaders, redactUrl } from \"./redaction\"",
+        redaction_path,
     );
     redactor_import.line_range = range(3, 3);
-    let mut cassette_import = import(
+    let mut cassette_import = import_with_target(
         "cassette-redaction",
         "cassette-file",
         cassette_path,
         "import { secretFindings, SecretFindingSchema, type SecretFinding } from \"./redaction\"",
+        redaction_path,
     );
     cassette_import.line_range = range(4, 4);
-    let store = store_with_snapshot(
+    let store = store_with_symbols(
         vec![
             file("matching-file", matching_path, "typescript"),
             file("redactor-file", redactor_path, "typescript"),
             file("cassette-file", cassette_path, "typescript"),
+            file("redaction-file", redaction_path, "typescript"),
         ],
         vec![redactor_import, cassette_import, matching_import],
+        vec![
+            symbol(
+                "redaction-helper-one",
+                "redaction-file",
+                redaction_path,
+                "envSecrets",
+            ),
+            symbol(
+                "redaction-helper-two",
+                "redaction-file",
+                redaction_path,
+                "pathFor",
+            ),
+            symbol(
+                "redaction-helper-three",
+                "redaction-file",
+                redaction_path,
+                "stringEntries",
+            ),
+            symbol(
+                "redaction-helper-four",
+                "redaction-file",
+                redaction_path,
+                "redactionSet",
+            ),
+        ],
         vec![
             chunk(
                 "matching-chunk",
@@ -168,6 +200,42 @@ fn import(import_id: &str, file_id: &str, path: &str, module: &str) -> CodeImpor
     }
 }
 
+fn import_with_target(
+    import_id: &str,
+    file_id: &str,
+    path: &str,
+    module: &str,
+    target_hint: &str,
+) -> CodeImportRecord {
+    let mut record = import(import_id, file_id, path, module);
+    record.target_hint = Some(target_hint.to_owned());
+    record
+}
+
+fn symbol(
+    symbol_snapshot_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+        canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "typescript".to_owned(),
+        name: name.to_owned(),
+        qualified_name: name.to_owned(),
+        kind: "function".to_owned(),
+        signature: format!("export const {name} = () => undefined"),
+        doc_comment: None,
+        byte_range: range(0, 1),
+        line_range: range(1, 1),
+    }
+}
+
 fn chunk(
     chunk_id: &str,
     file_id: &str,
@@ -198,6 +266,15 @@ async fn store_with_snapshot(
     imports: Vec<CodeImportRecord>,
     chunks: Vec<RepositoryCodeChunkRecord>,
 ) -> SqliteGraphStore {
+    store_with_symbols(files, imports, Vec::new(), chunks).await
+}
+
+async fn store_with_symbols(
+    files: Vec<RepositoryCodeFileRecord>,
+    imports: Vec<CodeImportRecord>,
+    symbols: Vec<RepositoryCodeSymbolRecord>,
+    chunks: Vec<RepositoryCodeChunkRecord>,
+) -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let registration =
         CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
@@ -221,7 +298,7 @@ async fn store_with_snapshot(
             deleted_paths: Vec::new(),
             tombstones: Vec::new(),
             files,
-            symbols: Vec::new(),
+            symbols,
             references: Vec::new(),
             imports,
             calls: Vec::new(),

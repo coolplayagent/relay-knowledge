@@ -65,6 +65,7 @@ pub(in crate::storage::sqlite::code::code_query) fn focused_symbol_fts_match_que
         .take(FOCUSED_SYMBOL_MAX_TERMS)
         .collect::<Vec<_>>();
     append_focused_symbol_workflow_terms(&terms, &mut recall_terms);
+    append_type_surface_companion_terms(&terms, &mut recall_terms);
 
     (recall_terms.len() >= 2).then(|| fts_match_query_with_operator(&recall_terms, " OR ", false))
 }
@@ -235,13 +236,39 @@ fn lifecycle_recall_match_query(anchor: &str, finalization_terms: &[String]) -> 
 pub(in crate::storage::sqlite::code::code_query) fn structured_hybrid_chunk_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let terms = dedupe_terms(super::fts_query_terms(query))
+    let query_terms = dedupe_terms(super::fts_query_terms(query));
+    let mut terms = query_terms
         .into_iter()
         .filter(|term| identifier_term_has_recall_structure(term))
         .take(MAX_HYBRID_CHUNK_RECALL_ANCHORS)
         .collect::<Vec<_>>();
+    append_type_surface_companion_terms(&dedupe_terms(super::fts_query_terms(query)), &mut terms);
 
     (!terms.is_empty()).then(|| fts_match_query_with_operator(&terms, " OR ", false))
+}
+
+fn append_type_surface_companion_terms(query_terms: &[String], recall_terms: &mut Vec<String>) {
+    if recall_terms.is_empty()
+        || !query_terms
+            .iter()
+            .any(|term| term.eq_ignore_ascii_case("type"))
+    {
+        return;
+    }
+
+    let mut appended = 0usize;
+    for companion in ["component", "metadata"] {
+        if appended >= 2 {
+            break;
+        }
+        if query_terms
+            .iter()
+            .any(|term| term.eq_ignore_ascii_case(companion))
+        {
+            push_case_insensitive_unique_term(recall_terms, &format!("{companion} Type"));
+            appended += 1;
+        }
+    }
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn compound_hybrid_chunk_fts_match_query(
@@ -284,8 +311,10 @@ fn hybrid_chunk_fts_match_query_with_compound(
     query: &str,
     include_compound_identifiers: bool,
 ) -> String {
-    let terms = dedupe_terms(super::fts_query_terms(query));
+    let mut terms = dedupe_terms(super::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
+        let query_terms = terms.clone();
+        append_type_surface_companion_terms(&query_terms, &mut terms);
         return fts_match_query_with_operator(&terms, " OR ", include_compound_identifiers);
     }
 
@@ -363,7 +392,9 @@ fn dedupe_terms(terms: Vec<String>) -> Vec<String> {
 
 fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
     if api_dense_hybrid_query(terms) {
-        return high_signal_hybrid_chunk_recall_terms(terms);
+        let mut recall_terms = high_signal_hybrid_chunk_recall_terms(terms);
+        append_type_surface_companion_terms(terms, &mut recall_terms);
+        return recall_terms;
     }
 
     let mut recall_terms = leading_hybrid_chunk_recall_anchors(terms);
@@ -388,6 +419,7 @@ fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
         }
         push_case_insensitive_unique_term(&mut recall_terms, term);
     }
+    append_type_surface_companion_terms(terms, &mut recall_terms);
 
     recall_terms
 }
@@ -911,6 +943,35 @@ mod tests {
             Some("\"openExternalSession\"")
         );
         assert!(structured_hybrid_chunk_fts_match_query("plain workflow query").is_none());
+    }
+
+    #[test]
+    fn structured_hybrid_chunk_fts_query_keeps_type_surface_companions() {
+        assert_eq!(
+            structured_hybrid_chunk_fts_match_query(
+                "metricsink plugin component Type MustNewType metric_sink"
+            )
+            .as_deref(),
+            Some("\"MustNewType\" OR \"metric_sink\" OR \"component Type\"")
+        );
+    }
+
+    #[test]
+    fn direct_hybrid_chunk_fts_query_keeps_type_surface_companions() {
+        assert_eq!(
+            direct_hybrid_chunk_fts_match_query(
+                "metricsink plugin component Type MustNewType metric_sink"
+            ),
+            "\"MustNewType\" OR \"metric_sink\" OR \"metricsink\" OR \"component Type\""
+        );
+    }
+
+    #[test]
+    fn direct_hybrid_chunk_fts_query_keeps_type_surface_companions_for_short_queries() {
+        assert_eq!(
+            direct_hybrid_chunk_fts_match_query("metricsink component Type MustNewType"),
+            "\"metricsink\" OR \"component\" OR \"Type\" OR \"MustNewType\" OR \"component Type\""
+        );
     }
 
     #[test]

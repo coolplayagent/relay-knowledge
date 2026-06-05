@@ -21,6 +21,8 @@ mod code_query_call_target_ranking;
 mod code_query_caller_context_scoring;
 #[path = "code_query_calls.rs"]
 mod code_query_calls;
+#[path = "code_query_chunk_path_scoring.rs"]
+mod code_query_chunk_path_scoring;
 #[path = "code_query_conversion_terms.rs"]
 mod code_query_conversion_terms;
 #[path = "code_query_designated_initializer_scoring.rs"]
@@ -94,6 +96,7 @@ use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
 use code_query_api_sequence_scoring::compact_unique_api_sequence_chunk_bonus;
 use code_query_calls::search_calls;
+use code_query_chunk_path_scoring::hybrid_chunk_path_adjustment;
 use code_query_designated_initializer_scoring::designated_initializer_chunk_bonus;
 use code_query_flow_scoring::{
     compact_api_sequence_chunk_bonus, compact_high_coverage_chunk_bonus,
@@ -842,6 +845,7 @@ fn search_chunks_with_fts_query(
                 &row.path,
                 request,
             )
+            + hybrid_chunk_path_adjustment(score, &request.query, &row.content, &row.path, request)
             + inline_construct_chunk_bonus(score, &request.query, &row.content, &row.path, request)
             + language_scoped_inline_usage_chunk_bonus(
                 score,

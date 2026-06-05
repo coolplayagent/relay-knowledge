@@ -208,7 +208,11 @@ impl RelayKnowledgeService {
         for outcome in member_outcomes {
             outcomes.push(outcome?);
         }
-        results.extend(repository_set_results_from_outcomes(&outcomes, &edge_index));
+        results.extend(repository_set_results_from_outcomes(
+            &request.query,
+            &outcomes,
+            &edge_index,
+        ));
         apply_bridge_support_bonus(&mut results);
         if repository_set_deferred_source_fallback_needed(&request, &outcomes, &results) {
             apply_repository_set_deferred_source_fallbacks(
@@ -218,7 +222,11 @@ impl RelayKnowledgeService {
             )
             .await?;
             results.clear();
-            results.extend(repository_set_results_from_outcomes(&outcomes, &edge_index));
+            results.extend(repository_set_results_from_outcomes(
+                &request.query,
+                &outcomes,
+                &edge_index,
+            ));
             apply_bridge_support_bonus(&mut results);
         }
         let truncated = dedupe_sort_truncate(&mut results, request.limit, &request.query);
@@ -499,6 +507,7 @@ async fn query_repository_set_member(
 }
 
 fn repository_set_results_from_outcomes(
+    query: &str,
     outcomes: &[RepositorySetMemberQueryOutcome],
     edge_index: &OverlayEvidenceIndex<'_>,
 ) -> Vec<CodeRepositorySetQueryHit> {
@@ -506,7 +515,7 @@ fn repository_set_results_from_outcomes(
     for outcome in outcomes {
         for hit in &outcome.hits {
             let overlay_evidence = edge_index.evidence_for_hit(hit);
-            let score = repository_set_score(hit, &outcome.member_status, &overlay_evidence);
+            let score = repository_set_score(query, hit, &outcome.member_status, &overlay_evidence);
             results.push(CodeRepositorySetQueryHit {
                 member: outcome.member_status.member.clone(),
                 hit: hit.clone(),
