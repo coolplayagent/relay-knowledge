@@ -234,6 +234,13 @@ graph-backed CLI surfaces before raw text search:
 - `repo feature-flags` for configuration-driven feature flags and guarded-code
   relationships.
 
+Treat kind values as command-local. Do not pass `repo software` kinds to
+`repo query`, do not pass `repo query` kinds to `repo software`, and do not use
+`index refresh` kinds (`bm25`, `semantic`, `vector`), worker kinds
+(`embedding`, `ocr`, `vision`, `extractor`), or knowledge-map source kinds
+(`repo`, `file`, `doc`, `config`, `db`, `ci`, `runtime`, `wiki`,
+`monitoring`) as repository query kinds.
+
 ### `repo query --kind` Code Retrieval
 
 Choose the command-local query kind from the user's intent:

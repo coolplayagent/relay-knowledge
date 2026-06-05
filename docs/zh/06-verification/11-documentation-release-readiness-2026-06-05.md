@@ -9,6 +9,7 @@
 ## 1. 目标
 
 本审计记录一次面向发版准备的文档刷新。目标是让 release 入口更容易阅读，让书架导航覆盖当前文档，让语言版本覆盖差异显式可见，并保持产品行为不变。
+最后一轮发版准备还确认了命令本地的 `--kind` 家族在根 README、CLI 命令参考和发布给 agent 的 skill 中保持一致。
 
 ## 2. 清单
 
@@ -26,6 +27,9 @@
 - 中英文书架索引补齐近期基准与验证记录，避免只能通过文件列表发现。
 - 第 19 章新增要求：推送 release tag 前需要在 `06-verification` 下保留带日期的文档准备记录。
 - `.knowledge/knowledge-map.yaml` 增加 release documentation 路由，供后续 agent 辅助维护文档时使用。
+- 根目录 README、中英文 CLI 命令参考和 `relay-knowledge-cli` skill 现在都明确
+  `--kind` 取值是命令本地的，并使用同一组 `repo query`、`repo software`、
+  `index refresh`、`worker` 和 `map source` 列表。
 
 ## 4. 安全边界
 

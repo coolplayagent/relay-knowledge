@@ -11,7 +11,9 @@
 This audit records a release-readiness refresh for the documentation surface. The
 goal is to make release entry points easier to follow, make book navigation
 complete, expose language-edition coverage gaps explicitly, and leave product
-behavior unchanged.
+behavior unchanged. The final release pass also verifies that command-local
+`--kind` families are explained consistently in the root READMEs, CLI command
+reference, and published agent skill.
 
 ## 2. Inventory
 
@@ -41,6 +43,10 @@ behavior unchanged.
   record before tagging a release.
 - `.knowledge/knowledge-map.yaml` now includes this release-documentation route
   for future agent-assisted documentation work.
+- Root READMEs, the English and Chinese CLI command reference, and the
+  `relay-knowledge-cli` skill now state that `--kind` values are command-local,
+  with matching lists for `repo query`, `repo software`, `index refresh`,
+  `worker`, and `map source` commands.
 
 ## 4. Safety Boundaries
 

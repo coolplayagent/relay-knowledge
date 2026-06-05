@@ -180,6 +180,11 @@ For user prompts about supported code query kinds, use graph-backed commands
 before plain text search. Select the command and command-local `--kind` from the
 user's intent.
 
+Each `--kind` set belongs to a specific command family. `repo query`,
+`repo software`, `index refresh`, `worker`, and `map source` kinds are not
+interchangeable. Do not map feature flags or impact analysis into
+`repo query --kind`; use `repo feature-flags` and `repo impact` instead.
+
 ### `repo query --kind`
 
 Use `relay-knowledge repo query --kind ...` for code graph retrieval tied to one

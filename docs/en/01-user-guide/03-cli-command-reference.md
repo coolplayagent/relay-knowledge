@@ -128,6 +128,22 @@ relay-knowledge version
 relay-knowledge version check
 ```
 
+Kind values are scoped to their command family:
+
+- `repo query --kind` and `repo-set query --kind`: `hybrid`, `symbol`,
+  `definition`, `references`, `callers`, `callees`, `imports`, `sbom`.
+- `repo software --kind`: `dependencies`, `sdks`, `files`, `topics`,
+  `relationships`, `build`, `iac`, `design`, `all`.
+- `index refresh --kind`: `bm25`, `semantic`, `vector`; omitting `--kind`
+  requests all supported index families.
+- `worker status|run-once --kind`: `embedding`, `ocr`, `vision`, `extractor`.
+- `map source add|update --kind`: `repo`, `file`, `doc`, `config`, `db`,
+  `ci`, `runtime`, `wiki`, `monitoring`.
+
+Do not pass kind values across command families. Use `repo impact` for impact
+analysis and `repo feature-flags` for feature flags; they are not
+`repo query --kind` values.
+
 Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. Non-interactive agents can run `repo index-worker --task-id <id> --format json` as an explicit single-shot drain command for queued or retrying tasks; `service worker run [--task-id <id>] --format json` is the split-worker preview entrypoint and claims at most one durable code-index task, completing or failing it through task id, lease owner, and attempt count checks; `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running. `repo index <alias> --reset --format json` clears unfinished task leases for the repository without deleting completed indexed scopes or reviving terminal dead-letter history. Index writes use one live writer per repository; queries, reports, graph reads, file queries, and health diagnostics use bounded read-only connections to read committed snapshots where SQLite WAL permits it.
 
 `repo remove <alias>` deletes the registered repository behind that alias from relay-knowledge runtime state, including all aliases for the repository id, code index scopes, code-index tasks, repository-set membership, repository-set overlays, and software projection rows. It does not delete files from the source repository on disk. Removal is rejected while the repository still has a running code-index task lease; after a successful remove, the same path or alias can be registered again.

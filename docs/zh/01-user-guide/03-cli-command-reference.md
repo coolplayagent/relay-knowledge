@@ -125,6 +125,21 @@ relay-knowledge version
 relay-knowledge version check
 ```
 
+Kind 取值按命令家族隔离：
+
+- `repo query --kind` 和 `repo-set query --kind`：`hybrid`、`symbol`、
+  `definition`、`references`、`callers`、`callees`、`imports`、`sbom`。
+- `repo software --kind`：`dependencies`、`sdks`、`files`、`topics`、
+  `relationships`、`build`、`iac`、`design`、`all`。
+- `index refresh --kind`：`bm25`、`semantic`、`vector`；省略 `--kind`
+  表示请求全部受支持的索引族。
+- `worker status|run-once --kind`：`embedding`、`ocr`、`vision`、`extractor`。
+- `map source add|update --kind`：`repo`、`file`、`doc`、`config`、`db`、
+  `ci`、`runtime`、`wiki`、`monitoring`。
+
+不要跨命令家族复用 kind 取值。影响分析使用 `repo impact`，feature flag 使用
+`repo feature-flags`；它们不是 `repo query --kind` 的取值。
+
 冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；`service worker run [--task-id <id>] --format json` 是 split-worker preview 入口，只 claim 一个 durable code-index task，并通过 task id、lease owner 和 attempt count 完成或失败该任务；`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
 
 `repo remove <alias>` 会从 relay-knowledge 运行时状态中删除该 alias 指向的整个注册仓库，包括该 repository id 的全部 alias、代码索引 scope、code-index task、repository-set 成员关系、repository-set overlay 和软件全域投影行。它不会删除磁盘上的源码仓库。如果仓库仍有 running code-index task lease，删除会被拒绝；删除成功后，同一路径或 alias 可以重新注册。

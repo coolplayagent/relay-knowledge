@@ -31,6 +31,12 @@ For feature flag, config gate, environment-variable gate, settings gate, or
 guarded-code questions, agents should use `repo feature-flags`. Feature flags
 are not a `repo query --kind` value.
 
+Kind values are command-local. Do not use `index refresh --kind` values
+(`bm25`, `semantic`, `vector`), worker values (`embedding`, `ocr`, `vision`,
+`extractor`), or knowledge-map source values (`repo`, `file`, `doc`, `config`,
+`db`, `ci`, `runtime`, `wiki`, `monitoring`) as `repo query` or
+`repo software` kinds.
+
 For cold repository indexing in non-interactive sessions, agents should run
 `repo index`, then inspect `repo status <alias> --format json` because the
 command may return a task id or may time out after claiming a durable lease.
