@@ -980,3 +980,8 @@
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## 2026-06-05 research self-iteration planning mode
+
+- 算法/架构：`tools/self_iteration` 新增只读 `research-plan` 模式，把本次 arXiv、X.com、Reddit、开源项目与系统工程深度研究流程抽象为 Markdown 计划，覆盖来源台账、可信度分层、综合矩阵、竞品 issue 拆解、双语文档、归档验证和远端 main 发布证据。
+- 不变量/预期影响/风险：该模式不调用 Codex、不运行评估、不写 self-iteration 历史、不修改产品 CLI/API、索引、存储、网络或发布行为；后续 research 迭代可先生成计划底稿，再按来源真实、issue 独立可验收和文档归档完整性推进。风险主要是输出模板过于保守，由 harness 单元测试和双语 README 参数覆盖约束。

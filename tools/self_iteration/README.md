@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | English
 
-This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It now evolves as a standalone Rust harness under `tools/self_iteration`, outside the product crate `src/` tree, and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; `self-iterate.sh` builds and runs the Rust binary directly.
+This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It also provides a reusable research-planning mode for source-backed roadmap research. It now evolves as a standalone Rust harness under `tools/self_iteration`, outside the product crate `src/` tree, and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; `self-iterate.sh` builds and runs the Rust binary directly.
 
 ## Start
 
@@ -31,6 +31,7 @@ Useful variants:
 ./self-iterate.sh once --profile fast --categories semantic_vector
 ./self-iterate.sh once --profile fast --categories semantic_vector,competitive
 ./self-iterate.sh once --profile smoke --dry-run-codex
+./self-iterate.sh research-plan --research-topic "2026 graph database research" --research-slug graph-database-research --research-date 2026-06-05
 ./self-iterate.sh loop --strategy unattended-layered
 ./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
 ```
@@ -52,6 +53,7 @@ Modes:
 | `once` | no | Runs one generation/evaluation iteration. |
 | `evaluate` | no | Scores the current diff without invoking Codex or creating a commit. |
 | `chart` | no | Exports `.git/relay-knowledge-self-iteration/score-v2.csv` and `score-v2.svg`. |
+| `research-plan` | no | Prints a reusable Markdown research self-iteration plan without invoking Codex, running evaluation, or writing history. |
 
 General options:
 
@@ -71,6 +73,14 @@ General options:
 | `--keep-workdirs` | false | Keeps per-run evaluation homes instead of deleting transient homes. |
 | `--use-current-candidate` | false | Skips Codex and evaluates the current working tree diff. |
 | `--fail-fast` | false | Propagates the first iteration error instead of continuing until limits. |
+
+Research planning options:
+
+| Option | Values / default | Effect |
+| --- | --- | --- |
+| `--research-topic TEXT` | `relay-knowledge research iteration` | Human-readable topic used in the generated research plan. |
+| `--research-slug VALUE` | `research-iteration`; lowercase ASCII, digits, `.`, `-`, `_` | Stable slug for generated archive, issue, or report filenames. |
+| `--research-date YYYY-MM-DD` | `YYYY-MM-DD` placeholder | Date written into the generated research plan. |
 
 Codex generation options:
 
@@ -132,6 +142,7 @@ Copyable examples:
 ./self-iterate.sh once --profile fast --categories semantic_vector
 ./self-iterate.sh once --profile full --categories all --exclude-categories research_judge
 ./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
+./self-iterate.sh research-plan --research-topic "2026 graph database research" --research-slug graph-database-research --research-date 2026-06-05 > .git/relay-knowledge-self-iteration/research-plan.md
 RELAY_KNOWLEDGE_JUDGE_BACKEND=none ./self-iterate.sh once --profile full --categories research_judge
 RELAY_KNOWLEDGE_JUDGE_BACKEND=http RELAY_KNOWLEDGE_JUDGE_BASE_URL=http://localhost:11434/v1 RELAY_KNOWLEDGE_JUDGE_API_KEY=local RELAY_KNOWLEDGE_JUDGE_MODEL=judge-model ./self-iterate.sh once --profile full --categories research_judge
 RELAY_KNOWLEDGE_JUDGE_COMMAND='opencode run "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." --file {prompt_file}' ./self-iterate.sh once --profile full --categories research_judge
@@ -163,6 +174,21 @@ Self-iteration generation defaults to `gpt-5.5` with Codex
 local reasoning profile by default. Override the model with `--model` and the
 reasoning effort with `--codex-reasoning-effort low|medium|high|xhigh` when a
 run intentionally needs a cheaper or different generation mode.
+
+## Research Planning Mode
+
+`research-plan` extracts the repeatable method from the 2026 graph database,
+CodeGraph, X.com, Reddit, and arXiv research pass. It prints a Markdown plan
+that can be used as the starting artifact for future research iterations. The
+plan includes a reference action summary, source-ledger checklist, synthesis
+matrix template, competitive issue extraction rules, documentation/archive
+outputs, validation gates, and completion evidence.
+
+The mode is intentionally read-only: it does not call Codex, does not run
+evaluation, and does not create `.git/relay-knowledge-self-iteration/` history
+records. Use it before a research iteration to keep source credibility,
+bilingual documentation, issue creation, archive records, and remote-main
+publication checks explicit.
 
 ## Loop behavior
 

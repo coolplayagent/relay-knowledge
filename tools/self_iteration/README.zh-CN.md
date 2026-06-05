@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-本目录包含一个独立的 Codex 驱动优化循环，用于改进代码仓库检索质量，以及图谱 semantic/vector 检索质量。它有意作为 `tools/self_iteration` 下的独立 Rust harness 演进，不放入产品 crate 的 `src/` 模块树；所有运行状态都存放在 `.git/relay-knowledge-self-iteration/` 下。旧的 tracked Python harness 已在功能对齐后清理，`self-iterate.sh` 会直接构建并运行 Rust binary。
+本目录包含一个独立的 Codex 驱动优化循环，用于改进代码仓库检索质量，以及图谱 semantic/vector 检索质量。它还提供可复用的 research planning 模式，用于来源可追溯的路线研究。它有意作为 `tools/self_iteration` 下的独立 Rust harness 演进，不放入产品 crate 的 `src/` 模块树；所有运行状态都存放在 `.git/relay-knowledge-self-iteration/` 下。旧的 tracked Python harness 已在功能对齐后清理，`self-iterate.sh` 会直接构建并运行 Rust binary。
 
 ## 启动
 
@@ -31,6 +31,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 ./self-iterate.sh once --profile fast --categories semantic_vector
 ./self-iterate.sh once --profile fast --categories semantic_vector,competitive
 ./self-iterate.sh once --profile smoke --dry-run-codex
+./self-iterate.sh research-plan --research-topic "2026 graph database research" --research-slug graph-database-research --research-date 2026-06-05
 ./self-iterate.sh loop --strategy unattended-layered
 ./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
 ```
@@ -52,6 +53,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
 | `once` | 否 | 只运行一轮生成和评估。 |
 | `evaluate` | 否 | 不调用 Codex、不创建 commit，只给当前 diff 打分。 |
 | `chart` | 否 | 导出 `.git/relay-knowledge-self-iteration/score-v2.csv` 和 `score-v2.svg`。 |
+| `research-plan` | 否 | 输出可复用的 Markdown research 自迭代计划，不调用 Codex、不运行评估、不写历史。 |
 
 通用参数：
 
@@ -71,6 +73,14 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
 | `--keep-workdirs` | false | 保留每轮 evaluation home，不清理临时 home。 |
 | `--use-current-candidate` | false | 跳过 Codex，直接评估当前工作树 diff。 |
 | `--fail-fast` | false | 首个迭代错误直接返回，而不是继续等循环限制。 |
+
+Research planning 参数：
+
+| 参数 | 取值 / 默认值 | 作用 |
+| --- | --- | --- |
+| `--research-topic TEXT` | `relay-knowledge research iteration` | 写入生成计划的人类可读研究主题。 |
+| `--research-slug VALUE` | `research-iteration`；小写 ASCII、数字、`.`、`-`、`_` | 用于后续归档、issue 或报告文件名的稳定 slug。 |
+| `--research-date YYYY-MM-DD` | `YYYY-MM-DD` 占位值 | 写入生成计划的日期。 |
 
 Codex 生成参数：
 
@@ -132,6 +142,7 @@ Codex 生成参数：
 ./self-iterate.sh once --profile fast --categories semantic_vector
 ./self-iterate.sh once --profile full --categories all --exclude-categories research_judge
 ./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
+./self-iterate.sh research-plan --research-topic "2026 graph database research" --research-slug graph-database-research --research-date 2026-06-05 > .git/relay-knowledge-self-iteration/research-plan.md
 RELAY_KNOWLEDGE_JUDGE_BACKEND=none ./self-iterate.sh once --profile full --categories research_judge
 RELAY_KNOWLEDGE_JUDGE_BACKEND=http RELAY_KNOWLEDGE_JUDGE_BASE_URL=http://localhost:11434/v1 RELAY_KNOWLEDGE_JUDGE_API_KEY=local RELAY_KNOWLEDGE_JUDGE_MODEL=judge-model ./self-iterate.sh once --profile full --categories research_judge
 RELAY_KNOWLEDGE_JUDGE_COMMAND='opencode run "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." --file {prompt_file}' ./self-iterate.sh once --profile full --categories research_judge
@@ -160,6 +171,12 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 自迭代生成阶段默认使用 `gpt-5.5`，并为 Codex 设置
 `model_reasoning_effort="xhigh"`，让无人值守候选默认走最高本地推理档位。需要更低成本或不同生成模式时，可用 `--model` 覆盖模型，用
 `--codex-reasoning-effort low|medium|high|xhigh` 覆盖推理强度。
+
+## Research Planning 模式
+
+`research-plan` 从 2026 年图数据库、CodeGraph、X.com、Reddit 和 arXiv 深度研究中提取可重复方法。它会输出一份 Markdown 计划，作为后续 research 自迭代的起始产物。计划包含动作总结、来源台账 checklist、综合矩阵模板、竞品 issue 提取规则、文档/归档产物、验证门禁和完成证据。
+
+该模式是只读的：不调用 Codex、不运行评估、不创建 `.git/relay-knowledge-self-iteration/` 历史记录。后续 research 迭代开始前先运行它，可以把来源可信度、双语文档、issue 创建、归档记录和远端 main 发布检查固定下来。
 
 ## 循环行为
 

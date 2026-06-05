@@ -7,6 +7,7 @@ mod git_ops;
 mod history;
 mod history_synthesis;
 mod memory;
+mod research_plan;
 mod scoring;
 mod unattended;
 
@@ -33,6 +34,17 @@ fn run(mut config: Config) -> Result<i32, String> {
         .workspace
         .canonicalize()
         .map_err(|error| format!("invalid workspace {}: {error}", config.workspace.display()))?;
+    if matches!(config.mode, Mode::ResearchPlan) {
+        println!(
+            "{}",
+            research_plan::render(research_plan::ResearchPlanInput {
+                topic: &config.research_topic,
+                slug: &config.research_slug,
+                date: &config.research_date,
+            })
+        );
+        return Ok(0);
+    }
     let paths = history::HistoryPaths::new(&config.workspace);
     paths.ensure()?;
     match config.mode {
@@ -48,6 +60,7 @@ fn run(mut config: Config) -> Result<i32, String> {
             run_loop(&config, &paths)
         }
         Mode::Loop => run_loop(&config, &paths),
+        Mode::ResearchPlan => unreachable!("research plan returns before history initialization"),
     }
 }
 

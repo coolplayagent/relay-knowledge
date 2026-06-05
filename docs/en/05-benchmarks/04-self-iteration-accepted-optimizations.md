@@ -50,3 +50,8 @@ This page is the compact English companion for the self-iteration optimization l
 
 - The primary Chinese accepted-optimization log is kept below the 1000-line hard cap by moving late detailed records to dated archive files.
 - Capability and architecture pages in both languages document the current source-root, cross-language call-target, and internal source-fallback behavior.
+
+## 2026-06-05 Research Self-Iteration Planning Mode
+
+- Algorithm and architecture: `tools/self_iteration` now includes a read-only `research-plan` mode that turns the arXiv, X.com, Reddit, open-source, and systems-engineering deep research workflow into a Markdown plan covering source ledgers, credibility tiers, synthesis matrices, competitive issue extraction, bilingual docs, archive validation, and remote-main publication evidence.
+- Invariants and limits: the mode does not call Codex, run evaluation, write self-iteration history, or change product CLI/API, indexing, storage, network, or release behavior. It gives future research iterations a reusable starting checklist while preserving real-source, independently testable issue, and documentation-archive requirements.

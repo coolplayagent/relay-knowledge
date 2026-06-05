@@ -11,7 +11,7 @@ if [ "${RELAY_KNOWLEDGE_SELF_ITERATION_RELEASE:-0}" = "1" ]; then
 fi
 HARNESS_BIN="$HARNESS_DIR/target/$TARGET_DIR/relay-knowledge-self-iterate"
 
-if [ "${1:-}" = "once" ] || [ "${1:-}" = "loop" ] || [ "${1:-}" = "evaluate" ] || [ "${1:-}" = "chart" ]; then
+if [ "${1:-}" = "once" ] || [ "${1:-}" = "loop" ] || [ "${1:-}" = "evaluate" ] || [ "${1:-}" = "chart" ] || [ "${1:-}" = "research-plan" ]; then
   MODE="$1"
   shift
 else

@@ -9,6 +9,7 @@ pub enum Mode {
     Once,
     Evaluate,
     Chart,
+    ResearchPlan,
 }
 
 impl Mode {
@@ -18,6 +19,7 @@ impl Mode {
             "once" => Some(Self::Once),
             "evaluate" => Some(Self::Evaluate),
             "chart" => Some(Self::Chart),
+            "research" | "research-plan" | "research_plan" => Some(Self::ResearchPlan),
             _ => None,
         }
     }
@@ -235,6 +237,9 @@ pub struct Config {
     pub cooldown_after_timeout_seconds: u64,
     pub deep_check_interval_accepts: usize,
     pub deep_check_interval_hours: u64,
+    pub research_topic: String,
+    pub research_slug: String,
+    pub research_date: String,
 }
 
 impl Config {
@@ -290,6 +295,9 @@ impl Config {
             cooldown_after_timeout_seconds: 900,
             deep_check_interval_accepts: 6,
             deep_check_interval_hours: 12,
+            research_topic: "relay-knowledge research iteration".to_owned(),
+            research_slug: "research-iteration".to_owned(),
+            research_date: "YYYY-MM-DD".to_owned(),
         };
         while let Some(arg) = parser.next() {
             match arg.as_str() {
@@ -386,6 +394,15 @@ impl Config {
                 "--deep-check-interval-hours" => {
                     config.deep_check_interval_hours = positive_u64(&parser.value(&arg)?, &arg)?;
                 }
+                "--research-topic" => {
+                    config.research_topic = non_empty_value(&parser.value(&arg)?, &arg)?;
+                }
+                "--research-slug" => {
+                    config.research_slug = research_slug(&parser.value(&arg)?)?;
+                }
+                "--research-date" => {
+                    config.research_date = research_date(&parser.value(&arg)?)?;
+                }
                 other if other.starts_with("--workspace=") => {
                     config.workspace = PathBuf::from(suffix(other, "--workspace="));
                 }
@@ -417,6 +434,16 @@ impl Config {
                 other if other.starts_with("--exclude-categories=") => {
                     excluded_categories =
                         Some(CategorySet::parse(suffix(other, "--exclude-categories="))?);
+                }
+                other if other.starts_with("--research-topic=") => {
+                    config.research_topic =
+                        non_empty_value(suffix(other, "--research-topic="), "--research-topic")?;
+                }
+                other if other.starts_with("--research-slug=") => {
+                    config.research_slug = research_slug(suffix(other, "--research-slug="))?;
+                }
+                other if other.starts_with("--research-date=") => {
+                    config.research_date = research_date(suffix(other, "--research-date="))?;
                 }
                 other if other.starts_with("--max-wall-clock-hours=") => {
                     config.max_wall_clock_hours = positive_u64(
@@ -553,6 +580,43 @@ fn positive_u64(value: &str, name: &str) -> Result<u64, String> {
     Ok(parsed)
 }
 
+fn non_empty_value(value: &str, name: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{name} must not be empty"));
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn research_slug(value: &str) -> Result<String, String> {
+    let slug = non_empty_value(value, "--research-slug")?;
+    if !slug.chars().all(|ch| {
+        ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_' | '.')
+    }) {
+        return Err(
+            "--research-slug may contain only lowercase ASCII letters, digits, '.', '-', or '_'"
+                .to_owned(),
+        );
+    }
+    Ok(slug)
+}
+
+fn research_date(value: &str) -> Result<String, String> {
+    let date = non_empty_value(value, "--research-date")?;
+    let bytes = date.as_bytes();
+    let valid = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit());
+    if !valid {
+        return Err("--research-date must use YYYY-MM-DD".to_owned());
+    }
+    Ok(date)
+}
+
 fn positive_usize(value: &str, name: &str) -> Result<usize, String> {
     let parsed = value
         .parse::<usize>()
@@ -610,6 +674,40 @@ mod tests {
 
         assert_eq!(config.model.as_deref(), Some("o3"));
         assert_eq!(config.codex_reasoning_effort, "high");
+    }
+
+    #[test]
+    fn parses_research_plan_options() {
+        let config = Config::parse(vec![
+            "research-plan".to_owned(),
+            "--research-topic".to_owned(),
+            "2026 graph database research".to_owned(),
+            "--research-slug=graph-database-research".to_owned(),
+            "--research-date".to_owned(),
+            "2026-06-05".to_owned(),
+        ])
+        .expect("config should parse");
+
+        assert_eq!(config.mode, Mode::ResearchPlan);
+        assert_eq!(config.research_topic, "2026 graph database research");
+        assert_eq!(config.research_slug, "graph-database-research");
+        assert_eq!(config.research_date, "2026-06-05");
+    }
+
+    #[test]
+    fn rejects_invalid_research_plan_metadata() {
+        let invalid_slug =
+            Config::parse(vec!["research-plan".to_owned(), "--research-slug=Graph DB".to_owned()])
+                .expect_err("invalid slug should fail");
+        let invalid_date = Config::parse(vec![
+            "research-plan".to_owned(),
+            "--research-date".to_owned(),
+            "20260605".to_owned(),
+        ])
+        .expect_err("invalid date should fail");
+
+        assert!(invalid_slug.contains("research-slug"));
+        assert!(invalid_date.contains("YYYY-MM-DD"));
     }
 
     #[test]
