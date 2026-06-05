@@ -56,6 +56,19 @@ clawhub publish skills/relay-knowledge-cli \
 
 这条 skill-over-CLI 路径与 MCP/ACP 协议接入是分离的。
 
+### 发版准备说明
+
+打新 release tag 前，先确认用户入口、安装说明、发布约束、checksum、生成后的
+skill metadata 和版本号仍然一致。发版相关阅读路径如下：
+
+- [文档书架](docs/zh/README.md)
+- [安装与运行时目录](docs/zh/01-user-guide/01-install-and-runtime.md)
+- [安装、发布与升级](docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md)
+- [文档发版准备审计 2026-06-05](docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md)
+
+本轮文档刷新保持 documentation-only，不改变 CLI、service、Web、索引、检索或 release
+workflow 行为。
+
 ## 当前能力
 
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。
@@ -85,6 +98,7 @@ clawhub publish skills/relay-knowledge-cli \
 - [第二卷第 9 章：代码图竞争力特性](docs/zh/02-capabilities/09-code-graph-competitive-features.md)：符号、引用、调用、导入、代码块、身份和边诊断。
 - [第二卷第 13 章：Agent 接入能力](docs/zh/02-capabilities/13-agent-access-capabilities.md)：MCP Streamable HTTP、资源、提示、ACP session、作用域策略和审计。
 - [附录 B.1：文档刷新审计](docs/zh/06-verification/01-documentation-book-refresh-2026-05-17.md)：文档新鲜度和已实现能力关闭状态的带日期验证记录。
+- [附录 B.11：文档发版准备审计 2026-06-05](docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md)：本次 documentation-only 刷新的发版导航、清单和链接检查记录。
 
 关键规格：
 

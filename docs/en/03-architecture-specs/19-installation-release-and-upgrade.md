@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 2.5
-> Date: 2026-06-04
+> Document version: 2.6
+> Date: 2026-06-05
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -76,12 +76,35 @@ Actual upgrades must still be performed explicitly by the user, installer, or
 package manager and continue to follow the preflight, checkpoint, service
 restart, and post-upgrade doctor flow.
 
-## 6. Acceptance Criteria
+## 6. Release Documentation Readiness
+
+Before a release tag is pushed, the release owner checks the documentation
+surface that users and operators will read first:
+
+- Root `README.md` and `README.zh-CN.md` describe the current version's
+  installation channels, bundled CLI skill artifact, and quality gates.
+- `docs/README.md`, `docs/en/README.md`, and `docs/zh/README.md` list the
+  current book structure, recent benchmark/verification records, and any
+  Chinese-only records pending translation.
+- Chapter 1 installation guidance and this Chapter 19 release contract agree on
+  runtime directories, service-manager operation, version checks, rollback, and
+  uninstall behavior.
+- A dated record in `06-verification` captures the document inventory, local
+  link check, file-length check, and the fact that the change is
+  documentation-only when no product behavior is intentionally modified.
+
+Documentation refreshes must not update release commands in a way that implies
+unavailable artifacts, unsupported package managers, unmanaged service loops, or
+automatic silent upgrades.
+
+## 7. Acceptance Criteria
 
 - Release artifacts, checksums, versions, and documentation match each other.
 - Linux GNU release binaries and the skill Linux x64 bundled asset require no `GLIBC_*` symbol newer than 2.31.
 - The GitHub Release includes the CLI skill archive in `checksums.txt`, the archive contains the skill `README.md` plus Linux x64 and Windows x64 asset binaries, and ClawHub publication uses the same crate version and generated asset layout when enabled.
 - The CLI can explain when a newer stable version is available, JSON output remains machine-readable, and ordinary commands never auto-install an update.
+- Release-facing documentation has a dated `06-verification` audit covering
+  navigation, inventory, link checks, and documentation-only change boundaries.
 - Service installation uses systemd, launchd, or Windows Service instead of unmanaged loops.
 - Uninstall removes binaries and service definitions while preserving runtime data unless the user explicitly confirms removal.
 - Partitioned SQLite shard directories participate in backup, migration, doctor, and uninstall confirmation.

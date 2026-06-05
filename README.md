@@ -76,6 +76,20 @@ clawhub publish skills/relay-knowledge-cli \
 
 This skill-over-CLI path is separate from MCP/ACP protocol access.
 
+### Release Readiness Notes
+
+Before tagging a new release, verify that user-facing entry points, installation
+guidance, release constraints, checksums, generated skill metadata, and version
+numbers still agree. The release-focused reading path is:
+
+- [Documentation Bookshelf](docs/en/README.md)
+- [Installation and Runtime Directories](docs/en/01-user-guide/01-install-and-runtime.md)
+- [Installation, Release, and Upgrade](docs/en/03-architecture-specs/19-installation-release-and-upgrade.md)
+- [Documentation Release Readiness Audit 2026-06-05](docs/en/06-verification/11-documentation-release-readiness-2026-06-05.md)
+
+This documentation refresh is intentionally documentation-only; it does not
+change CLI, service, Web, indexing, retrieval, or release workflow behavior.
+
 ## What Works Today
 
 - Hybrid GraphRAG context packs with BM25, local semantic signatures,
@@ -146,6 +160,9 @@ This skill-over-CLI path is separate from MCP/ACP protocol access.
 - [Appendix B.1: Documentation Refresh Audits](docs/en/06-verification/01-documentation-book-refresh-2026-05-17.md):
   dated verification records for documentation freshness and implemented
   capability closures.
+- [Appendix B.11: Documentation Release Readiness Audit 2026-06-05](docs/en/06-verification/11-documentation-release-readiness-2026-06-05.md):
+  latest release-navigation, inventory, and link-check record for this
+  documentation-only refresh.
 
 Key specs:
 
