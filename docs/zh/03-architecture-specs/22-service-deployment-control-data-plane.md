@@ -86,7 +86,7 @@ v1 支持并文档化四种拓扑：
 
 ## 7. API 扩展契约
 
-控制面 HTTP route 使用 `/api/*`，同源 Web 操作继续使用 `/api/web/operations/execute`。外部控制面 API 使用 `/api/v1/control/*` 或等价命名；当前 preview 只开放只读 status、health、service status 和 storage topology diagnostics，并保持 CLI JSON、Web、MCP tool 的语义兼容。
+控制面 HTTP route 使用 `/api/*`，同源 Web 操作继续使用 `/api/web/operations/execute`。外部控制面 API 使用 `/api/v1/control/*` 或等价命名；当前 preview 只开放只读 status、health、service status 和 storage topology diagnostics，并保持 CLI JSON、Web、MCP tool 的语义兼容。代码仓库远端 CLI 使用 `/api/v1/code/repositories/{alias}/index`、`/scope/preview`、`/status` 和 `/query`；这些 route 必须复用共享 `api` request/response 类型，不能复用 Web composer payload 作为外部契约。
 
 API response 必须包含 metadata、warnings/degraded state、freshness/truncation、stable error kind 和 trace context。长任务只返回 task handle、checkpoint 和可查询 status；不能同步执行无界索引、无界扫描、外部 provider 大批量调用或 shard 迁移。
 

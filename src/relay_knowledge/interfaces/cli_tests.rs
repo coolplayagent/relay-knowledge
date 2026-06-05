@@ -146,52 +146,6 @@ fn parses_dash_prefixed_ingest_content_as_value() {
 }
 
 #[test]
-fn parses_index_and_service_actions() {
-    let index = CliCommand::parse(["index", "refresh", "--kind", "bm25"])
-        .expect("index command should parse");
-    let service = CliCommand::parse(["service", "doctor"]).expect("service command should parse");
-    let run = CliCommand::parse(["service", "run", "--mcp", "streamable-http"])
-        .expect("service run should parse");
-
-    assert_eq!(
-        index.action,
-        CliAction::IndexRefresh {
-            kinds: vec![IndexKind::Bm25],
-        }
-    );
-    assert_eq!(service.action, CliAction::ServiceStatus);
-    assert_eq!(
-        run.action,
-        CliAction::ServiceRun {
-            mcp: ServiceMcpTransport::StreamableHttp,
-            web: false,
-        }
-    );
-}
-
-#[test]
-fn parses_service_run_with_web_and_mcp() {
-    let web = CliCommand::parse(["service", "run", "--web"]).expect("web service should parse");
-    let combined = CliCommand::parse(["service", "run", "--web", "--mcp", "streamable-http"])
-        .expect("combined service should parse");
-
-    assert_eq!(
-        web.action,
-        CliAction::ServiceRun {
-            mcp: ServiceMcpTransport::Configured,
-            web: true,
-        }
-    );
-    assert_eq!(
-        combined.action,
-        CliAction::ServiceRun {
-            mcp: ServiceMcpTransport::StreamableHttp,
-            web: true,
-        }
-    );
-}
-
-#[test]
 fn parses_operational_worker_proposal_audit_and_service_actions() {
     let worker = CliCommand::parse(["worker", "run-once", "--kind", "vision"])
         .expect("worker command should parse");
@@ -516,6 +470,7 @@ async fn run_version_honors_json_and_rejects_streaming_json_format() {
         CliCommand {
             action: CliAction::Version,
             format: OutputFormat::Json,
+            remote_base_url: None,
             help: false,
         },
         context("version-json"),
@@ -529,6 +484,7 @@ async fn run_version_honors_json_and_rejects_streaming_json_format() {
         CliCommand {
             action: CliAction::Version,
             format: OutputFormat::StreamingJson,
+            remote_base_url: None,
             help: false,
         },
         context("version-streaming"),
@@ -557,6 +513,7 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
                 entity_labels: vec!["Rust".to_owned()],
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("ingest"),
@@ -576,6 +533,7 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
                 freshness: FreshnessPolicy::WaitUntilFresh,
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("query"),
@@ -590,6 +548,7 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
         CliCommand {
             action: CliAction::GraphInspect,
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("graph"),
@@ -603,6 +562,7 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
                 kinds: vec![IndexKind::Semantic, IndexKind::Semantic],
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("index"),
@@ -614,6 +574,7 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
         CliCommand {
             action: CliAction::Health,
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("health"),
@@ -625,6 +586,7 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
         CliCommand {
             action: CliAction::ServiceStatus,
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("service"),
@@ -636,6 +598,7 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
         CliCommand {
             action: CliAction::ProviderProbe,
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("provider"),
@@ -674,6 +637,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 entity_labels: Vec::new(),
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("ops-ingest"),
@@ -688,6 +652,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 kind: Some(WorkerKind::Extractor),
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("worker-status"),
@@ -703,6 +668,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 kind: Some(WorkerKind::Extractor),
             },
             format: OutputFormat::Json,
+            remote_base_url: None,
             help: false,
         },
         context("worker-run-extractor"),
@@ -722,6 +688,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 proposal_id: first_id.clone(),
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("proposal-show"),
@@ -739,6 +706,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 reason: Some("accepted".to_owned()),
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("proposal-accept"),
@@ -754,6 +722,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 kind: Some(WorkerKind::Embedding),
             },
             format: OutputFormat::Json,
+            remote_base_url: None,
             help: false,
         },
         context("worker-run-embedding"),
@@ -775,6 +744,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 reason: Some("not needed".to_owned()),
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("proposal-reject"),
@@ -791,6 +761,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 limit: 10,
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("proposal-list"),
@@ -805,6 +776,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 limit: 10,
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("audit-query"),
@@ -818,6 +790,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
                 action: ServiceManagerAction::Install,
             },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("service-plan"),
@@ -829,6 +802,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
         CliCommand {
             action: CliAction::ServiceWorkerRun { task_id: None },
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("service-worker-run"),
@@ -840,6 +814,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
         CliCommand {
             action: CliAction::ServiceOperatorPause,
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("service-pause"),
@@ -851,6 +826,7 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
         CliCommand {
             action: CliAction::ServiceOperatorResume,
             format: OutputFormat::Text,
+            remote_base_url: None,
             help: false,
         },
         context("service-resume"),
@@ -877,6 +853,7 @@ async fn run_with_service_streams_generic_payloads() {
         CliCommand {
             action: CliAction::Health,
             format: OutputFormat::StreamingJson,
+            remote_base_url: None,
             help: false,
         },
         context("stream"),
@@ -899,6 +876,7 @@ async fn run_with_service_streams_project_status_contract() {
         CliCommand {
             action: CliAction::Status,
             format: OutputFormat::StreamingJson,
+            remote_base_url: None,
             help: false,
         },
         context("status-stream"),
@@ -933,6 +911,7 @@ async fn run_with_service_maps_api_errors_to_cli_errors() {
                 freshness: FreshnessPolicy::AllowStale,
             },
             format: OutputFormat::Json,
+            remote_base_url: None,
             help: false,
         },
         context("error"),

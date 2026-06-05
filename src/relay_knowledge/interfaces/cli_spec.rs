@@ -155,6 +155,15 @@ pub(super) fn cli_spec() -> CliSpec {
                 &["text", "json", "markdown", "streaming-json"],
             ),
             opt(
+                "--remote",
+                Some("base-url"),
+                false,
+                false,
+                "Sends supported repository index, status, scope preview, and query commands to a resident service HTTP API instead of opening local runtime storage.",
+                None,
+                &[],
+            ),
+            opt(
                 "--help",
                 None,
                 false,
@@ -236,7 +245,7 @@ fn command_value(spec: &CliSpec, command: &CliCommandSpec) -> Result<serde_json:
 fn render_help_text(spec: &CliSpec, path: &[String]) -> Result<String, CliError> {
     if path.is_empty() {
         let mut output = String::new();
-        output.push_str("Usage: relay-knowledge <command> [options] [--format text|json|markdown|streaming-json]\n\n");
+        output.push_str("Usage: relay-knowledge <command> [options] [--remote <base-url>] [--format text|json|markdown|streaming-json]\n\n");
         output.push_str("Use `relay-knowledge help <command> --format json` for machine-readable parameter metadata.\n\n");
         output.push_str("Commands:\n");
         for command in &spec.commands {

@@ -196,6 +196,8 @@ C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头
 
 冷启动 full `repo index` 会落持久化 code-index task 并立即返回 `task` handle。CLI 会启动有界单次 worker；非交互式 agent 可调用 `repo index-worker --task-id <id> --format json` 显式 drain 一次；`service run` 则用 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 控制的有界 code-index worker pool 消费同一队列，并继续运行单个 repository-set overlay refresh worker。
 
+本地 CLI 可以用 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问已部署常驻服务。远端 `repo index` 只向服务提交 durable task 并返回 task/status/checkpoint JSON；任务由远端 `service run --web` 的 worker pool 消费，而不是由本地 CLI 执行 `repo index-worker`。`repo index --reset` 和 `repo index-worker` 这类维护命令在远端配置下会被拒绝，必须在服务端机器执行。远端分发只会预先校验远端 URL 与 outbound network 设置；无关本机 runtime 和 retrieval 设置只在命令回落到本机状态时校验。
+
 不同 fingerprint 的 task 会独立排队和持有 lease；完全相同的 full-index fingerprint 会复用现有 task。
 
 `repo status` 会报告 `active_task`、checkpoint 计数和 scope retention。后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope。
@@ -284,6 +286,7 @@ relay-knowledge repo index relay-knowledge --ref main --format json
 relay-knowledge repo index-worker --task-id <task-id> --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge --remote http://127.0.0.1:8791 repo query relay-knowledge --query retry_policy --kind definition --freshness wait-until-fresh --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo feature-flags relay-knowledge --query checkout --ref HEAD --format json
 relay-knowledge repo software relay-knowledge --kind relationships --ref HEAD --format json

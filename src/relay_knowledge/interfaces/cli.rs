@@ -14,6 +14,8 @@ mod knowledge_cli;
 mod map_cli;
 #[path = "ops_cli.rs"]
 mod ops_cli;
+#[path = "remote_cli.rs"]
+mod remote_cli;
 #[path = "repo_cli.rs"]
 mod repo_cli;
 #[path = "repo_set_cli.rs"]
@@ -34,6 +36,7 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
+    env::{EnvironmentConfig, RemoteCliEnvironmentConfig},
 };
 
 use cli_render::{render_project_status, render_response, serialize_line};
@@ -79,6 +82,7 @@ impl OutputFormat {
 pub struct CliCommand {
     pub action: CliAction,
     pub format: OutputFormat,
+    pub remote_base_url: Option<String>,
     pub help: bool,
 }
 
@@ -92,6 +96,7 @@ impl CliCommand {
         let tokens = args.into_iter().map(Into::into).collect::<Vec<_>>();
         let mut action_tokens = Vec::new();
         let mut format = OutputFormat::default();
+        let mut remote_base_url = None;
         let mut help = false;
         let mut version = false;
         let mut command_seen = false;
@@ -113,6 +118,20 @@ impl CliCommand {
                 index += 2;
             } else if let Some(value) = arg.strip_prefix("--format=") {
                 format = OutputFormat::parse(value)?;
+                index += 1;
+            } else if arg == "--remote" {
+                remote_base_url = Some(
+                    tokens
+                        .get(index + 1)
+                        .ok_or(CliError::MissingValue("--remote"))?
+                        .clone(),
+                );
+                index += 2;
+            } else if let Some(value) = arg.strip_prefix("--remote=") {
+                if value.trim().is_empty() {
+                    return Err(CliError::MissingValue("--remote"));
+                }
+                remote_base_url = Some(value.to_owned());
                 index += 1;
             } else if arg == "--help" || arg == "-h" {
                 help = true;
@@ -159,6 +178,7 @@ impl CliCommand {
         Ok(Self {
             action,
             format,
+            remote_base_url,
             help,
         })
     }
@@ -595,12 +615,84 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
         return map_cli::run_map(map_command, context, command.format).await;
     }
 
-    let service = RelayKnowledgeService::from_process_environment()
+    let context = RequestContext::for_interface(InterfaceKind::Cli);
+    if remote_environment_needed(&command) {
+        let remote_environment = RemoteCliEnvironmentConfig::from_process()
+            .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
+        if let Some(remote) = remote_selection(&command, remote_environment.remote_cli.base_url) {
+            let remote_output = remote_cli::run_remote(
+                &remote_environment.network,
+                &remote.base_url,
+                &command.action,
+                context.clone(),
+                command.format,
+            )
+            .await?;
+            if let Some(output) = remote_output {
+                return Ok(output);
+            }
+            return Err(remote_unsupported_error());
+        }
+    }
+
+    let environment = EnvironmentConfig::from_process()
+        .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
+    if let Some(remote) = remote_selection(&command, environment.remote_cli.base_url.clone()) {
+        let remote_output = remote_cli::run_remote(
+            &environment.network,
+            &remote.base_url,
+            &command.action,
+            context.clone(),
+            command.format,
+        )
+        .await?;
+        if let Some(output) = remote_output {
+            return Ok(output);
+        }
+        return Err(remote_unsupported_error());
+    }
+
+    let service = RelayKnowledgeService::from_environment(&environment)
         .await
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
-    let context = RequestContext::for_interface(InterfaceKind::Cli);
 
     run_with_service(&service, command, context).await
+}
+
+fn remote_unsupported_error() -> CliError {
+    CliError::ApiFailed(
+        "remote CLI mode supports repo index, repo scope preview, repo status, and repo query"
+            .to_owned(),
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteSelection {
+    base_url: String,
+    explicit: bool,
+}
+
+fn remote_selection(command: &CliCommand, env_base_url: Option<String>) -> Option<RemoteSelection> {
+    if let Some(base_url) = command.remote_base_url.clone() {
+        return Some(RemoteSelection {
+            base_url,
+            explicit: true,
+        });
+    }
+    if remote_cli::supports(&command.action) || remote_cli::blocks_local_fallback(&command.action) {
+        return env_base_url.map(|base_url| RemoteSelection {
+            base_url,
+            explicit: false,
+        });
+    }
+
+    None
+}
+
+fn remote_environment_needed(command: &CliCommand) -> bool {
+    command.remote_base_url.is_some()
+        || remote_cli::supports(&command.action)
+        || remote_cli::blocks_local_fallback(&command.action)
 }
 
 /// Runs a parsed CLI command with an already composed service.
@@ -869,6 +961,14 @@ mod cli_naming_tests;
 #[cfg(test)]
 #[path = "cli_tests.rs"]
 mod cli_tests;
+
+#[cfg(test)]
+#[path = "cli_parse_tests.rs"]
+mod cli_parse_tests;
+
+#[cfg(test)]
+#[path = "remote_cli_tests.rs"]
+mod remote_cli_tests;
 
 #[cfg(test)]
 #[path = "cli_map_tests.rs"]

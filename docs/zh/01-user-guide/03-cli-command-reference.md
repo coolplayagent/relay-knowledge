@@ -6,6 +6,8 @@
 
 当请求 `--format json` 或 `--format streaming-json` 时，写入 stderr 的解析诊断和运行期 API 失败都会使用 JSON。运行期 API 失败沿用稳定 API 错误结构，包含 `error_kind`、`message` 和可选 `metadata`；text 和 markdown 格式继续输出便于人工阅读的 stderr 消息。
 
+需要从本地 CLI 访问已部署常驻服务时，使用全局 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`。远端模式当前只覆盖 `repo index`、`repo scope preview`、`repo status` 和 `repo query`，用于访问服务端已经注册的仓库。`repo index --reset` 和 `repo index-worker` 在远端模式选中时会被拒绝，必须在服务端机器执行；仅设置环境变量时，`status`、`health` 等无关本地命令继续使用本机 runtime state。
+
 ## 3.1 常用状态命令
 
 项目状态:

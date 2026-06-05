@@ -1,5 +1,7 @@
 //! Web HTTP adapter for same-origin diagnostics and static assets.
 
+#[path = "web_code_api.rs"]
+mod web_code_api;
 #[path = "web_model_config.rs"]
 mod web_model_config;
 
@@ -65,6 +67,7 @@ fn router_with_assets(
             get(read_only_service_status),
         )
         .route("/api/v1/control/storage/topology", get(storage_topology))
+        .merge(web_code_api::routes())
         .route("/api/web/graph/canvas", get(graph_canvas))
         .route("/api/web/operations/execute", post(execute_operation))
         .merge(web_model_config::routes())
@@ -483,7 +486,7 @@ async fn serve_file_or_status(path: PathBuf, missing_status: StatusCode) -> Resp
     }
 }
 
-fn api_error_response(error: ApiError) -> Response {
+pub(super) fn api_error_response(error: ApiError) -> Response {
     let status = match error.error_kind {
         ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
         ErrorKind::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -958,6 +961,10 @@ pub(super) struct WebState {
 #[cfg(test)]
 #[path = "web_control_tests.rs"]
 mod control_tests;
+
+#[cfg(test)]
+#[path = "web_code_api_tests.rs"]
+mod code_api_tests;
 
 #[cfg(test)]
 #[path = "web_tests.rs"]

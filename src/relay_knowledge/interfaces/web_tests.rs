@@ -4,13 +4,16 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use serde_json::{Value, json};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tower::ServiceExt;
 
 use crate::{
     api::{IngestEvidenceExtraction, IngestRequest},
     application::RelayKnowledgeService,
-    domain::EvidenceModality,
+    domain::{CodeIndexMode, CodeQueryKind, EvidenceModality, FreshnessPolicy},
     env::{EnvironmentConfig, PlatformKind},
 };
 
