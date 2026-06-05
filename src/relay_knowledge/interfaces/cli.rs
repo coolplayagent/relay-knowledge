@@ -438,7 +438,7 @@ impl fmt::Display for CliError {
             ),
             Self::InvalidSoftwareKind(value) => write!(
                 formatter,
-                "invalid --kind value '{value}', expected dependencies, sdks, build, iac, design, or all"
+                "invalid --kind value '{value}', expected dependencies, sdks, files, topics, relationships, build, iac, design, or all"
             ),
             Self::InvalidFreshness(value) => write!(
                 formatter,
@@ -661,7 +661,7 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
 
 fn remote_unsupported_error() -> CliError {
     CliError::ApiFailed(
-        "remote CLI mode supports repo index, repo scope preview, repo status, and repo query"
+        "remote CLI mode supports repo index, repo scope preview, repo status, repo query, repo feature-flags, repo impact, repo report, and repo software"
             .to_owned(),
     )
 }

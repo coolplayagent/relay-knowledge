@@ -25,7 +25,7 @@
 
 ## 12.2 运行时目录
 
-远端服务访问可用一次性 `--remote http://host:8791`，或在 automation profile 中设置 `RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://host:8791`。该变量影响支持的代码仓库 index/status/query 命令，并阻止 `repo index --reset` 与 `repo index-worker` 回落到本机；无关本地命令仍使用本机 runtime 目录解析。远端分发在联系服务前只校验远端 URL 和 outbound network 设置；完整本机 runtime、storage、retrieval 与路径校验会延迟到命令实际使用本机状态时。
+远端服务访问可用一次性 `--remote http://host:8791`，或在 automation profile 中设置 `RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://host:8791`。该变量影响支持的代码仓库 index、scope preview、status、query、feature-flags、impact、report 和 software projection 命令，并阻止 `repo index --reset` 与 `repo index-worker` 回落到本机；无关本地命令仍使用本机 runtime 目录解析。远端分发在联系服务前只校验远端 URL 和 outbound network 设置；完整本机 runtime、storage、retrieval 与路径校验会延迟到命令实际使用本机状态时。
 
 优先使用默认目录。需要隔离一次性实验时，只设置一个根目录:
 

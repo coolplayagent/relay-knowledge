@@ -25,7 +25,7 @@ Advanced configuration is grouped by purpose:
 
 ## 12.2 Runtime Directories
 
-Remote service access can be supplied once with `--remote http://host:8791`, or set in an automation profile as `RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://host:8791`. The variable affects supported code repository index/status/query commands and blocks local fallback for `repo index --reset` and `repo index-worker`; unrelated local commands still use local runtime directory resolution. Remote dispatch validates only the remote URL and outbound network settings before contacting the service, while full local runtime, storage, retrieval, and path validation is delayed until the command uses local state.
+Remote service access can be supplied once with `--remote http://host:8791`, or set in an automation profile as `RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://host:8791`. The variable affects supported code repository index, scope preview, status, query, feature-flag, impact, report, and software projection commands and blocks local fallback for `repo index --reset` and `repo index-worker`; unrelated local commands still use local runtime directory resolution. Remote dispatch validates only the remote URL and outbound network settings before contacting the service, while full local runtime, storage, retrieval, and path validation is delayed until the command uses local state.
 
 Prefer default directories. For isolated one-off experiments, set one root:
 
