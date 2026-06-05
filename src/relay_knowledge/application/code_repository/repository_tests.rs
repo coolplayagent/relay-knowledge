@@ -7,14 +7,18 @@ use std::{
 };
 
 use crate::{
-    api::{CodeRepositoryRegisterRequest, InterfaceKind, RequestContext},
+    api::{
+        CodeRepositoryFreshnessState, CodeRepositoryRegisterRequest, InterfaceKind, RequestContext,
+    },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     code::{reset_tracked_entries_call_count_for_root, tracked_entries_call_count_for_root},
     domain::{
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, FreshnessPolicy,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
+        CodeIndexSession, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
+        FreshnessPolicy,
     },
     env::{EnvironmentConfig, PlatformKind},
-    storage::SqliteGraphStore,
+    storage::{CodeRepositoryStore, SqliteGraphStore},
 };
 
 static TRACKED_ENTRIES_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -152,6 +156,173 @@ async fn duplicate_active_filesystem_full_index_resolves_live_snapshot_before_re
 }
 
 #[tokio::test]
+async fn allow_stale_query_reports_pending_freshness_and_source_read_requirement() {
+    let repo = FixtureRepo::create("code-query-pending-freshness");
+    repo.write("src/lib.rs", "pub fn pending_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-code-query-pending-freshness").await;
+    let indexed = service
+        .index_code_repository(
+            request("fixture", "HEAD"),
+            context("index-code-query-pending-base"),
+        )
+        .await
+        .expect("base index should succeed");
+    repo.write("src/lib.rs", "pub fn pending_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "changed"]);
+    let queued = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-code-query-pending-refresh"),
+        )
+        .await
+        .expect("changed index should queue");
+
+    let query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "pending_policy",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-code-query-pending-freshness"),
+        )
+        .await
+        .expect("allow-stale query should return previous index");
+
+    assert!(query.metadata.stale);
+    assert!(query.scope.stale);
+    assert_eq!(query.results[0].path, "src/lib.rs");
+    assert_eq!(query.freshness.state, CodeRepositoryFreshnessState::Pending);
+    assert!(query.freshness.direct_source_read_required);
+    assert_eq!(
+        query.freshness.index_lag.served_ref,
+        indexed.summary.resolved_commit_sha
+    );
+    assert_ne!(
+        query.freshness.index_lag.requested_resolved_ref,
+        query.freshness.index_lag.served_ref
+    );
+    assert!(!query.freshness.index_lag.requested_ref_indexed);
+    assert!(query.freshness.pending.active_matches_request);
+    assert_eq!(
+        query.freshness.pending.active_task_id.as_deref(),
+        queued.task.as_ref().map(|task| task.task_id.as_str())
+    );
+    assert_eq!(
+        query.freshness.direct_source_read_paths,
+        vec!["src/lib.rs".to_owned()]
+    );
+    assert!(
+        query
+            .freshness
+            .agent_instructions
+            .iter()
+            .any(|instruction| instruction.contains("read direct source"))
+    );
+}
+
+#[tokio::test]
+async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
+    let repo = FixtureRepo::create("code-query-unmatched-active-checkpoint");
+    repo.write("src/lib.rs", "pub fn stable_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let initial_commit = repo.git_text(["rev-parse", "HEAD"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let service = service_with_store(Arc::clone(&store)).await;
+
+    register_fixture_repo(&service, &repo, "register-unmatched-active-checkpoint").await;
+    let indexed = service
+        .index_code_repository(
+            request("fixture", &initial_commit),
+            context("index-unmatched-active-base"),
+        )
+        .await
+        .expect("initial commit should index");
+    repo.write("src/lib.rs", "pub fn stable_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "changed"]);
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-unmatched-active-head"),
+        )
+        .await
+        .expect("head refresh should queue");
+    let active_task = started.task.expect("active task should be queued");
+    store
+        .begin_code_index_session(CodeIndexSession {
+            repository_id: active_task.repository_id.clone(),
+            source_scope: active_task.source_scope.clone(),
+            base_resolved_commit_sha: Some(initial_commit.clone()),
+            resolved_commit_sha: active_task.resolved_commit_sha.clone(),
+            tree_hash: active_task.tree_hash.clone(),
+            path_filters: active_task.path_filters.clone(),
+            language_filters: active_task.language_filters.clone(),
+            full_replace: true,
+            total_path_count: 8,
+            changed_path_count: 8,
+            skipped_unchanged_count: 0,
+            deleted_paths: Vec::new(),
+            tombstones: Vec::new(),
+            resource_budget: CodeIndexResourceBudget::default(),
+        })
+        .await
+        .expect("unmatched active checkpoint should begin");
+
+    let query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "stable_policy",
+                selector("fixture", &initial_commit),
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-unmatched-active-base"),
+        )
+        .await
+        .expect("fresh indexed ref should query while another ref is active");
+
+    assert_eq!(query.freshness.state, CodeRepositoryFreshnessState::Fresh);
+    assert!(query.freshness.pending.active_for_repository);
+    assert!(!query.freshness.pending.active_matches_request);
+    assert_eq!(
+        query
+            .freshness
+            .cursor
+            .as_ref()
+            .map(|cursor| cursor.source_scope.as_str()),
+        Some(indexed.summary.source_scope.as_str())
+    );
+    assert_ne!(
+        query
+            .freshness
+            .cursor
+            .as_ref()
+            .map(|cursor| cursor.source_scope.as_str()),
+        Some(active_task.source_scope.as_str())
+    );
+}
+
+#[tokio::test]
 async fn filesystem_impact_reports_deleted_base_paths_from_stored_fingerprints() {
     let source = FixtureSourceDir::create("filesystem-impact-deleted-base-path");
     source.write("src/lib.rs", "pub fn unchanged_policy() -> u32 { 1 }\n");
@@ -245,6 +416,11 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    service_with_store(store).await
+}
+
+async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
@@ -257,7 +433,6 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
     let runtime = RuntimeConfiguration::from_environment(&environment)
         .await
         .expect("runtime should compose");
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
 
     RelayKnowledgeService::with_store(runtime, store)
 }
@@ -298,6 +473,14 @@ impl FixtureRepo {
             "git failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
+        let output = git_command(&self.path, args)
+            .output()
+            .expect("git should run");
+        assert!(output.status.success());
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 }
 

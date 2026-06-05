@@ -13,7 +13,7 @@ Freshness capability tells users which graph and index versions retrieval result
 ## User-visible Behavior
 
 - `freshness` supports `allow-stale`, `wait-until-fresh`, and `graph-only`.
-- Health and index refresh responses return `index_cursors[*]`.
+- Query, health, and index refresh responses return `index_cursors[*]`.
 - `index_refresh.stale_reasons[*]` explains lag, failure, and last error by index family and scoped cursor.
 - Ingest, query, index refresh, health, service doctor, and service startup share the bounded refresh queue.
 

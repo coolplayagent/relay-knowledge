@@ -8,7 +8,8 @@ use std::{
 
 use relay_knowledge::{
     api::{
-        CodeIndexWorkerRunRequest, CodeRepositoryRegisterRequest, InterfaceKind, RequestContext,
+        CodeIndexWorkerRunRequest, CodeRepositoryFreshnessState, CodeRepositoryRegisterRequest,
+        InterfaceKind, RequestContext,
     },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
@@ -773,6 +774,13 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
 
     assert!(flags.metadata.stale);
     assert!(flags.scope.stale);
+    assert_eq!(flags.freshness.state, CodeRepositoryFreshnessState::Pending);
+    assert!(flags.freshness.direct_source_read_required);
+    assert_eq!(flags.freshness.direct_source_read_paths, ["src/a.rs"]);
+    assert_eq!(
+        flags.freshness.pending.active_task_id.as_deref(),
+        started.task.as_ref().map(|task| task.task_id.as_str())
+    );
     assert!(
         flags
             .flags

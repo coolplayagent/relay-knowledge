@@ -26,7 +26,10 @@ use crate::{
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
 
-use super::{AgentProtocolStatus, ApiMetadata, RuntimeStatus};
+use super::{
+    AgentProtocolStatus, ApiMetadata, CodeRepositoryFreshnessDiagnostics,
+    FileIndexFreshnessDiagnostics, RuntimeStatus,
+};
 
 pub const GRAPH_CANVAS_DEFAULT_LIMIT: usize = 250;
 pub const GRAPH_CANVAS_MAX_LIMIT: usize = 1000;
@@ -334,6 +337,10 @@ pub struct HybridRetrievalResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
     pub indexes: Vec<IndexStatus>,
+    #[serde(default)]
+    pub index_cursors: Vec<IndexCursor>,
+    #[serde(default)]
+    pub index_refresh: IndexRefreshDiagnostics,
 }
 
 /// Graph inspection request with optional scope filtering reserved for adapters.
@@ -392,6 +399,8 @@ pub struct FileQueryRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_id: Option<String>,
     pub limit: usize,
+    #[serde(default)]
+    pub freshness_policy: FreshnessPolicy,
 }
 
 /// Local file-location query response.
@@ -403,6 +412,8 @@ pub struct FileQueryResponse {
     pub source_scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_id: Option<String>,
+    #[serde(default = "FileIndexFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: FileIndexFreshnessDiagnostics,
     pub results: Vec<crate::storage::FileSearchHit>,
     pub truncated: bool,
     pub duration_ms: u64,
@@ -836,6 +847,8 @@ impl CodeRepositoryScopeMetadata {
 pub struct CodeRepositoryQueryResponse {
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
+    #[serde(default = "CodeRepositoryFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: CodeRepositoryFreshnessDiagnostics,
     pub request: CodeRetrievalRequest,
     pub results: Vec<CodeRetrievalHit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -847,6 +860,8 @@ pub struct CodeRepositoryQueryResponse {
 pub struct CodeRepositoryFeatureFlagsResponse {
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
+    #[serde(default = "CodeRepositoryFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: CodeRepositoryFreshnessDiagnostics,
     pub request: CodeFeatureFlagRequest,
     pub flags: Vec<CodeFeatureFlagGraph>,
     #[serde(skip_serializing_if = "Option::is_none")]

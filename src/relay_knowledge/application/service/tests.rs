@@ -400,6 +400,9 @@ async fn retrieve_context_reports_results_and_index_freshness() {
             .collect::<Vec<_>>(),
         IndexKind::ALL
     );
+    assert!(!response.index_cursors.is_empty());
+    assert_eq!(response.index_refresh.queue_depth, 0);
+    assert_eq!(response.index_refresh.stale_index_count, 0);
 }
 
 #[tokio::test]

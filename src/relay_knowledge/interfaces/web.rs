@@ -613,6 +613,10 @@ fn file_query_request(payload: &Value) -> Result<FileQueryRequest, WebError> {
         source_scope: optional_string_field(payload, "source_scope"),
         root_id: optional_string_field(payload, "root_id"),
         limit: usize_field(payload, "limit")?,
+        freshness_policy: optional_string_field(payload, "freshness")
+            .map(|value| parse_freshness(&value))
+            .transpose()?
+            .unwrap_or(FreshnessPolicy::AllowStale),
     })
 }
 

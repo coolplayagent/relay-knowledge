@@ -75,7 +75,7 @@ Query commands can use `--freshness` to control derived index freshness:
 - `wait-until-fresh`: try to refresh lagging indexes before the query; return an error or degraded state when freshness cannot be met.
 - `graph-only`: bypass BM25, semantic, and vector indexes, and read only graph facts.
 
-General knowledge retrieval uses the current implementation default. Code repository queries default to `allow-stale`; pass `wait-until-fresh` when callers require the latest graph state.
+General knowledge retrieval uses the current implementation default. Code repository and local file queries default to `allow-stale`; pass `wait-until-fresh` when callers require the latest committed graph or file-index state. On `files query`, `graph-only` returns freshness diagnostics without file-index path candidates because local file location is a derived index, not an authoritative graph fact.
 
 ## 2.5 Argument Boundaries
 

@@ -599,7 +599,7 @@ relay-knowledge repo status relay-knowledge --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json
 RELAY_KNOWLEDGE_FILE_INDEX_ROOTS=/opt/docs relay-knowledge files index --root /opt/docs --source local-files --format json
-relay-knowledge files query "quarterly design pdf" --source local-files --format json
+relay-knowledge files query "quarterly design pdf" --source local-files --freshness wait-until-fresh --format json
 relay-knowledge worker status --format json
 relay-knowledge worker run-once --kind ocr --format json
 relay-knowledge proposal list --state proposed --format json
@@ -647,7 +647,11 @@ defaults, allowed values, repeatability, examples, and notes.
 Local file indexing roots must be absolute and present in
 `RELAY_KNOWLEDGE_FILE_INDEX_ROOTS`; relative entries are rejected before a
 background or explicit scan starts. `RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS`
-sets the per-root scan timeout budget.
+sets the per-root scan timeout budget. `files query --format json` returns a
+top-level `freshness` object with root cursors, index lag, stale/degraded
+reasons, bounded-rescan state, and direct-source-read instructions. Use
+`--freshness wait-until-fresh` to suppress pending, degraded, or overflowed
+file-index answers until a bounded scan has completed.
 
 ### Semantic and Vector Backends
 

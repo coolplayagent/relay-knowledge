@@ -77,6 +77,10 @@ Current MCP tool surface:
 
 Agent kind selection uses existing product kinds rather than a separate MCP taxonomy. `relay_code_query` accepts `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and `sbom`. `relay_software_query` accepts `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, and `all`. Singular aliases are accepted for agent ergonomics, and `configuration` maps to software `relationships` while `model` or `models` maps to software `design`; configuration-driven feature flags stay on `relay_code_feature_flags`.
 
+`relay_retrieve_context` returns GraphRAG context with `indexes`, `index_cursors`, and `index_refresh` diagnostics so agents can inspect BM25, semantic, vector, and scoped cursor lag before trusting derived context.
+
+`relay_code_query` and `relay_code_feature_flags` return the same code graph freshness object as CLI and Web, including `freshness.state`, `freshness.index_lag`, `freshness.pending`, `freshness.cursor`, and `freshness.direct_source_read_required`. When direct source reads are required, agents must follow `freshness.agent_instructions` and verify `freshness.direct_source_read_paths` before using stale graph evidence for changed files.
+
 Current MCP resource surface:
 
 - `relay://service/status`

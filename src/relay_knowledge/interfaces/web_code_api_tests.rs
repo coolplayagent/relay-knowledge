@@ -216,6 +216,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
             .len(),
         0
     );
+    assert_eq!(feature_flags["freshness"]["state"], "fresh");
 
     let zero_impact_limit = request_json(
         router.clone(),

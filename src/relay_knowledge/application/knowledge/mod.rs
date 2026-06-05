@@ -1,3 +1,4 @@
+mod file_freshness;
 pub(super) mod file_index;
 pub(super) mod index_refresh;
 pub(super) mod ingest;

@@ -75,7 +75,7 @@ relay-knowledge --version --format json
 - `wait-until-fresh`: 查询前尝试刷新落后的索引；无法满足时返回错误或 degraded 状态。
 - `graph-only`: 绕过 BM25、semantic 和 vector 等派生索引，只读图事实路径。
 
-普通知识检索默认使用当前实现的默认 freshness。代码仓库查询默认 `allow-stale`；需要严格读取最新图状态时，显式传入 `wait-until-fresh`。
+普通知识检索默认使用当前实现的默认 freshness。代码仓库查询和本机文件查询默认 `allow-stale`；需要严格读取最新已提交图状态或文件索引状态时，显式传入 `wait-until-fresh`。对 `files query`，`graph-only` 只返回 freshness 诊断，不返回文件索引路径候选，因为本机文件定位属于派生索引，不是权威图事实。
 
 ## 2.5 参数边界
 

@@ -51,7 +51,7 @@ relay-knowledge query "SQLite graph state" \
   --format json
 ```
 
-JSON 响应同时包含兼容展示用的 `results` 和面向 agent 的 `context_pack`。需要可审计引用时，优先读取 `context_pack.items[*].ranking`、`graph_facts`、`graph_paths`、`source_span`、`backend_statuses`、`budget_used`、`truncated` 和 `degraded_reason`。
+JSON 响应同时包含兼容展示用的 `results`、面向 agent 的 `context_pack`、`indexes`、`index_cursors` 和 `index_refresh` 诊断。需要可审计引用时，优先读取 `context_pack.items[*].ranking`、`graph_facts`、`graph_paths`、`source_span`、`backend_statuses`、`budget_used`、`truncated`、`degraded_reason` 和 `index_refresh.stale_reasons`。`index_cursors` 会报告 scoped BM25、semantic 和 vector cursor 状态，包括 backend/model metadata 以及可选 last error。
 
 混合检索会融合 BM25、本地 semantic signatures、本地 hashed-vector ANN、结构化图事实、schema path、temporal/community context、code graph documents 和可配置 provider backend metadata。候选先通过 reciprocal-rank fusion 初排，再由本地确定性 rerank 精选；entity lexical aliases 可帮助召回，但不会替换 canonical label。
 
