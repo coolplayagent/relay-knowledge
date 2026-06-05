@@ -18,12 +18,13 @@ const MAX_DERIVED_RESULT_LIMIT: usize = 512;
 const MAX_DERIVED_QUERY_TERMS: usize = 16;
 const VECTOR_LEXICAL_COVERAGE_WEIGHT: f64 = 0.05;
 const SEMANTIC_CANDIDATE_FIELDS: &[DerivedCandidateField] = &[DerivedCandidateField::json_token(
-    "lower(token_signature_json)",
+    "lower(semantic.token_signature_json)",
 )];
 const VECTOR_CANDIDATE_FIELDS: &[DerivedCandidateField] = &[
-    DerivedCandidateField::contains("lower(content)"),
-    DerivedCandidateField::contains("lower(coalesce(source_path, ''))"),
-    DerivedCandidateField::contains("lower(entity_labels_json)"),
+    DerivedCandidateField::contains("lower(vector.content)"),
+    DerivedCandidateField::contains("lower(coalesce(vector.source_path, ''))"),
+    DerivedCandidateField::contains("lower(vector.entity_labels_json)"),
+    DerivedCandidateField::json_token("lower(coalesce(semantic.token_signature_json, ''))"),
 ];
 
 pub(super) fn semantic_candidates(
@@ -38,18 +39,23 @@ pub(super) fn semantic_candidates(
     }
 
     let result_limit = bounded_candidate_limit(request);
-    let (scope_version_condition, scope_version_values) = derived_scope_version_filter(request)?;
+    let (scope_version_condition, scope_version_values) =
+        derived_scope_version_filter(request, "semantic")?;
     let (candidate_condition, ranking_expression, candidate_values) =
         derived_candidate_filter(&query_terms, SEMANTIC_CANDIDATE_FIELDS);
     let sql = format!(
         "
-        SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
-               source_scope, source_path, entity_labels_json, content, token_signature_json,
-               model, dimension, source_hash
-        FROM graph_semantic_documents
+        SELECT semantic.document_id, semantic.document_kind, semantic.evidence_id,
+               semantic.parent_evidence_id, semantic.modality, semantic.source_scope,
+               semantic.source_path, semantic.entity_labels_json, semantic.content,
+               semantic.token_signature_json, semantic.model, semantic.dimension,
+               semantic.source_hash
+        FROM graph_semantic_documents AS semantic
         WHERE {scope_version_condition}
           AND ({candidate_condition})
-        ORDER BY {ranking_expression} DESC, created_graph_version DESC, document_id ASC
+        ORDER BY {ranking_expression} DESC,
+                 semantic.created_graph_version DESC,
+                 semantic.document_id ASC
         LIMIT ?
         ",
     );
@@ -155,18 +161,24 @@ pub(super) fn vector_candidates(
     if query_terms.is_empty() {
         return Ok(Vec::new());
     }
-    let (scope_version_condition, scope_version_values) = derived_scope_version_filter(request)?;
+    let (scope_version_condition, scope_version_values) =
+        derived_scope_version_filter(request, "vector")?;
     let (candidate_condition, ranking_expression, candidate_values) =
         derived_candidate_filter(&query_terms, VECTOR_CANDIDATE_FIELDS);
     let sql = format!(
         "
-        SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
-               source_scope, source_path, entity_labels_json, content, vector_json, model,
-               dimension, source_hash
-        FROM graph_vector_documents
+        SELECT vector.document_id, vector.document_kind, vector.evidence_id,
+               vector.parent_evidence_id, vector.modality, vector.source_scope,
+               vector.source_path, vector.entity_labels_json, vector.content,
+               vector.vector_json, vector.model, vector.dimension, vector.source_hash
+        FROM graph_vector_documents AS vector
+        LEFT JOIN graph_semantic_documents AS semantic
+          ON semantic.document_id = vector.document_id
         WHERE {scope_version_condition}
           AND ({candidate_condition})
-        ORDER BY {ranking_expression} DESC, created_graph_version DESC, document_id ASC
+        ORDER BY {ranking_expression} DESC,
+                 vector.created_graph_version DESC,
+                 vector.document_id ASC
         LIMIT ?
         ",
     );
@@ -453,17 +465,18 @@ fn escape_like_pattern(value: &str) -> String {
 
 fn derived_scope_version_filter(
     request: &GraphSearchRequest,
-) -> Result<(&'static str, Vec<Value>), StorageError> {
+    table_alias: &str,
+) -> Result<(String, Vec<Value>), StorageError> {
     let graph_version = i64::try_from(request.graph_version.get()).map_err(|_| {
         StorageError::InvalidInput("graph version is too large for sqlite query".to_owned())
     })?;
     match &request.source_scope {
         Some(scope) => Ok((
-            "source_scope = ? AND created_graph_version <= ?",
+            format!("{table_alias}.source_scope = ? AND {table_alias}.created_graph_version <= ?"),
             vec![Value::Text(scope.clone()), Value::Integer(graph_version)],
         )),
         None => Ok((
-            "created_graph_version <= ?",
+            format!("{table_alias}.created_graph_version <= ?"),
             vec![Value::Integer(graph_version)],
         )),
     }
@@ -516,19 +529,21 @@ mod tests {
         };
 
         let (scoped_condition, scoped_values) =
-            derived_scope_version_filter(&scoped_request).expect("scoped filter should build");
+            derived_scope_version_filter(&scoped_request, "doc")
+                .expect("scoped filter should build");
         let (unscoped_condition, unscoped_values) =
-            derived_scope_version_filter(&unscoped_request).expect("unscoped filter should build");
+            derived_scope_version_filter(&unscoped_request, "doc")
+                .expect("unscoped filter should build");
 
         assert_eq!(
             scoped_condition,
-            "source_scope = ? AND created_graph_version <= ?"
+            "doc.source_scope = ? AND doc.created_graph_version <= ?"
         );
         assert_eq!(
             scoped_values,
             vec![Value::Text("repo-a".to_owned()), Value::Integer(7)]
         );
-        assert_eq!(unscoped_condition, "created_graph_version <= ?");
+        assert_eq!(unscoped_condition, "doc.created_graph_version <= ?");
         assert_eq!(unscoped_values, vec![Value::Integer(7)]);
     }
 
