@@ -220,6 +220,13 @@ pub fn build_unattended_prompt(
     } else {
         "Make one narrow, concrete candidate improvement for the current category."
     };
+    let mutation_guidance = if macro_explore {
+        "Mutation profile: macro biological mutation. Make a bounded but bolder architectural or algorithmic mutation that can create a step-change in capability. Prefer one coherent subsystem-level improvement over scattered edits. In final notes include mutation_hypothesis, affected_subsystem, expected_capability_jump, and regression_containment."
+    } else {
+        "Mutation profile: focused explore. Keep the candidate narrow and directly tied to the selected category."
+    };
+    let capability_snapshot =
+        capability_snapshot(latest.as_ref(), best.as_ref(), profile_best.as_ref());
     format!(
         r#"You are running relay-knowledge unattended self-iteration run {run_id}.
 
@@ -242,10 +249,15 @@ Goal:
   this machine, use bounded `grep -RIn` searches with excluded build and VCS
   directories so source search still completes.
 
+{mutation_guidance}
+
 Baseline:
 - Latest scored run: {latest_summary}
 - Best accepted run for this profile/category: {best_summary}
 - Best accepted run for this profile: {profile_best_summary}
+
+Current capability snapshot:
+{capability_snapshot}
 
 Recent rejected attempts:
 {rejected}
@@ -275,6 +287,8 @@ Before editing, inspect only the files needed for this category. In your final n
             .as_ref()
             .map(run_brief)
             .unwrap_or_else(|| "none for this profile".to_owned()),
+        mutation_guidance = mutation_guidance,
+        capability_snapshot = capability_snapshot,
         rejected = recent_rejections(paths),
         memory = progressive_memory_index(paths, if macro_explore { 5 } else { 3 }),
     )
@@ -282,10 +296,15 @@ Before editing, inspect only the files needed for this category. In your final n
 
 fn run_brief(run: &Value) -> String {
     format!(
-        "run_id={} score={} competitive={} reasons={}",
+        "run_id={} score={} base_score={} ceiling_bonus={} competitive={} semantic_vector={} research_judge={} performance={} reasons={}",
         value(run, "run_id"),
         value(run, "score"),
+        value(run, "base_score"),
+        value(run, "capability_ceiling_bonus"),
         value(run, "competitive_capability"),
+        value(run, "semantic_vector"),
+        value(run, "research_judge"),
+        value(run, "performance"),
         run.get("reject_reasons")
             .and_then(Value::as_array)
             .map(|items| {
@@ -297,6 +316,36 @@ fn run_brief(run: &Value) -> String {
             })
             .unwrap_or_default()
     )
+}
+
+fn capability_snapshot(
+    latest: Option<&Value>,
+    best: Option<&Value>,
+    profile_best: Option<&Value>,
+) -> String {
+    [
+        ("latest", latest),
+        ("category_best", best),
+        ("profile_best", profile_best),
+    ]
+    .into_iter()
+    .map(|(label, run)| {
+        let Some(run) = run else {
+            return format!("- {label}: none");
+        };
+        format!(
+            "- {label}: score={} competitive={} semantic_vector={} research_judge={} performance={} stability={} ceiling_bonus={}",
+            value(run, "score"),
+            value(run, "competitive_capability"),
+            value(run, "semantic_vector"),
+            value(run, "research_judge"),
+            value(run, "performance"),
+            value(run, "stability"),
+            value(run, "capability_ceiling_bonus"),
+        )
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 fn competitive_feature_targets(cases_config: &Value, limit: usize) -> String {
@@ -549,6 +598,65 @@ mod tests {
         assert!(prompt.contains("text_fallback"));
         assert!(prompt.contains("If `rg` is unavailable"));
         assert!(prompt.contains("grep -RIn"));
+        assert!(prompt.contains("Mutation profile: focused explore"));
+        assert!(!prompt.contains("macro biological mutation"));
+    }
+
+    #[test]
+    fn macro_unattended_prompt_requires_bolder_research_mutation() {
+        let workspace = temp_workspace("codex-macro-unattended-prompt");
+        let paths = HistoryPaths::new(&workspace);
+        paths.ensure().expect("history paths");
+        fs::write(
+            &paths.runs_jsonl,
+            json!({
+                "run_id": "accepted",
+                "timestamp": "1",
+                "profile": "fast",
+                "category_focus": "competitive",
+                "accepted": true,
+                "score_accepted": true,
+                "committed": true,
+                "commit": "abc1234",
+                "score": 0.91,
+                "base_score": 0.90,
+                "capability_ceiling_bonus": 0.01,
+                "foundational_capability": 0.95,
+                "competitive_capability": 0.82,
+                "semantic_vector": 0.88,
+                "research_judge": 0.77,
+                "performance": 0.81,
+                "stability": 1.0,
+                "reject_reasons": [],
+                "improvements": [],
+                "degradations": []
+            })
+            .to_string(),
+        )
+        .expect("runs");
+
+        let prompt = build_unattended_prompt(
+            &paths,
+            &workspace,
+            "run-test",
+            "fast",
+            EvaluationCategory::Competitive,
+            true,
+            &json!({
+                "research_judge_suite": {
+                    "competitive_feature_targets": ["P0 grouped code-query results"],
+                    "implementation_guardrails": ["Do not enumerate fixture strings"]
+                }
+            }),
+        );
+
+        assert!(prompt.contains("macro biological mutation"));
+        assert!(prompt.contains("step-change in capability"));
+        assert!(prompt.contains("mutation_hypothesis"));
+        assert!(prompt.contains("expected_capability_jump"));
+        assert!(prompt.contains("Current capability snapshot"));
+        assert!(prompt.contains("research_judge=0.77"));
+        assert!(prompt.contains("P0 grouped code-query results"));
     }
 
     fn temp_workspace(prefix: &str) -> std::path::PathBuf {

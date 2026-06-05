@@ -225,7 +225,7 @@ mod tests {
             },
         );
 
-        assert!((score.score - 0.86613).abs() < 0.00001);
+        assert!((score.base_score - 0.86613).abs() < 0.00001);
         assert!(!score.accepted);
         assert!(score.reject_reasons.iter().any(|reason| {
             reason.contains("did not beat profile best accepted score 0.950057")
@@ -255,6 +255,159 @@ mod tests {
         );
 
         assert!(score.accepted);
+    }
+
+    #[test]
+    fn dynamic_ceiling_rewards_high_baseline_competitive_and_research_progress() {
+        let previous = serde_json::json!({
+            "score": 0.9,
+            "foundational_capability": 0.95,
+            "competitive_capability": 0.90,
+            "semantic_vector": 0.90,
+            "research_judge": 0.80,
+            "performance": 0.90,
+            "stability": 1.0,
+            "gates": [],
+            "cases": [],
+            "metrics": []
+        });
+        let observation = EvaluationObservation {
+            gates: Vec::new(),
+            cases: vec![
+                case("foundation", "foundational_capability", 0.95),
+                case("competitive", "competitive_capability", 0.95),
+                case("semantic", "semantic_vector", 0.92),
+                case("research", "research_judge", 0.88),
+            ],
+            metrics: Vec::new(),
+            generated_diff: true,
+        };
+
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: Some(&previous),
+                profile_best_accepted: None,
+            },
+        );
+
+        assert!(score.capability_ceiling_bonus > 0.0);
+        assert!(score.score > score.base_score);
+        assert_eq!(score.scoring_policy, "dynamic_capability_ceiling_v1");
+        assert!(score.accepted);
+    }
+
+    #[test]
+    fn dynamic_ceiling_does_not_create_research_bonus_without_current_judge() {
+        let previous = serde_json::json!({
+            "score": 0.7,
+            "research_judge": 0.8,
+            "gates": [],
+            "cases": [],
+            "metrics": []
+        });
+        let observation = EvaluationObservation {
+            gates: Vec::new(),
+            cases: vec![
+                case("foundation", "foundational_capability", 0.9),
+                case("competitive", "competitive_capability", 0.9),
+                case("semantic", "semantic_vector", 0.9),
+            ],
+            metrics: Vec::new(),
+            generated_diff: true,
+        };
+
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: Some(&previous),
+                profile_best_accepted: None,
+            },
+        );
+
+        assert_eq!(score.research_judge, None);
+        assert_eq!(score.capability_ceiling_bonus, 0.0);
+    }
+
+    #[test]
+    fn dynamic_ceiling_ignores_unmeasured_performance_progress() {
+        let previous = serde_json::json!({
+            "score": 0.7,
+            "foundational_capability": 0.9,
+            "competitive_capability": 0.9,
+            "semantic_vector": 0.9,
+            "performance": 0.5,
+            "stability": 1.0,
+            "gates": [],
+            "cases": [],
+            "metrics": []
+        });
+        let observation = EvaluationObservation {
+            gates: Vec::new(),
+            cases: vec![
+                case("foundation", "foundational_capability", 0.9),
+                case("competitive", "competitive_capability", 0.9),
+                case("semantic", "semantic_vector", 0.9),
+            ],
+            metrics: Vec::new(),
+            generated_diff: true,
+        };
+
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: Some(&previous),
+                profile_best_accepted: None,
+            },
+        );
+
+        assert_eq!(score.performance, 1.0);
+        assert_eq!(score.capability_ceiling_bonus, 0.0);
+    }
+
+    #[test]
+    fn dynamic_ceiling_bonus_does_not_override_failed_gates() {
+        let previous = serde_json::json!({
+            "score": 0.9,
+            "foundational_capability": 0.9,
+            "competitive_capability": 0.8,
+            "semantic_vector": 0.8,
+            "performance": 0.8,
+            "stability": 1.0,
+            "gates": [],
+            "cases": [],
+            "metrics": []
+        });
+        let observation = EvaluationObservation {
+            gates: vec![GateObservation {
+                name: "cargo_test".to_owned(),
+                passed: false,
+                duration_ms: 1,
+                message: "failed".to_owned(),
+            }],
+            cases: vec![
+                case("foundation", "foundational_capability", 0.9),
+                case("competitive", "competitive_capability", 0.95),
+                case("semantic", "semantic_vector", 0.9),
+            ],
+            metrics: Vec::new(),
+            generated_diff: true,
+        };
+
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: Some(&previous),
+                profile_best_accepted: None,
+            },
+        );
+
+        assert!(score.capability_ceiling_bonus > 0.0);
+        assert!(!score.accepted);
+        assert!(score
+            .reject_reasons
+            .iter()
+            .any(|reason| reason.contains("quality gates failed")));
     }
 
     fn mixed_capability_observation() -> EvaluationObservation {

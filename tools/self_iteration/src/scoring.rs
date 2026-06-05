@@ -10,6 +10,7 @@ const RATIO_EPSILON: f64 = 0.005;
 const CASE_SCORE_EPSILON: f64 = 0.005;
 const METRIC_RELATIVE_EPSILON: f64 = 0.03;
 const METRIC_ABSOLUTE_EPSILON: f64 = 25.0;
+const CAPABILITY_CEILING_MAX_BONUS: f64 = 0.06;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateObservation {
@@ -115,6 +116,9 @@ pub struct ScoreBreakdown {
     pub research_judge: Option<f64>,
     pub performance: f64,
     pub stability: f64,
+    pub base_score: f64,
+    pub capability_ceiling_bonus: f64,
+    pub scoring_policy: String,
     pub accepted: bool,
     pub reject_reasons: Vec<String>,
     pub performance_strategy: String,
@@ -359,8 +363,9 @@ pub fn score_evaluation(
     let semantic_vector = average(&semantic_scores, 0.0);
     let research_judge = (!research_scores.is_empty()).then(|| average(&research_scores, 0.0));
     let performance = performance_score(&observation.metrics, previous_run);
+    let has_key_performance_metrics = observation.metrics.iter().any(|metric| metric.key);
     let stability = stability_score(&observation.gates, observation.generated_diff);
-    let score = weighted_score(
+    let base_score = weighted_score(
         foundational_capability,
         competitive_capability,
         semantic_vector,
@@ -368,6 +373,18 @@ pub fn score_evaluation(
         performance,
         stability,
     );
+    let current = ScoreComponents {
+        score: base_score,
+        foundational_capability,
+        competitive_capability,
+        semantic_vector,
+        research_judge,
+        performance,
+        stability,
+    };
+    let capability_ceiling_bonus =
+        capability_ceiling_bonus(current, baselines, has_key_performance_metrics);
+    let score = clamp(base_score + capability_ceiling_bonus);
     let improvements = changes(
         observation,
         ScoreComponents {
@@ -419,6 +436,9 @@ pub fn score_evaluation(
         research_judge,
         performance,
         stability,
+        base_score,
+        capability_ceiling_bonus,
+        scoring_policy: "dynamic_capability_ceiling_v1".to_owned(),
         accepted: reject_reasons.is_empty(),
         reject_reasons,
         performance_strategy: "budget_relative_v2".to_owned(),
@@ -824,6 +844,83 @@ fn weighted_score(
             + performance * 0.18
             + stability * 0.25
     }
+}
+
+fn capability_ceiling_bonus(
+    current: ScoreComponents,
+    baselines: ScoreBaselines<'_>,
+    has_key_performance_metrics: bool,
+) -> f64 {
+    let baseline = CapabilityBaseline::new(baselines);
+    if !baseline.available {
+        return 0.0;
+    }
+    let mut weighted_gain = 0.0;
+    let mut total_weight = 0.0;
+    let mut components = vec![
+        (
+            "competitive_capability",
+            current.competitive_capability,
+            0.35,
+        ),
+        ("semantic_vector", current.semantic_vector, 0.15),
+    ];
+    if has_key_performance_metrics {
+        components.push(("performance", current.performance, 0.20));
+    }
+    for (name, value, weight) in components {
+        if let Some(gain) = normalized_ceiling_gain(value, baseline.number(name)) {
+            weighted_gain += gain * weight;
+            total_weight += weight;
+        }
+    }
+    if let Some(research) = current.research_judge {
+        if let Some(gain) = normalized_ceiling_gain(research, baseline.number("research_judge")) {
+            weighted_gain += gain * 0.30;
+            total_weight += 0.30;
+        }
+    }
+    if total_weight == 0.0 {
+        return 0.0;
+    }
+    clamp(weighted_gain / total_weight) * CAPABILITY_CEILING_MAX_BONUS
+}
+
+struct CapabilityBaseline {
+    available: bool,
+    workload_previous: Option<Value>,
+    profile_best_accepted: Option<Value>,
+}
+
+impl CapabilityBaseline {
+    fn new(baselines: ScoreBaselines<'_>) -> Self {
+        Self {
+            available: baselines.workload_previous.is_some()
+                || baselines.profile_best_accepted.is_some(),
+            workload_previous: baselines.workload_previous.cloned(),
+            profile_best_accepted: baselines.profile_best_accepted.cloned(),
+        }
+    }
+
+    fn number(&self, name: &str) -> Option<f64> {
+        [
+            self.workload_previous.as_ref(),
+            self.profile_best_accepted.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(|run| run.get(name).and_then(Value::as_f64))
+        .reduce(f64::max)
+    }
+}
+
+fn normalized_ceiling_gain(current: f64, baseline: Option<f64>) -> Option<f64> {
+    let baseline = baseline?;
+    if current <= baseline + RATIO_EPSILON {
+        return None;
+    }
+    let remaining = (1.0 - baseline).max(RATIO_EPSILON);
+    Some(((current - baseline) / remaining).clamp(0.0, 1.0))
 }
 
 fn performance_score(metrics: &[MetricObservation], previous_run: Option<&Value>) -> f64 {

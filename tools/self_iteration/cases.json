@@ -346,7 +346,9 @@
       "P1 source groups and cross-repository contract read models that expose stale, version, provider, consumer, and confidence states.",
       "P1 chat grounding and citations bound to context-pack provenance, graph/index versions, source spans, and freshness indicators.",
       "P2 server-side or cached graph layout and scope lenses for large graph navigation without blocking query hot paths.",
-      "P2 read-only rename or refactor proposals with confidence, affected references, suggested tests, and explicit approval before writes."
+      "P2 read-only rename or refactor proposals with confidence, affected references, suggested tests, and explicit approval before writes.",
+      "Research-grade competitive gaps must be converted into deterministic cases, metrics, or judge evidence so later iterations can compound on the capability.",
+      "Macro-mutation candidates should improve a reusable retrieval, indexing, ranking, graph, context, service, or agent contract mechanism rather than a single case."
     ],
     "implementation_guardrails": [
       "Do not improve a case by enumerating known queries, paths, repositories, symbols, routes, or fixture-specific strings.",
@@ -357,15 +359,17 @@
     ],
     "rubric_dimensions": [
       "research_alignment",
+      "competitive_advantage",
       "architecture_soundness",
-      "reliability_resilience",
       "performance_generalization",
       "implementation_actionability",
-      "anti_fixture_special_casing"
+      "anti_fixture_special_casing",
+      "judge_evidence_quality"
     ],
     "min_score": 0.75,
     "min_confidence": 0.6,
     "min_anti_fixture_special_casing": 0.75,
+    "min_dimension_score": 0.65,
     "max_doc_chars": 3000,
     "max_diff_chars": 30000
   },

@@ -253,7 +253,7 @@ fn build_judge_prompt(input: JudgePromptInput<'_>) -> String {
         diff.push_str("\n...diff truncated...");
     }
     format!(
-        "You are the relay-knowledge research judge.\nReturn only one strict JSON object with passed, confidence, overall_score, scores, summary, evidence, risks, recommended_cases.\n\nDeterministic summary:\n{}\n\nJudge suite requirements:\n{}\n\nCandidate diff:\n```diff\n{}\n```\n\nReference document excerpts:\n{}",
+        "You are the relay-knowledge research judge.\nReturn only one strict JSON object with passed, confidence, overall_score, scores, summary, evidence, risks, recommended_cases, capability_delta, research_gaps.\nThe scores object must include every required dimension from the suite requirements and each score must be a number from 0.0 to 1.0. Judge the candidate for general research competitiveness, not fixture memorization.\n\nDeterministic summary:\n{}\n\nJudge suite requirements:\n{}\n\nCandidate diff:\n```diff\n{}\n```\n\nReference document excerpts:\n{}",
         deterministic_summary(
             input.gates,
             input.cases,
@@ -271,10 +271,12 @@ fn judge_suite_requirements(suite: &Value) -> String {
     serde_json::json!({
         "competitive_feature_targets": suite.get("competitive_feature_targets").cloned().unwrap_or(Value::Null),
         "implementation_guardrails": suite.get("implementation_guardrails").cloned().unwrap_or(Value::Null),
-        "rubric": suite.get("rubric").cloned().unwrap_or(Value::Null),
+        "rubric_dimensions": suite.get("rubric_dimensions").cloned().unwrap_or_else(|| serde_json::json!(required_judge_dimensions(suite))),
+        "required_output_fields": ["passed", "confidence", "overall_score", "scores", "summary", "evidence", "risks", "recommended_cases", "capability_delta", "research_gaps"],
         "min_score": suite.get("min_score").cloned().unwrap_or(Value::Null),
         "min_confidence": suite.get("min_confidence").cloned().unwrap_or(Value::Null),
         "min_anti_fixture_special_casing": suite.get("min_anti_fixture_special_casing").cloned().unwrap_or(Value::Null),
+        "min_dimension_score": suite.get("min_dimension_score").cloned().unwrap_or(Value::Null),
     })
     .to_string()
 }
@@ -292,10 +294,35 @@ fn deterministic_summary(
         "failed_gates": gates.iter().filter(|gate| !gate.passed).map(|gate| &gate.name).collect::<Vec<_>>(),
         "case_count": cases.len(),
         "failed_cases": cases.iter().filter(|case| !case.passed).take(16).map(|case| &case.case_id).collect::<Vec<_>>(),
+        "objective_scores": objective_score_summary(cases),
         "metrics": metrics.iter().take(16).map(|metric| format!("{}={}", metric.name, metric.value)).collect::<Vec<_>>(),
+        "metric_budget_failures": metrics.iter().filter(|metric| metric.key && metric.budget.is_some() && metric.score() < 1.0).map(|metric| format!("{}={} budget={}", metric.name, metric.value, metric.budget.unwrap_or_default())).collect::<Vec<_>>(),
         "report_sections": repo_reports.iter().map(|report| &report.repository).collect::<Vec<_>>(),
     })
     .to_string()
+}
+
+fn objective_score_summary(cases: &[CaseObservation]) -> Value {
+    let mut grouped: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    for case in cases {
+        grouped
+            .entry(case.objective.clone())
+            .or_default()
+            .push(case.score());
+    }
+    serde_json::json!(
+        grouped
+            .into_iter()
+            .map(|(objective, scores)| {
+                let average = if scores.is_empty() {
+                    0.0
+                } else {
+                    scores.iter().sum::<f64>() / scores.len() as f64
+                };
+                (objective, average)
+            })
+            .collect::<BTreeMap<_, _>>()
+    )
 }
 
 fn document_excerpts(workspace: &Path, suite: &Value, max_doc_chars: usize) -> String {
@@ -463,6 +490,7 @@ fn judge_outcome(text: &str, suite: &Value) -> (bool, bool, f64, String, Value) 
         .and_then(|scores| scores.get("anti_fixture_special_casing"))
         .and_then(Value::as_f64)
         .unwrap_or(score);
+    let contract_failures = judge_contract_failures(&payload, suite);
     let passed = payload
         .get("passed")
         .and_then(Value::as_bool)
@@ -481,13 +509,95 @@ fn judge_outcome(text: &str, suite: &Value) -> (bool, bool, f64, String, Value) 
             >= suite
                 .get("min_anti_fixture_special_casing")
                 .and_then(Value::as_f64)
-                .unwrap_or(0.75);
-    let message = payload
+                .unwrap_or(0.75)
+        && contract_failures.is_empty();
+    let mut message = payload
         .get("summary")
         .and_then(Value::as_str)
         .unwrap_or("judge completed")
         .to_owned();
+    if !contract_failures.is_empty() {
+        message.push_str("; judge contract failures: ");
+        message.push_str(&contract_failures.join(", "));
+    }
     (passed, passed, score, message, payload)
+}
+
+fn judge_contract_failures(payload: &Value, suite: &Value) -> Vec<String> {
+    let mut failures = judge_required_output_field_failures(payload);
+    failures.extend(judge_dimension_failures(payload, suite));
+    failures
+}
+
+fn judge_required_output_field_failures(payload: &Value) -> Vec<String> {
+    required_judge_output_fields()
+        .into_iter()
+        .filter(|field| payload.get(*field).is_none_or(Value::is_null))
+        .map(|field| format!("{field}=missing"))
+        .collect()
+}
+
+fn judge_dimension_failures(payload: &Value, suite: &Value) -> Vec<String> {
+    let min_dimension_score = suite
+        .get("min_dimension_score")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.65);
+    let Some(scores) = payload.get("scores") else {
+        return vec!["missing scores".to_owned()];
+    };
+    required_judge_dimensions(suite)
+        .into_iter()
+        .filter_map(|dimension| {
+            let Some(value) = scores.get(&dimension).and_then(Value::as_f64) else {
+                return Some(format!("{dimension}=missing"));
+            };
+            if !(0.0..=1.0).contains(&value) {
+                return Some(format!("{dimension}={value:.3} outside 0.0..1.0"));
+            }
+            (value < min_dimension_score).then(|| {
+                format!("{dimension}={value:.3} below min_dimension_score={min_dimension_score:.3}")
+            })
+        })
+        .collect()
+}
+
+fn required_judge_output_fields() -> [&'static str; 10] {
+    [
+        "passed",
+        "confidence",
+        "overall_score",
+        "scores",
+        "summary",
+        "evidence",
+        "risks",
+        "recommended_cases",
+        "capability_delta",
+        "research_gaps",
+    ]
+}
+
+fn required_judge_dimensions(suite: &Value) -> Vec<String> {
+    let configured = array_field(suite, "rubric_dimensions")
+        .iter()
+        .filter_map(Value::as_str)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if configured.is_empty() {
+        [
+            "research_alignment",
+            "competitive_advantage",
+            "architecture_soundness",
+            "performance_generalization",
+            "implementation_actionability",
+            "anti_fixture_special_casing",
+            "judge_evidence_quality",
+        ]
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect()
+    } else {
+        configured
+    }
 }
 
 fn shell_split(value: &str) -> Result<Vec<String>, String> {

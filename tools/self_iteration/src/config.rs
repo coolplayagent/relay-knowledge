@@ -768,6 +768,28 @@ mod tests {
     }
 
     #[test]
+    fn readmes_document_supported_long_options() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source =
+            std::fs::read_to_string(manifest.join("src/config.rs")).expect("config source");
+        let readme = std::fs::read_to_string(manifest.join("README.md")).expect("README.md");
+        let readme_zh =
+            std::fs::read_to_string(manifest.join("README.zh-CN.md")).expect("README.zh-CN.md");
+        let options = long_options_from_source(&source);
+
+        for option in options {
+            assert!(
+                readme.contains(&option),
+                "README.md should document {option}"
+            );
+            assert!(
+                readme_zh.contains(&option),
+                "README.zh-CN.md should document {option}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_unattended_layered_defaults() {
         let config = Config::parse(vec![
             "loop".to_owned(),
@@ -833,5 +855,20 @@ mod tests {
         assert_eq!(plan.global, 6);
         assert_eq!(plan.repositories, 16);
         assert_eq!(plan.queries, 32);
+    }
+
+    fn long_options_from_source(source: &str) -> BTreeSet<String> {
+        source
+            .split('"')
+            .filter_map(|item| item.strip_prefix("--"))
+            .map(|item| {
+                let name = item
+                    .split(|ch: char| ch == '=' || ch.is_whitespace())
+                    .next()
+                    .unwrap_or_default();
+                format!("--{name}")
+            })
+            .filter(|option| option.len() > 2 && !option.contains('{'))
+            .collect()
     }
 }

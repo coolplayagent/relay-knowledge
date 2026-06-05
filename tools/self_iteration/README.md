@@ -35,6 +35,109 @@ Useful variants:
 ./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
 ```
 
+## Command Line Reference
+
+Syntax:
+
+```bash
+./self-iterate.sh [mode] [options]
+tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
+```
+
+Modes:
+
+| Mode | Default | Behavior |
+| --- | --- | --- |
+| `loop` | yes | Generates candidates until limits stop the loop; accepted candidates are committed by the harness. |
+| `once` | no | Runs one generation/evaluation iteration. |
+| `evaluate` | no | Scores the current diff without invoking Codex or creating a commit. |
+| `chart` | no | Exports `.git/relay-knowledge-self-iteration/score-v2.csv` and `score-v2.svg`. |
+
+General options:
+
+| Option | Values / default | Effect |
+| --- | --- | --- |
+| `--workspace PATH` | launcher sets repository root | Workspace passed to Codex and evaluators. |
+| `--strategy VALUE` | `single`; aliases: `unattended-layered`, `unattended_layered`, `layered` | Selects the normal single loop or the long-running layered unattended strategy. |
+| `--profile VALUE` | `fast`; values: `smoke`, `fast`, `full`, `exhaustive` | Selects quality gates and evaluation workload. |
+| `--categories LIST` | unset; values: `foundational`, `competitive`, `semantic_vector`, `file_fixtures`, `repository_sets`, `research_judge`, `performance`, `all` | Focuses scoring/evaluation on selected objective families while preserving guardrails. |
+| `--exclude-categories LIST` | unset; same values as `--categories`; aliases include `judge`, `semantic-vector`, `repo_sets` | Removes categories after `all` expansion. Fails if nothing remains. |
+| `--max-iterations N` | unset | Stops after N loop iterations. |
+| `--stop-after-accepted N` | unset for `single`; `8` default in unattended | Stops after N accepted commits. |
+| `--sleep-seconds N` | `5` | Sleep between normal loop iterations; also sets unattended cycle sleep unless overridden. |
+| `--cycle-sleep-seconds N` | `120` unattended default | Sleep between unattended cycles. |
+| `--commit-message TEXT` | generated from score | Overrides accepted candidate commit subject. |
+| `--dry-run-codex` | false | Builds the prompt and records a dry generation result without invoking Codex. |
+| `--keep-workdirs` | false | Keeps per-run evaluation homes instead of deleting transient homes. |
+| `--use-current-candidate` | false | Skips Codex and evaluates the current working tree diff. |
+| `--fail-fast` | false | Propagates the first iteration error instead of continuing until limits. |
+
+Codex generation options:
+
+| Option | Values / default | Effect |
+| --- | --- | --- |
+| `--yolo` | false; launcher passes it by default | Maps to non-interactive Codex approvals and `danger-full-access` sandbox. |
+| `--model MODEL` | `gpt-5.5` | Codex model for candidate generation. |
+| `--codex-reasoning-effort VALUE` | `xhigh`; values: `low`, `medium`, `high`, `xhigh` | Sets `model_reasoning_effort`. |
+| `--codex-profile NAME` | unset | Passes `-p NAME` to Codex. |
+| `--codex-path PATH` | `codex` | Codex executable path. |
+| `--codex-timeout-seconds N` | `3600` | Candidate generation timeout. |
+
+Evaluation and concurrency options:
+
+| Option | Values / default | Effect |
+| --- | --- | --- |
+| `--command-timeout-seconds N` | `900` | Timeout for evaluator subprocesses and product CLI commands. |
+| `--jobs auto|N` | `auto` | Global command limiter; `auto` uses available CPU count or `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS`. |
+| `--repo-jobs auto|N` | `auto` | Repository-level parallelism; `auto` uses half the available CPU count. |
+| `--query-jobs auto|N` | `auto` | Query subprocess parallelism; `auto` uses available CPU count. |
+
+Unattended layered options:
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `--max-wall-clock-hours N` | `36` | Overall unattended runtime cap. |
+| `--explore-timeout-seconds N` | `900` | Timeout for short explore Codex attempts. |
+| `--macro-explore-timeout-seconds N` | `2700` | Timeout for macro mutation attempts. |
+| `--max-explore-attempts-per-cycle N` | `3` | Short explore retries before a cycle ends. |
+| `--max-consecutive-empty-candidates N` | `8` | Stops after repeated no-diff generations. |
+| `--max-consecutive-promotion-failures N` | `10` | Stops after repeated screen/validate failures. |
+| `--macro-after-competitive-failures N` | `4` | Triggers macro mutation after repeated competitive failures. |
+| `--macro-after-empty-candidates N` | `6` | Triggers macro mutation after repeated empty candidates. |
+| `--cooldown-after-accept-seconds N` | `300` | Sleep after accepted unattended commits. |
+| `--cooldown-after-timeout-seconds N` | `900` | Sleep after Codex timeout. |
+| `--deep-check-interval-accepts N` | `6` | Runs deeper validation after this many accepts. |
+| `--deep-check-interval-hours N` | `12` | Runs deeper validation after this many hours. |
+
+Environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_RELEASE=1` | Makes `self-iterate.sh` build and run the release harness binary. |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` | Overrides the global `--jobs auto` default only. |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS` | Comma-separated fast profile repository subset. |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT` | Per-repository fast case limit. |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS` | Comma-separated fast repository-set subset. |
+| `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT` | Per-repository-set fast case limit. |
+| `RELAY_KNOWLEDGE_JUDGE_BACKEND` | `http`, `openai`, `openai_compatible`, `api`, `llm`, `cli`, `opencode`, `agent`, `none`; disable aliases: `off`, `disabled`, `skip`, `false`. |
+| `RELAY_KNOWLEDGE_JUDGE_BASE_URL`, `RELAY_KNOWLEDGE_JUDGE_API_KEY`, `RELAY_KNOWLEDGE_JUDGE_MODEL` | OpenAI-compatible HTTP judge settings. |
+| `RELAY_KNOWLEDGE_JUDGE_COMMAND` | CLI judge command template; aliases: `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND`, `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`. |
+| `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS` | Shared judge timeout; default `120`. |
+
+Copyable examples:
+
+```bash
+./self-iterate.sh once --profile fast
+./self-iterate.sh evaluate --use-current-candidate --profile fast
+./self-iterate.sh once --profile fast --categories semantic_vector
+./self-iterate.sh once --profile full --categories all --exclude-categories research_judge
+./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
+RELAY_KNOWLEDGE_JUDGE_BACKEND=none ./self-iterate.sh once --profile full --categories research_judge
+RELAY_KNOWLEDGE_JUDGE_BACKEND=http RELAY_KNOWLEDGE_JUDGE_BASE_URL=http://localhost:11434/v1 RELAY_KNOWLEDGE_JUDGE_API_KEY=local RELAY_KNOWLEDGE_JUDGE_MODEL=judge-model ./self-iterate.sh once --profile full --categories research_judge
+RELAY_KNOWLEDGE_JUDGE_COMMAND='opencode run "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." --file {prompt_file}' ./self-iterate.sh once --profile full --categories research_judge
+./self-iterate.sh chart
+```
+
 ## Progress logs
 
 The harness writes live progress to stderr with the `[self-iterate]` prefix. Each
@@ -237,12 +340,14 @@ so the same candidate is not regenerated.
 When short attempts stall, the strategy escalates to `macro_explore` for
 competitive capability. Macro escalation triggers after repeated competitive
 promotion failures, repeated empty candidates, or a competitive-capability gap
-against the best accepted focused baseline. The macro prompt includes
-`research_judge_suite.competitive_feature_targets` and
-`implementation_guardrails` from `cases.json`, asks for a larger ranking,
+against the best accepted focused baseline. The macro prompt uses a bounded
+biological-mutation profile: it includes current capability snapshots,
+`research_judge_suite.competitive_feature_targets`, and
+`implementation_guardrails` from `cases.json`, then asks for a larger ranking,
 indexing, relationship extraction, query-planning, context-construction, or
-retrieval-evidence improvement, and still forbids fixture-specific
-enumeration.
+retrieval-evidence improvement. The final candidate notes must state the
+mutation hypothesis, affected subsystem, expected capability jump, and
+regression containment while still forbidding fixture-specific enumeration.
 
 Run state is persisted in
 `.git/relay-knowledge-self-iteration/unattended-state-v2.json` so a crashed
@@ -277,13 +382,28 @@ foundational_capability * 0.17
 + stability * 0.19
 ```
 
-This policy intentionally gives research quality and performance more influence
-than earlier self-iteration runs while keeping the other objectives protected by
-regression checks.
+These formulas produce `base_score`. The persisted `score` is
+`min(1.0, base_score + capability_ceiling_bonus)`. The dynamic ceiling bonus is
+bounded to `0.06` and is computed only from components that have real baseline
+fields in the latest matching workload run or the best accepted run for the
+same profile. It rewards progress against the remaining headroom toward `1.0`
+for competitive capability, semantic/vector quality, performance when the
+current run emits key performance metrics, and research_judge when a current
+judge score exists. Missing judge output never creates a research bonus, and
+the bonus cannot override failed gates, missing diffs, or protected objective
+regressions.
 
-The research judge evaluates research alignment, architecture soundness,
-reliability reasoning, performance generalization, implementation
-actionability, and fixture-special-casing risk. It can run through an
+This policy intentionally gives research quality, competitive capability, and
+performance more room to compound after the current baseline gets strong while
+keeping the other objectives protected by regression checks.
+
+The research judge evaluates research alignment, competitive advantage,
+architecture soundness, performance generalization, implementation
+actionability, fixture-special-casing risk, and judge evidence quality. It must
+return strict JSON with `passed`, `confidence`, `overall_score`, `scores`,
+`summary`, `evidence`, `risks`, `recommended_cases`, `capability_delta`, and
+`research_gaps`; every configured rubric dimension must appear in `scores` and
+meet `min_dimension_score`. It can run through an
 OpenAI-compatible HTTP endpoint or through an open coding-agent CLI such as
 `opencode`, `relay-teams`, `codex`, `cc`, or `copilot`. When no judge backend or
 HTTP settings are provided, the CLI judge defaults to `opencode`. All judge
@@ -291,9 +411,11 @@ overrides come from runtime environment variables:
 
 `cases.json` can also configure the judge workload. `documents` selects bounded
 02/03/04 excerpts, `competitive_feature_targets` lists the research-derived
-capabilities candidates should advance, and `implementation_guardrails` lists
-non-negotiable constraints such as anti-fixture behavior, async boundaries,
-freshness/version evidence, and same-change documentation updates.
+capabilities candidates should advance, `rubric_dimensions` and
+`min_dimension_score` define the strict scoring dimensions, and
+`implementation_guardrails` lists non-negotiable constraints such as
+anti-fixture behavior, async boundaries, freshness/version evidence, and
+same-change documentation updates.
 
 - `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli|opencode|none`; `opencode` is a
   CLI alias that uses the default opencode command unless a custom command is
@@ -315,8 +437,8 @@ JSON. Set `RELAY_KNOWLEDGE_JUDGE_BACKEND=none` to keep the suite selected while
 recording `judge_skipped`; `off`, `disabled`, `skip`, and `false` are accepted
 as disable aliases. Use `--exclude-categories research_judge` when the suite
 itself should not run. Explicit misconfiguration, malformed JSON, low
-confidence, low overall score, or low anti-fixture-special-casing score rejects
-the candidate.
+confidence, low overall score, low anti-fixture-special-casing score, missing
+dimension scores, or low required dimension scores rejects the candidate.
 
 Case objectives are continuous quality scores, not pass-rate counters. A passed case
 at rank 1 starts from `1.0`; a passed case at rank `N > 1` starts from
