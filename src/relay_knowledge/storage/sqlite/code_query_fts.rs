@@ -353,7 +353,12 @@ fn fts_match_query_with_operator(
         .collect::<Vec<_>>()
         .join(operator);
     let alternatives = if include_compound_identifiers {
-        compound_identifier_fts_terms(terms)
+        let compound_terms = terms
+            .iter()
+            .filter(|term| compound_identifier_source_term(term))
+            .cloned()
+            .collect::<Vec<_>>();
+        compound_identifier_fts_terms(&compound_terms)
     } else {
         Vec::new()
     };
@@ -716,6 +721,11 @@ fn compound_identifier_fts_terms(terms: &[String]) -> Vec<String> {
     alternatives
 }
 
+fn compound_identifier_source_term(term: &str) -> bool {
+    term.chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
 fn compound_identifier_parts(terms: &[String]) -> Option<Vec<String>> {
     let mut parts = Vec::new();
     for term in terms {
@@ -972,6 +982,14 @@ mod tests {
             direct_hybrid_chunk_fts_match_query("metricsink component Type MustNewType"),
             "\"metricsink\" OR \"component\" OR \"Type\" OR \"MustNewType\" OR \"component Type\""
         );
+    }
+
+    #[test]
+    fn hybrid_chunk_fts_query_keeps_compound_identifiers_with_type_surface_companions() {
+        let fts_query = hybrid_chunk_fts_match_query("metric_sink component Type");
+
+        assert!(fts_query.contains("\"component Type\""));
+        assert!(fts_query.contains("\"metricsink\""));
     }
 
     #[test]

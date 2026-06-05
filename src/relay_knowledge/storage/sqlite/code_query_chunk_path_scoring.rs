@@ -7,6 +7,7 @@ use super::code_query_path_ranking::{
 const HYBRID_TEST_CHUNK_PENALTY: f64 = -3.75;
 const HYBRID_GENERATED_CHUNK_PENALTY: f64 = -3.0;
 const HYBRID_TYPE_SURFACE_CHUNK_BONUS: f64 = 5.25;
+const MIN_DEMOTED_HYBRID_CHUNK_SCORE: f64 = 0.01;
 
 pub(super) fn hybrid_chunk_path_adjustment(
     base_score: f64,
@@ -30,7 +31,11 @@ pub(super) fn hybrid_chunk_path_adjustment(
         penalty += HYBRID_TYPE_SURFACE_CHUNK_BONUS;
     }
 
-    penalty
+    if penalty < 0.0 && base_score + penalty <= 0.0 {
+        MIN_DEMOTED_HYBRID_CHUNK_SCORE - base_score
+    } else {
+        penalty
+    }
 }
 
 fn query_requests_generated_chunk(query: &str, content: &str) -> bool {
@@ -146,6 +151,22 @@ mod tests {
             ),
             HYBRID_GENERATED_CHUNK_PENALTY
         );
+    }
+
+    #[test]
+    fn hybrid_chunk_path_adjustment_preserves_low_scoring_sole_chunk_hits() {
+        let request = request("sink.NewFactory EmitBatches metric_sink");
+        let base_score = 1.0;
+
+        let adjustment = hybrid_chunk_path_adjustment(
+            base_score,
+            &request.query,
+            "func TestFactory(t *testing.T) {}",
+            "connectors/metricsink/metricsink_test.go",
+            &request,
+        );
+
+        assert!((base_score + adjustment - MIN_DEMOTED_HYBRID_CHUNK_SCORE).abs() < f64::EPSILON);
     }
 
     #[test]

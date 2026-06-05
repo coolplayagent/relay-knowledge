@@ -234,13 +234,19 @@ pub(super) fn repository_set_score(
         freshness_penalty == 0.0,
         overlay_evidence,
     );
+    let priority_supported =
+        freshness_penalty == 0.0 && has_priority_supporting_overlay_evidence(overlay_evidence);
+    let domain_affinity_bonus = if priority_supported {
+        priority_domain_affinity_bonus(query, hit, member)
+    } else {
+        0.0
+    };
     let edge_bonus = overlay_evidence
         .iter()
         .map(|edge| f64::from(edge.confidence_basis_points) / 10_000.0)
         .fold(0.0, f64::max);
 
-    hit.score + priority_bonus + edge_bonus + priority_domain_affinity_bonus(query, hit, member)
-        - freshness_penalty
+    hit.score + priority_bonus + edge_bonus + domain_affinity_bonus - freshness_penalty
 }
 
 pub(super) fn apply_bridge_support_bonus(results: &mut [CodeRepositorySetQueryHit]) {
@@ -792,6 +798,43 @@ mod tests {
             member_priority_bonus(-100, true, &evidence),
             member_priority_bonus(-10, true, &evidence)
         );
+    }
+
+    #[test]
+    fn domain_affinity_requires_fresh_evidence_backed_priority() {
+        let member = member_status("app", "scope-app", 10);
+        let query = "metric_sink pipeline";
+        let fresh_hit = hit(
+            "repo-app",
+            "scope-app",
+            "connectors/metricsink/metricsink.go",
+            1,
+            10.0,
+            false,
+        );
+        let stale_hit = hit(
+            "repo-app",
+            "scope-app",
+            "connectors/metricsink/metricsink.go",
+            1,
+            10.0,
+            true,
+        );
+        let evidence = vec![edge(
+            "edge-in",
+            "scope-sdk",
+            Some("scope-app"),
+            r#"{"from_path":"src/sdk.rs","from_line_start":1,"from_line_end":1}"#,
+            10_000,
+        )];
+
+        let unsupported_score = repository_set_score(query, &fresh_hit, &member, &[]);
+        let supported_score = repository_set_score(query, &fresh_hit, &member, &evidence);
+        let stale_score = repository_set_score(query, &stale_hit, &member, &evidence);
+
+        assert!(supported_score > unsupported_score + 1.0);
+        assert!(unsupported_score < fresh_hit.score + 1.0);
+        assert!(stale_score < supported_score);
     }
 
     #[test]
