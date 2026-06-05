@@ -52,6 +52,9 @@ fn environment_remote_base_url_only_selects_supported_repo_commands() {
     let status = CliCommand::parse(["status"]).expect("status should parse");
     let repo_status =
         CliCommand::parse(["repo", "status", "org/repo"]).expect("repo status should parse");
+    let repo_software =
+        CliCommand::parse(["repo", "software", "org/repo", "--kind", "relationships"])
+            .expect("repo software should parse");
     let repo_reset = CliCommand::parse(["repo", "index", "--reset", "org/repo"])
         .expect("repo reset should parse");
     let repo_worker =
@@ -61,12 +64,20 @@ fn environment_remote_base_url_only_selects_supported_repo_commands() {
 
     assert!(!remote_environment_needed(&status));
     assert!(remote_environment_needed(&repo_status));
+    assert!(remote_environment_needed(&repo_software));
     assert!(remote_environment_needed(&repo_reset));
     assert!(remote_environment_needed(&repo_worker));
     assert!(remote_environment_needed(&explicit_status));
     assert_eq!(remote_selection(&status, env_remote.clone()), None);
     assert_eq!(
         remote_selection(&repo_status, env_remote),
+        Some(RemoteSelection {
+            base_url: "http://127.0.0.1:8791".to_owned(),
+            explicit: false,
+        })
+    );
+    assert_eq!(
+        remote_selection(&repo_software, Some("http://127.0.0.1:8791".to_owned())),
         Some(RemoteSelection {
             base_url: "http://127.0.0.1:8791".to_owned(),
             explicit: false,

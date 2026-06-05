@@ -1,7 +1,7 @@
 use crate::{
     api::{
         ApiStreamEvent, CodeRepositoryIndexStartResponse, CodeRepositoryRegisterRequest,
-        RequestContext, StreamEventKind,
+        CodeRepositoryReportResponse, RequestContext, StreamEventKind,
     },
     application::RelayKnowledgeService,
     domain::{
@@ -388,16 +388,7 @@ pub async fn run_repo(
                 )
                 .await
                 .map_err(|error| CliError::api_failed(error, format))?;
-            if format == OutputFormat::Markdown {
-                return render_markdown_report(&response);
-            }
-
-            render_response(
-                "code.repo.report",
-                response.metadata.clone(),
-                &response,
-                format,
-            )
+            render_report_response(&response, format)
         }
         RepoCommand::Software {
             alias,
@@ -426,6 +417,22 @@ pub async fn run_repo(
             )
         }
     }
+}
+
+pub(super) fn render_report_response(
+    response: &CodeRepositoryReportResponse,
+    format: OutputFormat,
+) -> Result<String, CliError> {
+    if format == OutputFormat::Markdown {
+        return render_markdown_report(response);
+    }
+
+    render_response(
+        "code.repo.report",
+        response.metadata.clone(),
+        response,
+        format,
+    )
 }
 
 fn render_index_worker_response(

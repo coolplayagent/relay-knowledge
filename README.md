@@ -344,7 +344,10 @@ Local CLIs can query a deployed resident service with `--remote <base-url>` or
 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote repository index commands submit
 durable tasks to the service and return task/status/checkpoint JSON; the remote
 `service run --web` worker pool drains those tasks rather than the local CLI
-running `repo index-worker`. Remote maintenance commands such as
+running `repo index-worker`. Remote read-only repository graph commands
+(`repo query`, `repo feature-flags`, `repo impact`, `repo report`, and
+`repo software`) read service-host index state and preserve their CLI `--kind`
+arguments. Remote maintenance commands such as
 `repo index --reset` and `repo index-worker` are rejected by a remote-selected
 CLI and must be run on the service host. Remote dispatch validates the remote
 URL and outbound network settings before HTTP; unrelated local runtime and
@@ -583,6 +586,7 @@ relay-knowledge repo index-worker --task-id <task-id> --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo query relay-knowledge --query retry_policy --kind definition --freshness wait-until-fresh --format json
+relay-knowledge --remote http://127.0.0.1:8791 repo software relay-knowledge --kind relationships --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo feature-flags relay-knowledge --query checkout --ref HEAD --format json
 relay-knowledge repo software relay-knowledge --kind relationships --ref HEAD --format json

@@ -3,11 +3,15 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     api::{
-        ApiError, CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
-        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, ErrorKind,
-        RequestContext,
+        ApiError, CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
+        CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
+        CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
+        CodeRepositoryStatusResponse, ErrorKind, RequestContext, SoftwareGlobalResponse,
     },
-    domain::{CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy},
+    domain::{
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
+        CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalRequest,
+    },
     env::NetworkEnvOverrides,
     net::{NetworkConfig, http},
 };
@@ -25,6 +29,10 @@ pub(super) fn supports(action: &CliAction) -> bool {
             RepoCommand::Index { .. }
                 | RepoCommand::ScopePreview { .. }
                 | RepoCommand::Query { .. }
+                | RepoCommand::FeatureFlags { .. }
+                | RepoCommand::Impact { .. }
+                | RepoCommand::Report { .. }
+                | RepoCommand::Software { .. }
                 | RepoCommand::Status { .. }
         )
     )
@@ -164,6 +172,114 @@ pub(super) async fn run_remote(
             )
             .map(Some)
         }
+        RepoCommand::FeatureFlags {
+            alias,
+            query,
+            limit,
+            ref_selector,
+            path_filters,
+            language_filters,
+            freshness,
+        } => {
+            let request = CodeFeatureFlagRequest::new(
+                query.clone(),
+                repo_cli::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    path_filters.clone(),
+                    language_filters.clone(),
+                    format,
+                )?,
+                *limit,
+                *freshness,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, CodeRepositoryFeatureFlagsResponse>(
+                    alias,
+                    "feature-flags",
+                    &request,
+                )
+                .await?;
+
+            render_response(
+                "code.repo.feature_flags",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::Impact {
+            alias,
+            base_ref,
+            head_ref,
+            limit,
+        } => {
+            let request = CodeImpactRequest::new(
+                repo_cli::selector(
+                    alias.clone(),
+                    head_ref.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    format,
+                )?,
+                base_ref.clone(),
+                head_ref.clone(),
+                *limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, CodeRepositoryImpactResponse>(alias, "impact", &request)
+                .await?;
+
+            render_response(
+                "code.repo.impact",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::Report { alias } => {
+            let response = client
+                .get_repository::<CodeRepositoryReportResponse>(alias, "report")
+                .await?;
+
+            repo_cli::render_report_response(&response, format).map(Some)
+        }
+        RepoCommand::Software {
+            alias,
+            ref_selector,
+            kind,
+            freshness,
+            limit,
+        } => {
+            let request = SoftwareGlobalRequest::new(
+                repo_cli::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    format,
+                )?,
+                *kind,
+                *freshness,
+                *limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, SoftwareGlobalResponse>(alias, "software", &request)
+                .await?;
+
+            render_response(
+                "code.repo.software",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
         RepoCommand::Status { alias } => {
             let response = client
                 .get_repository_status::<CodeRepositoryStatusResponse>(alias, "HEAD")
@@ -245,6 +361,23 @@ impl RemoteCliClient {
     {
         let mut url = repository_url(&self.base_url, alias, "status", self.format)?;
         url.query_pairs_mut().append_pair("ref", ref_selector);
+        let response = self
+            .client
+            .get(url)
+            .header("x-relay-request-id", &self.context.request_id)
+            .header("x-relay-trace-id", &self.context.trace_id)
+            .send()
+            .await
+            .map_err(|error| transport_error(error, self.format))?;
+
+        decode_response(response, self.format).await
+    }
+
+    async fn get_repository<R>(&self, alias: &str, suffix: &str) -> Result<R, CliError>
+    where
+        R: DeserializeOwned,
+    {
+        let url = repository_url(&self.base_url, alias, suffix, self.format)?;
         let response = self
             .client
             .get(url)

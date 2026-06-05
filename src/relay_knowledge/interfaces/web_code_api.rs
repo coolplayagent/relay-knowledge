@@ -9,7 +9,10 @@ use serde::Deserialize;
 
 use crate::{
     api::{ApiError, InterfaceKind, RequestContext},
-    domain::{CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, CodeRetrievalRequest},
+    domain::{
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
+        CodeRepositorySelector, CodeRetrievalRequest, SoftwareGlobalRequest,
+    },
 };
 
 use super::{WebState, api_error_response};
@@ -27,6 +30,22 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/query",
             post(code_repository_query),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/feature-flags",
+            post(code_repository_feature_flags),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/impact",
+            post(code_repository_impact),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/report",
+            get(code_repository_report),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/software",
+            post(code_repository_software),
         )
         .route(
             "/api/v1/code/repositories/{alias}/status",
@@ -105,6 +124,91 @@ async fn code_repository_query(
     }
 }
 
+async fn code_repository_feature_flags(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<CodeFeatureFlagRequest>,
+) -> Response {
+    if let Some(error) = normalize_feature_flag_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .query_code_repository_feature_flags(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_impact(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<CodeImpactRequest>,
+) -> Response {
+    if let Some(error) = normalize_impact_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .impact_code_repository(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_report(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    let selector = match CodeRepositorySelector::new(alias, "HEAD", Vec::new(), Vec::new()) {
+        Ok(selector) => selector,
+        Err(error) => return api_error_response(ApiError::invalid_argument(error.to_string())),
+    };
+    match state
+        .service
+        .code_repository_report(selector, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_software(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<SoftwareGlobalRequest>,
+) -> Response {
+    if let Some(error) = normalize_software_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .software_global_projection(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
 async fn code_repository_status(
     State(state): State<WebState>,
     AxumPath(alias): AxumPath<String>,
@@ -164,6 +268,60 @@ fn normalize_query_request(request: &mut CodeRetrievalRequest) -> Option<ApiErro
         request.code_query_kind,
         request.limit,
         request.freshness_policy,
+    ) {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_feature_flag_request(request: &mut CodeFeatureFlagRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match CodeFeatureFlagRequest::new(
+        request.query.take(),
+        request.repository.clone(),
+        request.limit,
+        request.freshness_policy,
+    ) {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_impact_request(request: &mut CodeImpactRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match CodeImpactRequest::new(
+        request.repository.clone(),
+        std::mem::take(&mut request.base_ref),
+        std::mem::take(&mut request.head_ref),
+        request.limit,
+    ) {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_software_request(request: &mut SoftwareGlobalRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match SoftwareGlobalRequest::new(
+        request.repository.clone(),
+        request.kind,
+        request.freshness_policy,
+        request.limit,
     ) {
         Ok(validated) => {
             *request = validated;

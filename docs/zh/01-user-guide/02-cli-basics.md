@@ -12,7 +12,7 @@ CLI 使用 git-style 子命令。全局 `--format` 和 `--remote <base-url>` 可
 relay-knowledge [command] [command options] [--remote <base-url>] [--format text|json|markdown|streaming-json]
 ```
 
-`--remote` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 会让支持的代码仓库索引、scope preview、status 和 query 命令访问常驻服务 HTTP API，而不是打开本机 runtime storage。远端模式不会执行 `repo index-worker`，索引任务由远端 `service run --web` 的有界 worker pool 消费。远端配置下的 `repo index --reset` 和 `repo index-worker` 会被拒绝，避免维护命令误清理或消费本机状态。
+`--remote` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 会让支持的代码仓库索引、scope preview、status、query、feature-flags、impact、report 和 software projection 命令访问常驻服务 HTTP API，而不是打开本机 runtime storage。远端模式不会执行 `repo index-worker`，索引任务由远端 `service run --web` 的有界 worker pool 消费。远端配置下的 `repo index --reset` 和 `repo index-worker` 会被拒绝，避免维护命令误清理或消费本机状态。
 
 没有子命令时等同于 `status`。查看帮助:
 
@@ -85,7 +85,8 @@ relay-knowledge --version --format json
 
 - `index refresh`: `bm25`、`semantic`、`vector`。
 - `worker`: `embedding`、`ocr`、`vision`、`extractor`。
-- `repo query`: `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`。
+- `repo query`: `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`。
+- `repo software`: `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`all`。
 
 当查询文本或 reason 中包含以 `-` 开头的词时，使用 `--` 或引号避免被解析成选项。
 

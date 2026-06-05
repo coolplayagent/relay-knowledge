@@ -17,8 +17,9 @@ use crate::{
     api::{CodeRepositoryRegisterRequest, InterfaceKind, RequestContext},
     application::RelayKnowledgeService,
     domain::{
-        CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy,
+        CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
+        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalKind,
+        SoftwareGlobalRequest,
     },
     env::{EnvironmentConfig, PlatformKind},
 };
@@ -160,7 +161,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
 
     let query_request = CodeRetrievalRequest::new(
         "retry_policy",
-        selector,
+        selector.clone(),
         CodeQueryKind::Definition,
         5,
         FreshnessPolicy::WaitUntilFresh,
@@ -175,6 +176,115 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     )
     .await;
     assert_eq!(query["results"][0]["path"], "src/lib.rs");
+
+    let blank_feature_flags = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/feature-flags",
+        Some(json!({
+            "query": " ",
+            "repository": selector.clone(),
+            "limit": 10,
+            "freshness_policy": "allow_stale"
+        })),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(blank_feature_flags["error_kind"], "invalid_argument");
+    assert!(
+        blank_feature_flags["message"]
+            .as_str()
+            .expect("message should render")
+            .contains("query: must not be empty")
+    );
+
+    let feature_flags_request =
+        CodeFeatureFlagRequest::new(None, selector.clone(), 10, FreshnessPolicy::AllowStale)
+            .expect("feature flags request should validate");
+    let feature_flags = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/feature-flags",
+        Some(json!(feature_flags_request)),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(
+        feature_flags["flags"]
+            .as_array()
+            .expect("flags array")
+            .len(),
+        0
+    );
+
+    let zero_impact_limit = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/impact",
+        Some(json!({
+            "repository": selector.clone(),
+            "base_ref": "HEAD~1",
+            "head_ref": "HEAD",
+            "limit": 0
+        })),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(zero_impact_limit["error_kind"], "invalid_argument");
+    assert!(
+        zero_impact_limit["message"]
+            .as_str()
+            .expect("message should render")
+            .contains("limit: must be greater than zero")
+    );
+
+    let report = request_json(
+        router.clone(),
+        "GET",
+        "/api/v1/code/repositories/fixture/report",
+        None,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(report["report"]["alias"], "fixture");
+
+    let zero_software_limit = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/software",
+        Some(json!({
+            "repository": selector.clone(),
+            "kind": "relationships",
+            "freshness_policy": "allow_stale",
+            "limit": 0
+        })),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(zero_software_limit["error_kind"], "invalid_argument");
+    assert!(
+        zero_software_limit["message"]
+            .as_str()
+            .expect("message should render")
+            .contains("limit: must be greater than zero")
+    );
+
+    let software_request = SoftwareGlobalRequest::new(
+        selector.clone(),
+        SoftwareGlobalKind::Relationships,
+        FreshnessPolicy::GraphOnly,
+        10,
+    )
+    .expect("software request should validate");
+    let software = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/software",
+        Some(json!(software_request)),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(software["request"]["kind"], "relationships");
 
     let mismatch = request_json(
         router,
