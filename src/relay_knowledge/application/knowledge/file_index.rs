@@ -9,10 +9,10 @@ use tokio::sync::{Semaphore, oneshot};
 
 use crate::{
     api::{
-        ApiError, ApiMetadata, FileIndexRequest, FileIndexResponse, FileQueryRequest,
-        FileQueryResponse, RequestContext,
+        ApiError, ApiMetadata, FileIndexFreshnessState, FileIndexRequest, FileIndexResponse,
+        FileQueryRequest, FileQueryResponse, RequestContext,
     },
-    domain::GraphVersion,
+    domain::{FreshnessPolicy, GraphVersion},
     storage::{
         FileIndexEntry, FileIndexRoot, FileIndexRootUpdate, FileIndexScanSummary,
         FileSearchRequest, StorageError,
@@ -20,6 +20,8 @@ use crate::{
 };
 
 use crate::application::{FileIndexRootConfig, service::RelayKnowledgeService};
+
+use super::file_freshness::{FileFreshnessContext, file_freshness_diagnostics};
 
 pub const DEFAULT_FILE_QUERY_LIMIT: usize = 20;
 const MAX_FILE_QUERY_LIMIT: usize = 500;
@@ -140,6 +142,61 @@ impl RelayKnowledgeService {
             normalize_optional_text(request.source_scope).map_err(ApiError::invalid_argument)?;
         let root_id =
             normalize_optional_text(request.root_id).map_err(ApiError::invalid_argument)?;
+        let configured_roots = self
+            .runtime
+            .file_index
+            .roots
+            .iter()
+            .map(file_index_root_from_config)
+            .collect::<Vec<_>>();
+        let diagnostics = store
+            .file_index_diagnostics()
+            .await
+            .map_err(storage_api_error)?;
+        if request.freshness_policy == FreshnessPolicy::GraphOnly {
+            let degraded_reason = "graph_only freshness policy selected".to_owned();
+            let freshness = file_freshness_diagnostics(FileFreshnessContext {
+                file_index_enabled: self.runtime.file_index.enabled,
+                configured_roots: &configured_roots,
+                diagnostics: &diagnostics,
+                freshness_policy: request.freshness_policy,
+                source_scope: source_scope.clone(),
+                root_id: root_id.clone(),
+                graph_version: GraphVersion::ZERO.get(),
+                query_degraded_reason: Some(degraded_reason.clone()),
+                returned_hits: &[],
+            });
+            return Ok(FileQueryResponse {
+                metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
+                query,
+                source_scope,
+                root_id,
+                freshness,
+                results: Vec::new(),
+                truncated: false,
+                duration_ms: elapsed_ms(started),
+                degraded_reason: Some(degraded_reason),
+            });
+        }
+        let freshness = file_freshness_diagnostics(FileFreshnessContext {
+            file_index_enabled: self.runtime.file_index.enabled,
+            configured_roots: &configured_roots,
+            diagnostics: &diagnostics,
+            freshness_policy: request.freshness_policy,
+            source_scope: source_scope.clone(),
+            root_id: root_id.clone(),
+            graph_version: GraphVersion::ZERO.get(),
+            query_degraded_reason: None,
+            returned_hits: &[],
+        });
+        if request.freshness_policy == FreshnessPolicy::WaitUntilFresh
+            && freshness.state != FileIndexFreshnessState::Fresh
+        {
+            return Err(ApiError::invalid_argument(format!(
+                "file index is {}; run files index before querying with wait_until_fresh",
+                file_freshness_state_label(freshness.state)
+            )));
+        }
         let results = match store
             .search_files(FileSearchRequest {
                 query: query.clone(),
@@ -152,15 +209,28 @@ impl RelayKnowledgeService {
         {
             Ok(results) => results,
             Err(error) if storage_error_timed_out(&error) => {
+                let degraded_reason = "file query timed out".to_owned();
+                let freshness = file_freshness_diagnostics(FileFreshnessContext {
+                    file_index_enabled: self.runtime.file_index.enabled,
+                    configured_roots: &configured_roots,
+                    diagnostics: &diagnostics,
+                    freshness_policy: request.freshness_policy,
+                    source_scope: source_scope.clone(),
+                    root_id: root_id.clone(),
+                    graph_version: GraphVersion::ZERO.get(),
+                    query_degraded_reason: Some(degraded_reason.clone()),
+                    returned_hits: &[],
+                });
                 return Ok(FileQueryResponse {
                     metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
                     query,
                     source_scope,
                     root_id,
+                    freshness,
                     results: Vec::new(),
                     truncated: false,
                     duration_ms: elapsed_ms(started),
-                    degraded_reason: Some("file query timed out".to_owned()),
+                    degraded_reason: Some(degraded_reason),
                 });
             }
             Err(error) => return Err(storage_api_error(error)),
@@ -168,12 +238,24 @@ impl RelayKnowledgeService {
         let mut results = results;
         let truncated = results.len() > limit;
         results.truncate(limit);
+        let freshness = file_freshness_diagnostics(FileFreshnessContext {
+            file_index_enabled: self.runtime.file_index.enabled,
+            configured_roots: &configured_roots,
+            diagnostics: &diagnostics,
+            freshness_policy: request.freshness_policy,
+            source_scope: source_scope.clone(),
+            root_id: root_id.clone(),
+            graph_version: GraphVersion::ZERO.get(),
+            query_degraded_reason: None,
+            returned_hits: &results,
+        });
 
         Ok(FileQueryResponse {
             metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
             query,
             source_scope,
             root_id,
+            freshness,
             results,
             truncated,
             duration_ms: elapsed_ms(started),
@@ -564,6 +646,17 @@ fn query_timeout_ms(timeout: std::time::Duration) -> u64 {
 
 fn storage_error_timed_out(error: &StorageError) -> bool {
     matches!(error, StorageError::InvalidInput(message) if message.contains("file query timed out"))
+}
+
+fn file_freshness_state_label(state: FileIndexFreshnessState) -> &'static str {
+    match state {
+        FileIndexFreshnessState::Fresh => "fresh",
+        FileIndexFreshnessState::Pending => "pending",
+        FileIndexFreshnessState::Paused => "paused",
+        FileIndexFreshnessState::Stale => "stale",
+        FileIndexFreshnessState::Degraded => "degraded",
+        FileIndexFreshnessState::Overflow => "overflow",
+    }
 }
 
 fn storage_api_error(error: StorageError) -> ApiError {

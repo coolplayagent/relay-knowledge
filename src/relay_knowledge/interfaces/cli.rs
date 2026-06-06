@@ -265,6 +265,7 @@ pub enum CliAction {
         source_scope: Option<String>,
         root_id: Option<String>,
         limit: usize,
+        freshness: FreshnessPolicy,
     },
     GraphInspect,
     IndexRefresh {

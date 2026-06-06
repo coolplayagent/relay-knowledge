@@ -13,7 +13,7 @@
 ## 用户可见行为
 
 - `freshness` 支持 `allow-stale`、`wait-until-fresh` 和 `graph-only`。
-- Health 和 index refresh 响应返回 `index_cursors[*]`。
+- Query、health 和 index refresh 响应返回 `index_cursors[*]`。
 - `index_refresh.stale_reasons[*]` 按 index family 和 scoped cursor 解释 lag、failure 和 last error。
 - Ingest、query、index refresh、health、service doctor 和 service startup 共享 bounded refresh queue。
 

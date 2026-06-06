@@ -1,4 +1,5 @@
 mod fast_index;
+mod freshness;
 mod repository;
 mod repository_set;
 #[cfg(test)]

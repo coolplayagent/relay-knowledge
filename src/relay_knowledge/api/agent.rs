@@ -7,6 +7,7 @@ use crate::domain::{
     RetrievalMode, RetrievedContextPack,
 };
 use crate::project::{ACP_LOCAL_ADAPTER_NAME, MCP_ADAPTER_NAME};
+use crate::storage::{IndexCursor, IndexRefreshDiagnostics};
 
 use super::{ApiMetadata, RequestContext};
 
@@ -208,6 +209,10 @@ pub struct AgentRetrievalResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backend_statuses: Vec<RetrievalBackendStatus>,
     pub indexes: Vec<IndexStatus>,
+    #[serde(default)]
+    pub index_cursors: Vec<IndexCursor>,
+    #[serde(default)]
+    pub index_refresh: IndexRefreshDiagnostics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
     pub truncated: bool,
@@ -236,6 +241,8 @@ impl AgentRetrievalResult {
             budget_used,
             degraded_reason,
             indexes,
+            index_cursors,
+            index_refresh,
         } = response;
         let item_bytes = context_pack
             .items
@@ -290,6 +297,8 @@ impl AgentRetrievalResult {
             rerank,
             backend_statuses,
             indexes,
+            index_cursors,
+            index_refresh,
             degraded_reason,
             truncated,
             budget_used: AgentBudgetUsed {
@@ -390,6 +399,11 @@ mod tests {
             },
             degraded_reason: None,
             indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics {
+                queue_depth: 2,
+                ..IndexRefreshDiagnostics::default()
+            },
         };
 
         let result = AgentRetrievalResult::from_retrieval(
@@ -406,6 +420,7 @@ mod tests {
         assert_eq!(result.rerank.returned_count, 2);
         assert_eq!(result.budget_used.context_bytes, max_context_bytes);
         assert_eq!(result.freshness, "allow-stale");
+        assert_eq!(result.index_refresh.queue_depth, 2);
     }
 
     #[test]
@@ -454,6 +469,8 @@ mod tests {
             },
             degraded_reason: None,
             indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
         };
 
         let result = AgentRetrievalResult::from_retrieval(

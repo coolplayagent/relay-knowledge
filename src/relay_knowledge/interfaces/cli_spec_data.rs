@@ -757,7 +757,7 @@ fn files_index() -> CliCommandSpec {
 fn files_query() -> CliCommandSpec {
     command!(
         &["files", "query"],
-        "relay-knowledge files query <text> [--source <scope>] [--root <root-id>] [--limit <n>]",
+        "relay-knowledge files query <text> [--source <scope>] [--root <root-id>] [--freshness <policy>] [--limit <n>]",
         "Query the local file-location index.",
         "files.query",
         CommandEffect::ReadOnly,
@@ -787,6 +787,15 @@ fn files_query() -> CliCommandSpec {
                 "Restricts results to one indexed root.",
                 None,
                 &[],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls file-index freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
             ),
             opt(
                 "--limit",

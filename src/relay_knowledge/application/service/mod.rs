@@ -32,7 +32,7 @@ use crate::{
     },
     storage::{
         FileIndexDiagnostics, GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection,
-        GraphSearchRequest, KnowledgeStore, NewAuditEvent, StorageError,
+        GraphSearchRequest, IndexRefreshDiagnostics, KnowledgeStore, NewAuditEvent, StorageError,
     },
 };
 
@@ -42,7 +42,8 @@ use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
     knowledge::{
         index_refresh::{
-            index_refresh_outcome, metadata_for_indexes, recover_index_kinds, refresh_index_kinds,
+            IndexRefreshOutcome, index_refresh_outcome, metadata_for_indexes, recover_index_kinds,
+            refresh_index_kinds,
         },
         ingest::mutation_batch_from_request,
         multimodal::extraction_ingest_request,
@@ -290,6 +291,8 @@ impl RelayKnowledgeService {
 
         let mut retrieval_mode = RetrievalMode::Hybrid;
         let mut indexes = Vec::new();
+        let mut index_cursors = Vec::new();
+        let mut index_refresh = IndexRefreshDiagnostics::default();
         let mut metadata = ApiMetadata::graph_only(&context, graph_version);
         let mut degraded_reasons = Vec::new();
         let backend_statuses = if plan.freshness == FreshnessPolicy::GraphOnly {
@@ -297,7 +300,10 @@ impl RelayKnowledgeService {
             degraded_reasons.push("graph_only freshness policy selected".to_owned());
             Vec::new()
         } else {
-            indexes = store.index_statuses().await.map_err(storage_api_error)?;
+            let mut index_outcome = retrieval_index_freshness_snapshot(&store).await?;
+            indexes = index_outcome.indexes;
+            index_cursors = index_outcome.cursors;
+            index_refresh = index_outcome.diagnostics;
             let mut active_indexes = indexes
                 .iter()
                 .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
@@ -317,7 +323,10 @@ impl RelayKnowledgeService {
                         &self.runtime.retrieval,
                     )
                     .await?;
-                    indexes = store.index_statuses().await.map_err(storage_api_error)?;
+                    index_outcome = retrieval_index_freshness_snapshot(&store).await?;
+                    indexes = index_outcome.indexes;
+                    index_cursors = index_outcome.cursors;
+                    index_refresh = index_outcome.diagnostics;
                     active_indexes = indexes
                         .iter()
                         .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
@@ -427,6 +436,8 @@ impl RelayKnowledgeService {
             budget_used,
             degraded_reason,
             indexes,
+            index_cursors,
+            index_refresh,
         })
     }
 
@@ -752,6 +763,36 @@ pub(super) async fn file_index_diagnostics_or_default(
         }
         Err(error) => Err(storage_api_error(error)),
     }
+}
+
+async fn retrieval_index_freshness_snapshot(
+    store: &Arc<dyn KnowledgeStore>,
+) -> Result<IndexRefreshOutcome, ApiError> {
+    let indexes = store.index_statuses().await.map_err(storage_api_error)?;
+    let cursors = match store.index_cursors().await {
+        Ok(cursors) => cursors,
+        Err(StorageError::InvalidInput(message))
+            if message == "index cursor storage is unavailable" =>
+        {
+            Vec::new()
+        }
+        Err(error) => return Err(storage_api_error(error)),
+    };
+    let diagnostics = match store.index_refresh_diagnostics(current_time_millis()).await {
+        Ok(diagnostics) => diagnostics,
+        Err(StorageError::InvalidInput(message))
+            if message == "index refresh diagnostics are unavailable" =>
+        {
+            IndexRefreshDiagnostics::default()
+        }
+        Err(error) => return Err(storage_api_error(error)),
+    };
+
+    Ok(IndexRefreshOutcome {
+        indexes,
+        cursors,
+        diagnostics,
+    })
 }
 
 fn normalize_optional_source_scope(value: Option<String>) -> Result<Option<String>, String> {

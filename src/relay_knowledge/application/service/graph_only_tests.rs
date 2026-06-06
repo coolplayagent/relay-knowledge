@@ -48,6 +48,8 @@ async fn graph_only_retrieval_bypasses_index_metadata() {
         Some("graph_only freshness policy selected")
     );
     assert!(response.indexes.is_empty());
+    assert!(response.index_cursors.is_empty());
+    assert_eq!(response.index_refresh, IndexRefreshDiagnostics::default());
     assert_eq!(response.metadata.index_version, None);
     assert_eq!(response.results[0].source_scope, "docs");
 }

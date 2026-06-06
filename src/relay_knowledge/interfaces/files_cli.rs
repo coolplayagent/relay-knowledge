@@ -3,7 +3,9 @@ use crate::{
     application::{DEFAULT_FILE_QUERY_LIMIT, RelayKnowledgeService},
 };
 
-use super::{CliAction, CliError, OutputFormat, cli_render::render_response, value_after};
+use super::{
+    CliAction, CliError, OutputFormat, cli_render::render_response, parse_freshness, value_after,
+};
 
 pub(super) fn parse_files(tokens: &[String]) -> Result<CliAction, CliError> {
     match tokens.first().map(String::as_str) {
@@ -44,6 +46,7 @@ pub(super) async fn run_files(
             source_scope,
             root_id,
             limit,
+            freshness,
         } => {
             let response = service
                 .query_files(
@@ -52,6 +55,7 @@ pub(super) async fn run_files(
                         source_scope: source_scope.clone(),
                         root_id: root_id.clone(),
                         limit: *limit,
+                        freshness_policy: *freshness,
                     },
                     context,
                 )
@@ -110,6 +114,7 @@ fn parse_files_query(tokens: &[String]) -> Result<CliAction, CliError> {
     let mut source_scope = None;
     let mut root_id = None;
     let mut limit = DEFAULT_FILE_QUERY_LIMIT;
+    let mut freshness = crate::domain::FreshnessPolicy::AllowStale;
     let mut index = 0;
 
     while index < tokens.len() {
@@ -133,6 +138,10 @@ fn parse_files_query(tokens: &[String]) -> Result<CliAction, CliError> {
                     .map_err(|_| CliError::InvalidLimit(value.clone()))?;
                 index += 2;
             }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
             other if !other.starts_with('-') && query.is_none() => {
                 let mut values = vec![other.to_owned()];
                 index += 1;
@@ -151,6 +160,7 @@ fn parse_files_query(tokens: &[String]) -> Result<CliAction, CliError> {
         source_scope,
         root_id,
         limit,
+        freshness,
     })
 }
 
@@ -214,7 +224,8 @@ mod tests {
                 query: "quarterly design".to_owned(),
                 source_scope: Some("local-files".to_owned()),
                 root_id: Some("root-1".to_owned()),
-                limit: 7
+                limit: 7,
+                freshness: crate::domain::FreshnessPolicy::AllowStale
             }
         );
 
@@ -226,7 +237,26 @@ mod tests {
                 query: "--dash".to_owned(),
                 source_scope: None,
                 root_id: None,
-                limit: DEFAULT_FILE_QUERY_LIMIT
+                limit: DEFAULT_FILE_QUERY_LIMIT,
+                freshness: crate::domain::FreshnessPolicy::AllowStale
+            }
+        );
+
+        let fresh = parse_files(&[
+            "query".to_owned(),
+            "design".to_owned(),
+            "--freshness".to_owned(),
+            "wait-until-fresh".to_owned(),
+        ])
+        .expect("freshness should parse");
+        assert_eq!(
+            fresh,
+            CliAction::FilesQuery {
+                query: "design".to_owned(),
+                source_scope: None,
+                root_id: None,
+                limit: DEFAULT_FILE_QUERY_LIMIT,
+                freshness: crate::domain::FreshnessPolicy::WaitUntilFresh
             }
         );
 
@@ -277,6 +307,7 @@ mod tests {
                 source_scope: Some("local-files".to_owned()),
                 root_id: None,
                 limit: 5,
+                freshness: crate::domain::FreshnessPolicy::AllowStale,
             },
             context,
             OutputFormat::Json,

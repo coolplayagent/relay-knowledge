@@ -77,6 +77,10 @@ MCP tool surface 当前包括:
 
 Agent kind 选择复用现有产品 kind，而不是新增一套 MCP taxonomy。`relay_code_query` 接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `sbom`。`relay_software_query` 接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design` 和 `all`。为方便 agent 调用，singular alias 会被接受；`configuration` 映射到软件 `relationships`，`model` 或 `models` 映射到软件 `design`；配置驱动 feature flag 仍通过 `relay_code_feature_flags` 查询。
 
+`relay_retrieve_context` 返回带 `indexes`、`index_cursors` 和 `index_refresh` 诊断的 GraphRAG context，便于 agent 在信任派生 context 前检查 BM25、semantic、vector 和 scoped cursor lag。
+
+`relay_code_query` 和 `relay_code_feature_flags` 返回与 CLI 和 Web 相同的代码图谱 freshness 对象，包括 `freshness.state`、`freshness.index_lag`、`freshness.pending`、`freshness.cursor` 和 `freshness.direct_source_read_required`。当响应要求直接读取源码时，agent 必须遵循 `freshness.agent_instructions`，并在使用 stale 图谱证据处理变化文件前验证 `freshness.direct_source_read_paths`。
+
 MCP resource surface 当前包括:
 
 - `relay://service/status`

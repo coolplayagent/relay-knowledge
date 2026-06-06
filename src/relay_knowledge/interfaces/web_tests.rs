@@ -760,6 +760,25 @@ fn request_builders_parse_web_payload_variants() {
     assert_eq!(query.code_query_kind, CodeQueryKind::Definition);
     assert_eq!(query.freshness_policy, FreshnessPolicy::WaitUntilFresh);
 
+    let file_query = file_query_request(&json!({
+        "query": "design",
+        "source_scope": "local-files",
+        "root_id": "root-1",
+        "freshness": "wait-until-fresh",
+        "limit": 7
+    }))
+    .expect("file query");
+    assert_eq!(file_query.source_scope.as_deref(), Some("local-files"));
+    assert_eq!(file_query.root_id.as_deref(), Some("root-1"));
+    assert_eq!(file_query.freshness_policy, FreshnessPolicy::WaitUntilFresh);
+
+    let default_file_query =
+        file_query_request(&json!({"query": "design", "limit": 7})).expect("default file query");
+    assert_eq!(
+        default_file_query.freshness_policy,
+        FreshnessPolicy::AllowStale
+    );
+
     let impact = code_impact_request(&payload).expect("impact");
     assert_eq!(impact.base_ref, "main");
     assert_eq!(impact.head_ref, "feature");

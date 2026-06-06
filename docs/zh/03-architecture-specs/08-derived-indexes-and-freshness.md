@@ -10,6 +10,8 @@
 
 派生索引的价值不只在召回速度，而在可解释的新鲜度。每个 read model 都必须能回答：它覆盖哪个 scope、哪个 graph version、哪个 backend、哪个 model/dimension、是否 stale、为何 degraded。
 
+GraphRAG 查询响应必须暴露与 health 和显式 refresh 响应相同的 `index_cursors` 与 `index_refresh` 诊断，让 BM25、semantic、vector 和 scoped cursor lag 在答案产出点可见。
+
 ## 2. Index Family
 
 | Index family | 用途 |
@@ -32,6 +34,8 @@
 文件名/路径索引、metadata 索引和内容索引分离：交互式文件定位不能等待 OCR、压缩包展开、大文件 hash、embedding 或全文内容抽取。所有文件查询先应用 source scope、授权 root、exclude/ignore、permission snapshot 和 freshness policy，再进入候选窗口。
 
 `local_file_change_cursor` 必须记录 last event、overflow、missed event、scan watermark、last scan error 和 stale reason。平台事件丢失或游标失效时，查询返回 degraded/stale metadata 并触发有界重扫，不能静默报告 fresh。
+
+本机文件查询响应必须携带顶层 freshness 对象，包含 `state`、`graph_version`、source scope、root id、root cursor、index lag、stale/degraded reason、是否需要直接读取源码、是否需要有界重扫、需要直接读取的返回路径以及 agent instructions。当前公开状态包括 `fresh`、`pending`、`paused`、`stale`、`degraded` 和 `overflow`。`overflow` 是 stale-answer control 状态：它表示 bounded scan 命中了配置预算，因此调用方在 `allow-stale` 下可以查看带诊断的旧索引路径，但 `wait-until-fresh` 必须拒绝该答案，直到后续有界重扫成功完成。
 
 ## 4. Freshness 状态机
 
@@ -64,13 +68,14 @@ missing -> stale -> refreshing -> fresh
 - `allow-stale`：可返回 stale 结果，但 metadata 必须说明 lag。
 - `wait-until-fresh`：等待必要索引推进到目标 version，超时返回稳定错误。
 - `require-fresh`：发现 stale 直接失败，不隐式刷新。
+- `graph-only`：绕过派生索引，只返回权威图事实；当请求没有对应的图事实 family 时，仅返回 freshness 诊断。
 
 ## 7. 验收标准
 
 - `health` 和 context pack 都能解释 index lag、missing family、dead-letter 和 last error。
 - 显式 refresh 入队失败时返回可重试错误，不伪装成 fresh。
 - startup reconciler 能从 mutation log 补发遗漏刷新任务。
-- 本机文件名查询不依赖内容索引；文件查询输出说明 path、metadata、content 和 change cursor 的 freshness/degraded 状态。
+- 本机文件名查询不依赖内容索引；文件查询输出说明 path、metadata、content 和 change cursor 的 freshness/degraded 状态，包括 bounded-scan overflow 和 direct source-read instructions。
 
 ---
 

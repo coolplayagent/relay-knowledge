@@ -25,6 +25,10 @@ use crate::{
 use crate::application::service::RelayKnowledgeService;
 
 use super::fast_index::fresh_full_index_response;
+use super::freshness::{
+    CodeFeatureFlagFreshnessContext, CodeQueryFreshnessContext,
+    code_feature_flag_freshness_diagnostics, code_query_freshness_diagnostics,
+};
 use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
@@ -526,6 +530,7 @@ impl RelayKnowledgeService {
                 .current_graph_version()
                 .await
                 .map_err(storage_api_error)?;
+            let degraded_reason = "graph_only freshness policy selected".to_owned();
             return Ok(CodeRepositoryQueryResponse {
                 metadata: ApiMetadata::graph_only(&context, graph_version),
                 scope: crate::api::CodeRepositoryScopeMetadata::from_status(
@@ -533,15 +538,24 @@ impl RelayKnowledgeService {
                     &request.repository,
                     request.repository.ref_selector.clone(),
                 ),
+                freshness: crate::api::CodeRepositoryFreshnessDiagnostics::graph_only(
+                    graph_version.get(),
+                    request.freshness_policy,
+                    indexed_source_scope(&status),
+                    request.repository.ref_selector.clone(),
+                    degraded_reason.clone(),
+                ),
                 request,
                 results: Vec::new(),
-                degraded_reason: Some("graph_only freshness policy selected".to_owned()),
+                degraded_reason: Some(degraded_reason),
             });
         }
         let requested_ref = request.repository.ref_selector.clone();
         let mut request = retrieval_request_at_indexed_ref(request, &status).await?;
+        let requested_resolved_ref = request.repository.ref_selector.clone();
+        let freshness_target = request.repository.clone();
         let mut served_stale_scope = false;
-        let mut stale_degraded_reason = None;
+        let mut stale_reason = None;
         let scoped_status = match resolved_code_scope_status(&store, &status, &request.repository)
             .await
         {
@@ -560,7 +574,7 @@ impl RelayKnowledgeService {
                 };
                 request.repository.ref_selector = last_indexed_commit;
                 served_stale_scope = true;
-                stale_degraded_reason = Some(
+                stale_reason = Some(
                     "requested ref is not indexed yet; served last completed code index".to_owned(),
                 );
                 stale_status
@@ -595,11 +609,11 @@ impl RelayKnowledgeService {
             .find_map(|hit| hit.degraded_reason.clone())
             .or(fallback_degraded_reason)
             .or_else(|| scoped_status.degraded_reason.clone())
-            .or(stale_degraded_reason);
+            .or_else(|| stale_reason.clone());
         let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
             &scoped_status,
             &request.repository,
-            requested_ref,
+            requested_ref.clone(),
         );
         if served_stale_scope {
             scope.stale = true;
@@ -608,10 +622,27 @@ impl RelayKnowledgeService {
         if served_stale_scope {
             metadata.stale = true;
         }
+        let freshness = code_query_freshness_diagnostics(
+            &store,
+            CodeQueryFreshnessContext {
+                base_status: &status,
+                scoped_status: &scoped_status,
+                request: &request,
+                requested_ref,
+                requested_resolved_ref,
+                freshness_target,
+                stale_reason,
+                degraded_reason: degraded_reason.clone(),
+                results: &results,
+                graph_version: graph_version.get(),
+            },
+        )
+        .await?;
 
         Ok(CodeRepositoryQueryResponse {
             metadata,
             scope,
+            freshness,
             request,
             results,
             degraded_reason,
@@ -631,6 +662,7 @@ impl RelayKnowledgeService {
                 .current_graph_version()
                 .await
                 .map_err(storage_api_error)?;
+            let degraded_reason = "graph_only freshness policy selected".to_owned();
             return Ok(CodeRepositoryFeatureFlagsResponse {
                 metadata: ApiMetadata::graph_only(&context, graph_version),
                 scope: crate::api::CodeRepositoryScopeMetadata::from_status(
@@ -638,15 +670,24 @@ impl RelayKnowledgeService {
                     &request.repository,
                     request.repository.ref_selector.clone(),
                 ),
+                freshness: crate::api::CodeRepositoryFreshnessDiagnostics::graph_only(
+                    graph_version.get(),
+                    request.freshness_policy,
+                    indexed_source_scope(&status),
+                    request.repository.ref_selector.clone(),
+                    degraded_reason.clone(),
+                ),
                 request,
                 flags: Vec::new(),
-                degraded_reason: Some("graph_only freshness policy selected".to_owned()),
+                degraded_reason: Some(degraded_reason),
             });
         }
         let requested_ref = request.repository.ref_selector.clone();
         let mut request = feature_flag_request_at_indexed_ref(request, &status).await?;
+        let requested_resolved_ref = request.repository.ref_selector.clone();
+        let freshness_target = request.repository.clone();
         let mut served_stale_scope = false;
-        let mut stale_degraded_reason = None;
+        let mut stale_reason = None;
         let scoped_status = match resolved_code_scope_status(&store, &status, &request.repository)
             .await
         {
@@ -665,7 +706,7 @@ impl RelayKnowledgeService {
                 };
                 request.repository.ref_selector = last_indexed_commit;
                 served_stale_scope = true;
-                stale_degraded_reason = Some(
+                stale_reason = Some(
                     "requested ref is not indexed yet; served last completed code index".to_owned(),
                 );
                 stale_status
@@ -695,7 +736,7 @@ impl RelayKnowledgeService {
         let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
             &scoped_status,
             &request.repository,
-            requested_ref,
+            requested_ref.clone(),
         );
         if served_stale_scope {
             scope.stale = true;
@@ -703,15 +744,32 @@ impl RelayKnowledgeService {
         let degraded_reason = scoped_status
             .degraded_reason
             .clone()
-            .or(stale_degraded_reason);
+            .or_else(|| stale_reason.clone());
         let mut metadata = ApiMetadata::graph_only(&context, graph_version);
         if served_stale_scope {
             metadata.stale = true;
         }
+        let freshness = code_feature_flag_freshness_diagnostics(
+            &store,
+            CodeFeatureFlagFreshnessContext {
+                base_status: &status,
+                scoped_status: &scoped_status,
+                request: &request,
+                requested_ref,
+                requested_resolved_ref,
+                freshness_target,
+                stale_reason,
+                degraded_reason: degraded_reason.clone(),
+                flags: &flags,
+                graph_version: graph_version.get(),
+            },
+        )
+        .await?;
 
         Ok(CodeRepositoryFeatureFlagsResponse {
             metadata,
             scope,
+            freshness,
             request,
             flags,
             degraded_reason,

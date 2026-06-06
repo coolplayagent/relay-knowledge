@@ -1,8 +1,10 @@
 //! Stable API contracts shared by CLI, Web, and future service adapters.
 
 mod agent;
+mod code_repository;
 mod context;
 mod error;
+mod file_index;
 mod metadata;
 mod operations;
 mod status;
@@ -13,8 +15,16 @@ pub use agent::{
     AgentProtocolKind, AgentProtocolStatus, AgentRequestContext, AgentRetrievalResult,
     RuntimeIdentity, freshness_label,
 };
+pub(crate) use code_repository::CodeRepositoryFreshnessInput;
+pub use code_repository::{
+    CodeRepositoryFreshnessCursor, CodeRepositoryFreshnessDiagnostics,
+    CodeRepositoryFreshnessState, CodeRepositoryIndexLag, CodeRepositoryPendingIndexWork,
+};
 pub use context::{InterfaceKind, RequestContext};
 pub use error::{ApiError, ErrorKind};
+pub use file_index::{
+    FileIndexFreshnessCursor, FileIndexFreshnessDiagnostics, FileIndexFreshnessState, FileIndexLag,
+};
 pub use metadata::ApiMetadata;
 pub use operations::{
     AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeIndexWorkerRunRequest,

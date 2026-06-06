@@ -10,6 +10,8 @@
 
 Derived indexes are valuable not only for recall speed but for explainable freshness. Every read model answers which scope, graph version, backend, model/dimension, stale state, and degraded reason it covers.
 
+GraphRAG query responses expose the same `index_cursors` and `index_refresh` diagnostics as health and explicit refresh responses, so BM25, semantic, vector, and scoped cursor lag are visible at the point where an answer is produced.
+
 ## 2. Index Families
 
 | Index family | Purpose |
@@ -32,6 +34,8 @@ Local file retrieval does not depend on Everything, Spotlight, Windows Search, l
 Filename/path, metadata, and content indexes are separate. Interactive file location must not wait for OCR, archive expansion, large-file hashing, embeddings, or full-content extraction. Every file query applies source scope, authorized root, exclude/ignore rules, permission snapshot, and freshness policy before entering the candidate window.
 
 `local_file_change_cursor` records last event, overflow, missed event, scan watermark, last scan error, and stale reason. If platform events are lost or cursors become invalid, queries return degraded or stale metadata and trigger bounded rescan instead of silently reporting freshness.
+
+Local file-query responses carry a top-level freshness object with `state`, `graph_version`, source scope, root id, root cursors, index lag, stale/degraded reason, direct-source-read requirements, bounded-rescan requirements, returned paths that need direct reads, and agent instructions. Current public states are `fresh`, `pending`, `paused`, `stale`, `degraded`, and `overflow`. Overflow is a stale-answer control state: it means a bounded scan hit its configured budget, so callers may inspect stale indexed paths under `allow-stale` but `wait-until-fresh` must reject the answer until a bounded rescan completes successfully.
 
 ## 4. Freshness State Machine
 
@@ -64,13 +68,14 @@ Freshness policies include at least:
 - `allow-stale`: return stale results with lag metadata.
 - `wait-until-fresh`: wait for required indexes to reach the target version or return a stable timeout error.
 - `require-fresh`: fail immediately on stale indexes without implicit refresh.
+- `graph-only`: bypass derived indexes and return only authoritative graph facts or freshness diagnostics when no graph fact family exists for the request.
 
 ## 7. Acceptance Criteria
 
 - `health` and context packs explain index lag, missing families, dead letters, and last errors.
 - Explicit refresh enqueue failure returns a retryable error and never pretends to be fresh.
 - Startup reconcilers replay missing refresh work from the mutation log.
-- Local filename queries do not depend on content indexes; file query output states path, metadata, content, and change-cursor freshness or degradation.
+- Local filename queries do not depend on content indexes; file query output states path, metadata, content, and change-cursor freshness or degradation, including bounded-scan overflow and direct source-read instructions.
 
 ---
 
