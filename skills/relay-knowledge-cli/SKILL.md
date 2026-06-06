@@ -2,7 +2,7 @@
 name: relay-knowledge-cli
 description: "Use relay-knowledge local CLI as an agent knowledge backend for repository knowledge graphs and GraphRAG: repo query --kind hybrid/symbol/definition/references/callers/callees/imports/sbom; repo software --kind dependencies/sdks/files/topics/relationships/build/iac/design/all; feature flags/config gates; indexing, impact, setup, install/upgrade diagnostics. Use for 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, 软件依赖, SDK/API, 代码地图, definitions, references, usage, impact. For large cold repo indexing, do not treat CLI timeouts as failure: capture repo index task ids when returned, recover missing ids from repo status <alias>, let service drain active tasks, or run bounded repo index-worker attempts for queued/retrying tasks. Use repo update/index refresh results or status diagnostics instead of assuming task ids. Prefer graph CLI before grep/ripgrep/rg/plain text search unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP setup/tools, ACP adapters, or protocol-level agent access."
 metadata:
-  version: 1.1.7
+  version: 1.1.8
   openclaw:
     skillKey: relay-knowledge-cli
     homepage: https://github.com/coolplayagent/relay-knowledge
