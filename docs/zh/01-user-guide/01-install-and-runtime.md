@@ -16,6 +16,10 @@
 
 常用脚本按职责拆分:
 
+> ⚠️ **开发环境限定**：`run.sh` 和 `run.sh --daemon` 仅用于开发环境验证，不可用于生产部署。
+> 长期后台运行必须由 systemd（Linux）、launchd（macOS）或 Windows Service 托管。
+> 生产部署请参阅第 15 章「服务化部署用户指南」。
+
 ```bash
 ./build.sh
 ./run.sh start --port 8791 --daemon
