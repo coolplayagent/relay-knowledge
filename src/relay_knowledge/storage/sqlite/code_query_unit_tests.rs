@@ -659,6 +659,7 @@ fn partial_code_hit(path: &str, layer: CodeRetrievalLayer, score: f64) -> CodeRe
         retrieval_layers: vec![layer],
         index_versions: vec!["code:commit".to_owned()],
         stale: false,
+        staleness_hint: None,
         degraded_reason: None,
         edge_kind: None,
         edge_resolution_state: None,

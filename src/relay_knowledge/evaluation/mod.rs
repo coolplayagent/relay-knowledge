@@ -412,6 +412,7 @@ mod tests {
             retrieval_layers: vec![CodeRetrievalLayer::Impact],
             index_versions: vec!["code_graph:1".to_owned()],
             stale,
+            staleness_hint: None,
             degraded_reason: None,
             edge_kind: None,
             edge_resolution_state: None,

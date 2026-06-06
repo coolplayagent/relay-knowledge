@@ -224,6 +224,7 @@ mod tests {
             retrieval_layers: vec![CodeRetrievalLayer::Lexical],
             index_versions: vec!["code:1".to_owned()],
             stale,
+            staleness_hint: None,
             degraded_reason: None,
             edge_kind: None,
             edge_resolution_state: None,

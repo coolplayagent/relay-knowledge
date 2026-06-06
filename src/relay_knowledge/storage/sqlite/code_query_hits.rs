@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use crate::{
     domain::{
         CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
-        RepositoryCodeRange,
+        RepositoryCodeRange, StalenessHint,
     },
     storage::StorageError,
 };
@@ -139,6 +139,11 @@ pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> 
             status.tree_hash.as_deref().unwrap_or("unindexed")
         )],
         stale: status.stale,
+        staleness_hint: Some(if status.stale {
+            StalenessHint::Stale {}
+        } else {
+            StalenessHint::Fresh
+        }),
         degraded_reason: parts.degraded_reason,
         edge_kind: parts.edge_kind,
         edge_resolution_state: parts.edge_resolution_state,
@@ -200,6 +205,7 @@ pub(super) fn mark_hits_degraded(hits: &mut [CodeRetrievalHit], reason: &str) {
 }
 
 fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit) {
+    target.stale |= source.stale;
     for layer in &source.retrieval_layers {
         if !target.retrieval_layers.contains(layer) {
             target.retrieval_layers.push(*layer);
@@ -228,5 +234,99 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
         target.edge_target_hint = source.edge_target_hint.clone();
         target.edge_confidence_basis_points = source.edge_confidence_basis_points;
         target.edge_confidence_tier = source.edge_confidence_tier.clone();
+    }
+    match (&target.staleness_hint, &source.staleness_hint) {
+        (_, Some(source_hint)) if source_hint.is_stale() => {
+            target.staleness_hint = source.staleness_hint.clone();
+        }
+        (None, Some(_)) => {
+            target.staleness_hint = source.staleness_hint.clone();
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CodeRetrievalLayer, RepositoryCodeRange, StalenessHint};
+
+    fn make_hit(staleness_hint: Option<StalenessHint>) -> CodeRetrievalHit {
+        let r = RepositoryCodeRange { start: 0, end: 1 };
+        CodeRetrievalHit {
+            repository_id: String::new(),
+            scope_id: String::new(),
+            resolved_commit_sha: String::new(),
+            tree_hash: String::new(),
+            path: String::new(),
+            language_id: String::new(),
+            byte_range: r.clone(),
+            line_range: r,
+            symbol_snapshot_id: None,
+            canonical_symbol_id: None,
+            file_id: None,
+            retrieval_layers: vec![CodeRetrievalLayer::Lexical],
+            index_versions: vec![],
+            stale: staleness_hint.as_ref().is_some_and(|h| h.is_stale()),
+            staleness_hint,
+            degraded_reason: None,
+            edge_kind: None,
+            edge_resolution_state: None,
+            edge_target_hint: None,
+            edge_confidence_basis_points: None,
+            edge_confidence_tier: None,
+            score: 1.0,
+            excerpt: String::new(),
+        }
+    }
+
+    #[test]
+    fn merge_prefers_stale_over_fresh() {
+        let fresh_hit = make_hit(Some(StalenessHint::Fresh));
+        let stale_hit = make_hit(Some(StalenessHint::Stale {}));
+        let mut target = fresh_hit.clone();
+        merge_hit_provenance(&mut target, &stale_hit);
+        assert_eq!(target.staleness_hint, Some(StalenessHint::Stale {}));
+        assert!(target.stale);
+    }
+
+    #[test]
+    fn merge_keeps_stale_when_source_is_fresh() {
+        let stale_hit = make_hit(Some(StalenessHint::Stale {}));
+        let fresh_hit = make_hit(Some(StalenessHint::Fresh));
+        let mut target = stale_hit.clone();
+        merge_hit_provenance(&mut target, &fresh_hit);
+        assert_eq!(target.staleness_hint, Some(StalenessHint::Stale {}));
+        assert!(target.stale);
+    }
+
+    #[test]
+    fn merge_fills_none_from_source() {
+        let no_hint = make_hit(None);
+        let fresh_hit = make_hit(Some(StalenessHint::Fresh));
+        let mut target = no_hint.clone();
+        merge_hit_provenance(&mut target, &fresh_hit);
+        assert_eq!(target.staleness_hint, Some(StalenessHint::Fresh));
+        assert!(!target.stale);
+    }
+
+    #[test]
+    fn merge_preserves_none_when_both_none() {
+        let a = make_hit(None);
+        let b = make_hit(None);
+        let mut target = a.clone();
+        merge_hit_provenance(&mut target, &b);
+        assert_eq!(target.staleness_hint, None);
+        assert!(!target.stale);
+    }
+
+    #[test]
+    fn merge_stale_bool_ors() {
+        let fresh_hit = make_hit(Some(StalenessHint::Fresh));
+        let stale_hit = make_hit(Some(StalenessHint::Stale {}));
+        let mut target = fresh_hit.clone();
+        assert!(!target.stale);
+        merge_hit_provenance(&mut target, &stale_hit);
+        assert!(target.stale);
     }
 }

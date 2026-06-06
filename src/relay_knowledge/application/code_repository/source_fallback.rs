@@ -7,7 +7,7 @@ use crate::{
     },
     domain::{
         CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
-        CodeRetrievalRequest,
+        CodeRetrievalRequest, StalenessHint,
     },
 };
 
@@ -334,6 +334,11 @@ pub(super) fn append_definition_source_fallback(
                 status.tree_hash.as_deref().unwrap_or("unindexed")
             )],
             stale: status.stale,
+            staleness_hint: Some(if status.stale {
+                StalenessHint::Stale {}
+            } else {
+                StalenessHint::Fresh
+            }),
             degraded_reason: status.degraded_reason.clone(),
             edge_kind: None,
             edge_resolution_state: None,
@@ -394,6 +399,11 @@ fn code_grep_hit(
             status.tree_hash.as_deref().unwrap_or("unindexed")
         )],
         stale: status.stale,
+        staleness_hint: Some(if status.stale {
+            StalenessHint::Stale {}
+        } else {
+            StalenessHint::Fresh
+        }),
         degraded_reason: degraded_reason.or_else(|| status.degraded_reason.clone()),
         edge_kind: None,
         edge_resolution_state: None,

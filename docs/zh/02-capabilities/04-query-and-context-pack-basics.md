@@ -29,7 +29,7 @@ relay-knowledge query "SQLite graph state"   --source docs   --freshness wait-un
 
 ## 降级与诊断
 
-`degraded_reason` 可能来自 stale index、graph-only、backend unavailable、parser degraded 或 budget exceeded。调用方应读取 metadata，而不是只看 item 数量。
+`degraded_reason` 可能来自 stale index、graph-only、backend unavailable、parser degraded 或 budget exceeded。调用方应读取 metadata，而不是只看 item 数量。每条检索结果的 `staleness_hint` 字段提供了比 `stale` 布尔更结构化的逐条新鲜度标记。
 
 ## 关联架构章节
 

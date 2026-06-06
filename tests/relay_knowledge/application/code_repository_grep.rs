@@ -655,6 +655,7 @@ fn structured_hit(status: &CodeRepositoryStatus) -> CodeRetrievalHit {
             status.tree_hash.as_deref().unwrap_or("unindexed")
         )],
         stale: false,
+        staleness_hint: None,
         degraded_reason: None,
         edge_kind: None,
         edge_resolution_state: None,
