@@ -10,7 +10,7 @@ on:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v1.1.7
+        default: v1.1.8
 
 permissions:
   contents: read
