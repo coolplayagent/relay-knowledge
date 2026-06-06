@@ -190,8 +190,9 @@ Use the repository scripts by responsibility:
 ### Self-Iteration Harness
 
 For unattended code and semantic/vector retrieval optimization experiments,
-start the independent Rust self-iteration harness under `tools/self_iteration`
-through the stable launcher:
+start the independent Rust self-iteration harness documented in
+[tools/self_iteration](tools/self_iteration/README.md) through the stable
+launcher:
 
 ```bash
 ./self-iterate.sh
