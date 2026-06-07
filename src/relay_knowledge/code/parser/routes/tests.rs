@@ -353,3 +353,36 @@ fn detects_flask_router_shorthand() {
     assert_eq!(routes[0].http_method, "put");
     assert_eq!(routes[0].handler_name, "update");
 }
+
+#[test]
+fn detects_flask_route_with_methods_kwarg() {
+    let source = "@app.route('/api', methods=['GET', 'POST'])\ndef api():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|r| r.http_method == "get"));
+    assert!(routes.iter().any(|r| r.http_method == "post"));
+}
+
+#[test]
+fn detects_flask_with_backslash_in_url() {
+    let source = "@app.route('/path\\\\/sub')\ndef handler():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+}
+
+#[test]
+fn detects_flask_empty_methods_list_defaults_to_get() {
+    let source = "@app.route('/default')\ndef handler():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "get");
+}
+
+#[test]
+fn detects_spring_request_mapping_with_method_attribute() {
+    let source = "@RequestMapping(value = \"/data\", method = RequestMethod.DELETE)\npublic String deleteData() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "delete");
+    assert_eq!(routes[0].url, "/data");
+}

@@ -725,33 +725,25 @@ fn record_routes(
 
 fn annotate_route_handler_symbol(
     build: &mut SnapshotBuild,
-    route_idx: usize,
+    _route_idx: usize,
     path: &str,
     handler_name: &str,
     url: &str,
     http_method: &str,
     route_line: usize,
 ) {
-    let mut best_idx: Option<usize> = None;
-    let mut best_dist: usize = usize::MAX;
-    for (i, sym) in build.symbols.iter().enumerate() {
-        if sym.path == path && sym.name == handler_name {
-            let sym_line = sym.line_range.start as usize;
-            if sym_line >= route_line {
-                let dist = sym_line - route_line;
-                if dist < best_dist {
-                    best_dist = dist;
-                    best_idx = Some(i);
-                }
-            }
-        }
-    }
-    if let Some(idx) = best_idx {
-        build.symbols[idx].symbol_role = Some(SymbolRole::RouteHandler {
+    let sym = build
+        .symbols
+        .iter_mut()
+        .filter(|s| s.path == path && s.name == handler_name)
+        .filter(|s| (s.line_range.start as usize) >= route_line)
+        .min_by_key(|s| (s.line_range.start as usize) - route_line);
+
+    if let Some(sym) = sym {
+        sym.symbol_role = Some(SymbolRole::RouteHandler {
             url: url.to_owned(),
             http_method: http_method.to_owned(),
         });
-        let _ = route_idx;
     }
 }
 
