@@ -22,16 +22,9 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             Some(pair) => pair,
             None => continue,
         };
-        let http_method = match method_part
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "get" | "post" | "put" | "delete" | "patch" => {
-                method_part.rsplit('.').next().unwrap().to_ascii_lowercase()
-            }
+        let raw_method = method_part.rsplit('.').next().unwrap_or("");
+        let http_method = match raw_method.to_ascii_lowercase().as_str() {
+            "get" | "post" | "put" | "delete" | "patch" => raw_method.to_ascii_lowercase(),
             _ => continue,
         };
         let after_method = after_method.trim_start();
@@ -40,7 +33,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         } else {
             continue;
         };
-        if !url.starts_with('/') && !url.starts_with("${") && url != "'" && url != "\"" {
+        if !url.starts_with('/') && !url.starts_with("${") {
             continue;
         }
         let handler = extract_handler_name(after_method);
