@@ -30,6 +30,12 @@ relay-knowledge repo query core --query retry_policy --kind callers --ref HEAD -
 relay-knowledge repo query core --query crate::retry_policy --kind imports --ref HEAD --format json
 ```
 
+## Web Route Awareness
+
+The code graph detects web framework route handler bindings during indexing. Supported frameworks include Express (JavaScript/TypeScript), Flask/FastAPI (Python), and Spring (Java). Each detected route produces a `CodeRouteRecord` with HTTP method, URL path, handler name, framework identifier, and source location. Route records are stored alongside symbols and can be used to answer "which handler serves a given endpoint?" queries.
+
+Symbols annotated as route handlers carry a `symbol_role` of type `SymbolRole::RouteHandler`, enabling downstream retrieval to prioritize or filter by HTTP endpoint semantics.
+
 ## Degradation and Diagnostics
 
 Parser or query failure is isolated to affected files and does not abort the entire repository batch. Unresolved or ambiguous edges are not presented as certain calls.

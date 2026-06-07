@@ -30,6 +30,12 @@ relay-knowledge repo query core --query retry_policy --kind callers --ref HEAD -
 relay-knowledge repo query core --query crate::retry_policy --kind imports --ref HEAD --format json
 ```
 
+## Web 路由感知
+
+代码图谱在索引期间检测 Web 框架路由处理器绑定。支持的框架包括 Express（JavaScript/TypeScript）、Flask/FastAPI（Python）和 Spring（Java）。每条检测到的路由生成一条 `CodeRouteRecord`，包含 HTTP 方法、URL 路径、处理器名称、框架标识符和源码位置。路由记录与符号一同存储，可用于回答"哪个处理函数服务于给定的 HTTP 端点？"等查询。
+
+被标注为路由处理器的符号携带 `symbol_role` 类型 `SymbolRole::RouteHandler`，使下游检索可以按 HTTP 端点语义优先排序或过滤。
+
 ## 降级与诊断
 
 Parser 或 query failure 只隔离到受影响文件，不会中止整个仓库 batch。未解析或歧义边不会伪装成确定调用。

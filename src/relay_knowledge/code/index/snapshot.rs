@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, path::Path};
 
 use crate::domain::{
     CodeCallRecord, CodeIndexSnapshot, CodeMonorepoWorkspace, CodePathTombstone,
-    CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord, code_snapshot_scope_id,
+    CodeRepositoryRegistration, CodeRepositorySelector, CodeRouteRecord,
+    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, code_snapshot_scope_id,
 };
 
 use super::{identity, ids::stable_id};
@@ -200,6 +200,7 @@ pub(in crate::code) struct SnapshotBuild {
     pub(in crate::code) dependencies: Vec<crate::domain::CodeDependencyRecord>,
     pub(in crate::code) feature_flags: Vec<crate::domain::CodeFeatureFlagRecord>,
     pub(in crate::code) chunks: Vec<crate::domain::RepositoryCodeChunkRecord>,
+    pub(in crate::code) routes: Vec<CodeRouteRecord>,
     pub(in crate::code) diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
     /// Detected monorepo workspace members populated when
     /// [`CodeWorkspaceDetectionConfig::enabled`] is `true`.
@@ -302,6 +303,7 @@ impl SnapshotBuild {
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
             chunks: Vec::new(),
+            routes: Vec::new(),
             diagnostics: Vec::new(),
             workspaces: Vec::new(),
         }
@@ -405,6 +407,7 @@ impl SnapshotBuild {
         self.calls.append(&mut other.calls);
         self.dependencies.append(&mut other.dependencies);
         self.feature_flags.append(&mut other.feature_flags);
+        self.routes.append(&mut other.routes);
         self.chunks.append(&mut other.chunks);
         self.diagnostics.append(&mut other.diagnostics);
         self.workspaces.append(&mut other.workspaces);

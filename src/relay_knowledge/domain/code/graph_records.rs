@@ -82,6 +82,15 @@ impl CodeReferenceKind {
     }
 }
 
+/// Role annotation for a symbol beyond its syntactic kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SymbolRole {
+    RouteHandler { url: String, http_method: String },
+    Middleware,
+    EventListener { event: String },
+}
+
 /// Resolution certainty for syntax-level code references.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -186,6 +195,8 @@ pub struct CodeSymbolRecord {
     pub kind: CodeSymbolKind,
     pub range: CodeRange,
     pub extraction: CodeExtractionMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_role: Option<SymbolRole>,
 }
 
 impl CodeSymbolRecord {
@@ -207,6 +218,7 @@ impl CodeSymbolRecord {
             kind,
             range,
             extraction,
+            symbol_role: None,
         })
     }
 }

@@ -453,6 +453,24 @@ pub struct CodeCallRecord {
     pub line_range: RepositoryCodeRange,
 }
 
+/// Web framework route mapping extracted from source code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRouteRecord {
+    pub repository_id: String,
+    pub source_scope: String,
+    pub route_id: String,
+    pub file_id: String,
+    pub path: String,
+    pub language_id: String,
+    pub url: String,
+    pub http_method: String,
+    pub handler_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handler_symbol_snapshot_id: Option<String>,
+    pub framework: String,
+    pub line_range: RepositoryCodeRange,
+}
+
 /// Feature flag or runtime configuration relationship extracted from code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagRecord {
@@ -635,7 +653,6 @@ pub struct CodeIndexBatch {
 }
 
 impl CodeIndexBatch {
-    /// Counts mutable SQLite rows written by this batch.
     pub fn row_count(&self) -> usize {
         self.files
             .len()

@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use crate::{
     domain::{
-        CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeFileRecord,
-        RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+        CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, CodeRouteRecord,
+        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+        RepositoryCodeSymbolRecord,
     },
     project::KNOWLEDGE_MAP_RELATIVE_PATH,
 };
@@ -16,6 +17,7 @@ use super::{
     manual::collect_manual_nodes,
     records::{records_from_captures, upsert_symbol},
     recovery,
+    routes::detect_routes,
     syntax::{extract_tag_captures_safely, parse_tree_safely},
     text::{count_lines, validate_text_content},
 };
@@ -585,6 +587,13 @@ pub(in crate::code::parser) fn parse_syntax_file(
         Some(&config_definitions),
     )?;
     build.chunks.extend(chunks);
+    record_routes(
+        build,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
+    );
 
     Ok(())
 }
@@ -656,6 +665,51 @@ fn record_feature_flags(
     build.feature_flags.extend(records);
 
     Ok(())
+}
+
+fn record_routes(
+    build: &mut SnapshotBuild,
+    path: &str,
+    file_id: &str,
+    language_id: &str,
+    content: &str,
+) {
+    let candidates = detect_routes(language_id, content);
+    if candidates.is_empty() {
+        return;
+    }
+    for candidate in candidates {
+        let route_id = stable_id(
+            "route",
+            [
+                &build.repository_id,
+                &build.source_scope,
+                path,
+                &candidate.url,
+                &candidate.http_method,
+                &candidate.line.to_string(),
+            ],
+        );
+        let line_range =
+            match RepositoryCodeRange::new("line_range", candidate.line, candidate.line) {
+                Ok(range) => range,
+                Err(_) => continue,
+            };
+        build.routes.push(CodeRouteRecord {
+            repository_id: build.repository_id.clone(),
+            source_scope: build.source_scope.clone(),
+            route_id,
+            file_id: file_id.to_owned(),
+            path: path.to_owned(),
+            language_id: language_id.to_owned(),
+            url: candidate.url,
+            http_method: candidate.http_method,
+            handler_name: candidate.handler_name,
+            handler_symbol_snapshot_id: None,
+            framework: candidate.framework,
+            line_range,
+        });
+    }
 }
 
 fn record_tree_sitter_failure(

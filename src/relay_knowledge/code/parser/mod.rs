@@ -9,6 +9,7 @@ mod manual;
 mod nodes;
 mod records;
 mod recovery;
+mod routes;
 mod syntax;
 mod text;
 pub(in crate::code) mod workspace;

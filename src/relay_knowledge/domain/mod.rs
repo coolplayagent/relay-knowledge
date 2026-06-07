@@ -46,6 +46,7 @@ pub use code::{
     CodeChunkRecord, CodeExtractionMetadata, CodeFileFields, CodeFileRecord, CodeGraphBatch,
     CodeGraphCommitReceipt, CodeParseStatus, CodeParseStatusCounts, CodeRange, CodeReferenceFields,
     CodeReferenceKind, CodeReferenceRecord, CodeResolutionState, CodeSymbolKind, CodeSymbolRecord,
+    SymbolRole,
 };
 pub use code_dependency::CodeDependencyRecord;
 pub use code_repository::{
@@ -58,8 +59,9 @@ pub use code_repository::{
     CodeRepositoryLanguagePreview, CodeRepositoryLargestFile, CodeRepositoryLatencySample,
     CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
     CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
-    CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, CodeScopeRetentionSummary,
-    CodeSymbolGenerationCounts, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
+    CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, CodeRouteRecord,
+    CodeScopeRetentionSummary, CodeSymbolGenerationCounts, RepositoryCodeChunkRecord,
+    RepositoryCodeFileRecord,
     RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     code_snapshot_expected_scope_id, code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
 };
