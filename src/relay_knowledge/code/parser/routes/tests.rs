@@ -307,9 +307,49 @@ fn skips_java_non_method_lines_between_annotations() {
 }
 
 #[test]
-fn detects_spring_class_prefix_with_empty_mapping() {
+fn detects_spring_method_line_between_annotations() {
+    let source = "@GetMapping(\"/a\")\npublic void handlerA() {\n@GetMapping(\"/b\")\npublic void handlerB() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 2);
+}
+
+#[test]
+fn detects_spring_class_prefix_with_empty_suffix() {
     let source = "@RequestMapping(\"/api\")\n@GetMapping\npublic String root() {\n";
     let routes = detect_routes("java", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api");
+}
+
+#[test]
+fn detects_flask_multiple_routes_in_sequence() {
+    let source = "@app.get('/a')\ndef a():\n    pass\n\n@app.post('/b')\ndef b():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert_eq!(routes[0].url, "/a");
+    assert_eq!(routes[1].url, "/b");
+}
+
+#[test]
+fn skips_python_non_def_after_decorator() {
+    let source = "@app.route('/skip')\nclass Something:\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert!(routes.is_empty());
+}
+
+#[test]
+fn detects_flask_method_decorator_with_dot_methods() {
+    let source = "@app.route('/data')\n@app.methods('POST')\ndef data():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "post");
+}
+
+#[test]
+fn detects_flask_router_shorthand() {
+    let source = "@router.put('/items')\ndef update():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "put");
+    assert_eq!(routes[0].handler_name, "update");
 }
