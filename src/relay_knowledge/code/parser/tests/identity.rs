@@ -286,6 +286,7 @@ fn duplicate_identity_symbol(kind: &str) -> RepositoryCodeSymbolRecord {
             .expect("byte range should validate"),
         line_range: RepositoryCodeRange::new("line_range", 1, 1)
             .expect("line range should validate"),
+        symbol_role: None,
     }
 }
 

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::code::SymbolRole;
 use super::code_repository_helpers::{
     append_hash_list, append_hash_part, checked_u32, normalize_filter_list, stable_hash64,
 };
@@ -392,6 +393,8 @@ pub struct RepositoryCodeSymbolRecord {
     pub doc_comment: Option<String>,
     pub byte_range: RepositoryCodeRange,
     pub line_range: RepositoryCodeRange,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol_role: Option<SymbolRole>,
 }
 
 /// Reference extracted from tree-sitter syntax and optionally resolved.

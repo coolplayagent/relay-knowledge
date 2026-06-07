@@ -151,3 +151,36 @@ fn skips_non_web_files() {
     );
     assert!(routes.is_empty());
 }
+
+#[test]
+fn detects_express_anonymous_handler() {
+    let source = "app.get('/health', (req, res) => {\n  res.json({ ok: true });\n});\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/health");
+    assert_eq!(routes[0].http_method, "get");
+    assert_eq!(routes[0].handler_name, "anonymous");
+    assert_eq!(routes[0].line, 1);
+}
+
+#[test]
+fn detects_flask_shorthand_get_method() {
+    let source = "@app.get('/ping')\ndef ping():\n    return 'pong'\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/ping");
+    assert_eq!(routes[0].http_method, "get");
+    assert_eq!(routes[0].handler_name, "ping");
+    assert_eq!(routes[0].framework, "flask");
+    assert_eq!(routes[0].line, 2);
+}
+
+#[test]
+fn detects_flask_shorthand_post_method() {
+    let source = "@app.post('/items')\ndef create_item():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/items");
+    assert_eq!(routes[0].http_method, "post");
+    assert_eq!(routes[0].handler_name, "create_item");
+}

@@ -868,6 +868,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(10, 20),
         line_range: range(10, 20),
+        symbol_role: None,
     }
 }
 

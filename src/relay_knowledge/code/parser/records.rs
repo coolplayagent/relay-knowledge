@@ -368,6 +368,7 @@ pub(super) fn symbol_record_with_qualified_suffix(
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
+        symbol_role: None,
     })
 }
 

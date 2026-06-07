@@ -905,6 +905,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(0, 1),
         line_range: range(5, 5),
+        symbol_role: None,
     }
 }
 

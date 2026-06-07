@@ -4,7 +4,7 @@ use crate::{
     domain::{
         CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, CodeRouteRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
-        RepositoryCodeSymbolRecord,
+        RepositoryCodeSymbolRecord, SymbolRole,
     },
     project::KNOWLEDGE_MAP_RELATIVE_PATH,
 };
@@ -342,6 +342,7 @@ fn record_text_only_symbol(
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", line.number, line.number)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
+        symbol_role: None,
     };
     upsert_symbol(output, symbol);
 
@@ -702,13 +703,37 @@ fn record_routes(
             file_id: file_id.to_owned(),
             path: path.to_owned(),
             language_id: language_id.to_owned(),
-            url: candidate.url,
-            http_method: candidate.http_method,
-            handler_name: candidate.handler_name,
+            url: candidate.url.clone(),
+            http_method: candidate.http_method.clone(),
+            handler_name: candidate.handler_name.clone(),
             handler_symbol_snapshot_id: None,
             framework: candidate.framework,
             line_range,
         });
+        annotate_route_handler_symbol(
+            build,
+            path,
+            &candidate.handler_name,
+            &candidate.url,
+            &candidate.http_method,
+        );
+    }
+}
+
+fn annotate_route_handler_symbol(
+    build: &mut SnapshotBuild,
+    path: &str,
+    handler_name: &str,
+    url: &str,
+    http_method: &str,
+) {
+    for sym in &mut build.symbols {
+        if sym.path == path && sym.name == handler_name {
+            sym.symbol_role = Some(SymbolRole::RouteHandler {
+                url: url.to_owned(),
+                http_method: http_method.to_owned(),
+            });
+        }
     }
 }
 

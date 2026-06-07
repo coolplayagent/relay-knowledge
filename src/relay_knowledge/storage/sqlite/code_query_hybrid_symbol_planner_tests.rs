@@ -922,6 +922,7 @@ fn qualified_symbol(
         doc_comment: None,
         byte_range: range(1, 1),
         line_range: range(1, 1),
+        symbol_role: None,
     }
 }
 

@@ -597,6 +597,7 @@ mod tests {
                 start: line_start,
                 end: line_end,
             },
+            symbol_role: None,
         }
     }
 

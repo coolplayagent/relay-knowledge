@@ -524,6 +524,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(0, 8),
         line_range,
+        symbol_role: None,
     }
 }
 

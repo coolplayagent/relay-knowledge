@@ -646,6 +646,7 @@ fn symbol(
             end: line_range.end,
         },
         line_range,
+        symbol_role: None,
     }
 }
 
