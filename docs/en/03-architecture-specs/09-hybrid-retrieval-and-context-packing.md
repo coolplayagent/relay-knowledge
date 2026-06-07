@@ -70,6 +70,21 @@ Packing favors diversity and citability. Duplicate hits from the same parent evi
 - Broad-scope code exact-text fallback first narrows candidate paths through the indexed FTS read model using query, path filters, and language filters; it falls back to bounded scope enumeration only when the query has no indexed candidates.
 - Degraded backends produce explicit degradation metadata instead of silent absence.
 
+## 7. Smart Query Identifier Extraction
+
+Query preprocessing (`retrieval/terms.rs`) recognizes and extracts code identifier patterns from natural language query text to improve FTS/BM25 recall:
+
+| Pattern | Example | Extraction |
+| --- | --- | --- |
+| PascalCase / CamelCase | `UserService`, `signInWithGoogle` | Original + split parts |
+| snake_case | `user_service`, `max_retries` | Original |
+| SCREAMING_SNAKE_CASE | `MAX_RETRIES`, `API_KEY` | Original |
+| dot.notation | `app.isPackaged` | Split segments |
+| ALL_CAPS abbreviations | `REST`, `HTTP`, `LRU` | Original |
+| Lowercase identifiers (3+ chars) | `render`, `parse`, `undo` | Original |
+
+Stop-word filtering covers at least 80 common English words (the, and, for, with, from, how, what, etc.), excluding words that cannot correspond to code symbols during identifier extraction. Stem variant expansion generates matching candidates for English verb/noun inflections (connecting → connect, connected; renderer → render), broadening match coverage. Extracted PascalCase/CamelCase identifiers receive 1.5x weight in BM25/FTS queries, snake_case/SCREAMING_SNAKE identifiers receive 1.3x weight, and lowercase identifiers use a base weight of 0.8x.
+
 ---
 
 Navigation: Previous: [8. Derived Indexes and Freshness](08-derived-indexes-and-freshness.md) | Next: [10. Semantic/Vector Provider Architecture](10-semantic-vector-provider-architecture.md)
