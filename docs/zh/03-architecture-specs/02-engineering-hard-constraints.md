@@ -46,6 +46,17 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 - 项目身份常量集中在 `project` 模块；模块局部运行默认值留在所属模块。
 - `unsafe` 默认禁止，除非有明确边界、理由和测试。
 
+## 5.1 文件监听 (fs.watch) 约束
+
+- 文件监听通过 `notify` crate 实现跨平台支持（Linux inotify、macOS FSEvents、Windows ReadDirectoryChangesW）。
+- 监听事件必须经过 debounce 窗口合并，防止高频文件变更产生无界任务。
+- 内容哈希过滤（`ContentHashCache`）必须过滤无实际内容变化的保存操作。
+- `max_watch_dirs` 必须限制最大监听目录数，防止 fd/inotify watch 资源耗尽。
+- 监听失败时必须自动降级（`Degraded` 状态），不得影响查询热路径或 async runtime。
+- Watcher 配置必须通过 `env` 模块的环境变量覆盖机制加载，不得在其他模块直接读取。
+- Watcher 状态和诊断信息必须通过 `service status` API 暴露。
+- 增量索引任务（`CodeIndexTaskSeed`）必须进入持久化任务队列，不得跳过 durable task lease、checkpoint 和 bounded retry。
+
 ## 6. 文档与测试硬约束
 
 - 任何代码、配置、行为、测试、workflow、benchmark、安装或运维变更都必须同时刷新对应文档。

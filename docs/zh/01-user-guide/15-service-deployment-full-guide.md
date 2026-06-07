@@ -141,9 +141,10 @@ relay-knowledge service definition write --format json
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
   relay-knowledge service run --mcp streamable-http
 
-# 同时启动 Web + MCP
+# 同时启动 Web + MCP + 文件监听
 RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
   RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
+  RELAY_KNOWLEDGE_WATCHER_ENABLED=true \
   relay-knowledge service run --web --mcp streamable-http
 ```
 

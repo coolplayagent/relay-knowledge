@@ -1,0 +1,127 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+pub struct ContentHashCache {
+    capacity: usize,
+    entries: HashMap<PathBuf, u64>,
+}
+
+impl ContentHashCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            entries: HashMap::new(),
+        }
+    }
+
+    pub fn check_and_update(&mut self, path: PathBuf, content: &[u8]) -> bool {
+        let new_hash = fnv_hash64(content);
+        let changed = match self.entries.get(&path) {
+            Some(&existing) => existing != new_hash,
+            None => true,
+        };
+        if changed {
+            if self.entries.len() >= self.capacity && !self.entries.contains_key(&path) {
+                if let Some(oldest_key) = self.entries.keys().next().cloned() {
+                    self.entries.remove(&oldest_key);
+                }
+            }
+            self.entries.insert(path, new_hash);
+        }
+        changed
+    }
+
+    pub fn remove(&mut self, path: &PathBuf) {
+        self.entries.remove(path);
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+fn fnv_hash64(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_new_file_as_changed() {
+        let mut cache = ContentHashCache::new(100);
+        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"hello"));
+    }
+
+    #[test]
+    fn detects_unchanged_file_as_not_changed() {
+        let mut cache = ContentHashCache::new(100);
+        cache.check_and_update(PathBuf::from("a.rs"), b"hello");
+        assert!(!cache.check_and_update(PathBuf::from("a.rs"), b"hello"));
+    }
+
+    #[test]
+    fn detects_modified_file_as_changed() {
+        let mut cache = ContentHashCache::new(100);
+        cache.check_and_update(PathBuf::from("a.rs"), b"hello");
+        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"world"));
+    }
+
+    #[test]
+    fn evicts_when_at_capacity() {
+        let mut cache = ContentHashCache::new(2);
+        cache.check_and_update(PathBuf::from("a.rs"), b"a");
+        cache.check_and_update(PathBuf::from("b.rs"), b"b");
+        cache.check_and_update(PathBuf::from("c.rs"), b"c");
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn remove_clears_entry() {
+        let mut cache = ContentHashCache::new(100);
+        cache.check_and_update(PathBuf::from("a.rs"), b"a");
+        let key = PathBuf::from("a.rs");
+        cache.remove(&key);
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn clear_empties_all_entries() {
+        let mut cache = ContentHashCache::new(100);
+        cache.check_and_update(PathBuf::from("a.rs"), b"a");
+        cache.check_and_update(PathBuf::from("b.rs"), b"b");
+        cache.clear();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn update_at_capacity_replaces_existing_without_eviction() {
+        let mut cache = ContentHashCache::new(2);
+        cache.check_and_update(PathBuf::from("a.rs"), b"a");
+        cache.check_and_update(PathBuf::from("b.rs"), b"b");
+        assert!(!cache.check_and_update(PathBuf::from("a.rs"), b"a"));
+        assert_eq!(cache.len(), 2);
+    }
+}

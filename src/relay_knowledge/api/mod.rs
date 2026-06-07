@@ -9,6 +9,7 @@ mod metadata;
 mod operations;
 mod status;
 mod stream;
+mod watcher_diagnostics;
 
 pub use agent::{
     AgentAccessPolicy, AgentAccessPolicySummary, AgentBudgetUsed, AgentPolicyError,
@@ -51,3 +52,4 @@ pub use operations::{
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};
+pub use watcher_diagnostics::WatcherDiagnostics;

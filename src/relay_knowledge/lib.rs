@@ -15,6 +15,7 @@ pub mod paths;
 pub mod project;
 pub mod retrieval;
 pub mod storage;
+pub mod watcher;
 
 pub use domain::KnowledgeEntity;
 pub use project::PROJECT_NAME;

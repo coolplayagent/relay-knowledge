@@ -42,6 +42,7 @@ pub struct RuntimeConfiguration {
     pub file_index: FileIndexRuntimeConfig,
     pub updates: UpdateRuntimeConfig,
     pub storage: StorageRuntimeConfig,
+    pub watcher: crate::watcher::WatcherConfig,
 }
 
 impl RuntimeConfiguration {
@@ -74,6 +75,8 @@ impl RuntimeConfiguration {
         let storage = StorageRuntimeConfig::from_environment(environment)
             .map_err(RuntimeConfigurationError::Storage)?;
 
+        let watcher = crate::watcher::WatcherConfig::from_environment(&environment.watcher);
+
         Ok(Self {
             paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
                 .map_err(RuntimeConfigurationError::Paths)?,
@@ -85,6 +88,7 @@ impl RuntimeConfiguration {
             file_index,
             updates,
             storage,
+            watcher,
         })
     }
 }

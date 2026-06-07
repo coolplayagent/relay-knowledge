@@ -89,6 +89,11 @@ pub const RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS: &str =
 pub const RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT: &str =
     "RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT";
 pub const RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS";
+pub const RELAY_KNOWLEDGE_WATCHER_ENABLED: &str = "RELAY_KNOWLEDGE_WATCHER_ENABLED";
+pub const RELAY_KNOWLEDGE_WATCHER_DEBOUNCE_MS: &str = "RELAY_KNOWLEDGE_WATCHER_DEBOUNCE_MS";
+pub const RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS: &str = "RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS";
+pub const RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY: &str =
+    "RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY";
 pub const RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED: &str = "RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED";
 pub const RELAY_KNOWLEDGE_UPDATE_SOURCES: &str = "RELAY_KNOWLEDGE_UPDATE_SOURCES";
 pub const RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS: &str =
@@ -277,6 +282,15 @@ pub struct TelemetryEnvOverrides {
     pub service_environment: Option<String>,
 }
 
+/// File watcher settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatcherEnvOverrides {
+    pub enabled: Option<bool>,
+    pub debounce_ms: Option<u64>,
+    pub max_watch_dirs: Option<usize>,
+    pub hash_cache_capacity: Option<usize>,
+}
+
 /// Fully parsed process environment relevant to relay-knowledge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentConfig {
@@ -290,6 +304,7 @@ pub struct EnvironmentConfig {
     pub file_index: FileIndexEnvOverrides,
     pub updates: UpdateEnvOverrides,
     pub telemetry: TelemetryEnvOverrides,
+    pub watcher: WatcherEnvOverrides,
     pub storage_topology: Option<String>,
 }
 
@@ -486,6 +501,18 @@ impl EnvironmentConfig {
                 otel_metrics: bool_var(&values, RELAY_OTEL_METRICS)?,
                 export_timeout_ms: positive_u64_var(&values, RELAY_OTEL_EXPORT_TIMEOUT_MS)?,
                 service_environment: string_var(&values, RELAY_OTEL_SERVICE_ENVIRONMENT)?,
+            },
+            watcher: WatcherEnvOverrides {
+                enabled: bool_var(&values, RELAY_KNOWLEDGE_WATCHER_ENABLED)?,
+                debounce_ms: positive_u64_var(&values, RELAY_KNOWLEDGE_WATCHER_DEBOUNCE_MS)?,
+                max_watch_dirs: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS,
+                )?,
+                hash_cache_capacity: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY,
+                )?,
             },
             storage_topology: string_var(&values, RELAY_KNOWLEDGE_STORAGE_TOPOLOGY)?,
         })

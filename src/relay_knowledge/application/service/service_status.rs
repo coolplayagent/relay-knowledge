@@ -1,7 +1,7 @@
 use crate::{
     api::{
         ApiError, ApiMetadata, AuditSinkStatus, CodeIndexWorkerStatus, RequestContext,
-        ServiceStatusResponse,
+        ServiceStatusResponse, WatcherDiagnostics,
     },
     domain::{CodeIndexTaskQueueStatus, GraphVersion, ProposalState, ServiceOperatorState},
     project::PROJECT_NAME,
@@ -108,6 +108,7 @@ impl RelayKnowledgeService {
                 event_count: audit_event_count,
                 last_error: None,
             },
+            watcher: None,
         }))
     }
 
@@ -142,6 +143,7 @@ impl RelayKnowledgeService {
                     "audit event count not sampled because storage is not open".to_owned(),
                 ),
             },
+            watcher: None,
         })
     }
 
@@ -157,6 +159,7 @@ impl RelayKnowledgeService {
             code_index_workers,
             proposal_backlog,
             audit_sink,
+            watcher,
         } = parts;
 
         ServiceStatusResponse {
@@ -181,6 +184,10 @@ impl RelayKnowledgeService {
             code_index_workers,
             proposal_backlog,
             audit_sink,
+            watcher: watcher
+                .as_ref()
+                .map(WatcherDiagnostics::from_watcher_state)
+                .unwrap_or_default(),
         }
     }
 }
@@ -196,4 +203,5 @@ struct ServiceStatusParts {
     code_index_workers: CodeIndexWorkerStatus,
     proposal_backlog: usize,
     audit_sink: AuditSinkStatus,
+    watcher: Option<crate::watcher::WatcherDiagnostics>,
 }

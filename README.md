@@ -654,6 +654,24 @@ reasons, bounded-rescan state, and direct-source-read instructions. Use
 `--freshness wait-until-fresh` to suppress pending, degraded, or overflowed
 file-index answers until a bounded scan has completed.
 
+### File Watcher (fs.watch)
+
+The file watcher detects source code changes and pushes incremental index
+tasks automatically. It is enabled by default on supported platforms.
+
+```bash
+RELAY_KNOWLEDGE_WATCHER_ENABLED=true
+RELAY_KNOWLEDGE_WATCHER_DEBOUNCE_MS=3000
+RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS=1024
+RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY=4096
+```
+
+The watcher uses the `notify` crate for cross-platform file system events
+(Linux inotify, macOS FSEvents, Windows ReadDirectoryChangesW). Events are
+debounced, content-hash filtered, and path-filtered before generating
+`WorktreeOverlay` incremental index tasks. Watcher diagnostics (state, event
+counts, degraded reason) appear in `service status --format json`.
+
 ### Semantic and Vector Backends
 
 Semantic/vector read-model backend metadata is configured only through the
