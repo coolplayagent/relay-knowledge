@@ -35,6 +35,34 @@ When semantic/vector backends are disabled or cursors are stale, BM25 and graph 
 When code source fallback hits candidate-path or budget limits, only exact-text fallback is degraded; existing BM25, code graph edge, and graph evidence candidates can still enter the context pack.
 When local file content cursors are stale, path and metadata remain usable for file location; responses explain content staleness, watcher lag, or bounded-rescan state.
 
+### BM25 Multi-level Fallback Strategy
+
+The BM25 retrieval path implements a three-level fallback chain to maximize recall while preserving ranking quality:
+
+```
+FTS5 prefix match (BM25 scoring)
+  ↓ empty result and query ≥ 2 chars
+Exact name match (LOWER(entity_labels) / LOWER(content))
+  ↓ empty result
+LIKE substring search (content LIKE '%query%' ESCAPE '\')
+  ↓ empty result and query ≥ 3 chars
+Levenshtein fuzzy search (edit distance ≤ 1..2)
+```
+
+**Performance bounds**:
+- Exact name match uses `LIKE '%"target"%'` to support multi-label entities
+- All WHERE clauses wrap OR conditions in parentheses to ensure scope and version filtering applies to all branches
+- Levenshtein scan scope is limited to distinct symbol names (much smaller than total node count)
+- Fuzzy matching uses a single batched SQL query with multiple OR LIKE clauses (not N+1 per-name queries)
+- Edit distance upper bound adapts to query length: ≤ 4 chars → max dist 1, > 4 chars → max dist 2
+- Fallback is total: if an earlier level returns results, later levels are skipped; results are deduplicated by document_id
+- All SQL queries use `graph_bm25.` table prefix to disambiguate columns
+
+**Applicable scenarios**:
+- Typo correction (e.g., `getUssr` → `getUser`)
+- Substring queries (e.g., `sign` → `signInWithGoogle`)
+- Short queries where FTS prefix matching is too noisy
+
 ## Related Architecture Chapters
 
 - [Hybrid Retrieval and Context Packing](../03-architecture-specs/09-hybrid-retrieval-and-context-packing.md)

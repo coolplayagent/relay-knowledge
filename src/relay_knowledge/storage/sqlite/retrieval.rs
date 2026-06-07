@@ -9,6 +9,9 @@ mod advanced;
 #[path = "retrieval/bm25.rs"]
 mod bm25;
 
+#[path = "retrieval/bm25_fallback.rs"]
+mod bm25_fallback;
+
 use rusqlite::{Connection, params};
 
 use crate::{
@@ -639,18 +642,25 @@ fn bm25_candidates(
     connection: &Connection,
     request: &GraphSearchRequest,
 ) -> Result<Vec<ScoredHit>, StorageError> {
-    let Some(match_query) = fts_query(&request.query) else {
-        return Ok(Vec::new());
-    };
-    let rows = bm25_candidate_rows(connection, request, &match_query)?;
-    let facts_by_evidence = facts_for_evidence_ids(
-        connection,
-        evidence_ids_from_bm25_rows(&rows),
-        request.graph_version,
-    )?;
-    rows.into_iter()
-        .map(|row| scored_bm25_hit(connection, row, request.graph_version, &facts_by_evidence))
-        .collect()
+    if let Some(match_query) = fts_query(&request.query) {
+        let rows = bm25_candidate_rows(connection, request, &match_query)?;
+        if !rows.is_empty() {
+            let facts_by_evidence = facts_for_evidence_ids(
+                connection,
+                evidence_ids_from_bm25_rows(&rows),
+                request.graph_version,
+            )?;
+            let hits: Vec<ScoredHit> = rows
+                .into_iter()
+                .map(|row| {
+                    scored_bm25_hit(connection, row, request.graph_version, &facts_by_evidence)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(hits);
+        }
+    }
+
+    bm25_fallback::fallback_candidates(connection, request)
 }
 
 fn scored_bm25_hit(
