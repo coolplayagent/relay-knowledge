@@ -35,6 +35,34 @@ Semantic/vector backend disabled 或 cursor stale 时，BM25 和 graph evidence 
 代码 source fallback 候选路径或预算耗尽时，只降级 exact-text 兜底层；已有 BM25、code graph edge 和 graph evidence 仍可进入 context pack。
 本机文件 content cursor stale 时，path/metadata 仍可服务文件定位；响应需要说明 content stale、watcher lag 或 bounded rescan 状态。
 
+### BM25 多级降级策略
+
+BM25 检索路径内部实现三级降级链，最大化召回率的同时保持排序质量：
+
+```
+FTS5 prefix match (BM25 评分)
+  ↓ 结果为空且 query ≥ 2 字符
+精确名匹配 (LOWER(entity_labels) / LOWER(content))
+  ↓ 结果为空
+LIKE 子串搜索 (content LIKE '%query%' ESCAPE '\')
+  ↓ 结果为空且 query ≥ 3 字符
+Levenshtein fuzzy search (edit distance ≤ 1..2)
+```
+
+**性能保底**：
+- 精确名匹配使用 `LIKE '%"target"%'` 支持多标签实体
+- 所有 WHERE 子句将 OR 条件包裹在括号内，确保 scope 和 version 过滤对全部分支生效
+- Levenshtein 扫描范围限制为 distinct symbol names（远小于 node 总数）
+- fuzzy 匹配使用单次批量 SQL 查询（多 OR LIKE 子句），非 N+1 逐名查询
+- edit distance 上限随 query 长度自适应：≤ 4 字符 → max dist 1，> 4 字符 → max dist 2
+- 降级为互斥瀑布式：前级有结果则跳过后续级，结果按 document_id 去重
+- 所有 SQL 查询均使用 `graph_bm25.` 表前缀消除歧义
+
+**适用场景**：
+- 用户拼写错误（如 `getUssr` → `getUser`）
+- 子串查询（如 `sign` → `signInWithGoogle`）
+- 短词查询（FTS 前缀匹配噪音太大时）
+
 ## 关联架构章节
 
 - [混合检索与 Context Packing](../03-architecture-specs/09-hybrid-retrieval-and-context-packing.md)
