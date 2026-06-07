@@ -119,6 +119,7 @@ fn merge_duplicate_hit(existing: &mut CodeRetrievalHit, candidate: CodeRetrieval
 }
 
 fn merge_hit_metadata(target: &mut CodeRetrievalHit, mut source: CodeRetrievalHit) {
+    target.stale |= source.stale;
     for layer in source.retrieval_layers {
         if !target.retrieval_layers.contains(&layer) {
             target.retrieval_layers.push(layer);
@@ -156,6 +157,15 @@ fn merge_hit_metadata(target: &mut CodeRetrievalHit, mut source: CodeRetrievalHi
     }
     if target.edge_confidence_tier.is_none() {
         target.edge_confidence_tier = source.edge_confidence_tier.take();
+    }
+    match (&target.staleness_hint, &source.staleness_hint) {
+        (_, Some(source_hint)) if source_hint.is_stale() => {
+            target.staleness_hint = source.staleness_hint.take();
+        }
+        (None, Some(_)) => {
+            target.staleness_hint = source.staleness_hint.take();
+        }
+        _ => {}
     }
 }
 
@@ -332,7 +342,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         CodeRepositorySetMember, CodeRepositorySetMemberStatus, FreshnessPolicy,
-        RepositoryCodeRange,
+        RepositoryCodeRange, StalenessHint,
     };
 
     #[test]
@@ -525,6 +535,7 @@ mod tests {
             retrieval_layers: vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition],
             index_versions: vec!["code:scope:tree".to_owned()],
             stale: false,
+            staleness_hint: None,
             degraded_reason: None,
             edge_kind: None,
             edge_resolution_state: None,
@@ -534,5 +545,32 @@ mod tests {
             score: 1.0,
             excerpt: excerpt.to_owned(),
         }
+    }
+
+    #[test]
+    fn merge_hit_metadata_prefers_stale_over_fresh() {
+        let mut fresh_hit = symbol_hit("sym1", "excerpt");
+        fresh_hit.staleness_hint = Some(StalenessHint::Fresh);
+        let mut stale_hit = fresh_hit.clone();
+        stale_hit.stale = true;
+        stale_hit.staleness_hint = Some(StalenessHint::Stale {});
+        let mut target = fresh_hit.clone();
+        merge_hit_metadata(&mut target, stale_hit);
+        assert_eq!(target.staleness_hint, Some(StalenessHint::Stale {}));
+        assert!(target.stale);
+    }
+
+    #[test]
+    fn merge_hit_metadata_keeps_stale_when_source_fresh() {
+        let mut stale_hit = symbol_hit("sym1", "excerpt");
+        stale_hit.stale = true;
+        stale_hit.staleness_hint = Some(StalenessHint::Stale {});
+        let mut fresh_hit = stale_hit.clone();
+        fresh_hit.stale = false;
+        fresh_hit.staleness_hint = Some(StalenessHint::Fresh);
+        let mut target = stale_hit.clone();
+        merge_hit_metadata(&mut target, fresh_hit);
+        assert_eq!(target.staleness_hint, Some(StalenessHint::Stale {}));
+        assert!(target.stale);
     }
 }

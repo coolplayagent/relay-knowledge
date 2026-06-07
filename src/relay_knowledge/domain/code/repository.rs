@@ -884,6 +884,8 @@ pub struct CodeImpactPathGroups {
     pub out_of_scope_changed_paths: Vec<String>,
 }
 
+pub use super::code_staleness::StalenessHint;
+
 /// Code retrieval hit with source location, layers, and freshness metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeRetrievalHit {
@@ -902,6 +904,8 @@ pub struct CodeRetrievalHit {
     pub retrieval_layers: Vec<CodeRetrievalLayer>,
     pub index_versions: Vec<String>,
     pub stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staleness_hint: Option<StalenessHint>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

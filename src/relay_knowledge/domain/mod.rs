@@ -13,6 +13,8 @@ mod code_repository_set;
 #[cfg(test)]
 #[path = "code/repository_tests.rs"]
 mod code_repository_tests;
+#[path = "code/staleness.rs"]
+mod code_staleness;
 #[path = "core/entity.rs"]
 mod entity;
 #[path = "core/error.rs"]
@@ -65,6 +67,7 @@ pub use code_repository_set::{
     CodeRepositorySetRefreshTaskState, CodeRepositorySetRemoveMemberRequest,
     CodeRepositorySetStatus,
 };
+pub use code_staleness::StalenessHint;
 pub use entity::KnowledgeEntity;
 pub use error::DomainError;
 pub use graph_version::GraphVersion;

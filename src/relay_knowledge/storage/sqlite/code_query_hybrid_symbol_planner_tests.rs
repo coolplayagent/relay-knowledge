@@ -850,6 +850,7 @@ fn symbol_hit(id: &str, canonical_symbol_id: &str, excerpt: &str) -> CodeRetriev
         retrieval_layers: vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition],
         index_versions: Vec::new(),
         stale: false,
+        staleness_hint: None,
         degraded_reason: None,
         edge_kind: None,
         edge_resolution_state: None,

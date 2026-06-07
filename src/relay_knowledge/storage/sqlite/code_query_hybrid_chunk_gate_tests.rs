@@ -329,6 +329,7 @@ fn chunk_gate_hit_with_language(language_id: &str, excerpt: &str) -> CodeRetriev
         retrieval_layers: vec![CodeRetrievalLayer::Lexical],
         index_versions: Vec::new(),
         stale: false,
+        staleness_hint: None,
         score: 1.0,
         excerpt: excerpt.to_owned(),
         degraded_reason: None,
