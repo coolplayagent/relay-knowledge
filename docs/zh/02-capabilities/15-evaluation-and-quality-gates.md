@@ -33,6 +33,20 @@ uv run --extra dev pytest tests/browser
 
 测试失败不能通过枚举已知 query、path、symbol 或 fixture 特例修复。优化必须来自通用 ranking signal、索引策略、数据结构、query planning 或并发边界。
 
+## 文件监听 (fs.watch) 验收
+
+文件监听功能需要满足以下验收条件：
+
+- **跨平台支持**：`notify` crate 集成，覆盖 Linux（inotify）、macOS（FSEvents）、Windows（ReadDirectoryChangesW）
+- **事件去抖**：可配置 debounce 窗口（默认 3s）合并高频文件变更事件
+- **内容哈希过滤**：`ContentHashCache`（FNV-1a）过滤无内容变化的保存操作
+- **路径过滤**：自动忽略 `.git/`、`target/`、`node_modules/` 等目录和二进制文件
+- **资源有界**：`max_watch_dirs` 限制最大监听目录数，防止 fd/inotify 资源耗尽
+- **降级恢复**：监听失败时自动降级为 `Degraded` 状态，不影响查询热路径
+- **诊断暴露**：watcher 状态通过 `service status` API 暴露（state、事件计数、降级原因）
+- **持久化任务**：增量索引任务通过 `CodeIndexTaskSeed`（WorktreeOverlay 模式）进入持久化队列
+- **单元测试覆盖**：config 解析、路径过滤、日志哈希、状态管理、任务生成、诊断序列化
+
 ## 关联验证记录
 
 - [文档书架刷新审计](../06-verification/01-documentation-book-refresh-2026-05-17.md)

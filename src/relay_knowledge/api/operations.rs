@@ -439,6 +439,8 @@ pub struct ServiceStatusResponse {
     pub code_index_workers: CodeIndexWorkerStatus,
     pub proposal_backlog: usize,
     pub audit_sink: AuditSinkStatus,
+    #[serde(default = "super::watcher_diagnostics::WatcherDiagnostics::default_disabled")]
+    pub watcher: super::watcher_diagnostics::WatcherDiagnostics,
 }
 
 /// Storage topology and shard-catalog diagnostics surfaced by the control plane.

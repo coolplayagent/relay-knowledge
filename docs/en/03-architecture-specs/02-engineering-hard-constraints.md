@@ -46,6 +46,17 @@ Network entry points support connection budgets, request budgets, body limits, t
 - Project identity constants live in the `project` module; module-local operational defaults stay with the owning module.
 - `unsafe` is prohibited by default unless the boundary, reason, and tests are explicit.
 
+## 5.1 File Watcher (fs.watch) Constraints
+
+- File watching uses the `notify` crate for cross-platform support (Linux inotify, macOS FSEvents, Windows ReadDirectoryChangesW).
+- Watch events must be debounced within a configurable window to prevent unbounded task generation from high-frequency file changes.
+- Content hash filtering (`ContentHashCache`) must skip save operations with no actual content change.
+- `max_watch_dirs` must cap the maximum watched directory count to prevent fd/inotify watch resource exhaustion.
+- Watch failures must auto-degrade (Degraded state) and must not affect query hot paths or the async runtime.
+- Watcher configuration must load through the `env` module environment variable override mechanism; no other module may read watcher environment variables directly.
+- Watcher state and diagnostics must be exposed through the `service status` API.
+- Incremental index tasks (`CodeIndexTaskSeed`) must enter the durable task queue; durable task leases, checkpoints, and bounded retry must not be skipped.
+
 ## 6. Documentation and Test Constraints
 
 - Code, configuration, behavior, tests, workflows, benchmarks, installation, and operations changes include matching documentation refreshes.

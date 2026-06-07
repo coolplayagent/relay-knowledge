@@ -33,6 +33,20 @@ uv run --extra dev pytest tests/browser
 
 Failing tests are not fixed by enumerating known queries, paths, symbols, or fixture cases. Improvements come from general ranking signals, indexing strategy, data structures, query planning, or concurrency boundaries.
 
+## File Watcher (fs.watch) Acceptance Criteria
+
+The file watcher feature must satisfy:
+
+- **Cross-platform support**: `notify` crate integration covering Linux (inotify), macOS (FSEvents), Windows (ReadDirectoryChangesW)
+- **Event debounce**: Configurable debounce window (default 3s) merges high-frequency file change events
+- **Content hash filtering**: `ContentHashCache` (FNV-1a) filters save operations with no content change
+- **Path filtering**: Automatically ignores `.git/`, `target/`, `node_modules/` directories and binary files
+- **Bounded resources**: `max_watch_dirs` caps maximum watched directories, preventing fd/inotify exhaustion
+- **Graceful degradation**: Watch failures auto-degrade to `Degraded` state without affecting query hot paths
+- **Diagnostic exposure**: Watcher state exposed via `service status` API (state, event counts, degradation reason)
+- **Durable tasks**: Incremental index tasks enter the durable queue via `CodeIndexTaskSeed` (WorktreeOverlay mode)
+- **Unit test coverage**: config parsing, path filtering, content hashing, state management, task generation, diagnostics serialization
+
 ## Related Verification Records
 
 - [Documentation Book Refresh Audit](../06-verification/01-documentation-book-refresh-2026-05-17.md)

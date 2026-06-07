@@ -78,6 +78,7 @@ RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
 - SQLite 本地存储和本地 deterministic semantic/vector read models 自动启用。
 - 网络和 QoS 使用保守默认值。
 - MCP 写入、远程监听和后台 silent updates 默认关闭。
+- 文件监听 (fs.watch) 默认启用，自动检测源码变更并推送增量索引任务。
 - 交互式文本 CLI 会按 24 小时缓存周期检查稳定新版本并只输出提示；不会自动安装或替换二进制。
 
 `status --format json` 会显示当前配置和状态。需要隔离一次性实验时，只设置一个临时 `RELAY_KNOWLEDGE_HOME`:

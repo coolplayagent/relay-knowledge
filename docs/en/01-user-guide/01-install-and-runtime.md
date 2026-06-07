@@ -74,6 +74,7 @@ Normal local use does not require environment variables. Defaults are:
 - Local SQLite storage and deterministic semantic/vector read models are enabled.
 - Network and QoS budgets use conservative defaults.
 - MCP writes, remote listening, and silent updates are disabled by default.
+- File watcher (fs.watch) is enabled by default, automatically detecting source changes and pushing incremental index tasks.
 - Interactive text CLI commands check for newer stable versions on a 24-hour cache interval and only print a notice; they do not install or replace binaries.
 
 `status --format json` shows current configuration and status. For an isolated one-off experiment, set a temporary `RELAY_KNOWLEDGE_HOME`:
