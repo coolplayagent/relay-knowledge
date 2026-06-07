@@ -184,3 +184,132 @@ fn detects_flask_shorthand_post_method() {
     assert_eq!(routes[0].http_method, "post");
     assert_eq!(routes[0].handler_name, "create_item");
 }
+
+#[test]
+fn detects_flask_shorthand_put_method() {
+    let source = "@app.put('/items/1')\ndef update_item():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "put");
+    assert_eq!(routes[0].handler_name, "update_item");
+}
+
+#[test]
+fn detects_flask_shorthand_delete_method() {
+    let source = "@app.delete('/items/1')\ndef delete_item():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "delete");
+}
+
+#[test]
+fn detects_flask_shorthand_patch_method() {
+    let source = "@app.patch('/items/1')\ndef patch_item():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "patch");
+}
+
+#[test]
+fn detects_flask_methods_decorator() {
+    let source = "@app.route('/api/data')\n@app.methods('PUT')\ndef data():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "put");
+}
+
+#[test]
+fn skips_flask_non_route_decorator() {
+    let source = "@app.template_filter('reverse')\ndef reverse_filter(s):\n    return s[::-1]\n";
+    let routes = detect_routes("python", source);
+    assert!(routes.is_empty());
+}
+
+#[test]
+fn skips_flask_decorator_without_matching_function() {
+    let source = "@app.route('/orphan')\n# no function follows\nsomething_else()\n";
+    let routes = detect_routes("python", source);
+    assert!(routes.is_empty());
+}
+
+#[test]
+fn detects_flask_route_with_head_option_methods() {
+    let source = "@app.route('/check', methods=['HEAD', 'OPTIONS'])\ndef check():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|r| r.http_method == "head"));
+    assert!(routes.iter().any(|r| r.http_method == "options"));
+}
+
+#[test]
+fn detects_flask_router_delete_shorthand() {
+    let source = "@router.delete('/items/1')\ndef delete_item():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "delete");
+}
+
+#[test]
+fn detects_spring_patch_mapping() {
+    let source = "@PatchMapping(\"/profile\")\npublic void patchProfile() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "patch");
+    assert_eq!(routes[0].handler_name, "patchProfile");
+}
+
+#[test]
+fn detects_spring_value_attribute() {
+    let source = "@GetMapping(value = \"/api/v2/users\")\npublic List<User> listUsers() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/v2/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn detects_spring_path_attribute() {
+    let source = "@PostMapping(path = \"/orders\")\npublic Order createOrder() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/orders");
+    assert_eq!(routes[0].http_method, "post");
+}
+
+#[test]
+fn skips_spring_non_mapping_annotation() {
+    let source = "@Autowired\nprivate UserService userService;\n";
+    let routes = detect_routes("java", source);
+    assert!(routes.is_empty());
+}
+
+#[test]
+fn detects_spring_empty_mapping_url() {
+    let source = "@GetMapping\npublic String home() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/");
+}
+
+#[test]
+fn detects_spring_request_mapping_post_method() {
+    let source = "@RequestMapping(value = \"/submit\", method = RequestMethod.POST)\npublic String submit() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].http_method, "post");
+}
+
+#[test]
+fn skips_java_non_method_lines_between_annotations() {
+    let source = "@GetMapping(\"/a\")\nsome random text\n";
+    let routes = detect_routes("java", source);
+    assert!(routes.is_empty());
+}
+
+#[test]
+fn detects_spring_class_prefix_with_empty_mapping() {
+    let source = "@RequestMapping(\"/api\")\n@GetMapping\npublic String root() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api");
+}
