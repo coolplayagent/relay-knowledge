@@ -413,9 +413,7 @@ fn extract_spring_method_attributes(line: &str) -> Vec<String> {
         .split(',')
     {
         let part = part.trim();
-        let Some(method_part) = part.strip_prefix("RequestMethod.") else {
-            continue;
-        };
+        let method_part = part.strip_prefix("RequestMethod.").unwrap_or(part);
         let method = method_part
             .trim_matches(|character: char| !character.is_ascii_alphabetic())
             .to_ascii_lowercase();

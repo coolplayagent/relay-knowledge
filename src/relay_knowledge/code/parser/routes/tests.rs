@@ -232,6 +232,41 @@ fn detects_fastapi_router_prefix() {
 }
 
 #[test]
+fn detects_fastapi_api_route_decorator_methods() {
+    let source = "@router.api_route('/items', methods=['GET', 'POST'])\ndef items():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/items" && route.http_method == "get")
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/items" && route.http_method == "post")
+    );
+}
+
+#[test]
+fn detects_typed_fastapi_router_prefix() {
+    let source = "router: APIRouter = APIRouter(prefix='/api')\n@router.get('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].framework, "fastapi");
+}
+
+#[test]
+fn merges_fastapi_include_router_prefix() {
+    let source = "router = APIRouter()\napp.include_router(router, prefix='/api')\n@router.get('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].framework, "fastapi");
+}
+
+#[test]
 fn detects_flask_shorthand_post_method() {
     let source = "@app.post('/items')\ndef create_item():\n    pass\n";
     let routes = detect_routes("python", source);
@@ -462,6 +497,17 @@ fn spring_class_level_method_constrains_methodless_request_mapping() {
 }
 
 #[test]
+fn detects_spring_static_imported_request_methods() {
+    let source =
+        "@RequestMapping(value = \"/submit\", method = {GET, POST})\npublic String submit() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.http_method == "get"));
+    assert!(routes.iter().any(|route| route.http_method == "post"));
+    assert!(routes.iter().all(|route| route.url == "/submit"));
+}
+
+#[test]
 fn expands_spring_multiple_class_prefixes() {
     let source = "@RequestMapping({\"/api\", \"/v1\"})\npublic class UserController {\n@GetMapping(\"/users\")\npublic List<User> users() {\n";
     let routes = detect_routes("java", source);
@@ -641,12 +687,48 @@ fn detects_multiline_express_route_chains() {
 }
 
 #[test]
+fn bounds_semicolon_free_express_route_chains() {
+    let source =
+        "router.route('/users')\n  .get(listUsers)\nrouter.route('/items')\n  .post(createItem)\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| {
+        route.url == "/users" && route.http_method == "get" && route.handler_name == "listUsers"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/items" && route.http_method == "post" && route.handler_name == "createItem"
+    }));
+    assert!(
+        !routes
+            .iter()
+            .any(|route| route.url == "/users" && route.http_method == "post")
+    );
+}
+
+#[test]
 fn detects_express_router_alias_assignments() {
     let source = "const users = express.Router();\napp.use('/api', users);\nusers.get('/users', listUsers);\n";
     let routes = detect_routes("typescript", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
     assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn detects_express_application_aliases() {
+    let source = "const server = express();\nserver.get('/health', health);\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/health");
+    assert_eq!(routes[0].handler_name, "health");
+}
+
+#[test]
+fn detects_multiline_express_router_mount_prefix() {
+    let source = "app.use(\n  '/api',\n  router\n);\nrouter.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
 }
 
 #[test]

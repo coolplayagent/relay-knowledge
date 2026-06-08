@@ -25,6 +25,14 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
                 continue;
             }
         }
+        if let Some((include_statement, include_lines)) =
+            python_include_router_statement(&lines, index)
+        {
+            if apply_python_include_router_prefix(&include_statement, &mut routers) {
+                index += include_lines;
+                continue;
+            }
+        }
         if trimmed.starts_with("@") {
             let (decorator_statement, decorator_lines) = flask_decorator_statement(&lines, index);
             if let Some(route_info) = parse_flask_decorator(&decorator_statement, &routers) {
@@ -116,7 +124,7 @@ fn parse_flask_decorator(
 
 fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> {
     let (left, right) = line.split_once('=')?;
-    let router_name = left.trim();
+    let router_name = python_assignment_name(left)?;
     if router_name.is_empty()
         || !router_name
             .chars()
@@ -138,7 +146,7 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
         return None;
     };
 
-    Some((router_name.to_owned(), router_info))
+    Some((router_name, router_info))
 }
 
 fn python_router_prefix_statement(lines: &[&str], start: usize) -> Option<(String, usize)> {
@@ -153,6 +161,58 @@ fn python_router_prefix_statement(lines: &[&str], start: usize) -> Option<(Strin
         start,
         MAX_PYTHON_ROUTER_PREFIX_LINES,
     ))
+}
+
+fn python_include_router_statement(lines: &[&str], start: usize) -> Option<(String, usize)> {
+    let first_line = lines[start].trim();
+    if !first_line.contains(".include_router(") {
+        return None;
+    }
+    Some(python_parenthesized_statement(
+        lines,
+        start,
+        MAX_PYTHON_ROUTER_PREFIX_LINES,
+    ))
+}
+
+fn apply_python_include_router_prefix(
+    statement: &str,
+    routers: &mut BTreeMap<String, PythonRouterInfo>,
+) -> bool {
+    let Some(paren_pos) = statement.find(".include_router(") else {
+        return false;
+    };
+    let args = trim_one_trailing_paren(&statement[paren_pos + ".include_router(".len()..]);
+    let arguments = split_python_top_level_arguments(args);
+    let Some(router_name) = arguments.first().map(|argument| argument.trim()) else {
+        return false;
+    };
+    if router_name.is_empty() {
+        return false;
+    }
+    let Some(prefix) = extract_python_keyword_string(args, "prefix") else {
+        return false;
+    };
+    let router_info = routers
+        .entry(router_name.to_owned())
+        .or_insert_with(|| PythonRouterInfo {
+            prefix: String::new(),
+            framework: "fastapi".to_owned(),
+        });
+    router_info.prefix = merge_url_parts(&prefix, &router_info.prefix);
+    router_info.framework = "fastapi".to_owned();
+    true
+}
+
+fn python_assignment_name(left: &str) -> Option<String> {
+    let name = left
+        .trim()
+        .split_once(':')
+        .map_or(left.trim(), |(name, _)| name.trim());
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.to_owned())
 }
 
 fn flask_decorator_statement(lines: &[&str], start: usize) -> (String, usize) {
@@ -224,6 +284,9 @@ fn route_url_and_framework(
     };
     let receiver = receiver.rsplit('.').next().unwrap_or(receiver);
     let Some(router_info) = routers.get(receiver) else {
+        if func_part.ends_with(".api_route") {
+            return (url.to_owned(), "fastapi".to_owned());
+        }
         return (url.to_owned(), "flask".to_owned());
     };
 
@@ -249,6 +312,7 @@ fn extract_flask_http_method(func_part: &str) -> String {
 
 fn func_line_matches_route(func_part: &str) -> bool {
     func_part.ends_with(".route")
+        || func_part.ends_with(".api_route")
         || func_part.ends_with(".get")
         || func_part.ends_with(".post")
         || func_part.ends_with(".put")
@@ -256,6 +320,48 @@ fn func_line_matches_route(func_part: &str) -> bool {
         || func_part.ends_with(".patch")
         || func_part.ends_with(".head")
         || func_part.ends_with(".options")
+}
+
+fn split_python_top_level_arguments(args: &str) -> Vec<&str> {
+    let mut arguments = Vec::new();
+    let mut argument_start = 0usize;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in args.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let argument = args[argument_start..index].trim();
+                if !argument.is_empty() {
+                    arguments.push(argument);
+                }
+                argument_start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    let argument = args[argument_start..].trim();
+    if !argument.is_empty() {
+        arguments.push(argument);
+    }
+    arguments
 }
 
 fn parse_flask_methods_decorator(line: &str) -> Option<Vec<String>> {

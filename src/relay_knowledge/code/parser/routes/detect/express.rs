@@ -23,8 +23,15 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             router_names.insert(router_name);
             continue;
         }
+        let mount_statement;
+        let mount_source = if trimmed.contains(".use(") {
+            mount_statement = express_use_statement(&lines, index);
+            mount_statement.as_str()
+        } else {
+            trimmed
+        };
         if let Some((router_name, prefix)) =
-            parse_express_router_mount(trimmed, &router_prefixes, &router_names)
+            parse_express_router_mount(mount_source, &router_prefixes, &router_names)
         {
             router_names.insert(router_name.clone());
             router_prefixes.insert(router_name, prefix);
@@ -215,10 +222,41 @@ fn express_method_call_statement(lines: &[String], start: usize) -> String {
 
 fn express_route_chain_statement(lines: &[String], start: usize) -> String {
     let mut statement = String::new();
-    for line in lines
+    for (offset, line) in lines
         .iter()
         .skip(start)
         .take(MAX_EXPRESS_ROUTE_REGISTRATION_LINES)
+        .enumerate()
+    {
+        let segment = line.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if offset > 0 && !segment.starts_with('.') {
+            break;
+        }
+        if !statement.is_empty() {
+            statement.push(' ');
+        }
+        statement.push_str(segment);
+        if statement_ends_with_semicolon(segment) {
+            break;
+        }
+    }
+    statement
+}
+
+fn express_use_statement(lines: &[String], start: usize) -> String {
+    let mut statement = String::new();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut saw_route_call = false;
+    for (offset, line) in lines
+        .iter()
+        .skip(start)
+        .take(MAX_EXPRESS_ROUTE_REGISTRATION_LINES)
+        .enumerate()
     {
         let segment = line.trim();
         if segment.is_empty() {
@@ -228,7 +266,18 @@ fn express_route_chain_statement(lines: &[String], start: usize) -> String {
             statement.push(' ');
         }
         statement.push_str(segment);
-        if statement_ends_with_semicolon(segment) {
+        let scan_start = if offset == 0 {
+            segment.find(".use(").unwrap_or(0)
+        } else {
+            0
+        };
+        if route_call_is_closed(
+            &segment[scan_start..],
+            &mut depth,
+            &mut quote,
+            &mut escaped,
+            &mut saw_route_call,
+        ) {
             break;
         }
     }
@@ -441,7 +490,8 @@ fn parse_express_router_alias(line: &str, router_factory_imported: bool) -> Opti
     let right = right.trim_start();
     let uses_express_factory = right.contains("express.Router(");
     let uses_imported_factory = router_factory_imported && right.starts_with("Router(");
-    if !uses_express_factory && !uses_imported_factory {
+    let uses_express_application = right.starts_with("express(");
+    if !uses_express_factory && !uses_imported_factory && !uses_express_application {
         return None;
     }
     js_assignment_variable_name(left)
