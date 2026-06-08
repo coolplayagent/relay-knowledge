@@ -53,6 +53,84 @@ async fn startup_rebuilds_obsolete_bm25_schema_without_deleting_graph_data() {
 }
 
 #[tokio::test]
+async fn startup_creates_missing_label_gram_table_for_current_schema_marker() {
+    let path = temp_db_path("label-grams-current-marker");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        store
+            .commit_code_graph_batch(
+                CodeGraphBatch::new(vec![parsed_code_file("repo", "src/lib.rs", "sym-main")])
+                    .expect("batch should validate"),
+            )
+            .await
+            .expect("code graph commit should succeed");
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("DROP TABLE graph_bm25_label_grams", [])
+            .expect("label gram table should drop");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "maim".to_owned(),
+            source_scope: Some("repo".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("fuzzy search should use recreated label grams");
+
+    assert!(hits.iter().any(|hit| hit.evidence_id == "sym-main"));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn startup_resumes_label_gram_backfill_from_previous_schema_marker() {
+    let path = temp_db_path("label-grams-previous-marker");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        store
+            .commit_code_graph_batch(
+                CodeGraphBatch::new(vec![parsed_code_file("repo", "src/lib.rs", "sym-resume")])
+                    .expect("batch should validate"),
+            )
+            .await
+            .expect("code graph commit should succeed");
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("DELETE FROM graph_bm25_label_grams", [])
+            .expect("partial label gram backfill should be simulated");
+        guard
+            .execute(
+                "
+                UPDATE relay_storage_schema_state
+                SET version = 1
+                WHERE key = 'sqlite_graph_store'
+                ",
+                [],
+            )
+            .expect("previous marker should be simulated");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "sym-resune".to_owned(),
+            source_scope: Some("repo".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("fuzzy search should use resumed label grams");
+
+    assert!(hits.iter().any(|hit| hit.evidence_id == "sym-resume"));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
 async fn initialization_backfills_empty_semantic_and_vector_documents() {
     let path = temp_db_path("derived-backfill");
     {

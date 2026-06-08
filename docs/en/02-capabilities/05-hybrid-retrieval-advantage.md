@@ -42,7 +42,7 @@ The BM25 retrieval path implements a three-level fallback chain to maximize reca
 ```
 FTS5 prefix match (BM25 scoring)
   ↓ empty result and query ≥ 2 chars
-Exact name match (LOWER(entity_labels) / LOWER(content))
+Exact name match (JSON-safe entity_labels LIKE / LOWER(content))
   ↓ empty result
 LIKE substring search (content LIKE '%query%' ESCAPE '\')
   ↓ empty result and query ≥ 3 chars
@@ -50,10 +50,14 @@ Levenshtein fuzzy search (edit distance ≤ 1..2)
 ```
 
 **Performance bounds**:
-- Exact name match uses `LIKE '%"target"%'` to support multi-label entities
+- Exact name match uses a JSON-encoded `LIKE '%"target"%'` pattern to support multi-label entities and escaped label characters
+- LIKE fallback escapes `\`, `%`, and `_` before binding parameters
 - All WHERE clauses wrap OR conditions in parentheses to ensure scope and version filtering applies to all branches
-- Levenshtein scan scope is limited to distinct symbol names (much smaller than total node count)
-- Fuzzy matching uses a single batched SQL query with multiple OR LIKE clauses (not N+1 per-name queries)
+- Levenshtein uses a maintained `graph_bm25_label_grams` label gram index to collect scope/version candidates by query-specific gram overlap and label-length bounds instead of scanning graph documents or truncating arbitrary anchor rows
+- Label gram schema and backfill are protected by the SQLite schema marker version, resume incomplete upgrades by comparing expected per-document grams, and cap query grams before building SQL bind parameters
+- Fuzzy matching applies the gram-overlap candidate cap before Rust Levenshtein scoring, then ranks matched names by edit distance before the matched-name cap
+- Fuzzy result rows are fetched by batch-joining ranked names through label-gram document ids, preserve the name's edit-distance score in result ordering, and avoid per-name leading-wildcard scans or a single cross-name SQL `LIMIT` that could drop closer matches
+- Fallback SQL limits rows before deterministic in-memory ordering so leading-wildcard LIKE paths do not require an unbounded SQL sort
 - Edit distance upper bound adapts to query length: ≤ 4 chars → max dist 1, > 4 chars → max dist 2
 - Fallback is total: if an earlier level returns results, later levels are skipped; results are deduplicated by document_id
 - All SQL queries use `graph_bm25.` table prefix to disambiguate columns

@@ -42,7 +42,7 @@ BM25 检索路径内部实现三级降级链，最大化召回率的同时保持
 ```
 FTS5 prefix match (BM25 评分)
   ↓ 结果为空且 query ≥ 2 字符
-精确名匹配 (LOWER(entity_labels) / LOWER(content))
+精确名匹配 (JSON-safe entity_labels LIKE / LOWER(content))
   ↓ 结果为空
 LIKE 子串搜索 (content LIKE '%query%' ESCAPE '\')
   ↓ 结果为空且 query ≥ 3 字符
@@ -50,10 +50,14 @@ Levenshtein fuzzy search (edit distance ≤ 1..2)
 ```
 
 **性能保底**：
-- 精确名匹配使用 `LIKE '%"target"%'` 支持多标签实体
+- 精确名匹配使用 JSON 编码后的 `LIKE '%"target"%'` pattern 支持多标签实体和转义后的 label 字符
+- LIKE fallback 在参数绑定前转义 `\`、`%` 和 `_`
 - 所有 WHERE 子句将 OR 条件包裹在括号内，确保 scope 和 version 过滤对全部分支生效
-- Levenshtein 扫描范围限制为 distinct symbol names（远小于 node 总数）
-- fuzzy 匹配使用单次批量 SQL 查询（多 OR LIKE 子句），非 N+1 逐名查询
+- Levenshtein 使用维护在 SQLite 中的 `graph_bm25_label_grams` label gram 索引，按 query-specific gram overlap 和 label length bound 收集 scope/version 候选，避免扫描 graph documents 或截断任意 anchor rows
+- label gram schema 和 backfill 由 SQLite schema marker version 保护，通过比较每个 document 的 expected grams 恢复未完成升级，并在构造 SQL bind 参数前限制 query grams 数量
+- fuzzy 匹配先应用 gram-overlap 候选上限，再由 Rust Levenshtein 评分，并在 matched-name cap 前按 edit distance 排序
+- fuzzy 结果通过 label-gram document ids 批量 join 已排序 name，保留该 name 的 edit-distance score 参与结果排序，避免 per-name leading-wildcard 扫描或单次跨 name SQL `LIMIT` 丢掉更近的匹配
+- fallback SQL 会先限制 rows，再做确定性内存排序，避免 leading-wildcard LIKE 路径触发无界 SQL sort
 - edit distance 上限随 query 长度自适应：≤ 4 字符 → max dist 1，> 4 字符 → max dist 2
 - 降级为互斥瀑布式：前级有结果则跳过后续级，结果按 document_id 去重
 - 所有 SQL 查询均使用 `graph_bm25.` 表前缀消除歧义

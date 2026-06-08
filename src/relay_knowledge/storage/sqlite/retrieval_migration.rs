@@ -8,7 +8,8 @@ use crate::{
 use super::{
     EvidenceDocumentInput, LOCAL_TOKENIZER_VERSION,
     context::{entities_for_evidence, parse_fact_status},
-    insert_code_chunk_document, insert_code_symbol_document, replace_evidence_document,
+    insert_code_chunk_document, insert_code_symbol_document, label_trigrams,
+    replace_evidence_document,
 };
 
 pub(super) fn rebuild_bm25_documents(connection: &Connection) -> Result<(), StorageError> {
@@ -41,6 +42,7 @@ fn clear_retrieval_documents(connection: &Connection) -> Result<(), StorageError
     connection.execute("DELETE FROM graph_bm25", [])?;
     connection.execute("DELETE FROM graph_semantic_documents", [])?;
     connection.execute("DELETE FROM graph_vector_documents", [])?;
+    label_trigrams::clear(connection)?;
 
     Ok(())
 }
