@@ -127,6 +127,7 @@ fn hybrid_grep_fallback_fills_after_structured_hits() {
             excerpt: "[RK_STAGE_READ] = {\n    .read = rk_helper,".to_owned(),
             byte_range: RepositoryCodeRange { start: 10, end: 19 },
             line_range: RepositoryCodeRange { start: 12, end: 13 },
+            is_generated: false,
         }],
         degraded_reason: None,
     };
@@ -230,6 +231,7 @@ fn hybrid_source_refresh_prefers_type_declaration_over_member_surface() {
         limit: 20,
         kind: SourceGrepKind::Hybrid,
         identity: None,
+        exclude_generated: false,
         needs_scope_paths: false,
     };
     let mut result = hit("db/db_impl.h", "DBImpl& operator=(const DBImpl&) = delete;");
@@ -249,6 +251,7 @@ fn hybrid_source_refresh_prefers_type_declaration_over_member_surface() {
                 excerpt: "class DBImpl : public DB {".to_owned(),
                 byte_range: RepositoryCodeRange { start: 0, end: 26 },
                 line_range: RepositoryCodeRange { start: 29, end: 29 },
+                is_generated: false,
             }],
             degraded_reason: None,
         },
@@ -307,6 +310,7 @@ fn hybrid_source_surface_fallback_refreshes_same_line_excerpt() {
                         .to_owned(),
                 byte_range: RepositoryCodeRange { start: 0, end: 82 },
                 line_range: RepositoryCodeRange { start: 13, end: 13 },
+            is_generated: false,
             }, SourceGrepMatch {
                 path: "src/protocol.ts".to_owned(),
                 language_id: "typescript".to_owned(),
@@ -315,6 +319,7 @@ fn hybrid_source_surface_fallback_refreshes_same_line_excerpt() {
                         .to_owned(),
                 byte_range: RepositoryCodeRange { start: 0, end: 73 },
                 line_range: RepositoryCodeRange { start: 11, end: 11 },
+            is_generated: false,
             }],
             degraded_reason: None,
         },
@@ -396,108 +401,6 @@ fn hybrid_source_surface_fallback_refreshes_related_incomplete_paths() {
 }
 
 #[test]
-fn hybrid_source_surface_refreshes_match_inside_structured_line_range() {
-    let request = request(
-        "external session workflow TypeScript client openExternalSession",
-        CodeQueryKind::Hybrid,
-        Vec::new(),
-    );
-    let plan = CodeGrepFallbackPlan {
-        commit: "commit".to_owned(),
-        query: "ExternalTypeScriptSessionClient".to_owned(),
-        paths: vec!["src/application.ts".to_owned()],
-        path_filters: Vec::new(),
-        language_filters: vec!["typescript".to_owned()],
-        limit: 12,
-        kind: SourceGrepKind::Hybrid,
-        identity: None,
-        needs_scope_paths: false,
-    };
-    let mut workflow_result = hit(
-        "src/application.ts",
-        "export function runExternalSessionWorkflow(payload: string): string {",
-    );
-    workflow_result.language_id = "typescript".to_owned();
-    workflow_result.line_range = RepositoryCodeRange { start: 4, end: 7 };
-    workflow_result.retrieval_layers =
-        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
-    workflow_result.canonical_symbol_id = Some("repo://repo/src::application::client".to_owned());
-    let mut results = vec![workflow_result];
-
-    append_code_grep_fallback(
-        &status(),
-        &request,
-        &mut results,
-        &plan,
-        SourceGrepOutcome {
-            matches: vec![SourceGrepMatch {
-                path: "src/application.ts".to_owned(),
-                language_id: "typescript".to_owned(),
-                excerpt: "const client = new ExternalTypeScriptSessionClient();".to_owned(),
-                byte_range: RepositoryCodeRange {
-                    start: 120,
-                    end: 152,
-                },
-                line_range: RepositoryCodeRange { start: 5, end: 5 },
-            }],
-            degraded_reason: None,
-        },
-    );
-
-    assert_eq!(results.len(), 1);
-    assert!(
-        results[0]
-            .excerpt
-            .contains("new ExternalTypeScriptSessionClient")
-    );
-    assert_eq!(
-        results[0].line_range,
-        RepositoryCodeRange { start: 4, end: 7 }
-    );
-    assert!(
-        results[0]
-            .retrieval_layers
-            .contains(&CodeRetrievalLayer::TextFallback)
-    );
-}
-
-#[test]
-fn hybrid_source_surface_fallback_skips_complete_exported_value_surfaces() {
-    let request = request(
-        "typed arrow payload projector trim provider record",
-        CodeQueryKind::Hybrid,
-        Vec::new(),
-    );
-    let mut result = hit(
-        "src/protocol.ts",
-        "export const trimPayload: PayloadProjector<string> = (payload) => payload.trim();",
-    );
-    result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
-    result.canonical_symbol_id = Some("repo://repo/src::protocol::trimPayload".to_owned());
-    let mut type_result = hit(
-        "src/protocol.ts",
-        "export type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;",
-    );
-    type_result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
-    type_result.canonical_symbol_id =
-        Some("repo://repo/src::protocol::PayloadProjector".to_owned());
-    let mut contextual_type_result = hit("src/provider.ts", "PayloadProjector<string>");
-    contextual_type_result.retrieval_layers =
-        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
-    contextual_type_result.canonical_symbol_id =
-        Some("repo://repo/src::protocol::PayloadProjector".to_owned());
-
-    assert!(
-        plan_code_grep_fallback(
-            &status(),
-            &request,
-            &[contextual_type_result, result, type_result]
-        )
-        .is_none()
-    );
-}
-
-#[test]
 fn import_fallback_runs_for_unresolved_external_imports_without_degrading() {
     let request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     let mut import_hit = hit("src/component.tsx", "react");
@@ -518,6 +421,7 @@ fn import_fallback_runs_for_unresolved_external_imports_without_degrading() {
             excerpt: "import React from \"react\";".to_owned(),
             byte_range: RepositoryCodeRange { start: 0, end: 26 },
             line_range: RepositoryCodeRange { start: 1, end: 1 },
+            is_generated: false,
         }],
         degraded_reason: None,
     };
@@ -594,6 +498,7 @@ fn import_fallback_scans_scope_for_relative_module_queries() {
                 excerpt: "export type { StreamEnvelope } from \"./protocol\";".to_owned(),
                 byte_range: RepositoryCodeRange { start: 0, end: 47 },
                 line_range: RepositoryCodeRange { start: 1, end: 1 },
+                is_generated: false,
             }],
             degraded_reason: None,
         },
@@ -630,6 +535,7 @@ fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes()
         limit: 10,
         kind: SourceGrepKind::Imports,
         identity: None,
+        exclude_generated: false,
         needs_scope_paths: false,
     };
 
@@ -646,6 +552,7 @@ fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes()
                     excerpt: "import { sendEnvelope } from \"./protocol\";".to_owned(),
                     byte_range: RepositoryCodeRange { start: 0, end: 41 },
                     line_range: RepositoryCodeRange { start: 3, end: 3 },
+                    is_generated: false,
                 },
                 SourceGrepMatch {
                     path: "src/provider.ts".to_owned(),
@@ -656,6 +563,7 @@ fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes()
                         end: 127,
                     },
                     line_range: RepositoryCodeRange { start: 8, end: 8 },
+                    is_generated: false,
                 },
                 SourceGrepMatch {
                     path: "src/provider.ts".to_owned(),
@@ -666,6 +574,7 @@ fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes()
                         end: 166,
                     },
                     line_range: RepositoryCodeRange { start: 9, end: 9 },
+                    is_generated: false,
                 },
             ],
             degraded_reason: None,
@@ -725,6 +634,7 @@ fn import_fallback_treats_import_call_queries_as_dynamic_import_intent() {
             limit: 10,
             kind: SourceGrepKind::Imports,
             identity: None,
+            exclude_generated: false,
             needs_scope_paths: false,
         };
 
@@ -743,6 +653,7 @@ fn import_fallback_treats_import_call_queries_as_dynamic_import_intent() {
                         end: 127,
                     },
                     line_range: RepositoryCodeRange { start: 8, end: 8 },
+                    is_generated: false,
                 }],
                 degraded_reason: None,
             },
@@ -787,6 +698,7 @@ fn import_fallback_keeps_graph_imports_before_dynamic_text_for_non_dynamic_queri
             limit: 10,
             kind: SourceGrepKind::Imports,
             identity: None,
+            exclude_generated: false,
             needs_scope_paths: false,
         };
 
@@ -805,6 +717,7 @@ fn import_fallback_keeps_graph_imports_before_dynamic_text_for_non_dynamic_queri
                         end: 127,
                     },
                     line_range: RepositoryCodeRange { start: 8, end: 8 },
+                    is_generated: false,
                 }],
                 degraded_reason: None,
             },
@@ -843,6 +756,7 @@ fn import_fallback_keeps_graph_evidence_ahead_of_text_fallback() {
             excerpt: "import React from \"react\";".to_owned(),
             byte_range: RepositoryCodeRange { start: 0, end: 26 },
             line_range: RepositoryCodeRange { start: 1, end: 1 },
+            is_generated: false,
         }],
         degraded_reason: None,
     };

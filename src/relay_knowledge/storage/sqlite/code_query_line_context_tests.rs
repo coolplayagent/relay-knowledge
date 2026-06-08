@@ -163,6 +163,7 @@ fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {
         byte_len: 0,
         line_count: 800,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

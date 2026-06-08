@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     code_cleanup::{count_code_rows, delete_path_indexes, delete_scope_index, path_indexes_exist},
-    code_status,
+    code_report, code_status,
 };
 
 #[path = "code_batch/dependencies.rs"]
@@ -209,6 +209,8 @@ fn finalize_session_once(
         })?;
     let checkpoint = checkpoint_for_scope(connection, &session.source_scope)?;
     let sqlite_write_count = count_scope_rows(connection, &session.source_scope)?;
+    let symbol_generation_counts =
+        code_report::scope_symbol_generation_counts(connection, &session.source_scope)?;
 
     Ok(crate::domain::CodeIndexSummary {
         repository_id: session.repository_id.clone(),
@@ -220,6 +222,8 @@ fn finalize_session_once(
         skipped_unchanged_count: session.skipped_unchanged_count,
         deleted_path_count: session.deleted_paths.len(),
         symbol_count: status.symbol_count,
+        handwritten_symbol_count: symbol_generation_counts.handwritten,
+        generated_symbol_count: symbol_generation_counts.generated,
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
         degraded_file_count: count_scope_diagnostics(
@@ -297,9 +301,9 @@ fn insert_files(transaction: &Transaction<'_>, batch: &CodeIndexBatch) -> Result
         "
         INSERT INTO code_repository_files (
             repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
-            line_count, parse_status, degraded_reason
+            line_count, parse_status, is_generated, degraded_reason
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         ",
     )?;
     for file in &batch.files {
@@ -313,6 +317,7 @@ fn insert_files(transaction: &Transaction<'_>, batch: &CodeIndexBatch) -> Result
             file.byte_len,
             file.line_count,
             file.parse_status.as_str(),
+            file.is_generated,
             file.degraded_reason,
         ])?;
     }

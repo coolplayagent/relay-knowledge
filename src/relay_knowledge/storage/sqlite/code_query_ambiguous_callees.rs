@@ -43,6 +43,7 @@ struct CalleeImplementationCandidate {
     body_excerpt: Option<String>,
     parse_status: String,
     degraded_reason: Option<String>,
+    is_generated: bool,
 }
 
 const AMBIGUOUS_CALLEE_IMPLEMENTATION_LIMIT: usize = 120;
@@ -70,14 +71,20 @@ pub(super) fn search_ambiguous_callee_implementation_hits(
         connection,
         status,
         &contexts,
+        request.exclude_generated,
         AMBIGUOUS_CALLEE_IMPLEMENTATION_LIMIT,
     )?;
     let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
     let mut hits = candidates
         .into_iter()
         .filter(|candidate| {
-            selected_row(&candidate.path, &candidate.language_id, status, request)
-                && (query_has_test_intent || !path_looks_like_test_or_benchmark(&candidate.path))
+            selected_row(
+                &candidate.path,
+                &candidate.language_id,
+                candidate.is_generated,
+                status,
+                request,
+            ) && (query_has_test_intent || !path_looks_like_test_or_benchmark(&candidate.path))
         })
         .filter_map(|candidate| {
             let (context, context_score) = best_ambiguous_callee_context(&candidate, &contexts)?;
@@ -114,6 +121,7 @@ pub(super) fn search_ambiguous_callee_implementation_hits(
                             &candidate.signature,
                             candidate.body_excerpt.as_deref(),
                         ),
+                        is_generated: candidate.is_generated,
                         degraded_reason: candidate.degraded_reason,
                         edge_kind: Some("call".to_owned()),
                         edge_resolution_state: Some("inferred".to_owned()),
@@ -169,6 +177,7 @@ fn search_callee_implementation_candidates(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     contexts: &[AmbiguousCalleeContext],
+    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<CalleeImplementationCandidate>, StorageError> {
     let callee_names = ambiguous_context_callee_lookup_names(contexts);
@@ -189,11 +198,17 @@ fn search_callee_implementation_candidates(
         callee_candidate_scope_predicate(&exact_paths, &path_prefixes, &target_hint_term_sets);
     let target_hint_order_expression =
         callee_candidate_target_hint_order_expression(&target_hint_term_sets);
+    let generated_filter = if exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
     let sql = format!(
         "
         SELECT s.file_id, s.path, s.language_id, s.symbol_snapshot_id,
                s.canonical_symbol_id, s.name, s.signature, s.byte_start, s.byte_end,
                s.line_start, s.line_end, f.parse_status, f.degraded_reason,
+               f.is_generated,
                (
                    SELECT chunk.content
                    FROM code_repository_chunks chunk
@@ -212,7 +227,8 @@ fn search_callee_implementation_candidates(
           AND s.language_id IN ({language_placeholders})
           AND ({candidate_scope_predicate})
           AND s.kind IN ('function', 'method')
-        ORDER BY {target_hint_order_expression} ASC, s.path ASC, s.line_start ASC
+          {generated_filter}
+        ORDER BY f.is_generated ASC, {target_hint_order_expression} ASC, s.path ASC, s.line_start ASC
         LIMIT ?
         "
     );
@@ -245,7 +261,8 @@ fn search_callee_implementation_candidates(
             },
             parse_status: row.get(11)?,
             degraded_reason: row.get(12)?,
-            body_excerpt: row.get(13)?,
+            is_generated: row.get::<_, i64>(13)? != 0,
+            body_excerpt: row.get(14)?,
         })
     })?;
 
@@ -861,6 +878,7 @@ mod tests {
             file_id: "file".to_owned(),
             path: "src/main/java/example/ServiceFactory.java".to_owned(),
             language_id: "java".to_owned(),
+            is_generated: false,
             caller_symbol_snapshot_id: Some("caller".to_owned()),
             caller_name: Some("dispatch".to_owned()),
             callee_symbol_snapshot_id: None,
@@ -889,6 +907,7 @@ mod tests {
             file_id: "file".to_owned(),
             path: path.to_owned(),
             language_id: "java".to_owned(),
+            is_generated: false,
             symbol_snapshot_id: "symbol".to_owned(),
             canonical_symbol_id: "repo://repo/handle".to_owned(),
             name: "handle".to_owned(),

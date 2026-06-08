@@ -16,6 +16,7 @@ Code repository basics let users register Git repositories or non-Git source dir
 relay-knowledge repo register /path/to/relay-knowledge --path src
 relay-knowledge repo index relay-knowledge --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo status relay-knowledge --format json
@@ -26,9 +27,11 @@ filesystem root directory name as the stable repository alias. Agents should
 prefer this default for first-time project registration so later sessions reuse
 the same index; `--alias` remains available as an explicit override.
 
-`repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy. `repo register` rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results.
+`repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, `--exclude-generated`, and freshness policy. `repo register` rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results.
 
 `definition`, `references`, and `hybrid` queries use the indexed code graph and SQLite FTS first. When those layers leave a specific recall gap, the query may run bounded internal exact-text source fallback over candidate files from the indexed commit. Fallback results are exposed through `lexical` and `text_fallback` layers and do not replace resolved reference, call, or import edges.
+
+Generated files such as protobuf stubs, swagger/OpenAPI clients, minified bundles, root-level build/dist outputs, and `target/generated/` outputs remain indexed for graph completeness. The index records generated-file metadata from path and header signals, report totals split handwritten and generated symbol counts, and default retrieval demotes generated-file hits. `--exclude-generated` removes generated files from structured retrieval and bounded source fallback results.
 
 Cold full `repo index` returns a queued task handle and lets the background code-index worker perform parsing and SQLite writes under a lease. `service run` recovers expired code-index leases at startup, and `repo index <alias> --reset` can requeue unfinished tasks without deleting completed indexed scopes or reviving terminal dead-letter history. `repo status` exposes the active task, checkpoint progress, finalization phase, and retention summary; successful workers keep the active scope, the two latest completed scopes, and unfinished task scopes. If a task is no longer active while the repository is still `indexing`, status reports the latest checkpoint so operators can distinguish a slow finalization phase from missing progress.
 

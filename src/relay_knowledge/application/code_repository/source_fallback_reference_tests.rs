@@ -61,6 +61,7 @@ fn reference_grep_fallback_ranks_usage_before_array_declaration() {
         limit: 10,
         kind: SourceGrepKind::References,
         identity: None,
+        exclude_generated: false,
         needs_scope_paths: false,
     };
     let outcome = SourceGrepOutcome {
@@ -71,6 +72,7 @@ fn reference_grep_fallback_ranks_usage_before_array_declaration() {
                 excerpt: "static rk_stage_fn rk_pipeline[] = {".to_owned(),
                 byte_range: RepositoryCodeRange { start: 10, end: 48 },
                 line_range: RepositoryCodeRange { start: 4, end: 4 },
+                is_generated: false,
             },
             SourceGrepMatch {
                 path: "src/pipeline.c".to_owned(),
@@ -81,6 +83,7 @@ fn reference_grep_fallback_ranks_usage_before_array_declaration() {
                     end: 123,
                 },
                 line_range: RepositoryCodeRange { start: 9, end: 9 },
+                is_generated: false,
             },
         ],
         degraded_reason: Some("source fallback".to_owned()),
@@ -116,6 +119,7 @@ fn reference_grep_fallback_ranks_declaration_first_for_typedef_intent() {
         limit: 5,
         kind: SourceGrepKind::References,
         identity: None,
+        exclude_generated: false,
         needs_scope_paths: false,
     };
     let mut results = Vec::new();
@@ -136,6 +140,7 @@ fn reference_grep_fallback_ranks_declaration_first_for_typedef_intent() {
                         start: 589,
                         end: 589,
                     },
+                    is_generated: false,
                 },
                 SourceGrepMatch {
                     path: "db/version_set.cc".to_owned(),
@@ -146,6 +151,7 @@ fn reference_grep_fallback_ranks_declaration_first_for_typedef_intent() {
                         start: 586,
                         end: 586,
                     },
+                    is_generated: false,
                 },
             ],
             degraded_reason: None,

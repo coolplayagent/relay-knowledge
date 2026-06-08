@@ -616,14 +616,16 @@ fn file_query_request(payload: &Value) -> Result<FileQueryRequest, WebError> {
 }
 
 fn code_query_request(payload: &Value) -> Result<CodeRetrievalRequest, WebError> {
-    CodeRetrievalRequest::new(
+    let mut request = CodeRetrievalRequest::new(
         string_field(payload, "query")?,
         code_selector(payload)?,
         parse_code_query_kind(string_field(payload, "kind")?)?,
         usize_field(payload, "limit")?,
         parse_freshness(string_field(payload, "freshness")?)?,
     )
-    .map_err(|error| WebError::bad_request(error.to_string()))
+    .map_err(|error| WebError::bad_request(error.to_string()))?;
+    request.exclude_generated = optional_bool_field(payload, "exclude_generated")?.unwrap_or(false);
+    Ok(request)
 }
 
 fn code_feature_flag_request(payload: &Value) -> Result<CodeFeatureFlagRequest, WebError> {
@@ -704,7 +706,7 @@ fn code_repository_set_remove_request(
 fn code_repository_set_query_request(
     payload: &Value,
 ) -> Result<CodeRepositorySetQueryRequest, WebError> {
-    CodeRepositorySetQueryRequest::new(
+    let mut request = CodeRepositorySetQueryRequest::new(
         string_field(payload, "set_alias")?,
         string_field(payload, "query")?,
         parse_code_query_kind(string_field(payload, "kind")?)?,
@@ -713,7 +715,9 @@ fn code_repository_set_query_request(
         optional_string_array_field(payload, "path_filters")?,
         optional_string_array_field(payload, "language_filters")?,
     )
-    .map_err(|error| WebError::bad_request(error.to_string()))
+    .map_err(|error| WebError::bad_request(error.to_string()))?;
+    request.exclude_generated = optional_bool_field(payload, "exclude_generated")?.unwrap_or(false);
+    Ok(request)
 }
 
 fn string_field<'a>(payload: &'a Value, field: &'static str) -> Result<&'a str, WebError> {

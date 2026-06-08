@@ -52,6 +52,7 @@ fn file(
         byte_len: 0,
         line_count: 1,
         parse_status,
+        is_generated: false,
         degraded_reason,
     }
 }

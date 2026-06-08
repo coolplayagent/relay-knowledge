@@ -70,6 +70,10 @@ pub(super) async fn fresh_full_index_response(
         .await
         .map_err(storage_api_error)?;
     let degraded_file_count = degraded_file_count_for_fresh_index(store, &scoped_status).await?;
+    let generation_counts = store
+        .code_repository_scope_symbol_generation_counts(source_scope.clone())
+        .await
+        .map_err(storage_api_error)?;
     let summary = CodeIndexSummary {
         repository_id: scoped_status.repository_id.clone(),
         source_scope,
@@ -80,6 +84,8 @@ pub(super) async fn fresh_full_index_response(
         skipped_unchanged_count: scoped_status.indexed_file_count,
         deleted_path_count: 0,
         symbol_count: scoped_status.symbol_count,
+        handwritten_symbol_count: generation_counts.handwritten_symbol_count,
+        generated_symbol_count: generation_counts.generated_symbol_count,
         reference_count: scoped_status.reference_count,
         chunk_count: scoped_status.chunk_count,
         degraded_file_count,

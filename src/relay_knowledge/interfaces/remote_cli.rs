@@ -147,8 +147,9 @@ pub(super) async fn run_remote(
             path_filters,
             language_filters,
             freshness,
+            exclude_generated,
         } => {
-            let request = CodeRetrievalRequest::new(
+            let mut request = CodeRetrievalRequest::new(
                 query.clone(),
                 repo_cli::selector(
                     alias.clone(),
@@ -162,6 +163,7 @@ pub(super) async fn run_remote(
                 *freshness,
             )
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            request.exclude_generated = *exclude_generated;
             let response = client
                 .post_repository::<_, CodeRepositoryQueryResponse>(alias, "query", &request)
                 .await?;

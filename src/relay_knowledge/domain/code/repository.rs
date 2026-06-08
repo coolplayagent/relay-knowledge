@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+use super::code_repository_helpers::{
+    append_hash_list, append_hash_part, checked_u32, normalize_filter_list, stable_hash64,
+};
 use super::{
     CodeDependencyRecord, CodeMonorepoWorkspace, CodeParseStatus, CodeParseStatusCounts,
     CodeWorkspaceDetectionConfig, DomainError, FreshnessPolicy, error::required_text,
 };
 
-#[path = "repository_hash.rs"]
-mod repository_hash;
-
-const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1";
+const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1-generated-files-v1";
 
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(
@@ -18,17 +18,14 @@ pub fn code_snapshot_scope_id(
     language_filters: &[String],
 ) -> String {
     let mut input = Vec::new();
-    repository_hash::append_hash_part(&mut input, "git_snapshot");
-    repository_hash::append_hash_part(&mut input, repository_id);
-    repository_hash::append_hash_part(&mut input, tree_hash);
-    repository_hash::append_hash_list(&mut input, path_filters);
-    repository_hash::append_hash_list(&mut input, language_filters);
-    repository_hash::append_hash_part(&mut input, CODE_SNAPSHOT_FACT_VERSION);
+    append_hash_part(&mut input, "git_snapshot");
+    append_hash_part(&mut input, repository_id);
+    append_hash_part(&mut input, tree_hash);
+    append_hash_list(&mut input, path_filters);
+    append_hash_list(&mut input, language_filters);
+    append_hash_part(&mut input, CODE_SNAPSHOT_FACT_VERSION);
 
-    format!(
-        "git_snapshot:{:016x}",
-        repository_hash::stable_hash64(&input)
-    )
+    format!("git_snapshot:{:016x}", stable_hash64(&input))
 }
 
 pub fn code_snapshot_expected_scope_id(
@@ -189,6 +186,8 @@ pub struct CodeRetrievalRequest {
     pub code_query_kind: CodeQueryKind,
     pub limit: usize,
     pub freshness_policy: FreshnessPolicy,
+    #[serde(default)]
+    pub exclude_generated: bool,
 }
 
 impl CodeRetrievalRequest {
@@ -212,6 +211,7 @@ impl CodeRetrievalRequest {
             code_query_kind,
             limit,
             freshness_policy,
+            exclude_generated: false,
         })
     }
 }
@@ -361,6 +361,8 @@ pub struct RepositoryCodeFileRecord {
     pub byte_len: usize,
     pub line_count: usize,
     pub parse_status: CodeParseStatus,
+    #[serde(default)]
+    pub is_generated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
 }
@@ -797,6 +799,10 @@ pub struct CodeIndexSummary {
     pub skipped_unchanged_count: usize,
     pub deleted_path_count: usize,
     pub symbol_count: usize,
+    #[serde(default)]
+    pub handwritten_symbol_count: usize,
+    #[serde(default)]
+    pub generated_symbol_count: usize,
     pub reference_count: usize,
     pub chunk_count: usize,
     pub degraded_file_count: usize,
@@ -849,10 +855,23 @@ pub struct CodeRepositoryTotals {
     pub repository_count: usize,
     pub indexed_file_count: usize,
     pub symbol_count: usize,
+    #[serde(default)]
+    pub handwritten_symbol_count: usize,
+    #[serde(default)]
+    pub generated_symbol_count: usize,
     pub reference_count: usize,
     pub chunk_count: usize,
     pub degraded_file_count: usize,
     pub parse_status_counts: CodeParseStatusCounts,
+}
+
+/// Generated/handwritten split for symbols in one code index scope.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeSymbolGenerationCounts {
+    #[serde(default)]
+    pub handwritten_symbol_count: usize,
+    #[serde(default)]
+    pub generated_symbol_count: usize,
 }
 
 /// Representative query latency captured for an operations report.
@@ -876,6 +895,10 @@ pub struct CodeRepositoryReport {
     pub tree_hash: Option<String>,
     pub indexed_file_count: usize,
     pub symbol_count: usize,
+    #[serde(default)]
+    pub handwritten_symbol_count: usize,
+    #[serde(default)]
+    pub generated_symbol_count: usize,
     pub reference_count: usize,
     pub chunk_count: usize,
     pub degraded_file_count: usize,
@@ -961,23 +984,4 @@ pub struct CodeFeatureFlagGraph {
     pub source_key: String,
     pub score: f64,
     pub usages: Vec<CodeFeatureFlagUsage>,
-}
-
-fn normalize_filter_list(
-    field: &'static str,
-    values: Vec<String>,
-) -> Result<Vec<String>, DomainError> {
-    let mut normalized = Vec::new();
-    for value in values {
-        let value = required_text(field, value)?;
-        if !normalized.contains(&value) {
-            normalized.push(value);
-        }
-    }
-
-    Ok(normalized)
-}
-
-fn checked_u32(field: &'static str, value: usize) -> Result<u32, DomainError> {
-    u32::try_from(value).map_err(|_| DomainError::invalid(field, "must fit in u32"))
 }

@@ -22,6 +22,7 @@ use super::{
 use crate::code::{
     CodeIndexError, SnapshotBuild, config_files,
     feature_flags::{FeatureFlagFileInput, extract_feature_flags},
+    generated_detection,
     languages::{LanguageSpec, detect_language},
     stable_content_hash, stable_id,
 };
@@ -38,6 +39,7 @@ pub(in crate::code) fn parse_indexed_file(
     );
     let language = detect_language(path);
     let line_count = count_lines(bytes);
+    let is_generated = generated_detection::is_generated_file(path, bytes);
     let (parse_status, degraded_reason, content) = validate_text_content(path, bytes, language)?;
 
     let Some(content) = content else {
@@ -51,6 +53,7 @@ pub(in crate::code) fn parse_indexed_file(
                 byte_len: bytes.len(),
                 line_count,
                 parse_status,
+                is_generated,
                 degraded_reason,
             },
         );
@@ -67,6 +70,7 @@ pub(in crate::code) fn parse_indexed_file(
                 byte_len: bytes.len(),
                 line_count,
                 parse_status,
+                is_generated,
                 degraded_reason,
             },
         );
@@ -90,6 +94,7 @@ pub(in crate::code) fn parse_indexed_file(
                 byte_len: bytes.len(),
                 line_count,
                 parse_status,
+                is_generated,
                 degraded_reason,
             },
         );
@@ -109,6 +114,7 @@ pub(in crate::code) fn parse_indexed_file(
             blob_hash: &blob_hash,
             byte_len: bytes.len(),
             line_count,
+            is_generated,
             content: &content,
         },
     )
@@ -122,6 +128,7 @@ struct FileStatusInput<'a> {
     byte_len: usize,
     line_count: usize,
     parse_status: CodeParseStatus,
+    is_generated: bool,
     degraded_reason: Option<String>,
 }
 
@@ -136,6 +143,7 @@ fn record_file_status(build: &mut SnapshotBuild, input: FileStatusInput<'_>) {
         byte_len: input.byte_len,
         line_count: input.line_count,
         parse_status: input.parse_status,
+        is_generated: input.is_generated,
         degraded_reason: input.degraded_reason.clone(),
     });
 
@@ -474,6 +482,7 @@ pub(in crate::code::parser) struct SyntaxFileInput<'a> {
     pub(in crate::code::parser) blob_hash: &'a str,
     pub(in crate::code::parser) byte_len: usize,
     pub(in crate::code::parser) line_count: usize,
+    pub(in crate::code::parser) is_generated: bool,
     pub(in crate::code::parser) content: &'a str,
 }
 
@@ -558,6 +567,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
             byte_len: input.byte_len,
             line_count: input.line_count,
             parse_status,
+            is_generated: input.is_generated,
             degraded_reason,
         },
     );
@@ -664,6 +674,7 @@ fn record_tree_sitter_failure(
             byte_len: input.byte_len,
             line_count: input.line_count,
             parse_status: CodeParseStatus::Failed,
+            is_generated: input.is_generated,
             degraded_reason: Some(tree_sitter_failure_message(stage, error)),
         },
     );

@@ -271,6 +271,11 @@ fn search_imports_by_target_hint_chunk(
     let import_path_filter = path_filter_sql_for_column("i.path", status, request);
     let import_language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
+    let import_generated_filter = if request.exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
@@ -281,7 +286,8 @@ fn search_imports_by_target_hint_chunk(
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
-               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
+               f.is_generated
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -289,7 +295,8 @@ fn search_imports_by_target_hint_chunk(
           AND i.target_hint IN ({placeholders})
           {import_path_filter}
           {import_language_filter}
-        ORDER BY i.path ASC, i.line_start ASC
+          {import_generated_filter}
+        ORDER BY f.is_generated ASC, i.path ASC, i.line_start ASC
         LIMIT ?
         "
     );
@@ -316,6 +323,7 @@ fn search_imports_by_target_hint_chunk(
             resolution_state: row.get(7)?,
             confidence_basis_points: row.get(8)?,
             confidence_tier: row.get(9)?,
+            is_generated: row.get::<_, i64>(10)? != 0,
         })
     })?;
 
@@ -329,7 +337,19 @@ fn import_target_symbol_matches(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<ImportTargetSymbol>, StorageError> {
     let fts_query = symbol_fts_match_query(&request.query);
-    let sql = "
+    let target_generated_filter = if request.exclude_generated {
+        "AND NOT EXISTS (
+             SELECT 1
+             FROM code_repository_files target_file
+             WHERE target_file.source_scope = code_repository_search.source_scope
+               AND target_file.path = code_repository_search.path
+               AND target_file.is_generated != 0
+         )"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "
         SELECT path, name, language_id
         FROM code_repository_symbols
         WHERE source_scope = ?
@@ -339,13 +359,22 @@ fn import_target_symbol_matches(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+                {target_generated_filter}
+              ORDER BY coalesce((
+                    SELECT target_file.is_generated FROM code_repository_files target_file
+                    WHERE target_file.source_scope = code_repository_search.source_scope
+                      AND target_file.path = code_repository_search.path
+                    LIMIT 1
+                  ), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
               LIMIT ?
         )
         ORDER BY path ASC, line_start ASC
         LIMIT ?
-        ";
-    let mut statement = prepare_code_search_statement(connection, sql)?;
+        "
+    );
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(
         params_from_iter(symbol_target_fts_values_for_limited(
             required_scope(status)?,
@@ -616,6 +645,7 @@ mod tests {
             file_id: "file".to_owned(),
             path: "src/provider.ts".to_owned(),
             language_id: "typescript".to_owned(),
+            is_generated: false,
             module: module.to_owned(),
             matched_symbol_name: None,
             target_symbol_names: None,

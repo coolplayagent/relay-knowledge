@@ -63,6 +63,67 @@ async fn git_fresh_full_index_skips_tracked_entry_plan_build() {
 }
 
 #[tokio::test]
+async fn git_fresh_filtered_full_index_uses_scope_generated_symbol_counts() {
+    let _guard = TRACKED_ENTRIES_TEST_LOCK.lock().await;
+    let repo = FixtureRepo::create("git-filtered-fast-path-generated-counts");
+    repo.write("src/narrow/lib.rs", "pub fn narrow_policy() -> u32 { 1 }\n");
+    repo.write(
+        "src/generated/api.pb.go",
+        "package generated\nfunc GeneratedPolicy() int { return 1 }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+    let observed_root = repo
+        .path
+        .canonicalize()
+        .expect("repo path should canonicalize");
+    let narrow_request = CodeIndexRequest {
+        repository: CodeRepositorySelector::new(
+            "fixture",
+            "HEAD",
+            vec!["src/narrow".to_owned()],
+            Vec::new(),
+        )
+        .expect("selector should validate"),
+        mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
+        freshness_policy: FreshnessPolicy::WaitUntilFresh,
+    };
+
+    register_fixture_repo(&service, &repo, "register-git-filtered-counts").await;
+    let narrow = service
+        .index_code_repository(
+            narrow_request.clone(),
+            context("index-filtered-counts-narrow"),
+        )
+        .await
+        .expect("narrow index should succeed");
+    service
+        .index_code_repository(
+            request("fixture", "HEAD"),
+            context("index-filtered-counts-broad"),
+        )
+        .await
+        .expect("broad index should succeed");
+
+    reset_tracked_entries_call_count_for_root(observed_root.clone());
+    let reused_narrow = service
+        .index_code_repository(narrow_request, context("index-filtered-counts-reuse"))
+        .await
+        .expect("fresh narrow index should reuse scoped status");
+
+    assert_eq!(
+        reused_narrow.summary.source_scope,
+        narrow.summary.source_scope
+    );
+    assert_eq!(reused_narrow.summary.progress.blob_read_count, 0);
+    assert_eq!(reused_narrow.summary.handwritten_symbol_count, 1);
+    assert_eq!(reused_narrow.summary.generated_symbol_count, 0);
+    assert_eq!(tracked_entries_call_count_for_root(&observed_root), 0);
+}
+
+#[tokio::test]
 async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
     let _guard = TRACKED_ENTRIES_TEST_LOCK.lock().await;
     let repo = FixtureRepo::create("git-active-duplicate-fast-path");

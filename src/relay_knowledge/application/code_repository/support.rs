@@ -441,6 +441,7 @@ pub(super) async fn apply_code_grep_fallback(
                 plan.query.clone(),
                 plan.path_filters.clone(),
                 plan.language_filters.clone(),
+                plan.exclude_generated,
                 SOURCE_GREP_CANDIDATE_FILE_LIMIT.saturating_add(1),
             )
             .await
@@ -483,6 +484,7 @@ pub(super) async fn apply_code_grep_fallback(
                 &path_filters,
                 &language_filters,
                 &identity,
+                plan.exclude_generated,
             )
         })
         .await?;

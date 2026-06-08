@@ -61,6 +61,7 @@ pub enum RepoCommand {
         path_filters: Vec<String>,
         language_filters: Vec<String>,
         freshness: FreshnessPolicy,
+        exclude_generated: bool,
     },
     FeatureFlags {
         alias: String,
@@ -293,8 +294,9 @@ pub async fn run_repo(
             path_filters,
             language_filters,
             freshness,
+            exclude_generated,
         } => {
-            let request = CodeRetrievalRequest::new(
+            let mut request = CodeRetrievalRequest::new(
                 query,
                 selector(alias, ref_selector, path_filters, language_filters, format)?,
                 kind,
@@ -302,6 +304,7 @@ pub async fn run_repo(
                 freshness,
             )
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            request.exclude_generated = exclude_generated;
             let response = service
                 .query_code_repository(request, context)
                 .await
@@ -681,6 +684,7 @@ fn parse_query(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut path_filters = Vec::new();
     let mut language_filters = Vec::new();
     let mut freshness = FreshnessPolicy::AllowStale;
+    let mut exclude_generated = false;
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
@@ -716,6 +720,10 @@ fn parse_query(tokens: &[String]) -> Result<RepoCommand, CliError> {
                 freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
                 index += 2;
             }
+            "--exclude-generated" => {
+                exclude_generated = true;
+                index += 1;
+            }
             other if !other.starts_with('-') && query.is_none() => {
                 let (value, next_index) = collect_positional_query(tokens, index);
                 query = Some(value);
@@ -734,6 +742,7 @@ fn parse_query(tokens: &[String]) -> Result<RepoCommand, CliError> {
         path_filters,
         language_filters,
         freshness,
+        exclude_generated,
     })
 }
 

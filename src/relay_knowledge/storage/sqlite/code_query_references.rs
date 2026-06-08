@@ -103,12 +103,18 @@ fn search_reference_identity_rows(
     let path_filter = path_filter_sql_for_column("r.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
+    let generated_filter = if request.exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
     let direct_limit = reference_identity_candidate_limit(request);
     let sql = reference_rows_sql(&format!(
         "
           AND r.name = ?
           {path_filter}
           {language_filter}
+          {generated_filter}
         "
     ));
     let mut values = vec![
@@ -139,6 +145,7 @@ fn search_reference_fts_rows(
 ) -> Result<Vec<ReferenceRow>, StorageError> {
     let fts_query = fts_match_query(&request.query);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let exclude_generated_flag = usize::from(request.exclude_generated);
     let sql = reference_rows_sql(&format!(
         "
           AND r.reference_id IN (
@@ -148,7 +155,10 @@ fn search_reference_fts_rows(
                 AND source_scope = ?
                 AND document_kind = 'reference'
                 {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
+              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
               LIMIT ?
           )
         "
@@ -203,6 +213,7 @@ fn reference_rows_sql(predicate_sql: &str) -> String {
                      chunk.chunk_id ASC
                    LIMIT 1
                ) AS source_excerpt_line_start
+               , f.is_generated
         FROM code_repository_references r
         INNER JOIN code_repository_files f
             ON f.source_scope = r.source_scope AND f.path = r.path
@@ -211,7 +222,7 @@ fn reference_rows_sql(predicate_sql: &str) -> String {
            AND s.symbol_snapshot_id = r.target_symbol_snapshot_id
         WHERE r.source_scope = ?
           {predicate_sql}
-        ORDER BY r.path ASC, r.line_start ASC
+        ORDER BY f.is_generated ASC, r.path ASC, r.line_start ASC
         LIMIT ?
         "
     )
@@ -240,6 +251,7 @@ fn row_to_reference(row: &Row<'_>) -> rusqlite::Result<ReferenceRow> {
         target_canonical_symbol_id: row.get(14)?,
         source_excerpt: row.get(15)?,
         source_excerpt_line_start: row.get(16)?,
+        is_generated: row.get::<_, i64>(17)? != 0,
     })
 }
 
@@ -252,7 +264,15 @@ fn reference_rows_to_hits(
     let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
 
     rows.into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
+        .filter(|row| {
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            )
+        })
         .filter_map(|row| {
             let base_score = score_query.score([
                 row.name.as_str(),
@@ -310,6 +330,7 @@ fn reference_rows_to_hits(
                             &row.kind,
                             &row.name,
                         ),
+                        is_generated: row.is_generated,
                         degraded_reason: None,
                         edge_kind: Some(row.kind),
                         edge_resolution_state: Some(row.resolution_state),

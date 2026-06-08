@@ -221,7 +221,7 @@ pub(super) fn repo_update() -> CliCommandSpec {
 pub(super) fn repo_query() -> CliCommandSpec {
     command!(
         &["repo", "query"],
-        "relay-knowledge repo query <alias> --query <text> [--kind <kind>] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]",
+        "relay-knowledge repo query <alias> --query <text> [--kind <kind>] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--exclude-generated] [--limit <n>]",
         "Retrieve code symbols, references, and chunks from a repository index.",
         "code.repo.query",
         CommandEffect::ReadOnly,
@@ -306,9 +306,21 @@ pub(super) fn repo_query() -> CliCommandSpec {
                 Some("10"),
                 &[],
             ),
+            opt(
+                "--exclude-generated",
+                None,
+                false,
+                false,
+                "Exclude generated files from query results.",
+                None,
+                &[],
+            ),
         ],
         &["relay-knowledge repo query core --query retry_policy --kind definition --format json"],
-        &["The meaning of --kind is command-local; do not reuse index or worker kind values here."],
+        &[
+            "The meaning of --kind is command-local; do not reuse index or worker kind values here.",
+            "Generated files remain indexed for freshness and statistics; --exclude-generated only filters retrieval results.",
+        ],
     )
 }
 

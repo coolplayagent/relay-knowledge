@@ -16,6 +16,7 @@
 relay-knowledge repo register /path/to/relay-knowledge --path src
 relay-knowledge repo index relay-knowledge --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo status relay-knowledge --format json
@@ -23,9 +24,11 @@ relay-knowledge repo status relay-knowledge --format json
 
 省略 `--alias` 或传入空 alias 时，注册会使用解析后的 Git root 或 filesystem root 目录名作为稳定仓库 alias。agent 首次注册项目时应优先使用这个默认值，让后续 session 复用同一索引；`--alias` 仍可作为显式覆盖。
 
-`repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language` 和 freshness policy。`repo register` 会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
+`repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language`、`--exclude-generated` 和 freshness policy。`repo register` 会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
 `definition`、`references` 和 `hybrid` 查询会先使用已索引代码图与 SQLite FTS；当这些层存在明确召回缺口时，才在已索引 commit 的候选文件上执行有界内部 exact-text source fallback。兜底结果以 `lexical` 和 `text_fallback` layer 暴露，不能替代 resolved reference/call/import edge。
+
+protobuf stub、swagger/OpenAPI client、minified bundle、仓库根层 `build/`/`dist/` output 和 `target/generated/` output 等生成文件仍会被索引，以保留图完整性。索引会通过路径和文件头信号记录 generated-file metadata，report totals 会拆分手写与生成 symbol 数量，默认检索会降低生成文件命中的排序分；`--exclude-generated` 会从结构化检索和有界 source fallback 结果中排除生成文件。
 
 冷启动 full `repo index` 会返回 queued task handle，由后台 code-index worker 在 lease 下执行解析和 SQLite 写入。`service run` 会在启动时恢复过期 code-index lease，`repo index <alias> --reset` 可以把未完成 task 重新排队，且不删除已完成 indexed scope，也不复活 terminal dead-letter 历史。`repo status` 暴露 active task、checkpoint 进度、finalization 阶段和 retention 摘要；worker 成功后会保留 active scope、最近两个完成 scope 和未完成任务 scope。如果任务已经不再 active 但仓库仍处于 `indexing`，status 会报告最近 checkpoint，便于区分 finalization 慢和进度缺失。
 

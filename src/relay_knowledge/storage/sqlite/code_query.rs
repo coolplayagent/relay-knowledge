@@ -1,5 +1,4 @@
-use rusqlite::types::Value;
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, params_from_iter, types::Value};
 
 #[path = "code_query_ambiguous_callees.rs"]
 mod code_query_ambiguous_callees;
@@ -134,9 +133,9 @@ use code_query_symbols::{
     hybrid_symbol_query_can_answer_without_non_symbol_layers, search_symbols,
 };
 
-const STRICT_HYBRID_CHUNK_LIMIT_MULTIPLIER: usize = 6;
-const STRICT_HYBRID_CHUNK_MIN_CANDIDATES: usize = 40;
-const STRICT_HYBRID_CHUNK_MAX_CANDIDATES: usize = 120;
+const STRICT_CHUNK_LIMIT_MULTIPLIER: usize = 6;
+const STRICT_CHUNK_MIN_CANDIDATES: usize = 40;
+const STRICT_CHUNK_MAX_CANDIDATES: usize = 120;
 
 pub(super) fn search_code(
     connection: &mut Connection,
@@ -725,12 +724,13 @@ fn search_chunks_with_fts_query(
     let query_language_filters = query_language_scoped_workflow_language_filters(request);
     let fts_filter =
         chunk_fts_path_and_language_filter_sql(status, request, &query_language_filters);
+    let exclude_generated_flag = usize::from(request.exclude_generated);
     let sql = format!(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
                symbol.canonical_symbol_id, symbol.name, symbol.qualified_name,
-               f.parse_status, f.degraded_reason
+               f.parse_status, f.degraded_reason, f.is_generated
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
@@ -745,7 +745,10 @@ fn search_chunks_with_fts_query(
                 AND source_scope = ?
                 AND document_kind = 'chunk'
                 {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
+              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
               LIMIT ?
           )
         ORDER BY c.path ASC, c.line_start ASC
@@ -783,6 +786,7 @@ fn search_chunks_with_fts_query(
                 symbol_qualified_name: row.get(11)?,
                 parse_status: row.get(12)?,
                 degraded_reason: row.get(13)?,
+                is_generated: row.get::<_, i64>(14)? != 0,
             })
         },
     )?;
@@ -792,7 +796,13 @@ fn search_chunks_with_fts_query(
     let mut hits = Vec::new();
     for row in rows {
         let row = row.map_err(StorageError::from)?;
-        if !selected_row(&row.path, &row.language_id, status, request) {
+        if !selected_row(
+            &row.path,
+            &row.language_id,
+            row.is_generated,
+            status,
+            request,
+        ) {
             continue;
         }
         let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
@@ -878,6 +888,7 @@ fn search_chunks_with_fts_query(
                 retrieval_layers: chunk_layers_for_request(request, &row.parse_status),
                 score,
                 excerpt: row.content,
+                is_generated: row.is_generated,
                 degraded_reason: row.degraded_reason,
                 edge_kind: None,
                 edge_resolution_state: None,
@@ -961,14 +972,11 @@ fn chunk_fts_values_for_limited_with_language(
 }
 
 fn strict_hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
-    request
+    let requested = request
         .limit
         .max(1)
-        .saturating_mul(STRICT_HYBRID_CHUNK_LIMIT_MULTIPLIER)
-        .clamp(
-            STRICT_HYBRID_CHUNK_MIN_CANDIDATES,
-            STRICT_HYBRID_CHUNK_MAX_CANDIDATES,
-        )
+        .saturating_mul(STRICT_CHUNK_LIMIT_MULTIPLIER);
+    requested.clamp(STRICT_CHUNK_MIN_CANDIDATES, STRICT_CHUNK_MAX_CANDIDATES)
 }
 
 fn chunk_layers_for_request(

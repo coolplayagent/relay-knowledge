@@ -262,6 +262,7 @@ fn normalize_query_request(request: &mut CodeRetrievalRequest) -> Option<ApiErro
     if let Some(error) = normalize_selector(&mut request.repository) {
         return Some(error);
     }
+    let exclude_generated = request.exclude_generated;
     match CodeRetrievalRequest::new(
         std::mem::take(&mut request.query),
         request.repository.clone(),
@@ -269,7 +270,8 @@ fn normalize_query_request(request: &mut CodeRetrievalRequest) -> Option<ApiErro
         request.limit,
         request.freshness_policy,
     ) {
-        Ok(validated) => {
+        Ok(mut validated) => {
+            validated.exclude_generated = exclude_generated;
             *request = validated;
             None
         }

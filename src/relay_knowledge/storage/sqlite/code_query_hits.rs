@@ -79,9 +79,13 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
 pub(super) fn selected_row(
     path: &str,
     language_id: &str,
+    is_generated: bool,
     status: &CodeRepositoryStatus,
     request: &crate::domain::CodeRetrievalRequest,
 ) -> bool {
+    if request.exclude_generated && is_generated {
+        return false;
+    }
     path_filter_allows(path, &status.path_filters)
         && path_filter_allows(path, &request.repository.path_filters)
         && language_filter_allows_path(path, language_id, &status.language_filters)
@@ -108,6 +112,7 @@ pub(super) struct HitParts {
     pub(super) retrieval_layers: Vec<CodeRetrievalLayer>,
     pub(super) score: f64,
     pub(super) excerpt: String,
+    pub(super) is_generated: bool,
     pub(super) degraded_reason: Option<String>,
     pub(super) edge_kind: Option<String>,
     pub(super) edge_resolution_state: Option<String>,
@@ -150,8 +155,18 @@ pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> 
         edge_target_hint: parts.edge_target_hint,
         edge_confidence_basis_points: parts.edge_confidence_basis_points,
         edge_confidence_tier: parts.edge_confidence_tier,
-        score: parts.score,
+        score: generated_adjusted_score(parts.score, parts.is_generated),
         excerpt: parts.excerpt,
+    }
+}
+
+fn generated_adjusted_score(score: f64, is_generated: bool) -> f64 {
+    const GENERATED_FILE_SCORE_MULTIPLIER: f64 = 0.35;
+
+    if is_generated {
+        score * GENERATED_FILE_SCORE_MULTIPLIER
+    } else {
+        score
     }
 }
 

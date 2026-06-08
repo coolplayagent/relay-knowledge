@@ -280,6 +280,81 @@ async fn callers_preserve_cross_file_indirect_bindings_with_receiver_context() {
 }
 
 #[tokio::test]
+async fn callers_exclude_generated_indirect_binding_evidence() {
+    let binding_path = "generated/ops.c";
+    let caller_path = "src/driver.c";
+
+    let mut caller_symbol = symbol("driver-read-symbol", "driver-file", caller_path, "rk_read");
+    caller_symbol.line_range = range(30, 34);
+    caller_symbol.signature = "int rk_read(struct rk_driver_ops *ops)".to_owned();
+
+    let mut indirect_call = call("driver-read-call", "driver-file", caller_path);
+    indirect_call.caller_symbol_snapshot_id = Some("driver-read-symbol".to_owned());
+    indirect_call.caller_name = Some("rk_read".to_owned());
+    indirect_call.callee_name = "read".to_owned();
+    indirect_call.line_range = range(32, 32);
+
+    let mut generated_file = file("ops-file", binding_path, "c");
+    generated_file.is_generated = true;
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![generated_file, file("driver-file", caller_path, "c")],
+        symbols: vec![caller_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![indirect_call],
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "ops-init-chunk",
+                "ops-file",
+                binding_path,
+                "static const struct rk_driver_ops rk_driver_ops = {\n\
+    .read = rk_driver_read,\n\
+};",
+                None,
+                range(10, 14),
+            ),
+            chunk(
+                "driver-read-chunk",
+                "driver-file",
+                caller_path,
+                "int rk_read(struct rk_driver_ops *ops)\n\
+{\n\
+    return ops->read(ops);\n\
+}",
+                Some("driver-read-symbol"),
+                range(30, 34),
+            ),
+        ],
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let mut request = request("rk_driver_read", CodeQueryKind::Callers);
+    request.exclude_generated = true;
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("indirect caller query should ignore generated binding evidence");
+
+    assert!(hits.iter().all(|hit| hit.path != caller_path), "{hits:?}");
+}
+
+#[tokio::test]
 async fn indirect_callers_ignore_same_field_calls_in_other_files() {
     let binding_path = "src/generated_table.c";
     let unrelated_path = "src/unrelated_device.c";
@@ -397,6 +472,7 @@ fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecor
         byte_len: 0,
         line_count: 80,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

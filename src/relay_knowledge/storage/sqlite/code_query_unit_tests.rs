@@ -750,6 +750,7 @@ fn code_query_file(file_id: &str, path: &str, language_id: &str) -> RepositoryCo
         byte_len: 0,
         line_count: 1,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

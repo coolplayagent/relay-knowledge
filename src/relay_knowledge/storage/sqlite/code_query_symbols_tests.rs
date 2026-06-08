@@ -216,6 +216,7 @@ fn symbol_row(name: &str, qualified_name: &str, kind: &str, signature: &str) -> 
         file_id: "file".to_owned(),
         path: "src/service.rs".to_owned(),
         language_id: "rust".to_owned(),
+        is_generated: false,
         signature: signature.to_owned(),
         doc_comment: None,
         byte_range: RepositoryCodeRange { start: 0, end: 0 },

@@ -632,6 +632,7 @@ fn parser_panics_are_recorded_as_failed_file_diagnostics() {
             blob_hash: "hash",
             byte_len: content.len(),
             line_count: 1,
+            is_generated: false,
             content,
         },
     )

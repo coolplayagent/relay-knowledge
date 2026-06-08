@@ -55,6 +55,7 @@ fn snapshot_with_feature_flags() -> CodeIndexSnapshot {
             byte_len: content.len(),
             line_count: 2,
             parse_status: CodeParseStatus::Parsed,
+            is_generated: false,
             degraded_reason: None,
         }],
         symbols: Vec::new(),

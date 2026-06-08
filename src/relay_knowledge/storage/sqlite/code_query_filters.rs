@@ -23,6 +23,18 @@ pub(in crate::storage::sqlite::code::code_query) fn fts_path_and_language_filter
         "path",
         &request.repository.language_filters,
     );
+    if request.exclude_generated {
+        clauses.push(
+            "NOT EXISTS (
+                SELECT 1
+                FROM code_repository_files generated_file
+                WHERE generated_file.source_scope = code_repository_search.source_scope
+                  AND generated_file.path = code_repository_search.path
+                  AND generated_file.is_generated != 0
+            )"
+            .to_owned(),
+        );
+    }
     if clauses.is_empty() {
         String::new()
     } else {

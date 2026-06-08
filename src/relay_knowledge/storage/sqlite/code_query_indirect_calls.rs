@@ -66,12 +66,18 @@ pub(super) fn search_indirect_call_identity_rows(
     let path_filter = path_filter_sql_for_column("c.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
+    let generated_filter = if request.exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
     let placeholders = placeholders(field_names.len());
     let sql = call_rows_sql(&format!(
         "
           AND c.callee_name IN ({placeholders})
           {path_filter}
           {language_filter}
+          {generated_filter}
         "
     ));
     let direct_limit = call_identity_candidate_limit(request);
@@ -116,6 +122,11 @@ fn search_indirect_call_bindings(
     target_name: &str,
 ) -> Result<IndirectCallBindings, StorageError> {
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let generated_filter = if request.exclude_generated {
+        "AND NOT EXISTS (SELECT 1 FROM code_repository_files file WHERE file.source_scope = code_repository_search.source_scope AND file.path = code_repository_search.path AND file.is_generated != 0)"
+    } else {
+        ""
+    };
     let sql = format!(
         "
         SELECT path, content
@@ -124,6 +135,7 @@ fn search_indirect_call_bindings(
           AND source_scope = ?
           AND document_kind = 'chunk'
           {fts_filter}
+          {generated_filter}
         ORDER BY bm25(code_repository_search) ASC, record_id ASC
         LIMIT ?
         "

@@ -643,6 +643,7 @@ fn non_git_source_fallback_reads_filesystem_snapshot_paths() {
             language_filters: Vec::new(),
             limit: 5,
             kind: SourceGrepKind::Definition,
+            exclude_generated: false,
         },
     )
     .expect("source fallback should read filesystem source");
@@ -820,6 +821,7 @@ fn scope_preview_reports_file_preset_exclusions_and_tracked_directories() {
     let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
 
     assert_eq!(preview.selected_file_count, 6);
+    assert_eq!(preview.generated_or_heavy_file_count, 2);
     assert!(
         preview
             .language_distribution

@@ -1,6 +1,9 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
-use crate::domain::{CodeRepositoryRegistration, RepositoryCodeRange};
+use crate::{
+    code::generated_detection,
+    domain::{CodeRepositoryRegistration, RepositoryCodeRange},
+};
 
 use super::{
     CodeIndexError, scope,
@@ -14,6 +17,7 @@ pub(crate) struct SourceDeclarationMatch {
     pub(crate) excerpt: String,
     pub(crate) byte_range: RepositoryCodeRange,
     pub(crate) line_range: RepositoryCodeRange,
+    pub(crate) is_generated: bool,
 }
 
 const MAX_SOURCE_DECLARATION_FILES: usize = 8;
@@ -27,6 +31,7 @@ pub(crate) fn source_declarations_for_identity(
     path_filters: &[String],
     language_filters: &[String],
     identity: &str,
+    exclude_generated: bool,
 ) -> Result<Vec<SourceDeclarationMatch>, CodeIndexError> {
     if !simple_source_identifier(identity) {
         return Ok(Vec::new());
@@ -49,16 +54,22 @@ pub(crate) fn source_declarations_for_identity(
         None
     };
     let mut seen = BTreeSet::new();
+    let mut files_inspected = 0usize;
     let mut files_considered = 0usize;
     let mut matches = Vec::new();
     for path in paths {
-        if files_considered >= MAX_SOURCE_DECLARATION_FILES {
+        if files_inspected >= MAX_SOURCE_DECLARATION_FILES
+            || files_considered >= MAX_SOURCE_DECLARATION_FILES
+        {
             break;
         }
         if !safe_git_blob_path(&path) || !seen.insert(path.clone()) {
             continue;
         }
-        files_considered += 1;
+        if exclude_generated && generated_detection::path_has_generated_signal(&path) {
+            continue;
+        }
+        files_inspected += 1;
         let Ok(bytes) = source_bytes_after_content_verification(
             &root,
             commit,
@@ -70,10 +81,17 @@ pub(crate) fn source_declarations_for_identity(
         if bytes.len() > MAX_SOURCE_DECLARATION_BYTES {
             continue;
         }
+        let is_generated = generated_detection::is_generated_file(&path, &bytes);
+        if exclude_generated && is_generated {
+            continue;
+        }
         let Ok(content) = std::str::from_utf8(&bytes) else {
             continue;
         };
-        if let Some(declaration) = first_source_declaration_match(&path, content, identity)? {
+        files_considered += 1;
+        if let Some(declaration) =
+            first_source_declaration_match(&path, content, identity, is_generated)?
+        {
             matches.push(declaration);
         }
     }
@@ -85,6 +103,7 @@ fn first_source_declaration_match(
     path: &str,
     content: &str,
     identity: &str,
+    is_generated: bool,
 ) -> Result<Option<SourceDeclarationMatch>, CodeIndexError> {
     let mut byte_start = 0usize;
     for (line_index, line) in content.split_inclusive('\n').enumerate() {
@@ -99,6 +118,7 @@ fn first_source_declaration_match(
                     .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
                 line_range: RepositoryCodeRange::new("line_range", line_number, line_number)
                     .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
+                is_generated,
             }));
         }
         byte_start += line.len();

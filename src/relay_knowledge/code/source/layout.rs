@@ -29,6 +29,7 @@ use super::{
     },
     source_roots::{NESTED_SOURCE_MARKERS, STRIPPABLE_SOURCE_ROOTS},
 };
+use crate::code::common::generated_detection;
 
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
 const PREVIEW_MAX_LARGEST_FILES: usize = 10;
@@ -288,11 +289,12 @@ pub fn preview_repository_scope(
         bucket.0 += 1;
         bucket.1 = bucket.1.saturating_add(entry.byte_count);
         let is_unsupported = language == "unknown";
+        let is_generated = generated_detection::path_has_generated_signal(&entry.path);
         let is_heavy = entry.byte_count > DEFAULT_TEXT_FILE_BUDGET_BYTES;
         if is_unsupported {
             unsupported_file_count += 1;
         }
-        if is_heavy {
+        if is_generated || is_heavy {
             generated_or_heavy_file_count += 1;
         }
         if is_unsupported || is_heavy {

@@ -49,6 +49,8 @@ struct CodeQueryArgs {
     language_filters: Vec<String>,
     #[serde(default)]
     freshness: Option<String>,
+    #[serde(default)]
+    exclude_generated: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +114,8 @@ struct CodeRepositorySetQueryArgs {
     language_filters: Vec<String>,
     #[serde(default)]
     freshness: Option<String>,
+    #[serde(default)]
+    exclude_generated: Option<bool>,
 }
 
 pub(super) async fn run_code_tool(
@@ -243,7 +247,7 @@ async fn code_repository_set_query_tool(
         Ok(freshness) => freshness,
         Err(error) => return tool_error_result(error),
     };
-    let request = match CodeRepositorySetQueryRequest::new(
+    let mut request = match CodeRepositorySetQueryRequest::new(
         repository_set,
         args.query,
         kind,
@@ -255,6 +259,7 @@ async fn code_repository_set_query_tool(
         Ok(request) => request,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };
+    request.exclude_generated = args.exclude_generated.unwrap_or(false);
 
     match server
         .service
@@ -316,10 +321,12 @@ async fn code_query_tool(server: &McpServer, arguments: Value, request_id: Strin
         Ok(selector) => selector,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };
-    let request = match CodeRetrievalRequest::new(args.query, selector, kind, limit, freshness) {
+    let mut request = match CodeRetrievalRequest::new(args.query, selector, kind, limit, freshness)
+    {
         Ok(request) => request,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };
+    request.exclude_generated = args.exclude_generated.unwrap_or(false);
 
     match server
         .service
@@ -470,6 +477,7 @@ pub(super) fn code_query_tool_definition() -> Value {
                 "ref_selector": {"type": "string"},
                 "path_filters": {"type": "array", "items": {"type": "string"}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
+                "exclude_generated": {"type": "boolean"},
                 "freshness": {
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
@@ -564,6 +572,7 @@ pub(super) fn code_repository_set_query_tool_definition() -> Value {
                 "limit": {"type": "integer", "minimum": 1},
                 "path_filters": {"type": "array", "items": {"type": "string"}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
+                "exclude_generated": {"type": "boolean"},
                 "freshness": {
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
@@ -674,6 +683,12 @@ mod tests {
                     "schema should advertise {alias}"
                 );
             }
+            assert!(
+                definition["inputSchema"]["properties"]
+                    .get("exclude_generated")
+                    .is_some(),
+                "schema should advertise generated-file exclusion"
+            );
         }
     }
 

@@ -886,6 +886,7 @@ fn file_with_language(file_id: &str, path: &str, language_id: &str) -> Repositor
         byte_len: 0,
         line_count: 8,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

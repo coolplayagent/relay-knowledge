@@ -509,6 +509,78 @@ async fn definition_queries_rank_source_implementations_above_header_declaration
     );
 }
 
+#[tokio::test]
+async fn generated_symbols_are_demoted_and_can_be_excluded() {
+    let handwritten_path = "src/recover.rs";
+    let generated_path = "api/recover.pb.go";
+    let mut generated_file = file_with_language("generated-file", generated_path, "go");
+    generated_file.is_generated = true;
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("handwritten-file", handwritten_path), generated_file],
+        symbols: vec![
+            symbol(
+                "handwritten-recover",
+                "handwritten-file",
+                handwritten_path,
+                "function",
+                "fn Recover()",
+                range(8, 8),
+            ),
+            symbol(
+                "generated-recover",
+                "generated-file",
+                generated_path,
+                "function",
+                "func Recover()",
+                range(8, 8),
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("Recover", CodeQueryKind::Symbol))
+        .await
+        .expect("symbol query should succeed");
+    let handwritten_score =
+        score_for_symbol(&hits, "handwritten-recover").expect("handwritten symbol should match");
+    let generated_score =
+        score_for_symbol(&hits, "generated-recover").expect("generated symbol should match");
+    assert!(
+        handwritten_score > generated_score,
+        "handwritten symbol should outrank generated symbol: {handwritten_score} <= {generated_score}",
+    );
+
+    let mut filtered_request = request("Recover", CodeQueryKind::Symbol);
+    filtered_request.exclude_generated = true;
+    let filtered = store
+        .search_code(filtered_request)
+        .await
+        .expect("filtered symbol query should succeed");
+    assert!(filtered.iter().any(|hit| hit.path == handwritten_path));
+    assert!(!filtered.iter().any(|hit| hit.path == generated_path));
+}
+
 fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {
     hits.iter()
         .find(|hit| hit.path == path)
@@ -543,6 +615,7 @@ fn file_with_language(file_id: &str, path: &str, language_id: &str) -> Repositor
         byte_len: 0,
         line_count: 1200,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }
