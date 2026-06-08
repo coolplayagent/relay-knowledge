@@ -5,6 +5,7 @@ use std::{
 
 use crate::domain::{
     CodeIndexSnapshot, CodePathTombstone, CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeWorkspaceDetectionConfig,
 };
 
 use super::{
@@ -25,43 +26,52 @@ use crate::code::{
     },
     snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
     source::{
-        git_tree_hash_with_submodules, gitlink as source_gitlink,
+        RepositorySourceKind, git_tree_hash_with_submodules, gitlink as source_gitlink,
         gitlink::paths as source_gitlink_paths, source_bytes_after_content_verification,
         source_commit_is_filesystem, source_kind,
     },
 };
 
+pub(super) struct IncrementalSnapshotRequest<'a> {
+    pub base_ref: &'a str,
+    pub head_ref: &'a str,
+    pub previous_hashes: &'a BTreeMap<String, String>,
+    pub base_resolved_commit_sha: Option<&'a str>,
+    pub workspace_detection: &'a CodeWorkspaceDetectionConfig,
+}
+
 pub(super) fn build_incremental_snapshot(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
     root: &Path,
-    base_ref: &str,
-    head_ref: &str,
-    previous_hashes: &BTreeMap<String, String>,
-    base_resolved_commit_sha: Option<&str>,
+    request: IncrementalSnapshotRequest<'_>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
-    if source_commit_is_filesystem(base_ref)
-        || source_commit_is_filesystem(head_ref)
-        || base_resolved_commit_sha.is_some_and(source_commit_is_filesystem)
+    if source_commit_is_filesystem(request.base_ref)
+        || source_commit_is_filesystem(request.head_ref)
+        || request
+            .base_resolved_commit_sha
+            .is_some_and(source_commit_is_filesystem)
         || source_kind(root)?.is_filesystem()
     {
         return build_filesystem_delta_snapshot(
             registration,
             selector,
             root,
-            head_ref,
-            previous_hashes,
-            base_resolved_commit_sha,
+            request.head_ref,
+            request.previous_hashes,
+            request.base_resolved_commit_sha,
+            request.workspace_detection,
         );
     }
-    let base_commit = resolve_ref(root, base_ref)?;
-    let commit = resolve_ref(root, head_ref)?;
+    let base_commit = resolve_ref(root, request.base_ref)?;
+    let commit = resolve_ref(root, request.head_ref)?;
     let parent_tree_hash = resolve_tree(root, &commit)?;
-    let changes = diff_changes(root, base_ref, head_ref)?;
+    let changes = diff_changes(root, request.base_ref, request.head_ref)?;
     let entry_scope = tracked_entry_scope_for_selector(registration, selector);
     let base_entries = tracked_entries_with_scope(root, &base_commit, &entry_scope)?;
     let base_source_layout = discover_source_layout(&base_entries);
-    let previous_entries = previous_hashes
+    let previous_entries = request
+        .previous_hashes
         .keys()
         .map(|path| changes::GitTreeEntry {
             path: path.clone(),
@@ -94,12 +104,20 @@ pub(super) fn build_incremental_snapshot(
         0,
     );
     build.base_resolved_commit_sha = Some(base_commit.clone());
+
+    build.detect_and_fill_workspaces(
+        root,
+        RepositorySourceKind::Git,
+        &head_entries,
+        request.workspace_detection,
+    );
+
     let parse_context = ChangedPathParseContext {
         registration,
         selector,
         root,
         base_commit: &base_commit,
-        previous_hashes,
+        previous_hashes: request.previous_hashes,
         source_layout: &source_layout,
         previous_source_layout: &previous_source_layout,
         effective_path_filters: &effective_path_filters,
@@ -152,8 +170,8 @@ pub(super) fn build_incremental_snapshot(
                         source_scope: build.source_scope.clone(),
                         old_path,
                         new_path: Some(new_path.clone()),
-                        base_ref: base_ref.to_owned(),
-                        head_ref: head_ref.to_owned(),
+                        base_ref: request.base_ref.to_owned(),
+                        head_ref: request.head_ref.to_owned(),
                     });
                 }
                 if !parse_expanded_gitlink_paths(
@@ -172,8 +190,8 @@ pub(super) fn build_incremental_snapshot(
                         source_scope: build.source_scope.clone(),
                         old_path,
                         new_path: Some(new_path.clone()),
-                        base_ref: base_ref.to_owned(),
-                        head_ref: head_ref.to_owned(),
+                        base_ref: request.base_ref.to_owned(),
+                        head_ref: request.head_ref.to_owned(),
                     });
                 }
                 if !parse_expanded_gitlink_paths(

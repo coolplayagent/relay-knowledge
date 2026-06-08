@@ -305,6 +305,7 @@ async fn store_with_symbols(
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
             chunks,
+            workspaces: Vec::new(),
             diagnostics: Vec::new(),
         })
         .await

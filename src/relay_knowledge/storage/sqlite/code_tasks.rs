@@ -757,7 +757,7 @@ fn retention_summary(
     for scope in unfinished_task_scopes(connection, repository_id)? {
         retained.insert(scope);
     }
-    for scope in repository_set_member_scopes(connection, repository_id)? {
+    for scope in user_repository_set_member_scopes(connection, repository_id)? {
         retained.insert(scope);
     }
     for scope in extra_retained_scopes {
@@ -772,6 +772,7 @@ fn retention_summary(
     if prune && !prunable.is_empty() {
         let transaction = connection.transaction()?;
         for scope in &prunable {
+            super::code_workspace::clear_workspace_state(&transaction, repository_id, scope)?;
             delete_scope_index(&transaction, scope)?;
             transaction.execute(
                 "DELETE FROM code_repository_scopes WHERE source_scope = ?1",
@@ -854,19 +855,25 @@ fn unfinished_task_scopes(
         .map_err(StorageError::from)
 }
 
-fn repository_set_member_scopes(
+fn user_repository_set_member_scopes(
     connection: &Connection,
     repository_id: &str,
 ) -> Result<Vec<String>, StorageError> {
+    let auto_set_id = super::code_workspace::workspace_set_id(repository_id);
     let mut statement = connection.prepare(
         "
-        SELECT DISTINCT source_scope
-        FROM code_repository_set_members
-        WHERE repository_id = ?1
+        SELECT DISTINCT member.source_scope
+        FROM code_repository_set_members member
+        INNER JOIN code_repository_sets set_record
+           ON set_record.set_id = member.set_id
+        WHERE member.repository_id = ?1
+          AND member.set_id <> ?2
         ORDER BY source_scope ASC
         ",
     )?;
-    let rows = statement.query_map(params![repository_id], |row| row.get::<_, String>(0))?;
+    let rows = statement.query_map(params![repository_id, auto_set_id], |row| {
+        row.get::<_, String>(0)
+    })?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)

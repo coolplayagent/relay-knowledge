@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, path::PathBuf, thread};
 
 use crate::domain::{
-    CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession, CodeRepositoryRegistration,
-    CodeRepositorySelector, code_snapshot_scope_id,
+    CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession, CodeMonorepoWorkspace,
+    CodeRepositoryRegistration, CodeRepositorySelector, CodeWorkspaceDetectionConfig,
+    code_snapshot_scope_id,
 };
 
 use super::{
@@ -10,7 +11,7 @@ use super::{
     changes::GitTreeEntry,
     identity, parse_indexed_file,
     scope::scoped_source_snapshot,
-    snapshot::{SnapshotBuild, SnapshotScopeFilters},
+    snapshot::{SnapshotBuild, SnapshotScopeFilters, detect_workspaces_for_source_snapshot},
     source::{
         RepositorySourceKind, ensure_filesystem_blobs_match_content_hashes,
         ensure_filesystem_paths_match_content_hashes, filesystem_content_hashes_for_paths,
@@ -37,6 +38,7 @@ pub struct CodeIndexPlan {
     source_kind: RepositorySourceKind,
     filesystem_path_hashes: BTreeMap<String, String>,
     paths: Vec<GitTreeEntry>,
+    workspaces: Vec<CodeMonorepoWorkspace>,
     cursor: usize,
     next_batch_index: usize,
     resource_budget: CodeIndexResourceBudget,
@@ -59,6 +61,7 @@ impl CodeIndexPlan {
             skipped_unchanged_count: 0,
             deleted_paths: Vec::new(),
             tombstones: Vec::new(),
+            workspaces: self.workspaces.clone(),
             resource_budget: self.resource_budget,
         }
     }
@@ -260,6 +263,22 @@ pub fn prepare_full_index_plan(
     selector: CodeRepositorySelector,
     resource_budget: CodeIndexResourceBudget,
 ) -> Result<CodeIndexPlan, CodeIndexError> {
+    prepare_full_index_plan_with_workspace_detection(
+        registration,
+        selector,
+        resource_budget,
+        &CodeWorkspaceDetectionConfig::default(),
+    )
+}
+
+/// Prepares a full repository index plan with caller-controlled workspace
+/// detection metadata for finalization.
+pub fn prepare_full_index_plan_with_workspace_detection(
+    registration: CodeRepositoryRegistration,
+    selector: CodeRepositorySelector,
+    resource_budget: CodeIndexResourceBudget,
+    workspace_detection: &CodeWorkspaceDetectionConfig,
+) -> Result<CodeIndexPlan, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let snapshot = scoped_source_snapshot(&registration, &selector, &root, &selector.ref_selector)?;
     let filesystem_path_hashes = filesystem_plan_path_hashes(&snapshot)?;
@@ -268,6 +287,14 @@ pub fn prepare_full_index_plan(
         &snapshot.tree_hash,
         &snapshot.path_filters,
         &snapshot.language_filters,
+    );
+    let workspaces = detect_workspaces_for_source_snapshot(
+        &snapshot.root,
+        snapshot.kind,
+        &snapshot.resolved_commit_sha,
+        &snapshot.entries,
+        &snapshot.path_filters,
+        workspace_detection,
     );
 
     Ok(CodeIndexPlan {
@@ -281,6 +308,7 @@ pub fn prepare_full_index_plan(
         source_kind: snapshot.kind,
         filesystem_path_hashes,
         paths: snapshot.entries,
+        workspaces,
         cursor: 0,
         next_batch_index: 1,
         resource_budget,

@@ -45,6 +45,7 @@ serde = "1"
             CodeIndexRequest {
                 repository: selector("fixture", "software-main"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-ref"),
@@ -99,6 +100,7 @@ serde = "1"
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-fast-first"),
@@ -112,6 +114,7 @@ serde = "1"
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-fast-second"),
@@ -176,6 +179,7 @@ tokio = "1"
             CodeIndexRequest {
                 repository: selector("fixture", &old_commit),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-old"),
@@ -187,6 +191,7 @@ tokio = "1"
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-head"),
@@ -245,6 +250,7 @@ serde = "1"
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-filter"),
@@ -300,6 +306,7 @@ serde = "1"
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-active-old"),
@@ -327,6 +334,7 @@ tokio = "1"
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("queue-software-active-new"),
@@ -384,6 +392,7 @@ async fn software_projection_links_document_topics_config_and_code_files() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-software-doc-config"),
@@ -436,6 +445,7 @@ async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
             CodeIndexRequest {
                 repository: selector("fixture", &old_commit),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-old-topic"),
@@ -464,6 +474,7 @@ async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
             CodeIndexRequest {
                 repository: selector("fixture", "topic"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-new-topic"),

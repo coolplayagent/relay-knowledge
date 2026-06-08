@@ -365,6 +365,23 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         CREATE INDEX IF NOT EXISTS code_repository_set_refresh_tasks_claimable
             ON code_repository_set_refresh_tasks(state, next_retry_at_ms, created_at_ms);
 
+        CREATE TABLE IF NOT EXISTS code_workspace_package_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            set_id TEXT NOT NULL,
+            package_name TEXT NOT NULL,
+            ecosystem TEXT NOT NULL,
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            workspace_format TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            UNIQUE (set_id, package_name, ecosystem)
+        );
+
+        CREATE INDEX IF NOT EXISTS code_workspace_package_mappings_set_package
+            ON code_workspace_package_mappings(set_id, package_name, ecosystem);
+        CREATE INDEX IF NOT EXISTS code_workspace_package_mappings_scope
+            ON code_workspace_package_mappings(source_scope);
+
         CREATE VIRTUAL TABLE IF NOT EXISTS code_repository_search USING fts5(
             source_scope UNINDEXED,
             document_kind UNINDEXED,

@@ -53,6 +53,7 @@ async fn symbol_import_queries_rank_repository_context_before_line_number() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -147,6 +148,7 @@ async fn symbol_import_queries_rank_dense_same_file_alias_usage() {
                 &repeated_provider_shared_usage(16),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -219,6 +221,7 @@ async fn symbol_import_usage_counts_only_the_queried_named_binding() {
                 &repeated_very_common_usage(30),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -274,6 +277,7 @@ async fn path_import_queries_include_resolved_target_symbols_in_excerpt() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -322,6 +326,7 @@ async fn path_import_queries_use_structured_rows_when_fts_is_unavailable() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -398,6 +403,7 @@ async fn path_import_queries_fall_back_to_bounded_structured_rows_when_fts_is_un
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -479,6 +485,7 @@ async fn path_import_queries_rank_public_header_importers_before_implementation_
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -568,6 +575,7 @@ async fn path_import_queries_keep_public_header_importers_first_with_target_symb
                 "void Cache<Key>::Insert(const Key& key) {\n  writer_->Append(std::string(key));\n}",
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -651,6 +659,7 @@ async fn path_import_queries_rank_importer_path_and_target_symbol_usage() {
                 "void bootstrap() {\n  start_runtime();\n}",
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -712,6 +721,7 @@ async fn path_import_queries_demote_test_importers_without_test_intent() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -764,6 +774,7 @@ async fn script_import_queries_match_shellcheck_source_context() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -826,6 +837,7 @@ async fn import_syntax_queries_rank_import_expression_rows_before_static_declara
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;

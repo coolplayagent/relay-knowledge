@@ -84,6 +84,7 @@ pub(super) fn snapshot_with_archive_output_dir_noise() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -172,6 +173,7 @@ pub(super) fn snapshot_with_checkpoint_version_constant_noise() -> CodeIndexSnap
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

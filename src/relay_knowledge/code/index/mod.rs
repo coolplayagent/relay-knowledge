@@ -17,7 +17,7 @@ mod worktree_overlay;
 
 use crate::domain::{
     CodeFileFingerprint, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSnapshot,
-    CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeRepositoryRegistration, CodeRepositorySelector, CodeWorkspaceDetectionConfig,
 };
 
 #[cfg(test)]
@@ -39,8 +39,10 @@ pub(crate) use filesystem_delta::changed_paths_for_filesystem_diff;
 use full_snapshot::build_full_snapshot;
 #[cfg(test)]
 pub(crate) use full_snapshot::mutate_next_filesystem_full_snapshot_read;
-use incremental::build_incremental_snapshot;
-pub use plan::{CodeIndexPlan, prepare_full_index_plan};
+use incremental::{IncrementalSnapshotRequest, build_incremental_snapshot};
+pub use plan::{
+    CodeIndexPlan, prepare_full_index_plan, prepare_full_index_plan_with_workspace_detection,
+};
 use worktree_overlay::build_worktree_overlay_snapshot;
 
 pub(in crate::code) const MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS: usize =
@@ -63,6 +65,24 @@ pub(crate) fn build_index_snapshot_with_base_commit(
     previous_hashes: Vec<CodeFileFingerprint>,
     base_resolved_commit_sha: Option<String>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
+    build_index_snapshot_with_workspace_detection(
+        registration,
+        selector,
+        mode,
+        previous_hashes,
+        base_resolved_commit_sha,
+        &CodeWorkspaceDetectionConfig::default(),
+    )
+}
+
+pub(crate) fn build_index_snapshot_with_workspace_detection(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    mode: CodeIndexMode,
+    previous_hashes: Vec<CodeFileFingerprint>,
+    base_resolved_commit_sha: Option<String>,
+    workspace_detection: &CodeWorkspaceDetectionConfig,
+) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let previous_hashes = previous_hashes
         .into_iter()
@@ -70,15 +90,20 @@ pub(crate) fn build_index_snapshot_with_base_commit(
         .collect::<BTreeMap<_, _>>();
 
     match mode {
-        CodeIndexMode::Full => build_full_snapshot(registration, selector, &root),
+        CodeIndexMode::Full => {
+            build_full_snapshot(registration, selector, &root, workspace_detection)
+        }
         CodeIndexMode::Incremental { base_ref, head_ref } => build_incremental_snapshot(
             registration,
             selector,
             &root,
-            &base_ref,
-            &head_ref,
-            &previous_hashes,
-            base_resolved_commit_sha.as_deref(),
+            IncrementalSnapshotRequest {
+                base_ref: &base_ref,
+                head_ref: &head_ref,
+                previous_hashes: &previous_hashes,
+                base_resolved_commit_sha: base_resolved_commit_sha.as_deref(),
+                workspace_detection,
+            },
         ),
         CodeIndexMode::WorktreeOverlay => build_worktree_overlay_snapshot(
             registration,
@@ -86,6 +111,7 @@ pub(crate) fn build_index_snapshot_with_base_commit(
             &root,
             &previous_hashes,
             base_resolved_commit_sha.as_deref(),
+            workspace_detection,
         ),
     }
 }

@@ -11,6 +11,7 @@ mod records;
 mod recovery;
 mod syntax;
 mod text;
+pub(in crate::code) mod workspace;
 
 pub(in crate::code) use dependencies::{
     dependency_manifest_language_ids, dependency_manifest_overrides_default_exclusion,

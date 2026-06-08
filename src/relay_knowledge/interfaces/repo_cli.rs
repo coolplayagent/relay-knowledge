@@ -172,6 +172,7 @@ pub async fn run_repo(
             let request = CodeIndexRequest {
                 repository: selector.clone(),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             };
             if dry_run {
@@ -235,6 +236,7 @@ pub async fn run_repo(
                     CodeIndexRequest {
                         repository: selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
                         mode: CodeIndexMode::Full,
+                        workspace_detection: Default::default(),
                         freshness_policy: FreshnessPolicy::AllowStale,
                     },
                     context,
@@ -267,6 +269,7 @@ pub async fn run_repo(
                         mode: CodeIndexMode::incremental(base_ref, head_ref).map_err(|error| {
                             CliError::invalid_api_argument(error.to_string(), format)
                         })?,
+                        workspace_detection: Default::default(),
                         freshness_policy: FreshnessPolicy::WaitUntilFresh,
                     },
                     context,

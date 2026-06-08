@@ -38,6 +38,9 @@ mod code_batch;
 #[path = "code_cleanup.rs"]
 mod code_cleanup;
 
+#[path = "code_workspace.rs"]
+mod code_workspace;
+
 #[path = "code_tasks.rs"]
 mod code_tasks;
 
@@ -125,6 +128,10 @@ mod code_metadata_tests;
 mod code_tasks_tests;
 
 #[cfg(test)]
+#[path = "code_tasks_retention_tests.rs"]
+mod code_tasks_retention_tests;
+
+#[cfg(test)]
 #[path = "code_tasks_status_tests.rs"]
 mod code_tasks_status_tests;
 
@@ -147,6 +154,10 @@ mod code_set_tests;
 #[cfg(test)]
 #[path = "code_set_workspace_tests.rs"]
 mod code_set_workspace_tests;
+
+#[cfg(test)]
+#[path = "code_workspace_lookup_tests.rs"]
+mod code_workspace_lookup_tests;
 
 use crate::{
     domain::{
@@ -436,6 +447,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary> {
         self.run(move |connection| code_snapshot::apply_snapshot(connection, snapshot))
+    }
+
+    fn clear_code_workspace_state(
+        &self,
+        repository_id: String,
+        source_scope: String,
+    ) -> StorageFuture<'_, ()> {
+        self.run(move |connection| {
+            code_workspace::clear_auto_workspace_state(connection, &repository_id, &source_scope)
+        })
     }
 
     fn begin_code_index_session(

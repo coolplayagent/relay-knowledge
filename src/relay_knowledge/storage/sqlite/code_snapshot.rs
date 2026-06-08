@@ -455,6 +455,14 @@ pub(super) fn apply_snapshot(
     }
     insert_imports_calls_chunks_diagnostics(&transaction, &snapshot)?;
     update_repository_after_snapshot(&transaction, &snapshot)?;
+    // Resolve workspace-level cross-repo imports when monorepo workspaces
+    // were detected during snapshot build.  No-op when workspaces is empty.
+    super::code_workspace::resolve_workspace_imports(
+        &transaction,
+        &snapshot.workspaces,
+        &snapshot.repository_id,
+        &snapshot.source_scope,
+    )?;
     transaction.commit()?;
 
     let status = super::code_status::repository_status(connection, &snapshot.repository_id)?

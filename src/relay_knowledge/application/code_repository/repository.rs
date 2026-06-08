@@ -9,18 +9,23 @@ use crate::{
         CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
-        REGISTRATION_LANGUAGE_FILTER_ERROR, build_index_snapshot_with_base_commit,
+        REGISTRATION_LANGUAGE_FILTER_ERROR, build_index_snapshot_with_workspace_detection,
         changed_paths_for_diff_with_filters, changed_paths_for_filesystem_diff,
         deleted_symbol_names_for_diff, partition_changed_paths_for_selector,
-        prepare_full_index_plan, preview_repository_scope, register_repository,
+        prepare_full_index_plan_with_workspace_detection, preview_repository_scope,
+        register_repository,
     },
     domain::{
         CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
-        CodeIndexResourceBudget, CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit,
-        CodeRetrievalRequest, FreshnessPolicy, StalenessHint,
+        CodeIndexResourceBudget, CodeRepositorySelector, CodeRepositoryStatus,
+        CodeRetrievalRequest, FreshnessPolicy,
     },
     storage::CodeImpactChanges,
 };
+
+#[path = "repository_staleness.rs"]
+mod repository_staleness;
+pub(super) use repository_staleness::annotate_query_result_staleness;
 
 use crate::application::service::RelayKnowledgeService;
 
@@ -143,6 +148,7 @@ impl RelayKnowledgeService {
                 &store,
                 registration,
                 selector,
+                request.workspace_detection.clone(),
                 CodeIndexResourceBudget::default(),
                 task_lease,
             )
@@ -150,13 +156,15 @@ impl RelayKnowledgeService {
         } else {
             let previous = previous_index_state_for_index(&store, &status, &request).await?;
             let mode = request.mode;
+            let workspace_detection = request.workspace_detection.clone();
             let snapshot = run_blocking_code(move || {
-                build_index_snapshot_with_base_commit(
+                build_index_snapshot_with_workspace_detection(
                     &registration,
                     &selector,
                     mode,
                     previous.fingerprints,
                     previous.base_resolved_commit_sha,
+                    &workspace_detection,
                 )
             })
             .await?;
@@ -205,11 +213,17 @@ impl RelayKnowledgeService {
         store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
         registration: crate::domain::CodeRepositoryRegistration,
         selector: CodeRepositorySelector,
+        workspace_detection: crate::domain::CodeWorkspaceDetectionConfig,
         resource_budget: CodeIndexResourceBudget,
         task_lease: Option<CodeIndexTaskLeaseContext>,
     ) -> Result<crate::domain::CodeIndexSummary, ApiError> {
         let mut plan = run_blocking_code(move || {
-            prepare_full_index_plan(registration, selector, resource_budget)
+            prepare_full_index_plan_with_workspace_detection(
+                registration,
+                selector,
+                resource_budget,
+                &workspace_detection,
+            )
         })
         .await?;
         let session = plan.session();
@@ -278,15 +292,26 @@ impl RelayKnowledgeService {
 
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
+        let workspace_detection = request.workspace_detection.clone();
+        let workspace_detection_json = serde_json::to_string(&workspace_detection)
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let resource_budget = CodeIndexResourceBudget::default();
         let plan = run_blocking_code(move || {
-            prepare_full_index_plan(registration, selector, resource_budget)
+            prepare_full_index_plan_with_workspace_detection(
+                registration,
+                selector,
+                resource_budget,
+                &workspace_detection,
+            )
         })
         .await?;
         let session = plan.session();
         let input_fingerprint = format!(
-            "full:{}:{}:{}",
-            session.repository_id, session.tree_hash, session.source_scope
+            "full:{}:{}:{}:{}",
+            session.repository_id,
+            session.tree_hash,
+            session.source_scope,
+            workspace_detection_json
         );
         if let Some(active_task) = store
             .active_code_index_task(session.repository_id.clone())
@@ -971,28 +996,5 @@ impl RelayKnowledgeService {
             ),
             report,
         })
-    }
-}
-
-pub(super) fn annotate_query_result_staleness(
-    results: &mut [CodeRetrievalHit],
-    freshness: &crate::api::CodeRepositoryFreshnessDiagnostics,
-) {
-    let hint = if freshness.pending.active_matches_request && freshness.direct_source_read_required
-    {
-        StalenessHint::PendingIndex {}
-    } else if freshness.direct_source_read_required {
-        StalenessHint::Stale {}
-    } else {
-        StalenessHint::Fresh
-    };
-    let requires_source_verification = hint.requires_source_verification();
-    for hit in results {
-        if requires_source_verification {
-            hit.stale = true;
-        }
-        if hint.should_replace(hit.staleness_hint.as_ref()) {
-            hit.staleness_hint = Some(hint.clone());
-        }
     }
 }

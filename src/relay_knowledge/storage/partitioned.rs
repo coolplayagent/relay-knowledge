@@ -585,6 +585,27 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         })
     }
 
+    fn clear_code_workspace_state(
+        &self,
+        repository_id: String,
+        source_scope: String,
+    ) -> StorageFuture<'_, ()> {
+        let this = self.clone();
+        Box::pin(async move {
+            if let Some(shard) = this
+                .catalog
+                .existing_repository_store(repository_id.clone())
+                .await?
+            {
+                shard
+                    .clear_code_workspace_state(repository_id.clone(), source_scope.clone())
+                    .await?;
+            }
+            this.control
+                .clear_code_workspace_state(repository_id, source_scope)
+                .await
+        })
+    }
     fn begin_code_index_session(
         &self,
         session: CodeIndexSession,

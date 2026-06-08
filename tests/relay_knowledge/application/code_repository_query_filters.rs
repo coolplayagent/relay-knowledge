@@ -57,6 +57,7 @@ pub fn test_retry_policy() -> u32 {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-filter-narrowing"),
@@ -174,6 +175,7 @@ async fn non_git_language_query_can_narrow_full_filesystem_index() {
             CodeIndexRequest {
                 repository: selector("fixture-fs", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-non-git-language-narrowing"),
@@ -228,6 +230,7 @@ async fn non_git_active_broad_index_allows_narrow_stale_query() {
             CodeIndexRequest {
                 repository: selector("fixture-fs", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-non-git-narrow-stale"),
@@ -249,6 +252,7 @@ async fn non_git_active_broad_index_allows_narrow_stale_query() {
             CodeIndexRequest {
                 repository: selector("fixture-fs", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-non-git-narrow-stale"),
@@ -299,6 +303,7 @@ async fn non_git_incremental_uses_explicit_filesystem_base_scope() {
             CodeIndexRequest {
                 repository: selector("fixture-fs", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-non-git-explicit-base-v1"),
@@ -328,6 +333,7 @@ async fn non_git_incremental_uses_explicit_filesystem_base_scope() {
             CodeIndexRequest {
                 repository: selector("fixture-fs", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-non-git-explicit-base-v2"),
@@ -342,6 +348,7 @@ async fn non_git_incremental_uses_explicit_filesystem_base_scope() {
                 repository: selector("fixture-fs", "HEAD"),
                 mode: CodeIndexMode::incremental(base_commit, "HEAD")
                     .expect("incremental mode should validate"),
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("update-non-git-explicit-base"),
@@ -379,6 +386,7 @@ async fn query_language_filter_includes_dependency_manifests() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-language-sbom"),
@@ -501,6 +509,7 @@ async fn query_configuration_languages_returns_nested_keys() {
             CodeIndexRequest {
                 repository: selector("fixture-config", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-config-languages"),
@@ -590,6 +599,7 @@ pub fn test_retry_policy() -> u32 {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-restricted"),
@@ -684,6 +694,7 @@ async fn assert_language_scoped_sbom(fixture: LanguageScopedSbomFixture<'_>) {
             CodeIndexRequest {
                 repository: selector(fixture.alias, "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context(&format!("index-{}", fixture.repo_name)),

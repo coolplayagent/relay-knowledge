@@ -58,6 +58,7 @@ async fn hybrid_symbols_rank_header_declarations_above_matching_implementations(
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -140,6 +141,7 @@ async fn exact_symbol_queries_rank_type_declaration_above_same_named_constructor
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -222,6 +224,7 @@ async fn hybrid_symbols_rank_typed_function_values_above_broad_method_matches() 
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -292,6 +295,7 @@ async fn scoped_definition_identity_ignores_non_contiguous_path_matches() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -354,6 +358,7 @@ async fn definition_queries_drop_test_symbols_when_production_alternatives_exist
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -416,6 +421,7 @@ async fn definition_path_queries_rank_exact_symbol_path_above_mentions() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -487,6 +493,7 @@ async fn definition_queries_rank_source_implementations_above_header_declaration
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;

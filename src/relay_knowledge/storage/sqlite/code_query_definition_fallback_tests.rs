@@ -112,6 +112,7 @@ fn snapshot_with_contextual_symbol_and_typedef_chunk() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![typedef_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -151,6 +152,7 @@ fn snapshot_with_cpp_header_chunk() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![header_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

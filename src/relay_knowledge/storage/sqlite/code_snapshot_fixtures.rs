@@ -101,6 +101,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_chunk_status(
         dependencies: Vec::new(),
         feature_flags: feature_flags(repository_id, "file", path, "rust", content),
         chunks: vec![chunk("chunk", "file", path, content, None)],
+        workspaces: Vec::new(),
         diagnostics: degraded_reason
             .map(|message| CodeFileDiagnostic {
                 repository_id: repository_id.to_owned(),
@@ -173,6 +174,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_symbol_and_matching_chunk(
             "fn target()",
             Some("target-symbol"),
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -223,6 +225,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_degraded_files(
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics,
     }
 }
@@ -273,6 +276,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_language_edges() -> CodeIn
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -324,6 +328,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_resolved_reference() -> Co
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -388,6 +393,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_duplicate_callee_names() -
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -446,6 +452,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_out_of_scope_seed() -> Cod
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -497,6 +504,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_rust_symbol_importer() -> 
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -535,6 +543,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_deleted_rust_module_import
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -573,6 +582,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_deleted_go_module_importer
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -605,6 +615,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_unresolved_caller() -> Cod
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -670,6 +681,7 @@ pub(in crate::storage::sqlite::code) fn incremental_snapshot_for_parsed_file() -
             "fn kept() -> u32 { 1 }",
             None,
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

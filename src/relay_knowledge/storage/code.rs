@@ -378,6 +378,14 @@ pub trait CodeRepositoryStore: Send + Sync {
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary>;
 
+    fn clear_code_workspace_state(
+        &self,
+        _repository_id: String,
+        _source_scope: String,
+    ) -> StorageFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn begin_code_index_session(
         &self,
         session: CodeIndexSession,

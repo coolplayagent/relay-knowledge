@@ -15,6 +15,8 @@ mod code_repository_set;
 mod code_repository_tests;
 #[path = "code/staleness.rs"]
 mod code_staleness;
+#[path = "code/workspace.rs"]
+mod code_workspace;
 #[path = "core/entity.rs"]
 mod entity;
 #[path = "core/error.rs"]
@@ -68,6 +70,10 @@ pub use code_repository_set::{
     CodeRepositorySetStatus,
 };
 pub use code_staleness::StalenessHint;
+pub use code_workspace::{
+    CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
+    CodeWorkspaceMember, CodeWorkspacePackageMapping,
+};
 pub use entity::KnowledgeEntity;
 pub use error::DomainError;
 pub use graph_version::GraphVersion;

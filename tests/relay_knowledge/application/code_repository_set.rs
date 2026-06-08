@@ -361,6 +361,7 @@ pub fn hidden_target() -> u32 {
             CodeIndexRequest {
                 repository: selector("plain"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-non-git-broad-member"),
@@ -620,6 +621,7 @@ async fn register_with_filters_and_index(
             CodeIndexRequest {
                 repository: selector(alias),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context(&format!("index-{alias}")),
@@ -760,6 +762,7 @@ fn snapshot_for_scope(
             line_range: RepositoryCodeRange { start: 1, end: 1 },
             symbol_snapshot_id: None,
         }],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

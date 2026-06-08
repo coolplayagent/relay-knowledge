@@ -52,6 +52,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     let index_request = CodeIndexRequest {
         repository: selector.clone(),
         mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
     };
 
@@ -68,6 +69,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     let incremental = CodeIndexRequest {
         repository: selector.clone(),
         mode: CodeIndexMode::incremental("HEAD~1", "HEAD").expect("refs should validate"),
+        workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
     };
     let rejected_incremental = request_json(

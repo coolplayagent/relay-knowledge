@@ -304,6 +304,7 @@ fn snapshot(repository_id: &str, source_scope: &str) -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

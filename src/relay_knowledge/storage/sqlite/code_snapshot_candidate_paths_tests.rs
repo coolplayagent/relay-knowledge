@@ -349,6 +349,7 @@ fn snapshot_with_chunk_status(
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![chunk("chunk", "file", path, content, None)],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

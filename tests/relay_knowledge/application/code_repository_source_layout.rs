@@ -47,6 +47,7 @@ async fn default_src_registration_indexes_discovered_external_source_roots() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD", Vec::new()),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index"),

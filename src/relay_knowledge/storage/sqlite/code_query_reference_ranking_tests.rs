@@ -57,6 +57,7 @@ async fn scoped_reference_queries_use_resolved_symbol_identity() {
             "function run() {\n  return RuntimeOwner.TargetThing();\n}",
             range(38, 42),
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -103,6 +104,7 @@ async fn exact_reference_queries_fall_back_to_chunks_when_reference_facts_are_mi
              auto cache = std::make_unique<cache_alias::Cache<std::string>>();",
             range(7, 8),
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -168,6 +170,7 @@ async fn reference_excerpts_prefer_the_reference_line_inside_large_chunks() {
              };",
             range(16, 27),
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -220,6 +223,7 @@ async fn exact_reference_fallback_chunks_rank_usage_context_before_declarations(
                 range(45, 50),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -322,6 +326,7 @@ async fn exact_reference_queries_rank_initializer_usage_before_declarations() {
                 range(16, 20),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -392,6 +397,7 @@ async fn exact_reference_queries_rank_indirect_array_calls_before_array_declarat
                 range(45, 50),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -460,6 +466,7 @@ async fn exact_reference_queries_rank_return_calls_before_assignment_calls() {
                 range(17, 19),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -532,6 +539,7 @@ async fn exact_reference_queries_rank_type_annotations_before_test_constructors(
                 range(32, 32),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -606,6 +614,7 @@ async fn exact_reference_queries_do_not_treat_object_literal_values_as_type_anno
                 range(19, 21),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -716,6 +725,7 @@ async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fi
                 range(64, 66),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -791,6 +801,7 @@ async fn exact_reference_queries_rank_constructor_calls_before_passive_values() 
                 range(19, 21),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
