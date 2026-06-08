@@ -29,7 +29,7 @@ relay-knowledge query "SQLite graph state"   --source docs   --freshness wait-un
 
 ## Degradation and Diagnostics
 
-`degraded_reason` may come from stale indexes, graph-only mode, backend unavailability, parser degradation, or budget exhaustion. Callers read metadata instead of relying only on item counts. The `staleness_hint` field on each retrieval hit provides a structured alternative to the `stale` boolean for inspecting per-result freshness.
+`degraded_reason` may come from stale indexes, graph-only mode, backend unavailability, parser degradation, or budget exhaustion. Callers read metadata instead of relying only on item counts. The `staleness_hint` field on each retrieval hit provides a structured alternative to the `stale` boolean; it distinguishes `fresh`, `pending_index`, and `stale` results so agents can decide when to verify direct source.
 
 ## Related Architecture Chapters
 

@@ -16,7 +16,7 @@ Freshness capability tells users which graph and index versions retrieval result
 - Query, health, and index refresh responses return `index_cursors[*]`.
 - `index_refresh.stale_reasons[*]` explains lag, failure, and last error by index family and scoped cursor.
 - Ingest, query, index refresh, health, service doctor, and service startup share the bounded refresh queue.
-- Each code retrieval hit carries a `staleness_hint` field (`{ "state": "fresh" }` or `{ "state": "stale" }`) alongside the legacy `stale` boolean, so API consumers can inspect per-hit freshness without parsing the boolean separately.
+- Each code retrieval hit carries a `staleness_hint` field alongside the legacy `stale` boolean. Current states are `{ "state": "fresh" }`, `{ "state": "pending_index" }`, and `{ "state": "stale" }`; `pending_index` means a matching refresh task is still queued, running, or retrying, so callers should read direct source before relying on that hit. Per-file timestamp payloads are intentionally omitted until the code graph stores file modification and indexed-at times.
 
 ## Competitive Features
 

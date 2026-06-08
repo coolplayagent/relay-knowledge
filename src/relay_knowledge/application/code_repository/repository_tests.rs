@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -8,14 +9,17 @@ use std::{
 
 use crate::{
     api::{
-        CodeRepositoryFreshnessState, CodeRepositoryRegisterRequest, InterfaceKind, RequestContext,
+        CodeRepositoryFreshnessDiagnostics, CodeRepositoryFreshnessState, CodeRepositoryIndexLag,
+        CodeRepositoryPendingIndexWork, CodeRepositoryRegisterRequest, InterfaceKind,
+        RequestContext,
     },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     code::{reset_tracked_entries_call_count_for_root, tracked_entries_call_count_for_root},
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
-        CodeIndexSession, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
-        FreshnessPolicy,
+        CodeIndexSession, CodeQueryKind, CodeRepositorySelector, CodeRetrievalHit,
+        CodeRetrievalLayer, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeRange,
+        StalenessHint,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{CodeRepositoryStore, SqliteGraphStore},
@@ -204,6 +208,11 @@ async fn allow_stale_query_reports_pending_freshness_and_source_read_requirement
     assert!(query.metadata.stale);
     assert!(query.scope.stale);
     assert_eq!(query.results[0].path, "src/lib.rs");
+    assert!(query.results[0].stale);
+    assert_eq!(
+        query.results[0].staleness_hint,
+        Some(StalenessHint::PendingIndex {})
+    );
     assert_eq!(query.freshness.state, CodeRepositoryFreshnessState::Pending);
     assert!(query.freshness.direct_source_read_required);
     assert_eq!(
@@ -322,6 +331,97 @@ async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
     );
 }
 
+#[test]
+fn active_pending_match_keeps_fresh_hit_when_source_read_is_not_required() {
+    let mut hits = vec![test_hit()];
+    let freshness = freshness_with_active_match(false);
+
+    super::repository::annotate_query_result_staleness(&mut hits, &freshness);
+
+    assert!(!hits[0].stale);
+    assert_eq!(hits[0].staleness_hint, Some(StalenessHint::Fresh));
+}
+
+fn freshness_with_active_match(
+    direct_source_read_required: bool,
+) -> CodeRepositoryFreshnessDiagnostics {
+    CodeRepositoryFreshnessDiagnostics {
+        state: if direct_source_read_required {
+            CodeRepositoryFreshnessState::Pending
+        } else {
+            CodeRepositoryFreshnessState::Fresh
+        },
+        freshness_policy: FreshnessPolicy::AllowStale,
+        graph_version: 1,
+        source_scope: Some("scope".to_owned()),
+        scope_stale: direct_source_read_required,
+        stale_reason: None,
+        degraded_reason: None,
+        index_lag: CodeRepositoryIndexLag {
+            requested_ref: "HEAD".to_owned(),
+            requested_resolved_ref: "commit".to_owned(),
+            served_ref: if direct_source_read_required {
+                "previous".to_owned()
+            } else {
+                "commit".to_owned()
+            },
+            requested_ref_indexed: !direct_source_read_required,
+            pending_file_count: None,
+            pending_task_count: 1,
+        },
+        pending: CodeRepositoryPendingIndexWork {
+            active_for_repository: true,
+            active_matches_request: true,
+            active_task_id: Some("task".to_owned()),
+            active_task_state: Some("running".to_owned()),
+            active_task_source_scope: Some("scope".to_owned()),
+            active_task_ref_selector: Some("HEAD".to_owned()),
+            active_task_resolved_commit_sha: Some("commit".to_owned()),
+            active_task_lease_expires_at_ms: Some(2),
+            queue_depth: 1,
+            queued_task_count: 0,
+            running_task_count: 1,
+            retrying_task_count: 0,
+            dead_letter_task_count: 0,
+            running_lease_count: 1,
+            last_error: None,
+        },
+        cursor: None,
+        direct_source_read_required,
+        direct_source_read_paths: Vec::new(),
+        agent_instructions: Vec::new(),
+    }
+}
+
+fn test_hit() -> CodeRetrievalHit {
+    let range = RepositoryCodeRange { start: 1, end: 2 };
+    CodeRetrievalHit {
+        repository_id: "repo".to_owned(),
+        scope_id: "scope".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path: "src/lib.rs".to_owned(),
+        language_id: "rust".to_owned(),
+        byte_range: range.clone(),
+        line_range: range,
+        symbol_snapshot_id: None,
+        canonical_symbol_id: None,
+        file_id: None,
+        retrieval_layers: vec![CodeRetrievalLayer::Definition],
+        index_versions: vec!["code:scope:tree".to_owned()],
+        stale: false,
+        staleness_hint: None,
+        degraded_reason: None,
+        edge_kind: None,
+        edge_resolution_state: None,
+        edge_target_hint: None,
+        edge_confidence_basis_points: None,
+        edge_confidence_tier: None,
+        score: 1.0,
+        excerpt: "pub fn stable_policy() -> u32 { 1 }".to_owned(),
+    }
+}
+
 #[tokio::test]
 async fn filesystem_impact_reports_deleted_base_paths_from_stored_fingerprints() {
     let source = FixtureSourceDir::create("filesystem-impact-deleted-base-path");
@@ -421,12 +521,24 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
 }
 
 async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKnowledgeService {
+    let runtime_root = std::env::temp_dir().join("relay-knowledge-code-repository-runtime");
+    let home_dir = runtime_root.join("home");
+    let temp_dir = runtime_root.join("tmp");
+    let relay_home = runtime_root.join("relay");
+    for directory in [&home_dir, &temp_dir, &relay_home] {
+        fs::create_dir_all(directory).expect("runtime test directory should be created");
+    }
     let environment = EnvironmentConfig::from_pairs(
-        PlatformKind::Unix,
+        PlatformKind::current(),
         [
-            ("HOME", "/home/alice"),
-            ("TMPDIR", "/tmp"),
-            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            (OsString::from("HOME"), home_dir.into_os_string()),
+            (OsString::from("TEMP"), temp_dir.clone().into_os_string()),
+            (OsString::from("TMP"), temp_dir.clone().into_os_string()),
+            (OsString::from("TMPDIR"), temp_dir.into_os_string()),
+            (
+                OsString::from("RELAY_KNOWLEDGE_HOME"),
+                relay_home.into_os_string(),
+            ),
         ],
     )
     .expect("environment should parse");
