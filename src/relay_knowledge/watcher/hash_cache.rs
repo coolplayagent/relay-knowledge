@@ -8,6 +8,12 @@ pub struct ContentHashCache {
     insertion_order: VecDeque<PathBuf>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentHashObservation {
+    pub changed: bool,
+    pub hash: u64,
+}
+
 impl ContentHashCache {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -17,11 +23,21 @@ impl ContentHashCache {
         }
     }
 
-    pub fn check_and_update(&mut self, path: PathBuf, content: &[u8]) -> bool {
+    pub fn check_and_update(&mut self, path: PathBuf, content: &[u8]) -> ContentHashObservation {
+        self.check_hash_and_update(path, content_hash64(content))
+    }
+
+    pub fn check_hash_and_update(
+        &mut self,
+        path: PathBuf,
+        new_hash: u64,
+    ) -> ContentHashObservation {
         if self.capacity == 0 {
-            return true;
+            return ContentHashObservation {
+                changed: true,
+                hash: new_hash,
+            };
         }
-        let new_hash = fnv_hash64(content);
         let changed = match self.entries.get(&path) {
             Some(&existing) => existing != new_hash,
             None => true,
@@ -35,7 +51,10 @@ impl ContentHashCache {
             }
             self.entries.insert(path, new_hash);
         }
-        changed
+        ContentHashObservation {
+            changed,
+            hash: new_hash,
+        }
     }
 
     pub fn remove(&mut self, path: &PathBuf) {
@@ -69,7 +88,7 @@ impl ContentHashCache {
     }
 }
 
-fn fnv_hash64(bytes: &[u8]) -> u64 {
+pub(super) fn content_hash64(bytes: &[u8]) -> u64 {
     const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
 
@@ -88,21 +107,42 @@ mod tests {
     #[test]
     fn detects_new_file_as_changed() {
         let mut cache = ContentHashCache::new(100);
-        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"hello"));
+        assert!(
+            cache
+                .check_and_update(PathBuf::from("a.rs"), b"hello")
+                .changed
+        );
     }
 
     #[test]
     fn detects_unchanged_file_as_not_changed() {
         let mut cache = ContentHashCache::new(100);
         cache.check_and_update(PathBuf::from("a.rs"), b"hello");
-        assert!(!cache.check_and_update(PathBuf::from("a.rs"), b"hello"));
+        assert!(
+            !cache
+                .check_and_update(PathBuf::from("a.rs"), b"hello")
+                .changed
+        );
     }
 
     #[test]
     fn detects_modified_file_as_changed() {
         let mut cache = ContentHashCache::new(100);
         cache.check_and_update(PathBuf::from("a.rs"), b"hello");
-        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"world"));
+        assert!(
+            cache
+                .check_and_update(PathBuf::from("a.rs"), b"world")
+                .changed
+        );
+    }
+
+    #[test]
+    fn returns_stable_content_hash_for_same_bytes() {
+        let mut cache = ContentHashCache::new(100);
+        let first = cache.check_and_update(PathBuf::from("a.rs"), b"hello");
+        let second = cache.check_and_update(PathBuf::from("a.rs"), b"hello");
+        assert_eq!(first.hash, second.hash);
+        assert!(!second.changed);
     }
 
     #[test]
@@ -137,7 +177,7 @@ mod tests {
         let mut cache = ContentHashCache::new(2);
         cache.check_and_update(PathBuf::from("a.rs"), b"a");
         cache.check_and_update(PathBuf::from("b.rs"), b"b");
-        assert!(!cache.check_and_update(PathBuf::from("a.rs"), b"a"));
+        assert!(!cache.check_and_update(PathBuf::from("a.rs"), b"a").changed);
         assert_eq!(cache.len(), 2);
     }
 
@@ -148,14 +188,16 @@ mod tests {
         cache.check_and_update(PathBuf::from("b.rs"), b"b");
         cache.check_and_update(PathBuf::from("c.rs"), b"c");
         assert_eq!(cache.len(), 2);
-        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"a"));
+        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"a").changed);
         assert_eq!(cache.len(), 2);
     }
 
     #[test]
     fn zero_capacity_tracks_no_entries() {
         let mut cache = ContentHashCache::new(0);
-        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"a"));
+        let observation = cache.check_and_update(PathBuf::from("a.rs"), b"a");
+        assert!(observation.changed);
+        assert_ne!(observation.hash, 0);
         assert!(cache.is_empty());
     }
 }

@@ -55,8 +55,9 @@ relay-knowledge health --format json
 2. **事件去抖**：在可配置的时间窗口内合并快速连续的文件变更事件
 3. **内容哈希过滤**：通过 FNV-1a 内容哈希跳过无实际内容变化的保存操作
 4. **路径过滤**：自动忽略 `.git/`、`target/`、`node_modules/`、`__pycache__/` 等目录和二进制文件
-5. **增量任务生成**：变更文件通过 `build_incremental_task_seed` 生成 `CodeIndexTaskSeed`，payload 是 `WorktreeOverlay` 模式的 `CodeIndexRequest`，进入与 code-index worker、lease、retry 和 dead-letter 共用的持久化队列
-6. **仓库生命周期同步**：服务运行期间注册或删除仓库时，通过 watcher command channel 执行 watch/unwatch；底层监听失败会进入 degraded 诊断，而不是只更新内存列表
+5. **首轮索引保护**：只有已经完成全量索引并拥有 `last_indexed_scope_id` 的仓库才会进入 watcher，避免 worktree overlay 生成不完整的首轮索引
+6. **增量任务生成**：变更文件通过 `build_incremental_task_seed` 生成 `CodeIndexTaskSeed`，payload 是 `WorktreeOverlay` 模式的 `CodeIndexRequest`，进入与 code-index worker、lease、retry 和 dead-letter 共用的持久化队列；overlay 指纹包含变更路径集合和内容代际，后续保存不会被去重到较早的 queued/running 任务中
+7. **仓库生命周期同步**：服务运行期间注册、刷新或删除仓库时，通过 watcher command channel 执行 watch/update/unwatch；底层监听失败会进入 degraded 诊断，而不是只更新内存列表
 
 ### 状态监控
 

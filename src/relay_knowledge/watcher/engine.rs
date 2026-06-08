@@ -17,6 +17,7 @@ use tracing;
 
 use super::{
     ContentHashCache, WatchedRepository, config::WatcherConfig, event_filter::WatcherEventFilter,
+    hash_cache::content_hash64,
 };
 
 const DEBOUNCE_CHANNEL_CAPACITY: usize = 4096;
@@ -185,6 +186,20 @@ struct WatcherLoopContext {
     debounce: Duration,
     max_watch_dirs: usize,
     task_sink: TaskQueueSink,
+}
+
+struct ChangedPathSnapshot {
+    path: PathBuf,
+    content_hash: u64,
+}
+
+enum WatchRegistrationPlan {
+    Add,
+    Replace {
+        index: usize,
+        previous_root: PathBuf,
+        root_changed: bool,
+    },
 }
 
 pub struct FileWatcher {
@@ -453,53 +468,116 @@ async fn watch_repository(
     repo: WatchedRepository,
     max_watch_dirs: usize,
 ) -> bool {
-    {
+    let plan = {
         let state_guard = state.read().await;
-        if state_guard.repositories.iter().any(|watched| {
-            watched.alias == repo.alias
-                || watched.repository_id == repo.repository_id
-                || watched.root == repo.root
+        if let Some(index) = state_guard.repositories.iter().position(|watched| {
+            watched.alias == repo.alias || watched.repository_id == repo.repository_id
         }) {
-            return false;
+            let watched = &state_guard.repositories[index];
+            if watched == &repo {
+                return false;
+            }
+            WatchRegistrationPlan::Replace {
+                index,
+                previous_root: watched.root.clone(),
+                root_changed: watched.root != repo.root,
+            }
+        } else {
+            if state_guard
+                .repositories
+                .iter()
+                .any(|watched| watched.root == repo.root)
+            {
+                return false;
+            }
+            if state_guard.repositories.len() >= max_watch_dirs {
+                drop(state_guard);
+                update_diagnostics_degraded(
+                    diag_tx,
+                    state,
+                    dropped_events,
+                    &format!(
+                        "exceeded max watch directories limit ({max_watch_dirs}); repository '{}' not watched",
+                        repo.alias
+                    ),
+                )
+                .await;
+                return false;
+            }
+            WatchRegistrationPlan::Add
         }
-        if state_guard.repositories.len() >= max_watch_dirs {
-            update_diagnostics_degraded(
-                diag_tx,
-                state,
-                dropped_events,
-                &format!(
-                    "exceeded max watch directories limit ({max_watch_dirs}); repository '{}' not watched",
-                    repo.alias
-                ),
-            )
-            .await;
-            return false;
-        }
-    }
+    };
 
-    match watcher.watch(&repo.root, RecursiveMode::Recursive) {
-        Ok(()) => {
+    match plan {
+        WatchRegistrationPlan::Add => match watcher.watch(&repo.root, RecursiveMode::Recursive) {
+            Ok(()) => {
+                let mut state_guard = state.write().await;
+                state_guard.repositories.push(repo);
+                drop(state_guard);
+                emit_diagnostics(state, diag_tx, dropped_events).await;
+                true
+            }
+            Err(error) => {
+                tracing::warn!(
+                    repository = %repo.alias,
+                    path = %repo.root.display(),
+                    error = %error,
+                    "failed to watch repository directory"
+                );
+                update_diagnostics_degraded(
+                    diag_tx,
+                    state,
+                    dropped_events,
+                    &format!("watch failed for {}: {error}", repo.alias),
+                )
+                .await;
+                false
+            }
+        },
+        WatchRegistrationPlan::Replace {
+            index,
+            previous_root,
+            root_changed,
+        } => {
+            if root_changed {
+                if let Err(error) = watcher.watch(&repo.root, RecursiveMode::Recursive) {
+                    tracing::warn!(
+                        repository = %repo.alias,
+                        path = %repo.root.display(),
+                        error = %error,
+                        "failed to watch replacement repository directory"
+                    );
+                    update_diagnostics_degraded(
+                        diag_tx,
+                        state,
+                        dropped_events,
+                        &format!("watch refresh failed for {}: {error}", repo.alias),
+                    )
+                    .await;
+                    return false;
+                }
+                if let Err(error) = watcher.unwatch(&previous_root) {
+                    tracing::warn!(
+                        repository = %repo.alias,
+                        path = %previous_root.display(),
+                        error = %error,
+                        "failed to unwatch replaced repository directory"
+                    );
+                    update_diagnostics_degraded(
+                        diag_tx,
+                        state,
+                        dropped_events,
+                        &format!("watch refresh cleanup failed for {}: {error}", repo.alias),
+                    )
+                    .await;
+                }
+            }
+
             let mut state_guard = state.write().await;
-            state_guard.repositories.push(repo);
+            state_guard.repositories[index] = repo;
             drop(state_guard);
             emit_diagnostics(state, diag_tx, dropped_events).await;
             true
-        }
-        Err(error) => {
-            tracing::warn!(
-                repository = %repo.alias,
-                path = %repo.root.display(),
-                error = %error,
-                "failed to watch repository directory"
-            );
-            update_diagnostics_degraded(
-                diag_tx,
-                state,
-                dropped_events,
-                &format!("watch failed for {}: {error}", repo.alias),
-            )
-            .await;
-            false
         }
     }
 }
@@ -574,43 +652,39 @@ async fn process_debounced_paths(
     paths: &[PathBuf],
     task_sink: &TaskQueueSink,
 ) {
-    let mut read_results = Vec::with_capacity(paths.len());
+    let mut changed_snapshots = Vec::new();
     for path in paths {
         let read_result = tokio::task::spawn_blocking({
             let path = path.clone();
-            move || std::fs::read(&path)
+            move || std::fs::read(&path).map(|content| content_hash64(&content))
         })
         .await;
-        read_results.push((path.clone(), read_result));
-    }
-
-    let mut really_changed = Vec::new();
-    {
         let mut state_guard = state.write().await;
-        for (path, read_result) in read_results {
-            match read_result {
-                Ok(Ok(content)) => {
-                    if state_guard
-                        .hash_cache
-                        .check_and_update(path.clone(), &content)
-                    {
-                        really_changed.push(path);
-                    } else {
-                        state_guard.events_filtered += 1;
-                    }
+        match read_result {
+            Ok(Ok(content_hash)) => {
+                let observation = state_guard
+                    .hash_cache
+                    .check_hash_and_update(path.clone(), content_hash);
+                if observation.changed {
+                    changed_snapshots.push(ChangedPathSnapshot {
+                        path: path.clone(),
+                        content_hash: observation.hash,
+                    });
+                } else {
+                    state_guard.events_filtered += 1;
                 }
-                Ok(Err(_)) => {
-                    state_guard.hash_cache.remove(&path);
-                    really_changed.push(path);
-                }
-                Err(_) => {
-                    really_changed.push(path);
-                }
+            }
+            Ok(Err(_)) | Err(_) => {
+                state_guard.hash_cache.remove(path);
+                changed_snapshots.push(ChangedPathSnapshot {
+                    path: path.clone(),
+                    content_hash: unreadable_path_fingerprint(path),
+                });
             }
         }
     }
 
-    if !really_changed.is_empty() {
+    if !changed_snapshots.is_empty() {
         let repositories = state.read().await.repositories.clone();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -619,14 +693,24 @@ async fn process_debounced_paths(
         let mut queued_tasks = 0u64;
 
         for repo in &repositories {
-            let repo_paths: Vec<PathBuf> = really_changed
+            let repo_changes = changed_snapshots
                 .iter()
-                .filter(|p| p.starts_with(&repo.root))
-                .cloned()
+                .filter(|change| change.path.starts_with(&repo.root))
+                .collect::<Vec<_>>();
+            let repo_paths: Vec<PathBuf> = repo_changes
+                .iter()
+                .map(|change| change.path.clone())
                 .collect();
-            if let Some(seed) =
-                build_incremental_task_seed(repo, &repo_paths, "HEAD", "", "", now_ms)
-            {
+            let content_fingerprint = changed_content_fingerprint(repo, &repo_changes);
+            if let Some(seed) = build_incremental_task_seed(
+                repo,
+                &repo_paths,
+                "HEAD",
+                "",
+                "",
+                content_fingerprint,
+                now_ms,
+            ) {
                 match task_sink(seed).await {
                     Ok(()) => {
                         queued_tasks += 1;
@@ -759,6 +843,7 @@ pub fn build_incremental_task_seed(
     ref_selector: &str,
     resolved_commit_sha: &str,
     tree_hash: &str,
+    content_fingerprint: u64,
     now_ms: u64,
 ) -> Option<crate::storage::CodeIndexTaskSeed> {
     if changed_paths.is_empty() {
@@ -780,13 +865,13 @@ pub fn build_incremental_task_seed(
         resolved_commit_sha.to_owned()
     };
     let task_tree_hash = if tree_hash.trim().is_empty() {
-        format!("worktree:pending:{path_hash:016x}")
+        format!("worktree:pending:{content_fingerprint:016x}")
     } else {
         tree_hash.to_owned()
     };
 
     let input_fingerprint = format!(
-        "worktree_overlay:{}:{}:{}:{path_hash:016x}",
+        "worktree_overlay:{}:{}:{}:{path_hash:016x}:{content_fingerprint:016x}",
         repository.repository_id, task_tree_hash, repository.source_scope,
     );
 
@@ -807,6 +892,7 @@ pub fn build_incremental_task_seed(
             serde_json::json!({
                 "repository_id": repository.repository_id.clone(),
                 "changed_paths": relative_paths,
+                "content_fingerprint": format!("{content_fingerprint:016x}"),
             }),
         );
     }
@@ -839,6 +925,28 @@ fn changed_path_labels(repository: &WatchedRepository, changed_paths: &[PathBuf]
     labels
 }
 
+fn changed_content_fingerprint(
+    repository: &WatchedRepository,
+    changes: &[&ChangedPathSnapshot],
+) -> u64 {
+    let mut entries = changes
+        .iter()
+        .filter_map(|change| {
+            let relative = change.path.strip_prefix(&repository.root).ok()?;
+            let label = path_label(relative)?;
+            Some((label, change.content_hash))
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries.dedup();
+    stable_content_fingerprint(&entries)
+}
+
+fn unreadable_path_fingerprint(path: &Path) -> u64 {
+    let label = path_label(path).unwrap_or_else(|| "<unreadable>".to_owned());
+    stable_content_fingerprint(&[(label, 0)])
+}
+
 fn path_label(path: &Path) -> Option<String> {
     let value = path
         .to_string_lossy()
@@ -853,6 +961,27 @@ fn stable_path_fingerprint(paths: &[String]) -> u64 {
     let mut hash = FNV_OFFSET_BASIS;
     for path in paths {
         for byte in path.as_bytes().iter().copied().chain([0]) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+    hash
+}
+
+fn stable_content_fingerprint(entries: &[(String, u64)]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for (path, content_hash) in entries {
+        for byte in path
+            .as_bytes()
+            .iter()
+            .copied()
+            .chain([0])
+            .chain(content_hash.to_le_bytes())
+            .chain([0])
+        {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(FNV_PRIME);
         }

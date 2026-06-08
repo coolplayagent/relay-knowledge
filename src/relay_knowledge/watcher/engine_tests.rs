@@ -98,7 +98,7 @@ fn diagnostics_default_is_disabled() {
 #[test]
 fn build_incremental_task_seed_returns_none_for_empty_paths() {
     let repo = test_repo("test");
-    let seed = build_incremental_task_seed(&repo, &[], "HEAD", "abc123", "tree1", 1000);
+    let seed = build_incremental_task_seed(&repo, &[], "HEAD", "abc123", "tree1", 0xabc, 1000);
     assert!(seed.is_none());
 }
 
@@ -106,7 +106,7 @@ fn build_incremental_task_seed_returns_none_for_empty_paths() {
 fn build_incremental_task_seed_returns_valid_overlay_seed() {
     let repo = test_repo("test");
     let paths = vec![PathBuf::from("/tmp/test-watcher/src/main.rs")];
-    let seed = build_incremental_task_seed(&repo, &paths, "HEAD", "sha123", "tree456", 1000)
+    let seed = build_incremental_task_seed(&repo, &paths, "HEAD", "sha123", "tree456", 0xabc, 1000)
         .expect("should return seed");
     assert_eq!(seed.repository_id, "repo-test");
     assert_eq!(seed.alias, "test");
@@ -121,7 +121,7 @@ fn build_incremental_task_seed_returns_valid_overlay_seed() {
 fn build_incremental_task_seed_payload_is_code_index_request() {
     let repo = test_repo("payload");
     let paths = vec![PathBuf::from("/tmp/test-watcher/x.rs")];
-    let seed = build_incremental_task_seed(&repo, &paths, "HEAD", "", "", 0).unwrap();
+    let seed = build_incremental_task_seed(&repo, &paths, "HEAD", "", "", 0xabc, 0).unwrap();
     let request: crate::domain::CodeIndexRequest =
         serde_json::from_str(&seed.payload_json).expect("payload should be CodeIndexRequest");
     assert_eq!(request.repository.repository, "payload");
@@ -134,9 +134,22 @@ fn build_incremental_task_seed_fingerprint_includes_path_set() {
     let repo = test_repo("fp");
     let paths1 = vec![PathBuf::from("/tmp/test-watcher/a.rs")];
     let paths2 = vec![PathBuf::from("/tmp/test-watcher/b.rs")];
-    let seed1 = build_incremental_task_seed(&repo, &paths1, "HEAD", "sha", "tree", 0).unwrap();
-    let seed2 = build_incremental_task_seed(&repo, &paths2, "HEAD", "sha", "tree", 0).unwrap();
+    let seed1 =
+        build_incremental_task_seed(&repo, &paths1, "HEAD", "sha", "tree", 0xabc, 0).unwrap();
+    let seed2 =
+        build_incremental_task_seed(&repo, &paths2, "HEAD", "sha", "tree", 0xabc, 0).unwrap();
     assert_ne!(seed1.input_fingerprint, seed2.input_fingerprint);
+}
+
+#[test]
+fn build_incremental_task_seed_fingerprint_includes_content_generation() {
+    let repo = test_repo("content-fp");
+    let paths = vec![PathBuf::from("/tmp/test-watcher/a.rs")];
+    let seed1 = build_incremental_task_seed(&repo, &paths, "HEAD", "sha", "", 0xabc, 0).unwrap();
+    let seed2 = build_incremental_task_seed(&repo, &paths, "HEAD", "sha", "", 0xdef, 0).unwrap();
+    assert_ne!(seed1.tree_hash, seed2.tree_hash);
+    assert_ne!(seed1.input_fingerprint, seed2.input_fingerprint);
+    assert!(seed1.payload_json.contains("\"content_fingerprint\""));
 }
 
 #[test]
@@ -198,6 +211,67 @@ async fn active_handle_watches_and_unwatches_dynamic_repository() {
 }
 
 #[tokio::test]
+async fn active_handle_refreshes_existing_repository_registration() {
+    let root = temp_dir("refresh");
+    let repo = WatchedRepository {
+        root: root.clone(),
+        path_filters: vec!["src".to_owned()],
+        source_scope: "scope-old".to_owned(),
+        ..test_repo("refresh")
+    };
+    let handle = FileWatcher::new(test_config())
+        .start(vec![])
+        .expect("handle");
+
+    assert!(handle.add_repository(repo).await);
+    let refreshed = WatchedRepository {
+        root,
+        path_filters: vec!["crates".to_owned()],
+        source_scope: "scope-new".to_owned(),
+        ..test_repo("refresh")
+    };
+    assert!(handle.add_repository(refreshed).await);
+
+    let state = handle.state.read().await;
+    assert_eq!(state.repositories.len(), 1);
+    assert_eq!(state.repositories[0].path_filters, vec!["crates"]);
+    assert_eq!(state.repositories[0].source_scope, "scope-new");
+    drop(state);
+    handle.request_shutdown();
+}
+
+#[tokio::test]
+async fn active_handle_refreshes_repository_root() {
+    let old_root = temp_dir("refresh-root-old");
+    let new_root = temp_dir("refresh-root-new");
+    let repo = WatchedRepository {
+        root: old_root,
+        ..test_repo("refresh-root")
+    };
+    let handle = FileWatcher::new(test_config())
+        .start(vec![])
+        .expect("handle");
+
+    assert!(handle.add_repository(repo).await);
+    assert!(
+        handle
+            .add_repository(WatchedRepository {
+                root: new_root.clone(),
+                source_scope: "scope-refresh-root-new".to_owned(),
+                ..test_repo("refresh-root")
+            })
+            .await
+    );
+
+    let state = handle.state.read().await;
+    assert_eq!(state.repositories.len(), 1);
+    assert_eq!(state.repositories[0].root, new_root);
+    assert_eq!(state.repositories[0].source_scope, "scope-refresh-root-new");
+    drop(state);
+    handle.request_shutdown();
+}
+
+#[tokio::test]
 async fn process_debounced_paths_queues_one_task_per_repository() {
     let root = temp_dir("queue");
     let src = root.join("src");
@@ -233,6 +307,52 @@ async fn process_debounced_paths_queues_one_task_per_repository() {
     assert_eq!(queued.lock().await.len(), 1);
     assert_eq!(state.read().await.index_tasks_queued, 1);
     assert_eq!(diag_rx.borrow().total_index_tasks_queued, 1);
+}
+
+#[tokio::test]
+async fn process_debounced_paths_uses_content_generation_in_task_fingerprint() {
+    let root = temp_dir("content-generation");
+    let changed = root.join("main.rs");
+    fs::write(&changed, "fn main() {}\n").expect("changed file");
+    let state = Arc::new(RwLock::new(WatcherInternalState {
+        repositories: vec![WatchedRepository {
+            root,
+            ..test_repo("content-generation")
+        }],
+        hash_cache: ContentHashCache::new(1024),
+        events_received: 0,
+        events_filtered: 0,
+        index_tasks_queued: 0,
+    }));
+    let (diag_tx, _) = watch::channel(WatcherDiagnostics::default());
+    let dropped_events = Arc::new(AtomicU64::new(0));
+    let queued = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let sink: TaskQueueSink = {
+        let queued = Arc::clone(&queued);
+        Arc::new(move |seed| {
+            let queued = Arc::clone(&queued);
+            Box::pin(async move {
+                queued.lock().await.push(seed);
+                Ok(())
+            })
+        })
+    };
+
+    process_debounced_paths(
+        &state,
+        &diag_tx,
+        &dropped_events,
+        std::slice::from_ref(&changed),
+        &sink,
+    )
+    .await;
+    fs::write(&changed, "fn main() { println!(\"changed\"); }\n").expect("changed file");
+    process_debounced_paths(&state, &diag_tx, &dropped_events, &[changed], &sink).await;
+
+    let queued = queued.lock().await;
+    assert_eq!(queued.len(), 2);
+    assert_ne!(queued[0].tree_hash, queued[1].tree_hash);
+    assert_ne!(queued[0].input_fingerprint, queued[1].input_fingerprint);
 }
 
 #[tokio::test]

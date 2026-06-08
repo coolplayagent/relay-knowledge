@@ -53,8 +53,9 @@ The resident service detects source code file changes for registered repositorie
 2. **Debounce**: Rapid consecutive file change events are merged within a configurable time window
 3. **Content hash filtering**: FNV-1a content hash skips save operations with no actual content change
 4. **Path filtering**: Automatically ignores `.git/`, `target/`, `node_modules/`, `__pycache__/` directories and binary files
-5. **Incremental task generation**: Changed files produce `CodeIndexTaskSeed` records with `CodeIndexRequest` payloads in `WorktreeOverlay` mode, entering the same durable queue used by code-index workers, leases, retries, and dead-letter handling
-6. **Repository lifecycle sync**: Repositories registered or removed while the service is running are watched or unwatched through the watcher command channel; watch failures degrade diagnostics instead of silently mutating only in-memory state
+5. **Initial-index guard**: Repositories are watched only after a completed full index provides `last_indexed_scope_id`, so worktree overlays never create a partial first index
+6. **Incremental task generation**: Changed files produce `CodeIndexTaskSeed` records with `CodeIndexRequest` payloads in `WorktreeOverlay` mode, entering the same durable queue used by code-index workers, leases, retries, and dead-letter handling; overlay fingerprints include the changed-path set and content generation so a later save cannot be deduplicated into an older queued or running task
+7. **Repository lifecycle sync**: Repositories registered, refreshed, or removed while the service is running are watched, updated, or unwatched through the watcher command channel; watch failures degrade diagnostics instead of silently mutating only in-memory state
 
 ### Status Monitoring
 
