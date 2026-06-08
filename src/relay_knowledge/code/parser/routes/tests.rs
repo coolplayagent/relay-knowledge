@@ -509,6 +509,36 @@ fn detects_multiline_express_route_registration() {
 }
 
 #[test]
+fn detects_express_router_mount_prefix() {
+    let source = "app.use('/api', router);\nrouter.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn detects_express_member_expression_handler_leaf() {
+    let source = "router.get('/users', userController.listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn detects_express_route_chains() {
+    let source = "router.route('/users').get(listUsers).post(createUser);\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| {
+        route.url == "/users" && route.http_method == "get" && route.handler_name == "listUsers"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/users" && route.http_method == "post" && route.handler_name == "createUser"
+    }));
+}
+
+#[test]
 fn detects_spring_methodless_request_mapping_as_any_method() {
     let source = "@RequestMapping(\"/status\")\npublic String status() {\n";
     let routes = detect_routes("java", source);
@@ -534,4 +564,33 @@ fn expands_spring_mapping_path_arrays() {
     assert!(routes.iter().any(|route| {
         route.url == "/exports" && route.http_method == "post" && route.handler_name == "transfer"
     }));
+}
+
+#[test]
+fn detects_multiline_spring_mapping_annotations() {
+    let source = "@PostMapping(\n    path = \"/login\"\n)\npublic String login() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/login");
+    assert_eq!(routes[0].http_method, "post");
+    assert_eq!(routes[0].handler_name, "login");
+}
+
+#[test]
+fn detects_flask_blueprint_url_prefix() {
+    let source = "bp = Blueprint('api', __name__, url_prefix='/api')\n@bp.route('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].handler_name, "users");
+}
+
+#[test]
+fn detects_multiline_flask_route_decorators() {
+    let source = "@app.route(\n    '/login',\n    methods=['POST'],\n)\ndef login():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/login");
+    assert_eq!(routes[0].http_method, "post");
+    assert_eq!(routes[0].handler_name, "login");
 }

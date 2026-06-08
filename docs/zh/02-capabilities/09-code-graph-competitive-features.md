@@ -32,7 +32,7 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --ref
 
 ## Web 路由感知
 
-代码图谱在索引期间检测 Web 框架路由处理器绑定。支持的框架包括 Express（JavaScript/TypeScript）、Flask/FastAPI（Python）和 Spring（Java）。检测器覆盖真实 Express app/router 调用、多行 route registration、以 anonymous handler 记录的 async inline callback、带 middleware 链的最终 endpoint handler、堆叠 Flask decorator、Flask tuple 或 list 形式的 `methods` 声明、FastAPI `APIRouter(prefix = ...)` 前缀、多个 Spring 类级 `@RequestMapping` 前缀、未注解 Java class 的前缀重置、顺序无关的 `value`/`path` 属性、path 数组、`RequestMethod` 数组，以及以 `http_method = "any"` 记录的无 method Spring mapping。每条检测到的路由生成一条 `CodeRouteRecord`，包含 HTTP 方法、URL 路径、处理器名称、框架标识符、源码位置，以及解析器能够匹配到结构化符号时的处理器符号链接。
+代码图谱在索引期间检测 Web 框架路由处理器绑定。支持的框架包括 Express（JavaScript/TypeScript）、Flask/FastAPI（Python）和 Spring（Java）。检测器覆盖真实 Express app/router 调用、router mount 前缀、`route()` 链式写法、member-expression handler 链接、多行 route registration、以 anonymous handler 记录的 async inline callback、带 middleware 链的最终 endpoint handler、堆叠和多行 Flask/FastAPI decorator、Flask Blueprint `url_prefix`、Flask tuple 或 list 形式的 `methods` 声明、FastAPI `APIRouter(prefix = ...)` 前缀、多个 Spring 类级 `@RequestMapping` 前缀、多行 Spring mapping annotation、未注解 Java class 的前缀重置、顺序无关的 `value`/`path` 属性、path 数组、`RequestMethod` 数组，以及以 `http_method = "any"` 记录的无 method Spring mapping。每条检测到的路由生成一条 `CodeRouteRecord`，包含 HTTP 方法、URL 路径、处理器名称、框架标识符、源码位置，以及解析器能够匹配到结构化符号时的处理器符号链接。
 
 路由记录会随 checkpointed batch 一起提交，持久化到 `code_repository_routes`，并作为 route search document 建入索引，因此普通的 durable 仓库索引流程可以通过 hybrid code search 回答"哪个处理函数服务于给定的 HTTP 端点？"等查询。被标注为路由处理器的符号会把 `SymbolRole::RouteHandler` 形式的 `symbol_role` 元数据持久化到 SQLite，使 checkpoint replay 或 full snapshot import 之后的下游检索仍可按 HTTP 端点语义优先排序或过滤。
 

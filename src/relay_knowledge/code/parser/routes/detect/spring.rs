@@ -2,20 +2,29 @@ use std::collections::BTreeSet;
 
 use super::RouteCandidate;
 
+const MAX_SPRING_MAPPING_ANNOTATION_LINES: usize = 12;
+
 pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteCandidate> {
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
     let mut pending_annotations: Vec<SpringPendingAnnotation> = Vec::new();
     let mut class_prefixes = Vec::<String>::new();
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if let Some(spring_routes) = parse_spring_route_annotation(trimmed) {
-            if pending_request_mapping_can_be_prefix(&pending_annotations) {
-                class_prefixes = pending_request_mapping_urls(&pending_annotations);
-                pending_annotations.clear();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        if trimmed.starts_with('@') {
+            let (annotation_statement, annotation_lines) =
+                spring_annotation_statement(&lines, index);
+            if let Some(spring_routes) = parse_spring_route_annotation(&annotation_statement) {
+                if pending_request_mapping_can_be_prefix(&pending_annotations) {
+                    class_prefixes = pending_request_mapping_urls(&pending_annotations);
+                    pending_annotations.clear();
+                }
+                pending_annotations.extend(spring_routes);
+                index += annotation_lines;
+                continue;
             }
-            pending_annotations.extend(spring_routes);
-            continue;
         }
         if line_declares_java_type(trimmed) {
             if pending_request_mapping_can_be_prefix(&pending_annotations) {
@@ -24,6 +33,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                 class_prefixes.clear();
             }
             pending_annotations.clear();
+            index += 1;
             continue;
         }
         if !pending_annotations.is_empty() {
@@ -53,6 +63,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                 pending_annotations.clear();
             }
         }
+        index += 1;
     }
     routes
 }
@@ -92,6 +103,61 @@ fn route_class_prefixes(class_prefixes: &[String]) -> Vec<String> {
         return vec![String::new()];
     }
     class_prefixes.to_vec()
+}
+
+fn spring_annotation_statement(lines: &[&str], start: usize) -> (String, usize) {
+    let mut statement = String::new();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut saw_open = false;
+    let mut consumed = 0usize;
+    for line in lines
+        .iter()
+        .skip(start)
+        .take(MAX_SPRING_MAPPING_ANNOTATION_LINES)
+    {
+        let segment = line.trim();
+        if !statement.is_empty() {
+            statement.push(' ');
+        }
+        statement.push_str(segment);
+        consumed += 1;
+        for character in segment.chars() {
+            if let Some(quote_char) = quote {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if character == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if character == quote_char {
+                    quote = None;
+                }
+                continue;
+            }
+            match character {
+                '"' => quote = Some(character),
+                '(' => {
+                    depth += 1;
+                    saw_open = true;
+                }
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if saw_open && depth == 0 {
+                        return (statement, consumed);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !saw_open {
+            return (statement, consumed);
+        }
+    }
+    (statement, consumed.max(1))
 }
 
 fn parse_spring_route_annotation(line: &str) -> Option<Vec<SpringPendingAnnotation>> {

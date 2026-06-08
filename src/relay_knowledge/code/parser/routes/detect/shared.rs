@@ -20,10 +20,21 @@ pub(in crate::code::parser) fn extract_handler_name(s: &str) -> Option<String> {
         .next_back()
 }
 
+pub(in crate::code::parser) fn extract_handler_name_from_arguments(s: &str) -> Option<String> {
+    split_top_level_arguments(s)
+        .into_iter()
+        .filter_map(handler_name_from_argument)
+        .next_back()
+}
+
 fn route_arguments_after_path(rest: &str) -> Vec<&str> {
     let Some(rest) = rest.strip_prefix(',') else {
         return Vec::new();
     };
+    split_top_level_arguments(rest)
+}
+
+fn split_top_level_arguments(rest: &str) -> Vec<&str> {
     let mut arguments = Vec::new();
     let mut argument_start = 0usize;
     let mut depth = 0usize;
@@ -83,7 +94,15 @@ fn handler_name_from_argument(argument: &str) -> Option<String> {
     let end = argument
         .find(|c: char| c == ')' || c == ',' || c.is_whitespace())
         .unwrap_or(argument.len());
-    Some(argument[..end].to_owned())
+    let name = argument[..end].rsplit('.').next().unwrap_or("").trim();
+    if name.is_empty()
+        || !name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '$'
+        })
+    {
+        return None;
+    }
+    Some(name.to_owned())
 }
 
 fn inline_callback_argument(argument: &str) -> bool {

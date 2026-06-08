@@ -3,28 +3,38 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::RouteCandidate;
 use super::shared::extract_quoted_string_python;
 
+const MAX_FLASK_ROUTE_DECORATOR_LINES: usize = 12;
+
 pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCandidate> {
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
     let mut pending_routes = Vec::<FlaskRouteInfo>::new();
     let mut router_prefixes = BTreeMap::<String, String>::new();
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if let Some((router_name, prefix)) = parse_fastapi_router_prefix(trimmed) {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        if let Some((router_name, prefix)) = parse_python_router_prefix(trimmed) {
             router_prefixes.insert(router_name, prefix);
+            index += 1;
             continue;
         }
         if trimmed.starts_with("@") {
-            if let Some(route_info) = parse_flask_decorator(trimmed, &router_prefixes) {
+            let (decorator_statement, decorator_lines) = flask_decorator_statement(&lines, index);
+            if let Some(route_info) = parse_flask_decorator(&decorator_statement, &router_prefixes)
+            {
                 pending_routes.push(route_info);
+                index += decorator_lines;
                 continue;
             }
             if let Some(route_info) = pending_routes.last_mut() {
-                if let Some(methods) = parse_flask_methods_decorator(trimmed) {
+                if let Some(methods) = parse_flask_methods_decorator(&decorator_statement) {
                     route_info.methods = methods;
+                    index += decorator_lines;
                     continue;
                 }
             }
+            index += 1;
             continue;
         }
         if !pending_routes.is_empty() {
@@ -52,6 +62,7 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
             }
             pending_routes.clear();
         }
+        index += 1;
     }
     routes
 }
@@ -87,11 +98,8 @@ fn parse_flask_decorator(
     Some(FlaskRouteInfo { url, methods })
 }
 
-fn parse_fastapi_router_prefix(line: &str) -> Option<(String, String)> {
+fn parse_python_router_prefix(line: &str) -> Option<(String, String)> {
     let (left, right) = line.split_once('=')?;
-    if !right.contains("APIRouter(") {
-        return None;
-    }
     let router_name = left.trim();
     if router_name.is_empty()
         || !router_name
@@ -100,9 +108,70 @@ fn parse_fastapi_router_prefix(line: &str) -> Option<(String, String)> {
     {
         return None;
     }
-    let prefix = extract_python_keyword_string(right, "prefix")?;
+    let prefix = if right.contains("APIRouter(") {
+        extract_python_keyword_string(right, "prefix")?
+    } else if right.contains("Blueprint(") {
+        extract_python_keyword_string(right, "url_prefix")?
+    } else {
+        return None;
+    };
 
     Some((router_name.to_owned(), prefix))
+}
+
+fn flask_decorator_statement(lines: &[&str], start: usize) -> (String, usize) {
+    let mut statement = String::new();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut saw_open = false;
+    let mut consumed = 0usize;
+    for line in lines
+        .iter()
+        .skip(start)
+        .take(MAX_FLASK_ROUTE_DECORATOR_LINES)
+    {
+        let segment = line.trim();
+        if !statement.is_empty() {
+            statement.push(' ');
+        }
+        statement.push_str(segment);
+        consumed += 1;
+        for character in segment.chars() {
+            if let Some(quote_char) = quote {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if character == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if character == quote_char {
+                    quote = None;
+                }
+                continue;
+            }
+            match character {
+                '\'' | '"' => quote = Some(character),
+                '(' => {
+                    depth += 1;
+                    saw_open = true;
+                }
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if saw_open && depth == 0 {
+                        return (statement, consumed);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !saw_open {
+            return (statement, consumed);
+        }
+    }
+    (statement, consumed.max(1))
 }
 
 fn route_url_with_router_prefix(
