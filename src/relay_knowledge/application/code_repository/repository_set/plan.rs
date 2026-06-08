@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::domain::{
     CodeQueryKind, CodeRepositorySetMemberStatus, CodeRepositorySetQueryRequest, CodeRetrievalHit,
-    CodeRetrievalLayer,
+    CodeRetrievalLayer, StalenessHint,
 };
 
 const MIN_DEPENDENCY_SYMBOL_PLAN_IDENTITIES: usize = 2;
@@ -119,7 +119,11 @@ fn merge_duplicate_hit(existing: &mut CodeRetrievalHit, candidate: CodeRetrieval
 }
 
 fn merge_hit_metadata(target: &mut CodeRetrievalHit, mut source: CodeRetrievalHit) {
-    target.stale |= source.stale;
+    target.stale |= source.stale
+        || source
+            .staleness_hint
+            .as_ref()
+            .is_some_and(StalenessHint::requires_source_verification);
     for layer in source.retrieval_layers {
         if !target.retrieval_layers.contains(&layer) {
             target.retrieval_layers.push(layer);
@@ -130,7 +134,6 @@ fn merge_hit_metadata(target: &mut CodeRetrievalHit, mut source: CodeRetrievalHi
             target.index_versions.push(version);
         }
     }
-    target.stale |= source.stale;
     if target.symbol_snapshot_id.is_none() {
         target.symbol_snapshot_id = source.symbol_snapshot_id.take();
     }
@@ -158,14 +161,10 @@ fn merge_hit_metadata(target: &mut CodeRetrievalHit, mut source: CodeRetrievalHi
     if target.edge_confidence_tier.is_none() {
         target.edge_confidence_tier = source.edge_confidence_tier.take();
     }
-    match (&target.staleness_hint, &source.staleness_hint) {
-        (_, Some(source_hint)) if source_hint.is_stale() => {
+    if let Some(source_hint) = &source.staleness_hint {
+        if source_hint.should_replace(target.staleness_hint.as_ref()) {
             target.staleness_hint = source.staleness_hint.take();
         }
-        (None, Some(_)) => {
-            target.staleness_hint = source.staleness_hint.take();
-        }
-        _ => {}
     }
 }
 
@@ -571,6 +570,19 @@ mod tests {
         let mut target = stale_hit.clone();
         merge_hit_metadata(&mut target, fresh_hit);
         assert_eq!(target.staleness_hint, Some(StalenessHint::Stale {}));
+        assert!(target.stale);
+    }
+
+    #[test]
+    fn merge_hit_metadata_prefers_pending_index_over_stale() {
+        let mut stale_hit = symbol_hit("sym1", "excerpt");
+        stale_hit.stale = true;
+        stale_hit.staleness_hint = Some(StalenessHint::Stale {});
+        let mut pending_hit = stale_hit.clone();
+        pending_hit.staleness_hint = Some(StalenessHint::PendingIndex {});
+        let mut target = stale_hit.clone();
+        merge_hit_metadata(&mut target, pending_hit);
+        assert_eq!(target.staleness_hint, Some(StalenessHint::PendingIndex {}));
         assert!(target.stale);
     }
 }

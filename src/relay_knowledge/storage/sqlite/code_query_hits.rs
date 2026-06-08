@@ -205,7 +205,11 @@ pub(super) fn mark_hits_degraded(hits: &mut [CodeRetrievalHit], reason: &str) {
 }
 
 fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit) {
-    target.stale |= source.stale;
+    target.stale |= source.stale
+        || source
+            .staleness_hint
+            .as_ref()
+            .is_some_and(StalenessHint::requires_source_verification);
     for layer in &source.retrieval_layers {
         if !target.retrieval_layers.contains(layer) {
             target.retrieval_layers.push(*layer);
@@ -235,14 +239,10 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
         target.edge_confidence_basis_points = source.edge_confidence_basis_points;
         target.edge_confidence_tier = source.edge_confidence_tier.clone();
     }
-    match (&target.staleness_hint, &source.staleness_hint) {
-        (_, Some(source_hint)) if source_hint.is_stale() => {
+    if let Some(source_hint) = &source.staleness_hint {
+        if source_hint.should_replace(target.staleness_hint.as_ref()) {
             target.staleness_hint = source.staleness_hint.clone();
         }
-        (None, Some(_)) => {
-            target.staleness_hint = source.staleness_hint.clone();
-        }
-        _ => {}
     }
 }
 
@@ -267,7 +267,9 @@ mod tests {
             file_id: None,
             retrieval_layers: vec![CodeRetrievalLayer::Lexical],
             index_versions: vec![],
-            stale: staleness_hint.as_ref().is_some_and(|h| h.is_stale()),
+            stale: staleness_hint
+                .as_ref()
+                .is_some_and(StalenessHint::requires_source_verification),
             staleness_hint,
             degraded_reason: None,
             edge_kind: None,
@@ -327,6 +329,16 @@ mod tests {
         let mut target = fresh_hit.clone();
         assert!(!target.stale);
         merge_hit_provenance(&mut target, &stale_hit);
+        assert!(target.stale);
+    }
+
+    #[test]
+    fn merge_prefers_pending_index_over_stale() {
+        let stale_hit = make_hit(Some(StalenessHint::Stale {}));
+        let pending_hit = make_hit(Some(StalenessHint::PendingIndex {}));
+        let mut target = stale_hit.clone();
+        merge_hit_provenance(&mut target, &pending_hit);
+        assert_eq!(target.staleness_hint, Some(StalenessHint::PendingIndex {}));
         assert!(target.stale);
     }
 }

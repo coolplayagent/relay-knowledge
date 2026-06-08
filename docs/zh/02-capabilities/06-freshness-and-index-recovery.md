@@ -16,7 +16,7 @@
 - Query、health 和 index refresh 响应返回 `index_cursors[*]`。
 - `index_refresh.stale_reasons[*]` 按 index family 和 scoped cursor 解释 lag、failure 和 last error。
 - Ingest、query、index refresh、health、service doctor 和 service startup 共享 bounded refresh queue。
-- 每条代码检索结果携带 `staleness_hint` 字段（`{ "state": "fresh" }` 或 `{ "state": "stale" }`），与遗留 `stale` 布尔并存，API 消费者可以直接查看每条结果的新鲜度结构化标记。
+- 每条代码检索结果携带 `staleness_hint` 字段，与遗留 `stale` 布尔并存。当前状态包括 `{ "state": "fresh" }`、`{ "state": "pending_index" }` 和 `{ "state": "stale" }`；`pending_index` 表示匹配的刷新任务仍在 queued、running 或 retrying，调用方应先读取直接源文件再信任该命中。代码图落库逐文件修改时间和索引时间之前，不填充逐文件时间戳 payload。
 
 ## 竞争力特性
 
