@@ -49,7 +49,7 @@ const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_symbols",
-        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end",
+        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end, symbol_role_json",
     },
     CodeScopeTable {
         table: "code_repository_references",
@@ -329,53 +329,7 @@ pub(super) fn apply_snapshot(
         .iter()
         .map(|file| (file.path.as_str(), file.language_id.as_str()))
         .collect::<BTreeMap<_, _>>();
-    for symbol in &snapshot.symbols {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_symbols (
-                repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
-                file_id, path, language_id, name,
-                qualified_name, kind, signature, doc_comment, byte_start, byte_end,
-                line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-            ",
-            params![
-                symbol.repository_id,
-                symbol.source_scope,
-                symbol.symbol_snapshot_id,
-                symbol.canonical_symbol_id,
-                symbol.file_id,
-                symbol.path,
-                symbol.language_id,
-                symbol.name,
-                symbol.qualified_name,
-                symbol.kind,
-                symbol.signature,
-                symbol.doc_comment,
-                symbol.byte_range.start,
-                symbol.byte_range.end,
-                symbol.line_range.start,
-                symbol.line_range.end,
-            ],
-        )?;
-        insert_search_document(
-            &transaction,
-            &symbol.source_scope,
-            "symbol",
-            &symbol.symbol_snapshot_id,
-            &symbol.path,
-            &symbol.language_id,
-            [
-                symbol.name.as_str(),
-                symbol.qualified_name.as_str(),
-                symbol.kind.as_str(),
-                symbol.signature.as_str(),
-                symbol.doc_comment.as_deref().unwrap_or_default(),
-                symbol.path.as_str(),
-            ],
-        )?;
-    }
+    super::code_symbols::insert_records(&transaction, &snapshot.symbols)?;
     for reference in &snapshot.references {
         transaction.execute(
             "

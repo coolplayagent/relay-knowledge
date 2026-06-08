@@ -8,16 +8,13 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
     let mut seen = BTreeSet::new();
     for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        let Some(rest) = trimmed
-            .find(".get(")
-            .or_else(|| trimmed.find(".post("))
-            .or_else(|| trimmed.find(".put("))
-            .or_else(|| trimmed.find(".delete("))
-            .or_else(|| trimmed.find(".patch("))
-            .map(|pos| &trimmed[pos..])
-        else {
+        let Some(method_pos) = express_method_position(trimmed) else {
             continue;
         };
+        if !receiver_looks_like_express_router(&trimmed[..method_pos]) {
+            continue;
+        }
+        let rest = &trimmed[method_pos..];
         let (method_part, after_method) = match rest.split_once('(') {
             Some(pair) => pair,
             None => continue,
@@ -49,4 +46,21 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         }
     }
     routes
+}
+
+fn express_method_position(line: &str) -> Option<usize> {
+    [".get(", ".post(", ".put(", ".delete(", ".patch("]
+        .into_iter()
+        .filter_map(|method| line.find(method))
+        .min()
+}
+
+fn receiver_looks_like_express_router(receiver: &str) -> bool {
+    let receiver_name = receiver
+        .rsplit(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .find(|part| !part.is_empty())
+        .unwrap_or_default();
+    let receiver_name = receiver_name.to_ascii_lowercase();
+
+    receiver_name == "app" || receiver_name == "router" || receiver_name.ends_with("router")
 }

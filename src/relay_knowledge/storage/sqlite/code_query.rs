@@ -60,6 +60,8 @@ mod code_query_path_ranking;
 mod code_query_proximity_scoring;
 #[path = "code_query_references.rs"]
 mod code_query_references;
+#[path = "code_query_routes.rs"]
+mod code_query_routes;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
 #[path = "code_query_sbom.rs"]
@@ -126,6 +128,7 @@ use code_query_interface_scoring::public_interface_chunk_bonus;
 use code_query_path_ranking::declaration_surface_path_bonus;
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};
+use code_query_routes::search_routes;
 use code_query_rows::ChunkRow;
 use code_query_sbom::search_sbom;
 use code_query_support::*;
@@ -263,6 +266,12 @@ fn search_code_with_status(
         let reference_hits = search_references(connection, status, request);
         if let Some(partial_hits) =
             append_hits_or_return_partial_on_search_outage(&mut hits, request, reference_hits)?
+        {
+            return Ok(partial_hits);
+        }
+        let route_hits = search_routes(connection, status, request);
+        if let Some(partial_hits) =
+            append_hits_or_return_partial_on_search_outage(&mut hits, request, route_hits)?
         {
             return Ok(partial_hits);
         }
@@ -993,7 +1002,6 @@ fn chunk_layers_for_request(
 
     layers
 }
-
 #[cfg(test)]
 #[path = "code_query_test_modules.rs"]
 mod test_modules;

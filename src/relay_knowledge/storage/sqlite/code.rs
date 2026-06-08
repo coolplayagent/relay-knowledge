@@ -16,6 +16,9 @@ mod code_feature_flags;
 
 #[path = "code_generated.rs"]
 mod code_generated;
+#[path = "code_symbols.rs"]
+mod code_symbols;
+
 #[path = "code_routes.rs"]
 mod code_routes;
 

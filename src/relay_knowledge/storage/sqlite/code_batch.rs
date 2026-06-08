@@ -74,7 +74,7 @@ fn apply_batch_once(
     let batch_is_new = checkpoint_batch_is_new(&transaction, batch)?;
     delete_batch_path_indexes_if_needed(&transaction, batch, batch_is_new)?;
     insert_files(&transaction, batch)?;
-    insert_symbols(&transaction, batch)?;
+    super::code_symbols::insert_records(&transaction, &batch.symbols)?;
     let materialize_edge_search = should_materialize_intermediate_edge_search(&transaction, batch)?;
     let edge_search_languages = if materialize_edge_search {
         Some(edge_file_languages_by_path(&transaction, batch)?)
@@ -321,61 +321,6 @@ fn insert_files(transaction: &Transaction<'_>, batch: &CodeIndexBatch) -> Result
             file.is_generated,
             file.degraded_reason,
         ])?;
-    }
-
-    Ok(())
-}
-
-fn insert_symbols(
-    transaction: &Transaction<'_>,
-    batch: &CodeIndexBatch,
-) -> Result<(), StorageError> {
-    let mut statement = transaction.prepare(
-        "
-        INSERT INTO code_repository_symbols (
-            repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
-            file_id, path, language_id, name,
-            qualified_name, kind, signature, doc_comment, byte_start, byte_end,
-            line_start, line_end
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-        ",
-    )?;
-    let mut search_documents = super::SearchDocumentInserter::new(transaction)?;
-    for symbol in &batch.symbols {
-        statement.execute(params![
-            symbol.repository_id,
-            symbol.source_scope,
-            symbol.symbol_snapshot_id,
-            symbol.canonical_symbol_id,
-            symbol.file_id,
-            symbol.path,
-            symbol.language_id,
-            symbol.name,
-            symbol.qualified_name,
-            symbol.kind,
-            symbol.signature,
-            symbol.doc_comment,
-            symbol.byte_range.start,
-            symbol.byte_range.end,
-            symbol.line_range.start,
-            symbol.line_range.end,
-        ])?;
-        search_documents.insert(
-            &symbol.source_scope,
-            "symbol",
-            &symbol.symbol_snapshot_id,
-            &symbol.path,
-            &symbol.language_id,
-            [
-                symbol.name.as_str(),
-                symbol.qualified_name.as_str(),
-                symbol.kind.as_str(),
-                symbol.signature.as_str(),
-                symbol.doc_comment.as_deref().unwrap_or_default(),
-                symbol.path.as_str(),
-            ],
-        )?;
     }
 
     Ok(())

@@ -89,6 +89,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             byte_end INTEGER NOT NULL,
             line_start INTEGER NOT NULL,
             line_end INTEGER NOT NULL,
+            symbol_role_json TEXT,
             PRIMARY KEY (source_scope, symbol_snapshot_id),
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
@@ -468,6 +469,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "is_generated",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "code_repository_symbols",
+        "symbol_role_json",
+        "TEXT",
+    )?;
     super::code_generated::backfill_all_path_generated_flags(connection)?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
     if table_has_columns(
@@ -591,7 +598,7 @@ fn backfill_search_symbols(connection: &Connection) -> Result<(), StorageError> 
         )
         SELECT source_scope, 'symbol', symbol_snapshot_id, path, language_id,
                name || ' ' || qualified_name || ' ' || kind || ' ' || signature || ' ' ||
-               coalesce(doc_comment, '')
+               coalesce(doc_comment, '') || ' ' || coalesce(symbol_role_json, '')
         FROM code_repository_symbols
         ",
         [],

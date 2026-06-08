@@ -54,6 +54,13 @@ fn skips_non_route_method_calls() {
 }
 
 #[test]
+fn skips_express_like_client_get_calls() {
+    let source = "axios.get('/users');\ncache.get('/health');\nclient.post('/events');\n";
+    let routes = detect_routes("typescript", source);
+    assert!(routes.is_empty());
+}
+
+#[test]
 fn detects_flask_route_with_method() {
     let source = "@app.route('/login', methods=['POST'])\ndef login():\n    pass\n";
     let routes = detect_routes("python", source);
@@ -183,6 +190,26 @@ fn detects_flask_async_route_handler() {
     assert_eq!(routes[0].url, "/async");
     assert_eq!(routes[0].http_method, "get");
     assert_eq!(routes[0].handler_name, "async_handler");
+}
+
+#[test]
+fn detects_flask_stacked_route_decorators() {
+    let source = "@app.get('/items')\n@app.post('/items')\ndef items():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.http_method == "get"));
+    assert!(routes.iter().any(|route| route.http_method == "post"));
+    assert!(routes.iter().all(|route| route.url == "/items"));
+}
+
+#[test]
+fn detects_fastapi_router_prefix() {
+    let source =
+        "router = APIRouter(prefix='/api')\n@router.get('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].handler_name, "users");
 }
 
 #[test]
@@ -395,4 +422,32 @@ fn detects_spring_request_mapping_with_method_attribute() {
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].http_method, "delete");
     assert_eq!(routes[0].url, "/data");
+}
+
+#[test]
+fn detects_spring_class_prefix_with_method_attribute() {
+    let source = "@RequestMapping(value = \"/api\", method = RequestMethod.GET)\npublic class UserController {\n@GetMapping(\"/users\")\npublic List<User> users() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].http_method, "get");
+}
+
+#[test]
+fn detects_spring_request_mapping_method_arrays() {
+    let source = "@RequestMapping(value = \"/submit\", method = {RequestMethod.GET, RequestMethod.POST})\npublic String submit() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.http_method == "get"));
+    assert!(routes.iter().any(|route| route.http_method == "post"));
+    assert!(routes.iter().all(|route| route.url == "/submit"));
+}
+
+#[test]
+fn detects_spring_path_attribute_after_method_attribute() {
+    let source = "@RequestMapping(method = RequestMethod.POST, value = \"/login\")\npublic String login() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/login");
+    assert_eq!(routes[0].http_method, "post");
 }
