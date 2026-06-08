@@ -923,3 +923,37 @@ fn accepts_python_keyword_route_paths() {
             .any(|route| route.url == "/api/items" && route.http_method == "get")
     );
 }
+
+#[test]
+fn detects_same_line_spring_mapping_methods() {
+    let source = "@GetMapping(\"/health\") public String health() {\n}\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/health");
+    assert_eq!(routes[0].handler_name, "health");
+}
+
+#[test]
+fn preserves_pathless_express_router_mount_prefix() {
+    let source = "const api = express.Router();\nconst usersRouter = express.Router();\napp.use('/api', api);\napi.use(usersRouter);\nusersRouter.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+}
+
+#[test]
+fn skips_commented_python_router_mounts() {
+    let source = "router = APIRouter()\n# app.include_router(router, prefix='/api')\n@router.get('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/users");
+}
+
+#[test]
+fn detects_express_routes_on_dollar_aliases() {
+    let source = "const api$ = express.Router();\napi$.get('/users', listUsers);\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}

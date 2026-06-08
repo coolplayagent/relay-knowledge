@@ -114,13 +114,19 @@ fn parse_express_router_mounts(
     else {
         return Vec::new();
     };
-    let Some(mount_path) = extract_quoted_string(after_use) else {
+    let arguments = javascript_top_level_arguments(after_use);
+    let Some(first_argument) = arguments.first() else {
         return Vec::new();
     };
-    if !mount_path.starts_with('/') {
-        return Vec::new();
-    }
-    express_router_mount_names(after_use, router_names)
+    let (mount_path, router_arguments) = if let Some(path) = extract_quoted_string(first_argument) {
+        if !path.starts_with('/') {
+            return Vec::new();
+        }
+        (path, &arguments[1..])
+    } else {
+        (String::new(), arguments.as_slice())
+    };
+    express_router_mount_names(router_arguments, router_names)
         .into_iter()
         .map(|router_name| ExpressRouterMount {
             receiver_name: receiver_name.clone(),
@@ -480,7 +486,9 @@ fn extract_quoted_strings(value: &str) -> Vec<String> {
 
 fn express_receiver_name(receiver: &str) -> Option<String> {
     receiver
-        .rsplit(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .rsplit(|character: char| {
+            !(character.is_ascii_alphanumeric() || character == '_' || character == '$')
+        })
         .find(|part| !part.is_empty())
         .map(str::to_owned)
 }
@@ -507,12 +515,9 @@ fn parse_express_router_alias(line: &str, router_factory_imported: bool) -> Opti
     js_assignment_variable_name(left)
 }
 
-fn express_router_mount_names(arguments: &str, router_names: &BTreeSet<String>) -> Vec<String> {
+fn express_router_mount_names(arguments: &[&str], router_names: &BTreeSet<String>) -> Vec<String> {
     let mut names = BTreeSet::new();
-    for argument in javascript_top_level_arguments(arguments)
-        .into_iter()
-        .skip(1)
-    {
+    for argument in arguments {
         collect_express_router_mount_names(argument, router_names, &mut names);
     }
     names.into_iter().collect()

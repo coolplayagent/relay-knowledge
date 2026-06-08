@@ -656,7 +656,10 @@ fn python_code_lines_without_triple_quoted_strings(content: &str) -> Vec<String>
     let mut delimiter = None;
     content
         .lines()
-        .map(|line| python_code_line_without_triple_quoted_strings(line, &mut delimiter))
+        .map(|line| {
+            let line = python_code_line_without_triple_quoted_strings(line, &mut delimiter);
+            python_code_line_without_comment(&line)
+        })
         .collect()
 }
 
@@ -694,4 +697,35 @@ fn next_python_triple_quote(value: &str) -> Option<(usize, &'static str)> {
         (None, Some(double)) => Some(double),
         (None, None) => None,
     }
+}
+
+fn python_code_line_without_comment(line: &str) -> String {
+    let mut result = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for character in line.chars() {
+        if let Some(quote_char) = quote {
+            result.push(character);
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        if character == '#' {
+            break;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        }
+        result.push(character);
+    }
+    result
 }

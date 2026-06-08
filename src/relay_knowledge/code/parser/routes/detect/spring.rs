@@ -29,6 +29,18 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                     pending_annotations.clear();
                 }
                 pending_annotations.extend(spring_routes);
+                let annotation_tail = spring_statement_after_annotation(&annotation_statement);
+                if let Some(method_name) = parse_java_method_def(annotation_tail.trim()) {
+                    record_spring_pending_routes(
+                        &mut routes,
+                        &mut seen,
+                        &class_prefixes,
+                        &mut pending_annotations,
+                        method_name,
+                        index + 1,
+                    );
+                    update_java_brace_depth(annotation_tail, &mut brace_depth);
+                }
                 index += annotation_lines;
                 continue;
             }
@@ -61,24 +73,14 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
         }
         if !pending_annotations.is_empty() {
             if let Some(method_name) = parse_java_method_def(trimmed) {
-                let prefixes = route_class_prefixes(&class_prefixes);
-                for annotation in pending_annotations.drain(..) {
-                    for prefix in &prefixes {
-                        let http_method =
-                            route_http_method_with_class_prefix(prefix, &annotation.http_method);
-                        let full_url = merge_url_parts(&prefix.url, &annotation.url);
-                        let key = (full_url.clone(), http_method.clone());
-                        if seen.insert(key) {
-                            routes.push(RouteCandidate {
-                                url: full_url,
-                                http_method,
-                                handler_name: method_name.clone(),
-                                framework: "spring".to_owned(),
-                                line: index + 1,
-                            });
-                        }
-                    }
-                }
+                record_spring_pending_routes(
+                    &mut routes,
+                    &mut seen,
+                    &class_prefixes,
+                    &mut pending_annotations,
+                    method_name,
+                    index + 1,
+                );
             } else if !trimmed.starts_with("public")
                 && !trimmed.starts_with("private")
                 && !trimmed.starts_with("protected")
@@ -115,6 +117,33 @@ struct SpringClassPrefix {
 struct SpringNestedTypeScope {
     restore_at_depth: usize,
     class_prefixes: Vec<SpringClassPrefix>,
+}
+
+fn record_spring_pending_routes(
+    routes: &mut Vec<RouteCandidate>,
+    seen: &mut BTreeSet<(String, String)>,
+    class_prefixes: &[SpringClassPrefix],
+    pending_annotations: &mut Vec<SpringPendingAnnotation>,
+    method_name: String,
+    line: usize,
+) {
+    let prefixes = route_class_prefixes(class_prefixes);
+    for annotation in pending_annotations.drain(..) {
+        for prefix in &prefixes {
+            let http_method = route_http_method_with_class_prefix(prefix, &annotation.http_method);
+            let full_url = merge_url_parts(&prefix.url, &annotation.url);
+            let key = (full_url.clone(), http_method.clone());
+            if seen.insert(key) {
+                routes.push(RouteCandidate {
+                    url: full_url,
+                    http_method,
+                    handler_name: method_name.clone(),
+                    framework: "spring".to_owned(),
+                    line,
+                });
+            }
+        }
+    }
 }
 
 fn pending_request_mapping_can_be_prefix(annotations: &[SpringPendingAnnotation]) -> bool {
@@ -211,6 +240,52 @@ fn spring_annotation_statement(lines: &[String], start: usize) -> (String, usize
         }
     }
     (statement, consumed.max(1))
+}
+
+fn spring_statement_after_annotation(statement: &str) -> &str {
+    let trimmed = statement.trim();
+    if !trimmed.starts_with('@') {
+        return "";
+    }
+    let after_at = &trimmed[1..];
+    let name_end = after_at
+        .find(|c: char| c == '(' || c.is_whitespace())
+        .unwrap_or(after_at.len());
+    let rest = after_at[name_end..].trim_start();
+    if !rest.starts_with('(') {
+        return rest;
+    }
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in rest.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '"' => quote = Some(character),
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return &rest[index + character.len_utf8()..];
+                }
+            }
+            _ => {}
+        }
+    }
+    ""
 }
 
 fn parse_spring_route_annotation(line: &str) -> Option<Vec<SpringPendingAnnotation>> {
