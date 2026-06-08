@@ -332,6 +332,19 @@ relay-knowledge query --help
 relay-knowledge query -- --help
 ```
 
+`repo-set refresh` 会基于已索引的 member snapshot 重建跨仓 import overlay
+edges。overlay 能识别 Go workspace/module manifest（`go.work`、`go.mod`）
+和 pnpm workspace（`pnpm-workspace.yaml` 加 package `package.json` 的名称、
+入口和 exports）。嵌套 `go.work` 只会把 `go.mod` 过滤作用在自身目录树内，
+pnpm package glob 只匹配 workspace root 下的路径，package key 来自索引时保留的完整
+workspace/package manifest 内容。pnpm root package 总是 included；没有 `packages`
+字段的 workspace 只包含 root package；`exports` 优先于 `main`/`module` 入口 alias。
+声明了 package `exports` 时，package subpath key 也会受 exports 约束：conditional
+export object 只选择一个优先 runtime target，wildcard subpath export 会映射匹配的文件
+pattern，未声明导出的私有文件不会获得合成 package subpath alias。
+仍无法匹配到成员 package 的 import 会保留为带 target hint evidence 的 `unresolved`
+跨仓 edge。
+
 #### Kind 参考
 
 `--kind` 的取值是命令本地的。同一个 flag 名称不代表不同命令共享同一组取值：

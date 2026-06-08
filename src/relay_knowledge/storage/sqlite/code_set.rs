@@ -17,7 +17,8 @@ use crate::{
 
 use super::{super::helpers::stable_id, code_status::parse_json_list};
 use manifest::{
-    manifest_module_prefixes_for_members, module_keys_for_path_with_prefixes, normalize_module_key,
+    manifest_module_prefixes_for_members, module_keys_for_path_with_prefixes,
+    module_keys_for_symbol_path_with_prefixes, normalize_module_key,
 };
 
 pub(super) fn create_set(
@@ -563,7 +564,7 @@ fn exports_for_members(
                 let name = row.get::<_, String>(3)?;
                 let qualified_name = row.get::<_, String>(4)?;
                 let path = row.get::<_, String>(5)?;
-                let mut keys = module_keys_for_path_with_prefixes(&path, prefixes);
+                let mut keys = module_keys_for_symbol_path_with_prefixes(&path, prefixes);
                 keys.insert(normalize_module_key(&name));
                 keys.insert(normalize_module_key(&qualified_name));
                 Ok(ExportTarget {

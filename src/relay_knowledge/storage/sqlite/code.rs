@@ -144,6 +144,10 @@ mod code_set_tasks_tests;
 #[path = "code_set_tests.rs"]
 mod code_set_tests;
 
+#[cfg(test)]
+#[path = "code_set_workspace_tests.rs"]
+mod code_set_workspace_tests;
+
 use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
