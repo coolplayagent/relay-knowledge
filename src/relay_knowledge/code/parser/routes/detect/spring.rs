@@ -11,7 +11,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
     let mut class_prefixes = Vec::<SpringClassPrefix>::new();
     let mut nested_type_scopes = Vec::<SpringNestedTypeScope>::new();
     let mut brace_depth = 0usize;
-    let lines: Vec<&str> = content.lines().collect();
+    let lines = java_code_lines_without_block_comments(content);
     let mut index = 0usize;
     while index < lines.len() {
         let trimmed = lines[index].trim();
@@ -158,7 +158,7 @@ fn route_http_method_with_class_prefix(prefix: &SpringClassPrefix, method: &str)
     method.to_owned()
 }
 
-fn spring_annotation_statement(lines: &[&str], start: usize) -> (String, usize) {
+fn spring_annotation_statement(lines: &[String], start: usize) -> (String, usize) {
     let mut statement = String::new();
     let mut depth = 0usize;
     let mut quote = None;
@@ -530,6 +530,55 @@ fn update_java_brace_depth(line: &str, brace_depth: &mut usize) {
             _ => {}
         }
     }
+}
+
+fn java_code_lines_without_block_comments(content: &str) -> Vec<String> {
+    let mut in_block_comment = false;
+    content
+        .lines()
+        .map(|line| java_code_line_without_block_comments(line, &mut in_block_comment))
+        .collect()
+}
+
+fn java_code_line_without_block_comments(line: &str, in_block_comment: &mut bool) -> String {
+    let mut result = String::new();
+    let mut chars = line.chars().peekable();
+    let mut quote = None;
+    let mut escaped = false;
+    while let Some(character) = chars.next() {
+        if *in_block_comment {
+            if character == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                *in_block_comment = false;
+            }
+            continue;
+        }
+        if let Some(quote_char) = quote {
+            result.push(character);
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        if character == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            *in_block_comment = true;
+            continue;
+        }
+        if matches!(character, '"' | '\'') {
+            quote = Some(character);
+        }
+        result.push(character);
+    }
+    result
 }
 
 fn parse_java_method_def(line: &str) -> Option<String> {

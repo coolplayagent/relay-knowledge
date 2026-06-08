@@ -23,15 +23,18 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             continue;
         }
         let mount_statement;
-        let mount_source = if trimmed.contains(".use(") {
+        let mount_source = if find_javascript_pattern_outside_strings(trimmed, ".use(").is_some() {
             mount_statement = express_use_statement(&lines, index);
             mount_statement.as_str()
         } else {
             trimmed
         };
-        if let Some(mount) = parse_express_router_mount(mount_source, &router_names) {
-            router_names.insert(mount.router_name.clone());
-            mounts.push(mount);
+        let parsed_mounts = parse_express_router_mounts(mount_source, &router_names);
+        if !parsed_mounts.is_empty() {
+            for mount in parsed_mounts {
+                router_names.insert(mount.router_name.clone());
+                mounts.push(mount);
+            }
             continue;
         }
         if express_route_start_position(trimmed).is_none() {
@@ -92,29 +95,39 @@ struct ExpressRouterMount {
     local_prefix: String,
 }
 
-fn parse_express_router_mount(
+fn parse_express_router_mounts(
     line: &str,
     router_names: &BTreeSet<String>,
-) -> Option<ExpressRouterMount> {
-    let use_pos = line.find(".use(")?;
-    let receiver_name = express_receiver_name(&line[..use_pos])?;
+) -> Vec<ExpressRouterMount> {
+    let Some(use_pos) = find_javascript_pattern_outside_strings(line, ".use(") else {
+        return Vec::new();
+    };
+    let Some(receiver_name) = express_receiver_name(&line[..use_pos]) else {
+        return Vec::new();
+    };
     if !express_router_name_is_router(&receiver_name, router_names) {
-        return None;
+        return Vec::new();
     }
-    let after_use = line[use_pos..].split_once('(')?.1.trim_start();
-    let mount_path = extract_quoted_string(after_use)?;
+    let Some(after_use) = line[use_pos..]
+        .split_once('(')
+        .map(|(_, args)| args.trim_start())
+    else {
+        return Vec::new();
+    };
+    let Some(mount_path) = extract_quoted_string(after_use) else {
+        return Vec::new();
+    };
     if !mount_path.starts_with('/') {
-        return None;
+        return Vec::new();
     }
-    let router_name = extract_handler_name(after_use)?;
-    if !express_router_name_is_router(&router_name, router_names) {
-        return None;
-    }
-    Some(ExpressRouterMount {
-        receiver_name,
-        router_name,
-        local_prefix: mount_path,
-    })
+    express_router_mount_names(after_use, router_names)
+        .into_iter()
+        .map(|router_name| ExpressRouterMount {
+            receiver_name: receiver_name.clone(),
+            router_name,
+            local_prefix: mount_path.clone(),
+        })
+        .collect()
 }
 
 fn record_express_route_chain(
@@ -123,7 +136,7 @@ fn record_express_route_chain(
     router_names: &BTreeSet<String>,
     route_infos: &mut Vec<ExpressRouteInfo>,
 ) -> bool {
-    let Some(route_pos) = statement.find(".route(") else {
+    let Some(route_pos) = find_javascript_pattern_outside_strings(statement, ".route(") else {
         return false;
     };
     let Some(receiver_name) = express_receiver_name(&statement[..route_pos]) else {
@@ -169,7 +182,7 @@ fn record_express_route_chain(
 }
 
 fn express_route_statement(lines: &[String], start: usize) -> String {
-    if lines[start].contains(".route(") {
+    if find_javascript_pattern_outside_strings(&lines[start], ".route(").is_some() {
         return express_route_chain_statement(lines, start);
     }
     express_method_call_statement(lines, start)
@@ -260,7 +273,7 @@ fn express_use_statement(lines: &[String], start: usize) -> String {
         }
         statement.push_str(segment);
         let scan_start = if offset == 0 {
-            segment.find(".use(").unwrap_or(0)
+            find_javascript_pattern_outside_strings(segment, ".use(").unwrap_or(0)
         } else {
             0
         };
@@ -335,15 +348,18 @@ fn express_method_position(line: &str) -> Option<usize> {
         ".all(",
     ]
     .into_iter()
-    .filter_map(|method| line.find(method))
+    .filter_map(|method| find_javascript_pattern_outside_strings(line, method))
     .min()
 }
 
 fn express_route_start_position(line: &str) -> Option<usize> {
-    [express_method_position(line), line.find(".route(")]
-        .into_iter()
-        .flatten()
-        .min()
+    [
+        express_method_position(line),
+        find_javascript_pattern_outside_strings(line, ".route("),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
 }
 
 fn express_http_method(raw_method: &str) -> Option<String> {
@@ -481,13 +497,121 @@ fn express_router_name_is_router(receiver_name: &str, router_names: &BTreeSet<St
 fn parse_express_router_alias(line: &str, router_factory_imported: bool) -> Option<String> {
     let (left, right) = line.split_once('=')?;
     let right = right.trim_start();
-    let uses_express_factory = right.contains("express.Router(");
+    let uses_express_factory =
+        find_javascript_pattern_outside_strings(right, "express.Router(").is_some();
     let uses_imported_factory = router_factory_imported && right.starts_with("Router(");
     let uses_express_application = right.starts_with("express(");
     if !uses_express_factory && !uses_imported_factory && !uses_express_application {
         return None;
     }
     js_assignment_variable_name(left)
+}
+
+fn express_router_mount_names(arguments: &str, router_names: &BTreeSet<String>) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    for argument in javascript_top_level_arguments(arguments)
+        .into_iter()
+        .skip(1)
+    {
+        collect_express_router_mount_names(argument, router_names, &mut names);
+    }
+    names.into_iter().collect()
+}
+
+fn collect_express_router_mount_names(
+    argument: &str,
+    router_names: &BTreeSet<String>,
+    names: &mut BTreeSet<String>,
+) {
+    if let Some(inner) = javascript_array_literal_inner(argument) {
+        for nested_argument in javascript_top_level_arguments(inner) {
+            collect_express_router_mount_names(nested_argument, router_names, names);
+        }
+        return;
+    }
+    let Some(router_name) = express_receiver_name(argument) else {
+        return;
+    };
+    if express_router_name_is_router(&router_name, router_names) {
+        names.insert(router_name);
+    }
+}
+
+fn javascript_top_level_arguments(rest: &str) -> Vec<&str> {
+    let mut arguments = Vec::new();
+    let mut argument_start = 0usize;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in rest.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' | '`' => quote = Some(character),
+            '(' | '[' | '{' => depth += 1,
+            ')' if depth == 0 => {
+                let argument = rest[argument_start..index].trim();
+                if !argument.is_empty() {
+                    arguments.push(argument);
+                }
+                return arguments;
+            }
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let argument = rest[argument_start..index].trim();
+                if !argument.is_empty() {
+                    arguments.push(argument);
+                }
+                argument_start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    let argument = rest[argument_start..].trim();
+    if !argument.is_empty() {
+        arguments.push(argument);
+    }
+    arguments
+}
+
+fn find_javascript_pattern_outside_strings(line: &str, pattern: &str) -> Option<usize> {
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in line.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        if line[index..].starts_with(pattern) {
+            return Some(index);
+        }
+        if matches!(character, '\'' | '"' | '`') {
+            quote = Some(character);
+        }
+    }
+    None
 }
 
 fn js_assignment_variable_name(left: &str) -> Option<String> {

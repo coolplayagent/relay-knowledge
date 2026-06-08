@@ -862,3 +862,64 @@ fn preserves_spring_prefix_after_nested_static_type() {
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
 }
+
+#[test]
+fn preserves_all_fastapi_router_mount_prefixes() {
+    let source = "router = APIRouter()\n@router.get('/users')\ndef users():\n    pass\napp.include_router(router, prefix='/v1')\napp.include_router(router, prefix='/v2')\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.url == "/v1/users"));
+    assert!(routes.iter().any(|route| route.url == "/v2/users"));
+}
+
+#[test]
+fn skips_express_routes_inside_strings() {
+    let source = "const doc = \"app.get('/demo', demo);\";\napp.get('/live', live);\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/live");
+    assert_eq!(routes[0].handler_name, "live");
+}
+
+#[test]
+fn mounts_every_router_passed_to_express_use() {
+    let source = "const authRouter = express.Router();\nconst usersRouter = express.Router();\nauthRouter.get('/login', login);\nusersRouter.get('/users', listUsers);\napp.use('/api', authRouter, usersRouter);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 2);
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/api/login" && route.handler_name == "login")
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/api/users" && route.handler_name == "listUsers")
+    );
+}
+
+#[test]
+fn skips_spring_mappings_inside_block_comments() {
+    let source = "/*\n@GetMapping(\"/old\")\npublic String old() {\n}\n*/\n@GetMapping(\"/live\")\npublic String live() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/live");
+    assert_eq!(routes[0].handler_name, "live");
+}
+
+#[test]
+fn accepts_python_keyword_route_paths() {
+    let source = "router = APIRouter(prefix='/api')\n@app.route(rule='/users', methods=['POST'])\ndef users():\n    pass\n@router.get(path='/items')\ndef items():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/users" && route.http_method == "post")
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/api/items" && route.http_method == "get")
+    );
+}

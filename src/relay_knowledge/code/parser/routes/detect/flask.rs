@@ -19,7 +19,7 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
         {
             if let Some((router_name, router_info)) = parse_python_router_prefix(&prefix_statement)
             {
-                routers.insert(router_name, router_info);
+                merge_python_router_declaration(&mut routers, router_name, router_info);
                 index += prefix_lines;
                 continue;
             }
@@ -103,7 +103,8 @@ struct PythonRouteBinding {
 
 #[derive(Clone)]
 struct PythonRouterInfo {
-    prefix: String,
+    local_prefix: String,
+    mount_prefixes: BTreeSet<String>,
     framework: String,
 }
 
@@ -123,7 +124,7 @@ fn parse_flask_decorator(
         return None;
     }
     let args_trimmed = trim_one_trailing_paren(args);
-    let url = extract_quoted_string_python(args_trimmed)?;
+    let url = extract_python_route_path(args_trimmed)?;
     let receiver_name = python_decorator_receiver(func_part);
     let framework = route_framework(func_part, receiver_name.as_deref(), routers);
     let methods = if route_method.is_empty() {
@@ -151,17 +152,20 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
     }
     let router_info = if right.contains("APIRouter(") {
         PythonRouterInfo {
-            prefix: extract_python_keyword_string(right, "prefix").unwrap_or_default(),
+            local_prefix: extract_python_keyword_string(right, "prefix").unwrap_or_default(),
+            mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
         }
     } else if right.contains("FastAPI(") {
         PythonRouterInfo {
-            prefix: String::new(),
+            local_prefix: String::new(),
+            mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
         }
     } else if right.contains("Blueprint(") {
         PythonRouterInfo {
-            prefix: extract_python_keyword_string(right, "url_prefix").unwrap_or_default(),
+            local_prefix: extract_python_keyword_string(right, "url_prefix").unwrap_or_default(),
+            mount_prefixes: BTreeSet::new(),
             framework: "flask".to_owned(),
         }
     } else {
@@ -169,6 +173,17 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
     };
 
     Some((router_name, router_info))
+}
+
+fn merge_python_router_declaration(
+    routers: &mut BTreeMap<String, PythonRouterInfo>,
+    router_name: String,
+    mut router_info: PythonRouterInfo,
+) {
+    if let Some(existing) = routers.remove(&router_name) {
+        router_info.mount_prefixes = existing.mount_prefixes;
+    }
+    routers.insert(router_name, router_info);
 }
 
 fn python_router_prefix_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
@@ -232,10 +247,11 @@ fn apply_python_include_router_prefix(
     let router_info = routers
         .entry(router_name.to_owned())
         .or_insert_with(|| PythonRouterInfo {
-            prefix: String::new(),
+            local_prefix: String::new(),
+            mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
         });
-    router_info.prefix = merge_url_parts(&prefix, &router_info.prefix);
+    router_info.mount_prefixes.insert(prefix);
     router_info.framework = "fastapi".to_owned();
     true
 }
@@ -262,10 +278,11 @@ fn apply_python_register_blueprint_prefix(
         routers
             .entry(blueprint_name.to_owned())
             .or_insert_with(|| PythonRouterInfo {
-                prefix: String::new(),
+                local_prefix: String::new(),
+                mount_prefixes: BTreeSet::new(),
                 framework: "flask".to_owned(),
             });
-    router_info.prefix = merge_url_parts(&prefix, &router_info.prefix);
+    router_info.mount_prefixes.insert(prefix);
     router_info.framework = "flask".to_owned();
     true
 }
@@ -347,36 +364,53 @@ fn materialize_python_routes(
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
     for route_info in route_bindings {
-        let (url, framework) = python_route_url_and_framework(&route_info, routers);
-        let key = (url.clone(), route_info.http_method.clone());
-        if seen.insert(key) {
-            routes.push(RouteCandidate {
-                url,
-                http_method: route_info.http_method,
-                handler_name: route_info.handler_name,
-                framework,
-                line: route_info.line,
-            });
+        for (url, framework) in python_route_urls_and_frameworks(&route_info, routers) {
+            let key = (url.clone(), route_info.http_method.clone());
+            if seen.insert(key) {
+                routes.push(RouteCandidate {
+                    url,
+                    http_method: route_info.http_method.clone(),
+                    handler_name: route_info.handler_name.clone(),
+                    framework,
+                    line: route_info.line,
+                });
+            }
         }
     }
     routes
 }
 
-fn python_route_url_and_framework(
+fn python_route_urls_and_frameworks(
     route_info: &PythonRouteBinding,
     routers: &BTreeMap<String, PythonRouterInfo>,
-) -> (String, String) {
+) -> Vec<(String, String)> {
     let Some(receiver_name) = route_info.receiver_name.as_deref() else {
-        return (route_info.local_url.clone(), route_info.framework.clone());
+        return vec![(route_info.local_url.clone(), route_info.framework.clone())];
     };
     let Some(router_info) = routers.get(receiver_name) else {
-        return (route_info.local_url.clone(), route_info.framework.clone());
+        return vec![(route_info.local_url.clone(), route_info.framework.clone())];
     };
 
-    (
-        merge_url_parts(&router_info.prefix, &route_info.local_url),
-        router_info.framework.clone(),
-    )
+    python_router_prefixes(router_info)
+        .into_iter()
+        .map(|prefix| {
+            (
+                merge_url_parts(&prefix, &route_info.local_url),
+                router_info.framework.clone(),
+            )
+        })
+        .collect()
+}
+
+fn python_router_prefixes(router_info: &PythonRouterInfo) -> BTreeSet<String> {
+    if router_info.mount_prefixes.is_empty() {
+        return BTreeSet::from([router_info.local_prefix.clone()]);
+    }
+    router_info
+        .mount_prefixes
+        .iter()
+        .map(|mount_prefix| merge_url_parts(mount_prefix, &router_info.local_prefix))
+        .collect()
 }
 
 fn python_decorator_receiver(func_part: &str) -> Option<String> {
@@ -510,6 +544,12 @@ fn extract_python_keyword_string(args: &str, keyword: &str) -> Option<String> {
     let eq_pos = after_keyword.find('=')?;
     let after_eq = after_keyword[eq_pos + 1..].trim_start();
     extract_quoted_string_python(after_eq)
+}
+
+fn extract_python_route_path(args: &str) -> Option<String> {
+    extract_quoted_string_python(args)
+        .or_else(|| extract_python_keyword_string(args, "path"))
+        .or_else(|| extract_python_keyword_string(args, "rule"))
 }
 
 fn extract_shorthand_method_from_route(args: &str) -> Vec<String> {
