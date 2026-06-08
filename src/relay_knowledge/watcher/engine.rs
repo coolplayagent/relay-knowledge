@@ -195,11 +195,14 @@ struct WatcherLoopContext {
 }
 
 enum WatchRegistrationPlan {
-    Add,
+    Add {
+        watch_root: bool,
+    },
     Replace {
         index: usize,
         previous_root: PathBuf,
-        root_changed: bool,
+        watch_new_root: bool,
+        unwatch_previous_root: bool,
     },
 }
 
@@ -478,20 +481,53 @@ async fn watch_repository(
             if watched == &repo {
                 return false;
             }
+            let root_changed = watched.root != repo.root;
+            let new_root_already_watched = root_changed
+                && state_guard
+                    .repositories
+                    .iter()
+                    .enumerate()
+                    .any(|(repo_index, watched)| repo_index != index && watched.root == repo.root);
+            let previous_root_still_watched = root_changed
+                && state_guard
+                    .repositories
+                    .iter()
+                    .enumerate()
+                    .any(|(repo_index, existing)| {
+                        repo_index != index && existing.root == watched.root
+                    });
+            if root_changed && !new_root_already_watched {
+                let root_count_after = watched_root_count(&state_guard.repositories) + 1
+                    - usize::from(!previous_root_still_watched);
+                if root_count_after > max_watch_dirs {
+                    drop(state_guard);
+                    update_diagnostics_degraded(
+                        diag_tx,
+                        state,
+                        dropped_events,
+                        &format!(
+                            "exceeded max watch directories limit ({max_watch_dirs}); repository '{}' not watched",
+                            repo.alias
+                        ),
+                    )
+                    .await;
+                    return false;
+                }
+            }
             WatchRegistrationPlan::Replace {
                 index,
                 previous_root: watched.root.clone(),
-                root_changed: watched.root != repo.root,
+                watch_new_root: root_changed && !new_root_already_watched,
+                unwatch_previous_root: root_changed && !previous_root_still_watched,
             }
         } else {
-            if state_guard
+            let root_already_watched = state_guard
                 .repositories
                 .iter()
-                .any(|watched| watched.root == repo.root)
+                .any(|watched| watched.root == repo.root);
+            if !root_already_watched
+                && watched_root_count(&state_guard.repositories) >= max_watch_dirs
             {
-                return false;
-            }
-            if state_guard.repositories.len() >= max_watch_dirs {
                 drop(state_guard);
                 update_diagnostics_degraded(
                     diag_tx,
@@ -505,42 +541,46 @@ async fn watch_repository(
                 .await;
                 return false;
             }
-            WatchRegistrationPlan::Add
+            WatchRegistrationPlan::Add {
+                watch_root: !root_already_watched,
+            }
         }
     };
 
     match plan {
-        WatchRegistrationPlan::Add => match watcher.watch(&repo.root, RecursiveMode::Recursive) {
-            Ok(()) => {
-                let mut state_guard = state.write().await;
-                state_guard.repositories.push(repo);
-                drop(state_guard);
-                emit_diagnostics(state, diag_tx, dropped_events).await;
-                true
+        WatchRegistrationPlan::Add { watch_root } => {
+            if watch_root {
+                if let Err(error) = watcher.watch(&repo.root, RecursiveMode::Recursive) {
+                    tracing::warn!(
+                        repository = %repo.alias,
+                        path = %repo.root.display(),
+                        error = %error,
+                        "failed to watch repository directory"
+                    );
+                    update_diagnostics_degraded(
+                        diag_tx,
+                        state,
+                        dropped_events,
+                        &format!("watch failed for {}: {error}", repo.alias),
+                    )
+                    .await;
+                    return false;
+                }
             }
-            Err(error) => {
-                tracing::warn!(
-                    repository = %repo.alias,
-                    path = %repo.root.display(),
-                    error = %error,
-                    "failed to watch repository directory"
-                );
-                update_diagnostics_degraded(
-                    diag_tx,
-                    state,
-                    dropped_events,
-                    &format!("watch failed for {}: {error}", repo.alias),
-                )
-                .await;
-                false
-            }
-        },
+
+            let mut state_guard = state.write().await;
+            state_guard.repositories.push(repo);
+            drop(state_guard);
+            emit_diagnostics(state, diag_tx, dropped_events).await;
+            true
+        }
         WatchRegistrationPlan::Replace {
             index,
             previous_root,
-            root_changed,
+            watch_new_root,
+            unwatch_previous_root,
         } => {
-            if root_changed {
+            if watch_new_root {
                 if let Err(error) = watcher.watch(&repo.root, RecursiveMode::Recursive) {
                     tracing::warn!(
                         repository = %repo.alias,
@@ -557,6 +597,13 @@ async fn watch_repository(
                     .await;
                     return false;
                 }
+            }
+
+            let mut state_guard = state.write().await;
+            state_guard.repositories[index] = repo.clone();
+            drop(state_guard);
+
+            if unwatch_previous_root {
                 if let Err(error) = watcher.unwatch(&previous_root) {
                     tracing::warn!(
                         repository = %repo.alias,
@@ -571,16 +618,22 @@ async fn watch_repository(
                         &format!("watch refresh cleanup failed for {}: {error}", repo.alias),
                     )
                     .await;
+                    return true;
                 }
             }
 
-            let mut state_guard = state.write().await;
-            state_guard.repositories[index] = repo;
-            drop(state_guard);
             emit_diagnostics(state, diag_tx, dropped_events).await;
             true
         }
     }
+}
+
+fn watched_root_count(repositories: &[WatchedRepository]) -> usize {
+    let mut roots = HashSet::new();
+    for repo in repositories {
+        roots.insert(repo.root.clone());
+    }
+    roots.len()
 }
 
 async fn unwatch_repository(
@@ -590,7 +643,7 @@ async fn unwatch_repository(
     dropped_events: &Arc<AtomicU64>,
     alias_or_id: &str,
 ) -> bool {
-    let repo = {
+    let (repo, unwatch_root) = {
         let mut state_guard = state.write().await;
         let Some(index) = state_guard
             .repositories
@@ -599,8 +652,18 @@ async fn unwatch_repository(
         else {
             return false;
         };
-        state_guard.repositories.remove(index)
+        let repo = state_guard.repositories.remove(index);
+        let unwatch_root = !state_guard
+            .repositories
+            .iter()
+            .any(|remaining| remaining.root == repo.root);
+        (repo, unwatch_root)
     };
+
+    if !unwatch_root {
+        emit_diagnostics(state, diag_tx, dropped_events).await;
+        return true;
+    }
 
     if let Err(error) = watcher.unwatch(&repo.root) {
         tracing::warn!(
@@ -627,8 +690,11 @@ async fn unwatch_all_repositories(
     state: &Arc<RwLock<WatcherInternalState>>,
 ) {
     let repositories = state.read().await.repositories.clone();
+    let mut unwatched_roots = HashSet::new();
     for repo in repositories {
-        let _ = watcher.unwatch(&repo.root);
+        if unwatched_roots.insert(repo.root.clone()) {
+            let _ = watcher.unwatch(&repo.root);
+        }
     }
 }
 
@@ -701,7 +767,7 @@ async fn process_debounced_paths(
         for repo in &repositories {
             let repo_changes = changed_snapshots
                 .iter()
-                .filter(|change| change.path.starts_with(&repo.root))
+                .filter(|change| repository_should_process_path(repo, &change.path))
                 .collect::<Vec<_>>();
             let repo_paths: Vec<PathBuf> = repo_changes
                 .iter()
@@ -759,16 +825,20 @@ async fn process_debounced_paths(
 
 fn should_process_path(state: &WatcherInternalState, path: &Path) -> bool {
     for repo in &state.repositories {
-        let filter = WatcherEventFilter::new(
-            repo.root.clone(),
-            repo.path_filters.clone(),
-            repo.language_filters.clone(),
-        );
-        if filter.should_process_path(path) {
+        if repository_should_process_path(repo, path) {
             return true;
         }
     }
     false
+}
+
+fn repository_should_process_path(repo: &WatchedRepository, path: &Path) -> bool {
+    WatcherEventFilter::new(
+        repo.root.clone(),
+        repo.path_filters.clone(),
+        repo.language_filters.clone(),
+    )
+    .should_process_path(path)
 }
 
 fn create_notify_watcher(

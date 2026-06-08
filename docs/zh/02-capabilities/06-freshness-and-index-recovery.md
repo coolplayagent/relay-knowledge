@@ -54,10 +54,10 @@ relay-knowledge health --format json
 1. **事件检测**：使用 `notify` crate 跨平台（Linux inotify、macOS FSEvents、Windows ReadDirectoryChangesW）检测文件创建/修改/删除
 2. **事件去抖**：在可配置的时间窗口内合并快速连续的文件变更事件
 3. **内容哈希过滤**：通过 FNV-1a 内容哈希跳过无实际内容变化的保存操作
-4. **路径过滤**：自动忽略 `.git/`、`target/`、`node_modules/`、`__pycache__/` 等目录和二进制文件
+4. **作用域过滤**：自动忽略 `.git/`、`target/`、`node_modules/`、`__pycache__/` 等目录和二进制文件，然后按每个仓库作用域自己的 path/language filter 判断是否生成 overlay 任务；`json`、`yaml`、`toml`、`sql` 和 `markdown` 等配置、文档语言过滤会在 watcher 事件中保留
 5. **首轮索引保护**：只有已经完成全量索引、拥有 `last_indexed_scope_id` 且不是 stale 的仓库才会进入 watcher，避免 worktree overlay 生成不完整的首轮索引或覆盖 stale 重配置状态
 6. **增量任务生成**：变更文件通过 `build_incremental_task_seed` 生成 `CodeIndexTaskSeed`，payload 是 `WorktreeOverlay` 模式的 `CodeIndexRequest`，进入与 code-index worker、lease、retry 和 dead-letter 共用的持久化队列；overlay 指纹包含变更路径集合和内容代际，后续保存不会被去重到较早的 queued/running 任务中
-7. **仓库生命周期同步**：服务运行期间注册、刷新或删除仓库时，通过 watcher command channel 执行 watch/update/unwatch；底层监听失败会进入 degraded 诊断，而不是只更新内存列表
+7. **仓库生命周期同步**：服务运行期间注册、刷新或删除仓库时，通过 watcher command channel 执行 watch/update/unwatch；多个仓库作用域可以共享同一个 root 目录，同时仍作为独立 overlay 目标保留；底层监听失败会进入 degraded 诊断，而不是只更新内存列表
 
 ### 状态监控
 
