@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     domain::{
         AuditEventRecord, CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt,
@@ -82,14 +80,14 @@ impl GraphStore for PartitionedSqliteKnowledgeStore {
     }
 
     fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection> {
-        self.control.inspect_graph()
+        let this = self.clone();
+        Box::pin(async move { super::diagnostics::inspect_graph(&this).await })
     }
 
     fn health_snapshot(&self, now_ms: u64) -> StorageFuture<'_, HealthStorageSnapshot> {
-        let control = Arc::clone(&self.control);
         let this = self.clone();
         Box::pin(async move {
-            let mut snapshot = control.health_snapshot(now_ms).await?;
+            let mut snapshot = super::diagnostics::health_snapshot(&this, now_ms).await?;
             snapshot.repository_code_totals = this.code_repository_totals().await?;
             Ok(snapshot)
         })

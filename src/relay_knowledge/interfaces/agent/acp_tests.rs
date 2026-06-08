@@ -386,6 +386,7 @@ impl GraphStore for SlowSearchStore {
                 code_reference_count: 0,
                 code_chunk_count: 0,
                 code_parse_status_counts: Default::default(),
+                sqlite: Default::default(),
             })
         })
     }
@@ -521,6 +522,7 @@ impl GraphStore for SearchFailStore {
                 code_reference_count: 0,
                 code_chunk_count: 0,
                 code_parse_status_counts: Default::default(),
+                sqlite: Default::default(),
             })
         })
     }

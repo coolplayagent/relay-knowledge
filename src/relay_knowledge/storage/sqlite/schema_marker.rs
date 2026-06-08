@@ -3,7 +3,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::storage::StorageError;
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-const SCHEMA_MARKER_VERSION: i64 = 2;
+const SCHEMA_MARKER_VERSION: i64 = 3;
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
@@ -107,6 +107,11 @@ pub(super) fn schema_initialization_is_current(
             GRAPH_BM25_LABEL_GRAM_COLUMNS,
         )?
         || !workspace_package_mappings_current(connection)?
+        || !table_has_columns(
+            connection,
+            "relay_sqlite_maintenance_diagnostics",
+            &["id", "last_maintenance_at_ms", "last_maintenance_error"],
+        )?
     {
         return Ok(false);
     }

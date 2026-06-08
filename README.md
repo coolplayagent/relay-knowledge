@@ -288,6 +288,17 @@ SQLite writes stay on a single writer lane. Code queries, reports, graph reads,
 file queries, and health diagnostics use bounded read-only connections where
 SQLite WAL permits concurrent committed-snapshot reads.
 
+After bulk code-index snapshot apply or checkpointed finalize, SQLite storage
+runs best-effort `PRAGMA optimize` and `PRAGMA wal_checkpoint(PASSIVE)`.
+`health --format json` and graph inspection expose `graph.sqlite` diagnostics
+with journal mode, WAL size, last maintenance time, and any maintenance error.
+Maintenance timestamps and errors are persisted in SQLite so service restarts
+and one-shot worker exits do not erase the last attempt. Under
+`partitioned_sqlite`, those fields aggregate the control database and all active
+repository shard databases through read-only shard diagnostics. If any active
+shard cannot be inspected, the aggregate keeps the shard error and reports an
+unknown WAL size instead of presenting a partial total.
+
 Public health is a liveness-safe read. It does not enqueue index refresh work,
 and under storage pressure it returns stale/degraded `storage_busy` diagnostics
 instead of waiting for indexing to finish.

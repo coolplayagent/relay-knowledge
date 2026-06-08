@@ -8,7 +8,8 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::storage::StorageError;
 
-const READ_SQLITE_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
+use super::maintenance::configure_read_connection;
+
 const READ_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(2);
 const READ_CONNECTIONS: usize = 4;
 
@@ -116,18 +117,6 @@ fn sleep_until_read_lock_retry(
     }
     let remaining = deadline.saturating_duration_since(now);
     std::thread::sleep(remaining.min(READ_LOCK_POLL_INTERVAL));
-
-    Ok(())
-}
-
-fn configure_read_connection(connection: &Connection) -> Result<(), StorageError> {
-    connection.busy_timeout(READ_SQLITE_BUSY_TIMEOUT)?;
-    connection.execute_batch(
-        "
-        PRAGMA foreign_keys = ON;
-        PRAGMA query_only = ON;
-        ",
-    )?;
 
     Ok(())
 }

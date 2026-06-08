@@ -446,7 +446,13 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        self.run(move |connection| code_snapshot::apply_snapshot(connection, snapshot))
+        let maintenance = self.maintenance.clone();
+        self.run(move |connection| {
+            let summary = code_snapshot::apply_snapshot(connection, snapshot)?;
+            super::maintenance::run_post_index_maintenance(connection, &maintenance);
+
+            Ok(summary)
+        })
     }
 
     fn clear_code_workspace_state(
@@ -477,7 +483,13 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         session: CodeIndexSession,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        self.run(move |connection| code_batch::finalize_session(connection, session))
+        let maintenance = self.maintenance.clone();
+        self.run(move |connection| {
+            let summary = code_batch::finalize_session(connection, session)?;
+            super::maintenance::run_post_index_maintenance(connection, &maintenance);
+
+            Ok(summary)
+        })
     }
 
     fn search_code(
