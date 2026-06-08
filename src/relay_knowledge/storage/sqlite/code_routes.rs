@@ -35,6 +35,7 @@ pub(super) fn insert_records(
             record.line_range.start,
             record.line_range.end,
         ])?;
+        let http_method_terms = route_http_method_search_terms(&record.http_method);
         search_documents.insert(
             &record.source_scope,
             "route",
@@ -43,7 +44,7 @@ pub(super) fn insert_records(
             &record.language_id,
             [
                 record.url.as_str(),
-                record.http_method.as_str(),
+                http_method_terms.as_str(),
                 record.handler_name.as_str(),
                 record.framework.as_str(),
                 record.path.as_str(),
@@ -52,4 +53,26 @@ pub(super) fn insert_records(
     }
 
     Ok(())
+}
+
+fn route_http_method_search_terms(method: &str) -> String {
+    if method == "any" {
+        return "any get post put delete patch head options".to_owned();
+    }
+    method.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::route_http_method_search_terms;
+
+    #[test]
+    fn any_route_method_search_terms_include_concrete_verbs() {
+        let terms = route_http_method_search_terms("any");
+
+        assert!(terms.contains("any"));
+        assert!(terms.contains("get"));
+        assert!(terms.contains("post"));
+        assert!(terms.contains("options"));
+    }
 }

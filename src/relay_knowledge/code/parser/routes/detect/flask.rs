@@ -10,7 +10,7 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
     let mut pending_routes = Vec::<FlaskRouteInfo>::new();
-    let mut router_prefixes = BTreeMap::<String, String>::new();
+    let mut routers = BTreeMap::<String, PythonRouterInfo>::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut index = 0usize;
     while index < lines.len() {
@@ -18,16 +18,16 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
         if let Some((prefix_statement, prefix_lines)) =
             python_router_prefix_statement(&lines, index)
         {
-            if let Some((router_name, prefix)) = parse_python_router_prefix(&prefix_statement) {
-                router_prefixes.insert(router_name, prefix);
+            if let Some((router_name, router_info)) = parse_python_router_prefix(&prefix_statement)
+            {
+                routers.insert(router_name, router_info);
                 index += prefix_lines;
                 continue;
             }
         }
         if trimmed.starts_with("@") {
             let (decorator_statement, decorator_lines) = flask_decorator_statement(&lines, index);
-            if let Some(route_info) = parse_flask_decorator(&decorator_statement, &router_prefixes)
-            {
+            if let Some(route_info) = parse_flask_decorator(&decorator_statement, &routers) {
                 pending_routes.push(route_info);
                 index += decorator_lines;
                 continue;
@@ -58,7 +58,7 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
                                 url: route_info.url.clone(),
                                 http_method: method,
                                 handler_name: handler.clone(),
-                                framework: "flask".to_owned(),
+                                framework: route_info.framework.clone(),
                                 line: index + 1,
                             });
                         }
@@ -75,11 +75,18 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
 struct FlaskRouteInfo {
     url: String,
     methods: Vec<String>,
+    framework: String,
+}
+
+#[derive(Clone)]
+struct PythonRouterInfo {
+    prefix: String,
+    framework: String,
 }
 
 fn parse_flask_decorator(
     line: &str,
-    router_prefixes: &BTreeMap<String, String>,
+    routers: &BTreeMap<String, PythonRouterInfo>,
 ) -> Option<FlaskRouteInfo> {
     let line = line.trim_start_matches('@');
     let (func_part, args) = if let Some(paren_pos) = line.find('(') {
@@ -94,16 +101,20 @@ fn parse_flask_decorator(
     }
     let args_trimmed = trim_one_trailing_paren(args);
     let url = extract_quoted_string_python(args_trimmed)?;
-    let url = route_url_with_router_prefix(func_part, &url, router_prefixes);
+    let (url, framework) = route_url_and_framework(func_part, &url, routers);
     let methods = if route_method.is_empty() {
         extract_methods_from_flask_args(args_trimmed)
     } else {
         vec![route_method]
     };
-    Some(FlaskRouteInfo { url, methods })
+    Some(FlaskRouteInfo {
+        url,
+        methods,
+        framework,
+    })
 }
 
-fn parse_python_router_prefix(line: &str) -> Option<(String, String)> {
+fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> {
     let (left, right) = line.split_once('=')?;
     let router_name = left.trim();
     if router_name.is_empty()
@@ -113,15 +124,21 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, String)> {
     {
         return None;
     }
-    let prefix = if right.contains("APIRouter(") {
-        extract_python_keyword_string(right, "prefix")?
+    let router_info = if right.contains("APIRouter(") {
+        PythonRouterInfo {
+            prefix: extract_python_keyword_string(right, "prefix").unwrap_or_default(),
+            framework: "fastapi".to_owned(),
+        }
     } else if right.contains("Blueprint(") {
-        extract_python_keyword_string(right, "url_prefix")?
+        PythonRouterInfo {
+            prefix: extract_python_keyword_string(right, "url_prefix").unwrap_or_default(),
+            framework: "flask".to_owned(),
+        }
     } else {
         return None;
     };
 
-    Some((router_name.to_owned(), prefix))
+    Some((router_name.to_owned(), router_info))
 }
 
 fn python_router_prefix_statement(lines: &[&str], start: usize) -> Option<(String, usize)> {
@@ -197,20 +214,23 @@ fn python_parenthesized_statement(
     (statement, consumed.max(1))
 }
 
-fn route_url_with_router_prefix(
+fn route_url_and_framework(
     func_part: &str,
     url: &str,
-    router_prefixes: &BTreeMap<String, String>,
-) -> String {
+    routers: &BTreeMap<String, PythonRouterInfo>,
+) -> (String, String) {
     let Some((receiver, _)) = func_part.rsplit_once('.') else {
-        return url.to_owned();
+        return (url.to_owned(), "flask".to_owned());
     };
     let receiver = receiver.rsplit('.').next().unwrap_or(receiver);
-    let Some(prefix) = router_prefixes.get(receiver) else {
-        return url.to_owned();
+    let Some(router_info) = routers.get(receiver) else {
+        return (url.to_owned(), "flask".to_owned());
     };
 
-    merge_url_parts(prefix, url)
+    (
+        merge_url_parts(&router_info.prefix, url),
+        router_info.framework.clone(),
+    )
 }
 
 fn extract_flask_http_method(func_part: &str) -> String {

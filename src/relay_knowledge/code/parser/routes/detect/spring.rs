@@ -8,7 +8,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
     let mut pending_annotations: Vec<SpringPendingAnnotation> = Vec::new();
-    let mut class_prefixes = Vec::<String>::new();
+    let mut class_prefixes = Vec::<SpringClassPrefix>::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut index = 0usize;
     while index < lines.len() {
@@ -18,7 +18,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                 spring_annotation_statement(&lines, index);
             if let Some(spring_routes) = parse_spring_route_annotation(&annotation_statement) {
                 if pending_request_mapping_can_be_prefix(&pending_annotations) {
-                    class_prefixes = pending_request_mapping_urls(&pending_annotations);
+                    class_prefixes = pending_request_mapping_prefixes(&pending_annotations);
                     pending_annotations.clear();
                 }
                 pending_annotations.extend(spring_routes);
@@ -28,7 +28,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
         }
         if line_declares_java_type(trimmed) {
             if pending_request_mapping_can_be_prefix(&pending_annotations) {
-                class_prefixes = pending_request_mapping_urls(&pending_annotations);
+                class_prefixes = pending_request_mapping_prefixes(&pending_annotations);
             } else {
                 class_prefixes.clear();
             }
@@ -41,12 +41,14 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                 let prefixes = route_class_prefixes(&class_prefixes);
                 for annotation in pending_annotations.drain(..) {
                     for prefix in &prefixes {
-                        let full_url = merge_url_parts(prefix, &annotation.url);
-                        let key = (full_url.clone(), annotation.http_method.clone());
+                        let http_method =
+                            route_http_method_with_class_prefix(prefix, &annotation.http_method);
+                        let full_url = merge_url_parts(&prefix.url, &annotation.url);
+                        let key = (full_url.clone(), http_method.clone());
                         if seen.insert(key) {
                             routes.push(RouteCandidate {
                                 url: full_url,
-                                http_method: annotation.http_method.clone(),
+                                http_method,
                                 handler_name: method_name.clone(),
                                 framework: "spring".to_owned(),
                                 line: index + 1,
@@ -80,6 +82,12 @@ struct SpringPendingAnnotation {
     kind: SpringAnnotationKind,
 }
 
+#[derive(Clone)]
+struct SpringClassPrefix {
+    url: String,
+    http_method: String,
+}
+
 fn pending_request_mapping_can_be_prefix(annotations: &[SpringPendingAnnotation]) -> bool {
     !annotations.is_empty()
         && annotations
@@ -87,22 +95,38 @@ fn pending_request_mapping_can_be_prefix(annotations: &[SpringPendingAnnotation]
             .all(|annotation| annotation.kind == SpringAnnotationKind::RequestMapping)
 }
 
-fn pending_request_mapping_urls(annotations: &[SpringPendingAnnotation]) -> Vec<String> {
+fn pending_request_mapping_prefixes(
+    annotations: &[SpringPendingAnnotation],
+) -> Vec<SpringClassPrefix> {
     let mut seen = BTreeSet::new();
-    let mut urls = Vec::new();
+    let mut prefixes = Vec::new();
     for annotation in annotations {
-        if seen.insert(annotation.url.clone()) {
-            urls.push(annotation.url.clone());
+        let key = (annotation.url.clone(), annotation.http_method.clone());
+        if seen.insert(key) {
+            prefixes.push(SpringClassPrefix {
+                url: annotation.url.clone(),
+                http_method: annotation.http_method.clone(),
+            });
         }
     }
-    urls
+    prefixes
 }
 
-fn route_class_prefixes(class_prefixes: &[String]) -> Vec<String> {
+fn route_class_prefixes(class_prefixes: &[SpringClassPrefix]) -> Vec<SpringClassPrefix> {
     if class_prefixes.is_empty() {
-        return vec![String::new()];
+        return vec![SpringClassPrefix {
+            url: String::new(),
+            http_method: "any".to_owned(),
+        }];
     }
     class_prefixes.to_vec()
+}
+
+fn route_http_method_with_class_prefix(prefix: &SpringClassPrefix, method: &str) -> String {
+    if method == "any" {
+        return prefix.http_method.clone();
+    }
+    method.to_owned()
 }
 
 fn spring_annotation_statement(lines: &[&str], start: usize) -> (String, usize) {

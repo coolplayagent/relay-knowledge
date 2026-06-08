@@ -228,6 +228,7 @@ fn detects_fastapi_router_prefix() {
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
     assert_eq!(routes[0].handler_name, "users");
+    assert_eq!(routes[0].framework, "fastapi");
 }
 
 #[test]
@@ -452,6 +453,15 @@ fn detects_spring_class_prefix_with_method_attribute() {
 }
 
 #[test]
+fn spring_class_level_method_constrains_methodless_request_mapping() {
+    let source = "@RequestMapping(path = \"/api\", method = RequestMethod.POST)\npublic class LoginController {\n@RequestMapping(\"/login\")\npublic String login() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/login");
+    assert_eq!(routes[0].http_method, "post");
+}
+
+#[test]
 fn expands_spring_multiple_class_prefixes() {
     let source = "@RequestMapping({\"/api\", \"/v1\"})\npublic class UserController {\n@GetMapping(\"/users\")\npublic List<User> users() {\n";
     let routes = detect_routes("java", source);
@@ -492,6 +502,24 @@ fn detects_spring_path_attribute_after_method_attribute() {
 #[test]
 fn detects_express_final_handler_after_middleware() {
     let source = "app.get('/users', requireAuth, auditRequest, listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn expands_express_path_arrays() {
+    let source = "app.get(['/v1/users', '/v2/users'], listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.url == "/v1/users"));
+    assert!(routes.iter().any(|route| route.url == "/v2/users"));
+    assert!(routes.iter().all(|route| route.handler_name == "listUsers"));
+}
+
+#[test]
+fn detects_express_final_handler_inside_callback_arrays() {
+    let source = "app.get('/users', [requireAuth, listUsers]);\n";
     let routes = detect_routes("typescript", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].handler_name, "listUsers");

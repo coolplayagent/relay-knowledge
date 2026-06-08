@@ -63,25 +63,23 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             continue;
         };
         let after_method = after_method.trim_start();
-        let url = if let Some(url) = extract_quoted_string(after_method) {
-            url
-        } else {
+        let urls = express_route_urls(after_method);
+        if urls.is_empty() {
             continue;
         };
-        if !url.starts_with('/') && !url.starts_with("${") {
-            continue;
-        }
-        let url = route_url_with_router_prefix(&receiver_name, &url, &router_prefixes);
         let handler = extract_handler_name(after_method);
-        let key = (url.clone(), http_method.clone());
-        if seen.insert(key) {
-            routes.push(RouteCandidate {
-                url,
-                http_method,
-                handler_name: handler.unwrap_or_else(|| "anonymous".to_owned()),
-                framework: "express".to_owned(),
-                line: index + 1,
-            });
+        for local_url in urls {
+            let url = route_url_with_router_prefix(&receiver_name, &local_url, &router_prefixes);
+            let key = (url.clone(), http_method.clone());
+            if seen.insert(key) {
+                routes.push(RouteCandidate {
+                    url,
+                    http_method: http_method.clone(),
+                    handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
+                    framework: "express".to_owned(),
+                    line: index + 1,
+                });
+            }
         }
     }
     routes
@@ -131,13 +129,10 @@ fn record_express_route_chain(
         return false;
     }
     let after_route = &statement[route_pos + ".route(".len()..];
-    let Some(local_url) = extract_quoted_string(after_route) else {
-        return false;
-    };
-    if !local_url.starts_with('/') && !local_url.starts_with("${") {
+    let urls = express_route_urls(after_route);
+    if urls.is_empty() {
         return false;
     }
-    let url = route_url_with_router_prefix(&receiver_name, &local_url, router_prefixes);
     let mut found_route_method = false;
     let mut scan = after_route;
     while let Some(method_pos) = express_method_position(scan) {
@@ -155,15 +150,18 @@ fn record_express_route_chain(
         };
         found_route_method = true;
         let handler = extract_handler_name_from_arguments(after_method);
-        let key = (url.clone(), http_method.clone());
-        if seen.insert(key) {
-            routes.push(RouteCandidate {
-                url: url.clone(),
-                http_method,
-                handler_name: handler.unwrap_or_else(|| "anonymous".to_owned()),
-                framework: "express".to_owned(),
-                line,
-            });
+        for local_url in &urls {
+            let url = route_url_with_router_prefix(&receiver_name, local_url, router_prefixes);
+            let key = (url.clone(), http_method.clone());
+            if seen.insert(key) {
+                routes.push(RouteCandidate {
+                    url,
+                    http_method: http_method.clone(),
+                    handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
+                    framework: "express".to_owned(),
+                    line,
+                });
+            }
         }
         scan = after_method;
     }
@@ -313,6 +311,113 @@ fn express_http_method(raw_method: &str) -> Option<String> {
         "all" => Some("any".to_owned()),
         _ => None,
     }
+}
+
+fn express_route_urls(arguments: &str) -> Vec<String> {
+    let Some(first_argument) = first_top_level_argument(arguments) else {
+        return Vec::new();
+    };
+    if let Some(url) = extract_quoted_string(first_argument) {
+        return route_url_literals([url]);
+    }
+    let Some(array_inner) = javascript_array_literal_inner(first_argument) else {
+        return Vec::new();
+    };
+    route_url_literals(extract_quoted_strings(array_inner))
+}
+
+fn route_url_literals(urls: impl IntoIterator<Item = String>) -> Vec<String> {
+    urls.into_iter()
+        .filter(|url| url.starts_with('/') || url.starts_with("${"))
+        .collect()
+}
+
+fn first_top_level_argument(arguments: &str) -> Option<&str> {
+    let arguments = arguments.trim_start();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in arguments.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' | '`' => quote = Some(character),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ',' if depth == 0 => {
+                let argument = arguments[..index].trim();
+                return (!argument.is_empty()).then_some(argument);
+            }
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    let argument = arguments.trim();
+    (!argument.is_empty()).then_some(argument)
+}
+
+fn javascript_array_literal_inner(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if !value.starts_with('[') {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in value.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' | '`' => quote = Some(character),
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(&value[1..index]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn extract_quoted_strings(value: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut offset = 0usize;
+    while let Some(start_relative) = value[offset..].find(['\'', '"', '`']) {
+        let start = offset + start_relative;
+        if let Some(url) = extract_quoted_string(&value[start..]) {
+            offset = start + url.len() + 2;
+            values.push(url);
+        } else {
+            break;
+        }
+    }
+    values
 }
 
 fn express_receiver_name(receiver: &str) -> Option<String> {
