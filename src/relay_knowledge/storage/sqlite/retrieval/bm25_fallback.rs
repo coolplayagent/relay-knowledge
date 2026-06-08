@@ -1,9 +1,9 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter, types::Value};
 
 use crate::storage::{GraphSearchRequest, StorageError};
 
 use super::bm25::RawBm25Row;
-use super::{ScoredHit, scored_bm25_hit, split_labels};
+use super::{ScoredHit, label_trigrams, scored_bm25_hit, split_labels};
 
 const MIN_LIKE_QUERY_LEN: usize = 2;
 const MIN_FUZZY_QUERY_LEN: usize = 3;
@@ -11,6 +11,8 @@ const FUZZY_SHORT_QUERY_MAX_DISTANCE: usize = 1;
 const FUZZY_LONG_QUERY_MAX_DISTANCE: usize = 2;
 const FUZZY_SHORT_QUERY_LENGTH_THRESHOLD: usize = 4;
 const FALLBACK_CANDIDATE_LIMIT: usize = 200;
+const FUZZY_LABEL_CANDIDATE_LIMIT: usize = FALLBACK_CANDIDATE_LIMIT * 8;
+const FUZZY_MATCHED_NAME_LIMIT: usize = FALLBACK_CANDIDATE_LIMIT;
 
 const SELECT_COLUMNS: &str = "\
             graph_bm25.document_id,\n\
@@ -85,10 +87,7 @@ fn exact_name_rows(
     request: &GraphSearchRequest,
 ) -> Result<Vec<FallbackCandidate>, StorageError> {
     let name_exact = request.query.trim().to_ascii_lowercase();
-    let name_like = format!(
-        "%\"{}\"%",
-        name_exact.replace('%', "\\%").replace('_', "\\_")
-    );
+    let name_like = json_string_contains_like_pattern(&name_exact)?;
     let limit = FALLBACK_CANDIDATE_LIMIT.min(request.limit);
     let filter = scope_filter(3, 4);
     let sql = format!(
@@ -127,18 +126,18 @@ fn exact_name_rows(
             })
         },
     )?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
+    let mut candidates = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    sort_fallback_candidates(&mut candidates);
+    Ok(candidates)
 }
 
 fn like_substring_rows(
     connection: &Connection,
     request: &GraphSearchRequest,
 ) -> Result<Vec<FallbackCandidate>, StorageError> {
-    let query_like = format!(
-        "%{}%",
-        request.query.trim().replace('%', "\\%").replace('_', "\\_")
-    );
+    let query_like = contains_like_pattern(request.query.trim());
     let limit = FALLBACK_CANDIDATE_LIMIT.min(request.limit);
     let filter = scope_filter(2, 3);
     let sql = format!(
@@ -176,8 +175,11 @@ fn like_substring_rows(
             })
         },
     )?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
+    let mut candidates = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    sort_fallback_candidates(&mut candidates);
+    Ok(candidates)
 }
 
 fn fuzzy_levenshtein_rows(
@@ -188,55 +190,99 @@ fn fuzzy_levenshtein_rows(
     let max_distance = adaptive_max_distance(query);
     let limit = FALLBACK_CANDIDATE_LIMIT.min(request.limit);
 
-    let distinct_names = collect_distinct_symbol_names(connection, request)?;
-    let matching_names: Vec<String> = distinct_names
-        .into_iter()
-        .filter(|name| {
-            let name_lower = name.to_ascii_lowercase();
-            let query_lower = query.to_ascii_lowercase();
-            levenshtein_distance(&query_lower, &name_lower) <= max_distance
-        })
-        .collect();
+    let distinct_names = label_trigrams::fuzzy_label_candidates(
+        connection,
+        request,
+        query,
+        max_distance,
+        FUZZY_LABEL_CANDIDATE_LIMIT,
+    )?;
+    let matching_names = matching_fuzzy_names(distinct_names, query, max_distance);
 
     if matching_names.is_empty() {
         return Ok(Vec::new());
     }
 
-    let n = matching_names.len();
-    let mut like_clauses = Vec::with_capacity(n);
-    for i in 0..n {
-        let idx = i + 1;
-        like_clauses.push(format!("graph_bm25.content LIKE ?{idx} ESCAPE '\\'"));
+    let mut candidates =
+        fuzzy_rows_for_names(connection, request, &matching_names, max_distance, limit)?;
+    sort_fuzzy_candidates(&mut candidates);
+    Ok(candidates)
+}
+
+fn fuzzy_rows_for_names(
+    connection: &Connection,
+    request: &GraphSearchRequest,
+    name_matches: &[FuzzyNameMatch],
+    max_distance: usize,
+    limit: usize,
+) -> Result<Vec<FallbackCandidate>, StorageError> {
+    if name_matches.is_empty() || limit == 0 {
+        return Ok(Vec::new());
     }
-    let like_expr = like_clauses.join(" OR ");
-    let scope_idx = (n + 1) as u32;
-    let version_idx = (n + 2) as u32;
-    let limit_idx = (n + 3) as u32;
-    let filter = scope_filter(scope_idx, version_idx);
+
+    let match_rows = name_matches
+        .iter()
+        .map(|_| "(?, ?, ?)")
+        .collect::<Vec<_>>()
+        .join(", ");
+    let scope_idx = (name_matches.len() * 3) + 1;
+    let version_idx = scope_idx + 1;
+    let limit_idx = version_idx + 1;
+    let filter = scope_filter(scope_idx as u32, version_idx as u32);
 
     let sql = format!(
         "\
+        WITH matched_names(name_lower, match_score, rank_order) AS (VALUES {match_rows}),\n\
+        candidate_docs AS (\n\
+            SELECT grams.document_id,\n\
+                   MAX(matched_names.match_score) AS match_score,\n\
+                   MIN(matched_names.rank_order) AS rank_order\n\
+            FROM graph_bm25_label_grams grams\n\
+            JOIN matched_names\n\
+              ON grams.label_lower = matched_names.name_lower\n\
+            WHERE (?{scope_idx} IS NULL OR grams.source_scope = ?{scope_idx})\n\
+              AND grams.created_graph_version <= ?{version_idx}\n\
+            GROUP BY grams.document_id\n\
+            ORDER BY match_score DESC,\n\
+                     rank_order ASC,\n\
+                     grams.document_id ASC\n\
+            LIMIT ?{limit_idx}\n\
+        )\n\
         SELECT\n\
-            {SELECT_COLUMNS}\n\
-        {JOIN_EVIDENCE}\n\
-        WHERE ({like_expr})\n\
+            {SELECT_COLUMNS},\n\
+            candidate_docs.match_score\n\
+        FROM candidate_docs\n\
+        JOIN graph_bm25\n\
+          ON graph_bm25.document_id = candidate_docs.document_id\n\
+        LEFT JOIN evidence e\n\
+          ON graph_bm25.document_kind = 'evidence'\n\
+         AND e.id = graph_bm25.evidence_id\n\
+        WHERE 1 = 1\n\
         {filter}\n\
-        LIMIT ?{limit_idx}"
+        ORDER BY candidate_docs.match_score DESC,\n\
+                 candidate_docs.rank_order ASC,\n\
+                 graph_bm25.document_id ASC"
     );
 
-    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    for name in &matching_names {
-        let name_like = format!("%{}%", name.replace('%', "\\%").replace('_', "\\_"));
-        param_values.push(Box::new(name_like));
+    let mut values = Vec::with_capacity((name_matches.len() * 3) + 3);
+    for (rank_order, name_match) in name_matches.iter().enumerate() {
+        values.push(Value::Text(name_match.name_lower.clone()));
+        values.push(Value::Real(fuzzy_match_score(
+            name_match.distance,
+            max_distance,
+        )));
+        values.push(Value::Integer(rank_order as i64));
     }
-    param_values.push(Box::new(request.source_scope.clone()));
-    param_values.push(Box::new(request.graph_version.get()));
-    param_values.push(Box::new(limit));
+    let scope_value = request
+        .source_scope
+        .as_ref()
+        .map_or(Value::Null, |scope| Value::Text(scope.clone()));
+    values.push(scope_value);
+    values.push(i64_value(request.graph_version.get(), "graph version")?);
+    values.push(Value::Integer(limit as i64));
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(|p| p.as_ref()).collect();
     let mut statement = connection.prepare(&sql)?;
-    let rows = statement.query_map(param_refs.as_slice(), |row| {
+    let rows = statement.query_map(params_from_iter(values), |row| {
         Ok(FallbackCandidate {
             document_id: row.get(0)?,
             document_kind: row.get(1)?,
@@ -247,54 +293,68 @@ fn fuzzy_levenshtein_rows(
             source_path: row.get(6)?,
             entity_labels: split_labels(row.get(7)?),
             content: row.get(8)?,
-            match_score: 0.25,
+            match_score: row.get(9)?,
         })
     })?;
+
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
 }
 
-fn collect_distinct_symbol_names(
-    connection: &Connection,
-    request: &GraphSearchRequest,
-) -> Result<Vec<String>, StorageError> {
-    let mut statement = connection.prepare(
-        "\
-        SELECT DISTINCT entity_labels\n\
-        FROM graph_bm25\n\
-        WHERE (?1 IS NULL OR source_scope = ?1)\n\
-          AND created_graph_version <= ?2\n\
-          AND document_kind IN ('code_symbol', 'code_chunk')\n\
-        LIMIT ?3",
-    )?;
-    let limit = FALLBACK_CANDIDATE_LIMIT * 5;
-    let rows = statement.query_map(
-        params![
-            request.source_scope.as_deref(),
-            request.graph_version.get(),
-            limit
-        ],
-        |row| {
-            let labels_str: String = row.get(0)?;
-            Ok(labels_str)
-        },
-    )?;
+fn i64_value(value: u64, name: &str) -> Result<Value, StorageError> {
+    let converted = i64::try_from(value)
+        .map_err(|_| StorageError::InvalidInput(format!("{name} is too large for sqlite")))?;
+    Ok(Value::Integer(converted))
+}
 
-    let mut names = Vec::new();
-    for row in rows {
-        let labels_json = row.map_err(StorageError::from)?;
-        if let Ok(labels) = serde_json::from_str::<Vec<String>>(&labels_json) {
-            for label in labels {
-                if !label.is_empty() && label.len() >= 2 {
-                    names.push(label);
-                }
-            }
-        }
-    }
-    names.sort();
-    names.dedup();
+fn sort_fuzzy_candidates(candidates: &mut [FallbackCandidate]) {
+    candidates.sort_by(|left, right| {
+        right
+            .match_score
+            .total_cmp(&left.match_score)
+            .then_with(|| left.document_id.cmp(&right.document_id))
+    });
+}
 
-    Ok(names)
+fn sort_fallback_candidates(candidates: &mut [FallbackCandidate]) {
+    candidates.sort_by(|left, right| left.document_id.cmp(&right.document_id));
+}
+
+fn fuzzy_match_score(distance: usize, max_distance: usize) -> f64 {
+    0.25 + (max_distance.saturating_sub(distance) as f64 * 0.01)
+}
+
+struct FuzzyNameMatch {
+    name: String,
+    name_lower: String,
+    distance: usize,
+}
+
+fn matching_fuzzy_names(
+    distinct_names: Vec<String>,
+    query: &str,
+    max_distance: usize,
+) -> Vec<FuzzyNameMatch> {
+    let query_lower = query.to_ascii_lowercase();
+    let mut matching_names = distinct_names
+        .into_iter()
+        .filter_map(|name| {
+            let name_lower = name.to_ascii_lowercase();
+            let distance = levenshtein_distance(&query_lower, &name_lower);
+            (distance <= max_distance).then_some(FuzzyNameMatch {
+                name,
+                name_lower,
+                distance,
+            })
+        })
+        .collect::<Vec<_>>();
+    matching_names.sort_by(|left, right| {
+        left.distance
+            .cmp(&right.distance)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    matching_names.truncate(FUZZY_MATCHED_NAME_LIMIT);
+    matching_names
 }
 
 pub(super) fn adaptive_max_distance(query: &str) -> usize {
@@ -357,6 +417,30 @@ fn merge_fallback_candidates(
     }
 
     merged
+}
+
+fn json_string_contains_like_pattern(value: &str) -> Result<String, StorageError> {
+    let json_string = serde_json::to_string(value)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    Ok(contains_like_pattern(&json_string))
+}
+
+fn contains_like_pattern(value: &str) -> String {
+    format!("%{}%", escape_like_pattern(value))
+}
+
+fn escape_like_pattern(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' | '%' | '_' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn convert_fallback_candidates(

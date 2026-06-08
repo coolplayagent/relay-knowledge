@@ -29,6 +29,9 @@ mod context;
 #[path = "retrieval/derived.rs"]
 mod derived;
 
+#[path = "retrieval/label_trigrams.rs"]
+mod label_trigrams;
+
 #[path = "retrieval_migration.rs"]
 mod migration;
 
@@ -54,9 +57,11 @@ const GRAPH_RETRIEVAL_SCHEMA_RETRY_DELAYS_MS: [u64; 4] = [10, 30, 90, 270];
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     execute_retrieval_schema(connection)?;
+    label_trigrams::initialize_schema(connection)?;
     if migration::derived_documents_missing(connection)? {
         migration::rebuild_bm25_documents(connection)?;
     }
+    label_trigrams::backfill_missing(connection)?;
 
     Ok(())
 }
@@ -170,6 +175,7 @@ pub(super) fn replace_evidence_document(
     input: EvidenceDocumentInput<'_>,
 ) -> Result<(), StorageError> {
     let document_id = evidence_document_id(input.evidence_id);
+    label_trigrams::delete_document(connection, &document_id)?;
     connection.execute(
         "DELETE FROM graph_bm25 WHERE document_id = ?1",
         params![document_id],
@@ -206,6 +212,16 @@ pub(super) fn replace_evidence_document(
             aliases_from_strings(input.entity_labels),
             input.content,
         ],
+    )?;
+    label_trigrams::replace_document(
+        connection,
+        label_trigrams::LabelGramDocument {
+            document_id: &document_id,
+            document_kind: "evidence",
+            source_scope: input.source_scope,
+            graph_version: input.graph_version,
+            labels: input.entity_labels,
+        },
     )?;
     replace_semantic_document(
         connection,
@@ -268,6 +284,7 @@ pub(super) fn delete_code_documents(
     source_scope: &str,
     path: &str,
 ) -> Result<(), StorageError> {
+    label_trigrams::delete_code_documents_for_path(connection, source_scope, path)?;
     connection.execute(
         "
         DELETE FROM graph_bm25
@@ -332,6 +349,16 @@ pub(super) fn insert_code_symbol_document(
             entity_aliases,
             content
         ],
+    )?;
+    label_trigrams::replace_document(
+        connection,
+        label_trigrams::LabelGramDocument {
+            document_id: &document_id,
+            document_kind: "code_symbol",
+            source_scope,
+            graph_version,
+            labels: &labels,
+        },
     )?;
     replace_semantic_document(
         connection,
@@ -408,6 +435,16 @@ pub(super) fn insert_code_chunk_document(
             entity_aliases,
             content
         ],
+    )?;
+    label_trigrams::replace_document(
+        connection,
+        label_trigrams::LabelGramDocument {
+            document_id: &document_id,
+            document_kind: "code_chunk",
+            source_scope,
+            graph_version,
+            labels: linked_symbol_ids,
+        },
     )?;
     replace_semantic_document(
         connection,

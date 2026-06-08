@@ -3,7 +3,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::storage::StorageError;
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-const SCHEMA_MARKER_VERSION: i64 = 1;
+const SCHEMA_MARKER_VERSION: i64 = 2;
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
@@ -51,6 +51,17 @@ const GRAPH_VECTOR_COLUMNS: &[&str] = &[
     "source_hash",
     "tokenizer_version",
 ];
+const GRAPH_BM25_LABEL_GRAM_COLUMNS: &[&str] = &[
+    "document_id",
+    "document_kind",
+    "source_scope",
+    "created_graph_version",
+    "label",
+    "label_lower",
+    "label_len",
+    "gram_size",
+    "gram",
+];
 
 pub(super) fn schema_initialization_is_current(
     connection: &Connection,
@@ -80,6 +91,11 @@ pub(super) fn schema_initialization_is_current(
             GRAPH_SEMANTIC_COLUMNS,
         )?
         || !table_has_columns(connection, "graph_vector_documents", GRAPH_VECTOR_COLUMNS)?
+        || !table_has_columns(
+            connection,
+            "graph_bm25_label_grams",
+            GRAPH_BM25_LABEL_GRAM_COLUMNS,
+        )?
     {
         return Ok(false);
     }
@@ -255,6 +271,43 @@ mod tests {
         assert!(
             schema_initialization_is_current(&connection)
                 .expect("current marker should be readable")
+        );
+    }
+
+    #[test]
+    fn schema_marker_requires_label_gram_table() {
+        let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+        let connection = store.connection.lock().expect("connection should lock");
+        mark_schema_initialization_current(&connection).expect("marker should write");
+
+        connection
+            .execute("DROP TABLE graph_bm25_label_grams", [])
+            .expect("label gram table should drop");
+
+        assert!(
+            !schema_initialization_is_current(&connection)
+                .expect("missing label gram table should be detected")
+        );
+    }
+
+    #[test]
+    fn schema_marker_rejects_previous_label_gram_migration_version() {
+        let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+        let connection = store.connection.lock().expect("connection should lock");
+        super::initialize_schema_marker(&connection).expect("marker table should initialize");
+        connection
+            .execute(
+                "
+                INSERT INTO relay_storage_schema_state (key, version, updated_at_ms)
+                VALUES ('sqlite_graph_store', 1, 0)
+                ",
+                [],
+            )
+            .expect("previous marker should insert");
+
+        assert!(
+            !schema_initialization_is_current(&connection)
+                .expect("previous label gram migration marker should be stale")
         );
     }
 }
