@@ -8,10 +8,9 @@ use super::shared::{
 const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
 
 pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<RouteCandidate> {
-    let mut routes = Vec::new();
-    let mut seen = BTreeSet::new();
+    let mut route_infos = Vec::new();
+    let mut mounts = Vec::new();
     let mut router_names = BTreeSet::<String>::from(["app".to_owned(), "router".to_owned()]);
-    let mut router_prefixes = BTreeMap::<String, String>::new();
     let router_factory_imported = express_router_factory_is_imported(content);
     let lines = javascript_code_lines_without_comments(content);
     for (index, line) in lines.iter().enumerate() {
@@ -30,25 +29,16 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         } else {
             trimmed
         };
-        if let Some((router_name, prefix)) =
-            parse_express_router_mount(mount_source, &router_prefixes, &router_names)
-        {
-            router_names.insert(router_name.clone());
-            router_prefixes.insert(router_name, prefix);
+        if let Some(mount) = parse_express_router_mount(mount_source, &router_names) {
+            router_names.insert(mount.router_name.clone());
+            mounts.push(mount);
             continue;
         }
         if express_route_start_position(trimmed).is_none() {
             continue;
         };
         let statement = express_route_statement(&lines, index);
-        if record_express_route_chain(
-            &statement,
-            index + 1,
-            &router_prefixes,
-            &router_names,
-            &mut seen,
-            &mut routes,
-        ) {
+        if record_express_route_chain(&statement, index + 1, &router_names, &mut route_infos) {
             continue;
         }
         let Some(method_pos) = express_method_position(&statement) else {
@@ -76,27 +66,36 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         };
         let handler = extract_handler_name(after_method);
         for local_url in urls {
-            let url = route_url_with_router_prefix(&receiver_name, &local_url, &router_prefixes);
-            let key = (url.clone(), http_method.clone());
-            if seen.insert(key) {
-                routes.push(RouteCandidate {
-                    url,
-                    http_method: http_method.clone(),
-                    handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
-                    framework: "express".to_owned(),
-                    line: index + 1,
-                });
-            }
+            route_infos.push(ExpressRouteInfo {
+                receiver_name: receiver_name.clone(),
+                local_url,
+                http_method: http_method.clone(),
+                handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
+                line: index + 1,
+            });
         }
     }
-    routes
+    materialize_express_routes(route_infos, &mounts)
+}
+
+struct ExpressRouteInfo {
+    receiver_name: String,
+    local_url: String,
+    http_method: String,
+    handler_name: String,
+    line: usize,
+}
+
+struct ExpressRouterMount {
+    receiver_name: String,
+    router_name: String,
+    local_prefix: String,
 }
 
 fn parse_express_router_mount(
     line: &str,
-    router_prefixes: &BTreeMap<String, String>,
     router_names: &BTreeSet<String>,
-) -> Option<(String, String)> {
+) -> Option<ExpressRouterMount> {
     let use_pos = line.find(".use(")?;
     let receiver_name = express_receiver_name(&line[..use_pos])?;
     if !express_router_name_is_router(&receiver_name, router_names) {
@@ -111,20 +110,18 @@ fn parse_express_router_mount(
     if !express_router_name_is_router(&router_name, router_names) {
         return None;
     }
-    let receiver_prefix = router_prefixes
-        .get(&receiver_name)
-        .map_or("", String::as_str);
-    let prefix = merge_url_parts(receiver_prefix, &mount_path);
-    Some((router_name, prefix))
+    Some(ExpressRouterMount {
+        receiver_name,
+        router_name,
+        local_prefix: mount_path,
+    })
 }
 
 fn record_express_route_chain(
     statement: &str,
     line: usize,
-    router_prefixes: &BTreeMap<String, String>,
     router_names: &BTreeSet<String>,
-    seen: &mut BTreeSet<(String, String)>,
-    routes: &mut Vec<RouteCandidate>,
+    route_infos: &mut Vec<ExpressRouteInfo>,
 ) -> bool {
     let Some(route_pos) = statement.find(".route(") else {
         return false;
@@ -158,17 +155,13 @@ fn record_express_route_chain(
         found_route_method = true;
         let handler = extract_handler_name_from_arguments(after_method);
         for local_url in &urls {
-            let url = route_url_with_router_prefix(&receiver_name, local_url, router_prefixes);
-            let key = (url.clone(), http_method.clone());
-            if seen.insert(key) {
-                routes.push(RouteCandidate {
-                    url,
-                    http_method: http_method.clone(),
-                    handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
-                    framework: "express".to_owned(),
-                    line,
-                });
-            }
+            route_infos.push(ExpressRouteInfo {
+                receiver_name: receiver_name.clone(),
+                local_url: local_url.clone(),
+                http_method: http_method.clone(),
+                handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
+                line,
+            });
         }
         scan = after_method;
     }
@@ -612,15 +605,78 @@ fn statement_ends_with_semicolon(segment: &str) -> bool {
     last_non_space == Some(';')
 }
 
-fn route_url_with_router_prefix(
+fn materialize_express_routes(
+    route_infos: Vec<ExpressRouteInfo>,
+    mounts: &[ExpressRouterMount],
+) -> Vec<RouteCandidate> {
+    let router_prefixes = resolved_express_router_prefixes(mounts);
+    let mut routes = Vec::new();
+    let mut seen = BTreeSet::new();
+    for route_info in route_infos {
+        let prefixes = router_prefixes
+            .get(&route_info.receiver_name)
+            .cloned()
+            .unwrap_or_else(|| BTreeSet::from([String::new()]));
+        for prefix in prefixes {
+            let url = merge_url_parts(&prefix, &route_info.local_url);
+            let key = (url.clone(), route_info.http_method.clone());
+            if seen.insert(key) {
+                routes.push(RouteCandidate {
+                    url,
+                    http_method: route_info.http_method.clone(),
+                    handler_name: route_info.handler_name.clone(),
+                    framework: "express".to_owned(),
+                    line: route_info.line,
+                });
+            }
+        }
+    }
+    routes
+}
+
+fn resolved_express_router_prefixes(
+    mounts: &[ExpressRouterMount],
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mounted_routers = mounts
+        .iter()
+        .map(|mount| mount.router_name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut router_prefixes = BTreeMap::<String, BTreeSet<String>>::new();
+    for _ in 0..=mounts.len() {
+        let mut changed = false;
+        for mount in mounts {
+            let Some(receiver_prefixes) =
+                express_receiver_prefixes(&mount.receiver_name, &router_prefixes, &mounted_routers)
+            else {
+                continue;
+            };
+            for receiver_prefix in receiver_prefixes {
+                let prefix = merge_url_parts(&receiver_prefix, &mount.local_prefix);
+                if router_prefixes
+                    .entry(mount.router_name.clone())
+                    .or_default()
+                    .insert(prefix)
+                {
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    router_prefixes
+}
+
+fn express_receiver_prefixes(
     receiver_name: &str,
-    url: &str,
-    router_prefixes: &BTreeMap<String, String>,
-) -> String {
-    let Some(prefix) = router_prefixes.get(receiver_name) else {
-        return url.to_owned();
-    };
-    merge_url_parts(prefix, url)
+    router_prefixes: &BTreeMap<String, BTreeSet<String>>,
+    mounted_routers: &BTreeSet<String>,
+) -> Option<BTreeSet<String>> {
+    if let Some(prefixes) = router_prefixes.get(receiver_name) {
+        return Some(prefixes.clone());
+    }
+    (!mounted_routers.contains(receiver_name)).then(|| BTreeSet::from([String::new()]))
 }
 
 fn merge_url_parts(prefix: &str, suffix: &str) -> String {

@@ -800,3 +800,65 @@ fn detects_fastapi_head_and_options_decorators() {
             .any(|route| route.url == "/ready" && route.http_method == "options")
     );
 }
+
+#[test]
+fn applies_late_express_router_mount_prefix() {
+    let source = "const router = express.Router();\nrouter.get('/users', listUsers);\napp.use('/api', router);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn labels_fastapi_application_decorators() {
+    let source = "app = FastAPI()\n@app.get('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].framework, "fastapi");
+}
+
+#[test]
+fn merges_flask_register_blueprint_prefix() {
+    let source = "bp = Blueprint('api', __name__)\napp.register_blueprint(bp, url_prefix='/api')\n@bp.route('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].framework, "flask");
+}
+
+#[test]
+fn applies_late_fastapi_include_router_prefix() {
+    let source = "router = APIRouter()\n@router.get('/users')\ndef users():\n    pass\napp.include_router(router, prefix='/api')\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].framework, "fastapi");
+}
+
+#[test]
+fn skips_python_routes_inside_triple_quoted_strings() {
+    let source = "\"\"\"\n@app.get('/demo')\ndef demo():\n    pass\n\"\"\"\n@app.get('/live')\ndef live():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/live");
+    assert_eq!(routes[0].handler_name, "live");
+}
+
+#[test]
+fn detects_fully_qualified_spring_mapping_annotations() {
+    let source = "@org.springframework.web.bind.annotation.GetMapping(\"/health\")\npublic String health() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/health");
+    assert_eq!(routes[0].http_method, "get");
+}
+
+#[test]
+fn preserves_spring_prefix_after_nested_static_type() {
+    let source = "@RequestMapping(\"/api\")\npublic class ApiController {\nstatic class Helper {\n}\n@GetMapping(\"/users\")\npublic String users() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+}

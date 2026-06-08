@@ -9,10 +9,17 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
     let mut seen = BTreeSet::new();
     let mut pending_annotations: Vec<SpringPendingAnnotation> = Vec::new();
     let mut class_prefixes = Vec::<SpringClassPrefix>::new();
+    let mut nested_type_scopes = Vec::<SpringNestedTypeScope>::new();
+    let mut brace_depth = 0usize;
     let lines: Vec<&str> = content.lines().collect();
     let mut index = 0usize;
     while index < lines.len() {
         let trimmed = lines[index].trim();
+        restore_closed_spring_nested_type_scopes(
+            &mut class_prefixes,
+            &mut nested_type_scopes,
+            brace_depth,
+        );
         if trimmed.starts_with('@') {
             let (annotation_statement, annotation_lines) =
                 spring_annotation_statement(&lines, index);
@@ -29,10 +36,26 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
         if line_declares_java_type(trimmed) {
             if pending_request_mapping_can_be_prefix(&pending_annotations) {
                 class_prefixes = pending_request_mapping_prefixes(&pending_annotations);
+                nested_type_scopes.clear();
+            } else if !class_prefixes.is_empty()
+                && line_declares_nested_java_helper_type(trimmed, brace_depth)
+            {
+                nested_type_scopes.push(SpringNestedTypeScope {
+                    restore_at_depth: brace_depth,
+                    class_prefixes: class_prefixes.clone(),
+                });
+                class_prefixes.clear();
             } else {
                 class_prefixes.clear();
+                nested_type_scopes.clear();
             }
             pending_annotations.clear();
+            update_java_brace_depth(trimmed, &mut brace_depth);
+            restore_closed_spring_nested_type_scopes(
+                &mut class_prefixes,
+                &mut nested_type_scopes,
+                brace_depth,
+            );
             index += 1;
             continue;
         }
@@ -65,6 +88,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                 pending_annotations.clear();
             }
         }
+        update_java_brace_depth(trimmed, &mut brace_depth);
         index += 1;
     }
     routes
@@ -86,6 +110,11 @@ struct SpringPendingAnnotation {
 struct SpringClassPrefix {
     url: String,
     http_method: String,
+}
+
+struct SpringNestedTypeScope {
+    restore_at_depth: usize,
+    class_prefixes: Vec<SpringClassPrefix>,
 }
 
 fn pending_request_mapping_can_be_prefix(annotations: &[SpringPendingAnnotation]) -> bool {
@@ -256,7 +285,13 @@ fn extract_spring_annotation_name(line: &str) -> Option<&str> {
     let name_end = after_at
         .find(|c: char| c == '(' || c.is_whitespace())
         .unwrap_or(after_at.len());
-    Some(&after_at[..name_end])
+    let annotation_name = &after_at[..name_end];
+    Some(
+        annotation_name
+            .rsplit('.')
+            .next()
+            .unwrap_or(annotation_name),
+    )
 }
 
 fn extract_annotation_string_values(line: &str) -> Vec<String> {
@@ -439,6 +474,62 @@ fn line_declares_java_type(line: &str) -> bool {
         || declaration.starts_with("class ")
         || declaration.starts_with("interface ")
         || declaration.starts_with("enum ")
+}
+
+fn line_declares_nested_java_helper_type(line: &str, brace_depth: usize) -> bool {
+    if brace_depth == 0 {
+        return false;
+    }
+    let declaration = line.split('{').next().unwrap_or(line).trim();
+    if declaration.starts_with("public class ")
+        || declaration.starts_with("public interface ")
+        || declaration.starts_with("public enum ")
+    {
+        return false;
+    }
+    line_declares_java_type(declaration)
+}
+
+fn restore_closed_spring_nested_type_scopes(
+    class_prefixes: &mut Vec<SpringClassPrefix>,
+    nested_type_scopes: &mut Vec<SpringNestedTypeScope>,
+    brace_depth: usize,
+) {
+    while nested_type_scopes
+        .last()
+        .is_some_and(|scope| brace_depth <= scope.restore_at_depth)
+    {
+        if let Some(scope) = nested_type_scopes.pop() {
+            *class_prefixes = scope.class_prefixes;
+        }
+    }
+}
+
+fn update_java_brace_depth(line: &str, brace_depth: &mut usize) {
+    let mut quote = None;
+    let mut escaped = false;
+    for character in line.chars() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '"' | '\'' => quote = Some(character),
+            '{' => *brace_depth += 1,
+            '}' => *brace_depth = brace_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
 }
 
 fn parse_java_method_def(line: &str) -> Option<String> {

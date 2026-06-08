@@ -7,11 +7,10 @@ const MAX_FLASK_ROUTE_DECORATOR_LINES: usize = 12;
 const MAX_PYTHON_ROUTER_PREFIX_LINES: usize = 12;
 
 pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCandidate> {
-    let mut routes = Vec::new();
-    let mut seen = BTreeSet::new();
+    let mut route_bindings = Vec::new();
     let mut pending_routes = Vec::<FlaskRouteInfo>::new();
     let mut routers = BTreeMap::<String, PythonRouterInfo>::new();
-    let lines: Vec<&str> = content.lines().collect();
+    let lines = python_code_lines_without_triple_quoted_strings(content);
     let mut index = 0usize;
     while index < lines.len() {
         let trimmed = lines[index].trim();
@@ -30,6 +29,14 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
         {
             if apply_python_include_router_prefix(&include_statement, &mut routers) {
                 index += include_lines;
+                continue;
+            }
+        }
+        if let Some((blueprint_statement, blueprint_lines)) =
+            python_register_blueprint_statement(&lines, index)
+        {
+            if apply_python_register_blueprint_prefix(&blueprint_statement, &mut routers) {
+                index += blueprint_lines;
                 continue;
             }
         }
@@ -60,16 +67,14 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
                         route_info.methods
                     };
                     for method in methods {
-                        let key = (route_info.url.clone(), method.clone());
-                        if seen.insert(key) {
-                            routes.push(RouteCandidate {
-                                url: route_info.url.clone(),
-                                http_method: method,
-                                handler_name: handler.clone(),
-                                framework: route_info.framework.clone(),
-                                line: index + 1,
-                            });
-                        }
+                        route_bindings.push(PythonRouteBinding {
+                            receiver_name: route_info.receiver_name.clone(),
+                            local_url: route_info.local_url.clone(),
+                            http_method: method,
+                            handler_name: handler.clone(),
+                            framework: route_info.framework.clone(),
+                            line: index + 1,
+                        });
                     }
                 }
             }
@@ -77,13 +82,23 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
         }
         index += 1;
     }
-    routes
+    materialize_python_routes(route_bindings, &routers)
 }
 
 struct FlaskRouteInfo {
-    url: String,
+    receiver_name: Option<String>,
+    local_url: String,
     methods: Vec<String>,
     framework: String,
+}
+
+struct PythonRouteBinding {
+    receiver_name: Option<String>,
+    local_url: String,
+    http_method: String,
+    handler_name: String,
+    framework: String,
+    line: usize,
 }
 
 #[derive(Clone)]
@@ -109,14 +124,16 @@ fn parse_flask_decorator(
     }
     let args_trimmed = trim_one_trailing_paren(args);
     let url = extract_quoted_string_python(args_trimmed)?;
-    let (url, framework) = route_url_and_framework(func_part, &url, routers);
+    let receiver_name = python_decorator_receiver(func_part);
+    let framework = route_framework(func_part, receiver_name.as_deref(), routers);
     let methods = if route_method.is_empty() {
         extract_methods_from_flask_args(args_trimmed)
     } else {
         vec![route_method]
     };
     Some(FlaskRouteInfo {
-        url,
+        receiver_name,
+        local_url: url,
         methods,
         framework,
     })
@@ -137,6 +154,11 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
             prefix: extract_python_keyword_string(right, "prefix").unwrap_or_default(),
             framework: "fastapi".to_owned(),
         }
+    } else if right.contains("FastAPI(") {
+        PythonRouterInfo {
+            prefix: String::new(),
+            framework: "fastapi".to_owned(),
+        }
     } else if right.contains("Blueprint(") {
         PythonRouterInfo {
             prefix: extract_python_keyword_string(right, "url_prefix").unwrap_or_default(),
@@ -149,10 +171,12 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
     Some((router_name, router_info))
 }
 
-fn python_router_prefix_statement(lines: &[&str], start: usize) -> Option<(String, usize)> {
+fn python_router_prefix_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
     let first_line = lines[start].trim();
     if !first_line.contains('=')
-        || (!first_line.contains("APIRouter(") && !first_line.contains("Blueprint("))
+        || (!first_line.contains("APIRouter(")
+            && !first_line.contains("FastAPI(")
+            && !first_line.contains("Blueprint("))
     {
         return None;
     }
@@ -163,9 +187,21 @@ fn python_router_prefix_statement(lines: &[&str], start: usize) -> Option<(Strin
     ))
 }
 
-fn python_include_router_statement(lines: &[&str], start: usize) -> Option<(String, usize)> {
+fn python_include_router_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
     let first_line = lines[start].trim();
     if !first_line.contains(".include_router(") {
+        return None;
+    }
+    Some(python_parenthesized_statement(
+        lines,
+        start,
+        MAX_PYTHON_ROUTER_PREFIX_LINES,
+    ))
+}
+
+fn python_register_blueprint_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
+    let first_line = lines[start].trim();
+    if !first_line.contains(".register_blueprint(") {
         return None;
     }
     Some(python_parenthesized_statement(
@@ -204,6 +240,36 @@ fn apply_python_include_router_prefix(
     true
 }
 
+fn apply_python_register_blueprint_prefix(
+    statement: &str,
+    routers: &mut BTreeMap<String, PythonRouterInfo>,
+) -> bool {
+    let Some(paren_pos) = statement.find(".register_blueprint(") else {
+        return false;
+    };
+    let args = trim_one_trailing_paren(&statement[paren_pos + ".register_blueprint(".len()..]);
+    let arguments = split_python_top_level_arguments(args);
+    let Some(blueprint_name) = arguments.first().map(|argument| argument.trim()) else {
+        return false;
+    };
+    if blueprint_name.is_empty() {
+        return false;
+    }
+    let Some(prefix) = extract_python_keyword_string(args, "url_prefix") else {
+        return false;
+    };
+    let router_info =
+        routers
+            .entry(blueprint_name.to_owned())
+            .or_insert_with(|| PythonRouterInfo {
+                prefix: String::new(),
+                framework: "flask".to_owned(),
+            });
+    router_info.prefix = merge_url_parts(&prefix, &router_info.prefix);
+    router_info.framework = "flask".to_owned();
+    true
+}
+
 fn python_assignment_name(left: &str) -> Option<String> {
     let name = left
         .trim()
@@ -215,12 +281,12 @@ fn python_assignment_name(left: &str) -> Option<String> {
     Some(name.to_owned())
 }
 
-fn flask_decorator_statement(lines: &[&str], start: usize) -> (String, usize) {
+fn flask_decorator_statement(lines: &[String], start: usize) -> (String, usize) {
     python_parenthesized_statement(lines, start, MAX_FLASK_ROUTE_DECORATOR_LINES)
 }
 
 fn python_parenthesized_statement(
-    lines: &[&str],
+    lines: &[String],
     start: usize,
     max_lines: usize,
 ) -> (String, usize) {
@@ -274,26 +340,64 @@ fn python_parenthesized_statement(
     (statement, consumed.max(1))
 }
 
-fn route_url_and_framework(
-    func_part: &str,
-    url: &str,
+fn materialize_python_routes(
+    route_bindings: Vec<PythonRouteBinding>,
+    routers: &BTreeMap<String, PythonRouterInfo>,
+) -> Vec<RouteCandidate> {
+    let mut routes = Vec::new();
+    let mut seen = BTreeSet::new();
+    for route_info in route_bindings {
+        let (url, framework) = python_route_url_and_framework(&route_info, routers);
+        let key = (url.clone(), route_info.http_method.clone());
+        if seen.insert(key) {
+            routes.push(RouteCandidate {
+                url,
+                http_method: route_info.http_method,
+                handler_name: route_info.handler_name,
+                framework,
+                line: route_info.line,
+            });
+        }
+    }
+    routes
+}
+
+fn python_route_url_and_framework(
+    route_info: &PythonRouteBinding,
     routers: &BTreeMap<String, PythonRouterInfo>,
 ) -> (String, String) {
-    let Some((receiver, _)) = func_part.rsplit_once('.') else {
-        return (url.to_owned(), "flask".to_owned());
+    let Some(receiver_name) = route_info.receiver_name.as_deref() else {
+        return (route_info.local_url.clone(), route_info.framework.clone());
     };
-    let receiver = receiver.rsplit('.').next().unwrap_or(receiver);
-    let Some(router_info) = routers.get(receiver) else {
-        if func_part.ends_with(".api_route") {
-            return (url.to_owned(), "fastapi".to_owned());
-        }
-        return (url.to_owned(), "flask".to_owned());
+    let Some(router_info) = routers.get(receiver_name) else {
+        return (route_info.local_url.clone(), route_info.framework.clone());
     };
 
     (
-        merge_url_parts(&router_info.prefix, url),
+        merge_url_parts(&router_info.prefix, &route_info.local_url),
         router_info.framework.clone(),
     )
+}
+
+fn python_decorator_receiver(func_part: &str) -> Option<String> {
+    let (receiver, _) = func_part.rsplit_once('.')?;
+    Some(receiver.rsplit('.').next().unwrap_or(receiver).to_owned())
+}
+
+fn route_framework(
+    func_part: &str,
+    receiver_name: Option<&str>,
+    routers: &BTreeMap<String, PythonRouterInfo>,
+) -> String {
+    if let Some(receiver_name) = receiver_name {
+        if let Some(router_info) = routers.get(receiver_name) {
+            return router_info.framework.clone();
+        }
+    }
+    if func_part.ends_with(".api_route") {
+        return "fastapi".to_owned();
+    }
+    "flask".to_owned()
 }
 
 fn extract_flask_http_method(func_part: &str) -> String {
@@ -506,4 +610,48 @@ fn merge_url_parts(prefix: &str, suffix: &str) -> String {
     let prefix = prefix.trim_end_matches('/');
     let suffix = suffix.trim_start_matches('/');
     format!("{prefix}/{suffix}")
+}
+
+fn python_code_lines_without_triple_quoted_strings(content: &str) -> Vec<String> {
+    let mut delimiter = None;
+    content
+        .lines()
+        .map(|line| python_code_line_without_triple_quoted_strings(line, &mut delimiter))
+        .collect()
+}
+
+fn python_code_line_without_triple_quoted_strings(
+    line: &str,
+    delimiter: &mut Option<&'static str>,
+) -> String {
+    let mut result = String::new();
+    let mut rest = line;
+    loop {
+        if let Some(active_delimiter) = *delimiter {
+            let Some(end_pos) = rest.find(active_delimiter) else {
+                return result;
+            };
+            rest = &rest[end_pos + active_delimiter.len()..];
+            *delimiter = None;
+            continue;
+        }
+        let Some((start_pos, next_delimiter)) = next_python_triple_quote(rest) else {
+            result.push_str(rest);
+            return result;
+        };
+        result.push_str(&rest[..start_pos]);
+        rest = &rest[start_pos + next_delimiter.len()..];
+        *delimiter = Some(next_delimiter);
+    }
+}
+
+fn next_python_triple_quote(value: &str) -> Option<(usize, &'static str)> {
+    let single = value.find("'''").map(|index| (index, "'''"));
+    let double = value.find("\"\"\"").map(|index| (index, "\"\"\""));
+    match (single, double) {
+        (Some(single), Some(double)) => Some(if single.0 <= double.0 { single } else { double }),
+        (Some(single), None) => Some(single),
+        (None, Some(double)) => Some(double),
+        (None, None) => None,
+    }
 }
