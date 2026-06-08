@@ -451,3 +451,39 @@ fn detects_spring_path_attribute_after_method_attribute() {
     assert_eq!(routes[0].url, "/login");
     assert_eq!(routes[0].http_method, "post");
 }
+
+#[test]
+fn detects_express_final_handler_after_middleware() {
+    let source = "app.get('/users', requireAuth, auditRequest, listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn detects_spring_methodless_request_mapping_as_any_method() {
+    let source = "@RequestMapping(\"/status\")\npublic String status() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/status");
+    assert_eq!(routes[0].http_method, "any");
+}
+
+#[test]
+fn expands_spring_mapping_path_arrays() {
+    let source = "@GetMapping({\"/v1/users\", \"/v2/users\"})\npublic List<User> users() {\n@RequestMapping(path = {\"/imports\", \"/exports\"}, method = RequestMethod.POST)\npublic String transfer() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 4);
+    assert!(routes.iter().any(|route| {
+        route.url == "/v1/users" && route.http_method == "get" && route.handler_name == "users"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/v2/users" && route.http_method == "get" && route.handler_name == "users"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/imports" && route.http_method == "post" && route.handler_name == "transfer"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/exports" && route.http_method == "post" && route.handler_name == "transfer"
+    }));
+}

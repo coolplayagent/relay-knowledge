@@ -466,6 +466,7 @@ pub struct CodeRouteRecord {
     pub path: String,
     pub language_id: String,
     pub url: String,
+    /// Lowercase HTTP verb, or `any` when a framework route accepts all methods.
     pub http_method: String,
     pub handler_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]

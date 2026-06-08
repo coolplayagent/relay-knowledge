@@ -74,46 +74,64 @@ fn pending_request_mapping_can_be_prefix(annotations: &[SpringPendingAnnotation]
 fn parse_spring_route_annotation(line: &str) -> Option<Vec<SpringPendingAnnotation>> {
     let annotation = extract_spring_annotation_name(line)?;
     match annotation {
-        "GetMapping" => Some(vec![SpringPendingAnnotation {
-            http_method: "get".to_owned(),
-            url: extract_annotation_string_value(line).unwrap_or_default(),
-            kind: SpringAnnotationKind::MethodMapping,
-        }]),
-        "PostMapping" => Some(vec![SpringPendingAnnotation {
-            http_method: "post".to_owned(),
-            url: extract_annotation_string_value(line).unwrap_or_default(),
-            kind: SpringAnnotationKind::MethodMapping,
-        }]),
-        "PutMapping" => Some(vec![SpringPendingAnnotation {
-            http_method: "put".to_owned(),
-            url: extract_annotation_string_value(line).unwrap_or_default(),
-            kind: SpringAnnotationKind::MethodMapping,
-        }]),
-        "DeleteMapping" => Some(vec![SpringPendingAnnotation {
-            http_method: "delete".to_owned(),
-            url: extract_annotation_string_value(line).unwrap_or_default(),
-            kind: SpringAnnotationKind::MethodMapping,
-        }]),
-        "PatchMapping" => Some(vec![SpringPendingAnnotation {
-            http_method: "patch".to_owned(),
-            url: extract_annotation_string_value(line).unwrap_or_default(),
-            kind: SpringAnnotationKind::MethodMapping,
-        }]),
+        "GetMapping" => Some(spring_pending_annotations(
+            vec!["get".to_owned()],
+            extract_annotation_string_values(line),
+            SpringAnnotationKind::MethodMapping,
+        )),
+        "PostMapping" => Some(spring_pending_annotations(
+            vec!["post".to_owned()],
+            extract_annotation_string_values(line),
+            SpringAnnotationKind::MethodMapping,
+        )),
+        "PutMapping" => Some(spring_pending_annotations(
+            vec!["put".to_owned()],
+            extract_annotation_string_values(line),
+            SpringAnnotationKind::MethodMapping,
+        )),
+        "DeleteMapping" => Some(spring_pending_annotations(
+            vec!["delete".to_owned()],
+            extract_annotation_string_values(line),
+            SpringAnnotationKind::MethodMapping,
+        )),
+        "PatchMapping" => Some(spring_pending_annotations(
+            vec!["patch".to_owned()],
+            extract_annotation_string_values(line),
+            SpringAnnotationKind::MethodMapping,
+        )),
         "RequestMapping" => {
-            let url = extract_annotation_string_value(line).unwrap_or_default();
-            Some(
-                extract_spring_method_attributes(line)
-                    .into_iter()
-                    .map(|method| SpringPendingAnnotation {
-                        http_method: method,
-                        url: url.clone(),
-                        kind: SpringAnnotationKind::RequestMapping,
-                    })
-                    .collect(),
-            )
+            let urls = extract_annotation_string_values(line);
+            Some(spring_pending_annotations(
+                extract_spring_method_attributes(line),
+                urls,
+                SpringAnnotationKind::RequestMapping,
+            ))
         }
         _ => None,
     }
+}
+
+fn spring_pending_annotations(
+    methods: Vec<String>,
+    urls: Vec<String>,
+    kind: SpringAnnotationKind,
+) -> Vec<SpringPendingAnnotation> {
+    let urls = if urls.is_empty() {
+        vec![String::new()]
+    } else {
+        urls
+    };
+    let mut annotations = Vec::new();
+    for method in methods {
+        for url in &urls {
+            annotations.push(SpringPendingAnnotation {
+                http_method: method.clone(),
+                url: url.clone(),
+                kind,
+            });
+        }
+    }
+    annotations
 }
 
 fn extract_spring_annotation_name(line: &str) -> Option<&str> {
@@ -128,19 +146,27 @@ fn extract_spring_annotation_name(line: &str) -> Option<&str> {
     Some(&after_at[..name_end])
 }
 
-fn extract_annotation_string_value(line: &str) -> Option<String> {
-    let paren_pos = line.find('(')?;
+fn extract_annotation_string_values(line: &str) -> Vec<String> {
+    let Some(paren_pos) = line.find('(') else {
+        return Vec::new();
+    };
     let inner_start = &line[paren_pos + 1..];
     let inner = inner_start.trim_start();
     if inner.starts_with('"') {
         extract_double_quoted_java_string(inner)
+            .into_iter()
+            .collect()
+    } else if inner.starts_with('{') {
+        extract_java_string_values_from_attribute_value(inner)
     } else {
-        extract_named_java_string_attribute(inner, "value")
-            .or_else(|| extract_named_java_string_attribute(inner, "path"))
+        find_named_java_attribute_value(inner, "value")
+            .or_else(|| find_named_java_attribute_value(inner, "path"))
+            .map(extract_java_string_values_from_attribute_value)
+            .unwrap_or_default()
     }
 }
 
-fn extract_named_java_string_attribute(inner: &str, name: &str) -> Option<String> {
+fn find_named_java_attribute_value<'a>(inner: &'a str, name: &str) -> Option<&'a str> {
     let mut search_start = 0usize;
     while let Some(relative_pos) = inner[search_start..].find(name) {
         let start = search_start + relative_pos;
@@ -157,13 +183,77 @@ fn extract_named_java_string_attribute(inner: &str, name: &str) -> Option<String
             .is_some_and(|character| character.is_whitespace() || character == '=');
         if before_is_boundary && after_is_boundary {
             let eq_pos = after_name.find('=')?;
-            let after_eq = after_name[eq_pos + 1..].trim_start();
-            return extract_double_quoted_java_string(after_eq);
+            return Some(after_name[eq_pos + 1..].trim_start());
         }
         search_start = end;
     }
 
     None
+}
+
+fn extract_java_string_values_from_attribute_value(value: &str) -> Vec<String> {
+    let segment = java_attribute_value_segment(value);
+    if segment.trim_start().starts_with('{') {
+        return extract_double_quoted_java_strings(segment);
+    }
+    extract_double_quoted_java_string(segment)
+        .into_iter()
+        .collect()
+}
+
+fn java_attribute_value_segment(value: &str) -> &str {
+    let value = value.trim_start();
+    if value.starts_with('{') {
+        let mut depth = 0usize;
+        for (index, character) in value.char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return &value[..=index];
+                    }
+                }
+                _ => {}
+            }
+        }
+        return value;
+    }
+    let end = value.find([',', ')']).unwrap_or(value.len());
+    &value[..end]
+}
+
+fn extract_double_quoted_java_strings(s: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut offset = 0usize;
+    while let Some(relative_start) = s[offset..].find('"') {
+        let start = offset + relative_start;
+        let mut value = String::new();
+        let mut escaped = false;
+        let mut closed_at = None;
+        for (relative_index, character) in s[start + 1..].char_indices() {
+            if escaped {
+                value.push(character);
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == '"' {
+                closed_at = Some(start + 1 + relative_index + character.len_utf8());
+                break;
+            }
+            value.push(character);
+        }
+        let Some(next_offset) = closed_at else {
+            break;
+        };
+        values.push(value);
+        offset = next_offset;
+    }
+    values
 }
 
 fn extract_double_quoted_java_string(s: &str) -> Option<String> {
@@ -196,25 +286,19 @@ fn extract_double_quoted_java_string(s: &str) -> Option<String> {
 fn extract_spring_method_attributes(line: &str) -> Vec<String> {
     let paren_pos = match line.find('(') {
         Some(pos) => pos,
-        None => return vec!["get".to_owned()],
+        None => return vec!["any".to_owned()],
     };
     let inner = &line[paren_pos + 1..];
-    let Some(method_start) = inner.find("method") else {
-        return vec!["get".to_owned()];
+    let Some(after_eq) = find_named_java_attribute_value(inner, "method") else {
+        return vec!["any".to_owned()];
     };
-    let after_method = &inner[method_start + 6..];
-    let Some(eq_pos) = after_method.find('=') else {
-        return vec!["get".to_owned()];
-    };
-    let after_eq = after_method[eq_pos + 1..].trim_start();
-    let value_end = after_eq.find(')').unwrap_or(after_eq.len());
-    let raw_value = after_eq[..value_end].trim();
-    let raw_value = raw_value
-        .strip_prefix('{')
-        .unwrap_or(raw_value)
-        .trim_end_matches('}');
+    let raw_value = java_attribute_value_segment(after_eq);
     let mut methods = Vec::new();
-    for part in raw_value.split(',') {
+    for part in raw_value
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .split(',')
+    {
         let part = part.trim();
         let Some(method_part) = part.strip_prefix("RequestMethod.") else {
             continue;
@@ -230,7 +314,7 @@ fn extract_spring_method_attributes(line: &str) -> Vec<String> {
         }
     }
     if methods.is_empty() {
-        methods.push("get".to_owned());
+        methods.push("any".to_owned());
     }
 
     methods

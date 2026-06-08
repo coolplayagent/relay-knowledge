@@ -27,7 +27,10 @@ mod candidate_paths;
 mod fingerprints;
 #[path = "code_snapshot_import_compat.rs"]
 mod import_compat;
+#[path = "code_snapshot_import.rs"]
+mod snapshot_import;
 
+use self::snapshot_import::copy_attached_code_table;
 #[cfg(test)]
 pub(super) use candidate_paths::candidate_path_fts_query;
 pub(super) use candidate_paths::{
@@ -537,30 +540,6 @@ fn clone_code_table(
             columns = table.columns,
         ),
         params![previous_scope, next_scope],
-    )?;
-
-    Ok(())
-}
-
-fn copy_attached_code_table(
-    transaction: &rusqlite::Transaction<'_>,
-    table: &CodeScopeTable,
-    source_scope: &str,
-) -> Result<(), StorageError> {
-    let selected_columns = import_compat::attached_code_table_selected_columns(
-        transaction,
-        table.table,
-        table.columns,
-    )?;
-    transaction.execute(
-        &format!(
-            "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {schema}.{table} WHERE source_scope = ?1",
-            table = table.table,
-            columns = table.columns,
-            selected_columns = selected_columns,
-            schema = IMPORT_SCHEMA,
-        ),
-        params![source_scope],
     )?;
 
     Ok(())

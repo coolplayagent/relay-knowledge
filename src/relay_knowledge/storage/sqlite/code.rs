@@ -104,6 +104,10 @@ mod code_batch_search_tests;
 mod code_snapshot_progress_tests;
 
 #[cfg(test)]
+#[path = "code_snapshot_import_tests.rs"]
+mod code_snapshot_import_tests;
+
+#[cfg(test)]
 #[path = "code_query_accuracy_tests.rs"]
 mod code_query_accuracy_tests;
 

@@ -783,14 +783,8 @@ fn annotate_route_handler_symbol(
         .filter(|idx| {
             build.symbols[*idx].path == annotation.path
                 && build.symbols[*idx].name == annotation.handler_name
-                && build.symbols[*idx].line_range.start >= route_line
         })
-        .min_by_key(|idx| {
-            build.symbols[*idx]
-                .line_range
-                .start
-                .saturating_sub(route_line)
-        });
+        .min_by_key(|idx| build.symbols[*idx].line_range.start.abs_diff(route_line));
 
     if let Some(symbol_idx) = symbol_idx {
         let sym = &mut build.symbols[symbol_idx];
@@ -809,7 +803,7 @@ fn annotate_route_handler_symbol(
             path = annotation.path,
             handler_name = annotation.handler_name,
             route_line,
-            "route handler symbol did not satisfy source range matching"
+            "route handler symbol was not linked"
         );
     }
 }
@@ -904,25 +898,23 @@ mod tests {
     }
 
     #[test]
-    fn record_routes_ignores_same_name_symbols_before_route_registration() {
+    fn record_routes_links_handler_symbols_declared_before_route_registration() {
         let mut build = route_test_build();
         build.symbols.push(route_symbol("before-route", 1, 1));
-        build.symbols.push(route_symbol("after-route", 3, 3));
 
         record_routes(
             &mut build,
             "src/routes.ts",
             "routes-file",
             "typescript",
-            "\napp.get('/users', listUsers);\nfunction listUsers() {}\n",
+            "function listUsers() {}\napp.get('/users', listUsers);\n",
         );
 
         assert_eq!(
             build.routes[0].handler_symbol_snapshot_id.as_deref(),
-            Some("after-route")
+            Some("before-route")
         );
-        assert!(build.symbols[0].symbol_role.is_none());
-        assert!(build.symbols[1].symbol_role.is_some());
+        assert!(build.symbols[0].symbol_role.is_some());
     }
 
     fn route_test_build() -> SnapshotBuild {
