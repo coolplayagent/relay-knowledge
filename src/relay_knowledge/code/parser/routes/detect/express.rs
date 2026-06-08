@@ -3,18 +3,25 @@ use std::collections::BTreeSet;
 use super::RouteCandidate;
 use super::shared::{extract_handler_name, extract_quoted_string};
 
+const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
+
 pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<RouteCandidate> {
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
-    for (index, line) in content.lines().enumerate() {
+    let lines: Vec<&str> = content.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        let Some(method_pos) = express_method_position(trimmed) else {
+        if express_method_position(trimmed).is_none() {
             continue;
         };
-        if !receiver_looks_like_express_router(&trimmed[..method_pos]) {
+        let statement = express_route_statement(&lines, index);
+        let Some(method_pos) = express_method_position(&statement) else {
+            continue;
+        };
+        if !receiver_looks_like_express_router(&statement[..method_pos]) {
             continue;
         }
-        let rest = &trimmed[method_pos..];
+        let rest = &statement[method_pos..];
         let (method_part, after_method) = match rest.split_once('(') {
             Some(pair) => pair,
             None => continue,
@@ -46,6 +53,87 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         }
     }
     routes
+}
+
+fn express_route_statement(lines: &[&str], start: usize) -> String {
+    let mut statement = String::new();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut saw_route_call = false;
+    for (offset, line) in lines
+        .iter()
+        .skip(start)
+        .take(MAX_EXPRESS_ROUTE_REGISTRATION_LINES)
+        .enumerate()
+    {
+        let segment = line.trim();
+        if !statement.is_empty() {
+            statement.push(' ');
+        }
+        statement.push_str(segment);
+        let scan_start = if offset == 0 {
+            route_method_open_position(segment).unwrap_or(0)
+        } else {
+            0
+        };
+        if route_call_is_closed(
+            &segment[scan_start..],
+            &mut depth,
+            &mut quote,
+            &mut escaped,
+            &mut saw_route_call,
+        ) {
+            break;
+        }
+    }
+    statement
+}
+
+fn route_method_open_position(line: &str) -> Option<usize> {
+    let method_pos = express_method_position(line)?;
+    let open_relative_pos = line[method_pos..].find('(')?;
+    Some(method_pos + open_relative_pos)
+}
+
+fn route_call_is_closed(
+    segment: &str,
+    depth: &mut usize,
+    quote: &mut Option<char>,
+    escaped: &mut bool,
+    saw_route_call: &mut bool,
+) -> bool {
+    for character in segment.chars() {
+        if let Some(quote_char) = quote {
+            if *escaped {
+                *escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                *escaped = true;
+                continue;
+            }
+            if character == *quote_char {
+                *quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' | '`' => *quote = Some(character),
+            '(' => {
+                *depth += 1;
+                *saw_route_call = true;
+            }
+            ')' => {
+                *depth = depth.saturating_sub(1);
+                if *saw_route_call && *depth == 0 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn express_method_position(line: &str) -> Option<usize> {

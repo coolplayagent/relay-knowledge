@@ -6,37 +6,42 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
     let mut pending_annotations: Vec<SpringPendingAnnotation> = Vec::new();
-    let mut class_prefix = String::new();
+    let mut class_prefixes = Vec::<String>::new();
     for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if let Some(spring_routes) = parse_spring_route_annotation(trimmed) {
             if pending_request_mapping_can_be_prefix(&pending_annotations) {
-                if let Some(annotation) = pending_annotations.first() {
-                    class_prefix = annotation.url.clone();
-                }
+                class_prefixes = pending_request_mapping_urls(&pending_annotations);
                 pending_annotations.clear();
             }
             pending_annotations.extend(spring_routes);
             continue;
         }
+        if line_declares_java_type(trimmed) {
+            if pending_request_mapping_can_be_prefix(&pending_annotations) {
+                class_prefixes = pending_request_mapping_urls(&pending_annotations);
+            } else {
+                class_prefixes.clear();
+            }
+            pending_annotations.clear();
+            continue;
+        }
         if !pending_annotations.is_empty() {
-            if line_declares_java_type(trimmed) {
-                if let Some(annotation) = pending_annotations.first() {
-                    class_prefix = annotation.url.clone();
-                }
-                pending_annotations.clear();
-            } else if let Some(method_name) = parse_java_method_def(trimmed) {
+            if let Some(method_name) = parse_java_method_def(trimmed) {
+                let prefixes = route_class_prefixes(&class_prefixes);
                 for annotation in pending_annotations.drain(..) {
-                    let full_url = merge_url_parts(&class_prefix, &annotation.url);
-                    let key = (full_url.clone(), annotation.http_method.clone());
-                    if seen.insert(key) {
-                        routes.push(RouteCandidate {
-                            url: full_url,
-                            http_method: annotation.http_method,
-                            handler_name: method_name.clone(),
-                            framework: "spring".to_owned(),
-                            line: index + 1,
-                        });
+                    for prefix in &prefixes {
+                        let full_url = merge_url_parts(prefix, &annotation.url);
+                        let key = (full_url.clone(), annotation.http_method.clone());
+                        if seen.insert(key) {
+                            routes.push(RouteCandidate {
+                                url: full_url,
+                                http_method: annotation.http_method.clone(),
+                                handler_name: method_name.clone(),
+                                framework: "spring".to_owned(),
+                                line: index + 1,
+                            });
+                        }
                     }
                 }
             } else if !trimmed.starts_with("public")
@@ -69,6 +74,24 @@ fn pending_request_mapping_can_be_prefix(annotations: &[SpringPendingAnnotation]
         && annotations
             .iter()
             .all(|annotation| annotation.kind == SpringAnnotationKind::RequestMapping)
+}
+
+fn pending_request_mapping_urls(annotations: &[SpringPendingAnnotation]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut urls = Vec::new();
+    for annotation in annotations {
+        if seen.insert(annotation.url.clone()) {
+            urls.push(annotation.url.clone());
+        }
+    }
+    urls
+}
+
+fn route_class_prefixes(class_prefixes: &[String]) -> Vec<String> {
+    if class_prefixes.is_empty() {
+        return vec![String::new()];
+    }
+    class_prefixes.to_vec()
 }
 
 fn parse_spring_route_annotation(line: &str) -> Option<Vec<SpringPendingAnnotation>> {

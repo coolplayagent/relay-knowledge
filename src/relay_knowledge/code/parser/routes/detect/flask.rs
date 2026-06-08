@@ -76,7 +76,7 @@ fn parse_flask_decorator(
     if !is_route {
         return None;
     }
-    let args_trimmed = args.trim_end_matches(')');
+    let args_trimmed = trim_one_trailing_paren(args);
     let url = extract_quoted_string_python(args_trimmed)?;
     let url = route_url_with_router_prefix(func_part, &url, router_prefixes);
     let methods = if route_method.is_empty() {
@@ -155,8 +155,13 @@ fn parse_flask_methods_decorator(line: &str) -> Option<Vec<String>> {
             return None;
         }
     }
-    let args_trimmed = args.trim_end_matches(')');
+    let args_trimmed = trim_one_trailing_paren(args);
     Some(extract_methods_list_python(args_trimmed))
+}
+
+fn trim_one_trailing_paren(args: &str) -> &str {
+    let trimmed = args.trim_end();
+    trimmed.strip_suffix(')').unwrap_or(trimmed)
 }
 
 fn extract_methods_from_flask_args(args: &str) -> Vec<String> {
@@ -170,16 +175,7 @@ fn extract_methods_from_flask_args(args: &str) -> Vec<String> {
         None => return Vec::new(),
     };
     let list_str = &after_methods[eq_pos + 1..];
-    let start = match list_str.find('[') {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let end = match list_str.rfind(']') {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let inner = &list_str[start + 1..end];
-    extract_methods_list_python(inner)
+    extract_methods_list_python(list_str)
 }
 
 fn extract_python_keyword_string(args: &str, keyword: &str) -> Option<String> {
@@ -225,7 +221,7 @@ fn extract_shorthand_method_from_route(args: &str) -> Vec<String> {
 
 fn extract_methods_list_python(args: &str) -> Vec<String> {
     let trimmed = args.trim();
-    let inner = trimmed.trim_start_matches('[').trim_end_matches(']');
+    let inner = python_collection_literal_inner(trimmed).unwrap_or(trimmed);
     let mut methods = Vec::new();
     for item in inner.split(',') {
         let item = item.trim();
@@ -240,6 +236,23 @@ fn extract_methods_list_python(args: &str) -> Vec<String> {
         }
     }
     methods
+}
+
+fn python_collection_literal_inner(value: &str) -> Option<&str> {
+    let trimmed = value.trim_start();
+    let (open_pos, close_char) =
+        trimmed
+            .char_indices()
+            .find_map(|(index, character)| match character {
+                '[' => Some((index, ']')),
+                '(' => Some((index, ')')),
+                _ => None,
+            })?;
+    let close_pos = trimmed.rfind(close_char)?;
+    if close_pos <= open_pos {
+        return None;
+    }
+    Some(&trimmed[open_pos + 1..close_pos])
 }
 
 fn parse_python_function_def(line: &str) -> Option<String> {

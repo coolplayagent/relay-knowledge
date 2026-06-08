@@ -69,6 +69,10 @@ fn route_arguments_after_path(rest: &str) -> Vec<&str> {
 }
 
 fn handler_name_from_argument(argument: &str) -> Option<String> {
+    let argument = argument.trim_start();
+    if inline_callback_argument(argument) {
+        return None;
+    }
     let is_func = argument
         .chars()
         .next()
@@ -80,6 +84,28 @@ fn handler_name_from_argument(argument: &str) -> Option<String> {
         .find(|c: char| c == ')' || c == ',' || c.is_whitespace())
         .unwrap_or(argument.len());
     Some(argument[..end].to_owned())
+}
+
+fn inline_callback_argument(argument: &str) -> bool {
+    argument.starts_with('(')
+        || strip_javascript_keyword(argument, "function").is_some()
+        || strip_javascript_keyword(argument, "async").is_some_and(|after_async| {
+            let after_async = after_async.trim_start();
+            after_async.starts_with('(')
+                || strip_javascript_keyword(after_async, "function").is_some()
+        })
+}
+
+fn strip_javascript_keyword<'a>(argument: &'a str, keyword: &str) -> Option<&'a str> {
+    let after_keyword = argument.strip_prefix(keyword)?;
+    if after_keyword
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return None;
+    }
+    Some(after_keyword)
 }
 
 pub(in crate::code::parser) fn extract_quoted_string_python(s: &str) -> Option<String> {

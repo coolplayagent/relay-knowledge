@@ -81,6 +81,15 @@ fn detects_flask_route_multiple_methods() {
 }
 
 #[test]
+fn detects_flask_route_with_tuple_methods() {
+    let source = "@app.route('/login', methods=('POST',))\ndef login():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/login");
+    assert_eq!(routes[0].http_method, "post");
+}
+
+#[test]
 fn detects_flask_route_default_get() {
     let source = "@app.route('/status')\ndef status():\n    pass\n";
     let routes = detect_routes("python", source);
@@ -168,6 +177,15 @@ fn detects_express_anonymous_handler() {
     assert_eq!(routes[0].http_method, "get");
     assert_eq!(routes[0].handler_name, "anonymous");
     assert_eq!(routes[0].line, 1);
+}
+
+#[test]
+fn detects_express_async_inline_handler_as_anonymous() {
+    let source = "app.get('/health', async (req, res) => {\n  res.json({ ok: true });\n});\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/health");
+    assert_eq!(routes[0].handler_name, "anonymous");
 }
 
 #[test]
@@ -434,6 +452,25 @@ fn detects_spring_class_prefix_with_method_attribute() {
 }
 
 #[test]
+fn expands_spring_multiple_class_prefixes() {
+    let source = "@RequestMapping({\"/api\", \"/v1\"})\npublic class UserController {\n@GetMapping(\"/users\")\npublic List<User> users() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.url == "/api/users"));
+    assert!(routes.iter().any(|route| route.url == "/v1/users"));
+}
+
+#[test]
+fn resets_spring_prefix_for_unannotated_classes() {
+    let source = "@RequestMapping(\"/api\")\npublic class ApiController {\n@GetMapping(\"/users\")\npublic String users() {\n}\npublic class HealthResource {\n@GetMapping(\"/health\")\npublic String health() {\n";
+    let routes = detect_routes("java", source);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.url == "/api/users"));
+    assert!(routes.iter().any(|route| route.url == "/health"));
+    assert!(!routes.iter().any(|route| route.url == "/api/health"));
+}
+
+#[test]
 fn detects_spring_request_mapping_method_arrays() {
     let source = "@RequestMapping(value = \"/submit\", method = {RequestMethod.GET, RequestMethod.POST})\npublic String submit() {\n";
     let routes = detect_routes("java", source);
@@ -458,6 +495,17 @@ fn detects_express_final_handler_after_middleware() {
     let routes = detect_routes("typescript", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn detects_multiline_express_route_registration() {
+    let source = "app.get(\n  '/users',\n  requireAuth,\n  listUsers\n);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].http_method, "get");
+    assert_eq!(routes[0].handler_name, "listUsers");
+    assert_eq!(routes[0].line, 1);
 }
 
 #[test]

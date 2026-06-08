@@ -708,3 +708,14 @@ pub struct CodeFeatureFlagGraph {
     pub score: f64,
     pub usages: Vec<CodeFeatureFlagUsage>,
 }
+
+#[cfg(test)]
+mod fact_version_tests {
+    use super::CODE_SNAPSHOT_FACT_VERSION;
+
+    #[test]
+    fn code_snapshot_fact_version_includes_generated_and_web_route_facts() {
+        assert!(CODE_SNAPSHOT_FACT_VERSION.contains("generated-files-v1"));
+        assert!(CODE_SNAPSHOT_FACT_VERSION.contains("web-routes-v1"));
+    }
+}
