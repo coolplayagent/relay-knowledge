@@ -45,7 +45,8 @@ uv run --extra dev pytest tests/browser
 - **降级恢复**：监听失败时自动降级为 `Degraded` 状态，不影响查询热路径
 - **诊断暴露**：watcher 状态通过 `service status` API 暴露（state、事件计数、降级原因）
 - **持久化任务**：增量索引任务通过 `CodeIndexTaskSeed`（WorktreeOverlay 模式）进入持久化队列
-- **单元测试覆盖**：config 解析、路径过滤、日志哈希、状态管理、任务生成、诊断序列化
+- **Worker 兼容**：watcher 生成的 payload 可以反序列化为 `CodeIndexRequest`，worker claim `WorktreeOverlay` 任务时保留 payload 中的 ref selector
+- **单元测试覆盖**：config 解析、路径过滤、确定性内容哈希淘汰、状态管理、动态 watch/unwatch、任务生成、事件丢弃诊断、worker overlay 任务执行、诊断序列化
 
 ## 关联验证记录
 

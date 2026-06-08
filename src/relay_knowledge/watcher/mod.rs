@@ -12,7 +12,7 @@ pub use hash_cache::ContentHashCache;
 
 use std::path::PathBuf;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WatchedRepository {
     pub repository_id: String,
     pub alias: String,

@@ -64,29 +64,6 @@ impl PartitionedSqliteKnowledgeStore {
             catalog: Arc::new(SqliteShardCatalog::new(control_path, paths)),
         })
     }
-
-    async fn incremental_base_scope(
-        &self,
-        snapshot: &CodeIndexSnapshot,
-    ) -> Result<Option<String>, StorageError> {
-        if snapshot.full_replace {
-            return Ok(None);
-        }
-        let Some(base_commit) = snapshot.base_resolved_commit_sha.clone() else {
-            return Ok(None);
-        };
-
-        Ok(self
-            .control
-            .code_repository_scope_status(
-                snapshot.repository_id.clone(),
-                base_commit,
-                snapshot.path_filters.clone(),
-                snapshot.language_filters.clone(),
-            )
-            .await?
-            .and_then(|status| status.last_indexed_scope_id))
-    }
 }
 
 impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
@@ -155,6 +132,10 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             shard_status.alias = control_status.alias;
             Ok(Some(shard_status))
         })
+    }
+
+    fn list_code_repositories(&self) -> StorageFuture<'_, Vec<CodeRepositoryStatus>> {
+        control_delegates::list_code_repositories(self)
     }
 
     fn remove_code_repository(
@@ -561,7 +542,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, CodeIndexSummary> {
         let this = self.clone();
         Box::pin(async move {
-            let base_scope = this.incremental_base_scope(&snapshot).await?;
+            let base_scope = control_delegates::incremental_base_scope(&this, &snapshot).await?;
             let shard = if snapshot.full_replace {
                 this.catalog
                     .staged_repository_store(snapshot.repository_id.clone())

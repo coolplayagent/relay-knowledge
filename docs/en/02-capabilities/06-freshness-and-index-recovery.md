@@ -36,7 +36,7 @@ Common states include stale index, graph-only, backend unavailable, semantic/vec
 
 ## File Watcher (fs.watch) Incremental Indexing
 
-The system detects source code file changes through file system watching and automatically pushes incremental index tasks to the durable task queue.
+The resident service detects source code file changes for registered repositories and automatically pushes worktree-overlay index tasks to the durable code-index task queue.
 
 ### Configuration
 
@@ -53,7 +53,8 @@ The system detects source code file changes through file system watching and aut
 2. **Debounce**: Rapid consecutive file change events are merged within a configurable time window
 3. **Content hash filtering**: FNV-1a content hash skips save operations with no actual content change
 4. **Path filtering**: Automatically ignores `.git/`, `target/`, `node_modules/`, `__pycache__/` directories and binary files
-5. **Incremental task generation**: Changed files produce `CodeIndexTaskSeed` (WorktreeOverlay mode) through `build_incremental_task_seed`, entering the durable task queue
+5. **Incremental task generation**: Changed files produce `CodeIndexTaskSeed` records with `CodeIndexRequest` payloads in `WorktreeOverlay` mode, entering the same durable queue used by code-index workers, leases, retries, and dead-letter handling
+6. **Repository lifecycle sync**: Repositories registered or removed while the service is running are watched or unwatched through the watcher command channel; watch failures degrade diagnostics instead of silently mutating only in-memory state
 
 ### Status Monitoring
 
@@ -64,11 +65,14 @@ Watcher state is exposed through the `service status` API with the following dia
 - `total_events_received`: total file change events received
 - `total_events_filtered`: events filtered out
 - `total_index_tasks_queued`: incremental index tasks generated
+- `total_events_dropped`: events dropped when the bounded debounce channel is full or closed
 - `degraded_reason`: reason for degradation (e.g., watch directory limit exceeded)
 
 ### Resource Protection
 
 - `max_watch_dirs` cap prevents inotify/fd exhaustion
+- The debounce event channel and watcher command channel are bounded
+- Queue failures set the watcher to degraded while preserving existing worker retry/dead-letter behavior for tasks that were durably accepted
 - Watch failures degrade gracefully (Degraded state) without affecting query hot paths
 - Unsupported platforms auto-disable (Disabled state)
 

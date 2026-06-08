@@ -28,6 +28,10 @@ pub(super) async fn run_service(
         .recover_orphaned_code_index_tasks_on_startup()
         .await
         .map_err(|error| CliError::ServiceRunFailed(error.message))?;
+    service
+        .start_code_repository_watcher()
+        .await
+        .map_err(|error| CliError::ServiceRunFailed(error.message))?;
     let (file_index_shutdown, file_index_shutdown_receiver) = tokio::sync::watch::channel(false);
     let file_index_task = if runtime.file_index.enabled {
         Some(tokio::spawn(files_cli::run_file_index_loop(
@@ -83,7 +87,11 @@ pub(super) async fn run_service(
         .await
         .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
     } else if runtime.agent.mcp_streamable_http_enabled {
-        let server = McpServer::new(service, runtime.network.clone(), runtime.agent.clone());
+        let server = McpServer::new(
+            service.clone(),
+            runtime.network.clone(),
+            runtime.agent.clone(),
+        );
         server
             .serve_until_shutdown(service_shutdown_signal())
             .await
@@ -91,6 +99,7 @@ pub(super) async fn run_service(
     } else {
         service_shutdown_signal().await;
     }
+    service.stop_code_repository_watcher().await;
     if let Some(task) = file_index_task {
         let _ = file_index_shutdown.send(true);
         let _ = task.await;

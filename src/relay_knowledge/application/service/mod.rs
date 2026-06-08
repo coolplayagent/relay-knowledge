@@ -61,6 +61,7 @@ pub struct RelayKnowledgeService {
     pub(super) runtime: RuntimeConfiguration,
     pub(super) storage: StorageProvider,
     pub(super) health_cache: Arc<tokio::sync::RwLock<Option<HealthResponse>>>,
+    pub(super) watcher: Arc<tokio::sync::RwLock<Option<crate::watcher::WatcherHandle>>>,
 }
 
 impl RelayKnowledgeService {
@@ -70,6 +71,7 @@ impl RelayKnowledgeService {
             storage: StorageProvider::configured(&runtime),
             runtime,
             health_cache: Arc::new(tokio::sync::RwLock::new(None)),
+            watcher: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -79,6 +81,7 @@ impl RelayKnowledgeService {
             runtime,
             storage: StorageProvider::ready(store),
             health_cache: Arc::new(tokio::sync::RwLock::new(None)),
+            watcher: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -891,6 +894,7 @@ pub(crate) mod knowledge_map;
 mod service_status;
 mod storage_diagnostics;
 mod storage_provider;
+mod watcher;
 
 #[cfg(test)]
 mod id_tests;

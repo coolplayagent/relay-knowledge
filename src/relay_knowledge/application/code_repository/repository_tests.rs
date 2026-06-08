@@ -22,7 +22,7 @@ use crate::{
         StalenessHint,
     },
     env::{EnvironmentConfig, PlatformKind},
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore},
 };
 
 static TRACKED_ENTRIES_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -157,6 +157,82 @@ async fn duplicate_active_filesystem_full_index_resolves_live_snapshot_before_re
             .as_ref()
             .map(|task| task.resolved_commit_sha.as_str())
     );
+}
+
+#[tokio::test]
+async fn queued_worktree_overlay_task_preserves_payload_ref_selector() {
+    let repo = FixtureRepo::create("queued-worktree-overlay-payload-ref");
+    repo.write("src/lib.rs", "pub fn overlay_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let service = service_with_store(Arc::clone(&store)).await;
+
+    register_fixture_repo(&service, &repo, "register-queued-overlay").await;
+    service
+        .index_code_repository(
+            request("fixture", "HEAD"),
+            context("index-queued-overlay-base"),
+        )
+        .await
+        .expect("base index should succeed");
+    repo.write(
+        "src/lib.rs",
+        "pub fn overlay_policy() -> u32 { 2 }\npub fn overlay_policy_v2() -> u32 { overlay_policy() }\n",
+    );
+    let overlay_request = CodeIndexRequest {
+        repository: selector("fixture", "HEAD"),
+        mode: CodeIndexMode::WorktreeOverlay,
+        freshness_policy: FreshnessPolicy::WaitUntilFresh,
+    };
+    let payload_json =
+        serde_json::to_string(&overlay_request).expect("overlay request should serialize");
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("repository should exist");
+    let task = store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: status.repository_id.clone(),
+            alias: status.alias.clone(),
+            ref_selector: "HEAD".to_owned(),
+            resolved_commit_sha: "invalid-ref-if-worker-overrides-payload".to_owned(),
+            tree_hash: "worktree:pending:test".to_owned(),
+            source_scope: format!("watcher:{}", status.repository_id),
+            path_filters: status.path_filters.clone(),
+            language_filters: status.language_filters.clone(),
+            mode: CodeIndexMode::WorktreeOverlay,
+            input_fingerprint: "queued-worktree-overlay-payload-ref".to_owned(),
+            resource_budget: CodeIndexResourceBudget::default(),
+            payload_json,
+            now_ms: 1,
+        })
+        .await
+        .expect("overlay task should queue");
+
+    let completed = service
+        .run_code_index_task_once(Some(task.task_id.clone()), context("run-queued-overlay"))
+        .await
+        .expect("worker should preserve payload ref for worktree overlay")
+        .expect("worker should claim the queued task");
+
+    assert_eq!(completed.task_id, task.task_id);
+    let query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "overlay_policy_v2",
+                selector("fixture", "worktree"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-queued-overlay"),
+        )
+        .await
+        .expect("explicit worktree query should succeed");
+    assert!(query.results.iter().any(|hit| hit.path == "src/lib.rs"));
 }
 
 #[tokio::test]

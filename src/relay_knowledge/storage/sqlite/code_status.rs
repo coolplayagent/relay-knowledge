@@ -100,6 +100,52 @@ pub(super) fn repository_status(
     repository_status_by_column(connection, repository, RepositoryLookupColumn::Alias)
 }
 
+pub(super) fn repository_statuses(
+    connection: &mut Connection,
+) -> Result<Vec<CodeRepositoryStatus>, StorageError> {
+    let statuses = {
+        let mut statement = connection.prepare(
+            "
+            SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
+                   last_indexed_scope_id, last_indexed_commit, tree_hash,
+                   state, indexed_file_count, symbol_count, reference_count, chunk_count,
+                   stale, degraded_reason
+            FROM code_repositories
+            ORDER BY alias, repository_id
+            ",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(CodeRepositoryStatus {
+                repository_id: row.get(0)?,
+                alias: row.get(1)?,
+                root_path: row.get(2)?,
+                path_filters: parse_json_list(row.get::<_, String>(3)?)?,
+                language_filters: parse_json_list(row.get::<_, String>(4)?)?,
+                last_indexed_scope_id: row.get(5)?,
+                last_indexed_commit: row.get(6)?,
+                tree_hash: row.get(7)?,
+                state: row.get(8)?,
+                indexed_file_count: row.get(9)?,
+                symbol_count: row.get(10)?,
+                reference_count: row.get(11)?,
+                chunk_count: row.get(12)?,
+                stale: row.get::<_, i64>(13)? != 0,
+                degraded_reason: row.get(14)?,
+            })
+        })?;
+        let mut statuses = Vec::new();
+        for row in rows {
+            statuses.push(row?);
+        }
+        statuses
+    };
+
+    statuses
+        .into_iter()
+        .map(|status| reconcile_repository_status_freshness(connection, status))
+        .collect()
+}
+
 pub(super) fn repository_scope_status(
     connection: &mut Connection,
     repository: &str,

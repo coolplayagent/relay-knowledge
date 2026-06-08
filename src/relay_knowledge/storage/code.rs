@@ -191,6 +191,10 @@ pub trait CodeRepositoryStore: Send + Sync {
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>>;
 
+    fn list_code_repositories(&self) -> StorageFuture<'_, Vec<CodeRepositoryStatus>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
     fn remove_code_repository(
         &self,
         repository: String,

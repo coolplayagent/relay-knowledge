@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct ContentHashCache {
     capacity: usize,
     entries: HashMap<PathBuf, u64>,
+    insertion_order: VecDeque<PathBuf>,
 }
 
 impl ContentHashCache {
@@ -12,10 +13,14 @@ impl ContentHashCache {
         Self {
             capacity,
             entries: HashMap::new(),
+            insertion_order: VecDeque::new(),
         }
     }
 
     pub fn check_and_update(&mut self, path: PathBuf, content: &[u8]) -> bool {
+        if self.capacity == 0 {
+            return true;
+        }
         let new_hash = fnv_hash64(content);
         let changed = match self.entries.get(&path) {
             Some(&existing) => existing != new_hash,
@@ -23,9 +28,10 @@ impl ContentHashCache {
         };
         if changed {
             if self.entries.len() >= self.capacity && !self.entries.contains_key(&path) {
-                if let Some(oldest_key) = self.entries.keys().next().cloned() {
-                    self.entries.remove(&oldest_key);
-                }
+                self.evict_oldest();
+            }
+            if !self.entries.contains_key(&path) {
+                self.insertion_order.push_back(path.clone());
             }
             self.entries.insert(path, new_hash);
         }
@@ -34,6 +40,7 @@ impl ContentHashCache {
 
     pub fn remove(&mut self, path: &PathBuf) {
         self.entries.remove(path);
+        self.insertion_order.retain(|entry| entry != path);
     }
 
     pub fn len(&self) -> usize {
@@ -50,6 +57,15 @@ impl ContentHashCache {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.insertion_order.clear();
+    }
+
+    fn evict_oldest(&mut self) {
+        while let Some(oldest_key) = self.insertion_order.pop_front() {
+            if self.entries.remove(&oldest_key).is_some() {
+                break;
+            }
+        }
     }
 }
 
@@ -123,5 +139,23 @@ mod tests {
         cache.check_and_update(PathBuf::from("b.rs"), b"b");
         assert!(!cache.check_and_update(PathBuf::from("a.rs"), b"a"));
         assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn evicts_in_insertion_order() {
+        let mut cache = ContentHashCache::new(2);
+        cache.check_and_update(PathBuf::from("a.rs"), b"a");
+        cache.check_and_update(PathBuf::from("b.rs"), b"b");
+        cache.check_and_update(PathBuf::from("c.rs"), b"c");
+        assert_eq!(cache.len(), 2);
+        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"a"));
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn zero_capacity_tracks_no_entries() {
+        let mut cache = ContentHashCache::new(0);
+        assert!(cache.check_and_update(PathBuf::from("a.rs"), b"a"));
+        assert!(cache.is_empty());
     }
 }

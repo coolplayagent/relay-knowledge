@@ -36,7 +36,7 @@ relay-knowledge health --format json
 
 ## 文件监听 (fs.watch) 增量索引
 
-系统支持通过文件系统监听实现近实时增量索引更新。当源代码文件发生变更时，watcher 自动检测变更并将增量索引任务推送到持久化任务队列。
+驻留服务会为已注册代码仓库启动文件监听。当源代码文件发生变更时，watcher 自动检测变更并将 worktree-overlay 索引任务推送到持久化 code-index 任务队列。
 
 ### 配置
 
@@ -55,7 +55,8 @@ relay-knowledge health --format json
 2. **事件去抖**：在可配置的时间窗口内合并快速连续的文件变更事件
 3. **内容哈希过滤**：通过 FNV-1a 内容哈希跳过无实际内容变化的保存操作
 4. **路径过滤**：自动忽略 `.git/`、`target/`、`node_modules/`、`__pycache__/` 等目录和二进制文件
-5. **增量任务生成**：变更文件通过 `build_incremental_task_seed` 生成 `CodeIndexTaskSeed`（WorktreeOverlay 模式），进入持久化任务队列
+5. **增量任务生成**：变更文件通过 `build_incremental_task_seed` 生成 `CodeIndexTaskSeed`，payload 是 `WorktreeOverlay` 模式的 `CodeIndexRequest`，进入与 code-index worker、lease、retry 和 dead-letter 共用的持久化队列
+6. **仓库生命周期同步**：服务运行期间注册或删除仓库时，通过 watcher command channel 执行 watch/unwatch；底层监听失败会进入 degraded 诊断，而不是只更新内存列表
 
 ### 状态监控
 
@@ -66,11 +67,14 @@ Watcher 状态通过 `service status` API 暴露，包含以下诊断信息：
 - `total_events_received`：接收到的文件变更事件总数
 - `total_events_filtered`：被过滤掉的事件数量
 - `total_index_tasks_queued`：生成的增量索引任务数量
+- `total_events_dropped`：有界 debounce channel 满或关闭时丢弃的事件数量
 - `degraded_reason`：降级原因（如超出监听目录上限）
 
 ### 资源保护
 
 - 通过 `max_watch_dirs` 限制防止 inotify/fd 耗尽
+- debounce event channel 和 watcher command channel 都是有界队列
+- 任务入队失败会将 watcher 标记为 degraded；已持久化接受的任务仍沿用现有 worker retry/dead-letter 机制
 - 监听失败时自动降级（Degraded 状态），不影响查询热路径
 - 不支持的平台自动禁用（Disabled 状态）
 

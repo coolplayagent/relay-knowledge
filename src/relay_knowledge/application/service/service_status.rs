@@ -108,7 +108,7 @@ impl RelayKnowledgeService {
                 event_count: audit_event_count,
                 last_error: None,
             },
-            watcher: None,
+            watcher: self.watcher_diagnostics().await,
         }))
     }
 
@@ -143,7 +143,7 @@ impl RelayKnowledgeService {
                     "audit event count not sampled because storage is not open".to_owned(),
                 ),
             },
-            watcher: None,
+            watcher: self.watcher_diagnostics().await,
         })
     }
 
@@ -187,7 +187,7 @@ impl RelayKnowledgeService {
             watcher: watcher
                 .as_ref()
                 .map(WatcherDiagnostics::from_watcher_state)
-                .unwrap_or_default(),
+                .unwrap_or_else(WatcherDiagnostics::default_disabled),
         }
     }
 }

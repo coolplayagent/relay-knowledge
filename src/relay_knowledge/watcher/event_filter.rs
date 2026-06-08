@@ -4,6 +4,7 @@ const INDEXABLE_EXTENSIONS: &[&str] = &[
     "rs",
     "py",
     "js",
+    "mjs",
     "ts",
     "tsx",
     "jsx",
@@ -12,10 +13,13 @@ const INDEXABLE_EXTENSIONS: &[&str] = &[
     "rb",
     "c",
     "cpp",
+    "cc",
+    "cxx",
     "h",
     "hpp",
     "cs",
     "kt",
+    "kts",
     "scala",
     "swift",
     "php",
@@ -27,6 +31,9 @@ const INDEXABLE_EXTENSIONS: &[&str] = &[
     "json",
     "xml",
     "md",
+    "markdown",
+    "rst",
+    "adoc",
     "sql",
     "cmake",
     "make",
@@ -172,7 +179,7 @@ fn extension_matches_language(ext: &str, language: &str) -> bool {
         "swift" => ext == "swift",
         "csharp" | "c#" => ext == "cs",
         "php" => ext == "php",
-        _ => ext == language,
+        _ => false,
     }
 }
 
@@ -250,5 +257,19 @@ mod tests {
     fn rejects_pycache() {
         let filter = WatcherEventFilter::new(root(), vec![], vec![]);
         assert!(!filter.should_process_path(&root().join("__pycache__/foo.cpython-311.pyc")));
+    }
+
+    #[test]
+    fn allows_known_language_alias_extensions() {
+        let filter = WatcherEventFilter::new(root(), vec![], vec![]);
+        assert!(filter.should_process_path(&root().join("src/lib.cc")));
+        assert!(filter.should_process_path(&root().join("web/app.mjs")));
+        assert!(filter.should_process_path(&root().join("build.gradle.kts")));
+    }
+
+    #[test]
+    fn unknown_language_filter_does_not_match_extension_by_name() {
+        let filter = WatcherEventFilter::new(root(), vec![], vec!["rs".to_owned()]);
+        assert!(!filter.should_process_path(&root().join("src/main.rs")));
     }
 }
