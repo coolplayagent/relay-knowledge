@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -384,6 +384,66 @@ async fn process_debounced_paths_filters_unchanged_hashes() {
     .await;
     process_debounced_paths(&state, &diag_tx, &dropped_events, &[changed], &sink).await;
 
+    let state = state.read().await;
+    assert_eq!(state.index_tasks_queued, 1);
+    assert_eq!(state.events_filtered, 1);
+}
+
+#[tokio::test]
+async fn process_debounced_paths_retries_same_content_after_queue_failure() {
+    let root = temp_dir("queue-failure-retry");
+    let changed = root.join("main.rs");
+    fs::write(&changed, "fn main() {}\n").expect("changed file");
+    let state = Arc::new(RwLock::new(WatcherInternalState {
+        repositories: vec![WatchedRepository {
+            root,
+            ..test_repo("queue-failure-retry")
+        }],
+        hash_cache: ContentHashCache::new(1024),
+        events_received: 0,
+        events_filtered: 0,
+        index_tasks_queued: 0,
+    }));
+    let (diag_tx, _) = watch::channel(WatcherDiagnostics::default());
+    let dropped_events = Arc::new(AtomicU64::new(0));
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let queued = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let sink: TaskQueueSink = {
+        let attempts = Arc::clone(&attempts);
+        let queued = Arc::clone(&queued);
+        Arc::new(move |seed| {
+            let attempts = Arc::clone(&attempts);
+            let queued = Arc::clone(&queued);
+            Box::pin(async move {
+                if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err("temporary queue failure".to_owned());
+                }
+                queued.lock().await.push(seed);
+                Ok(())
+            })
+        })
+    };
+
+    process_debounced_paths(
+        &state,
+        &diag_tx,
+        &dropped_events,
+        std::slice::from_ref(&changed),
+        &sink,
+    )
+    .await;
+    process_debounced_paths(
+        &state,
+        &diag_tx,
+        &dropped_events,
+        std::slice::from_ref(&changed),
+        &sink,
+    )
+    .await;
+    process_debounced_paths(&state, &diag_tx, &dropped_events, &[changed], &sink).await;
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(queued.lock().await.len(), 1);
     let state = state.read().await;
     assert_eq!(state.index_tasks_queued, 1);
     assert_eq!(state.events_filtered, 1);

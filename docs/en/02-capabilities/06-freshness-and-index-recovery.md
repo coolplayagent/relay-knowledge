@@ -53,7 +53,7 @@ The resident service detects source code file changes for registered repositorie
 2. **Debounce**: Rapid consecutive file change events are merged within a configurable time window
 3. **Content hash filtering**: FNV-1a content hash skips save operations with no actual content change
 4. **Path filtering**: Automatically ignores `.git/`, `target/`, `node_modules/`, `__pycache__/` directories and binary files
-5. **Initial-index guard**: Repositories are watched only after a completed full index provides `last_indexed_scope_id`, so worktree overlays never create a partial first index
+5. **Initial-index guard**: Repositories are watched only after a completed, non-stale full index provides `last_indexed_scope_id`, so worktree overlays never create a partial first index or run over stale reconfiguration state
 6. **Incremental task generation**: Changed files produce `CodeIndexTaskSeed` records with `CodeIndexRequest` payloads in `WorktreeOverlay` mode, entering the same durable queue used by code-index workers, leases, retries, and dead-letter handling; overlay fingerprints include the changed-path set and content generation so a later save cannot be deduplicated into an older queued or running task
 7. **Repository lifecycle sync**: Repositories registered, refreshed, or removed while the service is running are watched, updated, or unwatched through the watcher command channel; watch failures degrade diagnostics instead of silently mutating only in-memory state
 
@@ -73,6 +73,7 @@ Watcher state is exposed through the `service status` API with the following dia
 
 - `max_watch_dirs` cap prevents inotify/fd exhaustion
 - The debounce event channel and watcher command channel are bounded
+- The content hash cache advances only after a matching worktree-overlay task is durably queued, so transient queue failures remain retryable by the next matching file event
 - Queue failures set the watcher to degraded while preserving existing worker retry/dead-letter behavior for tasks that were durably accepted
 - Watch failures degrade gracefully (Degraded state) without affecting query hot paths
 - Unsupported platforms auto-disable (Disabled state)

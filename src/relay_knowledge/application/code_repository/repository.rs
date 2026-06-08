@@ -178,6 +178,15 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
+        let degraded_reason = status
+            .degraded_reason
+            .clone()
+            .or(software_projection.status.last_error.clone());
+        let status = CodeRepositoryStatus {
+            degraded_reason,
+            ..status
+        };
+        let _ = self.refresh_watched_code_repository(&status).await;
 
         Ok(CodeRepositoryIndexResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
@@ -187,12 +196,7 @@ impl RelayKnowledgeService {
                 request.repository.ref_selector.clone(),
             ),
             summary,
-            status: CodeRepositoryStatus {
-                degraded_reason: status
-                    .degraded_reason
-                    .or(software_projection.status.last_error.clone()),
-                ..status
-            },
+            status,
         })
     }
 

@@ -236,6 +236,32 @@ async fn queued_worktree_overlay_task_preserves_payload_ref_selector() {
 }
 
 #[tokio::test]
+async fn full_index_refreshes_running_watcher_after_initial_scope() {
+    let repo = FixtureRepo::create("watcher-refresh-after-initial-index");
+    repo.write("src/lib.rs", "pub fn watched_after_index() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let service = service_with_store(Arc::clone(&store)).await;
+    let handle = service
+        .start_code_repository_watcher()
+        .await
+        .expect("watcher should start")
+        .expect("watcher should be enabled");
+
+    register_fixture_repo(&service, &repo, "register-watcher-refresh").await;
+    assert_eq!(handle.repository_count().await, 0);
+
+    service
+        .index_code_repository(request("fixture", "HEAD"), context("index-watcher-refresh"))
+        .await
+        .expect("initial index should refresh watcher");
+
+    assert_eq!(handle.repository_count().await, 1);
+    handle.request_shutdown();
+}
+
+#[tokio::test]
 async fn allow_stale_query_reports_pending_freshness_and_source_read_requirement() {
     let repo = FixtureRepo::create("code-query-pending-freshness");
     repo.write("src/lib.rs", "pub fn pending_policy() -> u32 { 1 }\n");
