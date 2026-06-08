@@ -733,6 +733,7 @@ fn code_query_snapshot(
         calls,
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),

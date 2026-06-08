@@ -3,7 +3,7 @@
 [English](./09-code-graph-competitive-features.md) | [中文](../../zh/02-capabilities/09-code-graph-competitive-features.md)
 
 > Document version: 2.0
-> Date: 2026-05-17
+> Date: 2026-06-08
 > Scope: Book 2 capability guide
 
 ## Capability Positioning
@@ -32,9 +32,9 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --ref
 
 ## Web Route Awareness
 
-The code graph detects web framework route handler bindings during indexing. Supported frameworks include Express (JavaScript/TypeScript), Flask/FastAPI (Python), and Spring (Java). Each detected route produces a `CodeRouteRecord` with HTTP method, URL path, handler name, framework identifier, and source location. Route records are stored alongside symbols and can be used to answer "which handler serves a given endpoint?" queries.
+The code graph detects web framework route handler bindings during indexing. Supported frameworks include Express (JavaScript/TypeScript), Flask/FastAPI (Python), and Spring (Java). Each detected route produces a `CodeRouteRecord` with HTTP method, URL path, handler name, framework identifier, source location, and a handler symbol link when the parser can match the route to a structured symbol.
 
-Symbols annotated as route handlers carry a `symbol_role` of type `SymbolRole::RouteHandler`, enabling downstream retrieval to prioritize or filter by HTTP endpoint semantics.
+Route records are carried through checkpointed batches, persisted in `code_repository_routes`, and indexed as route search documents so normal durable repository indexing can answer "which handler serves a given endpoint?" queries. Symbols annotated as route handlers carry a `symbol_role` of type `SymbolRole::RouteHandler`, enabling downstream retrieval to prioritize or filter by HTTP endpoint semantics.
 
 ## Degradation and Diagnostics
 

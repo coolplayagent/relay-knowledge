@@ -87,8 +87,6 @@ impl CodeReferenceKind {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SymbolRole {
     RouteHandler { url: String, http_method: String },
-    Middleware,
-    EventListener { event: String },
 }
 
 /// Resolution certainty for syntax-level code references.

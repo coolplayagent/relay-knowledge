@@ -3,7 +3,7 @@
 [中文](./09-code-graph-competitive-features.md) | [English](../../en/02-capabilities/09-code-graph-competitive-features.md)
 
 > 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 编制日期: 2026-06-08
 > 适用范围: 第二卷能力说明
 
 ## 能力定位
@@ -32,9 +32,9 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --ref
 
 ## Web 路由感知
 
-代码图谱在索引期间检测 Web 框架路由处理器绑定。支持的框架包括 Express（JavaScript/TypeScript）、Flask/FastAPI（Python）和 Spring（Java）。每条检测到的路由生成一条 `CodeRouteRecord`，包含 HTTP 方法、URL 路径、处理器名称、框架标识符和源码位置。路由记录与符号一同存储，可用于回答"哪个处理函数服务于给定的 HTTP 端点？"等查询。
+代码图谱在索引期间检测 Web 框架路由处理器绑定。支持的框架包括 Express（JavaScript/TypeScript）、Flask/FastAPI（Python）和 Spring（Java）。每条检测到的路由生成一条 `CodeRouteRecord`，包含 HTTP 方法、URL 路径、处理器名称、框架标识符、源码位置，以及解析器能够匹配到结构化符号时的处理器符号链接。
 
-被标注为路由处理器的符号携带 `symbol_role` 类型 `SymbolRole::RouteHandler`，使下游检索可以按 HTTP 端点语义优先排序或过滤。
+路由记录会随 checkpointed batch 一起提交，持久化到 `code_repository_routes`，并作为 route search document 建入索引，因此普通的 durable 仓库索引流程可以回答"哪个处理函数服务于给定的 HTTP 端点？"等查询。被标注为路由处理器的符号携带 `symbol_role` 类型 `SymbolRole::RouteHandler`，使下游检索可以按 HTTP 端点语义优先排序或过滤。
 
 ## 降级与诊断
 

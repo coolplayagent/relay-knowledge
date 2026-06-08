@@ -146,6 +146,7 @@ fn snapshot_with_connector_service_context() -> CodeIndexSnapshot {
         calls: vec![call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),

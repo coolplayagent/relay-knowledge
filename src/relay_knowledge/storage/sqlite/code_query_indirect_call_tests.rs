@@ -47,6 +47,7 @@ async fn callers_follow_designated_function_pointer_bindings() {
         calls: vec![read_call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "table-init-chunk",
@@ -145,6 +146,7 @@ async fn callers_merge_indirect_bindings_when_direct_calls_exist() {
         calls: vec![direct_call, indirect_call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "direct-read-chunk",
@@ -238,6 +240,7 @@ async fn callers_preserve_cross_file_indirect_bindings_with_receiver_context() {
         calls: vec![indirect_call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "ops-init-chunk",
@@ -401,6 +404,7 @@ async fn indirect_callers_ignore_same_field_calls_in_other_files() {
         calls: vec![local_read_call, unrelated_call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "table-init-chunk",

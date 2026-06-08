@@ -36,6 +36,7 @@ async fn checkpointed_batches_finalize_typescript_named_import_edges() {
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -59,6 +60,7 @@ async fn checkpointed_batches_finalize_typescript_named_import_edges() {
             )],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -112,6 +114,7 @@ async fn checkpointed_batches_finalize_typescript_nonstandard_source_root_import
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -135,6 +138,7 @@ async fn checkpointed_batches_finalize_typescript_nonstandard_source_root_import
             )],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -184,6 +188,7 @@ async fn checkpointed_batches_finalize_keeps_bare_typescript_packages_unresolved
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -207,6 +212,7 @@ async fn checkpointed_batches_finalize_keeps_bare_typescript_packages_unresolved
             )],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -256,6 +262,7 @@ async fn checkpointed_batches_finalize_typescript_re_export_and_dynamic_import_e
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -288,6 +295,7 @@ async fn checkpointed_batches_finalize_typescript_re_export_and_dynamic_import_e
             ],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -364,6 +372,7 @@ async fn checkpointed_finalize_resolves_typescript_imported_call_references() {
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -397,6 +406,7 @@ async fn checkpointed_finalize_resolves_typescript_imported_call_references() {
             )],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })

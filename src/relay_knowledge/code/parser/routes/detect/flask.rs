@@ -122,12 +122,11 @@ fn parse_flask_methods_decorator(line: &str) -> Option<Vec<String>> {
 }
 
 fn extract_methods_from_flask_args(args: &str) -> Vec<String> {
-    let methods_start = args.find("methods");
-    if methods_start.is_none() {
+    let Some(methods_start) = args.find("methods") else {
         let dot_method = extract_shorthand_method_from_route(args);
         return dot_method;
-    }
-    let after_methods = &args[methods_start.unwrap() + 7..];
+    };
+    let after_methods = &args[methods_start + 7..];
     let eq_pos = match after_methods.find('=') {
         Some(p) => p,
         None => return Vec::new(),
@@ -199,10 +198,9 @@ fn extract_methods_list_python(args: &str) -> Vec<String> {
 
 fn parse_python_function_def(line: &str) -> Option<String> {
     let trimmed = line.trim();
-    if !trimmed.starts_with("def ") {
-        return None;
-    }
-    let after_def = &trimmed[4..];
+    let after_def = trimmed
+        .strip_prefix("def ")
+        .or_else(|| trimmed.strip_prefix("async def "))?;
     let name_end = after_def
         .find(|c: char| c == '(' || c.is_whitespace())
         .unwrap_or(after_def.len());

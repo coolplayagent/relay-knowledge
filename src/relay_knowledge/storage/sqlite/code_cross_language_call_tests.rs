@@ -244,6 +244,7 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -396,6 +397,7 @@ async fn finalize_reruns_call_target_checks_for_pre_resolved_calls() {
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })

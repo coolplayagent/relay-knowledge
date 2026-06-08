@@ -772,6 +772,7 @@ fn batch(source_scope: &str, batch_index: usize) -> CodeIndexBatch {
         imports: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

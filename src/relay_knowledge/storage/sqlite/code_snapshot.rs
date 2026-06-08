@@ -72,6 +72,10 @@ const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
         columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
     },
     CodeScopeTable {
+        table: "code_repository_routes",
+        columns: "repository_id, source_scope, route_id, file_id, path, language_id, url, http_method, handler_name, handler_symbol_snapshot_id, framework, line_start, line_end",
+    },
+    CodeScopeTable {
         table: "code_repository_chunks",
         columns: "repository_id, source_scope, chunk_id, file_id, path, language_id, content, byte_start, byte_end, line_start, line_end, symbol_snapshot_id",
     },
@@ -471,6 +475,7 @@ pub(super) fn apply_snapshot(
                 .saturating_add(snapshot.dependencies.len())
                 .saturating_add(snapshot.calls.len())
                 .saturating_add(snapshot.feature_flags.len())
+                .saturating_add(snapshot.routes.len())
                 .saturating_add(snapshot.chunks.len())
                 .saturating_add(snapshot.diagnostics.len()),
             skipped_file_count: snapshot.skipped_unchanged_count,
@@ -723,6 +728,7 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction,
         &snapshot.dependencies,
     )?;
+    super::code_routes::insert_records(transaction, &snapshot.routes)?;
     for chunk in &snapshot.chunks {
         transaction.execute(
             "

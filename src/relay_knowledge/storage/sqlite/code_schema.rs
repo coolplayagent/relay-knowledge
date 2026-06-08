@@ -195,6 +195,24 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_routes (
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            route_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            language_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            http_method TEXT NOT NULL,
+            handler_name TEXT NOT NULL,
+            handler_symbol_snapshot_id TEXT,
+            framework TEXT NOT NULL,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
+            PRIMARY KEY (source_scope, route_id),
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS code_repository_chunks (
             repository_id TEXT NOT NULL,
             source_scope TEXT NOT NULL,
@@ -418,6 +436,10 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_calls(source_scope, callee_name, caller_name, path);
         CREATE INDEX IF NOT EXISTS code_repository_feature_flags_lookup
             ON code_repository_feature_flags(source_scope, name, source_key, edge_kind, path);
+        CREATE INDEX IF NOT EXISTS code_repository_routes_lookup
+            ON code_repository_routes(source_scope, url, http_method, path);
+        CREATE INDEX IF NOT EXISTS code_repository_routes_handler_lookup
+            ON code_repository_routes(source_scope, handler_symbol_snapshot_id, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_lookup
             ON code_repository_imports(source_scope, module, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup
@@ -505,6 +527,7 @@ fn backfill_code_repository_search(connection: &Connection) -> Result<(), Storag
     backfill_search_dependencies(connection)?;
     backfill_search_feature_flags(connection)?;
     backfill_search_calls(connection)?;
+    backfill_search_routes(connection)?;
     backfill_search_chunks(connection)?;
     mark_code_schema_migration(connection, SEARCH_BACKFILL_MIGRATION)?;
 
@@ -725,6 +748,38 @@ fn backfill_search_calls(connection: &Connection) -> Result<(), StorageError> {
         return Ok(());
     }
     insert_search_calls(connection)
+}
+
+fn backfill_search_routes(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_routes",
+        &[
+            "source_scope",
+            "route_id",
+            "path",
+            "language_id",
+            "url",
+            "http_method",
+            "handler_name",
+            "framework",
+        ],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'route', route_id, path, language_id,
+               url || ' ' || http_method || ' ' || handler_name || ' ' || framework || ' ' || path
+        FROM code_repository_routes
+        ",
+        [],
+    )?;
+
+    Ok(())
 }
 
 fn rebuild_call_search_documents_after_signature_upgrade(

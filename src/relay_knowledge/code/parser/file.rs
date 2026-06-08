@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::{
     domain::{
@@ -675,10 +675,13 @@ fn record_routes(
     language_id: &str,
     content: &str,
 ) {
+    let _span = tracing::debug_span!("record_routes", path, file_id, language_id).entered();
     let candidates = detect_routes(language_id, content);
     if candidates.is_empty() {
         return;
     }
+    tracing::debug!(route_count = candidates.len(), "detected web routes");
+    let symbol_index = route_handler_symbol_index(&build.symbols);
     for candidate in candidates {
         let route_id = stable_id(
             "route",
@@ -694,7 +697,15 @@ fn record_routes(
         let line_range =
             match RepositoryCodeRange::new("line_range", candidate.line, candidate.line) {
                 Ok(range) => range,
-                Err(_) => continue,
+                Err(error) => {
+                    tracing::debug!(
+                        path,
+                        route_line = candidate.line,
+                        error = %error,
+                        "skipping route with invalid source range"
+                    );
+                    continue;
+                }
             };
         let route_idx = build.routes.len();
         build.routes.push(CodeRouteRecord {
@@ -713,37 +724,93 @@ fn record_routes(
         });
         annotate_route_handler_symbol(
             build,
-            route_idx,
-            path,
-            &candidate.handler_name,
-            &candidate.url,
-            &candidate.http_method,
-            candidate.line,
+            &symbol_index,
+            RouteHandlerAnnotation {
+                route_idx,
+                path,
+                handler_name: &candidate.handler_name,
+                url: &candidate.url,
+                http_method: &candidate.http_method,
+                route_line: candidate.line,
+            },
         );
     }
 }
 
+fn route_handler_symbol_index(
+    symbols: &[RepositoryCodeSymbolRecord],
+) -> BTreeMap<(String, String), Vec<usize>> {
+    let mut index = BTreeMap::<(String, String), Vec<usize>>::new();
+    for (symbol_idx, symbol) in symbols.iter().enumerate() {
+        index
+            .entry((symbol.path.clone(), symbol.name.clone()))
+            .or_default()
+            .push(symbol_idx);
+    }
+
+    index
+}
+
+struct RouteHandlerAnnotation<'a> {
+    route_idx: usize,
+    path: &'a str,
+    handler_name: &'a str,
+    url: &'a str,
+    http_method: &'a str,
+    route_line: usize,
+}
+
 fn annotate_route_handler_symbol(
     build: &mut SnapshotBuild,
-    _route_idx: usize,
-    path: &str,
-    handler_name: &str,
-    url: &str,
-    http_method: &str,
-    route_line: usize,
+    symbol_index: &BTreeMap<(String, String), Vec<usize>>,
+    annotation: RouteHandlerAnnotation<'_>,
 ) {
-    let sym = build
-        .symbols
-        .iter_mut()
-        .filter(|s| s.path == path && s.name == handler_name)
-        .filter(|s| (s.line_range.start as usize) >= route_line)
-        .min_by_key(|s| (s.line_range.start as usize) - route_line);
-
-    if let Some(sym) = sym {
-        sym.symbol_role = Some(SymbolRole::RouteHandler {
-            url: url.to_owned(),
-            http_method: http_method.to_owned(),
+    let route_line = annotation.route_line as u32;
+    let Some(symbol_indices) = symbol_index.get(&(
+        annotation.path.to_owned(),
+        annotation.handler_name.to_owned(),
+    )) else {
+        tracing::debug!(
+            path = annotation.path,
+            handler_name = annotation.handler_name,
+            "route handler symbol was not found"
+        );
+        return;
+    };
+    let symbol_idx = symbol_indices
+        .iter()
+        .copied()
+        .filter(|idx| {
+            build.symbols[*idx].path == annotation.path
+                && build.symbols[*idx].name == annotation.handler_name
+                && build.symbols[*idx].line_range.start >= route_line
+        })
+        .min_by_key(|idx| {
+            build.symbols[*idx]
+                .line_range
+                .start
+                .saturating_sub(route_line)
         });
+
+    if let Some(symbol_idx) = symbol_idx {
+        let sym = &mut build.symbols[symbol_idx];
+        let symbol_snapshot_id = sym.symbol_snapshot_id.clone();
+        if sym.symbol_role.is_none() {
+            sym.symbol_role = Some(SymbolRole::RouteHandler {
+                url: annotation.url.to_owned(),
+                http_method: annotation.http_method.to_owned(),
+            });
+        }
+        if let Some(route) = build.routes.get_mut(annotation.route_idx) {
+            route.handler_symbol_snapshot_id = Some(symbol_snapshot_id);
+        }
+    } else {
+        tracing::debug!(
+            path = annotation.path,
+            handler_name = annotation.handler_name,
+            route_line,
+            "route handler symbol did not satisfy source range matching"
+        );
     }
 }
 
@@ -800,6 +867,102 @@ impl FileParseOutput {
             symbols: Vec::new(),
             references: Vec::new(),
             reference_keys: HashSet::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::CodeRepositoryRegistration;
+
+    use super::*;
+
+    #[test]
+    fn record_routes_links_records_to_handler_symbols() {
+        let mut build = route_test_build();
+        build.symbols.push(route_symbol("list-users-symbol", 3, 5));
+
+        record_routes(
+            &mut build,
+            "src/routes.ts",
+            "routes-file",
+            "typescript",
+            "app.get('/users', listUsers);\napp.post('/users', listUsers);\nfunction listUsers() {}\n",
+        );
+
+        assert_eq!(build.routes.len(), 2);
+        assert!(build.routes.iter().all(|route| {
+            route.handler_symbol_snapshot_id.as_deref() == Some("list-users-symbol")
+        }));
+        assert_eq!(
+            build.symbols[0].symbol_role,
+            Some(SymbolRole::RouteHandler {
+                url: "/users".to_owned(),
+                http_method: "get".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn record_routes_ignores_same_name_symbols_before_route_registration() {
+        let mut build = route_test_build();
+        build.symbols.push(route_symbol("before-route", 1, 1));
+        build.symbols.push(route_symbol("after-route", 3, 3));
+
+        record_routes(
+            &mut build,
+            "src/routes.ts",
+            "routes-file",
+            "typescript",
+            "\napp.get('/users', listUsers);\nfunction listUsers() {}\n",
+        );
+
+        assert_eq!(
+            build.routes[0].handler_symbol_snapshot_id.as_deref(),
+            Some("after-route")
+        );
+        assert!(build.symbols[0].symbol_role.is_none());
+        assert!(build.symbols[1].symbol_role.is_some());
+    }
+
+    fn route_test_build() -> SnapshotBuild {
+        let registration =
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate");
+        SnapshotBuild::new(
+            &registration,
+            "commit".to_owned(),
+            "tree".to_owned(),
+            true,
+            1,
+            0,
+        )
+    }
+
+    fn route_symbol(
+        symbol_snapshot_id: &str,
+        line_start: u32,
+        line_end: u32,
+    ) -> RepositoryCodeSymbolRecord {
+        RepositoryCodeSymbolRecord {
+            repository_id: "repo".to_owned(),
+            source_scope: "scope".to_owned(),
+            symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+            canonical_symbol_id: "repo://repo/src::routes.ts::listUsers".to_owned(),
+            file_id: "routes-file".to_owned(),
+            path: "src/routes.ts".to_owned(),
+            language_id: "typescript".to_owned(),
+            name: "listUsers".to_owned(),
+            qualified_name: "listUsers".to_owned(),
+            kind: "function".to_owned(),
+            signature: "function listUsers()".to_owned(),
+            doc_comment: None,
+            byte_range: RepositoryCodeRange { start: 0, end: 1 },
+            line_range: RepositoryCodeRange {
+                start: line_start,
+                end: line_end,
+            },
+            symbol_role: None,
         }
     }
 }

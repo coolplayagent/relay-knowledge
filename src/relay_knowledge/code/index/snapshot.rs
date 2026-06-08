@@ -391,6 +391,7 @@ impl SnapshotBuild {
             calls: self.calls,
             dependencies: self.dependencies,
             feature_flags: self.feature_flags,
+            routes: self.routes,
             chunks: self.chunks,
             workspaces: self.workspaces,
             diagnostics: self.diagnostics,

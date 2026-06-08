@@ -53,6 +53,7 @@ pub(super) fn snapshot_with_c_imports() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),

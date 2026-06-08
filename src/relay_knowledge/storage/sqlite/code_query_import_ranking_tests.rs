@@ -52,6 +52,7 @@ async fn symbol_import_queries_rank_repository_context_before_line_number() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -122,6 +123,7 @@ async fn symbol_import_queries_rank_dense_same_file_alias_usage() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "script-chunk",
@@ -207,6 +209,7 @@ async fn symbol_import_usage_counts_only_the_queried_named_binding() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "active-chunk",
@@ -276,6 +279,7 @@ async fn path_import_queries_include_resolved_target_symbols_in_excerpt() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -325,6 +329,7 @@ async fn path_import_queries_use_structured_rows_when_fts_is_unavailable() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -402,6 +407,7 @@ async fn path_import_queries_fall_back_to_bounded_structured_rows_when_fts_is_un
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -484,6 +490,7 @@ async fn path_import_queries_rank_public_header_importers_before_implementation_
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -561,6 +568,7 @@ async fn path_import_queries_keep_public_header_importers_first_with_target_symb
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "header-chunk",
@@ -645,6 +653,7 @@ async fn path_import_queries_rank_importer_path_and_target_symbol_usage() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "active-chunk",
@@ -720,6 +729,7 @@ async fn path_import_queries_demote_test_importers_without_test_intent() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -773,6 +783,7 @@ async fn script_import_queries_match_shellcheck_source_context() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -836,6 +847,7 @@ async fn import_syntax_queries_rank_import_expression_rows_before_static_declara
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),

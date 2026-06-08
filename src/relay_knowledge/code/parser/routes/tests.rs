@@ -176,6 +176,16 @@ fn detects_flask_shorthand_get_method() {
 }
 
 #[test]
+fn detects_flask_async_route_handler() {
+    let source = "@app.get('/async')\nasync def async_handler():\n    return 'ok'\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/async");
+    assert_eq!(routes[0].http_method, "get");
+    assert_eq!(routes[0].handler_name, "async_handler");
+}
+
+#[test]
 fn detects_flask_shorthand_post_method() {
     let source = "@app.post('/items')\ndef create_item():\n    pass\n";
     let routes = detect_routes("python", source);
