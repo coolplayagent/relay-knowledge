@@ -3,9 +3,9 @@ use std::sync::Arc;
 use crate::{
     domain::{
         AuditEventRecord, CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt,
-        CodeReferenceRecord, CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion,
-        IndexKind, IndexStatus, ProposalState, RetrievalHit, ServiceOperatorStatus, WorkerStatus,
-        WorkerTaskRecord,
+        CodeIndexSnapshot, CodeReferenceRecord, CodeRepositoryStatus, CodeSymbolRecord,
+        CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus, ProposalState,
+        RetrievalHit, ServiceOperatorStatus, WorkerStatus, WorkerTaskRecord,
     },
     storage::{
         AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
@@ -16,12 +16,65 @@ use crate::{
         IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
         IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
         NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
-        StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure,
-        WorkerTaskSeed,
+        StorageError, StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion,
+        WorkerTaskFailure, WorkerTaskSeed,
     },
 };
 
 use super::PartitionedSqliteKnowledgeStore;
+
+pub(super) fn list_code_repositories(
+    store: &PartitionedSqliteKnowledgeStore,
+) -> StorageFuture<'_, Vec<CodeRepositoryStatus>> {
+    let this = store.clone();
+    Box::pin(async move {
+        let control_statuses = this.control.list_code_repositories().await?;
+        let mut statuses = Vec::with_capacity(control_statuses.len());
+        for control_status in control_statuses {
+            let Some(shard) = this
+                .catalog
+                .existing_repository_store(control_status.repository_id.clone())
+                .await?
+            else {
+                statuses.push(control_status);
+                continue;
+            };
+            let Some(mut shard_status) = shard
+                .code_repository_status(control_status.repository_id.clone())
+                .await?
+            else {
+                statuses.push(control_status);
+                continue;
+            };
+            shard_status.alias = control_status.alias;
+            statuses.push(shard_status);
+        }
+        Ok(statuses)
+    })
+}
+
+pub(super) async fn incremental_base_scope(
+    store: &PartitionedSqliteKnowledgeStore,
+    snapshot: &CodeIndexSnapshot,
+) -> Result<Option<String>, StorageError> {
+    if snapshot.full_replace {
+        return Ok(None);
+    }
+    let Some(base_commit) = snapshot.base_resolved_commit_sha.clone() else {
+        return Ok(None);
+    };
+
+    Ok(store
+        .control
+        .code_repository_scope_status(
+            snapshot.repository_id.clone(),
+            base_commit,
+            snapshot.path_filters.clone(),
+            snapshot.language_filters.clone(),
+        )
+        .await?
+        .and_then(|status| status.last_indexed_scope_id))
+}
 
 impl GraphStore for PartitionedSqliteKnowledgeStore {
     fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt> {

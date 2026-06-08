@@ -4,6 +4,7 @@ const INDEXABLE_EXTENSIONS: &[&str] = &[
     "rs",
     "py",
     "js",
+    "mjs",
     "ts",
     "tsx",
     "jsx",
@@ -12,10 +13,13 @@ const INDEXABLE_EXTENSIONS: &[&str] = &[
     "rb",
     "c",
     "cpp",
+    "cc",
+    "cxx",
     "h",
     "hpp",
     "cs",
     "kt",
+    "kts",
     "scala",
     "swift",
     "php",
@@ -27,6 +31,9 @@ const INDEXABLE_EXTENSIONS: &[&str] = &[
     "json",
     "xml",
     "md",
+    "markdown",
+    "rst",
+    "adoc",
     "sql",
     "cmake",
     "make",
@@ -157,22 +164,40 @@ impl WatcherEventFilter {
 }
 
 fn extension_matches_language(ext: &str, language: &str) -> bool {
-    match language {
+    match language.to_ascii_lowercase().as_str() {
         "rust" => ext == "rs",
-        "python" | "py" => ext == "py",
-        "javascript" | "js" => ext == "js" || ext == "jsx" || ext == "mjs",
-        "typescript" | "ts" => ext == "ts" || ext == "tsx",
+        "python" | "py" => ext == "py" || ext == "pyw",
+        "javascript" | "js" => ext == "js" || ext == "jsx" || ext == "mjs" || ext == "cjs",
+        "jsx" => ext == "jsx",
+        "typescript" | "ts" => ext == "ts" || ext == "mts" || ext == "cts",
+        "tsx" => ext == "tsx",
         "go" => ext == "go",
         "java" => ext == "java",
         "c" => ext == "c" || ext == "h",
-        "cpp" | "c++" => ext == "cpp" || ext == "hpp" || ext == "cc" || ext == "cxx",
+        "cpp" | "c++" => {
+            ext == "cpp"
+                || ext == "hpp"
+                || ext == "cc"
+                || ext == "cxx"
+                || ext == "hh"
+                || ext == "hxx"
+        }
         "ruby" | "rb" => ext == "rb",
         "kotlin" | "kt" => ext == "kt" || ext == "kts",
         "scala" => ext == "scala",
         "swift" => ext == "swift",
         "csharp" | "c#" => ext == "cs",
         "php" => ext == "php",
-        _ => ext == language,
+        "bash" | "shell" | "sh" => ext == "sh" || ext == "bash" || ext == "bats",
+        "json" => ext == "json",
+        "yaml" | "yml" => ext == "yaml" || ext == "yml",
+        "toml" => ext == "toml",
+        "sql" => ext == "sql",
+        "markdown" | "md" => ext == "md" || ext == "markdown",
+        "xml" => ext == "xml" || ext == "xsd" || ext == "xsl" || ext == "xslt",
+        "ini" => ext == "ini" || ext == "conf" || ext == "cfg",
+        "properties" => ext == "properties",
+        _ => false,
     }
 }
 
@@ -250,5 +275,33 @@ mod tests {
     fn rejects_pycache() {
         let filter = WatcherEventFilter::new(root(), vec![], vec![]);
         assert!(!filter.should_process_path(&root().join("__pycache__/foo.cpython-311.pyc")));
+    }
+
+    #[test]
+    fn allows_known_language_alias_extensions() {
+        let filter = WatcherEventFilter::new(root(), vec![], vec![]);
+        assert!(filter.should_process_path(&root().join("src/lib.cc")));
+        assert!(filter.should_process_path(&root().join("web/app.mjs")));
+        assert!(filter.should_process_path(&root().join("build.gradle.kts")));
+    }
+
+    #[test]
+    fn language_filters_accept_config_and_document_languages() {
+        for (language, path) in [
+            ("json", "config/app.json"),
+            ("yaml", "config/app.yaml"),
+            ("toml", "Cargo.toml"),
+            ("sql", "schema/main.sql"),
+            ("markdown", "README.md"),
+        ] {
+            let filter = WatcherEventFilter::new(root(), vec![], vec![language.to_owned()]);
+            assert!(filter.should_process_path(&root().join(path)));
+        }
+    }
+
+    #[test]
+    fn unknown_language_filter_does_not_match_extension_by_name() {
+        let filter = WatcherEventFilter::new(root(), vec![], vec!["rs".to_owned()]);
+        assert!(!filter.should_process_path(&root().join("src/main.rs")));
     }
 }

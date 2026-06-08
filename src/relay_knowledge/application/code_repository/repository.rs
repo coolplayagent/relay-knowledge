@@ -68,6 +68,7 @@ impl RelayKnowledgeService {
             .upsert_code_repository(registration.clone())
             .await
             .map_err(storage_api_error)?;
+        let _ = self.refresh_watched_code_repository(&status).await;
         let graph_version = store
             .current_graph_version()
             .await
@@ -97,6 +98,9 @@ impl RelayKnowledgeService {
             .ok_or_else(|| {
                 ApiError::storage_unavailable("removed code repository disappeared before delete")
             })?;
+        let _ = self
+            .remove_watched_code_repository(&removed_status.alias, &removed_status.repository_id)
+            .await;
         let graph_version = store
             .current_graph_version()
             .await
@@ -174,6 +178,15 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
+        let degraded_reason = status
+            .degraded_reason
+            .clone()
+            .or(software_projection.status.last_error.clone());
+        let status = CodeRepositoryStatus {
+            degraded_reason,
+            ..status
+        };
+        let _ = self.refresh_watched_code_repository(&status).await;
 
         Ok(CodeRepositoryIndexResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
@@ -183,12 +196,7 @@ impl RelayKnowledgeService {
                 request.repository.ref_selector.clone(),
             ),
             summary,
-            status: CodeRepositoryStatus {
-                degraded_reason: status
-                    .degraded_reason
-                    .or(software_projection.status.last_error.clone()),
-                ..status
-            },
+            status,
         })
     }
 
@@ -433,7 +441,9 @@ impl RelayKnowledgeService {
                 return Err(ApiError::invalid_argument(message));
             }
         };
-        request.repository.ref_selector = task.resolved_commit_sha.clone();
+        if task.mode != CodeIndexMode::WorktreeOverlay {
+            request.repository.ref_selector = task.resolved_commit_sha.clone();
+        }
         let lease_context = CodeIndexTaskLeaseContext {
             task_id: task.task_id.clone(),
             lease_owner: lease_owner.clone(),

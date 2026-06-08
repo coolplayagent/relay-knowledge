@@ -45,7 +45,8 @@ The file watcher feature must satisfy:
 - **Graceful degradation**: Watch failures auto-degrade to `Degraded` state without affecting query hot paths
 - **Diagnostic exposure**: Watcher state exposed via `service status` API (state, event counts, degradation reason)
 - **Durable tasks**: Incremental index tasks enter the durable queue via `CodeIndexTaskSeed` (WorktreeOverlay mode)
-- **Unit test coverage**: config parsing, path filtering, content hashing, state management, task generation, diagnostics serialization
+- **Worker compatibility**: Watcher-generated payloads deserialize as `CodeIndexRequest`, and queued `WorktreeOverlay` tasks preserve the payload ref selector when workers claim them
+- **Unit test coverage**: config parsing, path filtering, deterministic content-hash eviction, state management, dynamic watch/unwatch, task generation, dropped-event diagnostics, worker overlay task execution, diagnostics serialization
 
 ## Related Verification Records
 

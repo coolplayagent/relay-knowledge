@@ -209,6 +209,10 @@ impl CodeRepositoryStore for SqliteGraphStore {
         self.run_read(move |connection| code_status::repository_status(connection, &repository))
     }
 
+    fn list_code_repositories(&self) -> StorageFuture<'_, Vec<CodeRepositoryStatus>> {
+        self.run_read(code_status::repository_statuses)
+    }
+
     fn remove_code_repository(
         &self,
         repository: String,

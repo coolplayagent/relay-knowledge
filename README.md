@@ -656,8 +656,9 @@ file-index answers until a bounded scan has completed.
 
 ### File Watcher (fs.watch)
 
-The file watcher detects source code changes and pushes incremental index
-tasks automatically. It is enabled by default on supported platforms.
+The resident `service run` process starts the file watcher for registered code
+repositories and pushes source-code changes into the durable code-index task
+queue automatically. It is enabled by default on supported platforms.
 
 ```bash
 RELAY_KNOWLEDGE_WATCHER_ENABLED=true
@@ -669,8 +670,10 @@ RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY=4096
 The watcher uses the `notify` crate for cross-platform file system events
 (Linux inotify, macOS FSEvents, Windows ReadDirectoryChangesW). Events are
 debounced, content-hash filtered, and path-filtered before generating
-`WorktreeOverlay` incremental index tasks. Watcher diagnostics (state, event
-counts, degraded reason) appear in `service status --format json`.
+`WorktreeOverlay` task payloads that existing code-index workers claim through
+leases, retry, and dead-letter handling. Watcher diagnostics (state, watched
+repository count, event/drop counts, queued task count, degraded reason) appear
+in `service status --format json`.
 
 ### Semantic and Vector Backends
 
