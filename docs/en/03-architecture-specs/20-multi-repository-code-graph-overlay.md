@@ -25,6 +25,7 @@ The current implementation provides the initial product path across all three ph
 - SQLite persists `code_repository_sets`, `code_repository_set_members`, `code_repository_cross_edges`, overlay status, and overlay refresh tasks. Repository sets do not copy rows into base code fact tables.
 - Multi-repository query fans out at the application layer to each member's persisted `source_scope`, then merges by member priority, freshness, and overlay confidence. Request path/language filters narrow the member scope instead of widening or re-resolving it through current repository defaults. Deduplication includes repository, scope, path, line range, and excerpt.
 - `repo-set refresh` builds import/module-level cross-repository overlay edges with resolved, ambiguous, and unresolved states plus evidence JSON. Local, relative, or already resolved member imports stay inside their member repository and are not resolved through cross-repository symbol-name or basename fallback.
+- Workspace-aware package mapping supports Go `go.work`/`go.mod` module roots and pnpm `pnpm-workspace.yaml` plus package `package.json` names, entry points, and export subpaths. These mappings are used only by repository-set overlay refresh and do not change single-repository import resolution.
 - Scope retention preserves single-repository snapshots referenced by repository set members. Background overlay refresh tasks use durable leases, retries, dead-letter state, and the resident `service run` overlay refresh worker.
 
 ## 2. Current Baseline
@@ -184,6 +185,8 @@ code_repository_cross_edges
   evidence_json TEXT NOT NULL
   created_at_ms INTEGER NOT NULL
 ```
+
+During overlay refresh, unresolved external member imports are matched against a read-only package/module export index built from repository-set members. Go workspaces constrain `go.mod` package prefixes to `go.work use` directories only within the `go.work` root directory tree; modules outside that tree still contribute their own prefixes. pnpm workspaces parse `pnpm-workspace.yaml` package globs only for package paths under the workspace root and read package `package.json` names from complete workspace/package manifest content retained during indexing. The pnpm workspace root package is always included, a workspace without `packages` includes only that root package, and package `exports` entries take precedence over `main`, `module`, `types`, `typings`, and default `index` entry aliases. Declared `exports` constrain package subpath aliases: conditional export objects select a single preferred runtime target, wildcard subpath exports map matching file patterns, and files outside declared exports do not receive synthetic package subpath aliases. Imports that still do not match a member remain persisted as `unresolved` cross edges with `target_hint` evidence rather than being dropped or converted into degradation.
 
 Do not add materialized virtual fact rows. For example, `code_repository_files` must not receive copied rows for a repository set. Small statistics or query caches are acceptable only when invalidated by member `source_scope` and index version.
 

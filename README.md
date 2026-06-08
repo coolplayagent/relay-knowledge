@@ -619,6 +619,22 @@ relay-knowledge query --help
 relay-knowledge query -- --help
 ```
 
+`repo-set refresh` rebuilds cross-repository import overlay edges from the
+indexed member snapshots. The overlay understands Go workspace/module manifests
+(`go.work`, `go.mod`) and pnpm workspaces (`pnpm-workspace.yaml` plus package
+`package.json` names, entry points, and exports). Nested `go.work` files only
+scope `go.mod` filtering to their own directory tree, pnpm package globs only
+match paths under the workspace root, and package keys are parsed from complete
+workspace/package manifest content retained during indexing. pnpm root packages
+are always included, a workspace without `packages` includes only the root
+package, and `exports` takes precedence over `main`/`module` entry aliases.
+Declared package `exports` entries also bind package subpath keys: conditional export
+objects select a single preferred runtime target, wildcard subpath exports map
+matching file patterns, and private files outside declared exports do not receive
+synthetic package subpath aliases.
+Imports that still cannot be matched to a member package are retained as
+`unresolved` cross edges with target hint evidence.
+
 #### Kind Reference
 
 `--kind` values are command-local. Do not reuse a value from one command family
