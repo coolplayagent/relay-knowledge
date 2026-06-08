@@ -4,6 +4,7 @@ use super::RouteCandidate;
 use super::shared::extract_quoted_string_python;
 
 const MAX_FLASK_ROUTE_DECORATOR_LINES: usize = 12;
+const MAX_PYTHON_ROUTER_PREFIX_LINES: usize = 12;
 
 pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCandidate> {
     let mut routes = Vec::new();
@@ -14,10 +15,14 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
     let mut index = 0usize;
     while index < lines.len() {
         let trimmed = lines[index].trim();
-        if let Some((router_name, prefix)) = parse_python_router_prefix(trimmed) {
-            router_prefixes.insert(router_name, prefix);
-            index += 1;
-            continue;
+        if let Some((prefix_statement, prefix_lines)) =
+            python_router_prefix_statement(&lines, index)
+        {
+            if let Some((router_name, prefix)) = parse_python_router_prefix(&prefix_statement) {
+                router_prefixes.insert(router_name, prefix);
+                index += prefix_lines;
+                continue;
+            }
         }
         if trimmed.starts_with("@") {
             let (decorator_statement, decorator_lines) = flask_decorator_statement(&lines, index);
@@ -119,18 +124,36 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, String)> {
     Some((router_name.to_owned(), prefix))
 }
 
+fn python_router_prefix_statement(lines: &[&str], start: usize) -> Option<(String, usize)> {
+    let first_line = lines[start].trim();
+    if !first_line.contains('=')
+        || (!first_line.contains("APIRouter(") && !first_line.contains("Blueprint("))
+    {
+        return None;
+    }
+    Some(python_parenthesized_statement(
+        lines,
+        start,
+        MAX_PYTHON_ROUTER_PREFIX_LINES,
+    ))
+}
+
 fn flask_decorator_statement(lines: &[&str], start: usize) -> (String, usize) {
+    python_parenthesized_statement(lines, start, MAX_FLASK_ROUTE_DECORATOR_LINES)
+}
+
+fn python_parenthesized_statement(
+    lines: &[&str],
+    start: usize,
+    max_lines: usize,
+) -> (String, usize) {
     let mut statement = String::new();
     let mut depth = 0usize;
     let mut quote = None;
     let mut escaped = false;
     let mut saw_open = false;
     let mut consumed = 0usize;
-    for line in lines
-        .iter()
-        .skip(start)
-        .take(MAX_FLASK_ROUTE_DECORATOR_LINES)
-    {
+    for line in lines.iter().skip(start).take(max_lines) {
         let segment = line.trim();
         if !statement.is_empty() {
             statement.push(' ');
@@ -198,6 +221,8 @@ fn extract_flask_http_method(func_part: &str) -> String {
         "put" => "put".to_owned(),
         "delete" => "delete".to_owned(),
         "patch" => "patch".to_owned(),
+        "head" => "head".to_owned(),
+        "options" => "options".to_owned(),
         _ => String::new(),
     }
 }
@@ -209,6 +234,8 @@ fn func_line_matches_route(func_part: &str) -> bool {
         || func_part.ends_with(".put")
         || func_part.ends_with(".delete")
         || func_part.ends_with(".patch")
+        || func_part.ends_with(".head")
+        || func_part.ends_with(".options")
 }
 
 fn parse_flask_methods_decorator(line: &str) -> Option<Vec<String>> {

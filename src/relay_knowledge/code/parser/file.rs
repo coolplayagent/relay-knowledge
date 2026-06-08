@@ -789,11 +789,12 @@ fn annotate_route_handler_symbol(
     if let Some(symbol_idx) = symbol_idx {
         let sym = &mut build.symbols[symbol_idx];
         let symbol_snapshot_id = sym.symbol_snapshot_id.clone();
-        if sym.symbol_role.is_none() {
-            sym.symbol_role = Some(SymbolRole::RouteHandler {
-                url: annotation.url.to_owned(),
-                http_method: annotation.http_method.to_owned(),
-            });
+        let url = annotation.url.to_owned();
+        let http_method = annotation.http_method.to_owned();
+        if let Some(role) = &mut sym.symbol_role {
+            role.merge_route_handler(url, http_method);
+        } else {
+            sym.symbol_role = Some(SymbolRole::RouteHandler { url, http_method });
         }
         if let Some(route) = build.routes.get_mut(annotation.route_idx) {
             route.handler_symbol_snapshot_id = Some(symbol_snapshot_id);
@@ -888,12 +889,18 @@ mod tests {
         assert!(build.routes.iter().all(|route| {
             route.handler_symbol_snapshot_id.as_deref() == Some("list-users-symbol")
         }));
-        assert_eq!(
-            build.symbols[0].symbol_role,
-            Some(SymbolRole::RouteHandler {
-                url: "/users".to_owned(),
-                http_method: "get".to_owned()
-            })
+        let Some(SymbolRole::RouteHandlers { routes }) = &build.symbols[0].symbol_role else {
+            panic!("shared handler should preserve every route role");
+        };
+        assert!(
+            routes
+                .iter()
+                .any(|route| route.url == "/users" && route.http_method == "get")
+        );
+        assert!(
+            routes
+                .iter()
+                .any(|route| route.url == "/users" && route.http_method == "post")
         );
     }
 

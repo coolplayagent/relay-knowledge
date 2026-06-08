@@ -16,7 +16,7 @@ pub(in crate::code::parser) fn detect_routes(
     content: &str,
 ) -> Vec<RouteCandidate> {
     match language_id {
-        "javascript" | "typescript" | "tsx" => express::detect_express_routes(content),
+        "javascript" | "jsx" | "typescript" | "tsx" => express::detect_express_routes(content),
         "python" => flask::detect_flask_routes(content),
         "java" => spring::detect_spring_routes(content),
         _ => Vec::new(),

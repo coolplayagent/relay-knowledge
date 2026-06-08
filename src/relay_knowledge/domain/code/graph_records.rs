@@ -87,6 +87,53 @@ impl CodeReferenceKind {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SymbolRole {
     RouteHandler { url: String, http_method: String },
+    RouteHandlers { routes: Vec<RouteHandlerRole> },
+}
+
+/// Single HTTP endpoint binding attached to a route-handler symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteHandlerRole {
+    pub url: String,
+    pub http_method: String,
+}
+
+impl SymbolRole {
+    /// Adds a route-handler binding while preserving the legacy single-route
+    /// representation until a second distinct endpoint is attached.
+    pub fn merge_route_handler(&mut self, url: String, http_method: String) {
+        match self {
+            Self::RouteHandler {
+                url: existing_url,
+                http_method: existing_method,
+            } if *existing_url == url && *existing_method == http_method => {}
+            Self::RouteHandler { .. } => {
+                let existing = std::mem::replace(self, Self::RouteHandlers { routes: Vec::new() });
+                if let Self::RouteHandler {
+                    url: existing_url,
+                    http_method: existing_method,
+                } = existing
+                {
+                    *self = Self::RouteHandlers {
+                        routes: vec![
+                            RouteHandlerRole {
+                                url: existing_url,
+                                http_method: existing_method,
+                            },
+                            RouteHandlerRole { url, http_method },
+                        ],
+                    };
+                }
+            }
+            Self::RouteHandlers { routes } => {
+                if !routes
+                    .iter()
+                    .any(|route| route.url == url && route.http_method == http_method)
+                {
+                    routes.push(RouteHandlerRole { url, http_method });
+                }
+            }
+        }
+    }
 }
 
 /// Resolution certainty for syntax-level code references.

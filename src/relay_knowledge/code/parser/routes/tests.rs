@@ -594,3 +594,99 @@ fn detects_multiline_flask_route_decorators() {
     assert_eq!(routes[0].http_method, "post");
     assert_eq!(routes[0].handler_name, "login");
 }
+
+#[test]
+fn detects_multiline_express_route_chains() {
+    let source = "router.route('/users')\n  .get(listUsers)\n  .post(createUser);\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 2);
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.http_method == "get" && route.handler_name == "listUsers")
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.http_method == "post" && route.handler_name == "createUser")
+    );
+}
+
+#[test]
+fn detects_express_router_alias_assignments() {
+    let source = "const users = express.Router();\napp.use('/api', users);\nusers.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn skips_commented_express_registrations() {
+    let source = "// app.get('/users', listUsers);\n/* router.post('/admin', admin); */\napp.get('/live', live);\n";
+    let routes = detect_routes("javascript", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/live");
+}
+
+#[test]
+fn detects_express_all_head_and_options_methods() {
+    let source = "app.all('/any', anyHandler);\napp.head('/head', headHandler);\napp.options('/cors', corsHandler);\n";
+    let routes = detect_routes("typescript", source);
+    assert_eq!(routes.len(), 3);
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/any" && route.http_method == "any")
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/head" && route.http_method == "head")
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/cors" && route.http_method == "options")
+    );
+}
+
+#[test]
+fn detects_jsx_express_routes() {
+    let routes = detect_routes("jsx", "app.get('/status', status);\n");
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/status");
+}
+
+#[test]
+fn detects_multiline_fastapi_router_prefix() {
+    let source = "router = APIRouter(\n    prefix='/api',\n)\n@router.get('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+}
+
+#[test]
+fn detects_multiline_flask_blueprint_prefix() {
+    let source = "bp = Blueprint(\n    'api',\n    __name__,\n    url_prefix='/api',\n)\n@bp.route('/users')\ndef users():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+}
+
+#[test]
+fn detects_fastapi_head_and_options_decorators() {
+    let source = "@router.head('/ready')\ndef ready():\n    pass\n@router.options('/ready')\ndef options():\n    pass\n";
+    let routes = detect_routes("python", source);
+    assert_eq!(routes.len(), 2);
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/ready" && route.http_method == "head")
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.url == "/ready" && route.http_method == "options")
+    );
+}

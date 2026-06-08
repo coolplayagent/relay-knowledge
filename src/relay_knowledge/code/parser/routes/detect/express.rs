@@ -10,15 +10,27 @@ const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
 pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<RouteCandidate> {
     let mut routes = Vec::new();
     let mut seen = BTreeSet::new();
+    let mut router_names = BTreeSet::<String>::from(["app".to_owned(), "router".to_owned()]);
     let mut router_prefixes = BTreeMap::<String, String>::new();
-    let lines: Vec<&str> = content.lines().collect();
+    let router_factory_imported = express_router_factory_is_imported(content);
+    let lines = javascript_code_lines_without_comments(content);
     for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if let Some((router_name, prefix)) = parse_express_router_mount(trimmed, &router_prefixes) {
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(router_name) = parse_express_router_alias(trimmed, router_factory_imported) {
+            router_names.insert(router_name);
+            continue;
+        }
+        if let Some((router_name, prefix)) =
+            parse_express_router_mount(trimmed, &router_prefixes, &router_names)
+        {
+            router_names.insert(router_name.clone());
             router_prefixes.insert(router_name, prefix);
             continue;
         }
-        if express_method_position(trimmed).is_none() {
+        if express_route_start_position(trimmed).is_none() {
             continue;
         };
         let statement = express_route_statement(&lines, index);
@@ -26,6 +38,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             &statement,
             index + 1,
             &router_prefixes,
+            &router_names,
             &mut seen,
             &mut routes,
         ) {
@@ -37,7 +50,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         let Some(receiver_name) = express_receiver_name(&statement[..method_pos]) else {
             continue;
         };
-        if !express_router_name_is_router(&receiver_name) {
+        if !express_router_name_is_router(&receiver_name, &router_names) {
             continue;
         }
         let rest = &statement[method_pos..];
@@ -46,9 +59,8 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             None => continue,
         };
         let raw_method = method_part.rsplit('.').next().unwrap_or("");
-        let http_method = match raw_method.to_ascii_lowercase().as_str() {
-            "get" | "post" | "put" | "delete" | "patch" => raw_method.to_ascii_lowercase(),
-            _ => continue,
+        let Some(http_method) = express_http_method(raw_method) else {
+            continue;
         };
         let after_method = after_method.trim_start();
         let url = if let Some(url) = extract_quoted_string(after_method) {
@@ -78,10 +90,11 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
 fn parse_express_router_mount(
     line: &str,
     router_prefixes: &BTreeMap<String, String>,
+    router_names: &BTreeSet<String>,
 ) -> Option<(String, String)> {
     let use_pos = line.find(".use(")?;
     let receiver_name = express_receiver_name(&line[..use_pos])?;
-    if !express_router_name_is_router(&receiver_name) {
+    if !express_router_name_is_router(&receiver_name, router_names) {
         return None;
     }
     let after_use = line[use_pos..].split_once('(')?.1.trim_start();
@@ -90,7 +103,7 @@ fn parse_express_router_mount(
         return None;
     }
     let router_name = extract_handler_name(after_use)?;
-    if !express_router_name_is_router(&router_name) {
+    if !express_router_name_is_router(&router_name, router_names) {
         return None;
     }
     let receiver_prefix = router_prefixes
@@ -104,6 +117,7 @@ fn record_express_route_chain(
     statement: &str,
     line: usize,
     router_prefixes: &BTreeMap<String, String>,
+    router_names: &BTreeSet<String>,
     seen: &mut BTreeSet<(String, String)>,
     routes: &mut Vec<RouteCandidate>,
 ) -> bool {
@@ -113,7 +127,7 @@ fn record_express_route_chain(
     let Some(receiver_name) = express_receiver_name(&statement[..route_pos]) else {
         return false;
     };
-    if !express_router_name_is_router(&receiver_name) {
+    if !express_router_name_is_router(&receiver_name, router_names) {
         return false;
     }
     let after_route = &statement[route_pos + ".route(".len()..];
@@ -132,9 +146,9 @@ fn record_express_route_chain(
             break;
         };
         let raw_method = method_part.rsplit('.').next().unwrap_or("");
-        let http_method = match raw_method.to_ascii_lowercase().as_str() {
-            "get" | "post" | "put" | "delete" | "patch" => raw_method.to_ascii_lowercase(),
-            _ => {
+        let http_method = match express_http_method(raw_method) {
+            Some(method) => method,
+            None => {
                 scan = &rest[method_part.len()..];
                 continue;
             }
@@ -156,7 +170,14 @@ fn record_express_route_chain(
     found_route_method
 }
 
-fn express_route_statement(lines: &[&str], start: usize) -> String {
+fn express_route_statement(lines: &[String], start: usize) -> String {
+    if lines[start].contains(".route(") {
+        return express_route_chain_statement(lines, start);
+    }
+    express_method_call_statement(lines, start)
+}
+
+fn express_method_call_statement(lines: &[String], start: usize) -> String {
     let mut statement = String::new();
     let mut depth = 0usize;
     let mut quote = None;
@@ -169,6 +190,9 @@ fn express_route_statement(lines: &[&str], start: usize) -> String {
         .enumerate()
     {
         let segment = line.trim();
+        if segment.is_empty() {
+            continue;
+        }
         if !statement.is_empty() {
             statement.push(' ');
         }
@@ -191,8 +215,30 @@ fn express_route_statement(lines: &[&str], start: usize) -> String {
     statement
 }
 
+fn express_route_chain_statement(lines: &[String], start: usize) -> String {
+    let mut statement = String::new();
+    for line in lines
+        .iter()
+        .skip(start)
+        .take(MAX_EXPRESS_ROUTE_REGISTRATION_LINES)
+    {
+        let segment = line.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if !statement.is_empty() {
+            statement.push(' ');
+        }
+        statement.push_str(segment);
+        if statement_ends_with_semicolon(segment) {
+            break;
+        }
+    }
+    statement
+}
+
 fn route_method_open_position(line: &str) -> Option<usize> {
-    let method_pos = express_method_position(line)?;
+    let method_pos = express_route_start_position(line)?;
     let open_relative_pos = line[method_pos..].find('(')?;
     Some(method_pos + open_relative_pos)
 }
@@ -238,10 +284,35 @@ fn route_call_is_closed(
 }
 
 fn express_method_position(line: &str) -> Option<usize> {
-    [".get(", ".post(", ".put(", ".delete(", ".patch("]
+    [
+        ".get(",
+        ".post(",
+        ".put(",
+        ".delete(",
+        ".patch(",
+        ".head(",
+        ".options(",
+        ".all(",
+    ]
+    .into_iter()
+    .filter_map(|method| line.find(method))
+    .min()
+}
+
+fn express_route_start_position(line: &str) -> Option<usize> {
+    [express_method_position(line), line.find(".route(")]
         .into_iter()
-        .filter_map(|method| line.find(method))
+        .flatten()
         .min()
+}
+
+fn express_http_method(raw_method: &str) -> Option<String> {
+    let method = raw_method.to_ascii_lowercase();
+    match method.as_str() {
+        "get" | "post" | "put" | "delete" | "patch" | "head" | "options" => Some(method),
+        "all" => Some("any".to_owned()),
+        _ => None,
+    }
 }
 
 fn express_receiver_name(receiver: &str) -> Option<String> {
@@ -251,10 +322,139 @@ fn express_receiver_name(receiver: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn express_router_name_is_router(receiver_name: &str) -> bool {
+fn express_router_name_is_router(receiver_name: &str, router_names: &BTreeSet<String>) -> bool {
+    if router_names.contains(receiver_name) {
+        return true;
+    }
     let receiver_name = receiver_name.to_ascii_lowercase();
 
     receiver_name == "app" || receiver_name == "router" || receiver_name.ends_with("router")
+}
+
+fn parse_express_router_alias(line: &str, router_factory_imported: bool) -> Option<String> {
+    let (left, right) = line.split_once('=')?;
+    let right = right.trim_start();
+    let uses_express_factory = right.contains("express.Router(");
+    let uses_imported_factory = router_factory_imported && right.starts_with("Router(");
+    if !uses_express_factory && !uses_imported_factory {
+        return None;
+    }
+    js_assignment_variable_name(left)
+}
+
+fn js_assignment_variable_name(left: &str) -> Option<String> {
+    let left = left.trim();
+    let left = left
+        .strip_prefix("const ")
+        .or_else(|| left.strip_prefix("let "))
+        .or_else(|| left.strip_prefix("var "))
+        .unwrap_or(left)
+        .trim();
+    let name_end = left
+        .find(|character: char| character == ':' || character.is_whitespace())
+        .unwrap_or(left.len());
+    let name = &left[..name_end];
+    if name.is_empty()
+        || !name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '$'
+        })
+    {
+        return None;
+    }
+    Some(name.to_owned())
+}
+
+fn express_router_factory_is_imported(content: &str) -> bool {
+    content.lines().any(|line| {
+        let line = line.trim();
+        line.contains("Router")
+            && (line.contains("from 'express'")
+                || line.contains("from \"express\"")
+                || line.contains("require('express')")
+                || line.contains("require(\"express\")"))
+    })
+}
+
+fn javascript_code_lines_without_comments(content: &str) -> Vec<String> {
+    let mut in_block_comment = false;
+    content
+        .lines()
+        .map(|line| javascript_code_line_without_comments(line, &mut in_block_comment))
+        .collect()
+}
+
+fn javascript_code_line_without_comments(line: &str, in_block_comment: &mut bool) -> String {
+    let mut result = String::new();
+    let mut chars = line.chars().peekable();
+    let mut quote = None;
+    let mut escaped = false;
+    while let Some(character) = chars.next() {
+        if *in_block_comment {
+            if character == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                *in_block_comment = false;
+            }
+            continue;
+        }
+        if let Some(quote_char) = quote {
+            result.push(character);
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        if character == '/' && chars.peek() == Some(&'/') {
+            break;
+        }
+        if character == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            *in_block_comment = true;
+            continue;
+        }
+        if matches!(character, '\'' | '"' | '`') {
+            quote = Some(character);
+        }
+        result.push(character);
+    }
+    result
+}
+
+fn statement_ends_with_semicolon(segment: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut last_non_space = None;
+    for character in segment.chars() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"' | '`') {
+            quote = Some(character);
+            continue;
+        }
+        if !character.is_whitespace() {
+            last_non_space = Some(character);
+        }
+    }
+    last_non_space == Some(';')
 }
 
 fn route_url_with_router_prefix(

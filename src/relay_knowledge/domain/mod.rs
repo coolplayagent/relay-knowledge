@@ -48,7 +48,7 @@ pub use code::{
     CodeChunkRecord, CodeExtractionMetadata, CodeFileFields, CodeFileRecord, CodeGraphBatch,
     CodeGraphCommitReceipt, CodeParseStatus, CodeParseStatusCounts, CodeRange, CodeReferenceFields,
     CodeReferenceKind, CodeReferenceRecord, CodeResolutionState, CodeSymbolKind, CodeSymbolRecord,
-    SymbolRole,
+    RouteHandlerRole, SymbolRole,
 };
 pub use code_dependency::CodeDependencyRecord;
 pub use code_repository::{
