@@ -11,7 +11,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
     let mut class_prefixes = Vec::<SpringClassPrefix>::new();
     let mut nested_type_scopes = Vec::<SpringNestedTypeScope>::new();
     let mut brace_depth = 0usize;
-    let lines = java_code_lines_without_block_comments(content);
+    let lines = java_code_lines_without_comments(content);
     let mut index = 0usize;
     while index < lines.len() {
         let trimmed = lines[index].trim();
@@ -20,17 +20,18 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
             &mut nested_type_scopes,
             brace_depth,
         );
-        if trimmed.starts_with('@') {
+        if let Some(annotation_offset) = spring_route_annotation_offset(trimmed) {
             let (annotation_statement, annotation_lines) =
-                spring_annotation_statement(&lines, index);
-            if let Some(spring_routes) = parse_spring_route_annotation(&annotation_statement) {
+                spring_annotation_statement_from_offset(&lines, index, annotation_offset);
+            let (spring_routes, annotation_tail) =
+                spring_route_annotations_and_tail(&annotation_statement);
+            if !spring_routes.is_empty() {
                 if pending_request_mapping_can_be_prefix(&pending_annotations) {
                     class_prefixes = pending_request_mapping_prefixes(&pending_annotations);
                     pending_annotations.clear();
                 }
                 pending_annotations.extend(spring_routes);
-                let annotation_tail = spring_statement_after_annotation(&annotation_statement);
-                if let Some(method_name) = parse_java_method_def(annotation_tail.trim()) {
+                if let Some(method_name) = parse_java_method_def(annotation_tail) {
                     record_spring_pending_routes(
                         &mut routes,
                         &mut seen,
@@ -44,6 +45,26 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                 index += annotation_lines;
                 continue;
             }
+        }
+        if !pending_annotations.is_empty() && trimmed.starts_with('@') {
+            let (annotation_statement, annotation_lines) =
+                spring_annotation_statement_from_offset(&lines, index, 0);
+            let annotation_tail = spring_statement_after_annotation(&annotation_statement);
+            if let Some(method_name) = parse_java_method_def(annotation_tail) {
+                record_spring_pending_routes(
+                    &mut routes,
+                    &mut seen,
+                    &class_prefixes,
+                    &mut pending_annotations,
+                    method_name,
+                    index + 1,
+                );
+                update_java_brace_depth(annotation_tail, &mut brace_depth);
+            } else {
+                update_java_brace_depth(&annotation_statement, &mut brace_depth);
+            }
+            index += annotation_lines;
+            continue;
         }
         if line_declares_java_type(trimmed) {
             if pending_request_mapping_can_be_prefix(&pending_annotations) {
@@ -81,11 +102,11 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                     method_name,
                     index + 1,
                 );
-            } else if !trimmed.starts_with("public")
+            } else if !trimmed.is_empty()
+                && !trimmed.starts_with("public")
                 && !trimmed.starts_with("private")
                 && !trimmed.starts_with("protected")
                 && !trimmed.starts_with("@")
-                && !trimmed.is_empty()
             {
                 pending_annotations.clear();
             }
@@ -121,7 +142,7 @@ struct SpringNestedTypeScope {
 
 fn record_spring_pending_routes(
     routes: &mut Vec<RouteCandidate>,
-    seen: &mut BTreeSet<(String, String)>,
+    seen: &mut BTreeSet<(String, String, String, usize)>,
     class_prefixes: &[SpringClassPrefix],
     pending_annotations: &mut Vec<SpringPendingAnnotation>,
     method_name: String,
@@ -132,7 +153,12 @@ fn record_spring_pending_routes(
         for prefix in &prefixes {
             let http_method = route_http_method_with_class_prefix(prefix, &annotation.http_method);
             let full_url = merge_url_parts(&prefix.url, &annotation.url);
-            let key = (full_url.clone(), http_method.clone());
+            let key = (
+                full_url.clone(),
+                http_method.clone(),
+                method_name.clone(),
+                line,
+            );
             if seen.insert(key) {
                 routes.push(RouteCandidate {
                     url: full_url,
@@ -187,7 +213,85 @@ fn route_http_method_with_class_prefix(prefix: &SpringClassPrefix, method: &str)
     method.to_owned()
 }
 
-fn spring_annotation_statement(lines: &[String], start: usize) -> (String, usize) {
+fn spring_route_annotation_offset(line: &str) -> Option<usize> {
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in line.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '"' | '\'') {
+            quote = Some(character);
+            continue;
+        }
+        if character == '@'
+            && spring_annotation_name_at(line, index).is_some_and(is_spring_route_annotation_name)
+        {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn spring_route_annotations_and_tail(statement: &str) -> (Vec<SpringPendingAnnotation>, &str) {
+    let mut annotations = Vec::new();
+    let mut scan = statement.trim_start();
+    while let Some(annotation_offset) = spring_route_annotation_offset(scan) {
+        if !scan[..annotation_offset].trim().is_empty() {
+            break;
+        }
+        let annotation_statement = &scan[annotation_offset..];
+        let Some(mut spring_routes) = parse_spring_route_annotation(annotation_statement) else {
+            break;
+        };
+        annotations.append(&mut spring_routes);
+        scan = spring_statement_after_annotation(annotation_statement).trim_start();
+    }
+    (annotations, scan)
+}
+
+fn spring_annotation_name_at(line: &str, at_index: usize) -> Option<&str> {
+    let after_at = &line[at_index + 1..];
+    let name_end = after_at
+        .find(|c: char| c == '(' || c.is_whitespace())
+        .unwrap_or(after_at.len());
+    let annotation_name = &after_at[..name_end];
+    (!annotation_name.is_empty()).then(|| {
+        annotation_name
+            .rsplit('.')
+            .next()
+            .unwrap_or(annotation_name)
+    })
+}
+
+fn is_spring_route_annotation_name(annotation: &str) -> bool {
+    matches!(
+        annotation,
+        "GetMapping"
+            | "PostMapping"
+            | "PutMapping"
+            | "DeleteMapping"
+            | "PatchMapping"
+            | "RequestMapping"
+    )
+}
+
+fn spring_annotation_statement_from_offset(
+    lines: &[String],
+    start: usize,
+    first_line_offset: usize,
+) -> (String, usize) {
     let mut statement = String::new();
     let mut depth = 0usize;
     let mut quote = None;
@@ -199,7 +303,12 @@ fn spring_annotation_statement(lines: &[String], start: usize) -> (String, usize
         .skip(start)
         .take(MAX_SPRING_MAPPING_ANNOTATION_LINES)
     {
-        let segment = line.trim();
+        let trimmed = line.trim();
+        let segment = if consumed == 0 {
+            trimmed.get(first_line_offset..).unwrap_or(trimmed)
+        } else {
+            trimmed
+        };
         if !statement.is_empty() {
             statement.push(' ');
         }
@@ -390,28 +499,65 @@ fn extract_annotation_string_values(line: &str) -> Vec<String> {
 }
 
 fn find_named_java_attribute_value<'a>(inner: &'a str, name: &str) -> Option<&'a str> {
-    let mut search_start = 0usize;
-    while let Some(relative_pos) = inner[search_start..].find(name) {
-        let start = search_start + relative_pos;
-        let end = start + name.len();
-        let before_is_boundary = start == 0
-            || inner[..start]
-                .chars()
-                .next_back()
-                .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
-        let after_name = &inner[end..];
-        let after_is_boundary = after_name
-            .chars()
-            .next()
-            .is_some_and(|character| character.is_whitespace() || character == '=');
-        if before_is_boundary && after_is_boundary {
-            let eq_pos = after_name.find('=')?;
-            return Some(after_name[eq_pos + 1..].trim_start());
+    for argument in split_java_top_level_arguments(inner) {
+        let Some(after_name) = argument.trim_start().strip_prefix(name) else {
+            continue;
+        };
+        let after_name = after_name.trim_start();
+        if let Some(after_eq) = after_name.strip_prefix('=') {
+            return Some(after_eq.trim_start());
         }
-        search_start = end;
     }
-
     None
+}
+
+fn split_java_top_level_arguments(inner: &str) -> Vec<&str> {
+    let mut arguments = Vec::new();
+    let mut argument_start = 0usize;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in inner.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '"' | '\'' => quote = Some(character),
+            '(' | '[' | '{' => depth += 1,
+            ')' if depth == 0 => {
+                let argument = inner[argument_start..index].trim();
+                if !argument.is_empty() {
+                    arguments.push(argument);
+                }
+                return arguments;
+            }
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let argument = inner[argument_start..index].trim();
+                if !argument.is_empty() {
+                    arguments.push(argument);
+                }
+                argument_start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    let argument = inner[argument_start..].trim();
+    if !argument.is_empty() {
+        arguments.push(argument);
+    }
+    arguments
 }
 
 fn extract_java_string_values_from_attribute_value(value: &str) -> Vec<String> {
@@ -607,15 +753,15 @@ fn update_java_brace_depth(line: &str, brace_depth: &mut usize) {
     }
 }
 
-fn java_code_lines_without_block_comments(content: &str) -> Vec<String> {
+fn java_code_lines_without_comments(content: &str) -> Vec<String> {
     let mut in_block_comment = false;
     content
         .lines()
-        .map(|line| java_code_line_without_block_comments(line, &mut in_block_comment))
+        .map(|line| java_code_line_without_comments(line, &mut in_block_comment))
         .collect()
 }
 
-fn java_code_line_without_block_comments(line: &str, in_block_comment: &mut bool) -> String {
+fn java_code_line_without_comments(line: &str, in_block_comment: &mut bool) -> String {
     let mut result = String::new();
     let mut chars = line.chars().peekable();
     let mut quote = None;
@@ -647,6 +793,9 @@ fn java_code_line_without_block_comments(line: &str, in_block_comment: &mut bool
             chars.next();
             *in_block_comment = true;
             continue;
+        }
+        if character == '/' && chars.peek() == Some(&'/') {
+            break;
         }
         if matches!(character, '"' | '\'') {
             quote = Some(character);

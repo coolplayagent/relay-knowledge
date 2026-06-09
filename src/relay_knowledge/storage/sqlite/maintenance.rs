@@ -547,6 +547,7 @@ mod tests {
             files: Vec::new(),
             symbols: Vec::new(),
             references: Vec::new(),
+            routes: Vec::new(),
             imports: Vec::new(),
             calls: Vec::new(),
             dependencies: Vec::new(),

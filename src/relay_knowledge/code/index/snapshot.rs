@@ -302,8 +302,8 @@ impl SnapshotBuild {
             calls: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
-            chunks: Vec::new(),
             routes: Vec::new(),
+            chunks: Vec::new(),
             diagnostics: Vec::new(),
             workspaces: Vec::new(),
         }

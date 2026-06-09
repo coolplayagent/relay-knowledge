@@ -2,9 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::shared::{
     extract_handler_name, extract_handler_name_from_arguments, extract_quoted_string,
+    javascript_regex_literal_can_start,
 };
 use super::{ANONYMOUS_ROUTE_HANDLER_NAME, RouteCandidate};
 
+const DYNAMIC_EXPRESS_MOUNT_PREFIX: &str = "\0dynamic";
 const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
 
 pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<RouteCandidate> {
@@ -41,43 +43,12 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             continue;
         };
         let statement = express_route_statement(&lines, index);
-        if record_express_route_chain(&statement, index + 1, &router_names, &mut route_infos) {
+        let recorded_chain =
+            record_express_route_chain(&statement, index + 1, &router_names, &mut route_infos);
+        let recorded_methods =
+            record_express_method_calls(&statement, index + 1, &router_names, &mut route_infos);
+        if !recorded_chain && !recorded_methods {
             continue;
-        }
-        let Some(method_pos) = express_method_position(&statement) else {
-            continue;
-        };
-        let Some(receiver_name) = express_receiver_name(&statement[..method_pos]) else {
-            continue;
-        };
-        if !express_router_name_is_router(&receiver_name, &router_names) {
-            continue;
-        }
-        let rest = &statement[method_pos..];
-        let (method_part, after_method) = match rest.split_once('(') {
-            Some(pair) => pair,
-            None => continue,
-        };
-        let raw_method = method_part.rsplit('.').next().unwrap_or("");
-        let Some(http_method) = express_http_method(raw_method) else {
-            continue;
-        };
-        let after_method = after_method.trim_start();
-        let urls = express_route_urls(after_method);
-        if urls.is_empty() {
-            continue;
-        };
-        let handler = extract_handler_name(after_method);
-        for local_url in urls {
-            route_infos.push(ExpressRouteInfo {
-                receiver_name: receiver_name.clone(),
-                local_url,
-                http_method: http_method.clone(),
-                handler_name: handler
-                    .clone()
-                    .unwrap_or_else(|| ANONYMOUS_ROUTE_HANDLER_NAME.to_owned()),
-                line: index + 1,
-            });
         }
     }
     materialize_express_routes(route_infos, &mounts)
@@ -120,20 +91,40 @@ fn parse_express_router_mounts(
     let Some(first_argument) = arguments.first() else {
         return Vec::new();
     };
-    let (mount_path, router_arguments) = if let Some(path) = extract_quoted_string(first_argument) {
+    let (mount_paths, router_arguments) = if let Some(path) = extract_quoted_string(first_argument)
+    {
         if !path.starts_with('/') {
             return Vec::new();
         }
-        (path, &arguments[1..])
+        (vec![path], &arguments[1..])
+    } else if let Some(array_inner) = javascript_array_literal_inner(first_argument) {
+        let paths = route_url_literals(extract_quoted_strings(array_inner));
+        if paths.is_empty() {
+            (vec![String::new()], arguments.as_slice())
+        } else {
+            (paths, &arguments[1..])
+        }
+    } else if express_receiver_name(first_argument).is_some_and(|router_name| {
+        express_router_mount_argument_is_router(&router_name, router_names)
+    }) {
+        (vec![String::new()], arguments.as_slice())
     } else {
-        (String::new(), arguments.as_slice())
+        (
+            vec![DYNAMIC_EXPRESS_MOUNT_PREFIX.to_owned()],
+            &arguments[1..],
+        )
     };
     express_router_mount_names(router_arguments, router_names)
         .into_iter()
-        .map(|router_name| ExpressRouterMount {
-            receiver_name: receiver_name.clone(),
-            router_name,
-            local_prefix: mount_path.clone(),
+        .flat_map(|router_name| {
+            mount_paths.iter().map({
+                let receiver_name = receiver_name.clone();
+                move |mount_path| ExpressRouterMount {
+                    receiver_name: receiver_name.clone(),
+                    router_name: router_name.clone(),
+                    local_prefix: mount_path.clone(),
+                }
+            })
         })
         .collect()
 }
@@ -165,11 +156,18 @@ fn record_express_route_chain(
         let Some((method_part, after_method)) = rest.split_once('(') else {
             break;
         };
+        let next_scan = javascript_call_end(after_method)
+            .and_then(|end| after_method.get(end..))
+            .unwrap_or("");
         let raw_method = method_part.rsplit('.').next().unwrap_or("");
         let http_method = match express_http_method(raw_method) {
             Some(method) => method,
             None => {
-                scan = &rest[method_part.len()..];
+                let next_scan = next_scan.trim_start();
+                if !next_scan.starts_with('.') {
+                    break;
+                }
+                scan = next_scan;
                 continue;
             }
         };
@@ -186,7 +184,64 @@ fn record_express_route_chain(
                 line,
             });
         }
-        scan = after_method;
+        let next_scan = next_scan.trim_start();
+        if !next_scan.starts_with('.') {
+            break;
+        }
+        scan = next_scan;
+    }
+    found_route_method
+}
+
+fn record_express_method_calls(
+    statement: &str,
+    line: usize,
+    router_names: &BTreeSet<String>,
+    route_infos: &mut Vec<ExpressRouteInfo>,
+) -> bool {
+    let mut found_route_method = false;
+    let mut scan = statement;
+    while let Some(method_pos) = express_method_position(scan) {
+        let rest = &scan[method_pos..];
+        let Some((method_part, after_method)) = rest.split_once('(') else {
+            break;
+        };
+        let next_scan = javascript_call_end(after_method)
+            .and_then(|end| after_method.get(end..))
+            .unwrap_or("");
+        let Some(receiver_name) = express_receiver_name(&scan[..method_pos]) else {
+            scan = next_scan;
+            continue;
+        };
+        if !express_router_name_is_router(&receiver_name, router_names) {
+            scan = next_scan;
+            continue;
+        }
+        let raw_method = method_part.rsplit('.').next().unwrap_or("");
+        let Some(http_method) = express_http_method(raw_method) else {
+            scan = next_scan;
+            continue;
+        };
+        let after_method = after_method.trim_start();
+        let urls = express_route_urls(after_method);
+        if urls.is_empty() {
+            scan = next_scan;
+            continue;
+        };
+        found_route_method = true;
+        let handler = extract_handler_name(after_method);
+        for local_url in urls {
+            route_infos.push(ExpressRouteInfo {
+                receiver_name: receiver_name.clone(),
+                local_url,
+                http_method: http_method.clone(),
+                handler_name: handler
+                    .clone()
+                    .unwrap_or_else(|| ANONYMOUS_ROUTE_HANDLER_NAME.to_owned()),
+                line,
+            });
+        }
+        scan = next_scan;
     }
     found_route_method
 }
@@ -435,6 +490,36 @@ fn first_top_level_argument(arguments: &str) -> Option<&str> {
     (!argument.is_empty()).then_some(argument)
 }
 
+fn javascript_call_end(arguments: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in arguments.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' | '`' => quote = Some(character),
+            '(' | '[' | '{' => depth += 1,
+            ')' if depth == 0 => return Some(index + character.len_utf8()),
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn javascript_array_literal_inner(value: &str) -> Option<&str> {
     let value = value.trim();
     if !value.starts_with('[') {
@@ -503,7 +588,7 @@ fn express_router_name_is_router(receiver_name: &str, router_names: &BTreeSet<St
     }
     let receiver_name = receiver_name.to_ascii_lowercase();
 
-    receiver_name == "app" || receiver_name == "router" || receiver_name.ends_with("router")
+    receiver_name == "app" || receiver_name == "router"
 }
 
 fn parse_express_router_alias(line: &str, router_factory_imported: bool) -> Option<String> {
@@ -512,8 +597,16 @@ fn parse_express_router_alias(line: &str, router_factory_imported: bool) -> Opti
     let uses_express_factory =
         find_javascript_pattern_outside_strings(right, "express.Router(").is_some();
     let uses_imported_factory = router_factory_imported && right.starts_with("Router(");
+    let uses_required_factory =
+        find_javascript_pattern_outside_strings(right, "require('express').Router(").is_some()
+            || find_javascript_pattern_outside_strings(right, "require(\"express\").Router(")
+                .is_some();
     let uses_express_application = right.starts_with("express(");
-    if !uses_express_factory && !uses_imported_factory && !uses_express_application {
+    if !uses_express_factory
+        && !uses_imported_factory
+        && !uses_required_factory
+        && !uses_express_application
+    {
         return None;
     }
     js_assignment_variable_name(left)
@@ -541,9 +634,19 @@ fn collect_express_router_mount_names(
     let Some(router_name) = express_receiver_name(argument) else {
         return;
     };
-    if express_router_name_is_router(&router_name, router_names) {
+    if express_router_mount_argument_is_router(&router_name, router_names) {
         names.insert(router_name);
     }
+}
+
+fn express_router_mount_argument_is_router(
+    router_name: &str,
+    router_names: &BTreeSet<String>,
+) -> bool {
+    if express_router_name_is_router(router_name, router_names) {
+        return true;
+    }
+    router_name.to_ascii_lowercase().ends_with("router")
 }
 
 fn javascript_top_level_arguments(rest: &str) -> Vec<&str> {
@@ -598,6 +701,8 @@ fn javascript_top_level_arguments(rest: &str) -> Vec<&str> {
 fn find_javascript_pattern_outside_strings(line: &str, pattern: &str) -> Option<usize> {
     let mut quote = None;
     let mut escaped = false;
+    let mut regex_literal = false;
+    let mut regex_class = false;
     for (index, character) in line.char_indices() {
         if let Some(quote_char) = quote {
             if escaped {
@@ -613,11 +718,34 @@ fn find_javascript_pattern_outside_strings(line: &str, pattern: &str) -> Option<
             }
             continue;
         }
+        if regex_literal {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match character {
+                '\\' => escaped = true,
+                '[' => regex_class = true,
+                ']' if regex_class => regex_class = false,
+                '/' if !regex_class => regex_literal = false,
+                _ => {}
+            }
+            continue;
+        }
         if line[index..].starts_with(pattern) {
             return Some(index);
         }
-        if matches!(character, '\'' | '"' | '`') {
-            quote = Some(character);
+        match character {
+            '\'' | '"' | '`' => {
+                quote = Some(character);
+                escaped = false;
+            }
+            '/' if javascript_regex_literal_can_start(&line[..index]) => {
+                regex_literal = true;
+                regex_class = false;
+                escaped = false;
+            }
+            _ => {}
         }
     }
     None
@@ -646,49 +774,73 @@ fn js_assignment_variable_name(left: &str) -> Option<String> {
 }
 
 fn express_router_factory_is_imported(content: &str) -> bool {
-    content.lines().any(|line| {
-        let line = line.trim();
-        line.contains("Router")
-            && (line.contains("from 'express'")
-                || line.contains("from \"express\"")
-                || line.contains("require('express')")
-                || line.contains("require(\"express\")"))
-    })
+    javascript_code_lines_without_comments(content)
+        .into_iter()
+        .any(|line| {
+            let line = line.trim();
+            find_javascript_pattern_outside_strings(line, "Router").is_some()
+                && ((line.starts_with("import ")
+                    && (line.contains("from 'express'") || line.contains("from \"express\"")))
+                    || (find_javascript_pattern_outside_strings(line, "require(").is_some()
+                        && (line.contains("require('express')")
+                            || line.contains("require(\"express\")"))))
+        })
 }
 
 fn javascript_code_lines_without_comments(content: &str) -> Vec<String> {
-    let mut in_block_comment = false;
+    let mut state = JavascriptLineState::default();
     content
         .lines()
-        .map(|line| javascript_code_line_without_comments(line, &mut in_block_comment))
+        .map(|line| javascript_code_line_without_comments(line, &mut state))
         .collect()
 }
 
-fn javascript_code_line_without_comments(line: &str, in_block_comment: &mut bool) -> String {
+#[derive(Default)]
+struct JavascriptLineState {
+    in_block_comment: bool,
+    quote: Option<char>,
+    escaped: bool,
+}
+
+fn javascript_code_line_without_comments(line: &str, state: &mut JavascriptLineState) -> String {
     let mut result = String::new();
     let mut chars = line.chars().peekable();
-    let mut quote = None;
-    let mut escaped = false;
+    let mut suppress_continued_quote = state.quote.is_some();
     while let Some(character) = chars.next() {
-        if *in_block_comment {
+        if state.in_block_comment {
             if character == '*' && chars.peek() == Some(&'/') {
                 chars.next();
-                *in_block_comment = false;
+                state.in_block_comment = false;
             }
             continue;
         }
-        if let Some(quote_char) = quote {
+        if let Some(quote_char) = state.quote {
+            if suppress_continued_quote {
+                if state.escaped {
+                    state.escaped = false;
+                    continue;
+                }
+                if character == '\\' {
+                    state.escaped = true;
+                    continue;
+                }
+                if character == quote_char {
+                    state.quote = None;
+                    suppress_continued_quote = false;
+                }
+                continue;
+            }
             result.push(character);
-            if escaped {
-                escaped = false;
+            if state.escaped {
+                state.escaped = false;
                 continue;
             }
             if character == '\\' {
-                escaped = true;
+                state.escaped = true;
                 continue;
             }
             if character == quote_char {
-                quote = None;
+                state.quote = None;
             }
             continue;
         }
@@ -697,14 +849,19 @@ fn javascript_code_line_without_comments(line: &str, in_block_comment: &mut bool
         }
         if character == '/' && chars.peek() == Some(&'*') {
             chars.next();
-            *in_block_comment = true;
+            state.in_block_comment = true;
             continue;
         }
         if matches!(character, '\'' | '"' | '`') {
-            quote = Some(character);
+            state.quote = Some(character);
+            state.escaped = false;
         }
         result.push(character);
     }
+    if state.quote.is_some_and(|quote| quote != '`') && !state.escaped {
+        state.quote = None;
+    }
+    state.escaped = false;
     result
 }
 
@@ -751,6 +908,9 @@ fn materialize_express_routes(
             .cloned()
             .unwrap_or_else(|| BTreeSet::from([String::new()]));
         for prefix in prefixes {
+            if prefix == DYNAMIC_EXPRESS_MOUNT_PREFIX {
+                continue;
+            }
             let url = merge_url_parts(&prefix, &route_info.local_url);
             let key = (
                 url.clone(),
@@ -789,7 +949,13 @@ fn resolved_express_router_prefixes(
                 continue;
             };
             for receiver_prefix in receiver_prefixes {
-                let prefix = merge_url_parts(&receiver_prefix, &mount.local_prefix);
+                let prefix = if receiver_prefix == DYNAMIC_EXPRESS_MOUNT_PREFIX
+                    || mount.local_prefix == DYNAMIC_EXPRESS_MOUNT_PREFIX
+                {
+                    DYNAMIC_EXPRESS_MOUNT_PREFIX.to_owned()
+                } else {
+                    merge_url_parts(&receiver_prefix, &mount.local_prefix)
+                };
                 if router_prefixes
                     .entry(mount.router_name.clone())
                     .or_default()

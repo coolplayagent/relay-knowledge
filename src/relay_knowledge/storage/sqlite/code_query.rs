@@ -112,7 +112,8 @@ use code_query_hybrid_planning::{
     hybrid_query_has_conversion_expansion_intent, hybrid_query_has_declaration_expansion_intent,
     hybrid_query_has_inline_expansion_intent, hybrid_query_prefers_chunk_first,
     hybrid_sequence_terms, query_language_scoped_workflow_surface_scopes,
-    workflow_language_scope_language_ids, workflow_language_scope_matches,
+    strict_hybrid_chunk_candidate_limit, workflow_language_scope_language_ids,
+    workflow_language_scope_matches,
 };
 #[cfg(test)]
 use code_query_import_scoring::{
@@ -135,10 +136,6 @@ use code_query_support::*;
 use code_query_symbols::{
     hybrid_symbol_query_can_answer_without_non_symbol_layers, search_symbols,
 };
-
-const STRICT_CHUNK_LIMIT_MULTIPLIER: usize = 6;
-const STRICT_CHUNK_MIN_CANDIDATES: usize = 40;
-const STRICT_CHUNK_MAX_CANDIDATES: usize = 120;
 
 pub(super) fn search_code(
     connection: &mut Connection,
@@ -202,6 +199,13 @@ fn search_code_with_status(
                         &chunk_hits,
                     )
                 {
+                    if let Some(partial_hits) = append_hits_or_return_partial_on_search_outage(
+                        &mut chunk_hits,
+                        request,
+                        search_routes(connection, status, request),
+                    )? {
+                        return Ok(partial_hits);
+                    }
                     hits.extend(chunk_hits);
                     dedupe_sort_truncate(&mut hits, request.limit);
                     return Ok(hits);
@@ -227,6 +231,14 @@ fn search_code_with_status(
             request,
             chunk_first_outage.as_ref().map(|outage| outage.0.as_str()),
         )?);
+        if request.code_query_kind == CodeQueryKind::Hybrid {
+            let route_hits = search_routes(connection, status, request);
+            if let Some(partial_hits) =
+                append_hits_or_return_partial_on_search_outage(&mut hits, request, route_hits)?
+            {
+                return Ok(partial_hits);
+            }
+        }
         if hybrid_symbol_query_can_answer_without_non_symbol_layers(request, &hits) {
             dedupe_sort_truncate(&mut hits, request.limit);
             return Ok(hits);
@@ -266,12 +278,6 @@ fn search_code_with_status(
         let reference_hits = search_references(connection, status, request);
         if let Some(partial_hits) =
             append_hits_or_return_partial_on_search_outage(&mut hits, request, reference_hits)?
-        {
-            return Ok(partial_hits);
-        }
-        let route_hits = search_routes(connection, status, request);
-        if let Some(partial_hits) =
-            append_hits_or_return_partial_on_search_outage(&mut hits, request, route_hits)?
         {
             return Ok(partial_hits);
         }
@@ -980,28 +986,6 @@ fn chunk_fts_values_for_limited_with_language(
     values
 }
 
-fn strict_hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
-    let requested = request
-        .limit
-        .max(1)
-        .saturating_mul(STRICT_CHUNK_LIMIT_MULTIPLIER);
-    requested.clamp(STRICT_CHUNK_MIN_CANDIDATES, STRICT_CHUNK_MAX_CANDIDATES)
-}
-
-fn chunk_layers_for_request(
-    request: &CodeRetrievalRequest,
-    parse_status: &str,
-) -> Vec<CodeRetrievalLayer> {
-    let mut layers = chunk_layers(parse_status);
-    if request.code_query_kind == CodeQueryKind::References
-        && SymbolIdentityQuery::from_query(&request.query).is_some()
-        && !layers.contains(&CodeRetrievalLayer::TextFallback)
-    {
-        layers.push(CodeRetrievalLayer::TextFallback);
-    }
-
-    layers
-}
 #[cfg(test)]
 #[path = "code_query_test_modules.rs"]
 mod test_modules;

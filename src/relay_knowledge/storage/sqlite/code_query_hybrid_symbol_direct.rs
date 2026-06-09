@@ -275,6 +275,7 @@ mod tests {
             calls: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             workspaces: Vec::new(),
             diagnostics: Vec::new(),
@@ -313,6 +314,7 @@ mod tests {
             doc_comment: None,
             byte_range: RepositoryCodeRange { start: 1, end: 1 },
             line_range: RepositoryCodeRange { start: 1, end: 1 },
+            symbol_role: None,
         }
     }
 

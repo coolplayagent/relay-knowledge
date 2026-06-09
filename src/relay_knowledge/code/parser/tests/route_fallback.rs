@@ -20,6 +20,7 @@ fn parser_failure_fallback_records_routes() {
             blob_hash: "hash",
             byte_len: content.len(),
             line_count: 1,
+            is_generated: false,
             content,
         },
     )
@@ -51,6 +52,7 @@ fn query_failure_fallback_records_routes() {
             blob_hash: "hash",
             byte_len: content.len(),
             line_count: 1,
+            is_generated: false,
             content,
         },
     )

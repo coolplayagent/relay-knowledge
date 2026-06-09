@@ -11,9 +11,8 @@ use crate::{
 use super::{
     HitParts,
     code_query_support::{
-        CandidateLayer, ScoreQuery, candidate_limit, fts_match_query,
-        fts_values_for_limited_with_language, language_filter_sql_for_column,
-        path_filter_sql_for_column, score_exact_path,
+        CandidateLayer, ScoreQuery, candidate_limit, escape_sql_like, fts_match_query,
+        fts_path_and_language_filter_sql, fts_values_for_limited_with_language, score_exact_path,
     },
     hit_from_parts, prepare_code_search_statement, required_scope, selected_row,
 };
@@ -30,6 +29,7 @@ struct RouteRow {
     line_range: RepositoryCodeRange,
     handler_canonical_symbol_id: Option<String>,
     parse_status: String,
+    is_generated: bool,
     degraded_reason: Option<String>,
 }
 
@@ -39,16 +39,15 @@ pub(super) fn search_routes(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let source_scope = required_scope(status)?;
-    let fts_query = fts_match_query(&request.query);
+    let route_query = RouteQuery::new(&request.query);
     let route_limit = candidate_limit(request, CandidateLayer::Chunk);
-    let path_filter = path_filter_sql_for_column("path", status, request);
-    let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT route.file_id, route.path, route.language_id, route.url, route.http_method,
                route.handler_name, route.handler_symbol_snapshot_id, route.framework,
                route.line_start, route.line_end, symbol.canonical_symbol_id,
-               file.parse_status, file.degraded_reason
+               file.parse_status, file.is_generated, file.degraded_reason
         FROM code_repository_routes route
         INNER JOIN code_repository_files file
             ON file.source_scope = route.source_scope AND file.path = route.path
@@ -56,18 +55,22 @@ pub(super) fn search_routes(
             ON symbol.source_scope = route.source_scope
            AND symbol.symbol_snapshot_id = route.handler_symbol_snapshot_id
         WHERE route.source_scope = ?
-          AND route.route_id IN (
+          AND (
+              route.route_id IN (
               SELECT record_id
               FROM code_repository_search
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'route'
-                {path_filter}
-                {language_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+                {fts_filter}
+              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
               LIMIT ?
+              )
+              OR (? != '' AND route.url LIKE ? ESCAPE '\')
           )
-        ORDER BY route.path ASC, route.line_start ASC, route.url ASC, route.http_method ASC
+        ORDER BY file.is_generated ASC, route.path ASC, route.line_start ASC, route.url ASC, route.http_method ASC
         LIMIT ?
         "
     );
@@ -77,8 +80,9 @@ pub(super) fn search_routes(
             source_scope,
             status,
             request,
-            &fts_query,
+            &route_query.fts_query,
             route_limit,
+            route_query.fallback_like.as_deref(),
         )),
         |row| {
             Ok(RouteRow {
@@ -96,7 +100,8 @@ pub(super) fn search_routes(
                 },
                 handler_canonical_symbol_id: row.get(10)?,
                 parse_status: row.get(11)?,
-                degraded_reason: row.get(12)?,
+                is_generated: row.get::<_, i64>(12)? != 0,
+                degraded_reason: row.get(13)?,
             })
         },
     )?;
@@ -105,7 +110,13 @@ pub(super) fn search_routes(
     let mut hits = Vec::new();
     for row in rows {
         let row = row.map_err(StorageError::from)?;
-        if !selected_row(&row.path, &row.language_id, status, request) {
+        if !selected_row(
+            &row.path,
+            &row.language_id,
+            row.is_generated,
+            status,
+            request,
+        ) {
             continue;
         }
         let score = score_query.score([
@@ -115,7 +126,8 @@ pub(super) fn search_routes(
             row.framework.as_str(),
             row.path.as_str(),
         ]) + score_exact_path(&query, &row.path)
-            + exact_route_url_bonus(&query, &row.url);
+            + route_query.exact_url_bonus(&row.url)
+            + route_query.parameterized_url_bonus(&row.url);
         let edge_resolution_state = if row.handler_symbol_snapshot_id.is_some() {
             "resolved"
         } else {
@@ -133,6 +145,7 @@ pub(super) fn search_routes(
                 file_id: Some(row.file_id),
                 retrieval_layers: route_layers(&row.parse_status),
                 score,
+                is_generated: row.is_generated,
                 excerpt: format!(
                     "{} {} -> {} ({})",
                     row.http_method.to_ascii_uppercase(),
@@ -159,16 +172,158 @@ fn route_fts_values(
     request: &CodeRetrievalRequest,
     fts_query: &str,
     limit: usize,
+    fallback_like: Option<&str>,
 ) -> Vec<Value> {
-    fts_values_for_limited_with_language(source_scope, status, request, fts_query, limit, limit)
+    let mut values = fts_values_for_limited_with_language(
+        source_scope,
+        status,
+        request,
+        fts_query,
+        limit,
+        limit,
+    );
+    let final_limit = values.pop().unwrap_or(Value::Integer(limit as i64));
+    let fallback_like = fallback_like.unwrap_or("");
+    values.push(Value::Text(fallback_like.to_owned()));
+    values.push(Value::Text(fallback_like.to_owned()));
+    values.push(final_limit);
+    values
 }
 
-fn exact_route_url_bonus(query: &str, url: &str) -> f64 {
-    if query.trim() == url.to_ascii_lowercase() {
-        6.0
-    } else {
-        0.0
+struct RouteQuery {
+    fts_query: String,
+    url: Option<String>,
+    fallback_like: Option<String>,
+}
+
+impl RouteQuery {
+    fn new(query: &str) -> Self {
+        let url = route_query_url(query);
+        Self {
+            fts_query: fts_match_query(&route_query_fts_text(query)),
+            fallback_like: url.as_deref().and_then(route_url_fallback_like),
+            url,
+        }
     }
+
+    fn exact_url_bonus(&self, url: &str) -> f64 {
+        if self
+            .url
+            .as_deref()
+            .is_some_and(|query_url| query_url == url.to_ascii_lowercase())
+        {
+            6.0
+        } else {
+            0.0
+        }
+    }
+
+    fn parameterized_url_bonus(&self, route_url: &str) -> f64 {
+        if self
+            .url
+            .as_deref()
+            .is_some_and(|query_url| route_url_matches_parameterized_query(route_url, query_url))
+        {
+            5.0
+        } else {
+            0.0
+        }
+    }
+}
+
+fn route_query_fts_text(query: &str) -> String {
+    let mut terms = Vec::new();
+    for token in query.split_whitespace() {
+        if let Some(url) = normalized_route_url_token(token) {
+            terms.extend(route_url_fts_segments(&url));
+        } else {
+            terms.push(token.to_owned());
+        }
+    }
+
+    if terms.is_empty() {
+        query.to_owned()
+    } else {
+        terms.join(" ")
+    }
+}
+
+fn route_query_url(query: &str) -> Option<String> {
+    query
+        .split_whitespace()
+        .find_map(normalized_route_url_token)
+}
+
+fn normalized_route_url_token(token: &str) -> Option<String> {
+    let token = token.trim_matches(|character: char| {
+        matches!(
+            character,
+            '`' | '"' | '\'' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
+        )
+    });
+    if !token.starts_with('/') {
+        return None;
+    }
+    let end = token.find(['?', '#']).unwrap_or(token.len());
+    let path = &token[..end];
+    (path.len() > 1).then(|| path.to_ascii_lowercase())
+}
+
+fn route_url_fts_segments(url: &str) -> Vec<String> {
+    route_url_segments(url)
+        .into_iter()
+        .filter(|segment| !concrete_route_query_segment(segment))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn route_url_fallback_like(url: &str) -> Option<String> {
+    let segments = route_url_segments(url);
+    if segments.len() < 2 {
+        return None;
+    }
+    let prefix = format!("/{}", segments[..segments.len() - 1].join("/"));
+    Some(format!("{}/%", escape_sql_like(&prefix)))
+}
+
+fn route_url_matches_parameterized_query(route_url: &str, query_url: &str) -> bool {
+    let route_segments = route_url_segments(route_url);
+    let query_segments = route_url_segments(query_url);
+    if route_segments.len() != query_segments.len() {
+        return false;
+    }
+    let mut matched_parameter = false;
+    for (route_segment, query_segment) in route_segments.iter().zip(query_segments.iter()) {
+        if route_parameter_segment(route_segment) {
+            matched_parameter = true;
+            continue;
+        }
+        if !route_segment.eq_ignore_ascii_case(query_segment) {
+            return false;
+        }
+    }
+    matched_parameter
+}
+
+fn route_url_segments(url: &str) -> Vec<&str> {
+    url.trim_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
+fn route_parameter_segment(segment: &str) -> bool {
+    segment.starts_with(':')
+        || (segment.starts_with('{') && segment.ends_with('}'))
+        || (segment.starts_with('<') && segment.ends_with('>'))
+}
+
+fn concrete_route_query_segment(segment: &str) -> bool {
+    segment.chars().all(|character| character.is_ascii_digit())
+        || (segment.len() >= 8
+            && segment
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() || character == '-'))
 }
 
 fn route_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {

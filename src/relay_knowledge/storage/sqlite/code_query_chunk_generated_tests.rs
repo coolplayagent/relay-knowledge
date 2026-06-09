@@ -51,6 +51,7 @@ async fn chunk_queries_prefer_handwritten_fts_rows_before_candidate_limit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),
         diagnostics: Vec::new(),

@@ -322,6 +322,7 @@ async fn sbom_queries_prefer_handwritten_candidates_before_limits() {
         calls: Vec::new(),
         dependencies,
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),

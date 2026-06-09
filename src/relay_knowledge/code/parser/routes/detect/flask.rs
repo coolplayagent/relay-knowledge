@@ -5,6 +5,7 @@ use super::shared::extract_quoted_string_python;
 
 const MAX_FLASK_ROUTE_DECORATOR_LINES: usize = 12;
 const MAX_PYTHON_ROUTER_PREFIX_LINES: usize = 12;
+const DYNAMIC_PYTHON_MOUNT_PREFIX: &str = "\0dynamic";
 
 pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCandidate> {
     let mut route_bindings = Vec::new();
@@ -40,6 +41,16 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
                 continue;
             }
         }
+        if let Some((url_rule_statement, url_rule_lines)) =
+            python_add_url_rule_statement(&lines, index)
+        {
+            if let Some(bindings) = parse_python_add_url_rule(&url_rule_statement, &routers, index)
+            {
+                route_bindings.extend(bindings);
+                index += url_rule_lines;
+                continue;
+            }
+        }
         if trimmed.starts_with("@") {
             let (decorator_statement, decorator_lines) = flask_decorator_statement(&lines, index);
             if let Some(route_info) = parse_flask_decorator(&decorator_statement, &routers) {
@@ -54,7 +65,7 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
                     continue;
                 }
             }
-            index += 1;
+            index += decorator_lines;
             continue;
         }
         if !pending_routes.is_empty() {
@@ -77,8 +88,9 @@ pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCa
                         });
                     }
                 }
+            } else if !trimmed.is_empty() {
+                pending_routes.clear();
             }
-            pending_routes.clear();
         }
         index += 1;
     }
@@ -106,6 +118,7 @@ struct PythonRouterInfo {
     local_prefix: String,
     mount_prefixes: BTreeSet<String>,
     framework: String,
+    mount_required: bool,
 }
 
 fn parse_flask_decorator(
@@ -150,29 +163,37 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
     {
         return None;
     }
-    let router_info = if right.contains("APIRouter(") {
+    let router_info = if let Some(args) = python_call_arguments(right, "APIRouter(") {
         PythonRouterInfo {
-            local_prefix: extract_python_keyword_string(right, "prefix").unwrap_or_default(),
+            local_prefix: python_prefix_argument(args, "prefix"),
             mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
+            mount_required: true,
         }
-    } else if right.contains("FastAPI(") {
+    } else if python_call_arguments(right, "FastAPI(").is_some() {
         PythonRouterInfo {
             local_prefix: String::new(),
             mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
+            mount_required: false,
         }
-    } else if right.contains("Blueprint(") {
+    } else if let Some(args) = python_call_arguments(right, "Blueprint(") {
         PythonRouterInfo {
-            local_prefix: extract_python_keyword_string(right, "url_prefix").unwrap_or_default(),
+            local_prefix: python_prefix_argument(args, "url_prefix"),
             mount_prefixes: BTreeSet::new(),
             framework: "flask".to_owned(),
+            mount_required: true,
         }
     } else {
         return None;
     };
 
     Some((router_name, router_info))
+}
+
+fn python_call_arguments<'a>(source: &'a str, marker: &str) -> Option<&'a str> {
+    let start = source.find(marker)? + marker.len();
+    Some(trim_one_trailing_paren(&source[start..]))
 }
 
 fn merge_python_router_declaration(
@@ -226,6 +247,54 @@ fn python_register_blueprint_statement(lines: &[String], start: usize) -> Option
     ))
 }
 
+fn python_add_url_rule_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
+    let first_line = lines[start].trim();
+    if !first_line.contains(".add_url_rule(") {
+        return None;
+    }
+    Some(python_parenthesized_statement(
+        lines,
+        start,
+        MAX_FLASK_ROUTE_DECORATOR_LINES,
+    ))
+}
+
+fn parse_python_add_url_rule(
+    statement: &str,
+    routers: &BTreeMap<String, PythonRouterInfo>,
+    line_index: usize,
+) -> Option<Vec<PythonRouteBinding>> {
+    let paren_pos = statement.find(".add_url_rule(")?;
+    let func_part = &statement[..paren_pos];
+    let receiver_name = python_decorator_receiver(func_part);
+    let args = trim_one_trailing_paren(&statement[paren_pos + ".add_url_rule(".len()..]);
+    let local_url = extract_python_route_path(args)?;
+    let methods = extract_methods_from_flask_args(args);
+    let methods = if methods.is_empty() {
+        vec!["get".to_owned()]
+    } else {
+        methods
+    };
+    let handler_name = extract_python_keyword_value(args, "view_func")
+        .and_then(python_handler_name_from_value)
+        .or_else(|| extract_python_add_url_rule_positional_handler(args))
+        .unwrap_or_else(|| super::ANONYMOUS_ROUTE_HANDLER_NAME.to_owned());
+    let framework = route_framework("add_url_rule", receiver_name.as_deref(), routers);
+    Some(
+        methods
+            .into_iter()
+            .map(|http_method| PythonRouteBinding {
+                receiver_name: receiver_name.clone(),
+                local_url: local_url.clone(),
+                http_method,
+                handler_name: handler_name.clone(),
+                framework: framework.clone(),
+                line: line_index + 1,
+            })
+            .collect(),
+    )
+}
+
 fn apply_python_include_router_prefix(
     statement: &str,
     routers: &mut BTreeMap<String, PythonRouterInfo>,
@@ -234,22 +303,17 @@ fn apply_python_include_router_prefix(
         return false;
     };
     let args = trim_one_trailing_paren(&statement[paren_pos + ".include_router(".len()..]);
-    let arguments = split_python_top_level_arguments(args);
-    let Some(router_name) = arguments.first().map(|argument| argument.trim()) else {
+    let Some(router_name) = extract_python_router_argument(args, "router") else {
         return false;
     };
-    if router_name.is_empty() {
-        return false;
-    }
-    let Some(prefix) = extract_python_keyword_string(args, "prefix") else {
-        return false;
-    };
+    let prefix = python_prefix_argument(args, "prefix");
     let router_info = routers
-        .entry(router_name.to_owned())
+        .entry(router_name)
         .or_insert_with(|| PythonRouterInfo {
             local_prefix: String::new(),
             mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
+            mount_required: true,
         });
     router_info.mount_prefixes.insert(prefix);
     router_info.framework = "fastapi".to_owned();
@@ -264,24 +328,18 @@ fn apply_python_register_blueprint_prefix(
         return false;
     };
     let args = trim_one_trailing_paren(&statement[paren_pos + ".register_blueprint(".len()..]);
-    let arguments = split_python_top_level_arguments(args);
-    let Some(blueprint_name) = arguments.first().map(|argument| argument.trim()) else {
+    let Some(blueprint_name) = extract_python_router_argument(args, "blueprint") else {
         return false;
     };
-    if blueprint_name.is_empty() {
-        return false;
-    }
-    let Some(prefix) = extract_python_keyword_string(args, "url_prefix") else {
-        return false;
-    };
-    let router_info =
-        routers
-            .entry(blueprint_name.to_owned())
-            .or_insert_with(|| PythonRouterInfo {
-                local_prefix: String::new(),
-                mount_prefixes: BTreeSet::new(),
-                framework: "flask".to_owned(),
-            });
+    let prefix = python_prefix_argument(args, "url_prefix");
+    let router_info = routers
+        .entry(blueprint_name)
+        .or_insert_with(|| PythonRouterInfo {
+            local_prefix: String::new(),
+            mount_prefixes: BTreeSet::new(),
+            framework: "flask".to_owned(),
+            mount_required: true,
+        });
     router_info.mount_prefixes.insert(prefix);
     router_info.framework = "flask".to_owned();
     true
@@ -365,7 +423,12 @@ fn materialize_python_routes(
     let mut seen = BTreeSet::new();
     for route_info in route_bindings {
         for (url, framework) in python_route_urls_and_frameworks(&route_info, routers) {
-            let key = (url.clone(), route_info.http_method.clone());
+            let key = (
+                url.clone(),
+                route_info.http_method.clone(),
+                route_info.handler_name.clone(),
+                route_info.line,
+            );
             if seen.insert(key) {
                 routes.push(RouteCandidate {
                     url,
@@ -403,12 +466,19 @@ fn python_route_urls_and_frameworks(
 }
 
 fn python_router_prefixes(router_info: &PythonRouterInfo) -> BTreeSet<String> {
+    if router_info.local_prefix == DYNAMIC_PYTHON_MOUNT_PREFIX {
+        return BTreeSet::new();
+    }
     if router_info.mount_prefixes.is_empty() {
+        if router_info.mount_required {
+            return BTreeSet::new();
+        }
         return BTreeSet::from([router_info.local_prefix.clone()]);
     }
     router_info
         .mount_prefixes
         .iter()
+        .filter(|mount_prefix| mount_prefix.as_str() != DYNAMIC_PYTHON_MOUNT_PREFIX)
         .map(|mount_prefix| merge_url_parts(mount_prefix, &router_info.local_prefix))
         .collect()
 }
@@ -525,31 +595,103 @@ fn trim_one_trailing_paren(args: &str) -> &str {
 }
 
 fn extract_methods_from_flask_args(args: &str) -> Vec<String> {
-    let Some(methods_start) = args.find("methods") else {
+    let Some(list_str) = extract_python_keyword_value(args, "methods") else {
         let dot_method = extract_shorthand_method_from_route(args);
         return dot_method;
     };
-    let after_methods = &args[methods_start + 7..];
-    let eq_pos = match after_methods.find('=') {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let list_str = &after_methods[eq_pos + 1..];
     extract_methods_list_python(list_str)
 }
 
 fn extract_python_keyword_string(args: &str, keyword: &str) -> Option<String> {
-    let keyword_start = args.find(keyword)?;
-    let after_keyword = &args[keyword_start + keyword.len()..];
-    let eq_pos = after_keyword.find('=')?;
-    let after_eq = after_keyword[eq_pos + 1..].trim_start();
-    extract_quoted_string_python(after_eq)
+    extract_python_keyword_value(args, keyword).and_then(extract_quoted_string_python)
+}
+
+fn python_prefix_argument(args: &str, keyword: &str) -> String {
+    if let Some(prefix) = extract_python_keyword_string(args, keyword) {
+        return prefix;
+    }
+    if extract_python_keyword_value(args, keyword).is_some() {
+        return DYNAMIC_PYTHON_MOUNT_PREFIX.to_owned();
+    }
+    String::new()
+}
+
+fn extract_python_router_argument(args: &str, keyword: &str) -> Option<String> {
+    extract_python_keyword_value(args, keyword)
+        .and_then(python_handler_name_from_value)
+        .or_else(|| {
+            split_python_top_level_arguments(args)
+                .into_iter()
+                .find(|argument| !argument.contains('='))
+                .and_then(python_handler_name_from_value)
+        })
+}
+
+fn extract_python_keyword_value<'a>(args: &'a str, keyword: &str) -> Option<&'a str> {
+    for argument in split_python_top_level_arguments(args) {
+        let argument = argument.trim_start();
+        let Some(after_keyword) = argument.strip_prefix(keyword) else {
+            continue;
+        };
+        if let Some(after_eq) = after_keyword.strip_prefix('=') {
+            return Some(after_eq.trim_start());
+        }
+        if after_keyword
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
+            let after_name = after_keyword.trim_start();
+            if let Some(after_eq) = after_name.strip_prefix('=') {
+                return Some(after_eq.trim_start());
+            }
+        }
+    }
+    None
+}
+
+fn extract_python_add_url_rule_positional_handler(args: &str) -> Option<String> {
+    let arguments = split_python_top_level_arguments(args);
+    let value = arguments.get(2)?.trim();
+    if value.contains('=') {
+        return None;
+    }
+    python_handler_name_from_value(value)
+}
+
+fn python_handler_name_from_value(value: &str) -> Option<String> {
+    let value = value.trim_start();
+    if value.starts_with("lambda") || value.starts_with('(') {
+        return None;
+    }
+    let name_end = value
+        .find(|character: char| {
+            character == '(' || character == ')' || character == ',' || character.is_whitespace()
+        })
+        .unwrap_or(value.len());
+    let dotted_name = &value[..name_end];
+    let mut parts = dotted_name
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.last() == Some(&"as_view") && parts.len() > 1 {
+        parts.pop();
+    }
+    let name = parts.last().copied().unwrap_or("");
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return None;
+    }
+    Some(name.to_owned())
 }
 
 fn extract_python_route_path(args: &str) -> Option<String> {
-    extract_quoted_string_python(args)
-        .or_else(|| extract_python_keyword_string(args, "path"))
+    extract_python_keyword_string(args, "path")
         .or_else(|| extract_python_keyword_string(args, "rule"))
+        .or_else(|| extract_quoted_string_python(args))
 }
 
 fn extract_shorthand_method_from_route(args: &str) -> Vec<String> {
@@ -612,6 +754,7 @@ fn python_collection_literal_inner(value: &str) -> Option<&str> {
             .find_map(|(index, character)| match character {
                 '[' => Some((index, ']')),
                 '(' => Some((index, ')')),
+                '{' => Some((index, '}')),
                 _ => None,
             })?;
     let close_pos = trimmed.rfind(close_char)?;

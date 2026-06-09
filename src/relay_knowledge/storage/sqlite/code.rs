@@ -124,6 +124,10 @@ mod code_query_import_generated_tests;
 mod code_query_chunk_generated_tests;
 
 #[cfg(test)]
+#[path = "code_query_route_generated_tests.rs"]
+mod code_query_route_generated_tests;
+
+#[cfg(test)]
 #[path = "code_query_symbol_generated_tests.rs"]
 mod code_query_symbol_generated_tests;
 

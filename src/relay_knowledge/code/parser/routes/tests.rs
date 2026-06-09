@@ -224,8 +224,7 @@ fn detects_flask_stacked_route_decorators() {
 
 #[test]
 fn detects_fastapi_router_prefix() {
-    let source =
-        "router = APIRouter(prefix='/api')\n@router.get('/users')\ndef users():\n    pass\n";
+    let source = "router = APIRouter(prefix='/api')\napp = FastAPI()\napp.include_router(router)\n@router.get('/users')\ndef users():\n    pass\n";
     let routes = detect_routes("python", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
@@ -252,7 +251,7 @@ fn detects_fastapi_api_route_decorator_methods() {
 
 #[test]
 fn detects_typed_fastapi_router_prefix() {
-    let source = "router: APIRouter = APIRouter(prefix='/api')\n@router.get('/users')\ndef users():\n    pass\n";
+    let source = "router: APIRouter = APIRouter(prefix='/api')\napp = FastAPI()\napp.include_router(router)\n@router.get('/users')\ndef users():\n    pass\n";
     let routes = detect_routes("python", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
@@ -594,11 +593,11 @@ fn detects_express_router_mount_prefix() {
 }
 
 #[test]
-fn detects_express_member_expression_handler_leaf() {
+fn detects_express_member_expression_handler_target() {
     let source = "router.get('/users', userController.listUsers);\n";
     let routes = detect_routes("typescript", source);
     assert_eq!(routes.len(), 1);
-    assert_eq!(routes[0].handler_name, "listUsers");
+    assert_eq!(routes[0].handler_name, "userController.listUsers");
 }
 
 #[test]
@@ -654,7 +653,7 @@ fn detects_multiline_spring_mapping_annotations() {
 
 #[test]
 fn detects_flask_blueprint_url_prefix() {
-    let source = "bp = Blueprint('api', __name__, url_prefix='/api')\n@bp.route('/users')\ndef users():\n    pass\n";
+    let source = "bp = Blueprint('api', __name__, url_prefix='/api')\napp.register_blueprint(bp)\n@bp.route('/users')\ndef users():\n    pass\n";
     let routes = detect_routes("python", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
@@ -772,7 +771,7 @@ fn detects_jsx_express_routes() {
 
 #[test]
 fn detects_multiline_fastapi_router_prefix() {
-    let source = "router = APIRouter(\n    prefix='/api',\n)\n@router.get('/users')\ndef users():\n    pass\n";
+    let source = "router = APIRouter(\n    prefix='/api',\n)\napp = FastAPI()\napp.include_router(router)\n@router.get('/users')\ndef users():\n    pass\n";
     let routes = detect_routes("python", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
@@ -780,7 +779,7 @@ fn detects_multiline_fastapi_router_prefix() {
 
 #[test]
 fn detects_multiline_flask_blueprint_prefix() {
-    let source = "bp = Blueprint(\n    'api',\n    __name__,\n    url_prefix='/api',\n)\n@bp.route('/users')\ndef users():\n    pass\n";
+    let source = "bp = Blueprint(\n    'api',\n    __name__,\n    url_prefix='/api',\n)\napp.register_blueprint(bp)\n@bp.route('/users')\ndef users():\n    pass\n";
     let routes = detect_routes("python", source);
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/api/users");
@@ -911,7 +910,7 @@ fn skips_spring_mappings_inside_block_comments() {
 
 #[test]
 fn accepts_python_keyword_route_paths() {
-    let source = "router = APIRouter(prefix='/api')\n@app.route(rule='/users', methods=['POST'])\ndef users():\n    pass\n@router.get(path='/items')\ndef items():\n    pass\n";
+    let source = "router = APIRouter(prefix='/api')\napp = FastAPI()\napp.include_router(router)\n@app.route(rule='/users', methods=['POST'])\ndef users():\n    pass\n@router.get(path='/items')\ndef items():\n    pass\n";
     let routes = detect_routes("python", source);
     assert_eq!(routes.len(), 2);
     assert!(
@@ -947,8 +946,7 @@ fn preserves_pathless_express_router_mount_prefix() {
 fn skips_commented_python_router_mounts() {
     let source = "router = APIRouter()\n# app.include_router(router, prefix='/api')\n@router.get('/users')\ndef users():\n    pass\n";
     let routes = detect_routes("python", source);
-    assert_eq!(routes.len(), 1);
-    assert_eq!(routes[0].url, "/users");
+    assert!(routes.is_empty());
 }
 
 #[test]

@@ -2,6 +2,13 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
+#[path = "code_schema_migrations.rs"]
+mod migrations;
+
+use self::migrations::{
+    code_schema_migration_applied, mark_code_schema_migration, table_has_columns,
+};
+
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
 pub(super) const GENERATED_DETECTION_REINDEX_MIGRATION: &str = "generated-detection-reindex-v1";
@@ -969,51 +976,6 @@ fn backfill_edge_search_language_ids_once(connection: &Connection) -> Result<(),
     mark_code_schema_migration(connection, EDGE_SEARCH_LANGUAGE_ID_MIGRATION)?;
     Ok(())
 }
-fn code_schema_migration_applied(
-    connection: &Connection,
-    name: &str,
-) -> Result<bool, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT EXISTS (
-                SELECT 1
-                FROM code_repository_schema_migrations
-                WHERE name = ?1
-            )
-            ",
-            [name],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(StorageError::from)
-}
-fn mark_code_schema_migration(connection: &Connection, name: &str) -> Result<(), StorageError> {
-    connection.execute(
-        "
-        INSERT OR REPLACE INTO code_repository_schema_migrations (name, applied_at_ms)
-        VALUES (?1, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
-        ",
-        [name],
-    )?;
-    Ok(())
-}
-fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-fn table_has_columns(
-    connection: &Connection,
-    table: &str,
-    required_columns: &[&str],
-) -> Result<bool, StorageError> {
-    let columns = table_columns(connection, table)?;
-    Ok(required_columns
-        .iter()
-        .all(|required| columns.iter().any(|column| column == required)))
-}
-
 #[cfg(test)]
 #[path = "code_schema_tests.rs"]
 mod tests;

@@ -19,6 +19,9 @@ const CONTEXTUAL_API_SURFACE_MIN_CONTEXT_TERMS: usize = 3;
 const TYPED_DATAFLOW_SURFACE_MIN_TERMS: usize = 6;
 const TYPED_DATAFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS: usize = 5;
 const TYPED_DATAFLOW_SURFACE_MIN_DATAFLOW_TERMS: usize = 3;
+const STRICT_CHUNK_LIMIT_MULTIPLIER: usize = 6;
+const STRICT_CHUNK_MIN_CANDIDATES: usize = 40;
+const STRICT_CHUNK_MAX_CANDIDATES: usize = 120;
 const HIGH_SIGNAL_TERM_LEN: usize = 5;
 
 enum HybridChunkFirstPlan {
@@ -33,6 +36,14 @@ enum HybridChunkFirstPlan {
 
 pub(super) fn hybrid_query_prefers_chunk_first(request: &CodeRetrievalRequest) -> bool {
     hybrid_chunk_first_plan(request).is_some()
+}
+
+pub(super) fn strict_hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    let requested = request
+        .limit
+        .max(1)
+        .saturating_mul(STRICT_CHUNK_LIMIT_MULTIPLIER);
+    requested.clamp(STRICT_CHUNK_MIN_CANDIDATES, STRICT_CHUNK_MAX_CANDIDATES)
 }
 
 pub(super) fn hybrid_query_requires_chunk_first_before_symbols(

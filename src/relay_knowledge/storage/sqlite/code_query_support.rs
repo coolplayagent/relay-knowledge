@@ -1,7 +1,10 @@
 use rusqlite::types::Value;
 
+use super::super::code_query_hits::chunk_layers;
 use super::code_query_identifiers::identifier_terms_equivalent;
-use crate::domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest};
+use crate::domain::{
+    CodeQueryKind, CodeRepositoryStatus, CodeRetrievalLayer, CodeRetrievalRequest,
+};
 
 #[path = "code_query_conversion_scoring.rs"]
 mod code_query_conversion_scoring;
@@ -854,6 +857,21 @@ pub(super) fn candidate_limit(request: &CodeRetrievalRequest, layer: CandidateLa
     };
 
     requested.saturating_mul(multiplier).clamp(minimum, maximum)
+}
+
+pub(super) fn chunk_layers_for_request(
+    request: &CodeRetrievalRequest,
+    parse_status: &str,
+) -> Vec<CodeRetrievalLayer> {
+    let mut layers = chunk_layers(parse_status);
+    if request.code_query_kind == CodeQueryKind::References
+        && SymbolIdentityQuery::from_query(&request.query).is_some()
+        && !layers.contains(&CodeRetrievalLayer::TextFallback)
+    {
+        layers.push(CodeRetrievalLayer::TextFallback);
+    }
+
+    layers
 }
 
 pub(super) fn fts_values_for_limited_with_language(

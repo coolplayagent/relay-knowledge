@@ -319,6 +319,7 @@ async fn callers_exclude_generated_indirect_binding_evidence() {
         calls: vec![indirect_call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "ops-init-chunk",

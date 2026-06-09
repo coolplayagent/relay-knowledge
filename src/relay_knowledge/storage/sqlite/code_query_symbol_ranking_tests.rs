@@ -559,6 +559,7 @@ async fn generated_symbols_are_demoted_and_can_be_excluded() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
