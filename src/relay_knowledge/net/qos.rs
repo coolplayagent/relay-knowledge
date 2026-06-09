@@ -1,7 +1,7 @@
 //! QoS admission policy for inbound and outbound network work.
 //!
-//! The policy keeps future HTTP, indexing, and background network tasks inside
-//! explicit resource budgets before they can allocate unbounded work.
+//! The policy keeps HTTP clients, HTTP servers, and background network tasks
+//! inside explicit resource budgets before they can allocate unbounded work.
 
 use std::{
     error::Error,
