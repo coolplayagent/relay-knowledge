@@ -1,8 +1,10 @@
-//! HTTP runtime policy owned by the network boundary.
+//! HTTP client and server runtime owned by the network boundary.
 //!
-//! This module intentionally models configuration and validation only. Future
-//! HTTP server/client adapters must use a mature async runtime underneath this
-//! boundary and keep QoS admission in `net::qos`.
+//! This module owns validated HTTP configuration, outbound JSON client policy,
+//! the bounded raw JSON POST helper, async Axum router serving, request body
+//! limits, per-request timeouts, graceful shutdown, and QoS-gated listener
+//! admission. Higher layers should use these APIs instead of constructing
+//! sockets, listeners, HTTP clients, or HTTP server loops directly.
 
 use std::{
     convert::Infallible,
@@ -42,7 +44,7 @@ pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_MAX_BODY_BYTES: u64 = 1_048_576;
 pub const DEFAULT_SSL_VERIFY: bool = true;
 
-/// Event-driven HTTP configuration for future inbound and outbound adapters.
+/// Event-driven HTTP configuration for inbound and outbound adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpConfig {
     pub bind_address: HttpBindAddress,

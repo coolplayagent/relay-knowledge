@@ -1,8 +1,11 @@
 //! Network configuration and policy boundary.
 //!
 //! All network-facing code must enter through this module or its children.
-//! The current foundation layer defines event-driven HTTP configuration and
-//! QoS admission policy without opening sockets or starting unmanaged loops.
+//! This boundary owns event-driven HTTP client and server construction,
+//! listener/socket setup, proxy and TLS policy, request and shutdown timeouts,
+//! and QoS admission. Higher layers supply routers, payloads, and domain
+//! handlers; they should not open sockets, build HTTP clients, or run protocol
+//! loops outside `net`.
 
 use std::{
     error::Error,
@@ -15,7 +18,7 @@ use crate::env::{EnvError, EnvironmentConfig, NetworkEnvOverrides};
 pub mod http;
 pub mod qos;
 
-/// Resolved network policy shared by future HTTP clients and servers.
+/// Resolved network policy shared by HTTP clients and servers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkConfig {
     pub http: http::HttpConfig,
