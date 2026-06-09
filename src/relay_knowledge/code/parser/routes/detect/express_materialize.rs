@@ -8,6 +8,7 @@ use super::express::{
 pub(super) fn materialize_express_routes(
     route_infos: Vec<ExpressRouteInfo>,
     mounts: &[ExpressRouterMount],
+    root_receiver_names: &BTreeSet<String>,
 ) -> Vec<RouteCandidate> {
     let router_prefixes = resolved_express_router_prefixes(mounts);
     let mut routes = Vec::new();
@@ -16,7 +17,9 @@ pub(super) fn materialize_express_routes(
         let prefixes = router_prefixes
             .get(&route_info.receiver_name)
             .cloned()
-            .unwrap_or_else(|| BTreeSet::from([String::new()]));
+            .unwrap_or_else(|| {
+                express_unmounted_receiver_prefixes(&route_info.receiver_name, root_receiver_names)
+            });
         for prefix in prefixes {
             if prefix == DYNAMIC_EXPRESS_MOUNT_PREFIX {
                 continue;
@@ -40,6 +43,16 @@ pub(super) fn materialize_express_routes(
         }
     }
     routes
+}
+
+fn express_unmounted_receiver_prefixes(
+    receiver_name: &str,
+    root_receiver_names: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    if root_receiver_names.contains(receiver_name) {
+        return BTreeSet::from([String::new()]);
+    }
+    BTreeSet::from(["/:mount".to_owned()])
 }
 
 fn resolved_express_router_prefixes(

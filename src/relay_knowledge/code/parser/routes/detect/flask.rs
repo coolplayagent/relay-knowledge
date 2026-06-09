@@ -119,6 +119,7 @@ struct PythonRouterInfo {
     mount_prefixes: BTreeSet<String>,
     framework: String,
     mount_required: bool,
+    cross_file_mount_candidate: bool,
 }
 
 fn parse_flask_decorator(
@@ -169,6 +170,7 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
             mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
             mount_required: true,
+            cross_file_mount_candidate: python_router_name_is_cross_file_candidate(&router_name),
         }
     } else if python_call_arguments(right, "FastAPI(").is_some() {
         PythonRouterInfo {
@@ -176,6 +178,7 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
             mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
             mount_required: false,
+            cross_file_mount_candidate: false,
         }
     } else if let Some(args) = python_call_arguments(right, "Blueprint(") {
         PythonRouterInfo {
@@ -183,6 +186,7 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
             mount_prefixes: BTreeSet::new(),
             framework: "flask".to_owned(),
             mount_required: true,
+            cross_file_mount_candidate: python_router_name_is_cross_file_candidate(&router_name),
         }
     } else {
         return None;
@@ -205,6 +209,14 @@ fn merge_python_router_declaration(
         router_info.mount_prefixes = existing.mount_prefixes;
     }
     routers.insert(router_name, router_info);
+}
+
+fn python_router_name_is_cross_file_candidate(router_name: &str) -> bool {
+    !matches!(router_name, "router" | "bp" | "blueprint")
+        && (router_name.ends_with("_router")
+            || router_name.ends_with("_blueprint")
+            || router_name.ends_with("Router")
+            || router_name.ends_with("Blueprint"))
 }
 
 fn python_router_prefix_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
@@ -314,6 +326,7 @@ fn apply_python_include_router_prefix(
             mount_prefixes: BTreeSet::new(),
             framework: "fastapi".to_owned(),
             mount_required: true,
+            cross_file_mount_candidate: false,
         });
     router_info.mount_prefixes.insert(prefix);
     router_info.framework = "fastapi".to_owned();
@@ -339,6 +352,7 @@ fn apply_python_register_blueprint_prefix(
             mount_prefixes: BTreeSet::new(),
             framework: "flask".to_owned(),
             mount_required: true,
+            cross_file_mount_candidate: false,
         });
     router_info.mount_prefixes.insert(prefix);
     router_info.framework = "flask".to_owned();
@@ -471,6 +485,9 @@ fn python_router_prefixes(router_info: &PythonRouterInfo) -> BTreeSet<String> {
     }
     if router_info.mount_prefixes.is_empty() {
         if router_info.mount_required {
+            if router_info.cross_file_mount_candidate {
+                return BTreeSet::from([merge_url_parts("/:mount", &router_info.local_prefix)]);
+            }
             return BTreeSet::new();
         }
         return BTreeSet::from([router_info.local_prefix.clone()]);

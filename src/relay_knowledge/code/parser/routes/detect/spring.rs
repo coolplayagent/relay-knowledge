@@ -420,6 +420,9 @@ fn spring_tail_after_leading_annotations(mut tail: &str) -> &str {
 
 fn parse_spring_route_annotation(line: &str) -> Option<Vec<SpringPendingAnnotation>> {
     let annotation = extract_spring_annotation_name(line)?;
+    if spring_annotation_uses_concatenated_path(line) {
+        return Some(Vec::new());
+    }
     match annotation {
         "GetMapping" => Some(spring_pending_annotations(
             vec!["get".to_owned()],
@@ -456,6 +459,22 @@ fn parse_spring_route_annotation(line: &str) -> Option<Vec<SpringPendingAnnotati
         }
         _ => None,
     }
+}
+
+fn spring_annotation_uses_concatenated_path(line: &str) -> bool {
+    let Some(paren_pos) = line.find('(') else {
+        return false;
+    };
+    let inner = line[paren_pos + 1..].trim_start();
+    let value = if inner.starts_with('"') || inner.starts_with('{') {
+        Some(inner)
+    } else {
+        find_named_java_attribute_value(inner, "value")
+            .or_else(|| find_named_java_attribute_value(inner, "path"))
+    };
+    value.is_some_and(|value| {
+        java_attribute_value_has_top_level_concat(java_attribute_value_segment(value))
+    })
 }
 
 fn spring_pending_annotations(
@@ -505,11 +524,7 @@ fn extract_annotation_string_values(line: &str) -> Vec<String> {
     };
     let inner_start = &line[paren_pos + 1..];
     let inner = inner_start.trim_start();
-    if inner.starts_with('"') {
-        extract_double_quoted_java_string(inner)
-            .into_iter()
-            .collect()
-    } else if inner.starts_with('{') {
+    if inner.starts_with(['"', '{']) {
         extract_java_string_values_from_attribute_value(inner)
     } else {
         find_named_java_attribute_value(inner, "value")
@@ -583,6 +598,9 @@ fn split_java_top_level_arguments(inner: &str) -> Vec<&str> {
 
 fn extract_java_string_values_from_attribute_value(value: &str) -> Vec<String> {
     let segment = java_attribute_value_segment(value);
+    if java_attribute_value_has_top_level_concat(segment) {
+        return Vec::new();
+    }
     if segment.trim_start().starts_with('{') {
         return extract_double_quoted_java_strings(segment);
     }
@@ -611,6 +629,36 @@ fn java_attribute_value_segment(value: &str) -> &str {
     }
     let end = value.find([',', ')']).unwrap_or(value.len());
     &value[..end]
+}
+
+fn java_attribute_value_has_top_level_concat(value: &str) -> bool {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for character in value.chars() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '"' | '\'' => quote = Some(character),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '+' if depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn extract_double_quoted_java_strings(s: &str) -> Vec<String> {

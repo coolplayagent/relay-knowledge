@@ -17,6 +17,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
     let mut route_infos = Vec::new();
     let mut mounts = Vec::new();
     let mut router_names = BTreeSet::<String>::from(["app".to_owned(), "router".to_owned()]);
+    let mut root_receiver_names = router_names.clone();
     let express_names = express_namespace_names(content);
     let router_factory_names = express_router_factory_names(content);
     let lines = javascript_code_lines_without_comments(content);
@@ -25,7 +26,10 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         if trimmed.is_empty() {
             continue;
         }
-        if let Some(router_name) =
+        if let Some(application_name) = parse_express_application_alias(trimmed, &express_names) {
+            router_names.insert(application_name.clone());
+            root_receiver_names.insert(application_name);
+        } else if let Some(router_name) =
             parse_express_router_alias(trimmed, &router_factory_names, &express_names)
         {
             router_names.insert(router_name);
@@ -56,7 +60,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             continue;
         }
     }
-    materialize_express_routes(route_infos, &mounts)
+    materialize_express_routes(route_infos, &mounts, &root_receiver_names)
 }
 
 pub(super) struct ExpressRouteInfo {
@@ -650,13 +654,18 @@ fn parse_express_router_alias(
         find_javascript_pattern_outside_strings(right, "require('express').Router(").is_some()
             || find_javascript_pattern_outside_strings(right, "require(\"express\").Router(")
                 .is_some();
-    let uses_express_application = express_names
+    if !uses_express_factory && !uses_imported_factory && !uses_required_factory {
+        return None;
+    }
+    js_assignment_variable_name(left)
+}
+
+fn parse_express_application_alias(line: &str, express_names: &BTreeSet<String>) -> Option<String> {
+    let (left, right) = line.split_once('=')?;
+    let right = right.trim_start();
+    if !express_names
         .iter()
-        .any(|name| right.starts_with(&format!("{name}(")));
-    if !uses_express_factory
-        && !uses_imported_factory
-        && !uses_required_factory
-        && !uses_express_application
+        .any(|name| right.starts_with(&format!("{name}(")))
     {
         return None;
     }

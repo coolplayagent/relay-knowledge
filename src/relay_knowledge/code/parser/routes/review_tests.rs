@@ -225,7 +225,7 @@ fn detects_express_namespace_import_router_factories() {
     let routes = detect_routes("typescript", source);
 
     assert_eq!(routes.len(), 1);
-    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].url, "/:mount/users");
     assert_eq!(routes[0].http_method, "get");
     assert_eq!(routes[0].handler_name, "listUsers");
 }
@@ -236,7 +236,7 @@ fn detects_aliased_express_router_import_factories() {
     let routes = detect_routes("typescript", source);
 
     assert_eq!(routes.len(), 1);
-    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].url, "/:mount/users");
     assert_eq!(routes[0].http_method, "get");
     assert_eq!(routes[0].handler_name, "listUsers");
 }
@@ -503,6 +503,16 @@ fn preserves_spring_prefixes_across_public_nested_types() {
 }
 
 #[test]
+fn skips_spring_routes_with_concatenated_path_fragments() {
+    let source = "@GetMapping(\"/api\" + USERS_PATH)\npublic String users() {\n}\n@RequestMapping(path = \"/v1\" + suffix)\npublic String versioned() {\n}\n@GetMapping(\"/live\")\npublic String live() {\n}\n";
+    let routes = detect_routes("java", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/live");
+    assert_eq!(routes[0].handler_name, "live");
+}
+
+#[test]
 fn ignores_spring_attribute_names_inside_string_values() {
     let source =
         "@RequestMapping(value = \"/health\", params = \"method=POST\") public String health() {\n";
@@ -520,7 +530,17 @@ fn detects_inline_commonjs_express_router_factories() {
     let routes = detect_routes("javascript", source);
 
     assert_eq!(routes.len(), 1);
-    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].url, "/:mount/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn preserves_unresolved_express_mount_prefixes_for_custom_routers() {
+    let source = "const usersRouter = express.Router();\nusersRouter.get('/users', listUsers);\n";
+    let routes = detect_routes("javascript", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/:mount/users");
     assert_eq!(routes[0].handler_name, "listUsers");
 }
 
@@ -530,4 +550,20 @@ fn skips_dynamic_express_router_mount_prefixes() {
     let routes = detect_routes("javascript", source);
 
     assert!(routes.is_empty());
+}
+
+#[test]
+fn preserves_unresolved_python_mount_prefixes_for_exported_routers() {
+    let source = "users_router = APIRouter(prefix='/users')\n@users_router.get('/{id}')\ndef get_user():\n    pass\nadmin_blueprint = Blueprint('admin', __name__, url_prefix='/admin')\n@admin_blueprint.route('/settings')\ndef settings():\n    pass\n";
+    let routes = detect_routes("python", source);
+
+    assert_eq!(routes.len(), 2);
+    assert!(
+        routes
+            .iter()
+            .any(|route| { route.url == "/:mount/users/{id}" && route.handler_name == "get_user" })
+    );
+    assert!(routes.iter().any(|route| {
+        route.url == "/:mount/admin/settings" && route.handler_name == "settings"
+    }));
 }

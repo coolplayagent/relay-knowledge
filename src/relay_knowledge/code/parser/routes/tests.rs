@@ -954,6 +954,6 @@ fn detects_express_routes_on_dollar_aliases() {
     let source = "const api$ = express.Router();\napi$.get('/users', listUsers);\n";
     let routes = detect_routes("javascript", source);
     assert_eq!(routes.len(), 1);
-    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].url, "/:mount/users");
     assert_eq!(routes[0].handler_name, "listUsers");
 }
