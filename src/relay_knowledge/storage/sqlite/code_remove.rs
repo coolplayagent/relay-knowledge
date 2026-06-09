@@ -568,6 +568,7 @@ mod tests {
                 CREATE TABLE code_repository_dependencies (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_feature_flags (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_calls (source_scope TEXT NOT NULL);
+                CREATE TABLE code_repository_routes (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_chunks (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_file_diagnostics (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_path_tombstones (source_scope TEXT NOT NULL);

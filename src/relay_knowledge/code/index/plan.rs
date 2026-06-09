@@ -147,6 +147,7 @@ impl CodeIndexPlan {
             imports: build.imports,
             dependencies: build.dependencies,
             feature_flags: build.feature_flags,
+            routes: build.routes,
             chunks: build.chunks,
             diagnostics: build.diagnostics,
         };
@@ -379,6 +380,7 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
         .saturating_add(build.imports.len())
         .saturating_add(build.dependencies.len())
         .saturating_add(build.feature_flags.len())
+        .saturating_add(build.routes.len())
         .saturating_add(build.chunks.len())
         .saturating_add(build.diagnostics.len())
 }

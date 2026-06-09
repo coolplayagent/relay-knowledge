@@ -131,6 +131,7 @@ fn snapshot_with_generated_ambiguous_callee_noise() -> CodeIndexSnapshot {
         calls: vec![ambiguous_call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -180,6 +181,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(0, 1),
         line_range: range(1, 1),
+        symbol_role: None,
     }
 }
 

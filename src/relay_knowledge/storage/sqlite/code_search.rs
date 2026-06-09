@@ -241,18 +241,26 @@ fn search_document_content_into<'a>(
             continue;
         }
         append_search_field(content, field);
-        if document_kind == "symbol" && symbol_search_fields < 2 {
+        if search_field_expands_identifier_terms(document_kind, symbol_search_fields) {
             push_identifier_search_terms(field, symbol_terms);
         }
         symbol_search_fields += 1;
     }
 
-    if document_kind == "symbol" && !symbol_terms.is_empty() {
+    if !symbol_terms.is_empty() {
         symbol_terms.sort();
         symbol_terms.dedup();
         for term in symbol_terms.iter() {
             append_search_field(content, term);
         }
+    }
+}
+
+fn search_field_expands_identifier_terms(document_kind: &str, field_index: usize) -> bool {
+    match document_kind {
+        "symbol" => field_index < 2,
+        "route" => field_index == 3,
+        _ => false,
     }
 }
 
@@ -325,6 +333,26 @@ mod tests {
         assert_eq!(
             content,
             "NewLRUCache leveldb::NewLRUCache function db/cache.cc cache leveldb lru new newlrucache"
+        );
+    }
+
+    #[test]
+    fn route_search_content_expands_handler_identifier_terms() {
+        let content = search_document_content(
+            "route",
+            [
+                "route endpoint http",
+                "/api/users",
+                "get",
+                "listUsers",
+                "express",
+                "src/routes.ts",
+            ],
+        );
+
+        assert_eq!(
+            content,
+            "route endpoint http /api/users get listUsers express src/routes.ts list listusers users"
         );
     }
 

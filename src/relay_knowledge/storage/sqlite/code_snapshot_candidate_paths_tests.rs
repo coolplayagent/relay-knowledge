@@ -505,6 +505,7 @@ fn snapshot_with_chunk_status(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![chunk("chunk", "file", path, content, None)],
         workspaces: Vec::new(),
         diagnostics: Vec::new(),

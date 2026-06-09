@@ -107,6 +107,7 @@ async fn symbol_fts_queries_prefer_handwritten_rows_before_candidate_limit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -176,6 +177,7 @@ async fn store_with_generated_symbol_fixture() -> SqliteGraphStore {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -245,6 +247,7 @@ fn symbol_with_signature(
         doc_comment: None,
         byte_range: RepositoryCodeRange { start: 1, end: 1 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
+        symbol_role: None,
     }
 }
 

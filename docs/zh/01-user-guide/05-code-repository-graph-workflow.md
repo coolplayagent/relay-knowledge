@@ -85,7 +85,7 @@ relay-knowledge repo status repo --format json
 
 如果旧 service 进程在持有 task lease 时退出，且任务仍然卡住，可以执行 `relay-knowledge repo index repo --reset --format json`，把该仓库未完成 task 重新排队。Reset 不会删除已完成 indexed scope，也不会复活历史 dead-letter task；旧 worker 仍必须匹配当前 lease owner 和 attempt token，因此不能完成已经 reset 的任务。
 
-已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。对于包含 submodule 的 Git scope，freshness key 还会记录 scope 内 gitlink 是从可用 submodule 对象展开，还是因不可用而跳过；因此先前被跳过的 submodule 在后续初始化后会让旧 scope 失效。带 path filter 的 Git freshness probe 只检查与请求 scope 相交的 gitlink；无 scope 时才回退到 whole-tree submodule 状态。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束；新增文件落在 `external_deps/`、`modules/` 等非 `src/` source root 时会沿用同一 source-layout 策略进入增量索引。
+已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实或 Web 路由事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。对于包含 submodule 的 Git scope，freshness key 还会记录 scope 内 gitlink 是从可用 submodule 对象展开，还是因不可用而跳过；因此先前被跳过的 submodule 在后续初始化后会让旧 scope 失效。带 path filter 的 Git freshness probe 只检查与请求 scope 相交的 gitlink；无 scope 时才回退到 whole-tree submodule 状态。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束；新增文件落在 `external_deps/`、`modules/` 等非 `src/` source root 时会沿用同一 source-layout 策略进入增量索引。
 
 ## 5.4 符号与关系查询
 

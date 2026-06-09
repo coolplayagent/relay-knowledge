@@ -234,6 +234,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(0, 1),
         line_range: range(1, 1),
+        symbol_role: None,
     }
 }
 
@@ -305,6 +306,7 @@ async fn store_with_symbols(
             calls: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks,
             workspaces: Vec::new(),
             diagnostics: Vec::new(),

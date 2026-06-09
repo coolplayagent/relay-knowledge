@@ -26,6 +26,7 @@ pub(super) fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRe
         doc_comment: None,
         byte_range: RepositoryCodeRange { start: 0, end: 8 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
+        symbol_role: None,
     }
 }
 

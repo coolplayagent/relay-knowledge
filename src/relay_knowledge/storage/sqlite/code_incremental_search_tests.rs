@@ -42,6 +42,7 @@ async fn incremental_call_search_uses_cloned_symbol_signatures() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -121,6 +122,7 @@ async fn incremental_call_search_batches_cloned_symbol_signature_lookups() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -192,6 +194,7 @@ async fn incremental_path_cleanup_deletes_cloned_search_rows() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![chunk(
             BASE_SCOPE,
             "doc-chunk",
@@ -271,6 +274,7 @@ fn incremental_snapshot() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -339,6 +343,7 @@ fn symbol(
         doc_comment: None,
         byte_range: RepositoryCodeRange { start: 0, end: 20 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
+        symbol_role: None,
     }
 }
 

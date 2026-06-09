@@ -27,7 +27,10 @@ mod candidate_paths;
 mod fingerprints;
 #[path = "code_snapshot_import_compat.rs"]
 mod import_compat;
+#[path = "code_snapshot_import.rs"]
+mod snapshot_import;
 
+use self::snapshot_import::copy_attached_code_table;
 #[cfg(test)]
 pub(super) use candidate_paths::candidate_path_fts_query;
 pub(super) use candidate_paths::{
@@ -49,7 +52,7 @@ const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_symbols",
-        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end",
+        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end, symbol_role_json",
     },
     CodeScopeTable {
         table: "code_repository_references",
@@ -70,6 +73,10 @@ const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     CodeScopeTable {
         table: "code_repository_feature_flags",
         columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
+    },
+    CodeScopeTable {
+        table: "code_repository_routes",
+        columns: "repository_id, source_scope, route_id, file_id, path, language_id, url, http_method, handler_name, handler_symbol_snapshot_id, framework, line_start, line_end",
     },
     CodeScopeTable {
         table: "code_repository_chunks",
@@ -325,53 +332,7 @@ pub(super) fn apply_snapshot(
         .iter()
         .map(|file| (file.path.as_str(), file.language_id.as_str()))
         .collect::<BTreeMap<_, _>>();
-    for symbol in &snapshot.symbols {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_symbols (
-                repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
-                file_id, path, language_id, name,
-                qualified_name, kind, signature, doc_comment, byte_start, byte_end,
-                line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-            ",
-            params![
-                symbol.repository_id,
-                symbol.source_scope,
-                symbol.symbol_snapshot_id,
-                symbol.canonical_symbol_id,
-                symbol.file_id,
-                symbol.path,
-                symbol.language_id,
-                symbol.name,
-                symbol.qualified_name,
-                symbol.kind,
-                symbol.signature,
-                symbol.doc_comment,
-                symbol.byte_range.start,
-                symbol.byte_range.end,
-                symbol.line_range.start,
-                symbol.line_range.end,
-            ],
-        )?;
-        insert_search_document(
-            &transaction,
-            &symbol.source_scope,
-            "symbol",
-            &symbol.symbol_snapshot_id,
-            &symbol.path,
-            &symbol.language_id,
-            [
-                symbol.name.as_str(),
-                symbol.qualified_name.as_str(),
-                symbol.kind.as_str(),
-                symbol.signature.as_str(),
-                symbol.doc_comment.as_deref().unwrap_or_default(),
-                symbol.path.as_str(),
-            ],
-        )?;
-    }
+    super::code_symbols::insert_records(&transaction, &snapshot.symbols)?;
     for reference in &snapshot.references {
         transaction.execute(
             "
@@ -471,6 +432,7 @@ pub(super) fn apply_snapshot(
                 .saturating_add(snapshot.dependencies.len())
                 .saturating_add(snapshot.calls.len())
                 .saturating_add(snapshot.feature_flags.len())
+                .saturating_add(snapshot.routes.len())
                 .saturating_add(snapshot.chunks.len())
                 .saturating_add(snapshot.diagnostics.len()),
             skipped_file_count: snapshot.skipped_unchanged_count,
@@ -578,30 +540,6 @@ fn clone_code_table(
             columns = table.columns,
         ),
         params![previous_scope, next_scope],
-    )?;
-
-    Ok(())
-}
-
-fn copy_attached_code_table(
-    transaction: &rusqlite::Transaction<'_>,
-    table: &CodeScopeTable,
-    source_scope: &str,
-) -> Result<(), StorageError> {
-    let selected_columns = import_compat::attached_code_table_selected_columns(
-        transaction,
-        table.table,
-        table.columns,
-    )?;
-    transaction.execute(
-        &format!(
-            "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {schema}.{table} WHERE source_scope = ?1",
-            table = table.table,
-            columns = table.columns,
-            selected_columns = selected_columns,
-            schema = IMPORT_SCHEMA,
-        ),
-        params![source_scope],
     )?;
 
     Ok(())
@@ -723,6 +661,7 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction,
         &snapshot.dependencies,
     )?;
+    super::code_routes::insert_records(transaction, &snapshot.routes)?;
     for chunk in &snapshot.chunks {
         transaction.execute(
             "

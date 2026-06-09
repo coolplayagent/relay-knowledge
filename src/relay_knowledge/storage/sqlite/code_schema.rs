@@ -2,6 +2,18 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
+#[path = "code_schema_migrations.rs"]
+mod migrations;
+#[path = "code_route_schema.rs"]
+mod route_schema;
+
+use self::migrations::{
+    code_schema_migration_applied, mark_code_schema_migration, table_has_columns,
+};
+#[cfg(test)]
+pub(super) use self::route_schema::ROUTE_EXTRACTION_REINDEX_MIGRATION;
+use self::route_schema::mark_legacy_route_extraction_scopes_stale_once;
+
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
 pub(super) const GENERATED_DETECTION_REINDEX_MIGRATION: &str = "generated-detection-reindex-v1";
@@ -89,6 +101,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             byte_end INTEGER NOT NULL,
             line_start INTEGER NOT NULL,
             line_end INTEGER NOT NULL,
+            symbol_role_json TEXT,
             PRIMARY KEY (source_scope, symbol_snapshot_id),
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
@@ -192,6 +205,24 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             line_end INTEGER NOT NULL,
             excerpt TEXT NOT NULL,
             PRIMARY KEY (source_scope, usage_id),
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS code_repository_routes (
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            route_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            language_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            http_method TEXT NOT NULL,
+            handler_name TEXT NOT NULL,
+            handler_symbol_snapshot_id TEXT,
+            framework TEXT NOT NULL,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
+            PRIMARY KEY (source_scope, route_id),
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
@@ -418,6 +449,10 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_calls(source_scope, callee_name, caller_name, path);
         CREATE INDEX IF NOT EXISTS code_repository_feature_flags_lookup
             ON code_repository_feature_flags(source_scope, name, source_key, edge_kind, path);
+        CREATE INDEX IF NOT EXISTS code_repository_routes_lookup
+            ON code_repository_routes(source_scope, url, http_method, path);
+        CREATE INDEX IF NOT EXISTS code_repository_routes_handler_lookup
+            ON code_repository_routes(source_scope, handler_symbol_snapshot_id, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_lookup
             ON code_repository_imports(source_scope, module, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup
@@ -446,8 +481,15 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "is_generated",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "code_repository_symbols",
+        "symbol_role_json",
+        "TEXT",
+    )?;
     super::code_generated::backfill_all_path_generated_flags(connection)?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
+    mark_legacy_route_extraction_scopes_stale_once(connection)?;
     if table_has_columns(
         connection,
         "code_repository_calls",
@@ -505,6 +547,7 @@ fn backfill_code_repository_search(connection: &Connection) -> Result<(), Storag
     backfill_search_dependencies(connection)?;
     backfill_search_feature_flags(connection)?;
     backfill_search_calls(connection)?;
+    backfill_search_routes(connection)?;
     backfill_search_chunks(connection)?;
     mark_code_schema_migration(connection, SEARCH_BACKFILL_MIGRATION)?;
 
@@ -568,7 +611,7 @@ fn backfill_search_symbols(connection: &Connection) -> Result<(), StorageError> 
         )
         SELECT source_scope, 'symbol', symbol_snapshot_id, path, language_id,
                name || ' ' || qualified_name || ' ' || kind || ' ' || signature || ' ' ||
-               coalesce(doc_comment, '')
+               coalesce(doc_comment, '') || ' ' || coalesce(symbol_role_json, '')
         FROM code_repository_symbols
         ",
         [],
@@ -725,6 +768,38 @@ fn backfill_search_calls(connection: &Connection) -> Result<(), StorageError> {
         return Ok(());
     }
     insert_search_calls(connection)
+}
+
+fn backfill_search_routes(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_routes",
+        &[
+            "source_scope",
+            "route_id",
+            "path",
+            "language_id",
+            "url",
+            "http_method",
+            "handler_name",
+            "framework",
+        ],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'route', route_id, path, language_id,
+               url || ' ' || http_method || ' ' || handler_name || ' ' || framework || ' ' || path
+        FROM code_repository_routes
+        ",
+        [],
+    )?;
+
+    Ok(())
 }
 
 fn rebuild_call_search_documents_after_signature_upgrade(
@@ -907,51 +982,6 @@ fn backfill_edge_search_language_ids_once(connection: &Connection) -> Result<(),
     mark_code_schema_migration(connection, EDGE_SEARCH_LANGUAGE_ID_MIGRATION)?;
     Ok(())
 }
-fn code_schema_migration_applied(
-    connection: &Connection,
-    name: &str,
-) -> Result<bool, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT EXISTS (
-                SELECT 1
-                FROM code_repository_schema_migrations
-                WHERE name = ?1
-            )
-            ",
-            [name],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(StorageError::from)
-}
-fn mark_code_schema_migration(connection: &Connection, name: &str) -> Result<(), StorageError> {
-    connection.execute(
-        "
-        INSERT OR REPLACE INTO code_repository_schema_migrations (name, applied_at_ms)
-        VALUES (?1, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
-        ",
-        [name],
-    )?;
-    Ok(())
-}
-fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-fn table_has_columns(
-    connection: &Connection,
-    table: &str,
-    required_columns: &[&str],
-) -> Result<bool, StorageError> {
-    let columns = table_columns(connection, table)?;
-    Ok(required_columns
-        .iter()
-        .all(|required| columns.iter().any(|column| column == required)))
-}
-
 #[cfg(test)]
 #[path = "code_schema_tests.rs"]
 mod tests;

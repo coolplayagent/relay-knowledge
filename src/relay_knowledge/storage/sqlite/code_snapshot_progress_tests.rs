@@ -73,6 +73,7 @@ fn snapshot_with_feature_flags() -> CodeIndexSnapshot {
             config_facts: &[],
         })
         .expect("feature flag fixture should extract"),
+        routes: Vec::new(),
         chunks: vec![RepositoryCodeChunkRecord {
             repository_id: "repo".to_owned(),
             source_scope: TEST_SOURCE_SCOPE.to_owned(),

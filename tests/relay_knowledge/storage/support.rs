@@ -113,6 +113,7 @@ pub(super) fn snapshot(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![chunk],
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -177,6 +178,7 @@ pub(super) fn batch_from_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexBatch
         imports: snapshot.imports,
         dependencies: snapshot.dependencies,
         feature_flags: snapshot.feature_flags,
+        routes: snapshot.routes,
         chunks: snapshot.chunks,
         diagnostics: snapshot.diagnostics,
     }

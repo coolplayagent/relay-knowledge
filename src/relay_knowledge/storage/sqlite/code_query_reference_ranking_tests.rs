@@ -50,6 +50,7 @@ async fn scoped_reference_queries_use_resolved_symbol_identity() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![chunk(
             "caller-chunk",
             "caller-file",
@@ -96,6 +97,7 @@ async fn exact_reference_queries_fall_back_to_chunks_when_reference_facts_are_mi
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![chunk(
             "pipeline-chunk",
             "pipeline-file",
@@ -152,6 +154,7 @@ async fn reference_excerpts_prefer_the_reference_line_inside_large_chunks() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![chunk(
             "cache-class-chunk",
             "cache-file",
@@ -207,6 +210,7 @@ async fn exact_reference_fallback_chunks_rank_usage_context_before_declarations(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "pipeline-declaration-chunk",
@@ -296,6 +300,7 @@ async fn exact_reference_queries_rank_initializer_usage_before_declarations() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "header-chunk",
@@ -381,6 +386,7 @@ async fn exact_reference_queries_rank_indirect_array_calls_before_array_declarat
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "pipeline-declaration-chunk",
@@ -450,6 +456,7 @@ async fn exact_reference_queries_rank_return_calls_before_assignment_calls() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "assignment-chunk",
@@ -523,6 +530,7 @@ async fn exact_reference_queries_rank_type_annotations_before_test_constructors(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "service-chunk",
@@ -598,6 +606,7 @@ async fn exact_reference_queries_do_not_treat_object_literal_values_as_type_anno
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "registry-chunk",
@@ -695,6 +704,7 @@ async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fi
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "session-chunk",
@@ -785,6 +795,7 @@ async fn exact_reference_queries_rank_constructor_calls_before_passive_values() 
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![
             chunk(
                 "registry-chunk",
@@ -868,6 +879,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(10, 20),
         line_range: range(10, 20),
+        symbol_role: None,
     }
 }
 

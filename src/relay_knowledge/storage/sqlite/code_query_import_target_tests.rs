@@ -245,6 +245,7 @@ fn snapshot_with_import_target_outside_importer_scope() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -307,6 +308,7 @@ fn snapshot_with_generated_import_target_noise() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -370,6 +372,7 @@ fn snapshot_with_generated_target_symbol_noise() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -412,6 +415,7 @@ fn snapshot_with_python_vendor_target() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -461,6 +465,7 @@ fn snapshot_with_many_target_symbol_hints() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -505,6 +510,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(0, 1),
         line_range: range(1, 1),
+        symbol_role: None,
     }
 }
 

@@ -16,6 +16,11 @@ mod code_feature_flags;
 
 #[path = "code_generated.rs"]
 mod code_generated;
+#[path = "code_symbols.rs"]
+mod code_symbols;
+
+#[path = "code_routes.rs"]
+mod code_routes;
 
 #[path = "code_query_scope.rs"]
 mod code_query_scope;
@@ -99,6 +104,10 @@ mod code_batch_search_tests;
 mod code_snapshot_progress_tests;
 
 #[cfg(test)]
+#[path = "code_snapshot_import_tests.rs"]
+mod code_snapshot_import_tests;
+
+#[cfg(test)]
 #[path = "code_query_accuracy_tests.rs"]
 mod code_query_accuracy_tests;
 
@@ -113,6 +122,10 @@ mod code_query_import_generated_tests;
 #[cfg(test)]
 #[path = "code_query_chunk_generated_tests.rs"]
 mod code_query_chunk_generated_tests;
+
+#[cfg(test)]
+#[path = "code_query_route_generated_tests.rs"]
+mod code_query_route_generated_tests;
 
 #[cfg(test)]
 #[path = "code_query_symbol_generated_tests.rs"]

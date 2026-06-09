@@ -6,8 +6,8 @@ use crate::{
     domain::{
         CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,
         CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+        CodeRetrievalRequest, CodeRouteRecord, FreshnessPolicy, RepositoryCodeFileRecord,
+        RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, SymbolRole,
     },
     storage::{CodeRepositoryStore, SqliteGraphStore},
 };
@@ -50,6 +50,7 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
             imports: vec![python_import],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -87,6 +88,185 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
         languages.get(&("import".to_owned(), "py/app.py".to_owned())),
         Some(&"python".to_owned())
     );
+}
+
+#[tokio::test]
+async fn checkpointed_batches_persist_route_records() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:route-batch";
+    let session = session_for_scope(source_scope);
+    let path = "src/routes.ts";
+
+    store
+        .begin_code_index_session(session)
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "route-file", path, "typescript")],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: Vec::new(),
+            dependencies: Vec::new(),
+            feature_flags: Vec::new(),
+            routes: vec![route(source_scope, "route-1", "route-file", path)],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+
+    assert_eq!(route_row_count(&store, source_scope).await, 1);
+    assert_eq!(route_search_count(&store, source_scope, "route-1").await, 1);
+}
+
+#[tokio::test]
+async fn checkpointed_batches_search_routes_and_persist_handler_roles() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:route-search";
+    let session = session_for_scope(source_scope);
+    let path = "src/routes.ts";
+    let mut handler = symbol(
+        source_scope,
+        "list-users-symbol",
+        "route-file",
+        path,
+        "listUsers",
+        "function listUsers() {}",
+    );
+    handler.language_id = "typescript".to_owned();
+    handler.symbol_role = Some(SymbolRole::RouteHandler {
+        url: "/api/users".to_owned(),
+        http_method: "get".to_owned(),
+    });
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "route-file", path, "typescript")],
+            symbols: vec![handler],
+            references: Vec::new(),
+            imports: Vec::new(),
+            dependencies: Vec::new(),
+            feature_flags: Vec::new(),
+            routes: vec![route(source_scope, "route-1", "route-file", path)],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let role_json = symbol_role_json(&store, source_scope, "list-users-symbol").await;
+    assert!(role_json.contains("route_handler"));
+    assert!(role_json.contains("/api/users"));
+
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let request = CodeRetrievalRequest::new(
+        "endpoint /api/users",
+        selector,
+        CodeQueryKind::Hybrid,
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("route search should succeed");
+
+    let route_hit = hits
+        .iter()
+        .find(|hit| hit.edge_kind.as_deref() == Some("route"))
+        .expect("route document should contribute a hit");
+    assert_eq!(route_hit.path, path);
+    assert_eq!(
+        route_hit.symbol_snapshot_id.as_deref(),
+        Some("list-users-symbol")
+    );
+    assert_eq!(route_hit.edge_resolution_state.as_deref(), Some("resolved"));
+    assert!(route_hit.excerpt.contains("GET /api/users"));
+}
+
+#[tokio::test]
+async fn checkpointed_batches_search_unlinked_routes_as_unresolved_edges() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:unlinked-route";
+    let session = session_for_scope(source_scope);
+    let path = "src/routes.ts";
+    let mut unlinked_route = route(source_scope, "route-unlinked", "route-file", path);
+    unlinked_route.url = "/api/status".to_owned();
+    unlinked_route.handler_name = "status".to_owned();
+    unlinked_route.handler_symbol_snapshot_id = None;
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "route-file", path, "typescript")],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: Vec::new(),
+            dependencies: Vec::new(),
+            feature_flags: Vec::new(),
+            routes: vec![unlinked_route],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let request = CodeRetrievalRequest::new(
+        "route /api/status",
+        selector,
+        CodeQueryKind::Hybrid,
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("route search should succeed");
+
+    let route_hit = hits
+        .iter()
+        .find(|hit| hit.edge_kind.as_deref() == Some("route"))
+        .expect("route document should contribute a hit");
+    assert_eq!(
+        route_hit.edge_resolution_state.as_deref(),
+        Some("unresolved")
+    );
+    assert_eq!(route_hit.edge_target_hint.as_deref(), Some("status"));
+    assert!(route_hit.symbol_snapshot_id.is_none());
+    assert!(route_hit.canonical_symbol_id.is_none());
 }
 
 #[tokio::test]
@@ -130,6 +310,7 @@ async fn checkpointed_call_search_uses_caller_signature_for_scoped_callee_querie
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -210,6 +391,7 @@ async fn checkpointed_call_search_uses_callee_signature_for_scoped_caller_querie
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -290,6 +472,7 @@ async fn checkpointed_call_search_documents_include_finalized_signatures() {
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -339,6 +522,7 @@ async fn checkpointed_import_search_documents_include_finalized_target_and_path(
             imports: vec![import],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -395,6 +579,7 @@ async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
             imports: vec![python_import],
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -444,6 +629,7 @@ async fn retained_scope_reindex_keeps_intermediate_edge_search_rows() {
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -581,6 +767,7 @@ fn symbol(
         doc_comment: None,
         byte_range: RepositoryCodeRange { start: 0, end: 64 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
+        symbol_role: None,
     }
 }
 
@@ -606,6 +793,23 @@ fn import(
     }
 }
 
+fn route(source_scope: &str, route_id: &str, file_id: &str, path: &str) -> CodeRouteRecord {
+    CodeRouteRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        route_id: route_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "typescript".to_owned(),
+        url: "/api/users".to_owned(),
+        http_method: "get".to_owned(),
+        handler_name: "listUsers".to_owned(),
+        handler_symbol_snapshot_id: Some("list-users-symbol".to_owned()),
+        framework: "express".to_owned(),
+        line_range: RepositoryCodeRange { start: 1, end: 1 },
+    }
+}
+
 fn session_for_scope(source_scope: &str) -> CodeIndexSession {
     CodeIndexSession {
         repository_id: "repo".to_owned(),
@@ -624,6 +828,75 @@ fn session_for_scope(source_scope: &str) -> CodeIndexSession {
         workspaces: Vec::new(),
         resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),
     }
+}
+
+async fn route_row_count(store: &SqliteGraphStore, source_scope: &str) -> usize {
+    let source_scope = source_scope.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT COUNT(*)
+                    FROM code_repository_routes
+                    WHERE source_scope = ?1
+                    ",
+                    params![source_scope],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("route row count should load")
+}
+
+async fn route_search_count(store: &SqliteGraphStore, source_scope: &str, route_id: &str) -> usize {
+    let source_scope = source_scope.to_owned();
+    let route_id = route_id.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT COUNT(*)
+                    FROM code_repository_search_metadata
+                    WHERE source_scope = ?1
+                      AND document_kind = 'route'
+                      AND record_id = ?2
+                    ",
+                    params![source_scope, route_id],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("route search count should load")
+}
+
+async fn symbol_role_json(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+    symbol_snapshot_id: &str,
+) -> String {
+    let source_scope = source_scope.to_owned();
+    let symbol_snapshot_id = symbol_snapshot_id.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT symbol_role_json
+                    FROM code_repository_symbols
+                    WHERE source_scope = ?1
+                      AND symbol_snapshot_id = ?2
+                    ",
+                    params![source_scope, symbol_snapshot_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("symbol role json should load")
 }
 
 async fn search_document_languages(

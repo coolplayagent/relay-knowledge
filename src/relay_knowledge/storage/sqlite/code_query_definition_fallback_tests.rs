@@ -111,6 +111,7 @@ fn snapshot_with_contextual_symbol_and_typedef_chunk() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![typedef_chunk],
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -151,6 +152,7 @@ fn snapshot_with_cpp_header_chunk() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![header_chunk],
         workspaces: Vec::new(),
         diagnostics: Vec::new(),
@@ -180,6 +182,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(line_range.start, line_range.end),
         line_range,
+        symbol_role: None,
     }
 }
 
