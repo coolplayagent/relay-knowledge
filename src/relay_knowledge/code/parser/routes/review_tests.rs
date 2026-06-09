@@ -178,6 +178,31 @@ fn keeps_same_line_express_route_chain_separate_from_following_registration() {
 }
 
 #[test]
+fn detects_express_namespace_import_router_factories() {
+    let source = "import * as web from 'express';\nconst api = web.Router();\napi.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].http_method, "get");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn continues_after_same_line_express_mounts() {
+    let source = "const router = express.Router();\nrouter.get('/users', listUsers);\napp.use('/api', router); app.get('/health', health);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| {
+        route.url == "/api/users" && route.http_method == "get" && route.handler_name == "listUsers"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/health" && route.http_method == "get" && route.handler_name == "health"
+    }));
+}
+
+#[test]
 fn detects_multiple_same_line_spring_mapping_annotations() {
     let source = "@GetMapping(\"/alpha\") @PostMapping(\"/beta\") public String handle() {\n}\n";
     let routes = detect_routes("java", source);

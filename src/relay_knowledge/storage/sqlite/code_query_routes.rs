@@ -67,11 +67,11 @@ pub(super) fn search_routes(
                 AND source_scope = ?
                 AND document_kind = 'route'
                 {fts_filter}
-              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
-                  bm25(code_repository_search) ASC,
-                  record_id ASC
-              LIMIT ?
-              )
+                  ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
+                      bm25(code_repository_search) ASC,
+                      record_id ASC
+                  LIMIT ?
+                  )
               OR (
                   ? != ''
                   AND route.url LIKE ? ESCAPE '\\'
@@ -89,9 +89,8 @@ pub(super) fn search_routes(
             source_scope,
             status,
             request,
-            &route_query.fts_query,
-            route_limit,
             &route_query,
+            route_limit,
         )),
         |row| {
             Ok(RouteRow {
@@ -206,15 +205,14 @@ fn route_fts_values(
     source_scope: &str,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
-    fts_query: &str,
-    limit: usize,
     route_query: &RouteQuery,
+    limit: usize,
 ) -> Vec<Value> {
     let mut values = fts_values_for_limited_with_language(
         source_scope,
         status,
         request,
-        fts_query,
+        &route_query.fts_query,
         limit,
         limit,
     );
@@ -276,18 +274,6 @@ impl RouteQuery {
     }
 }
 
-fn route_query_http_method(query: &str) -> Option<String> {
-    query.split_whitespace().find_map(|token| {
-        let token = token.trim_matches(|character: char| !character.is_ascii_alphabetic());
-        let method = token.to_ascii_lowercase();
-        matches!(
-            method.as_str(),
-            "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
-        )
-        .then_some(method)
-    })
-}
-
 fn route_query_fts_text(query: &str) -> String {
     let mut terms = Vec::new();
     for token in query.split_whitespace() {
@@ -309,6 +295,28 @@ fn route_query_url(query: &str) -> Option<String> {
     query
         .split_whitespace()
         .find_map(normalized_route_url_token)
+}
+
+fn route_query_http_method(query: &str) -> Option<String> {
+    query
+        .split_whitespace()
+        .find_map(normalized_http_method_token)
+}
+
+fn normalized_http_method_token(token: &str) -> Option<String> {
+    let token = token
+        .trim_matches(|character: char| {
+            matches!(
+                character,
+                '`' | '"' | '\'' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
+            )
+        })
+        .to_ascii_lowercase();
+    match token.as_str() {
+        "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "any" => Some(token),
+        "all" => Some("any".to_owned()),
+        _ => None,
+    }
 }
 
 fn normalized_route_url_token(token: &str) -> Option<String> {

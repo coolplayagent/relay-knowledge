@@ -1,5 +1,6 @@
 pub(in crate::code::parser) mod express;
 pub(in crate::code::parser) mod flask;
+pub(in crate::code::parser) mod javascript;
 pub(in crate::code::parser) mod shared;
 pub(in crate::code::parser) mod spring;
 

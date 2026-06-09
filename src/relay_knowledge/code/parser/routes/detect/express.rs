@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::javascript::{
+    find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
+    statement_ends_with_semicolon,
+};
 use super::shared::{
     extract_handler_name, extract_handler_name_from_arguments, extract_quoted_string,
-    javascript_regex_literal_can_start,
 };
 use super::{ANONYMOUS_ROUTE_HANDLER_NAME, RouteCandidate};
 
@@ -13,6 +16,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
     let mut route_infos = Vec::new();
     let mut mounts = Vec::new();
     let mut router_names = BTreeSet::<String>::from(["app".to_owned(), "router".to_owned()]);
+    let express_names = express_namespace_names(content);
     let router_factory_imported = express_router_factory_is_imported(content);
     let lines = javascript_code_lines_without_comments(content);
     for (index, line) in lines.iter().enumerate() {
@@ -20,9 +24,10 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         if trimmed.is_empty() {
             continue;
         }
-        if let Some(router_name) = parse_express_router_alias(trimmed, router_factory_imported) {
+        if let Some(router_name) =
+            parse_express_router_alias(trimmed, router_factory_imported, &express_names)
+        {
             router_names.insert(router_name);
-            continue;
         }
         let mount_statement;
         let mount_source = if find_javascript_pattern_outside_strings(trimmed, ".use(").is_some() {
@@ -590,17 +595,24 @@ fn express_router_name_is_router(receiver_name: &str, router_names: &BTreeSet<St
     receiver_name == "app" || receiver_name == "router"
 }
 
-fn parse_express_router_alias(line: &str, router_factory_imported: bool) -> Option<String> {
+fn parse_express_router_alias(
+    line: &str,
+    router_factory_imported: bool,
+    express_names: &BTreeSet<String>,
+) -> Option<String> {
     let (left, right) = line.split_once('=')?;
     let right = right.trim_start();
-    let uses_express_factory =
-        find_javascript_pattern_outside_strings(right, "express.Router(").is_some();
+    let uses_express_factory = express_names.iter().any(|name| {
+        find_javascript_pattern_outside_strings(right, &format!("{name}.Router(")).is_some()
+    });
     let uses_imported_factory = router_factory_imported && right.starts_with("Router(");
     let uses_required_factory =
         find_javascript_pattern_outside_strings(right, "require('express').Router(").is_some()
             || find_javascript_pattern_outside_strings(right, "require(\"express\").Router(")
                 .is_some();
-    let uses_express_application = right.starts_with("express(");
+    let uses_express_application = express_names
+        .iter()
+        .any(|name| right.starts_with(&format!("{name}(")));
     if !uses_express_factory
         && !uses_imported_factory
         && !uses_required_factory
@@ -697,59 +709,6 @@ fn javascript_top_level_arguments(rest: &str) -> Vec<&str> {
     arguments
 }
 
-fn find_javascript_pattern_outside_strings(line: &str, pattern: &str) -> Option<usize> {
-    let mut quote = None;
-    let mut escaped = false;
-    let mut regex_literal = false;
-    let mut regex_class = false;
-    for (index, character) in line.char_indices() {
-        if let Some(quote_char) = quote {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if character == quote_char {
-                quote = None;
-            }
-            continue;
-        }
-        if regex_literal {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            match character {
-                '\\' => escaped = true,
-                '[' => regex_class = true,
-                ']' if regex_class => regex_class = false,
-                '/' if !regex_class => regex_literal = false,
-                _ => {}
-            }
-            continue;
-        }
-        if line[index..].starts_with(pattern) {
-            return Some(index);
-        }
-        match character {
-            '\'' | '"' | '`' => {
-                quote = Some(character);
-                escaped = false;
-            }
-            '/' if javascript_regex_literal_can_start(&line[..index]) => {
-                regex_literal = true;
-                regex_class = false;
-                escaped = false;
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 fn js_assignment_variable_name(left: &str) -> Option<String> {
     let left = left.trim();
     let left = left
@@ -762,14 +721,18 @@ fn js_assignment_variable_name(left: &str) -> Option<String> {
         .find(|character: char| character == ':' || character.is_whitespace())
         .unwrap_or(left.len());
     let name = &left[..name_end];
-    if name.is_empty()
-        || !name.chars().all(|character| {
-            character.is_ascii_alphanumeric() || character == '_' || character == '$'
-        })
-    {
+    if name.is_empty() || !name.chars().all(js_identifier_character) {
         return None;
     }
     Some(name.to_owned())
+}
+
+fn js_identifier_name(name: &str) -> Option<String> {
+    (!name.is_empty() && name.chars().all(js_identifier_character)).then(|| name.to_owned())
+}
+
+fn js_identifier_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_' || character == '$'
 }
 
 fn express_router_factory_is_imported(content: &str) -> bool {
@@ -786,112 +749,57 @@ fn express_router_factory_is_imported(content: &str) -> bool {
         })
 }
 
-fn javascript_code_lines_without_comments(content: &str) -> Vec<String> {
-    let mut state = JavascriptLineState::default();
-    content
-        .lines()
-        .map(|line| javascript_code_line_without_comments(line, &mut state))
-        .collect()
-}
-
-#[derive(Default)]
-struct JavascriptLineState {
-    in_block_comment: bool,
-    quote: Option<char>,
-    escaped: bool,
-}
-
-fn javascript_code_line_without_comments(line: &str, state: &mut JavascriptLineState) -> String {
-    let mut result = String::new();
-    let mut chars = line.chars().peekable();
-    let mut suppress_continued_quote = state.quote.is_some();
-    while let Some(character) = chars.next() {
-        if state.in_block_comment {
-            if character == '*' && chars.peek() == Some(&'/') {
-                chars.next();
-                state.in_block_comment = false;
-            }
-            continue;
-        }
-        if let Some(quote_char) = state.quote {
-            if suppress_continued_quote {
-                if state.escaped {
-                    state.escaped = false;
-                    continue;
-                }
-                if character == '\\' {
-                    state.escaped = true;
-                    continue;
-                }
-                if character == quote_char {
-                    state.quote = None;
-                    suppress_continued_quote = false;
-                }
-                continue;
-            }
-            result.push(character);
-            if state.escaped {
-                state.escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                state.escaped = true;
-                continue;
-            }
-            if character == quote_char {
-                state.quote = None;
-            }
-            continue;
-        }
-        if character == '/' && chars.peek() == Some(&'/') {
-            break;
-        }
-        if character == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            state.in_block_comment = true;
-            continue;
-        }
-        if matches!(character, '\'' | '"' | '`') {
-            state.quote = Some(character);
-            state.escaped = false;
-        }
-        result.push(character);
-    }
-    if state.quote.is_some_and(|quote| quote != '`') && !state.escaped {
-        state.quote = None;
-    }
-    state.escaped = false;
-    result
-}
-
-fn statement_ends_with_semicolon(segment: &str) -> bool {
-    let mut quote = None;
-    let mut escaped = false;
-    let mut last_non_space = None;
-    for character in segment.chars() {
-        if let Some(quote_char) = quote {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if character == quote_char {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(character, '\'' | '"' | '`') {
-            quote = Some(character);
-            continue;
-        }
-        if !character.is_whitespace() {
-            last_non_space = Some(character);
+fn express_namespace_names(content: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::from(["express".to_owned()]);
+    for line in javascript_code_lines_without_comments(content) {
+        let line = line.trim();
+        let name = express_import_namespace_name(line)
+            .or_else(|| express_import_default_name(line))
+            .or_else(|| express_require_namespace_name(line));
+        if let Some(name) = name {
+            names.insert(name);
         }
     }
-    last_non_space == Some(';')
+    names
+}
+
+fn express_import_namespace_name(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("import * as ")?;
+    if !express_imports_from_module(rest) {
+        return None;
+    }
+    let name_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    js_identifier_name(&rest[..name_end])
+}
+
+fn express_import_default_name(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("import ")?;
+    let rest = rest.strip_prefix("type ").unwrap_or(rest).trim_start();
+    if rest.starts_with(['{', '*']) || !express_imports_from_module(rest) {
+        return None;
+    }
+    let name_end = rest
+        .find(|character: char| character == ',' || character.is_whitespace())
+        .unwrap_or(rest.len());
+    js_identifier_name(&rest[..name_end])
+}
+
+fn express_require_namespace_name(line: &str) -> Option<String> {
+    let (left, right) = line.split_once('=')?;
+    let right = right.trim_start();
+    if !right.starts_with("require('express')")
+        && !right.starts_with("require(\"express\")")
+        && !right.starts_with("require(`express`)")
+    {
+        return None;
+    }
+    js_assignment_variable_name(left)
+}
+
+fn express_imports_from_module(rest: &str) -> bool {
+    rest.contains("from 'express'")
+        || rest.contains("from \"express\"")
+        || rest.contains("from `express`")
 }
 
 fn materialize_express_routes(

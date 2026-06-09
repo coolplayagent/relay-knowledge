@@ -163,21 +163,27 @@ async fn concrete_endpoint_queries_match_parameterized_routes() {
 }
 
 #[tokio::test]
-async fn route_url_fallback_respects_query_http_method() {
-    let mut user_route = route("route-user", "route-file", "src/routes.ts", "getUser");
-    user_route.url = "/users/:id".to_owned();
-    user_route.http_method = "post".to_owned();
-    let store = store_with_routes(vec![user_route]).await;
+async fn route_url_fallback_respects_requested_http_method() {
+    let mut post_route = route(
+        "route-post-user",
+        "route-file",
+        "src/routes.ts",
+        "updateUser",
+    );
+    post_route.url = "/users/:id".to_owned();
+    post_route.http_method = "post".to_owned();
+    let store = store_with_routes(vec![post_route]).await;
 
     let hits = store
-        .search_code(route_request("GET /users/42 missingtoken", 3))
+        .search_code(route_request("GET /users/42 unmatched", 3))
         .await
         .expect("route fallback query should succeed");
 
     assert!(
-        hits.iter()
-            .all(|hit| hit.edge_kind.as_deref() != Some("route")),
-        "GET query should not recall a POST-only parameterized route: {hits:?}"
+        !hits
+            .iter()
+            .any(|hit| hit.edge_kind.as_deref() == Some("route")),
+        "GET fallback must not admit POST-only parameterized routes: {hits:?}"
     );
 }
 
@@ -237,6 +243,40 @@ async fn route_url_fallback_applies_path_filters_before_limit() {
         "path-scoped route should survive fallback candidate limiting: {hits:?}"
     );
     assert!(!hits.iter().any(|hit| hit.path.starts_with("aaa/")));
+}
+
+#[tokio::test]
+async fn route_url_fallback_applies_language_filters_before_limit() {
+    let mut outside_route = route(
+        "route-outside-user",
+        "outside-route-file",
+        "aaa/routes.js",
+        "outsideUser",
+    );
+    outside_route.url = "/users/:id".to_owned();
+    outside_route.language_id = "javascript".to_owned();
+    let mut inside_route = route(
+        "route-inside-user",
+        "inside-route-file",
+        "src/api/routes.ts",
+        "getUser",
+    );
+    inside_route.url = "/users/:id".to_owned();
+    let store = store_with_routes(vec![outside_route, inside_route]).await;
+
+    let hits = store
+        .search_code(route_request_with_filters(
+            "GET /users/42 unmatched",
+            1,
+            Vec::new(),
+            vec!["typescript".to_owned()],
+        ))
+        .await
+        .expect("scoped route fallback query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].edge_kind.as_deref(), Some("route"));
+    assert_eq!(hits[0].path, "src/api/routes.ts");
 }
 
 #[tokio::test]
@@ -349,9 +389,7 @@ async fn store_with_routes(routes: Vec<CodeRouteRecord>) -> SqliteGraphStore {
         .iter()
         .filter_map(|route| {
             let key = (route.file_id.clone(), route.path.clone());
-            seen_files
-                .insert(key)
-                .then(|| file(&route.file_id, &route.path))
+            seen_files.insert(key).then(|| file_for_route(route))
         })
         .collect::<Vec<_>>();
     let changed_path_count = files.len();
@@ -384,9 +422,17 @@ async fn store_with_routes(routes: Vec<CodeRouteRecord>) -> SqliteGraphStore {
 }
 
 fn route_request(query: &str, limit: usize) -> CodeRetrievalRequest {
-    let selector =
-        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["typescript".to_owned()])
-            .expect("selector should validate");
+    route_request_with_filters(query, limit, Vec::new(), vec!["typescript".to_owned()])
+}
+
+fn route_request_with_filters(
+    query: &str,
+    limit: usize,
+    path_filters: Vec<String>,
+    language_filters: Vec<String>,
+) -> CodeRetrievalRequest {
+    let selector = CodeRepositorySelector::new("repo", "commit", path_filters, language_filters)
+        .expect("selector should validate");
     CodeRetrievalRequest::new(
         query,
         selector,
@@ -395,4 +441,10 @@ fn route_request(query: &str, limit: usize) -> CodeRetrievalRequest {
         FreshnessPolicy::AllowStale,
     )
     .expect("request should validate")
+}
+
+fn file_for_route(route: &CodeRouteRecord) -> RepositoryCodeFileRecord {
+    let mut record = file(&route.file_id, &route.path);
+    record.language_id = route.language_id.clone();
+    record
 }
