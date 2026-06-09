@@ -153,22 +153,24 @@ fn record_spring_pending_routes(
     let prefixes = route_class_prefixes(class_prefixes);
     for annotation in pending_annotations.drain(..) {
         for prefix in &prefixes {
-            let http_method = route_http_method_with_class_prefix(prefix, &annotation.http_method);
             let full_url = merge_url_parts(&prefix.url, &annotation.url);
-            let key = (
-                full_url.clone(),
-                http_method.clone(),
-                method_name.clone(),
-                line,
-            );
-            if seen.insert(key) {
-                routes.push(RouteCandidate {
-                    url: full_url,
-                    http_method,
-                    handler_name: method_name.clone(),
-                    framework: "spring".to_owned(),
+            for http_method in route_http_methods_with_class_prefix(prefix, &annotation.http_method)
+            {
+                let key = (
+                    full_url.clone(),
+                    http_method.clone(),
+                    method_name.clone(),
                     line,
-                });
+                );
+                if seen.insert(key) {
+                    routes.push(RouteCandidate {
+                        url: full_url.clone(),
+                        http_method,
+                        handler_name: method_name.clone(),
+                        framework: "spring".to_owned(),
+                        line,
+                    });
+                }
             }
         }
     }
@@ -208,11 +210,14 @@ fn route_class_prefixes(class_prefixes: &[SpringClassPrefix]) -> Vec<SpringClass
     class_prefixes.to_vec()
 }
 
-fn route_http_method_with_class_prefix(prefix: &SpringClassPrefix, method: &str) -> String {
+fn route_http_methods_with_class_prefix(prefix: &SpringClassPrefix, method: &str) -> Vec<String> {
     if method == "any" {
-        return prefix.http_method.clone();
+        return vec![prefix.http_method.clone()];
     }
-    method.to_owned()
+    if prefix.http_method == "any" || prefix.http_method == method {
+        return vec![method.to_owned()];
+    }
+    vec![prefix.http_method.clone(), method.to_owned()]
 }
 
 fn spring_route_annotation_offset(line: &str) -> Option<usize> {
@@ -770,23 +775,37 @@ fn update_java_brace_depth(line: &str, brace_depth: &mut usize) {
 }
 
 fn java_code_lines_without_comments(content: &str) -> Vec<String> {
-    let mut in_block_comment = false;
+    let mut state = JavaCodeLineState::default();
     content
         .lines()
-        .map(|line| java_code_line_without_comments(line, &mut in_block_comment))
+        .map(|line| java_code_line_without_comments(line, &mut state))
         .collect()
 }
 
-fn java_code_line_without_comments(line: &str, in_block_comment: &mut bool) -> String {
+#[derive(Default)]
+struct JavaCodeLineState {
+    in_block_comment: bool,
+    in_text_block: bool,
+}
+
+fn java_code_line_without_comments(line: &str, state: &mut JavaCodeLineState) -> String {
     let mut result = String::new();
-    let mut chars = line.chars().peekable();
+    let mut chars = line.char_indices().peekable();
     let mut quote = None;
     let mut escaped = false;
-    while let Some(character) = chars.next() {
-        if *in_block_comment {
-            if character == '*' && chars.peek() == Some(&'/') {
+    while let Some((index, character)) = chars.next() {
+        if state.in_block_comment {
+            if character == '*' && chars.peek().is_some_and(|(_, next)| *next == '/') {
                 chars.next();
-                *in_block_comment = false;
+                state.in_block_comment = false;
+            }
+            continue;
+        }
+        if state.in_text_block {
+            if line[index..].starts_with("\"\"\"") {
+                chars.next();
+                chars.next();
+                state.in_text_block = false;
             }
             continue;
         }
@@ -805,13 +824,19 @@ fn java_code_line_without_comments(line: &str, in_block_comment: &mut bool) -> S
             }
             continue;
         }
-        if character == '/' && chars.peek() == Some(&'*') {
+        if character == '/' && chars.peek().is_some_and(|(_, next)| *next == '*') {
             chars.next();
-            *in_block_comment = true;
+            state.in_block_comment = true;
             continue;
         }
-        if character == '/' && chars.peek() == Some(&'/') {
+        if character == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') {
             break;
+        }
+        if character == '"' && line[index..].starts_with("\"\"\"") {
+            chars.next();
+            chars.next();
+            state.in_text_block = true;
+            continue;
         }
         if matches!(character, '"' | '\'') {
             quote = Some(character);

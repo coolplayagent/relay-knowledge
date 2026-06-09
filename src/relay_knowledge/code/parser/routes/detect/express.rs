@@ -1,5 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
+use super::express_materialize::materialize_express_routes;
 use super::javascript::{
     find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
     statement_ends_with_semicolon,
@@ -9,7 +10,7 @@ use super::shared::{
 };
 use super::{ANONYMOUS_ROUTE_HANDLER_NAME, RouteCandidate};
 
-const DYNAMIC_EXPRESS_MOUNT_PREFIX: &str = "\0dynamic";
+pub(super) const DYNAMIC_EXPRESS_MOUNT_PREFIX: &str = "\0dynamic";
 const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
 
 pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<RouteCandidate> {
@@ -58,18 +59,18 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
     materialize_express_routes(route_infos, &mounts)
 }
 
-struct ExpressRouteInfo {
-    receiver_name: String,
-    local_url: String,
-    http_method: String,
-    handler_name: String,
-    line: usize,
+pub(super) struct ExpressRouteInfo {
+    pub(super) receiver_name: String,
+    pub(super) local_url: String,
+    pub(super) http_method: String,
+    pub(super) handler_name: String,
+    pub(super) line: usize,
 }
 
-struct ExpressRouterMount {
-    receiver_name: String,
-    router_name: String,
-    local_prefix: String,
+pub(super) struct ExpressRouterMount {
+    pub(super) receiver_name: String,
+    pub(super) router_name: String,
+    pub(super) local_prefix: String,
 }
 
 fn parse_express_router_mounts(
@@ -117,14 +118,28 @@ fn parse_express_router_mount_at(
     };
     let (mount_paths, router_arguments) = if let Some(path) = extract_quoted_string(first_argument)
     {
-        if !path.starts_with('/') {
+        if path.contains("${") {
+            (
+                vec![DYNAMIC_EXPRESS_MOUNT_PREFIX.to_owned()],
+                &arguments[1..],
+            )
+        } else if path.starts_with('/') {
+            (vec![path], &arguments[1..])
+        } else {
             return Vec::new();
         }
-        (vec![path], &arguments[1..])
     } else if let Some(array_inner) = javascript_array_literal_inner(first_argument) {
-        let paths = route_url_literals(extract_quoted_strings(array_inner));
+        let path_values = extract_quoted_strings(array_inner);
+        let paths = route_url_literals(path_values.iter().cloned());
         if paths.is_empty() {
-            (vec![String::new()], arguments.as_slice())
+            if path_values.iter().any(|path| path.contains("${")) {
+                (
+                    vec![DYNAMIC_EXPRESS_MOUNT_PREFIX.to_owned()],
+                    &arguments[1..],
+                )
+            } else {
+                (vec![String::new()], arguments.as_slice())
+            }
         } else {
             (paths, &arguments[1..])
         }
@@ -159,60 +174,63 @@ fn record_express_route_chain(
     router_names: &BTreeSet<String>,
     route_infos: &mut Vec<ExpressRouteInfo>,
 ) -> bool {
-    let Some(route_pos) = find_javascript_pattern_outside_strings(statement, ".route(") else {
-        return false;
-    };
-    let Some(receiver_name) = express_receiver_name(&statement[..route_pos]) else {
-        return false;
-    };
-    if !express_router_name_is_router(&receiver_name, router_names) {
-        return false;
-    }
-    let after_route = &statement[route_pos + ".route(".len()..];
-    let urls = express_route_urls(after_route);
-    if urls.is_empty() {
-        return false;
-    }
     let mut found_route_method = false;
-    let mut scan = after_route;
-    while let Some(method_pos) = express_method_position(scan) {
-        let rest = &scan[method_pos..];
-        let Some((method_part, after_method)) = rest.split_once('(') else {
-            break;
+    let mut statement_scan = statement;
+    while let Some(route_pos) = find_javascript_pattern_outside_strings(statement_scan, ".route(") {
+        let Some(receiver_name) = express_receiver_name(&statement_scan[..route_pos]) else {
+            statement_scan = &statement_scan[route_pos + ".route(".len()..];
+            continue;
         };
-        let next_scan = javascript_call_end(after_method)
-            .and_then(|end| after_method.get(end..))
-            .unwrap_or("");
-        let raw_method = method_part.rsplit('.').next().unwrap_or("");
-        let http_method = match express_http_method(raw_method) {
-            Some(method) => method,
-            None => {
+        if !express_router_name_is_router(&receiver_name, router_names) {
+            statement_scan = &statement_scan[route_pos + ".route(".len()..];
+            continue;
+        }
+        let after_route = &statement_scan[route_pos + ".route(".len()..];
+        let urls = express_route_urls(after_route);
+        if urls.is_empty() {
+            statement_scan = after_route;
+            continue;
+        }
+        let mut chain_scan = after_route;
+        let mut after_chain = after_route;
+        while let Some(method_pos) = express_method_position(chain_scan) {
+            let rest = &chain_scan[method_pos..];
+            let Some((method_part, after_method)) = rest.split_once('(') else {
+                break;
+            };
+            let next_scan = javascript_call_end(after_method)
+                .and_then(|end| after_method.get(end..))
+                .unwrap_or("");
+            after_chain = next_scan;
+            let raw_method = method_part.rsplit('.').next().unwrap_or("");
+            let Some(http_method) = express_http_method(raw_method) else {
                 let next_scan = next_scan.trim_start();
                 if !next_scan.starts_with('.') {
                     break;
                 }
-                scan = next_scan;
+                chain_scan = next_scan;
                 continue;
+            };
+            found_route_method = true;
+            let handler = extract_handler_name_from_arguments(after_method);
+            for local_url in &urls {
+                route_infos.push(ExpressRouteInfo {
+                    receiver_name: receiver_name.clone(),
+                    local_url: local_url.clone(),
+                    http_method: http_method.clone(),
+                    handler_name: handler
+                        .clone()
+                        .unwrap_or_else(|| ANONYMOUS_ROUTE_HANDLER_NAME.to_owned()),
+                    line,
+                });
             }
-        };
-        found_route_method = true;
-        let handler = extract_handler_name_from_arguments(after_method);
-        for local_url in &urls {
-            route_infos.push(ExpressRouteInfo {
-                receiver_name: receiver_name.clone(),
-                local_url: local_url.clone(),
-                http_method: http_method.clone(),
-                handler_name: handler
-                    .clone()
-                    .unwrap_or_else(|| ANONYMOUS_ROUTE_HANDLER_NAME.to_owned()),
-                line,
-            });
+            let next_scan = next_scan.trim_start();
+            if !next_scan.starts_with('.') {
+                break;
+            }
+            chain_scan = next_scan;
         }
-        let next_scan = next_scan.trim_start();
-        if !next_scan.starts_with('.') {
-            break;
-        }
-        scan = next_scan;
+        statement_scan = after_chain;
     }
     found_route_method
 }
@@ -475,7 +493,7 @@ fn express_route_urls(arguments: &str) -> Vec<String> {
 
 fn route_url_literals(urls: impl IntoIterator<Item = String>) -> Vec<String> {
     urls.into_iter()
-        .filter(|url| url.starts_with('/') || url.starts_with("${"))
+        .filter(|url| url.starts_with('/') && !url.contains("${"))
         .collect()
 }
 
@@ -881,95 +899,7 @@ fn express_imports_from_module(rest: &str) -> bool {
         || rest.contains("from `express`")
 }
 
-fn materialize_express_routes(
-    route_infos: Vec<ExpressRouteInfo>,
-    mounts: &[ExpressRouterMount],
-) -> Vec<RouteCandidate> {
-    let router_prefixes = resolved_express_router_prefixes(mounts);
-    let mut routes = Vec::new();
-    let mut seen = BTreeSet::new();
-    for route_info in route_infos {
-        let prefixes = router_prefixes
-            .get(&route_info.receiver_name)
-            .cloned()
-            .unwrap_or_else(|| BTreeSet::from([String::new()]));
-        for prefix in prefixes {
-            if prefix == DYNAMIC_EXPRESS_MOUNT_PREFIX {
-                continue;
-            }
-            let url = merge_url_parts(&prefix, &route_info.local_url);
-            let key = (
-                url.clone(),
-                route_info.http_method.clone(),
-                route_info.handler_name.clone(),
-                route_info.line,
-            );
-            if seen.insert(key) {
-                routes.push(RouteCandidate {
-                    url,
-                    http_method: route_info.http_method.clone(),
-                    handler_name: route_info.handler_name.clone(),
-                    framework: "express".to_owned(),
-                    line: route_info.line,
-                });
-            }
-        }
-    }
-    routes
-}
-
-fn resolved_express_router_prefixes(
-    mounts: &[ExpressRouterMount],
-) -> BTreeMap<String, BTreeSet<String>> {
-    let mounted_routers = mounts
-        .iter()
-        .map(|mount| mount.router_name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut router_prefixes = BTreeMap::<String, BTreeSet<String>>::new();
-    for _ in 0..=mounts.len() {
-        let mut changed = false;
-        for mount in mounts {
-            let Some(receiver_prefixes) =
-                express_receiver_prefixes(&mount.receiver_name, &router_prefixes, &mounted_routers)
-            else {
-                continue;
-            };
-            for receiver_prefix in receiver_prefixes {
-                let prefix = if receiver_prefix == DYNAMIC_EXPRESS_MOUNT_PREFIX
-                    || mount.local_prefix == DYNAMIC_EXPRESS_MOUNT_PREFIX
-                {
-                    DYNAMIC_EXPRESS_MOUNT_PREFIX.to_owned()
-                } else {
-                    merge_url_parts(&receiver_prefix, &mount.local_prefix)
-                };
-                if router_prefixes
-                    .entry(mount.router_name.clone())
-                    .or_default()
-                    .insert(prefix)
-                {
-                    changed = true;
-                }
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    router_prefixes
-}
-
-fn express_receiver_prefixes(
-    receiver_name: &str,
-    router_prefixes: &BTreeMap<String, BTreeSet<String>>,
-    mounted_routers: &BTreeSet<String>,
-) -> Option<BTreeSet<String>> {
-    if let Some(prefixes) = router_prefixes.get(receiver_name) {
-        return Some(prefixes.clone());
-    }
-    (!mounted_routers.contains(receiver_name)).then(|| BTreeSet::from([String::new()]))
-}
-
-fn merge_url_parts(prefix: &str, suffix: &str) -> String {
+pub(super) fn merge_url_parts(prefix: &str, suffix: &str) -> String {
     if prefix.is_empty() {
         return if suffix.starts_with('/') {
             suffix.to_owned()

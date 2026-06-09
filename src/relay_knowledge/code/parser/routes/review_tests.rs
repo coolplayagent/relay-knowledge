@@ -133,6 +133,16 @@ fn skips_express_routes_inside_multiline_template_literals() {
 }
 
 #[test]
+fn skips_dynamic_express_template_route_paths() {
+    let source = "app.get(`${base}/users`, listUsers);\napp.post(`/api/${tenant}/users`, createUser);\napp.get('/live', liveHandler);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/live");
+    assert_eq!(routes[0].handler_name, "liveHandler");
+}
+
+#[test]
 fn preserves_express_member_expression_handler_targets() {
     let source = "router.get('/users', usersController.list);\n";
     let routes = detect_routes("typescript", source);
@@ -174,6 +184,20 @@ fn keeps_same_line_express_route_chain_separate_from_following_registration() {
     }));
     assert!(!routes.iter().any(|route| {
         route.url == "/health" && route.http_method == "post" && route.handler_name == "login"
+    }));
+}
+
+#[test]
+fn detects_multiple_same_line_express_route_chains() {
+    let source = "router.route('/alpha').get(alpha); router.route('/beta').post(beta);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| {
+        route.url == "/alpha" && route.http_method == "get" && route.handler_name == "alpha"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/beta" && route.http_method == "post" && route.handler_name == "beta"
     }));
 }
 
@@ -424,6 +448,30 @@ fn keeps_spring_routes_before_multiline_non_route_annotations() {
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/admin");
     assert_eq!(routes[0].handler_name, "admin");
+}
+
+#[test]
+fn preserves_class_level_spring_request_methods() {
+    let source = "@RequestMapping(value = \"/api\", method = RequestMethod.POST)\npublic class UsersController {\n@GetMapping(\"/users\")\npublic String users() {\n}\n}\n";
+    let routes = detect_routes("java", source);
+
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| {
+        route.url == "/api/users" && route.http_method == "get" && route.handler_name == "users"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/api/users" && route.http_method == "post" && route.handler_name == "users"
+    }));
+}
+
+#[test]
+fn ignores_spring_routes_inside_java_text_blocks() {
+    let source = "String docs = \"\"\"\n@GetMapping(\"/documented\")\npublic String documented() {\n}\n\"\"\";\n@GetMapping(\"/live\")\npublic String live() {\n}\n";
+    let routes = detect_routes("java", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/live");
+    assert_eq!(routes[0].handler_name, "live");
 }
 
 #[test]
