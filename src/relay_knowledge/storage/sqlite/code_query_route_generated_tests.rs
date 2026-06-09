@@ -319,8 +319,16 @@ async fn route_url_fallback_recalls_all_parameterized_routes() {
         "getItem",
     );
     brace_route.url = "/{tenant}/{id}".to_owned();
+    let mut flask_route = route(
+        "route-flask-tenant-item",
+        "flask-route-file",
+        "src/flask_routes.py",
+        "get_item",
+    );
+    flask_route.url = "/<tenant>/<id>".to_owned();
     routes.push(colon_route);
     routes.push(brace_route);
+    routes.push(flask_route);
     let store = store_with_routes(routes).await;
 
     let hits = store
@@ -333,6 +341,9 @@ async fn route_url_fallback_recalls_all_parameterized_routes() {
     }));
     assert!(hits.iter().any(|hit| {
         hit.edge_kind.as_deref() == Some("route") && hit.excerpt.contains("GET /{tenant}/{id}")
+    }));
+    assert!(hits.iter().any(|hit| {
+        hit.edge_kind.as_deref() == Some("route") && hit.excerpt.contains("GET /<tenant>/<id>")
     }));
     assert!(!hits.iter().any(|hit| hit.path.starts_with("aaa/")));
 }

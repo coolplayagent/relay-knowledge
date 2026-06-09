@@ -545,6 +545,26 @@ fn preserves_unresolved_express_mount_prefixes_for_custom_routers() {
 }
 
 #[test]
+fn detects_exported_express_router_aliases() {
+    let source = "import { Router } from 'express';\nexport const usersRouter = Router();\nusersRouter.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/:mount/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
+fn treats_express_middleware_only_mounts_as_root() {
+    let source = "const usersRouter = express.Router();\napp.use(requireAuth, usersRouter);\nusersRouter.get('/users', listUsers);\n";
+    let routes = detect_routes("javascript", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
 fn skips_dynamic_express_router_mount_prefixes() {
     let source = "const usersRouter = express.Router();\napp.use(apiPrefix, usersRouter);\nusersRouter.get('/users', listUsers);\n";
     let routes = detect_routes("javascript", source);

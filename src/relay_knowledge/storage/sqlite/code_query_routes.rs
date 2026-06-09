@@ -444,14 +444,17 @@ fn route_url_all_parameterized_fallback_globs(url: &str) -> Vec<String> {
         return Vec::new();
     }
     let mut globs = Vec::new();
-    for mask in 0usize..(1usize << segments.len()) {
+    let combinations = 3usize.pow(segments.len() as u32);
+    for mut mask in 0usize..combinations {
         let pattern_segments = (0..segments.len())
-            .map(|index| {
-                if mask & (1usize << index) == 0 {
-                    ":*"
-                } else {
-                    "{*}"
-                }
+            .map(|_| {
+                let pattern = match mask % 3 {
+                    0 => ":*",
+                    1 => "{*}",
+                    _ => "<*>",
+                };
+                mask /= 3;
+                pattern
             })
             .collect::<Vec<_>>();
         globs.push(format!("/{}", pattern_segments.join("/")));

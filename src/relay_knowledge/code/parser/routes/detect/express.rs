@@ -151,6 +151,8 @@ fn parse_express_router_mount_at(
         express_router_mount_argument_is_router(&router_name, router_names)
     }) {
         (vec![String::new()], arguments.as_slice())
+    } else if arguments.len() > 1 && !express_use_argument_looks_like_dynamic_path(first_argument) {
+        (vec![String::new()], &arguments[1..])
     } else {
         (
             vec![DYNAMIC_EXPRESS_MOUNT_PREFIX.to_owned()],
@@ -709,6 +711,16 @@ fn express_router_mount_argument_is_router(
     router_name.to_ascii_lowercase().ends_with("router")
 }
 
+fn express_use_argument_looks_like_dynamic_path(argument: &str) -> bool {
+    let Some(name) = express_receiver_name(argument) else {
+        return true;
+    };
+    let name = name.to_ascii_lowercase();
+    ["prefix", "path", "url", "route", "base", "mount"]
+        .iter()
+        .any(|marker| name.contains(marker))
+}
+
 fn javascript_top_level_arguments(rest: &str) -> Vec<&str> {
     let mut arguments = Vec::new();
     let mut argument_start = 0usize;
@@ -760,6 +772,7 @@ fn javascript_top_level_arguments(rest: &str) -> Vec<&str> {
 
 fn js_assignment_variable_name(left: &str) -> Option<String> {
     let left = left.trim();
+    let left = left.strip_prefix("export ").unwrap_or(left).trim_start();
     let left = left
         .strip_prefix("const ")
         .or_else(|| left.strip_prefix("let "))
