@@ -7,6 +7,7 @@ mod error;
 mod file_index;
 mod metadata;
 mod operations;
+mod service_plan;
 mod status;
 mod stream;
 mod watcher_diagnostics;
@@ -45,11 +46,12 @@ pub use operations::{
     IngestEvidence, IngestEvidenceExtraction, IngestRelation, IngestRequest, IngestResponse,
     MultimodalExtractionRequest, MultimodalExtractionResponse, ProposalDecisionApiRequest,
     ProposalDecisionResponse, ProposalListApiRequest, ProposalListResponse, ProposalShowResponse,
-    ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServicePlanRequest,
-    ServicePlanResponse, ServiceRecoveryReport, ServiceStatusResponse, SoftwareGlobalResponse,
-    StorageShardDiagnostics, StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest,
-    WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
+    ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServiceRecoveryReport,
+    ServiceStatusResponse, SoftwareGlobalResponse, StorageShardDiagnostics,
+    StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest, WorkerRunResponse,
+    WorkerStatusRequest, WorkerStatusResponse,
 };
+pub use service_plan::{ServicePlanRequest, ServicePlanResponse};
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};
 pub use watcher_diagnostics::WatcherDiagnostics;

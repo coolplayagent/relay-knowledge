@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -16,6 +17,8 @@ use relay_knowledge::{
     storage::CodeIndexTaskSeed,
 };
 use rusqlite::Connection;
+
+static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn runtime_paths() -> RuntimePaths {
     runtime_paths_for_root(&unique_temp_dir("partitioned-sqlite"))
@@ -39,8 +42,9 @@ pub(super) fn unique_temp_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock should be after epoch")
         .as_nanos();
+    let sequence = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "relay-knowledge-{name}-{}-{nanos}",
+        "relay-knowledge-{name}-{}-{nanos}-{sequence}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&path);

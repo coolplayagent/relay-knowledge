@@ -1,18 +1,19 @@
 use std::{
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use super::*;
 use crate::{
-    api::{HybridRetrievalRequest, InterfaceKind, RequestContext},
+    api::{HybridRetrievalRequest, InterfaceKind, RequestContext, ServicePlanRequest},
     domain::{
         CodeChunkRecord, CodeFileFingerprint, CodeGraphBatch, CodeGraphCommitReceipt,
         CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSnapshot, CodeIndexSummary,
         CodeIndexTaskRecord, CodeReferenceRecord, CodeRepositoryRegistration, CodeRepositoryStatus,
         CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord,
         CommitReceipt, FreshnessPolicy, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RetrievalHit, RetrievalMode,
+        RetrievalHit, RetrievalMode, ServiceManagerAction,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
@@ -74,6 +75,47 @@ async fn health_timeout_covers_legacy_snapshot_fallback() {
         Some("storage_busy: health snapshot timed out")
     );
     assert!(started.elapsed() < Duration::from_millis(1500));
+}
+
+#[tokio::test]
+async fn service_plan_metadata_uses_current_graph_version() {
+    let service = service_with_store(Arc::new(GraphOnlySearchStore)).await;
+
+    let response = service
+        .service_plan(
+            ServicePlanRequest {
+                action: ServiceManagerAction::Install,
+                dry_run: true,
+                execute: false,
+                target_version: None,
+                install_dir: None,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-plan", "trace-plan"),
+        )
+        .await
+        .expect("service plan should render");
+
+    assert_eq!(response.metadata.graph_version, 1);
+}
+
+#[tokio::test]
+async fn service_definition_write_metadata_uses_current_graph_version() {
+    let root = unique_root("service-definition-metadata");
+    let _ = std::fs::remove_dir_all(&root);
+    let service = service_with_store_at(Arc::new(GraphOnlySearchStore), &root).await;
+
+    let response = service
+        .write_service_definition(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-definition",
+            "trace-definition",
+        ))
+        .await
+        .expect("service definition should be written");
+
+    assert_eq!(response.metadata.graph_version, 1);
+    assert!(PathBuf::from(&response.plan.definition_path).exists());
+    let _ = std::fs::remove_dir_all(root);
 }
 
 struct GraphOnlySearchStore;
@@ -340,12 +382,20 @@ fn unsupported<T: Send + 'static>(message: &'static str) -> StorageFuture<'stati
 }
 
 async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
+    service_with_store_at(store, Path::new("/srv/relay")).await
+}
+
+async fn service_with_store_at(
+    store: Arc<dyn KnowledgeStore>,
+    root: &Path,
+) -> RelayKnowledgeService {
+    let root = root.to_str().expect("test root should be utf-8");
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
             ("HOME", "/home/alice"),
             ("TMPDIR", "/tmp"),
-            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_HOME", root),
         ],
     )
     .expect("environment should parse");
@@ -354,4 +404,11 @@ async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeSer
         .expect("runtime should compose");
 
     RelayKnowledgeService::with_store(runtime, store)
+}
+
+fn unique_root(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "relay-knowledge-graph-only-{name}-{}",
+        std::process::id()
+    ))
 }

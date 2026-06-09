@@ -32,10 +32,10 @@ use std::{error::Error, fmt};
 use crate::{
     api::{
         ApiError, GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest,
-        IngestEvidence, IngestRequest, InterfaceKind, RequestContext,
+        IngestEvidence, IngestRequest, InterfaceKind, RequestContext, ServicePlanRequest,
     },
     application::RelayKnowledgeService,
-    domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
+    domain::{FreshnessPolicy, IndexKind, ProposalState, WorkerKind},
     env::{EnvironmentConfig, RemoteCliEnvironmentConfig},
 };
 
@@ -214,6 +214,8 @@ fn option_consumes_value(option: &str) -> bool {
             | "--scope"
             | "--topic"
             | "--uri"
+            | "--target-version"
+            | "--install-dir"
     )
 }
 
@@ -309,9 +311,7 @@ pub enum CliAction {
     RepoSet(repo_set_cli::RepoSetCommand),
     Health,
     ServiceStatus,
-    ServicePlan {
-        action: ServiceManagerAction,
-    },
+    ServicePlan(ServicePlanRequest),
     ServiceDefinitionWrite,
     ServiceOperatorStatus,
     ServiceOperatorPause,
@@ -463,7 +463,7 @@ impl fmt::Display for CliError {
             ),
             Self::InvalidServiceAction(value) => write!(
                 formatter,
-                "invalid service action '{value}', expected install or uninstall"
+                "invalid service action '{value}', expected install, upgrade, rollback, or uninstall"
             ),
             Self::InvalidLimit(value) => write!(formatter, "invalid --limit value '{value}'"),
             Self::MissingFormatValue => write!(formatter, "missing value for --format"),
@@ -861,7 +861,7 @@ pub async fn run_with_service(
         | CliAction::ProposalSupersede { .. }
         | CliAction::AuditQuery { .. }
         | CliAction::ServiceStatus
-        | CliAction::ServicePlan { .. }
+        | CliAction::ServicePlan(_)
         | CliAction::ServiceDefinitionWrite
         | CliAction::ServiceOperatorStatus
         | CliAction::ServiceOperatorPause

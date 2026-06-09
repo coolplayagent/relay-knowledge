@@ -361,7 +361,7 @@ fn macos_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, Pat
         )?
         .join(APP_DIR_NAME),
         runtime_dir: state_dir.join("run"),
-        service_dir: application_support.join(APP_DIR_NAME).join("service"),
+        service_dir: home.join("Library").join("LaunchAgents"),
     })
 }
 
@@ -705,6 +705,10 @@ mod tests {
         assert_eq!(
             paths.cache_dir,
             PathBuf::from("/Users/alice/Library/Caches/relay-knowledge")
+        );
+        assert_eq!(
+            paths.service_dir,
+            PathBuf::from("/Users/alice/Library/LaunchAgents")
         );
         assert_eq!(paths.temp_dir, PathBuf::from("/tmp/relay-knowledge"));
     }

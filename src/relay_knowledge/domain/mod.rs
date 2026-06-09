@@ -94,9 +94,11 @@ pub use mutation::{
 };
 pub use operational::{
     AuditEventRecord, AuditStatus, ProposalConflictRecord, ProposalConflictSeverity, ProposalKind,
-    ProposalProvenance, ProposalRecord, ProposalState, ServiceDefinitionPlan, ServiceManagerAction,
-    ServiceOperatorState, ServiceOperatorStatus, WorkerBackendState, WorkerKind, WorkerStatus,
-    WorkerTaskRecord, WorkerTaskState, normalize_actor,
+    ProposalProvenance, ProposalRecord, ProposalState, ServiceDefinitionPlan,
+    ServiceLifecycleExecutionReport, ServiceLifecycleStep, ServiceLifecycleStepResult,
+    ServiceManagerAction, ServiceOperatorState, ServiceOperatorStatus, ServicePackageManifestCheck,
+    ServicePermissionRequirement, WorkerBackendState, WorkerKind, WorkerStatus, WorkerTaskRecord,
+    WorkerTaskState, normalize_actor,
 };
 pub use retrieval::{
     CodeGraphArtifact, CodeGraphArtifactKind, ContextEntity, ContextGraphFact,

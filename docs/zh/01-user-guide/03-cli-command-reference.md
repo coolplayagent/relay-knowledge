@@ -116,7 +116,8 @@ relay-knowledge provider probe
 relay-knowledge health
 relay-knowledge service status
 relay-knowledge service doctor
-relay-knowledge service plan install|uninstall
+relay-knowledge service plan install|upgrade|rollback|uninstall [--target-version <version>] [--install-dir <path>]
+relay-knowledge service lifecycle install|upgrade|rollback|uninstall [--dry-run|--execute] [--target-version <version>] [--install-dir <path>]
 relay-knowledge service definition write
 relay-knowledge service operator status|pause|resume
 relay-knowledge service worker run [--task-id <id>]

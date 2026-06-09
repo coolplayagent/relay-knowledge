@@ -46,11 +46,12 @@ The Web service run operation only returns the current service runtime snapshot 
 
 ## 9.3 Service Manager
 
-Service manager v1 generates platform definitions and command previews. It does not automatically run privileged installation commands:
+Service manager v1 generates platform definitions and staged lifecycle plans. Dry-run is the default; explicit `service lifecycle <action> --execute` runs local file steps and platform service-manager commands. JSON API callers may send `execute: true` without also sending `dry_run: false`; explicit `dry_run: true` remains a dry-run request. Failed execution returns an operation error with the failed step id instead of wrapping a report with `failed_step_id` in a successful response.
 
 ```bash
 relay-knowledge setup profile service --format json
 relay-knowledge service plan install --format json
+relay-knowledge service lifecycle install --dry-run --format json
 relay-knowledge service definition write --format json
 ```
 
@@ -58,7 +59,18 @@ Linux returns a systemd user service plan, macOS returns a launchd plist plan, a
 
 When `partitioned_sqlite` is enabled, service doctor, backup, migration, and uninstall confirmation must cover both the primary database and the `stores/repositories/` shard directory. Moving only the primary database leaves code facts invisible and is not a successful migration or rollback.
 
-`service plan install|uninstall --format json` includes `runtime_state_paths` for the primary database, config, state, log, and cache paths. With `partitioned_sqlite`, it also includes the shard directory and adds a `warnings` entry that backup, migration, rollback, and uninstall confirmation must cover both the primary database and shard directory.
+`service plan install|upgrade|rollback|uninstall --format json` includes `runtime_state_paths`, `lifecycle_steps`, `rollback_steps`, `permission_requirements`, `package_manifest_checks`, the service name, the binary path, the service definition path, and the lifecycle checkpoint path. With `partitioned_sqlite`, it also includes the shard directory and adds a `warnings` entry that backup, migration, rollback, and uninstall confirmation must cover both the primary database and shard directory.
+
+Execution remains explicit:
+
+```bash
+relay-knowledge service lifecycle install --execute --format json
+relay-knowledge service lifecycle upgrade --execute --target-version 1.2.3 --install-dir /opt/relay-knowledge --format json
+relay-knowledge service lifecycle rollback --execute --install-dir /opt/relay-knowledge --format json
+relay-knowledge service lifecycle uninstall --execute --format json
+```
+
+If a lifecycle execution stage fails, the execution report records completed steps, failed step id, rollback steps attempted, and whether rollback completed. Rollback is only marked complete when every selected rollback step succeeds; failures before any mutating lifecycle step do not stop or uninstall an existing service. Installs with an explicit `--install-dir` reject an existing target binary instead of overwriting it; upgrades checkpoint an existing target binary and remove the copied binary during rollback when no prior binary backup existed. External service-manager and doctor commands are time-bounded so hung child processes return an execution report instead of waiting forever. The uninstall path removes service registration and generated service definitions, but runtime data stays in `runtime_state_paths` unless the user explicitly removes it.
 
 ## 9.4 Silent Update Operator
 
@@ -87,4 +99,4 @@ For short development checks, prefer foreground commands or `run.sh`:
 ./run.sh stop --force
 ```
 
-For long-running background operation, use `service plan` and `service definition write` to generate platform service-manager configuration. A user or installer should then perform the privileged installation step. Do not replace systemd, Windows Service, or launchd with unmanaged CLI loops. Runtime data, logs, caches, worker queues, and dead-letter data must stay in `paths`-managed directories, not the release extraction directory or repository directory.
+For long-running background operation, use `service plan` to inspect the staged plan and `service lifecycle ... --execute` only when the paths, permissions, and rollback plan are acceptable. Do not replace systemd, Windows Service, or launchd with unmanaged CLI loops. Runtime data, logs, caches, worker queues, and dead-letter data must stay in `paths`-managed directories, not the release extraction directory or repository directory.

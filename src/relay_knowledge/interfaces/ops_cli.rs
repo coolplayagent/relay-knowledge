@@ -155,9 +155,9 @@ pub(super) async fn run_operational_action(
                 format,
             )?
         }
-        CliAction::ServicePlan { action } => {
+        CliAction::ServicePlan(request) => {
             let response = service
-                .service_plan(ServicePlanRequest { action }, context)
+                .service_plan(request, context)
                 .await
                 .map_err(|error| CliError::api_failed(error, format))?;
 
@@ -312,12 +312,16 @@ pub(super) fn parse_service(tokens: &[String]) -> Result<CliAction, CliError> {
         return Ok(CliAction::ServiceStatus);
     }
     if tokens.first().map(String::as_str) == Some("plan") {
-        let value = tokens
-            .get(1)
-            .ok_or(CliError::MissingValue("install|uninstall"))?;
-        return Ok(CliAction::ServicePlan {
-            action: parse_service_action(value)?,
-        });
+        return Ok(CliAction::ServicePlan(parse_service_lifecycle_request(
+            &tokens[1..],
+            false,
+        )?));
+    }
+    if tokens.first().map(String::as_str) == Some("lifecycle") {
+        return Ok(CliAction::ServicePlan(parse_service_lifecycle_request(
+            &tokens[1..],
+            true,
+        )?));
     }
     if tokens == ["definition", "write"] {
         return Ok(CliAction::ServiceDefinitionWrite);
@@ -446,6 +450,64 @@ fn parse_service_worker(tokens: &[String]) -> Result<CliAction, CliError> {
     }
 
     Ok(CliAction::ServiceWorkerRun { task_id })
+}
+
+fn parse_service_lifecycle_request(
+    tokens: &[String],
+    allow_execute: bool,
+) -> Result<ServicePlanRequest, CliError> {
+    let action_token = tokens
+        .first()
+        .ok_or(CliError::MissingValue("install|upgrade|rollback|uninstall"))?;
+    let action = parse_service_action(action_token)?;
+    let mut dry_run = true;
+    let mut execute = false;
+    let mut dry_run_seen = false;
+    let mut execute_seen = false;
+    let mut target_version = None;
+    let mut install_dir = None;
+    let mut index = 1;
+
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--dry-run" => {
+                if execute_seen {
+                    return Err(CliError::UnexpectedArgument("--dry-run".to_owned()));
+                }
+                dry_run_seen = true;
+                dry_run = true;
+                execute = false;
+                index += 1;
+            }
+            "--execute" if allow_execute => {
+                if dry_run_seen {
+                    return Err(CliError::UnexpectedArgument("--execute".to_owned()));
+                }
+                execute_seen = true;
+                dry_run = false;
+                execute = true;
+                index += 1;
+            }
+            "--execute" => return Err(CliError::UnexpectedArgument("--execute".to_owned())),
+            "--target-version" => {
+                target_version = Some(value_after(tokens, index, "--target-version")?);
+                index += 2;
+            }
+            "--install-dir" => {
+                install_dir = Some(value_after(tokens, index, "--install-dir")?);
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(ServicePlanRequest {
+        action,
+        dry_run,
+        execute,
+        target_version,
+        install_dir,
+    })
 }
 
 fn parse_service_run(tokens: &[String]) -> Result<CliAction, CliError> {

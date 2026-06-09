@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 2.6
-> 编制日期: 2026-06-05
+> 文档版本: 2.7
+> 编制日期: 2026-06-09
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -27,7 +27,7 @@
 
 Installer 或安装脚本支持：版本选择、安装目录选择、dry run、校验和验证、service definition 生成、失败回滚和 uninstall plan。默认不会把数据写入 release 解压目录。
 
-服务化部署安装体验必须显式说明拓扑：`embedded_cli` 不安装常驻服务，`resident_single_process` 安装一个平台 service，`resident_partitioned_sqlite` 还要把 shard 目录纳入备份/迁移/卸载确认。`service plan install|uninstall --format json` 必须在 `runtime_state_paths` 和 `warnings` 中列出主库、配置/状态/日志/缓存路径，以及 partitioned 模式下的 shard 目录覆盖要求；未来 `split_worker_preview` 必须分别生成控制服务和 worker 服务定义并说明每个进程的权限、环境变量、日志和 shutdown 行为。
+服务化部署安装体验必须显式说明拓扑：`embedded_cli` 不安装常驻服务，`resident_single_process` 安装一个平台 service，`resident_partitioned_sqlite` 还要把 shard 目录纳入备份/迁移/卸载确认。`service plan install|upgrade|rollback|uninstall --format json` 必须在 `runtime_state_paths`、`lifecycle_steps`、`rollback_steps`、`permission_requirements` 和 `warnings` 中列出主库、配置/状态/日志/缓存路径、service definition 路径、service 名称、权限要求、失败回滚计划，以及 partitioned 模式下的 shard 目录覆盖要求。`service lifecycle <action> --dry-run` 是默认可审计输出；只有显式传入 `--execute` 才能写 service definition、checkpoint 或安装目录，并调用 systemd、launchd 或 Windows Service 命令。未来 `split_worker_preview` 必须分别生成控制服务和 worker 服务定义并说明每个进程的权限、环境变量、日志和 shutdown 行为。
 
 精确代码源码兜底由产品内部实现，运行时不能依赖 `rg`。面向 agent 的 setup 说明可以提到使用有界 `rg` 或 `grep -RIn` 做人工检查工具，但安装器不能把递归 grep 作为 service 依赖，也不能把它当成已索引查询行为的替代品。
 
@@ -58,6 +58,8 @@ preflight doctor
 
 失败时回滚二进制和 service definition；数据 migration 必须有 checkpoint 或 forward-only 说明。
 
+`service lifecycle upgrade --execute` 必须按 dry-run 中的阶段顺序执行：先记录 rollback checkpoint，再停止 service、复制二进制、写 service definition、刷新平台 service manager、启动 service，并在后置 doctor 前后保留执行报告。Linux systemd unit 必须引用包含空格的路径，并把字面 `$` 转义为 `$$`。install 写入显式 `--install-dir` 前不得覆盖已有目标二进制或 service definition；Windows install 必须把 service 创建和 registry/environment 写入拆成可单独回滚的步骤。upgrade 必须 checkpoint 已有目标二进制和 service definition，checkpoint backup 必须使用 attempt-scoped 文件并通过原子 checkpoint 发布成为当前回滚依据；没有旧备份时失败回滚和显式 rollback 只能删除本次确实复制或写入的目标文件，definition-only upgrade 不得删除当前运行的 binary。Windows 和 macOS upgrade 必须在启动前刷新平台 service registration，使 SCM `BinaryPathName` 或 launchd loaded job 与更新后的 service definition 一致。uninstall 失败回滚和基于 uninstall checkpoint 的显式 rollback 如果需要恢复已删除的 service definition，必须从 uninstall 前 checkpoint 恢复原 definition，再重新注册 service manager。文件或 service manager 状态变化后任一阶段失败时，必须按 `rollback_steps` 尝试恢复已完成步骤；restore、definition rewrite、unregister 或 service-registration rollback step 失败后不得继续执行依赖的删除、reload/start 步骤；任何此类状态变化前失败时，不得停止、disable、恢复、重启或卸载既有 service。只有选中的 rollback steps 全部成功时，执行报告才能把 rollback 标为完成；外部 service manager 或 doctor 子进程必须有有界执行时间，并在等待退出和超时期间持续读取 stdout/stderr，进程退出或超时后的输出收集也必须有边界。`--execute` 出现失败 step 时，API/CLI 操作必须返回错误并带出失败 step id，不能把失败报告包装成成功响应。`service lifecycle rollback --execute` 使用 checkpoint 备份恢复二进制和 service definition；没有 checkpoint 时必须把缺口暴露在 warnings 或执行错误中，不能静默宣称回滚成功。
+
 `relay-knowledge version check` 是只读诊断入口，输出当前版本、最新稳定版本、来源、release URL 和诊断信息。实际升级仍必须由用户、installer 或包管理器显式执行，并继续遵守 preflight、checkpoint、service restart 和 post-upgrade doctor 流程。
 
 ## 6. 发版文档准备
@@ -81,9 +83,11 @@ preflight doctor
 - CLI 能说明稳定新版本可用，JSON 输出保持机器可读且普通命令不会自动安装新版。
 - 面向 release 的文档有带日期的 `06-verification` 审计，覆盖导航、清单、链接检查和 documentation-only 改动边界。
 - service install 使用 systemd、launchd 或 Windows Service，而非 unmanaged loop。
-- uninstall 清理二进制和服务定义，但保留或按用户确认处理 runtime data。
+- `service lifecycle <action> --dry-run` 输出 service 名称、definition 路径、安装目录、运行时路径、权限要求、rollback 计划和 package manifest 校验链路；`--execute` 只在显式请求时运行，并在失败时执行 rollback steps 且返回操作错误。
+- uninstall 清理服务注册和服务定义，但保留或按用户确认处理 runtime data。
 - 分片 SQLite 拓扑的 shard 目录参与 backup、migration、doctor 和 uninstall 确认。
 - 控制服务和 split worker 的服务定义、运行时目录、日志、环境变量和权限边界在 plan/install/uninstall 中可诊断、可回滚。
+- Release workflow 或等价门禁必须运行 service lifecycle dry-run smoke，验证发布二进制生成的 service definition、rollback plan 和 package manifest 检查不会与 release tag 漂移。
 
 ---
 

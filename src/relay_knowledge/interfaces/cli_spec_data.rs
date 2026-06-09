@@ -234,6 +234,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
             &["Alias for service status."],
         ),
         service_plan(),
+        service_lifecycle(),
         command!(
             &["service", "definition", "write"],
             "relay-knowledge service definition write",
@@ -679,8 +680,8 @@ fn audit_query() -> CliCommandSpec {
 fn service_plan() -> CliCommandSpec {
     command!(
         &["service", "plan"],
-        "relay-knowledge service plan install|uninstall",
-        "Preview service-manager commands.",
+        "relay-knowledge service plan install|upgrade|rollback|uninstall [--target-version <version>] [--install-dir <path>]",
+        "Preview service lifecycle commands.",
         "service.plan",
         CommandEffect::ReadOnly,
         &[arg(
@@ -689,12 +690,90 @@ fn service_plan() -> CliCommandSpec {
             false,
             "Service manager action to plan.",
             None,
-            &["install", "uninstall"],
+            &["install", "upgrade", "rollback", "uninstall"],
         )],
-        &[],
-        &["relay-knowledge service plan install --format json"],
-        &["Returns commands for the platform service manager without executing privileged steps."],
+        &service_lifecycle_options(false),
+        &["relay-knowledge service plan upgrade --target-version 1.2.3 --format json"],
+        &[
+            "Returns dry-run lifecycle steps, permissions, runtime paths, rollback plan, and package manifest checks without executing platform commands."
+        ],
     )
+}
+
+fn service_lifecycle() -> CliCommandSpec {
+    command!(
+        &["service", "lifecycle"],
+        "relay-knowledge service lifecycle install|upgrade|rollback|uninstall [--dry-run|--execute] [--target-version <version>] [--install-dir <path>]",
+        "Run or dry-run a staged service lifecycle plan.",
+        "service.lifecycle",
+        CommandEffect::WritesServiceDefinition,
+        &[arg(
+            "action",
+            true,
+            false,
+            "Service lifecycle action to run or dry-run.",
+            None,
+            &["install", "upgrade", "rollback", "uninstall"],
+        )],
+        &service_lifecycle_options(true),
+        &[
+            "relay-knowledge service lifecycle install --dry-run --format json",
+            "relay-knowledge service lifecycle upgrade --execute --target-version 1.2.3 --install-dir /opt/relay-knowledge --format json",
+        ],
+        &[
+            "Defaults to dry-run. `--execute` runs local file steps and platform service-manager commands, rolling back completed steps if a later step fails."
+        ],
+    )
+}
+
+fn service_lifecycle_options(include_execute: bool) -> Vec<CliOptionSpec> {
+    let mut options = vec![
+        opt(
+            "--target-version",
+            Some("version"),
+            false,
+            false,
+            "Version selected for install or upgrade planning.",
+            None,
+            &[],
+        ),
+        opt(
+            "--install-dir",
+            Some("path"),
+            false,
+            false,
+            "Absolute binary install directory, kept separate from runtime state paths.",
+            None,
+            &[],
+        ),
+    ];
+    if include_execute {
+        options.insert(
+            0,
+            opt(
+                "--dry-run",
+                None,
+                false,
+                false,
+                "Render the lifecycle plan without executing steps.",
+                Some("true"),
+                &[],
+            ),
+        );
+        options.insert(
+            1,
+            opt(
+                "--execute",
+                None,
+                false,
+                false,
+                "Execute staged local file steps and platform service-manager commands.",
+                None,
+                &[],
+            ),
+        );
+    }
+    options
 }
 
 fn service_worker() -> CliCommandSpec {
