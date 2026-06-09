@@ -38,6 +38,7 @@ pub(super) fn insert_records(
             record.line_range.end,
         ])?;
         let http_method_terms = route_http_method_search_terms(&record.http_method);
+        let handler_terms = route_handler_search_terms(&record.handler_name);
         search_documents.insert(
             &record.source_scope,
             "route",
@@ -49,6 +50,7 @@ pub(super) fn insert_records(
                 record.url.as_str(),
                 http_method_terms.as_str(),
                 record.handler_name.as_str(),
+                handler_terms.as_str(),
                 record.framework.as_str(),
                 record.path.as_str(),
             ],
@@ -65,9 +67,56 @@ fn route_http_method_search_terms(method: &str) -> String {
     method.to_owned()
 }
 
+fn route_handler_search_terms(handler_name: &str) -> String {
+    let mut terms = Vec::new();
+    for token in handler_name
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty())
+    {
+        terms.push(token.to_ascii_lowercase());
+        terms.extend(
+            token
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .map(str::to_ascii_lowercase),
+        );
+        terms.extend(route_handler_camel_case_terms(token));
+    }
+    terms.sort();
+    terms.dedup();
+
+    terms.join(" ")
+}
+
+fn route_handler_camel_case_terms(token: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut start = 0;
+    let mut previous: Option<char> = None;
+    let chars = token.char_indices().collect::<Vec<_>>();
+    for (index, (byte_index, character)) in chars.iter().enumerate() {
+        let next = chars.get(index + 1).map(|(_, next)| *next);
+        let starts_upper_word = character.is_ascii_uppercase()
+            && previous.is_some_and(|previous| {
+                previous.is_ascii_lowercase()
+                    || previous.is_ascii_digit()
+                    || next.is_some_and(|next| next.is_ascii_lowercase())
+            });
+        if *byte_index > start && starts_upper_word {
+            terms.push(token[start..*byte_index].to_ascii_lowercase());
+            start = *byte_index;
+        }
+        previous = Some(*character);
+    }
+    if start < token.len() {
+        terms.push(token[start..].to_ascii_lowercase());
+    }
+
+    terms
+}
+
 #[cfg(test)]
 mod tests {
-    use super::route_http_method_search_terms;
+    use super::{route_handler_search_terms, route_http_method_search_terms};
 
     #[test]
     fn any_route_method_search_terms_include_concrete_verbs() {
@@ -77,5 +126,15 @@ mod tests {
         assert!(terms.contains("get"));
         assert!(terms.contains("post"));
         assert!(terms.contains("options"));
+    }
+
+    #[test]
+    fn route_handler_search_terms_split_identifier_parts() {
+        let terms = route_handler_search_terms("usersController.listActiveUsers");
+
+        assert!(terms.contains("users"));
+        assert!(terms.contains("controller"));
+        assert!(terms.contains("list"));
+        assert!(terms.contains("active"));
     }
 }

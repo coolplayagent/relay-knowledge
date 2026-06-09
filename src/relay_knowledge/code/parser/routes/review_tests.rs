@@ -224,6 +224,27 @@ fn detects_spring_mapping_after_same_line_annotation() {
 }
 
 #[test]
+fn keeps_python_route_decorators_across_multiline_non_route_decorators() {
+    let source =
+        "@app.get('/admin')\n@requires_permission(\n    'admin',\n)\ndef admin():\n    pass\n";
+    let routes = detect_routes("python", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/admin");
+    assert_eq!(routes[0].handler_name, "admin");
+}
+
+#[test]
+fn keeps_spring_mapping_across_multiline_non_route_annotations() {
+    let source = "@GetMapping(\"/admin\")\n@PreAuthorize(\n    \"hasRole('ADMIN')\"\n)\npublic String admin() {\n}\n";
+    let routes = detect_routes("java", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/admin");
+    assert_eq!(routes[0].handler_name, "admin");
+}
+
+#[test]
 fn skips_express_routes_inside_regex_literals() {
     let source = "const re = /app.get('\\/demo', demo)/;\napp.get('/live', live);\n";
     let routes = detect_routes("typescript", source);
