@@ -879,6 +879,7 @@ fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecor
         byte_len: 0,
         line_count: 1,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

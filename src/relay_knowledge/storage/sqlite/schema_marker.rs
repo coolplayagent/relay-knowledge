@@ -72,6 +72,19 @@ const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
     "created_at_ms",
 ];
 const CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE: &[&str] = &["set_id", "package_name", "ecosystem"];
+const CODE_REPOSITORY_FILES_COLUMNS: &[&str] = &[
+    "repository_id",
+    "source_scope",
+    "file_id",
+    "path",
+    "language_id",
+    "blob_hash",
+    "byte_len",
+    "line_count",
+    "parse_status",
+    "is_generated",
+    "degraded_reason",
+];
 
 pub(super) fn schema_initialization_is_current(
     connection: &Connection,
@@ -111,6 +124,11 @@ pub(super) fn schema_initialization_is_current(
             connection,
             "relay_sqlite_maintenance_diagnostics",
             &["id", "last_maintenance_at_ms", "last_maintenance_error"],
+        )?
+        || !table_has_columns(
+            connection,
+            "code_repository_files",
+            CODE_REPOSITORY_FILES_COLUMNS,
         )?
     {
         return Ok(false);

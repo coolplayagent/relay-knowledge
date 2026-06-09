@@ -36,6 +36,7 @@ pub enum RepoSetCommand {
         path_filters: Vec<String>,
         language_filters: Vec<String>,
         freshness: FreshnessPolicy,
+        exclude_generated: bool,
     },
     Status {
         set_alias: String,
@@ -140,8 +141,9 @@ pub async fn run_repo_set(
             path_filters,
             language_filters,
             freshness,
+            exclude_generated,
         } => {
-            let request = CodeRepositorySetQueryRequest::new(
+            let mut request = CodeRepositorySetQueryRequest::new(
                 set_alias,
                 query,
                 kind,
@@ -151,6 +153,7 @@ pub async fn run_repo_set(
                 language_filters,
             )
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            request.exclude_generated = exclude_generated;
             let response = service
                 .query_code_repository_set(request, context)
                 .await
@@ -302,6 +305,7 @@ fn parse_query(tokens: &[String]) -> Result<RepoSetCommand, CliError> {
     let mut path_filters = Vec::new();
     let mut language_filters = Vec::new();
     let mut freshness = FreshnessPolicy::AllowStale;
+    let mut exclude_generated = false;
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
@@ -333,6 +337,10 @@ fn parse_query(tokens: &[String]) -> Result<RepoSetCommand, CliError> {
                 freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
                 index += 2;
             }
+            "--exclude-generated" => {
+                exclude_generated = true;
+                index += 1;
+            }
             other if !other.starts_with('-') && query.is_none() => {
                 let (value, next_index) = collect_positional_query(tokens, index);
                 query = Some(value);
@@ -350,6 +358,7 @@ fn parse_query(tokens: &[String]) -> Result<RepoSetCommand, CliError> {
         path_filters,
         language_filters,
         freshness,
+        exclude_generated,
     })
 }
 

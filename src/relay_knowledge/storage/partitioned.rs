@@ -22,7 +22,8 @@ use crate::{
         CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
         CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
         CodeRepositorySetStatus, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
-        CodeRetrievalRequest, SoftwareGlobalProjection, SoftwareGlobalRequest,
+        CodeRetrievalRequest, CodeSymbolGenerationCounts, SoftwareGlobalProjection,
+        SoftwareGlobalRequest,
     },
     paths::RuntimePaths,
     storage::{
@@ -43,7 +44,6 @@ use routing::{
     source_scope_store,
 };
 use status::mirror_status;
-use totals::add_code_repository_totals;
 
 /// SQLite topology that keeps global control state in one DB and code facts in
 /// one DB per registered repository.
@@ -478,6 +478,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         source_scope: String,
         path_filters: Vec<String>,
         language_filters: Vec<String>,
+        exclude_generated: bool,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
         let this = self.clone();
@@ -488,6 +489,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
                         source_scope,
                         path_filters,
                         language_filters,
+                        exclude_generated,
                         limit,
                     )
                     .await;
@@ -497,6 +499,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
                     source_scope,
                     path_filters,
                     language_filters,
+                    exclude_generated,
                     limit,
                 )
                 .await
@@ -509,6 +512,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         query: String,
         path_filters: Vec<String>,
         language_filters: Vec<String>,
+        exclude_generated: bool,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
         let this = self.clone();
@@ -520,6 +524,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
                         query,
                         path_filters,
                         language_filters,
+                        exclude_generated,
                         limit,
                     )
                     .await;
@@ -530,6 +535,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
                     query,
                     path_filters,
                     language_filters,
+                    exclude_generated,
                     limit,
                 )
                 .await
@@ -813,25 +819,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
 
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
         let this = self.clone();
-        Box::pin(async move {
-            let repository_ids = this.catalog.repository_ids().await?;
-            let mut totals = this
-                .control
-                .code_repository_totals_excluding(repository_ids.clone())
-                .await?;
-            for repository_id in repository_ids {
-                let Some(shard) = this
-                    .catalog
-                    .existing_repository_store(repository_id)
-                    .await?
-                else {
-                    continue;
-                };
-                let shard_totals = shard.code_repository_totals().await?;
-                add_code_repository_totals(&mut totals, shard_totals);
-            }
-            Ok(totals)
-        })
+        Box::pin(async move { totals::code_repository_totals(this.control, this.catalog).await })
     }
 
     fn code_repository_report(
@@ -847,6 +835,16 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
                 return shard.code_repository_report(repository).await;
             }
             this.control.code_repository_report(repository).await
+        })
+    }
+
+    fn code_repository_scope_symbol_generation_counts(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, CodeSymbolGenerationCounts> {
+        let this = self.clone();
+        Box::pin(async move {
+            totals::scope_symbol_generation_counts(this.control, this.catalog, source_scope).await
         })
     }
 

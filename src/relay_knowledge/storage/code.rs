@@ -8,7 +8,7 @@ use crate::domain::{
     CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
     CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
     CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
-    SoftwareGlobalProjection, SoftwareGlobalRequest,
+    CodeSymbolGenerationCounts, SoftwareGlobalProjection, SoftwareGlobalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -348,6 +348,7 @@ pub trait CodeRepositoryStore: Send + Sync {
         source_scope: String,
         _path_filters: Vec<String>,
         _language_filters: Vec<String>,
+        _exclude_generated: bool,
         _limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
         Box::pin(async move {
@@ -363,12 +364,14 @@ pub trait CodeRepositoryStore: Send + Sync {
         _query: String,
         path_filters: Vec<String>,
         language_filters: Vec<String>,
+        exclude_generated: bool,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
         self.code_file_candidate_paths_for_scope(
             source_scope,
             path_filters,
             language_filters,
+            exclude_generated,
             limit,
         )
     }
@@ -493,6 +496,17 @@ pub trait CodeRepositoryStore: Send + Sync {
         Box::pin(async move {
             Err(StorageError::InvalidInput(format!(
                 "code repository report for '{repository}' is unavailable"
+            )))
+        })
+    }
+
+    fn code_repository_scope_symbol_generation_counts(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, CodeSymbolGenerationCounts> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code symbol generation counts for source scope '{source_scope}' are unavailable"
             )))
         })
     }

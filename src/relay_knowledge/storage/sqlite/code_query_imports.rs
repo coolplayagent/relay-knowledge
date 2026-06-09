@@ -89,6 +89,11 @@ fn search_import_identifier_rows(
     let path_filter = path_filter_sql_for_column("i.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
+    let generated_filter = if request.exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
     let predicates = patterns
         .iter()
         .map(|_| {
@@ -99,7 +104,8 @@ fn search_import_identifier_rows(
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
-               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
+               f.is_generated
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -107,7 +113,8 @@ fn search_import_identifier_rows(
           AND ({predicates})
           {path_filter}
           {language_filter}
-        ORDER BY i.path ASC, i.line_start ASC
+          {generated_filter}
+        ORDER BY f.is_generated ASC, i.path ASC, i.line_start ASC
         LIMIT ?
         "
     );
@@ -176,10 +183,16 @@ fn search_import_path_rows(
     let path_filter = path_filter_sql_for_column("i.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
+    let generated_filter = if request.exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
-               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
+               f.is_generated
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -190,7 +203,8 @@ fn search_import_path_rows(
           )
           {path_filter}
           {language_filter}
-        ORDER BY i.path ASC, i.line_start ASC
+          {generated_filter}
+        ORDER BY f.is_generated ASC, i.path ASC, i.line_start ASC
         LIMIT ?
         "
     );
@@ -280,10 +294,12 @@ fn search_import_fts_rows(
 ) -> Result<Vec<ImportRow>, StorageError> {
     let fts_query = fts_match_query(&request.query);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let exclude_generated_flag = usize::from(request.exclude_generated);
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
-               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
+               f.is_generated
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -295,7 +311,20 @@ fn search_import_fts_rows(
                 AND source_scope = ?
                 AND document_kind = 'import'
                 {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (
+                    SELECT 1 FROM code_repository_files fts_file
+                    WHERE fts_file.source_scope = code_repository_search.source_scope
+                      AND fts_file.path = code_repository_search.path
+                      AND fts_file.is_generated != 0
+                ))
+              ORDER BY coalesce((
+                    SELECT fts_file.is_generated FROM code_repository_files fts_file
+                    WHERE fts_file.source_scope = code_repository_search.source_scope
+                      AND fts_file.path = code_repository_search.path
+                    LIMIT 1
+                  ), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
               LIMIT ?
           )
         ORDER BY i.path ASC, i.line_start ASC
@@ -336,6 +365,7 @@ fn row_to_import(row: &Row<'_>) -> rusqlite::Result<ImportRow> {
         resolution_state: row.get(7)?,
         confidence_basis_points: row.get(8)?,
         confidence_tier: row.get(9)?,
+        is_generated: row.get::<_, i64>(10)? != 0,
     })
 }
 
@@ -360,7 +390,15 @@ fn import_rows_to_hits(
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
+        .filter(|row| {
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            )
+        })
         .filter_map(|row| {
             let excerpt = import_excerpt(
                 &row.module,
@@ -484,6 +522,7 @@ fn import_rows_to_hits(
                         retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
                         score: score + 1.0,
                         excerpt,
+                        is_generated: row.is_generated,
                         degraded_reason: None,
                         edge_kind: Some("import".to_owned()),
                         edge_resolution_state: Some(row.resolution_state),

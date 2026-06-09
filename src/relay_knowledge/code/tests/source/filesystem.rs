@@ -841,6 +841,7 @@ fn broad_filesystem_commit_source_fallback_accepts_narrow_request_scope() {
             language_filters: Vec::new(),
             limit: 5,
             kind: SourceGrepKind::Definition,
+            exclude_generated: false,
         },
     )
     .expect("source fallback should verify the stored broad scope");
@@ -869,6 +870,7 @@ fn stored_filesystem_commit_source_fallback_refuses_live_changes() {
             language_filters: Vec::new(),
             limit: 5,
             kind: SourceGrepKind::Definition,
+            exclude_generated: false,
         },
     )
     .expect("source fallback should handle stale filesystem source");
@@ -905,6 +907,7 @@ fn stored_filesystem_commit_source_fallback_rechecks_bytes_after_read() {
             language_filters: Vec::new(),
             limit: 5,
             kind: SourceGrepKind::Definition,
+            exclude_generated: false,
         },
     )
     .expect("source fallback should handle filesystem read races");
@@ -941,6 +944,7 @@ fn language_filtered_filesystem_commit_source_fallback_reads_current_scope() {
             language_filters,
             limit: 5,
             kind: SourceGrepKind::Definition,
+            exclude_generated: false,
         },
     )
     .expect("source fallback should verify language-filtered filesystem source");
@@ -979,6 +983,7 @@ fn stored_filesystem_commit_source_fallback_survives_later_git_metadata() {
             language_filters: Vec::new(),
             limit: 5,
             kind: SourceGrepKind::Definition,
+            exclude_generated: false,
         },
     )
     .expect("source fallback should verify stored filesystem ref");

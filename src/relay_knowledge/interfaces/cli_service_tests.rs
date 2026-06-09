@@ -295,6 +295,7 @@ fn snapshot(repository_id: &str, source_scope: &str) -> CodeIndexSnapshot {
             byte_len: 1,
             line_count: 1,
             parse_status: CodeParseStatus::Parsed,
+            is_generated: false,
             degraded_reason: None,
         }],
         symbols: Vec::new(),

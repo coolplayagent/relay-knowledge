@@ -18,6 +18,9 @@ mod hybrid_chunk_gate_tests;
 #[path = "code_query_call_ranking_tests.rs"]
 mod call_ranking_tests;
 
+#[path = "code_query_call_generated_tests.rs"]
+mod call_generated_tests;
+
 #[path = "code_query_indirect_call_tests.rs"]
 mod indirect_call_tests;
 
@@ -32,6 +35,9 @@ mod definition_fallback_tests;
 
 #[path = "code_query_reference_ranking_tests.rs"]
 mod reference_ranking_tests;
+
+#[path = "code_query_reference_generated_tests.rs"]
+mod reference_generated_tests;
 
 #[path = "code_query_excerpt_tests.rs"]
 mod excerpt_tests;

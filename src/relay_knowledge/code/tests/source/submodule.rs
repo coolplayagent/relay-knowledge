@@ -149,6 +149,7 @@ fn source_grep_reads_submodule_materialized_source() {
             language_filters: Vec::new(),
             limit: 5,
             kind: SourceGrepKind::Definition,
+            exclude_generated: false,
         },
     )
     .expect("source grep should read submodule blobs");

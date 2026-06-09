@@ -43,8 +43,29 @@ fn parses_repo_query_with_kind_filters_and_freshness() {
             path_filters: vec!["src".to_owned()],
             language_filters: vec!["rust".to_owned()],
             freshness: FreshnessPolicy::WaitUntilFresh,
+            exclude_generated: false,
         }
     );
+}
+
+#[test]
+fn parses_repo_query_exclude_generated_flag() {
+    let command = parse_repo(&[
+        "query".to_owned(),
+        "core".to_owned(),
+        "--query".to_owned(),
+        "RetryPolicy".to_owned(),
+        "--exclude-generated".to_owned(),
+    ])
+    .expect("repo query should parse generated exclusion");
+
+    assert!(matches!(
+        command,
+        RepoCommand::Query {
+            exclude_generated: true,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -431,6 +452,7 @@ fn run_worker() {
             path_filters: Vec::new(),
             language_filters: Vec::new(),
             freshness: FreshnessPolicy::WaitUntilFresh,
+            exclude_generated: false,
         },
         context("query-after-index"),
         OutputFormat::Json,
@@ -483,6 +505,7 @@ fn run_worker() {
             path_filters: Vec::new(),
             language_filters: Vec::new(),
             freshness: FreshnessPolicy::AllowStale,
+            exclude_generated: false,
         },
         context("query"),
         OutputFormat::Json,
@@ -714,6 +737,7 @@ pub fn stable_project_entry() -> &'static str {
                 path_filters: Vec::new(),
                 language_filters: Vec::new(),
                 freshness: FreshnessPolicy::AllowStale,
+                exclude_generated: false,
             },
             context("query-alias"),
             OutputFormat::Json,

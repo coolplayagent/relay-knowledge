@@ -11,6 +11,10 @@ use crate::{
     },
 };
 
+use super::source_fallback_imports::{
+    import_grep_candidate_paths, import_grep_query, local_import_specifier,
+    quoted_import_specifier, relative_path_import_specifier,
+};
 use super::source_fallback_surface::{
     exact_path_hybrid_source_line_score, hit_allows_source_refresh, hit_source_line_is_better,
     hybrid_exact_path_source_fallback, hybrid_source_surface_fallback,
@@ -19,11 +23,11 @@ use super::source_fallback_surface::{
 use super::source_surface::hit_has_complete_source_surface;
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
-const MAX_IMPORT_SOURCE_CANDIDATE_PATHS: usize = 32;
 const DYNAMIC_IMPORT_SOURCE_FALLBACK_BONUS: f64 = 1.1;
 const HYBRID_EXACT_TYPE_DECLARATION_BONUS: f64 = 6.0;
 const REFERENCE_DECLARATION_INTENT_BONUS: f64 = 2.2;
 const REFERENCE_SOURCE_DECLARATION_PENALTY: f64 = -1.9;
+const GENERATED_FILE_SCORE_MULTIPLIER: f64 = 0.35;
 
 pub(super) struct CodeGrepFallbackPlan {
     pub(super) commit: String,
@@ -34,6 +38,7 @@ pub(super) struct CodeGrepFallbackPlan {
     pub(super) limit: usize,
     pub(super) kind: SourceGrepKind,
     pub(super) identity: Option<String>,
+    pub(super) exclude_generated: bool,
     needs_scope_paths: bool,
 }
 
@@ -58,6 +63,7 @@ impl CodeGrepFallbackPlan {
             language_filters: self.language_filters.clone(),
             limit: self.limit,
             kind: self.kind,
+            exclude_generated: self.exclude_generated,
         }
     }
 }
@@ -98,6 +104,7 @@ pub(super) fn plan_code_grep_fallback(
                 limit: request.limit,
                 kind: SourceGrepKind::Definition,
                 identity: Some(identity),
+                exclude_generated: request.exclude_generated,
             })
         }
         CodeQueryKind::References => {
@@ -123,6 +130,7 @@ pub(super) fn plan_code_grep_fallback(
                 limit: request.limit,
                 kind: SourceGrepKind::References,
                 identity: None,
+                exclude_generated: request.exclude_generated,
                 needs_scope_paths,
             })
         }
@@ -144,6 +152,7 @@ pub(super) fn plan_code_grep_fallback(
                 limit: request.limit,
                 kind: SourceGrepKind::Imports,
                 identity: None,
+                exclude_generated: request.exclude_generated,
                 needs_scope_paths,
             })
         }
@@ -158,6 +167,7 @@ pub(super) fn plan_code_grep_fallback(
                     limit: request.limit,
                     kind: SourceGrepKind::Hybrid,
                     identity: None,
+                    exclude_generated: request.exclude_generated,
                     needs_scope_paths: false,
                 });
             }
@@ -171,6 +181,7 @@ pub(super) fn plan_code_grep_fallback(
                     limit: request.limit,
                     kind: SourceGrepKind::Hybrid,
                     identity: None,
+                    exclude_generated: request.exclude_generated,
                     needs_scope_paths: false,
                 });
             }
@@ -196,6 +207,7 @@ pub(super) fn plan_code_grep_fallback(
                 limit: request.limit.saturating_sub(results.len()).max(1),
                 kind: SourceGrepKind::Hybrid,
                 identity: None,
+                exclude_generated: request.exclude_generated,
                 needs_scope_paths,
             })
         }
@@ -217,8 +229,10 @@ pub(super) fn append_code_grep_fallback(
     let base_fallback_score = grep_score(plan.kind, score_bounds);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
-        let fallback_score =
-            source_grep_match_score(request, plan, &matched, score_bounds, base_fallback_score);
+        let fallback_score = generated_adjusted_fallback_score(
+            source_grep_match_score(request, plan, &matched, score_bounds, base_fallback_score),
+            matched.is_generated,
+        );
         if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == matched.path
                 && hit.line_range.start == matched.line_range.start
@@ -292,6 +306,8 @@ pub(super) fn append_definition_source_fallback(
     let best_score = results.first().map_or(0.0, |hit| hit.score);
     let metadata = path_metadata(results);
     for declaration in declarations {
+        let declaration_score =
+            generated_adjusted_fallback_score(best_score + 4.0, declaration.is_generated);
         if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == declaration.path
                 && hit.line_range.start == declaration.line_range.start
@@ -300,7 +316,7 @@ pub(super) fn append_definition_source_fallback(
             add_retrieval_layer(existing, CodeRetrievalLayer::Definition);
             add_retrieval_layer(existing, CodeRetrievalLayer::Lexical);
             add_retrieval_layer(existing, CodeRetrievalLayer::TextFallback);
-            existing.score = existing.score.max(best_score + 4.0);
+            existing.score = existing.score.max(declaration_score);
             continue;
         }
         let path_metadata = metadata.get(&declaration.path);
@@ -345,7 +361,7 @@ pub(super) fn append_definition_source_fallback(
             edge_target_hint: None,
             edge_confidence_basis_points: None,
             edge_confidence_tier: None,
-            score: best_score + 4.0,
+            score: declaration_score,
             excerpt: declaration.excerpt,
         });
     }
@@ -501,6 +517,14 @@ fn source_grep_match_score(
     };
 
     (base_score + adjustment).max(0.0)
+}
+
+fn generated_adjusted_fallback_score(score: f64, is_generated: bool) -> f64 {
+    if is_generated {
+        score * GENERATED_FILE_SCORE_MULTIPLIER
+    } else {
+        score
+    }
 }
 
 fn import_source_grep_score_adjustment(query: &str, specifier: &str, excerpt: &str) -> f64 {
@@ -718,7 +742,7 @@ fn canonical_symbol_leaf_matches(canonical_symbol_id: &str, identity: &str) -> b
         .is_some_and(|leaf| leaf == identity)
 }
 
-fn push_candidate_path(paths: &mut Vec<String>, path: &str) {
+pub(super) fn push_candidate_path(paths: &mut Vec<String>, path: &str) {
     let normalized = normalize_filter_path(path);
     if !normalized.is_empty() && !paths.iter().any(|existing| existing == normalized) {
         paths.push(normalized.to_owned());
@@ -753,7 +777,7 @@ fn results_define_identity(results: &[CodeRetrievalHit], identity: &str) -> bool
     })
 }
 
-fn definition_identity(query: &str) -> Option<String> {
+pub(super) fn definition_identity(query: &str) -> Option<String> {
     let mut identity = None;
     for raw_token in query.split_whitespace().map(str::trim) {
         if raw_token.contains('/') || raw_token.contains('\\') {
@@ -814,141 +838,6 @@ fn leading_source_identifier(query: &str) -> Option<String> {
     None
 }
 
-fn import_grep_query(
-    request: &CodeRetrievalRequest,
-    results: &[CodeRetrievalHit],
-) -> Option<String> {
-    if let Some(query) = results
-        .iter()
-        .find_map(unindexed_external_import_specifier)
-        .and_then(|specifier| {
-            if specifier.len() <= 128 {
-                Some(specifier)
-            } else {
-                definition_identity(&specifier)
-            }
-        })
-    {
-        return Some(query);
-    }
-
-    local_relative_import_query(request, results)
-}
-
-fn local_relative_import_query(
-    request: &CodeRetrievalRequest,
-    results: &[CodeRetrievalHit],
-) -> Option<String> {
-    if results.is_empty() || results.len() >= request.limit {
-        return None;
-    }
-    let specifier = import_specifier(&request.query)?;
-    (specifier.len() <= 128 && relative_path_import_specifier(&specifier)).then_some(specifier)
-}
-
-fn import_grep_candidate_paths(results: &[CodeRetrievalHit], specifier: &str) -> Vec<String> {
-    let mut paths = Vec::new();
-    for hit in results {
-        let Some(candidate) = unindexed_external_import_specifier(hit) else {
-            continue;
-        };
-        if candidate == specifier {
-            push_candidate_path(&mut paths, &hit.path);
-        }
-        if paths.len() >= MAX_IMPORT_SOURCE_CANDIDATE_PATHS {
-            break;
-        }
-    }
-
-    paths
-}
-
-fn unindexed_external_import_specifier(hit: &CodeRetrievalHit) -> Option<String> {
-    if hit.edge_kind.as_deref() != Some("import")
-        || hit.edge_resolution_state.as_deref() != Some("unresolved")
-    {
-        return None;
-    }
-
-    hit.edge_target_hint
-        .as_deref()
-        .and_then(external_import_specifier)
-}
-
-fn external_import_specifier(target_hint: &str) -> Option<String> {
-    let specifier = import_specifier(target_hint)?;
-    (!local_import_specifier(&specifier)).then_some(specifier)
-}
-
-fn import_specifier(target_hint: &str) -> Option<String> {
-    let trimmed = target_hint.trim().trim_end_matches(';').trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if let Some(quoted) = quoted_import_specifier(trimmed) {
-        return Some(quoted.to_owned());
-    }
-    if let Some(rest) = trimmed.strip_prefix("pub use ") {
-        return statement_head(rest);
-    }
-    if let Some(rest) = trimmed.strip_prefix("use ") {
-        return statement_head(rest);
-    }
-    if let Some(rest) = trimmed.strip_prefix("from ") {
-        let module = rest
-            .split_once(" import ")
-            .map_or(rest, |(module, _)| module);
-        return statement_head(module);
-    }
-    if let Some(rest) = trimmed.strip_prefix("import ") {
-        let module = rest.split_once(" from ").map_or(rest, |(_, module)| module);
-        return statement_head(module);
-    }
-
-    statement_head(trimmed)
-}
-
-fn quoted_import_specifier(value: &str) -> Option<&str> {
-    let mut quoted = None;
-    for quote in ['"', '\'', '`'] {
-        if let Some(start) = value.find(quote) {
-            let after_start = value.get(start + quote.len_utf8()..)?;
-            if let Some(end) = after_start.find(quote) {
-                quoted = Some(after_start.get(..end)?);
-            }
-        }
-    }
-    quoted.filter(|specifier| !specifier.trim().is_empty())
-}
-
-fn statement_head(value: &str) -> Option<String> {
-    let head = value
-        .trim()
-        .trim_matches(['"', '\'', '`', '<', '>'])
-        .trim_end_matches(';')
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches(',')
-        .trim();
-    (!head.is_empty()).then(|| head.to_owned())
-}
-
-fn local_import_specifier(specifier: &str) -> bool {
-    let specifier = specifier.trim();
-    specifier.starts_with('.')
-        || specifier.starts_with('/')
-        || matches!(specifier, "crate" | "self" | "super")
-        || specifier.starts_with("crate::")
-        || specifier.starts_with("self::")
-        || specifier.starts_with("super::")
-}
-
-fn relative_path_import_specifier(specifier: &str) -> bool {
-    let specifier = specifier.trim();
-    specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/')
-}
-
 fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     let mut merged = Vec::new();
     for value in left.iter().chain(right.iter()) {
@@ -1003,3 +892,11 @@ mod tests;
 #[cfg(test)]
 #[path = "source_fallback_reference_tests.rs"]
 mod reference_tests;
+
+#[cfg(test)]
+#[path = "source_fallback_generated_tests.rs"]
+mod generated_tests;
+
+#[cfg(test)]
+#[path = "source_fallback_surface_tests.rs"]
+mod surface_tests;

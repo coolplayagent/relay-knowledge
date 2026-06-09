@@ -97,8 +97,23 @@ fn parses_repo_set_commands_and_validation_errors() {
             path_filters: vec!["src".to_owned()],
             language_filters: vec!["rust".to_owned()],
             freshness: FreshnessPolicy::WaitUntilFresh,
+            exclude_generated: false,
         }
     );
+    assert!(matches!(
+        parse_repo_set(&[
+            "query".to_owned(),
+            "workspace".to_owned(),
+            "--query".to_owned(),
+            "RetryPolicy".to_owned(),
+            "--exclude-generated".to_owned(),
+        ])
+        .expect("query should parse generated exclusion"),
+        RepoSetCommand::Query {
+            exclude_generated: true,
+            ..
+        }
+    ));
     assert_eq!(
         parse_repo_set(&[
             "query".to_owned(),
@@ -114,6 +129,7 @@ fn parses_repo_set_commands_and_validation_errors() {
             path_filters: Vec::new(),
             language_filters: Vec::new(),
             freshness: FreshnessPolicy::AllowStale,
+            exclude_generated: false,
         }
     );
     assert_eq!(
@@ -282,6 +298,7 @@ pub fn serve() -> u32 {
             path_filters: Vec::new(),
             language_filters: Vec::new(),
             freshness: FreshnessPolicy::GraphOnly,
+            exclude_generated: false,
         },
         context("query-graph-only"),
         OutputFormat::Json,
@@ -305,6 +322,7 @@ pub fn serve() -> u32 {
             path_filters: Vec::new(),
             language_filters: Vec::new(),
             freshness: FreshnessPolicy::WaitUntilFresh,
+            exclude_generated: false,
         },
         context("query-wait-before-refresh"),
         OutputFormat::Json,
@@ -327,6 +345,7 @@ pub fn serve() -> u32 {
             path_filters: Vec::new(),
             language_filters: Vec::new(),
             freshness: FreshnessPolicy::AllowStale,
+            exclude_generated: false,
         },
         context("query"),
         OutputFormat::Json,

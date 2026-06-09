@@ -445,6 +445,7 @@ fn file(source_scope: &str, file_id: &str, path: &str) -> RepositoryCodeFileReco
         byte_len: 20,
         line_count: 1,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

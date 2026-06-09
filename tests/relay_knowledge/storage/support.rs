@@ -73,6 +73,7 @@ pub(super) fn snapshot(
         byte_len: content.len(),
         line_count: 1,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     };
     let chunk = RepositoryCodeChunkRecord {

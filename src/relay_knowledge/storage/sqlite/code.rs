@@ -14,6 +14,9 @@ mod code_query_hits;
 #[path = "code_feature_flags.rs"]
 mod code_feature_flags;
 
+#[path = "code_generated.rs"]
+mod code_generated;
+
 #[path = "code_query_scope.rs"]
 mod code_query_scope;
 
@@ -104,6 +107,22 @@ mod code_query_accuracy_tests;
 mod code_query_import_target_tests;
 
 #[cfg(test)]
+#[path = "code_query_import_generated_tests.rs"]
+mod code_query_import_generated_tests;
+
+#[cfg(test)]
+#[path = "code_query_chunk_generated_tests.rs"]
+mod code_query_chunk_generated_tests;
+
+#[cfg(test)]
+#[path = "code_query_symbol_generated_tests.rs"]
+mod code_query_symbol_generated_tests;
+
+#[cfg(test)]
+#[path = "code_query_ambiguous_callee_generated_tests.rs"]
+mod code_query_ambiguous_callee_generated_tests;
+
+#[cfg(test)]
 #[path = "code_query_import_ranking_tests.rs"]
 mod code_query_import_ranking_tests;
 
@@ -164,8 +183,8 @@ use crate::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
         CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
         CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
-        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, SoftwareGlobalProjection,
-        SoftwareGlobalRequest,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeSymbolGenerationCounts,
+        SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
@@ -409,6 +428,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         source_scope: String,
         path_filters: Vec<String>,
         language_filters: Vec<String>,
+        exclude_generated: bool,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
         self.run_read(move |connection| {
@@ -417,6 +437,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
                 &source_scope,
                 &path_filters,
                 &language_filters,
+                exclude_generated,
                 limit,
             )
         })
@@ -428,6 +449,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         query: String,
         path_filters: Vec<String>,
         language_filters: Vec<String>,
+        exclude_generated: bool,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
         self.run_read(move |connection| {
@@ -437,6 +459,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
                 &query,
                 &path_filters,
                 &language_filters,
+                exclude_generated,
                 limit,
             )
         })
@@ -554,6 +577,19 @@ impl CodeRepositoryStore for SqliteGraphStore {
         repository: String,
     ) -> StorageFuture<'_, CodeRepositoryReport> {
         self.run_read(move |connection| code_report::repository_report(connection, &repository))
+    }
+
+    fn code_repository_scope_symbol_generation_counts(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, CodeSymbolGenerationCounts> {
+        self.run_read(move |connection| {
+            let counts = code_report::scope_symbol_generation_counts(connection, &source_scope)?;
+            Ok(CodeSymbolGenerationCounts {
+                handwritten_symbol_count: counts.handwritten,
+                generated_symbol_count: counts.generated,
+            })
+        })
     }
 
     fn refresh_software_global_projection(

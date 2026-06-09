@@ -81,6 +81,15 @@ pub(super) fn repo_set() -> CliCommandSpec {
                 Some("allow-stale"),
                 &["allow-stale", "wait-until-fresh", "graph-only"],
             ),
+            opt(
+                "--exclude-generated",
+                None,
+                false,
+                false,
+                "Exclude generated files from repo-set query results.",
+                None,
+                &[],
+            ),
         ],
         &[
             "relay-knowledge repo-set create workspace --format json",
@@ -90,6 +99,7 @@ pub(super) fn repo_set() -> CliCommandSpec {
         ],
         &[
             "Repository sets store member snapshot pointers and overlay edges; they never copy code fact rows.",
+            "Generated files remain indexed in member repositories; --exclude-generated only filters retrieval results.",
         ],
     )
 }

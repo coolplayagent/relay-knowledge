@@ -7,6 +7,7 @@ use std::{
 
 use crate::domain::{CodeRepositoryRegistration, RepositoryCodeRange};
 
+use super::common::generated_detection;
 use super::{
     CodeIndexError,
     languages::language_id,
@@ -28,6 +29,7 @@ pub(crate) const SOURCE_GREP_CANDIDATE_FILE_LIMIT: usize = 256;
 const MAX_GREP_CANDIDATE_FILES: usize = SOURCE_GREP_CANDIDATE_FILE_LIMIT;
 const MAX_GREP_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GREP_LINE_BYTES: usize = 4096;
+const GENERATED_EXCLUSION_READ_BUDGET_MULTIPLIER: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceGrepKind {
@@ -45,6 +47,7 @@ pub(crate) struct SourceGrepRequest {
     pub(crate) language_filters: Vec<String>,
     pub(crate) limit: usize,
     pub(crate) kind: SourceGrepKind,
+    pub(crate) exclude_generated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +63,7 @@ pub(crate) struct SourceGrepMatch {
     pub(crate) excerpt: String,
     pub(crate) byte_range: RepositoryCodeRange,
     pub(crate) line_range: RepositoryCodeRange,
+    pub(crate) is_generated: bool,
 }
 
 pub(crate) fn source_grep_matches(
@@ -85,9 +89,11 @@ pub(crate) fn source_grep_matches(
         registration,
         commit,
         &candidates.paths,
-        SourceMaterializationScope {
+        SourceMaterializationOptions {
             path_filters: &request.path_filters,
             language_filters: &request.language_filters,
+            exclude_generated: request.exclude_generated,
+            max_bytes: MAX_GREP_BYTES,
         },
         &mut tree,
     )?;
@@ -145,6 +151,9 @@ fn selected_candidate_paths(request: &SourceGrepRequest) -> CandidatePaths {
         if !safe_git_blob_path(path) || !path_filter_allows(path, &request.path_filters) {
             continue;
         }
+        if request.exclude_generated && generated_detection::path_has_generated_signal(path) {
+            continue;
+        }
         let language = language_id(path).unwrap_or("unknown");
         if !language_filter_allows(path, language, &request.language_filters) {
             continue;
@@ -161,44 +170,37 @@ fn selected_candidate_paths(request: &SourceGrepRequest) -> CandidatePaths {
 }
 
 #[derive(Clone, Copy)]
-struct SourceMaterializationScope<'a> {
+struct SourceMaterializationOptions<'a> {
     path_filters: &'a [String],
     language_filters: &'a [String],
+    exclude_generated: bool,
+    max_bytes: usize,
 }
 
 fn materialize_source_blobs(
     registration: &CodeRepositoryRegistration,
     commit: &str,
     paths: &[String],
-    scope: SourceMaterializationScope<'_>,
+    options: SourceMaterializationOptions<'_>,
     tree: &mut TempSourceTree,
 ) -> Result<MaterializedFiles, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
-    materialize_source_blobs_with_budget(
-        registration,
-        &root,
-        commit,
-        paths,
-        scope,
-        tree,
-        MAX_GREP_BYTES,
-    )
+    materialize_source_blobs_at_root(registration, &root, commit, paths, options, tree)
 }
 
-fn materialize_source_blobs_with_budget(
+fn materialize_source_blobs_at_root(
     registration: &CodeRepositoryRegistration,
     root: &Path,
     commit: &str,
     paths: &[String],
-    scope: SourceMaterializationScope<'_>,
+    options: SourceMaterializationOptions<'_>,
     tree: &mut TempSourceTree,
-    max_bytes: usize,
 ) -> Result<MaterializedFiles, CodeIndexError> {
     let verified_hashes = match ensure_source_grep_commit_current(
         registration,
         commit,
-        scope.path_filters,
-        scope.language_filters,
+        options.path_filters,
+        options.language_filters,
     ) {
         Ok(hashes) => hashes,
         Err(error) if source_commit_is_filesystem(commit) => {
@@ -209,25 +211,43 @@ fn materialize_source_blobs_with_budget(
         }
         Err(error) => return Err(error),
     };
-    let materialized = if let Some(selection) =
-        candidate_source_blob_selection(root, commit, paths, max_bytes)
+    let materialized = if options.exclude_generated {
+        materialize_source_blobs_per_path(
+            root,
+            commit,
+            paths,
+            tree,
+            options.max_bytes,
+            verified_hashes.as_ref(),
+            options.exclude_generated,
+        )?
+    } else if let Some(selection) =
+        candidate_source_blob_selection(root, commit, paths, options.max_bytes)
     {
-        materialize_selected_source_blobs(root, commit, selection, tree, verified_hashes.as_ref())?
+        materialize_selected_source_blobs(
+            root,
+            commit,
+            selection,
+            tree,
+            verified_hashes.as_ref(),
+            options.exclude_generated,
+        )?
     } else {
         materialize_source_blobs_per_path(
             root,
             commit,
             paths,
             tree,
-            max_bytes,
+            options.max_bytes,
             verified_hashes.as_ref(),
+            options.exclude_generated,
         )?
     };
     if let Err(error) = ensure_source_grep_commit_current(
         registration,
         commit,
-        scope.path_filters,
-        scope.language_filters,
+        options.path_filters,
+        options.language_filters,
     ) {
         if source_commit_is_filesystem(commit) {
             return Ok(MaterializedFiles {
@@ -288,6 +308,7 @@ fn materialize_selected_source_blobs(
     selection: BlobCandidateSelection,
     tree: &mut TempSourceTree,
     expected_hashes: Option<&BTreeMap<String, String>>,
+    exclude_generated: bool,
 ) -> Result<MaterializedFiles, CodeIndexError> {
     let mut file_count = 0usize;
     for (path, bytes) in selection.paths.iter().zip(candidate_source_blobs(
@@ -299,6 +320,9 @@ fn materialize_selected_source_blobs(
         let Some(bytes) = bytes else {
             continue;
         };
+        if exclude_generated && generated_detection::is_generated_file(path, &bytes) {
+            continue;
+        }
         tree.write(path, bytes.as_slice())?;
         file_count += 1;
     }
@@ -318,30 +342,110 @@ fn materialize_source_blobs_per_path(
     tree: &mut TempSourceTree,
     max_bytes: usize,
     expected_hashes: Option<&BTreeMap<String, String>>,
+    exclude_generated: bool,
 ) -> Result<MaterializedFiles, CodeIndexError> {
-    let mut byte_count = 0usize;
+    let sizes = source_blob_sizes_after_policy_verification(root, commit, paths).ok();
+    let mut budget = SourceMaterializationBudget::new(max_bytes, exclude_generated);
     let mut file_count = 0usize;
-    let mut exhausted = false;
-    for path in paths {
+    for (index, path) in paths.iter().enumerate() {
+        if let Some(size) = sizes
+            .as_ref()
+            .and_then(|sizes| sizes.get(index))
+            .copied()
+            .flatten()
+            && !budget.may_read_known_size(size)
+        {
+            continue;
+        }
         let Ok(bytes) =
             source_bytes_after_content_verification(root, commit, path, expected_hashes)
         else {
             continue;
         };
-        if byte_count.saturating_add(bytes.len()) > max_bytes {
-            exhausted = true;
+        budget.record_read(bytes.len());
+        if bytes.len() > max_bytes {
+            budget.mark_exhausted();
+            continue;
+        }
+        if exclude_generated && generated_detection::is_generated_file(path, &bytes) {
+            continue;
+        }
+        if !budget.try_materialize(bytes.len()) {
             continue;
         }
         tree.write(path, &bytes)?;
-        byte_count += bytes.len();
         file_count += 1;
     }
 
     Ok(MaterializedFiles {
         file_count,
-        degraded_reason: exhausted
+        degraded_reason: budget
+            .is_exhausted()
             .then(|| "source fallback materialized byte budget exhausted".to_owned()),
     })
+}
+
+struct SourceMaterializationBudget {
+    materialized_bytes: usize,
+    read_bytes: usize,
+    materialized_limit: usize,
+    read_limit: usize,
+    exclude_generated: bool,
+    exhausted: bool,
+}
+
+impl SourceMaterializationBudget {
+    fn new(materialized_limit: usize, exclude_generated: bool) -> Self {
+        let read_limit = if exclude_generated {
+            materialized_limit.saturating_mul(GENERATED_EXCLUSION_READ_BUDGET_MULTIPLIER)
+        } else {
+            materialized_limit
+        };
+        Self {
+            materialized_bytes: 0,
+            read_bytes: 0,
+            materialized_limit,
+            read_limit,
+            exclude_generated,
+            exhausted: false,
+        }
+    }
+
+    fn may_read_known_size(&mut self, size: usize) -> bool {
+        if size > self.materialized_limit
+            || self.read_bytes.saturating_add(size) > self.read_limit
+            || (!self.exclude_generated
+                && self.materialized_bytes.saturating_add(size) > self.materialized_limit)
+        {
+            self.exhausted = true;
+            return false;
+        }
+        true
+    }
+
+    fn record_read(&mut self, size: usize) {
+        self.read_bytes = self.read_bytes.saturating_add(size);
+        if self.read_bytes > self.read_limit {
+            self.exhausted = true;
+        }
+    }
+
+    fn try_materialize(&mut self, size: usize) -> bool {
+        if self.materialized_bytes.saturating_add(size) > self.materialized_limit {
+            self.exhausted = true;
+            return false;
+        }
+        self.materialized_bytes += size;
+        true
+    }
+
+    fn mark_exhausted(&mut self) {
+        self.exhausted = true;
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.exhausted
+    }
 }
 
 struct BlobCandidateSelection {
@@ -410,9 +514,12 @@ fn internal_source_grep_matches(
         return Ok(Vec::new());
     }
 
-    let mut matches = Vec::new();
+    let mut handwritten_matches = Vec::new();
+    let mut generated_matches = Vec::new();
     for path in paths {
-        if matches.len() >= request.limit {
+        if handwritten_matches.len() >= request.limit
+            && (request.exclude_generated || generated_matches.len() >= request.limit)
+        {
             break;
         }
         let Ok(bytes) = fs::read(root.join(path)) else {
@@ -421,29 +528,59 @@ fn internal_source_grep_matches(
         if source_bytes_are_binary(&bytes) {
             continue;
         }
+        let is_generated = generated_detection::is_generated_file(path, &bytes);
+        if request.exclude_generated && is_generated {
+            continue;
+        }
+        let matches = if is_generated {
+            &mut generated_matches
+        } else {
+            &mut handwritten_matches
+        };
+        if matches.len() >= request.limit {
+            continue;
+        }
         push_internal_file_matches(
-            path,
-            &bytes,
+            InternalFileScan {
+                path,
+                bytes: &bytes,
+                is_generated,
+            },
             &queries,
             request.kind,
             request.limit,
             &accepts,
-            &mut matches,
+            matches,
         )?;
     }
 
+    let mut matches = handwritten_matches;
+    if matches.len() < request.limit {
+        matches.extend(
+            generated_matches
+                .into_iter()
+                .take(request.limit - matches.len()),
+        );
+    }
     Ok(matches)
 }
 
+struct InternalFileScan<'a> {
+    path: &'a str,
+    bytes: &'a [u8],
+    is_generated: bool,
+}
+
 fn push_internal_file_matches(
-    path: &str,
-    bytes: &[u8],
+    input: InternalFileScan<'_>,
     queries: &[Vec<u8>],
     kind: SourceGrepKind,
     limit: usize,
     accepts: &impl Fn(&SourceGrepMatch) -> bool,
     matches: &mut Vec<SourceGrepMatch>,
 ) -> Result<(), CodeIndexError> {
+    let path = input.path;
+    let bytes = input.bytes;
     let mut line_start = 0usize;
     let mut line_number = 1usize;
     let mut previous_line = None;
@@ -510,6 +647,7 @@ fn push_internal_file_matches(
                 excerpt,
                 byte_range,
                 line_range,
+                is_generated: input.is_generated,
             };
             if accepts(&matched) {
                 matches.push(matched);
@@ -677,320 +815,4 @@ impl Drop for TempSourceTree {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::process::Command;
-
-    use super::*;
-
-    #[test]
-    fn internal_scanner_filters_definition_lines_before_enforcing_limit() {
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        tree.write("src/lib.c", b"return target();\nint target(void);\n")
-            .expect("source path should be written");
-        let request = SourceGrepRequest {
-            query: "target".to_owned(),
-            paths: vec!["src/lib.c".to_owned()],
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-            limit: 1,
-            kind: SourceGrepKind::Definition,
-        };
-
-        let matches =
-            internal_source_grep_matches(&tree.root, &request.paths, &request, |matched| {
-                source_line_defines_identity(&matched.excerpt, "target")
-            })
-            .expect("internal scanner should apply definition acceptance");
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].line_range.start, 2);
-        assert_eq!(matches[0].excerpt, "int target(void);");
-    }
-
-    #[test]
-    fn internal_scanner_includes_template_preamble_for_declaration_lines() {
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        tree.write(
-            "include/cache.h",
-            b"template <typename InstanceType>\nclass NoDestructor {};\n",
-        )
-        .expect("source path should be written");
-        let request = SourceGrepRequest {
-            query: "NoDestructor".to_owned(),
-            paths: vec!["include/cache.h".to_owned()],
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-            limit: 1,
-            kind: SourceGrepKind::Definition,
-        };
-
-        let matches =
-            internal_source_grep_matches(&tree.root, &request.paths, &request, |matched| {
-                source_grep_accepts(SourceGrepKind::Definition, "NoDestructor", matched)
-            })
-            .expect("internal scanner should include template context");
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(
-            matches[0].line_range,
-            RepositoryCodeRange { start: 1, end: 2 }
-        );
-        assert!(
-            matches[0]
-                .excerpt
-                .contains("template <typename InstanceType>")
-        );
-        assert!(matches[0].excerpt.contains("class NoDestructor"));
-    }
-
-    #[test]
-    fn hybrid_scanner_tokenizes_query_and_keeps_initializer_header() {
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        tree.write(
-            "src/generated_table.c",
-            b"static const struct rk_table_row rk_rows[] = {\n  [RK_STAGE_READ] = {\n    .name = \"read\",\n    .read = rk_driver_read,\n  },\n};\n",
-        )
-        .expect("source path should be written");
-        let request = SourceGrepRequest {
-            query: "compound initializer table row read function pointer".to_owned(),
-            paths: vec!["src/generated_table.c".to_owned()],
-            path_filters: vec!["src/generated_table.c".to_owned()],
-            language_filters: vec!["c".to_owned()],
-            limit: 5,
-            kind: SourceGrepKind::Hybrid,
-        };
-
-        let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
-            .expect("hybrid scanner should search query terms");
-
-        assert!(matches.iter().any(|matched| {
-            matched.excerpt.contains("[RK_STAGE_READ]")
-                && matched.excerpt.contains(".read = rk_driver_read")
-        }));
-    }
-
-    #[test]
-    fn unknown_language_filter_allows_document_source_fallback_candidates() {
-        assert!(language_filter_allows(
-            "docs/operations.md",
-            "markdown",
-            &["unknown".to_owned()]
-        ));
-        assert!(!language_filter_allows(
-            "src/service.py",
-            "python",
-            &["unknown".to_owned()]
-        ));
-    }
-
-    #[test]
-    fn internal_scanner_searches_materialized_paths_without_ripgrep() {
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        tree.write(
-            ".github/workflows/ci.yml",
-            b"# RK_INTERNAL_SCANNER_REFERENCE\nname: ci\n",
-        )
-        .expect("hidden path should be written");
-        let request = SourceGrepRequest {
-            query: "RK_INTERNAL_SCANNER_REFERENCE".to_owned(),
-            paths: vec![".github/workflows/ci.yml".to_owned()],
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-            limit: 5,
-            kind: SourceGrepKind::References,
-        };
-
-        let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
-            .expect("internal scanner should read materialized files");
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].path, ".github/workflows/ci.yml");
-        assert_eq!(matches[0].line_range.start, 1);
-        assert_eq!(matches[0].byte_range.start, 2);
-        assert!(matches[0].excerpt.contains("RK_INTERNAL_SCANNER_REFERENCE"));
-    }
-
-    #[test]
-    fn internal_scanner_returns_bounded_excerpts_for_long_non_definition_lines() {
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        let prefix = "x".repeat(MAX_GREP_LINE_BYTES + 64);
-        let suffix = "y".repeat(MAX_GREP_LINE_BYTES + 64);
-        let source = format!("{prefix}RK_LONG_REFERENCE{suffix}\n");
-        tree.write("dist/bundle.js", source.as_bytes())
-            .expect("long source path should be written");
-        let request = SourceGrepRequest {
-            query: "RK_LONG_REFERENCE".to_owned(),
-            paths: vec!["dist/bundle.js".to_owned()],
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-            limit: 5,
-            kind: SourceGrepKind::References,
-        };
-
-        let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
-            .expect("internal scanner should return long-line matches");
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].line_range.start, 1);
-        assert_eq!(matches[0].byte_range.start, prefix.len() as u32);
-        assert!(matches[0].excerpt.contains("RK_LONG_REFERENCE"));
-        assert!(matches[0].excerpt.len() <= MAX_GREP_LINE_BYTES);
-    }
-
-    #[test]
-    fn internal_scanner_skips_binary_blobs() {
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        tree.write("assets/blob.bin", b"prefix RK_BINARY_REFERENCE\0suffix\n")
-            .expect("binary path should be written");
-        let request = SourceGrepRequest {
-            query: "RK_BINARY_REFERENCE".to_owned(),
-            paths: vec!["assets/blob.bin".to_owned()],
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-            limit: 5,
-            kind: SourceGrepKind::References,
-        };
-
-        let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
-            .expect("internal scanner should skip binary blobs without failing");
-
-        assert!(matches.is_empty());
-    }
-
-    #[test]
-    fn internal_scanner_primary_path_does_not_report_ripgrep_unavailable() {
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        tree.write("src/component.tsx", b"import React from \"react\";\n")
-            .expect("source path should be written");
-        let request = SourceGrepRequest {
-            query: "react".to_owned(),
-            paths: vec!["src/component.tsx".to_owned()],
-            path_filters: Vec::new(),
-            language_filters: vec!["tsx".to_owned()],
-            limit: 10,
-            kind: SourceGrepKind::Imports,
-        };
-
-        let outcome =
-            source_grep_matches_from_materialized_tree(&tree.root, &request.paths, &request, None)
-                .expect("internal scanner should search materialized source");
-
-        assert_eq!(outcome.matches.len(), 1);
-        assert_eq!(outcome.matches[0].path, "src/component.tsx");
-        assert_eq!(outcome.matches[0].language_id, "tsx");
-        assert_eq!(outcome.matches[0].excerpt, "import React from \"react\";");
-        assert!(outcome.degraded_reason.is_none());
-    }
-
-    #[test]
-    fn materialization_skips_oversized_blob_and_keeps_later_candidates() {
-        let repo = TestRepo::create("grep-materialization-budget");
-        repo.write("large.txt", "abcdef");
-        repo.write("small.txt", "xy");
-        repo.git(["add", "."]);
-        repo.git(["commit", "-m", "budget fixture"]);
-        let mut tree = TempSourceTree::create().expect("temp tree should be created");
-        let paths = vec!["large.txt".to_owned(), "small.txt".to_owned()];
-        let registration = CodeRepositoryRegistration::new(
-            "repo",
-            "alias",
-            repo.root.display().to_string(),
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("registration should validate");
-
-        let materialized = materialize_source_blobs_with_budget(
-            &registration,
-            &repo.root,
-            "HEAD",
-            &paths,
-            SourceMaterializationScope {
-                path_filters: &[],
-                language_filters: &[],
-            },
-            &mut tree,
-            5,
-        )
-        .expect("materialization should succeed");
-
-        assert_eq!(materialized.file_count, 1);
-        assert!(materialized.degraded_reason.is_some());
-        assert!(!tree.root.join("large.txt").exists());
-        assert_eq!(
-            fs::read_to_string(tree.root.join("small.txt")).expect("small blob should exist"),
-            "xy"
-        );
-    }
-
-    #[test]
-    fn candidate_paths_apply_scope_filters_and_budget() {
-        let request = SourceGrepRequest {
-            query: "target".to_owned(),
-            paths: vec![
-                "src/lib.rs".to_owned(),
-                "../bad.rs".to_owned(),
-                "tests/lib.rs".to_owned(),
-                "src/app.py".to_owned(),
-            ],
-            path_filters: vec!["src".to_owned()],
-            language_filters: vec!["rust".to_owned()],
-            limit: 5,
-            kind: SourceGrepKind::Hybrid,
-        };
-
-        let candidates = selected_candidate_paths(&request);
-
-        assert_eq!(candidates.paths, ["src/lib.rs"]);
-    }
-
-    struct TestRepo {
-        root: PathBuf,
-    }
-
-    impl TestRepo {
-        fn create(name: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default();
-            let root = std::env::temp_dir().join(format!(
-                "relay-knowledge-{name}-{}-{nanos}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&root).expect("repo directory should be created");
-            let repo = Self { root };
-            repo.git(["init"]);
-            repo.git(["config", "user.email", "relay@example.invalid"]);
-            repo.git(["config", "user.name", "Relay Test"]);
-            repo
-        }
-
-        fn write(&self, relative: &str, content: &str) {
-            let path = self.root.join(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).expect("parent directory should exist");
-            }
-            fs::write(path, content).expect("fixture file should be written");
-        }
-
-        fn git<const N: usize>(&self, args: [&str; N]) {
-            let output = Command::new("git")
-                .current_dir(&self.root)
-                .args(args)
-                .output()
-                .expect("git should run");
-            assert!(
-                output.status.success(),
-                "git failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-    }
-
-    impl Drop for TestRepo {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-}
+mod tests;

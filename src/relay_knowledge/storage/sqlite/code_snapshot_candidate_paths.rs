@@ -13,6 +13,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_scope(
     source_scope: &str,
     path_filters: &[String],
     language_filters: &[String],
+    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
     if limit == 0 {
@@ -20,6 +21,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_scope(
     }
     let path_filter = path_filter_sql_for_column("path", path_filters);
     let language_filter = language_filter_sql_for_column("language_id", language_filters);
+    let generated_filter = generated_filter_sql(exclude_generated, "is_generated");
     let sql = format!(
         "
         SELECT path
@@ -27,6 +29,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_scope(
         WHERE source_scope = ?
           {path_filter}
           {language_filter}
+          {generated_filter}
         ORDER BY path ASC
         LIMIT ?
         "
@@ -48,6 +51,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_query_scope(
     query: &str,
     path_filters: &[String],
     language_filters: &[String],
+    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
     match retry_code_search_operation(|| {
@@ -57,6 +61,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_query_scope(
             query,
             path_filters,
             language_filters,
+            exclude_generated,
             limit,
         )
     }) {
@@ -66,6 +71,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_query_scope(
             source_scope,
             path_filters,
             language_filters,
+            exclude_generated,
             limit,
         ),
         Err(error) if candidate_path_search_can_use_scope_fallback(&error) => {
@@ -75,6 +81,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_query_scope(
                 query,
                 path_filters,
                 language_filters,
+                exclude_generated,
                 limit,
             )?;
             if paths.is_empty() {
@@ -93,6 +100,7 @@ fn file_candidate_paths_from_search(
     query: &str,
     path_filters: &[String],
     language_filters: &[String],
+    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
     if limit == 0 {
@@ -103,6 +111,7 @@ fn file_candidate_paths_from_search(
     };
     let path_filter = path_filter_sql_for_column("path", path_filters);
     let language_filter = language_filter_sql_for_column("language_id", language_filters);
+    let generated_filter = search_generated_filter_sql(exclude_generated);
     let sql = format!(
         "
         SELECT path
@@ -111,6 +120,7 @@ fn file_candidate_paths_from_search(
           AND source_scope = ?
           {path_filter}
           {language_filter}
+          {generated_filter}
         GROUP BY path
         ORDER BY MIN(rank) ASC, path ASC
         LIMIT ?
@@ -133,6 +143,7 @@ fn file_candidate_paths_from_indexed_content(
     query: &str,
     path_filters: &[String],
     language_filters: &[String],
+    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
     if limit == 0 {
@@ -148,6 +159,7 @@ fn file_candidate_paths_from_indexed_content(
 
     let path_filter = path_filter_sql_for_column("f.path", path_filters);
     let language_filter = language_filter_sql_for_column("f.language_id", language_filters);
+    let generated_filter = generated_filter_sql(exclude_generated, "f.is_generated");
     let term_filter = terms
         .iter()
         .map(|_| "(instr(lower(f.path), ?) > 0 OR instr(lower(COALESCE(c.content, '')), ?) > 0)")
@@ -171,6 +183,7 @@ fn file_candidate_paths_from_indexed_content(
         WHERE f.source_scope = ?
           {path_filter}
           {language_filter}
+          {generated_filter}
           AND ({term_filter})
         GROUP BY f.path
         ORDER BY ({term_score}) DESC, f.path ASC
@@ -188,6 +201,34 @@ fn file_candidate_paths_from_indexed_content(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn generated_filter_sql(exclude_generated: bool, column: &str) -> &'static str {
+    if exclude_generated {
+        return match column {
+            "is_generated" => "AND is_generated = 0",
+            "f.is_generated" => "AND f.is_generated = 0",
+            _ => "",
+        };
+    }
+
+    ""
+}
+
+fn search_generated_filter_sql(exclude_generated: bool) -> &'static str {
+    if exclude_generated {
+        return "
+          AND NOT EXISTS (
+              SELECT 1
+              FROM code_repository_files generated_file
+              WHERE generated_file.source_scope = code_repository_search.source_scope
+                AND generated_file.path = code_repository_search.path
+                AND generated_file.is_generated != 0
+          )
+        ";
+    }
+
+    ""
 }
 
 fn push_candidate_path_term_values(values: &mut Vec<Value>, terms: &[String]) {

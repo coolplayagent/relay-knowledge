@@ -271,6 +271,77 @@ async fn sbom_query_applies_requested_limit_after_relevance_ranking() {
 }
 
 #[tokio::test]
+async fn sbom_queries_prefer_handwritten_candidates_before_limits() {
+    let mut files = Vec::new();
+    let mut dependencies = Vec::new();
+    for index in 0..220 {
+        let file_id = format!("generated-file-{index:03}");
+        let path = format!("generated/Cargo_{index:03}.toml");
+        let mut generated_file = file(&file_id, &path, "rust");
+        generated_file.is_generated = true;
+        files.push(generated_file);
+        dependencies.push(dependency(
+            &format!("generated-dep-{index:03}"),
+            &file_id,
+            &path,
+            "cargo",
+            "serde",
+            Some("1"),
+        ));
+    }
+    files.push(file("handwritten-file", "src/Cargo.toml", "rust"));
+    dependencies.push(dependency(
+        "handwritten-dep",
+        "handwritten-file",
+        "src/Cargo.toml",
+        "cargo",
+        "serde",
+        Some("1"),
+    ));
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies,
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request_with_limit(
+            "serde",
+            CodeQueryKind::Sbom,
+            Vec::new(),
+            Vec::new(),
+            5,
+        ))
+        .await
+        .expect("sbom query should keep handwritten dependency candidates");
+
+    assert_eq!(
+        hits.first().map(|hit| hit.path.as_str()),
+        Some("src/Cargo.toml")
+    );
+}
+
+#[tokio::test]
 async fn sbom_query_marks_lockfile_edges_as_locked() {
     let mut locked = dependency(
         "dep-locked",
@@ -363,6 +434,7 @@ fn file(file_id: &str, path: &str, language_id: &str) -> crate::domain::Reposito
         byte_len: 20,
         line_count: 1,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

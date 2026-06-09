@@ -724,6 +724,64 @@ async fn repository_report_counts_degraded_files_beyond_summary_limit() {
 }
 
 #[tokio::test]
+async fn generated_files_remain_indexed_with_split_symbol_statistics() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let mut snapshot = snapshot_with_symbol_and_matching_chunk();
+    for index in 0..4 {
+        let file_id = format!("generated-file-{index}");
+        let path = format!("api/generated_{index}.pb.go");
+        let mut file =
+            code_test_support::file(&file_id, &path, "go", CodeParseStatus::Parsed, None);
+        file.is_generated = true;
+        snapshot.files.push(file);
+        snapshot.symbols.push(code_test_support::symbol(
+            &format!("generated-symbol-{index}"),
+            &file_id,
+            &path,
+            &format!("generated_target_{index}"),
+        ));
+    }
+    snapshot.changed_path_count = snapshot.files.len();
+    retarget_snapshot_to_fact_scope(&mut snapshot);
+
+    let summary = store
+        .apply_code_index_snapshot(snapshot)
+        .await
+        .expect("snapshot should apply");
+    let report = store
+        .code_repository_report("fixture".to_owned())
+        .await
+        .expect("report should load");
+    let totals = store
+        .code_repository_totals()
+        .await
+        .expect("totals should load");
+    let scope_counts = store
+        .code_repository_scope_symbol_generation_counts(summary.source_scope.clone())
+        .await
+        .expect("scope generation counts should load");
+
+    assert_eq!(summary.indexed_file_count, 5);
+    assert_eq!(summary.symbol_count, 5);
+    assert_eq!(summary.handwritten_symbol_count, 1);
+    assert_eq!(summary.generated_symbol_count, 4);
+    assert_eq!(report.handwritten_symbol_count, 1);
+    assert_eq!(report.generated_symbol_count, 4);
+    assert_eq!(totals.handwritten_symbol_count, 1);
+    assert_eq!(totals.generated_symbol_count, 4);
+    assert_eq!(scope_counts.handwritten_symbol_count, 1);
+    assert_eq!(scope_counts.generated_symbol_count, 4);
+    assert_eq!(report.representative_queries, ["target"]);
+}
+
+#[tokio::test]
 async fn repeated_identical_registration_preserves_fresh_status() {
     let store = store_with_repository_snapshot(snapshot_with_chunk(
         "repo",

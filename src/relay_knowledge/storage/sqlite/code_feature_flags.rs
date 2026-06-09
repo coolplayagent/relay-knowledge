@@ -146,7 +146,13 @@ fn search_with_status(
     let mut groups = BTreeMap::<String, CodeFeatureFlagGraph>::new();
     for row in rows {
         let row = row?;
-        if !selected_row(&row.path, &row.language_id, status, &retrieval_request) {
+        if !selected_row(
+            &row.path,
+            &row.language_id,
+            false,
+            status,
+            &retrieval_request,
+        ) {
             continue;
         }
         if !terms.is_empty() && !row_matches_terms(&row, &terms) {

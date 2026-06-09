@@ -289,10 +289,28 @@ fn search_symbol_identity_rows_by_name(
     } else {
         ""
     };
+    let generated_filter = if request.exclude_generated {
+        "AND coalesce((
+                   SELECT file.is_generated
+                   FROM code_repository_files file
+                   WHERE file.source_scope = code_repository_symbols.source_scope
+                     AND file.path = code_repository_symbols.path
+                   LIMIT 1
+               ), 0) = 0"
+    } else {
+        ""
+    };
     let sql = format!(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
+               coalesce((
+                   SELECT file.is_generated
+                   FROM code_repository_files file
+                   WHERE file.source_scope = code_repository_symbols.source_scope
+                     AND file.path = code_repository_symbols.path
+                   LIMIT 1
+               ), 0) AS is_generated,
                CASE WHEN code_repository_symbols.kind = 'class' THEN (
                    SELECT MIN(previous.line_start)
                    FROM code_repository_symbols previous
@@ -305,9 +323,10 @@ fn search_symbol_identity_rows_by_name(
         WHERE source_scope = ?
           AND name = ?
           {scoped_filter}
+          {generated_filter}
           {path_filter}
           {language_filter}
-        ORDER BY path ASC, line_start ASC
+        ORDER BY is_generated ASC, path ASC, line_start ASC
         LIMIT ?
         "
     );
@@ -429,10 +448,18 @@ fn search_symbol_fts_rows(
 ) -> Result<Vec<SymbolRow>, StorageError> {
     let fts_query = symbol_fts_match_query_for_request(request);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let exclude_generated_flag = usize::from(request.exclude_generated);
     let sql = format!(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
+               coalesce((
+                   SELECT file.is_generated
+                   FROM code_repository_files file
+                   WHERE file.source_scope = code_repository_symbols.source_scope
+                     AND file.path = code_repository_symbols.path
+                   LIMIT 1
+               ), 0) AS is_generated,
                CASE WHEN code_repository_symbols.kind = 'class' THEN (
                    SELECT MIN(previous.line_start)
                    FROM code_repository_symbols previous
@@ -450,10 +477,13 @@ fn search_symbol_fts_rows(
                 AND source_scope = ?
                 AND document_kind = 'symbol'
                 {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
+              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
               LIMIT ?
           )
-        ORDER BY path ASC, line_start ASC
+        ORDER BY is_generated ASC, path ASC, line_start ASC
         LIMIT ?
         "
     );
@@ -504,7 +534,8 @@ fn row_to_symbol(row: &rusqlite::Row<'_>) -> rusqlite::Result<SymbolRow> {
         name: row.get(11)?,
         qualified_name: row.get(12)?,
         kind: row.get(13)?,
-        previous_symbol_context_start: row.get(14)?,
+        is_generated: row.get::<_, i64>(14)? != 0,
+        previous_symbol_context_start: row.get(15)?,
     })
 }
 
@@ -522,7 +553,15 @@ fn symbol_rows_to_hits(
     let drop_test_symbols = should_drop_test_symbols(status, request, &rows, query_has_test_intent);
 
     rows.into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
+        .filter(|row| {
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            )
+        })
         .filter(|row| !drop_test_symbols || !path_looks_like_test_or_benchmark(&row.path))
         .filter_map(|row| {
             let score = score_query.score([
@@ -585,6 +624,7 @@ fn symbol_rows_to_hits(
                         ],
                         score,
                         excerpt,
+                        is_generated: row.is_generated,
                         degraded_reason: None,
                         edge_kind: None,
                         edge_resolution_state: None,
@@ -610,8 +650,13 @@ fn should_drop_test_symbols(
             CodeQueryKind::Definition | CodeQueryKind::Symbol
         )
         && rows.iter().any(|row| {
-            selected_row(&row.path, &row.language_id, status, request)
-                && !path_looks_like_test_or_benchmark(&row.path)
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            ) && !path_looks_like_test_or_benchmark(&row.path)
         })
 }
 

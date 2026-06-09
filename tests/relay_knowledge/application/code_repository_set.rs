@@ -739,6 +739,7 @@ fn snapshot_for_scope(
             byte_len: content.len(),
             line_count: 1,
             parse_status: CodeParseStatus::Parsed,
+            is_generated: false,
             degraded_reason: None,
         }],
         symbols: Vec::new(),

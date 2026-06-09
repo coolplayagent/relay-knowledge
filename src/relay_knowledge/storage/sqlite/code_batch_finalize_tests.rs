@@ -828,6 +828,7 @@ fn file(
         byte_len: 20,
         line_count: 1,
         parse_status,
+        is_generated: false,
         degraded_reason: None,
     }
 }

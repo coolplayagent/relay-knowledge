@@ -4,6 +4,7 @@ use crate::storage::StorageError;
 
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
+pub(super) const GENERATED_DETECTION_REINDEX_MIGRATION: &str = "generated-detection-reindex-v1";
 const SEARCH_BACKFILL_MIGRATION: &str = "code-search-backfill-v1";
 const SEARCH_METADATA_BACKFILL_MIGRATION: &str = "code-search-metadata-backfill-v1";
 
@@ -65,6 +66,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             byte_len INTEGER NOT NULL,
             line_count INTEGER NOT NULL,
             parse_status TEXT NOT NULL,
+            is_generated INTEGER NOT NULL DEFAULT 0,
             degraded_reason TEXT,
             PRIMARY KEY (source_scope, path),
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
@@ -438,6 +440,14 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "applied_at_ms",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "code_repository_files",
+        "is_generated",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::code_generated::backfill_all_path_generated_flags(connection)?;
+    mark_legacy_generated_detection_scopes_stale_once(connection)?;
     if table_has_columns(
         connection,
         "code_repository_calls",
@@ -456,6 +466,16 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     backfill_edge_search_language_ids(connection)?;
 
     Ok(())
+}
+
+fn mark_legacy_generated_detection_scopes_stale_once(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, GENERATED_DETECTION_REINDEX_MIGRATION)? {
+        return Ok(());
+    }
+    super::code_generated::mark_all_generated_detection_scopes_stale(connection)?;
+    mark_code_schema_migration(connection, GENERATED_DETECTION_REINDEX_MIGRATION)
 }
 
 fn backfill_code_repository_aliases(connection: &Connection) -> Result<(), StorageError> {

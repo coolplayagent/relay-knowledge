@@ -90,7 +90,7 @@ pub(crate) use source_declarations::{
     source_declarations_for_identity, source_line_defines_identity,
 };
 
-use common::{ids, languages};
+use common::{generated_detection, ids, languages};
 use ids::{stable_content_hash, stable_id};
 use index::snapshot;
 use index::snapshot::SnapshotBuild;

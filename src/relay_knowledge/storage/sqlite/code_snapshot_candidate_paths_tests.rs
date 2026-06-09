@@ -5,7 +5,12 @@ use crate::{
         CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 const TEST_SOURCE_SCOPE: &str = "git_snapshot:test";
@@ -35,6 +40,7 @@ async fn candidate_paths_for_scope_apply_filters_before_limit() {
             TEST_SOURCE_SCOPE.to_owned(),
             vec!["docs".to_owned()],
             vec!["unknown".to_owned()],
+            false,
             1,
         )
         .await
@@ -74,6 +80,7 @@ async fn candidate_paths_for_query_scope_use_search_before_scope_budget() {
             "RK_LATE_BUDGET_NOTE".to_owned(),
             Vec::new(),
             vec!["rust".to_owned()],
+            false,
             1,
         )
         .await
@@ -84,6 +91,7 @@ async fn candidate_paths_for_query_scope_use_search_before_scope_budget() {
             "MISSING_BUDGET_NOTE".to_owned(),
             Vec::new(),
             vec!["rust".to_owned()],
+            false,
             1,
         )
         .await
@@ -91,6 +99,152 @@ async fn candidate_paths_for_query_scope_use_search_before_scope_budget() {
 
     assert_eq!(paths, ["zzz/target.rs"]);
     assert_eq!(fallback_paths, ["src/noise_000.rs"]);
+}
+
+#[tokio::test]
+async fn candidate_paths_for_query_scope_excludes_generated_before_limit() {
+    let mut snapshot = snapshot_with_chunk_status(
+        "repo",
+        "src/target.rs",
+        "fn handwritten_target() { /* RK_GENERATED_FILTER_NOTE */ }",
+        CodeParseStatus::Parsed,
+        None,
+    );
+    for index in 0..8 {
+        let file_id = format!("generated-{index}");
+        let path = format!("dist/generated_{index}.rs");
+        let mut generated_file = file(&file_id, &path, "rust", CodeParseStatus::Parsed, None);
+        generated_file.is_generated = true;
+        snapshot.files.push(generated_file);
+        snapshot.chunks.push(chunk(
+            &format!("generated-chunk-{index}"),
+            &file_id,
+            &path,
+            "fn generated_target() { /* RK_GENERATED_FILTER_NOTE */ }",
+            None,
+        ));
+    }
+    let store = store_with_repository_snapshot(snapshot).await;
+
+    let paths = store
+        .code_file_candidate_paths_for_query_scope(
+            TEST_SOURCE_SCOPE.to_owned(),
+            "RK_GENERATED_FILTER_NOTE".to_owned(),
+            Vec::new(),
+            vec!["rust".to_owned()],
+            true,
+            1,
+        )
+        .await
+        .expect("generated candidates should be filtered before the limit");
+
+    assert_eq!(paths, ["src/target.rs"]);
+}
+
+#[tokio::test]
+async fn imports_legacy_file_table_without_generated_column_and_backfills_paths() {
+    let source_path = temp_database_path("legacy-generated-import");
+    let source_store = SqliteGraphStore::open(&source_path).expect("legacy source store opens");
+    source_store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("source repository should persist");
+    let snapshot = snapshot_with_chunk_status(
+        "repo",
+        "dist/generated.js",
+        "generated import fixture",
+        CodeParseStatus::Parsed,
+        None,
+    );
+    source_store
+        .apply_code_index_snapshot(snapshot)
+        .await
+        .expect("source snapshot should persist");
+    source_store
+        .run(|connection| {
+            connection.execute_batch(
+                "
+                ALTER TABLE code_repository_files RENAME TO code_repository_files_current;
+                CREATE TABLE code_repository_files (
+                    repository_id TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    file_id TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    language_id TEXT NOT NULL,
+                    blob_hash TEXT NOT NULL,
+                    byte_len INTEGER NOT NULL,
+                    line_count INTEGER NOT NULL,
+                    parse_status TEXT NOT NULL,
+                    degraded_reason TEXT,
+                    PRIMARY KEY (source_scope, path)
+                );
+                INSERT INTO code_repository_files (
+                    repository_id, source_scope, file_id, path, language_id, blob_hash,
+                    byte_len, line_count, parse_status, degraded_reason
+                )
+                SELECT
+                    repository_id, source_scope, file_id, path, language_id, blob_hash,
+                    byte_len, line_count, parse_status, degraded_reason
+                FROM code_repository_files_current;
+                DROP TABLE code_repository_files_current;
+                ",
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("source database should simulate pre-generated-flag schema");
+    drop(source_store);
+
+    let target_store = SqliteGraphStore::open_in_memory().expect("target store opens");
+    target_store
+        .run(move |connection| {
+            super::import_repository_from_database(
+                connection,
+                &source_path,
+                "repo",
+                Some(TEST_SOURCE_SCOPE),
+            )
+        })
+        .await
+        .expect("legacy code scope should import");
+    let is_generated = target_store
+        .run_read(|connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT is_generated
+                    FROM code_repository_files
+                    WHERE source_scope = ?1 AND path = 'dist/generated.js'
+                    ",
+                    [TEST_SOURCE_SCOPE],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .await
+        .expect("imported generated flag should load");
+    let stale = target_store
+        .run_read(|connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT stale
+                    FROM code_repository_scopes
+                    WHERE source_scope = ?1
+                    ",
+                    [TEST_SOURCE_SCOPE],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .await
+        .expect("imported scope stale flag should load");
+
+    assert_eq!(is_generated, 1);
+    assert_eq!(stale, 1);
 }
 
 #[tokio::test]
@@ -133,6 +287,7 @@ async fn candidate_paths_for_query_scope_deduplicates_before_limit() {
             "shared_signal".to_owned(),
             Vec::new(),
             vec!["rust".to_owned()],
+            false,
             2,
         )
         .await
@@ -181,6 +336,7 @@ async fn candidate_paths_for_query_scope_falls_back_when_search_table_unavailabl
             "RK_LATE_BUDGET_NOTE".to_owned(),
             Vec::new(),
             vec!["rust".to_owned()],
+            false,
             1,
         )
         .await
@@ -213,6 +369,7 @@ async fn candidate_paths_for_query_scope_reports_unavailable_search_without_quer
             "RK_LATE_BUDGET_NOTE".to_owned(),
             Vec::new(),
             vec!["rust".to_owned()],
+            false,
             1,
         )
         .await
@@ -371,6 +528,7 @@ fn file(
         byte_len: 20,
         line_count: 1,
         parse_status,
+        is_generated: false,
         degraded_reason,
     }
 }
@@ -406,4 +564,18 @@ fn code_search_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest
         FreshnessPolicy::AllowStale,
     )
     .expect("request should validate")
+}
+
+fn temp_database_path(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let path = std::env::temp_dir().join(format!(
+        "relay-knowledge-{name}-{}-{nanos}.sqlite",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+
+    path
 }

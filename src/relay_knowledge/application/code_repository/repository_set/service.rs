@@ -451,7 +451,7 @@ async fn query_repository_set_member(
     .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
     let member_query_plan =
         repository_set_member_query_plan(&request, &member_status, highest_priority);
-    let search_request = CodeRetrievalRequest::new(
+    let mut search_request = CodeRetrievalRequest::new(
         member_query_plan.query,
         selector.clone(),
         member_query_plan.kind,
@@ -459,6 +459,7 @@ async fn query_repository_set_member(
         FreshnessPolicy::AllowStale,
     )
     .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+    search_request.exclude_generated = request.exclude_generated;
     let mut active_request = search_request.clone();
     if let Some(reason) = fact_version_scope_mismatch_reason(&member_status) {
         return Ok(RepositorySetMemberQueryOutcome {
@@ -481,7 +482,7 @@ async fn query_repository_set_member(
         && !dependency_symbol_plan_needs_fallback;
     if dependency_symbol_plan_needs_fallback {
         let symbol_plan_hits = hits;
-        let fallback_request = CodeRetrievalRequest::new(
+        let mut fallback_request = CodeRetrievalRequest::new(
             request.query.clone(),
             selector,
             request.code_query_kind,
@@ -489,6 +490,7 @@ async fn query_repository_set_member(
             FreshnessPolicy::AllowStale,
         )
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        fallback_request.exclude_generated = request.exclude_generated;
         active_request = fallback_request.clone();
         let fallback_hits = store
             .search_code_scope(member.source_scope.clone(), fallback_request)

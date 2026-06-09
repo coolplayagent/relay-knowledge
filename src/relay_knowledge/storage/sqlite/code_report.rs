@@ -13,10 +13,13 @@ use super::code_status;
 pub(in crate::storage::sqlite) fn repository_totals(
     connection: &mut Connection,
 ) -> Result<CodeRepositoryTotals, StorageError> {
+    let symbol_counts = symbol_generation_counts(connection)?;
     Ok(CodeRepositoryTotals {
         repository_count: count_all_rows(connection, "code_repositories")?,
         indexed_file_count: count_all_rows(connection, "code_repository_files")?,
         symbol_count: count_all_rows(connection, "code_repository_symbols")?,
+        handwritten_symbol_count: symbol_counts.handwritten,
+        generated_symbol_count: symbol_counts.generated,
         reference_count: count_all_rows(connection, "code_repository_references")?,
         chunk_count: count_all_rows(connection, "code_repository_chunks")?,
         degraded_file_count: count_all_rows(connection, "code_repository_file_diagnostics")?,
@@ -32,6 +35,7 @@ pub(in crate::storage::sqlite) fn repository_totals_excluding(
         return repository_totals(connection);
     }
 
+    let symbol_counts = symbol_generation_counts_excluding(connection, excluded_repository_ids)?;
     Ok(CodeRepositoryTotals {
         repository_count: count_rows_excluding(
             connection,
@@ -48,6 +52,8 @@ pub(in crate::storage::sqlite) fn repository_totals_excluding(
             "code_repository_symbols",
             excluded_repository_ids,
         )?,
+        handwritten_symbol_count: symbol_counts.handwritten,
+        generated_symbol_count: symbol_counts.generated,
         reference_count: count_rows_excluding(
             connection,
             "code_repository_references",
@@ -80,6 +86,7 @@ pub(super) fn repository_report(
     let scope = status.last_indexed_scope_id.as_deref().unwrap_or_default();
     let degradation_summary = repository_diagnostics(connection, scope)?;
     let degraded_file_count = repository_degraded_file_count(connection, scope)?;
+    let symbol_counts = scope_symbol_generation_counts(connection, scope)?;
     let edge_counts = repository_edge_resolution_counts(connection, scope)?;
     let representative_queries = representative_queries(connection, scope)?;
     let freshness_state = if status.stale {
@@ -99,6 +106,8 @@ pub(super) fn repository_report(
         tree_hash: status.tree_hash,
         indexed_file_count: status.indexed_file_count,
         symbol_count: status.symbol_count,
+        handwritten_symbol_count: symbol_counts.handwritten,
+        generated_symbol_count: symbol_counts.generated,
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
         degraded_file_count,
@@ -110,6 +119,74 @@ pub(super) fn repository_report(
         latency_samples: Vec::<CodeRepositoryLatencySample>::new(),
         freshness_state,
     })
+}
+
+#[derive(Debug, Default)]
+pub(in crate::storage::sqlite) struct SymbolGenerationCounts {
+    pub(in crate::storage::sqlite) handwritten: usize,
+    pub(in crate::storage::sqlite) generated: usize,
+}
+
+pub(in crate::storage::sqlite) fn scope_symbol_generation_counts(
+    connection: &Connection,
+    source_scope: &str,
+) -> Result<SymbolGenerationCounts, StorageError> {
+    symbol_generation_counts_with_predicate(
+        connection,
+        "WHERE symbol.source_scope = ?1",
+        params![source_scope],
+    )
+}
+
+fn symbol_generation_counts(
+    connection: &Connection,
+) -> Result<SymbolGenerationCounts, StorageError> {
+    symbol_generation_counts_with_predicate(connection, "", [])
+}
+
+fn symbol_generation_counts_excluding(
+    connection: &Connection,
+    excluded_repository_ids: &[String],
+) -> Result<SymbolGenerationCounts, StorageError> {
+    let placeholders = placeholders(excluded_repository_ids.len());
+    symbol_generation_counts_with_predicate(
+        connection,
+        &format!("WHERE symbol.repository_id NOT IN ({placeholders})"),
+        params_from_iter(excluded_repository_ids),
+    )
+}
+
+fn symbol_generation_counts_with_predicate<P>(
+    connection: &Connection,
+    predicate_sql: &str,
+    params: P,
+) -> Result<SymbolGenerationCounts, StorageError>
+where
+    P: rusqlite::Params,
+{
+    connection
+        .query_row(
+            &format!(
+                "
+                SELECT
+                    SUM(CASE WHEN file.is_generated != 0 THEN 0 ELSE 1 END),
+                    SUM(CASE WHEN file.is_generated != 0 THEN 1 ELSE 0 END)
+                FROM code_repository_symbols symbol
+                INNER JOIN code_repository_files file
+                  ON file.source_scope = symbol.source_scope
+                 AND file.path = symbol.path
+                {predicate_sql}
+                "
+            ),
+            params,
+            |row| {
+                Ok(SymbolGenerationCounts {
+                    handwritten: row.get::<_, Option<usize>>(0)?.unwrap_or_default(),
+                    generated: row.get::<_, Option<usize>>(1)?.unwrap_or_default(),
+                })
+            },
+        )
+        .map_err(StorageError::from)
 }
 
 fn repository_parse_status_counts(
@@ -261,10 +338,14 @@ fn representative_queries(
     let mut queries = Vec::new();
     let mut statement = connection.prepare(
         "
-        SELECT name
-        FROM code_repository_symbols
-        WHERE source_scope = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT symbol.name
+        FROM code_repository_symbols symbol
+        INNER JOIN code_repository_files file
+          ON file.source_scope = symbol.source_scope
+         AND file.path = symbol.path
+        WHERE symbol.source_scope = ?1
+          AND file.is_generated = 0
+        ORDER BY symbol.path ASC, symbol.line_start ASC
         LIMIT 3
         ",
     )?;

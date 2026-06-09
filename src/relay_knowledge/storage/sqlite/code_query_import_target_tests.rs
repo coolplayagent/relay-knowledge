@@ -76,6 +76,108 @@ async fn target_symbol_import_queries_chunk_large_hint_sets() {
 }
 
 #[tokio::test]
+async fn target_symbol_import_queries_filter_generated_rows_before_candidate_limit() {
+    let store = store_with_snapshot(snapshot_with_generated_import_target_noise()).await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let mut request = crate::domain::CodeRetrievalRequest::new(
+        "SharedType",
+        selector,
+        CodeQueryKind::Imports,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+    request.exclude_generated = true;
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("generated import target noise should not exhaust candidates");
+
+    assert!(hits.iter().any(|hit| hit.path == "src/handwritten.rs"));
+    assert!(!hits.iter().any(|hit| hit.path.starts_with("generated/")));
+}
+
+#[tokio::test]
+async fn target_symbol_import_queries_prefer_handwritten_import_rows_before_candidate_limit() {
+    let store = store_with_snapshot(snapshot_with_generated_import_target_noise()).await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "SharedType",
+        selector,
+        CodeQueryKind::Imports,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("handwritten import target rows should survive candidate capping");
+
+    assert_eq!(
+        hits.first().map(|hit| hit.path.as_str()),
+        Some("src/handwritten.rs")
+    );
+}
+
+#[tokio::test]
+async fn target_symbol_import_queries_filter_generated_target_symbols_before_candidate_limit() {
+    let store = store_with_snapshot(snapshot_with_generated_target_symbol_noise()).await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let mut request = crate::domain::CodeRetrievalRequest::new(
+        "SharedType",
+        selector,
+        CodeQueryKind::Imports,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+    request.exclude_generated = true;
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("generated target symbols should not exhaust candidates");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/handwritten.rs");
+    assert_eq!(hits[0].edge_target_hint.as_deref(), Some("shared.rs"));
+}
+
+#[tokio::test]
+async fn target_symbol_import_queries_prefer_handwritten_target_symbols_before_candidate_limit() {
+    let store = store_with_snapshot(snapshot_with_generated_target_symbol_noise()).await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "SharedType",
+        selector,
+        CodeQueryKind::Imports,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("handwritten target symbols should survive candidate capping");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/handwritten.rs");
+    assert_eq!(hits[0].edge_target_hint.as_deref(), Some("shared.rs"));
+}
+
+#[tokio::test]
 async fn target_symbol_import_queries_do_not_strip_vendor_for_python_targets() {
     let store = store_with_snapshot(snapshot_with_python_vendor_target()).await;
     let selector =
@@ -139,6 +241,131 @@ fn snapshot_with_import_target_outside_importer_scope() -> CodeIndexSnapshot {
             "pkg/kubeapiserver/authorizer/config.go",
             "k8s.io/client-go/informers",
             Some("k8s.io/client-go/informers"),
+        )],
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_generated_import_target_noise() -> CodeIndexSnapshot {
+    let mut files = vec![file("target-symbol-file", "src/shared.rs", "rust")];
+    let mut imports = Vec::new();
+    for index in 0..220 {
+        let file_id = format!("generated-importer-file-{index:03}");
+        let path = format!("generated/importer_{index:03}.rs");
+        let mut generated_file = file(&file_id, &path, "rust");
+        generated_file.is_generated = true;
+        files.push(generated_file);
+        imports.push(import(
+            &format!("generated-import-{index:03}"),
+            &file_id,
+            &path,
+            "crate::shared",
+            Some("shared.rs"),
+        ));
+    }
+    files.push(file(
+        "handwritten-importer-file",
+        "src/handwritten.rs",
+        "rust",
+    ));
+    imports.push(import(
+        "handwritten-import",
+        "handwritten-importer-file",
+        "src/handwritten.rs",
+        "crate::shared",
+        Some("shared.rs"),
+    ));
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: vec![symbol(
+            "target-symbol",
+            "target-symbol-file",
+            "src/shared.rs",
+            "SharedType",
+            "rust",
+        )],
+        references: Vec::new(),
+        imports,
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_generated_target_symbol_noise() -> CodeIndexSnapshot {
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..220 {
+        let file_id = format!("generated-target-file-{index:03}");
+        let path = format!("generated/target_{index:03}.rs");
+        let mut generated_file = file(&file_id, &path, "rust");
+        generated_file.is_generated = true;
+        files.push(generated_file);
+        symbols.push(symbol(
+            &format!("generated-target-symbol-{index:03}"),
+            &file_id,
+            &path,
+            "SharedType",
+            "rust",
+        ));
+    }
+    files.push(file("target-symbol-file", "src/shared.rs", "rust"));
+    files.push(file(
+        "handwritten-importer-file",
+        "src/handwritten.rs",
+        "rust",
+    ));
+    symbols.push(symbol(
+        "target-symbol",
+        "target-symbol-file",
+        "src/shared.rs",
+        "SharedType",
+        "rust",
+    ));
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols,
+        references: Vec::new(),
+        imports: vec![import(
+            "handwritten-import",
+            "handwritten-importer-file",
+            "src/handwritten.rs",
+            "crate::shared",
+            Some("shared.rs"),
         )],
         calls: Vec::new(),
         dependencies: Vec::new(),
@@ -251,6 +478,7 @@ fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecor
         byte_len: 0,
         line_count: 1,
         parse_status: CodeParseStatus::Parsed,
+        is_generated: false,
         degraded_reason: None,
     }
 }

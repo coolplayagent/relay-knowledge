@@ -8,6 +8,8 @@ pub(crate) mod code_call_targets;
 mod code_dependency;
 #[path = "code/repository.rs"]
 mod code_repository;
+#[path = "code/repository_helpers.rs"]
+mod code_repository_helpers;
 #[path = "code/repository_set.rs"]
 mod code_repository_set;
 #[cfg(test)]
@@ -57,9 +59,9 @@ pub use code_repository::{
     CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
     CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
     CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, CodeScopeRetentionSummary,
-    RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, code_snapshot_expected_scope_id,
-    code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
+    CodeSymbolGenerationCounts, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
+    RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    code_snapshot_expected_scope_id, code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
 };
 pub use code_repository_set::{
     CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetAddMemberRequest,

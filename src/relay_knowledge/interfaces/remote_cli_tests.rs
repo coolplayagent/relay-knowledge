@@ -46,6 +46,7 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
         assert!(request.contains("\"query\":\"retry_policy\""));
         assert!(request.contains("\"repository\":\"org/repo\""));
         assert!(request.contains("\"code_query_kind\":\"definition\""));
+        assert!(request.contains("\"exclude_generated\":true"));
         let response = json!({
             "metadata": {
                 "trace_id": "trace-remote-query",
@@ -102,6 +103,7 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
         path_filters: Vec::new(),
         language_filters: Vec::new(),
         freshness: FreshnessPolicy::AllowStale,
+        exclude_generated: true,
     });
 
     let output = remote_cli::run_remote(

@@ -13,6 +13,7 @@ pub(super) struct SymbolRow {
     pub(super) name: String,
     pub(super) qualified_name: String,
     pub(super) kind: String,
+    pub(super) is_generated: bool,
     pub(super) previous_symbol_context_start: Option<u32>,
 }
 
@@ -32,6 +33,7 @@ pub(super) struct ReferenceRow {
     pub(super) target_canonical_symbol_id: Option<String>,
     pub(super) source_excerpt: Option<String>,
     pub(super) source_excerpt_line_start: Option<u32>,
+    pub(super) is_generated: bool,
 }
 
 pub(super) struct CallRow {
@@ -54,6 +56,7 @@ pub(super) struct CallRow {
     pub(super) callee_signature: Option<String>,
     pub(super) caller_excerpt: Option<String>,
     pub(super) callee_excerpt: Option<String>,
+    pub(super) is_generated: bool,
 }
 
 pub(super) struct ImportRow {
@@ -69,6 +72,7 @@ pub(super) struct ImportRow {
     pub(super) resolution_state: String,
     pub(super) confidence_basis_points: u16,
     pub(super) confidence_tier: String,
+    pub(super) is_generated: bool,
 }
 
 pub(super) struct DependencyRow {
@@ -84,6 +88,7 @@ pub(super) struct DependencyRow {
     pub(super) is_lockfile: bool,
     pub(super) line_range: RepositoryCodeRange,
     pub(super) excerpt: String,
+    pub(super) is_generated: bool,
 }
 
 pub(super) struct ChunkRow {
@@ -99,4 +104,5 @@ pub(super) struct ChunkRow {
     pub(super) symbol_qualified_name: Option<String>,
     pub(super) parse_status: String,
     pub(super) degraded_reason: Option<String>,
+    pub(super) is_generated: bool,
 }

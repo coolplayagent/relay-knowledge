@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::V
 
 use crate::{
     domain::{
-        CodeFileFingerprint, CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary,
+        CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary,
         code_snapshot_expected_scope_id, code_snapshot_scope_is_fact_versioned,
     },
     storage::StorageError,
@@ -16,18 +16,24 @@ use crate::{
 use super::{
     MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT,
     code_cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index},
+    code_report,
     code_search::{backfill_search_metadata_for_scope, insert_search_document},
     code_status::{canonical_filter_values, canonical_path_filters, parse_json_list},
 };
 
 #[path = "code_snapshot_candidate_paths.rs"]
 mod candidate_paths;
+#[path = "code_snapshot_fingerprints.rs"]
+mod fingerprints;
+#[path = "code_snapshot_import_compat.rs"]
+mod import_compat;
 
 #[cfg(test)]
 pub(super) use candidate_paths::candidate_path_fts_query;
 pub(super) use candidate_paths::{
     file_candidate_paths_for_query_scope, file_candidate_paths_for_scope,
 };
+pub(super) use fingerprints::{file_fingerprints, file_fingerprints_for_scope};
 
 const IMPORT_SCHEMA: &str = "relay_import";
 
@@ -39,7 +45,7 @@ struct CodeScopeTable {
 const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     CodeScopeTable {
         table: "code_repository_files",
-        columns: "repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len, line_count, parse_status, degraded_reason",
+        columns: "repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len, line_count, parse_status, is_generated, degraded_reason",
     },
     CodeScopeTable {
         table: "code_repository_symbols",
@@ -227,6 +233,11 @@ fn import_code_scope(
     {
         return Ok(());
     }
+    let imported_generated_detection_is_current =
+        import_compat::attached_generated_detection_is_current(
+            transaction,
+            super::code_schema::GENERATED_DETECTION_REINDEX_MIGRATION,
+        )?;
 
     delete_scope_index(transaction, source_scope)?;
     let copied = transaction.execute(
@@ -257,58 +268,13 @@ fn import_code_scope(
     for table in IMPORTED_DERIVED_SCOPE_TABLES {
         copy_attached_code_table(transaction, table, source_scope)?;
     }
+    super::code_generated::backfill_scope_path_generated_flags(transaction, source_scope)?;
+    if !imported_generated_detection_is_current {
+        super::code_generated::mark_scope_generated_detection_stale(transaction, source_scope)?;
+    }
     backfill_search_metadata_for_scope(transaction, source_scope)?;
 
     Ok(())
-}
-
-pub(super) fn file_fingerprints(
-    connection: &mut Connection,
-    repository_id: &str,
-) -> Result<Vec<CodeFileFingerprint>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT path, blob_hash
-        FROM code_repository_files
-        WHERE repository_id = ?1
-          AND source_scope = (
-              SELECT last_indexed_scope_id FROM code_repositories WHERE repository_id = ?1
-          )
-        ORDER BY path ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![repository_id], |row| {
-        Ok(CodeFileFingerprint {
-            path: row.get(0)?,
-            blob_hash: row.get(1)?,
-        })
-    })?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
-pub(super) fn file_fingerprints_for_scope(
-    connection: &mut Connection,
-    source_scope: &str,
-) -> Result<Vec<CodeFileFingerprint>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT path, blob_hash
-        FROM code_repository_files
-        WHERE source_scope = ?1
-        ORDER BY path ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok(CodeFileFingerprint {
-            path: row.get(0)?,
-            blob_hash: row.get(1)?,
-        })
-    })?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
 }
 
 pub(super) fn apply_snapshot(
@@ -335,9 +301,9 @@ pub(super) fn apply_snapshot(
             "
             INSERT INTO code_repository_files (
                 repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
-                line_count, parse_status, degraded_reason
+                line_count, parse_status, is_generated, degraded_reason
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ",
             params![
                 file.repository_id,
@@ -349,6 +315,7 @@ pub(super) fn apply_snapshot(
                 file.byte_len,
                 file.line_count,
                 file.parse_status.as_str(),
+                file.is_generated,
                 file.degraded_reason,
             ],
         )?;
@@ -469,6 +436,8 @@ pub(super) fn apply_snapshot(
         .ok_or_else(|| {
             StorageError::InvalidInput("code repository status is missing after index".to_owned())
         })?;
+    let symbol_generation_counts =
+        code_report::scope_symbol_generation_counts(connection, &snapshot.source_scope)?;
 
     Ok(CodeIndexSummary {
         repository_id: snapshot.repository_id,
@@ -480,6 +449,8 @@ pub(super) fn apply_snapshot(
         skipped_unchanged_count: snapshot.skipped_unchanged_count,
         deleted_path_count: snapshot.deleted_paths.len(),
         symbol_count: status.symbol_count,
+        handwritten_symbol_count: symbol_generation_counts.handwritten,
+        generated_symbol_count: symbol_generation_counts.generated,
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
         degraded_file_count: snapshot.diagnostics.len(),
@@ -617,11 +588,17 @@ fn copy_attached_code_table(
     table: &CodeScopeTable,
     source_scope: &str,
 ) -> Result<(), StorageError> {
+    let selected_columns = import_compat::attached_code_table_selected_columns(
+        transaction,
+        table.table,
+        table.columns,
+    )?;
     transaction.execute(
         &format!(
-            "INSERT INTO {table} ({columns}) SELECT {columns} FROM {schema}.{table} WHERE source_scope = ?1",
+            "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {schema}.{table} WHERE source_scope = ?1",
             table = table.table,
             columns = table.columns,
+            selected_columns = selected_columns,
             schema = IMPORT_SCHEMA,
         ),
         params![source_scope],

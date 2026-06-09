@@ -194,7 +194,7 @@ fn chunks_for_paths(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
-               symbol.canonical_symbol_id, f.parse_status, f.degraded_reason
+               symbol.canonical_symbol_id, f.parse_status, f.degraded_reason, f.is_generated
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
@@ -227,6 +227,7 @@ fn chunks_for_paths(
             canonical_symbol_id: row.get(9)?,
             parse_status: row.get(10)?,
             degraded_reason: row.get(11)?,
+            is_generated: row.get::<_, i64>(12)? != 0,
         })
     })?;
     let rows = rows
@@ -250,6 +251,7 @@ fn chunks_for_paths(
                     retrieval_layers: chunk_layers(&row.parse_status),
                     score: 4.0,
                     excerpt: row.content,
+                    is_generated: row.is_generated,
                     degraded_reason: row.degraded_reason,
                     edge_kind: None,
                     edge_resolution_state: None,
@@ -293,7 +295,8 @@ fn callers_for_symbols(
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
                c.line_start, c.line_end, c.target_hint, c.resolution_state,
-               c.confidence_basis_points, c.confidence_tier, caller.canonical_symbol_id
+               c.confidence_basis_points, c.confidence_tier, caller.canonical_symbol_id,
+               f.is_generated
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
@@ -325,6 +328,7 @@ fn callers_for_symbols(
             confidence_basis_points: row.get(11)?,
             confidence_tier: row.get(12)?,
             caller_canonical_symbol_id: row.get(13)?,
+            is_generated: row.get::<_, i64>(14)? != 0,
         })
     })?;
     let symbol_set = symbol_ids.iter().collect::<BTreeSet<_>>();
@@ -358,6 +362,7 @@ fn callers_for_symbols(
                     retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
                     score: 2.5,
                     excerpt: format!("{caller} calls {}", row.callee_name),
+                    is_generated: row.is_generated,
                     degraded_reason: None,
                     edge_kind: Some("call".to_owned()),
                     edge_resolution_state: Some(row.resolution_state),
@@ -391,7 +396,8 @@ fn importers_for_modules(
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
-               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
+               f.is_generated
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -417,6 +423,7 @@ fn importers_for_modules(
             resolution_state: row.get(7)?,
             confidence_basis_points: row.get(8)?,
             confidence_tier: row.get(9)?,
+            is_generated: row.get::<_, i64>(10)? != 0,
         })
     })?;
     let rows = rows
@@ -445,6 +452,7 @@ fn importers_for_modules(
                     retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
                     score: 2.0,
                     excerpt: row.module,
+                    is_generated: row.is_generated,
                     degraded_reason: None,
                     edge_kind: Some("import".to_owned()),
                     edge_resolution_state: Some(row.resolution_state),
@@ -678,6 +686,7 @@ struct ImpactChunkRow {
     canonical_symbol_id: Option<String>,
     parse_status: String,
     degraded_reason: Option<String>,
+    is_generated: bool,
 }
 
 struct ImpactCallRow {
@@ -694,6 +703,7 @@ struct ImpactCallRow {
     confidence_basis_points: u16,
     confidence_tier: String,
     caller_canonical_symbol_id: Option<String>,
+    is_generated: bool,
 }
 
 struct ImpactImportRow {
@@ -706,6 +716,7 @@ struct ImpactImportRow {
     resolution_state: String,
     confidence_basis_points: u16,
     confidence_tier: String,
+    is_generated: bool,
 }
 
 #[cfg(test)]

@@ -1,7 +1,8 @@
 use rusqlite::Connection;
 
 use super::{
-    CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION, SEARCH_BACKFILL_MIGRATION,
+    CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION,
+    GENERATED_DETECTION_REINDEX_MIGRATION, SEARCH_BACKFILL_MIGRATION,
     SEARCH_METADATA_BACKFILL_MIGRATION, code_schema_migration_applied, initialize_code_schema,
 };
 
@@ -52,6 +53,149 @@ fn backfills_legacy_call_search_without_symbol_link_columns() {
     assert!(content.contains("LegacyCaller"));
     assert!(content.contains("target_fn"));
     assert!(content.contains("target_hint"));
+}
+
+#[test]
+fn backfills_path_generated_flags_after_adding_legacy_file_column() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_files (
+                source_scope TEXT NOT NULL,
+                path TEXT NOT NULL,
+                language_id TEXT NOT NULL
+            );
+            INSERT INTO code_repository_files (source_scope, path, language_id)
+            VALUES
+                ('scope', 'dist/client.js', 'javascript'),
+                ('scope', 'build/openapi/client.rs', 'rust'),
+                ('scope', 'src/build/config.rs', 'rust'),
+                ('scope', 'internal/dist/reader.go', 'go'),
+                ('scope', 'src/service.rs', 'rust');
+            ",
+        )
+        .expect("legacy file table should initialize");
+
+    initialize_code_schema(&connection).expect("code schema should initialize");
+
+    let generated: i64 = connection
+        .query_row(
+            "
+            SELECT is_generated
+            FROM code_repository_files
+            WHERE path = 'dist/client.js'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .expect("generated flag should load");
+    let root_build_generated: i64 = connection
+        .query_row(
+            "
+            SELECT is_generated
+            FROM code_repository_files
+            WHERE path = 'build/openapi/client.rs'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .expect("root build generated flag should load");
+    let nested_build_handwritten: i64 = connection
+        .query_row(
+            "
+            SELECT is_generated
+            FROM code_repository_files
+            WHERE path = 'src/build/config.rs'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .expect("nested build flag should load");
+    let nested_dist_handwritten: i64 = connection
+        .query_row(
+            "
+            SELECT is_generated
+            FROM code_repository_files
+            WHERE path = 'internal/dist/reader.go'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .expect("nested dist flag should load");
+    let handwritten: i64 = connection
+        .query_row(
+            "
+            SELECT is_generated
+            FROM code_repository_files
+            WHERE path = 'src/service.rs'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .expect("handwritten flag should load");
+
+    assert_eq!(generated, 1);
+    assert_eq!(root_build_generated, 1);
+    assert_eq!(nested_build_handwritten, 0);
+    assert_eq!(nested_dist_handwritten, 0);
+    assert_eq!(handwritten, 0);
+}
+
+#[test]
+fn generated_detection_migration_marks_existing_scopes_stale_once() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("code schema should initialize");
+    connection
+        .execute_batch(
+            "
+            DELETE FROM code_repository_schema_migrations
+            WHERE name = 'generated-detection-reindex-v1';
+            INSERT INTO code_repositories (
+                repository_id, alias, root_path, path_filters_json, language_filters_json,
+                last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                indexed_file_count, symbol_count, reference_count, chunk_count,
+                stale, degraded_reason
+            )
+            VALUES (
+                'repo', 'fixture', '/tmp/repo', '[]', '[]', 'scope', 'commit',
+                'tree', 'fresh', 1, 1, 0, 0, 0, NULL
+            );
+            INSERT INTO code_repository_scopes (
+                source_scope, repository_id, resolved_commit_sha, tree_hash,
+                path_filters_json, language_filters_json, indexed_file_count,
+                symbol_count, reference_count, chunk_count, stale, degraded_reason
+            )
+            VALUES ('scope', 'repo', 'commit', 'tree', '[]', '[]', 1, 1, 0, 0, 0, NULL);
+            INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, blob_hash,
+                byte_len, line_count, parse_status, is_generated, degraded_reason
+            )
+            VALUES ('repo', 'scope', 'file', 'src/client.ts', 'typescript', 'hash', 20, 1, 'parsed', 0, NULL);
+            ",
+        )
+        .expect("fresh legacy scope should insert");
+
+    initialize_code_schema(&connection).expect("generated detection migration should run");
+    assert_eq!(repository_stale(&connection), 1);
+    assert_eq!(scope_stale(&connection), 1);
+    assert!(
+        code_schema_migration_applied(&connection, GENERATED_DETECTION_REINDEX_MIGRATION)
+            .expect("migration marker should load")
+    );
+
+    connection
+        .execute_batch(
+            "
+            UPDATE code_repositories SET stale = 0 WHERE repository_id = 'repo';
+            UPDATE code_repository_scopes SET stale = 0 WHERE source_scope = 'scope';
+            ",
+        )
+        .expect("stale flags should reset");
+    initialize_code_schema(&connection).expect("marked migration should skip");
+
+    assert_eq!(repository_stale(&connection), 0);
+    assert_eq!(scope_stale(&connection), 0);
 }
 
 #[test]
@@ -328,7 +472,7 @@ fn edge_language_backfill_is_marked_after_one_legacy_update() {
                     0, 0, 0, 0, 0, NULL);
             INSERT INTO code_repository_files
             VALUES ('repo', 'scope', 'import-file', 'src/lib.rs', 'rust', 'hash',
-                    20, 1, 'parsed', NULL);
+                    20, 1, 'parsed', 0, NULL);
             INSERT INTO code_repository_search (
                 source_scope, document_kind, record_id, path, language_id, content
             )
@@ -381,4 +525,24 @@ fn edge_search_language(connection: &Connection) -> String {
             |row| row.get(0),
         )
         .expect("edge search row should load")
+}
+
+fn repository_stale(connection: &Connection) -> i64 {
+    connection
+        .query_row(
+            "SELECT stale FROM code_repositories WHERE repository_id = 'repo'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repository stale flag should load")
+}
+
+fn scope_stale(connection: &Connection) -> i64 {
+    connection
+        .query_row(
+            "SELECT stale FROM code_repository_scopes WHERE source_scope = 'scope'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("scope stale flag should load")
 }

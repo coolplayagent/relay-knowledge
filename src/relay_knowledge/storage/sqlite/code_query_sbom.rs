@@ -25,28 +25,35 @@ pub(super) fn search_sbom(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let exclude_generated_flag = usize::from(request.exclude_generated);
     let sql = format!(
         "
         SELECT dependency.file_id, dependency.path, dependency.language_id,
                dependency.ecosystem, dependency.package_name, dependency.requirement,
                dependency.resolved_version, dependency.dependency_group,
                dependency.source_kind, dependency.is_lockfile, dependency.line_start,
-               dependency.line_end, dependency.excerpt
+               dependency.line_end, dependency.excerpt, coalesce(file.is_generated, 0)
         FROM code_repository_dependencies dependency
+        LEFT JOIN code_repository_files file
+          ON file.source_scope = dependency.source_scope
+         AND file.path = dependency.path
         JOIN (
-              SELECT source_scope, record_id, bm25(code_repository_search) AS fts_rank
+              SELECT source_scope, record_id, bm25(code_repository_search) AS fts_rank,
+                     coalesce((SELECT file.is_generated FROM code_repository_files file WHERE file.source_scope = code_repository_search.source_scope AND file.path = code_repository_search.path LIMIT 1), 0) AS is_generated
               FROM code_repository_search
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'dependency'
                 {fts_filter}
-              ORDER BY fts_rank ASC, record_id ASC
+                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files file WHERE file.source_scope = code_repository_search.source_scope AND file.path = code_repository_search.path AND file.is_generated != 0))
+              ORDER BY is_generated ASC, fts_rank ASC, record_id ASC
               LIMIT ?
         ) candidate
           ON candidate.source_scope = dependency.source_scope
          AND candidate.record_id = dependency.dependency_id
         WHERE dependency.source_scope = ?
         ORDER BY CASE WHEN lower(dependency.package_name) = lower(?) THEN 0 ELSE 1 END ASC,
+                 candidate.is_generated ASC,
                  candidate.fts_rank ASC,
                  dependency.is_lockfile DESC,
                  dependency.path ASC,
@@ -83,6 +90,7 @@ pub(super) fn search_sbom(
                     end: row.get(11)?,
                 },
                 excerpt: row.get(12)?,
+                is_generated: row.get::<_, i64>(13)? != 0,
             })
         },
     )?;
@@ -93,7 +101,15 @@ pub(super) fn search_sbom(
 
     let mut hits = rows
         .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
+        .filter(|row| {
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            )
+        })
         .filter_map(|row| {
             let score = dependency_score(&score_query, &request.query, &row);
             let excerpt = dependency_excerpt(&row);
@@ -116,6 +132,7 @@ pub(super) fn search_sbom(
                         retrieval_layers: vec![CodeRetrievalLayer::Sbom],
                         score,
                         excerpt,
+                        is_generated: row.is_generated,
                         degraded_reason: None,
                         edge_kind: Some("dependency".to_owned()),
                         edge_resolution_state: Some(edge_resolution_state),

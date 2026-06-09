@@ -125,12 +125,18 @@ fn search_call_identity_rows(
     let path_filter = path_filter_sql_for_column("c.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
+    let generated_filter = if request.exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
     let direct_limit = call_identity_candidate_limit(request);
     let sql = call_rows_sql(&format!(
         "
           AND {} = ?
           {path_filter}
           {language_filter}
+          {generated_filter}
         ",
         identity.match_column()
     ));
@@ -203,6 +209,7 @@ fn search_call_fts_rows(
     let fts_query = fts_match_query(&request.query);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
     let call_direction_filter = call_direction_fts_filter_sql(request);
+    let exclude_generated_flag = usize::from(request.exclude_generated);
     let sql = call_rows_sql(&format!(
         "
           AND c.call_id IN (
@@ -213,7 +220,10 @@ fn search_call_fts_rows(
                 AND document_kind = 'call'
                 {fts_filter}
                 {call_direction_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
+              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
               LIMIT ?
           )
         "
@@ -274,7 +284,8 @@ fn call_rows_sql(predicate_sql: &str) -> String {
                             chunk.line_start ASC,
                             chunk.chunk_id ASC
                    LIMIT 1
-               ) AS callee_excerpt
+               ) AS callee_excerpt,
+               f.is_generated
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
@@ -286,7 +297,7 @@ fn call_rows_sql(predicate_sql: &str) -> String {
            AND callee.symbol_snapshot_id = c.callee_symbol_snapshot_id
         WHERE c.source_scope = ?
           {predicate_sql}
-        ORDER BY c.path ASC, c.line_start ASC
+        ORDER BY f.is_generated ASC, c.path ASC, c.line_start ASC
         LIMIT ?
         "
     )
@@ -320,6 +331,7 @@ fn row_to_call(row: &Row<'_>) -> rusqlite::Result<CallRow> {
         callee_signature: row.get(19)?,
         caller_excerpt: row.get(20)?,
         callee_excerpt: row.get(21)?,
+        is_generated: row.get::<_, i64>(22)? != 0,
     })
 }
 
@@ -341,7 +353,15 @@ fn call_rows_to_hits(
     let callee_execution_order = callee_execution_order(&rows, request);
 
     rows.into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
+        .filter(|row| {
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            )
+        })
         .filter_map(|row| {
             let caller_target_call_count = call_site_counts
                 .as_ref()
@@ -510,6 +530,7 @@ fn call_rows_to_hits(
                         score: score
                             + 1.25
                             + call_edge_confidence_bonus(row.confidence_basis_points),
+                        is_generated: row.is_generated,
                         excerpt: if request.code_query_kind == CodeQueryKind::Callees {
                             callee_excerpt(
                                 row.caller_excerpt.as_deref(),

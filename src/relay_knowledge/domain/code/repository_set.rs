@@ -160,6 +160,8 @@ pub struct CodeRepositorySetQueryRequest {
     pub freshness_policy: FreshnessPolicy,
     pub path_filters: Vec<String>,
     pub language_filters: Vec<String>,
+    #[serde(default)]
+    pub exclude_generated: bool,
 }
 
 impl CodeRepositorySetQueryRequest {
@@ -186,6 +188,7 @@ impl CodeRepositorySetQueryRequest {
             freshness_policy,
             path_filters: normalize_filter_list("path_filter", path_filters)?,
             language_filters: normalize_filter_list("language_filter", language_filters)?,
+            exclude_generated: false,
         })
     }
 }
