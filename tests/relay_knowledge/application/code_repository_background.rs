@@ -36,6 +36,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-background-index"),
@@ -47,6 +48,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-background-index-duplicate"),
@@ -72,6 +74,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-background-index-moved-head"),
@@ -168,6 +171,7 @@ async fn background_index_prunes_scopes_beyond_active_and_recent_budget() {
                 CodeIndexRequest {
                     repository: selector("fixture", &commit),
                     mode: CodeIndexMode::Full,
+                    workspace_detection: Default::default(),
                     freshness_policy: FreshnessPolicy::AllowStale,
                 },
                 context("start-retention"),
@@ -227,6 +231,7 @@ async fn repository_status_reports_checkpoint_without_active_task() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-orphan-checkpoint-baseline"),
@@ -260,6 +265,7 @@ async fn repository_status_reports_checkpoint_without_active_task() {
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
         tombstones: Vec::new(),
+        workspaces: Vec::new(),
         resource_budget: CodeIndexResourceBudget::default(),
     };
     store
@@ -306,6 +312,7 @@ async fn repository_status_recovers_expired_code_index_task_lease() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-expired-lease"),
@@ -359,6 +366,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-shared-store-running"),
@@ -383,6 +391,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-shared-store-duplicate"),
@@ -405,6 +414,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-shared-store-moved-head"),
@@ -449,13 +459,13 @@ async fn code_index_health_isolation_cases_health_and_query_respond_during_full_
     repo.git(["commit", "-m", "initial"]);
     let service = service_with_file_store("code-health-isolation").await;
 
-    register_fixture_repo_without_language_filter(&service, &repo, "register-health-isolation")
-        .await;
+    register_fixture_repo(&service, &repo, "register-health-isolation").await;
     let initial = service
         .start_code_repository_index(
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-health-isolation-initial"),
@@ -490,6 +500,7 @@ async fn code_index_health_isolation_cases_health_and_query_respond_during_full_
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-health-isolation-large"),
@@ -557,6 +568,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-stale-filtered-a"),
@@ -571,6 +583,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/b.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-stale-filtered-b"),
@@ -585,6 +598,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-stale-filtered-a"),
@@ -654,6 +668,7 @@ async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-stale-unmatched-a"),
@@ -668,6 +683,7 @@ async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-stale-unmatched-a"),
@@ -716,6 +732,7 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-stale-feature-flag-a"),
@@ -733,6 +750,7 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/b.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-stale-feature-flag-b"),
@@ -750,6 +768,7 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
             CodeIndexRequest {
                 repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-stale-feature-flag-a"),
@@ -827,25 +846,6 @@ async fn query_ref(
 }
 
 async fn register_fixture_repo(service: &RelayKnowledgeService, repo: &FixtureRepo, name: &str) {
-    service
-        .register_code_repository(
-            CodeRepositoryRegisterRequest {
-                root_path: repo.path.display().to_string(),
-                alias: "fixture".to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: Vec::new(),
-            },
-            context(name),
-        )
-        .await
-        .expect("repository should register");
-}
-
-async fn register_fixture_repo_without_language_filter(
-    service: &RelayKnowledgeService,
-    repo: &FixtureRepo,
-    name: &str,
-) {
     service
         .register_code_repository(
             CodeRepositoryRegisterRequest {

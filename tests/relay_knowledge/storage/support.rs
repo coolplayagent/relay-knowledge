@@ -109,6 +109,7 @@ pub(super) fn snapshot(
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -154,6 +155,7 @@ pub(super) fn session_for_snapshot(snapshot: &CodeIndexSnapshot) -> CodeIndexSes
         skipped_unchanged_count: snapshot.skipped_unchanged_count,
         deleted_paths: snapshot.deleted_paths.clone(),
         tombstones: snapshot.tombstones.clone(),
+        workspaces: snapshot.workspaces.clone(),
         resource_budget: CodeIndexResourceBudget::default(),
     }
 }

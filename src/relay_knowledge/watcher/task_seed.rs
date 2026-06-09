@@ -53,6 +53,7 @@ pub fn build_incremental_task_seed(
             language_filters: Vec::new(),
         },
         mode: crate::domain::CodeIndexMode::WorktreeOverlay,
+        workspace_detection: Default::default(),
         freshness_policy: crate::domain::FreshnessPolicy::WaitUntilFresh,
     };
     let mut payload = serde_json::to_value(&request).ok()?;

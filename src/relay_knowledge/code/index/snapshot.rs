@@ -1,12 +1,183 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 
 use crate::domain::{
-    CodeCallRecord, CodeIndexSnapshot, CodePathTombstone, CodeRepositoryRegistration,
-    CodeRepositorySelector, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
-    code_snapshot_scope_id,
+    CodeCallRecord, CodeIndexSnapshot, CodeMonorepoWorkspace, CodePathTombstone,
+    CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord, code_snapshot_scope_id,
 };
 
 use super::{identity, ids::stable_id};
+use crate::code::{
+    parser::workspace::WorkspaceSource,
+    source::{RepositorySourceKind, changes::GitTreeEntry, source_snapshot_bytes},
+};
+
+struct IndexedWorkspaceSource<'a> {
+    root_path: &'a Path,
+    kind: RepositorySourceKind,
+    commit: &'a str,
+    entries: &'a [GitTreeEntry],
+    path_filters: &'a [String],
+}
+
+impl WorkspaceSource for IndexedWorkspaceSource<'_> {
+    fn root_path(&self) -> &Path {
+        self.root_path
+    }
+
+    fn read_to_string(&self, relative_path: &str) -> Option<String> {
+        let relative_path = indexed_workspace_path(relative_path)?;
+        if !self.entries.iter().any(|entry| entry.path == relative_path)
+            && !workspace_manifest_read_allowed(&relative_path, self.path_filters)
+        {
+            return None;
+        }
+        source_snapshot_bytes(self.root_path, self.kind, self.commit, &relative_path)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+    }
+
+    fn child_dirs(&self, relative_dir: &str) -> Vec<String> {
+        let Some(parent) = indexed_workspace_path(relative_dir) else {
+            return Vec::new();
+        };
+        let prefix = (!parent.is_empty()).then(|| format!("{parent}/"));
+        let mut dirs = std::collections::BTreeSet::new();
+        for entry in self.entries {
+            let rest = match &prefix {
+                Some(prefix) => entry.path.strip_prefix(prefix.as_str()),
+                None => Some(entry.path.as_str()),
+            };
+            let Some(rest) = rest else {
+                continue;
+            };
+            let Some((child, _)) = rest.split_once('/') else {
+                continue;
+            };
+            if child.is_empty() {
+                continue;
+            }
+            dirs.insert(match &prefix {
+                Some(_) => format!("{parent}/{child}"),
+                None => child.to_owned(),
+            });
+        }
+        dirs.into_iter().collect()
+    }
+
+    fn descendant_dirs_containing_file(
+        &self,
+        relative_dir: &str,
+        file_name: &str,
+        directory_limit: usize,
+        entry_limit: usize,
+    ) -> Vec<String> {
+        let Some(parent) = indexed_workspace_path(relative_dir) else {
+            return Vec::new();
+        };
+        if directory_limit == 0
+            || entry_limit == 0
+            || file_name.trim().is_empty()
+            || file_name.contains('/')
+        {
+            return Vec::new();
+        }
+
+        let prefix = (!parent.is_empty()).then(|| format!("{parent}/"));
+        let mut dirs = std::collections::BTreeSet::new();
+        for entry in self.entries.iter().take(entry_limit) {
+            let rest = match &prefix {
+                Some(prefix) => entry.path.strip_prefix(prefix.as_str()),
+                None => Some(entry.path.as_str()),
+            };
+            let Some(rest) = rest else {
+                continue;
+            };
+            let Some(dir) = rest
+                .strip_suffix(file_name)
+                .and_then(|value| value.strip_suffix('/'))
+            else {
+                continue;
+            };
+            if dir.is_empty() {
+                continue;
+            }
+
+            let relative_path = match &prefix {
+                Some(_) => format!("{parent}/{dir}"),
+                None => dir.to_owned(),
+            };
+            dirs.insert(relative_path);
+            if dirs.len() >= directory_limit {
+                break;
+            }
+        }
+
+        dirs.into_iter().collect()
+    }
+}
+
+fn indexed_workspace_path(path: &str) -> Option<String> {
+    let normalized = path.trim().replace('\\', "/");
+    let mut segments = Vec::new();
+    for segment in normalized.split('/') {
+        let segment = segment.trim();
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." {
+            return None;
+        }
+        segments.push(segment);
+    }
+    Some(segments.join("/"))
+}
+
+pub(in crate::code) fn detect_workspaces_for_source_snapshot(
+    root_path: &Path,
+    kind: RepositorySourceKind,
+    commit: &str,
+    entries: &[GitTreeEntry],
+    path_filters: &[String],
+    config: &crate::domain::CodeWorkspaceDetectionConfig,
+) -> Vec<CodeMonorepoWorkspace> {
+    let source = IndexedWorkspaceSource {
+        root_path,
+        kind,
+        commit,
+        entries,
+        path_filters,
+    };
+    crate::code::parser::workspace::detect_workspaces_from_source(&source, config)
+}
+
+fn workspace_manifest_read_allowed(relative_path: &str, path_filters: &[String]) -> bool {
+    is_workspace_manifest_path(relative_path) && workspace_path_allowed(relative_path, path_filters)
+}
+
+fn is_workspace_manifest_path(relative_path: &str) -> bool {
+    matches!(
+        relative_path.rsplit('/').next(),
+        Some("pnpm-workspace.yaml" | "go.work" | "package.json" | "Cargo.toml" | "go.mod")
+    )
+}
+
+fn workspace_path_allowed(relative_path: &str, path_filters: &[String]) -> bool {
+    path_filters.is_empty()
+        || path_filters.iter().any(|filter| {
+            indexed_workspace_path(filter)
+                .as_deref()
+                .is_some_and(|filter| path_filter_covers(filter, relative_path))
+        })
+}
+
+fn path_filter_covers(filter: &str, path: &str) -> bool {
+    filter.is_empty()
+        || path == filter
+        || path
+            .strip_prefix(filter)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
 
 pub(in crate::code) struct SnapshotBuild {
     pub(in crate::code) repository_id: String,
@@ -30,6 +201,9 @@ pub(in crate::code) struct SnapshotBuild {
     pub(in crate::code) feature_flags: Vec<crate::domain::CodeFeatureFlagRecord>,
     pub(in crate::code) chunks: Vec<crate::domain::RepositoryCodeChunkRecord>,
     pub(in crate::code) diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
+    /// Detected monorepo workspace members populated when
+    /// [`CodeWorkspaceDetectionConfig::enabled`] is `true`.
+    pub(in crate::code) workspaces: Vec<CodeMonorepoWorkspace>,
 }
 
 pub(in crate::code) struct SnapshotScopeFilters {
@@ -129,6 +303,7 @@ impl SnapshotBuild {
             feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
+            workspaces: Vec::new(),
         }
     }
 
@@ -215,6 +390,7 @@ impl SnapshotBuild {
             dependencies: self.dependencies,
             feature_flags: self.feature_flags,
             chunks: self.chunks,
+            workspaces: self.workspaces,
             diagnostics: self.diagnostics,
         }
     }
@@ -231,10 +407,33 @@ impl SnapshotBuild {
         self.feature_flags.append(&mut other.feature_flags);
         self.chunks.append(&mut other.chunks);
         self.diagnostics.append(&mut other.diagnostics);
+        self.workspaces.append(&mut other.workspaces);
     }
 
     pub(in crate::code) fn language_filters(&self) -> &[String] {
         &self.language_filters
+    }
+
+    /// Scans the repository root for monorepo workspace manifests and
+    /// populates `self.workspaces` when detection is enabled.
+    ///
+    /// This is a no-op when [`CodeWorkspaceDetectionConfig::enabled`] is
+    /// `false` or when no supported workspace manifests are found.
+    pub(in crate::code) fn detect_and_fill_workspaces(
+        &mut self,
+        root_path: &Path,
+        kind: RepositorySourceKind,
+        entries: &[GitTreeEntry],
+        config: &crate::domain::CodeWorkspaceDetectionConfig,
+    ) {
+        self.workspaces = detect_workspaces_for_source_snapshot(
+            root_path,
+            kind,
+            &self.commit,
+            entries,
+            &self.path_filters,
+            config,
+        );
     }
 }
 
@@ -338,6 +537,36 @@ mod tests {
             Some("c-definition")
         );
         assert_eq!(call.resolution_state, "resolved");
+    }
+
+    #[test]
+    fn indexed_workspace_descendant_scan_respects_directory_and_entry_limits() {
+        let entries = (0..8)
+            .map(|index| GitTreeEntry {
+                path: format!("packages/pkg-{index}/package.json"),
+                byte_count: 1,
+            })
+            .collect::<Vec<_>>();
+        let source = IndexedWorkspaceSource {
+            root_path: std::path::Path::new("/repo"),
+            kind: RepositorySourceKind::FileSystem,
+            commit: "commit",
+            entries: &entries,
+            path_filters: &[],
+        };
+
+        assert_eq!(
+            source
+                .descendant_dirs_containing_file("packages", "package.json", 3, 8)
+                .len(),
+            3
+        );
+        assert_eq!(
+            source
+                .descendant_dirs_containing_file("packages", "package.json", 8, 2)
+                .len(),
+            2
+        );
     }
 
     fn symbol(

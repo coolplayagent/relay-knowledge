@@ -88,6 +88,7 @@ pub(super) fn snapshot_with_exact_match_noise() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -150,6 +151,7 @@ pub(super) fn snapshot_with_type_name_signature_mentions() -> CodeIndexSnapshot 
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -219,6 +221,7 @@ pub(super) fn snapshot_with_many_signature_mentions() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -310,6 +313,7 @@ pub(super) fn snapshot_with_scoped_cpp_definition_noise() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

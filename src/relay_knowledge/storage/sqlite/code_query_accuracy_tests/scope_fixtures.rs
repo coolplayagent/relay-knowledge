@@ -33,6 +33,7 @@ pub(super) fn snapshot_with_target_symbol() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -87,6 +88,7 @@ pub(super) fn snapshot_with_path_filtered_candidate_overflow() -> CodeIndexSnaps
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -135,6 +137,7 @@ pub(super) fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics,
     }
 }

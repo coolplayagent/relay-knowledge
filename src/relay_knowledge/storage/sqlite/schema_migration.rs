@@ -87,6 +87,16 @@ const GRAPH_VECTOR_COLUMNS: &[&str] = &[
     "source_hash",
     "tokenizer_version",
 ];
+const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
+    "set_id",
+    "package_name",
+    "ecosystem",
+    "repository_id",
+    "source_scope",
+    "workspace_format",
+    "created_at_ms",
+];
+const CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE: &[&str] = &["set_id", "package_name", "ecosystem"];
 
 const CODE_GRAPH_SCHEMAS: &[DerivedTableSchema] = &[
     DerivedTableSchema {
@@ -192,6 +202,7 @@ fn prepare_existing_database_once(connection: &Connection) -> Result<(), Storage
     drop_incompatible_table(connection, "graph_vector_documents", GRAPH_VECTOR_COLUMNS)?;
     rebuild_incompatible_code_graph_tables(connection)?;
     rebuild_incompatible_index_refresh_tasks(connection)?;
+    rebuild_incompatible_workspace_package_mappings(connection)?;
 
     Ok(())
 }
@@ -406,6 +417,58 @@ fn rebuild_incompatible_code_graph_tables(connection: &Connection) -> Result<(),
     Ok(())
 }
 
+fn rebuild_incompatible_workspace_package_mappings(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if !table_exists(connection, "code_workspace_package_mappings")? {
+        return Ok(());
+    }
+    if !table_has_columns(
+        connection,
+        "code_workspace_package_mappings",
+        CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS,
+    )? {
+        connection.execute("DROP TABLE code_workspace_package_mappings", [])?;
+        return Ok(());
+    }
+    if table_has_unique_columns(
+        connection,
+        "code_workspace_package_mappings",
+        CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE,
+    )? {
+        return Ok(());
+    }
+
+    connection.execute_batch(
+        "
+        DROP TABLE IF EXISTS code_workspace_package_mappings_rebuild_legacy;
+        ALTER TABLE code_workspace_package_mappings
+            RENAME TO code_workspace_package_mappings_rebuild_legacy;
+        CREATE TABLE code_workspace_package_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            set_id TEXT NOT NULL,
+            package_name TEXT NOT NULL,
+            ecosystem TEXT NOT NULL,
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            workspace_format TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            UNIQUE (set_id, package_name, ecosystem)
+        );
+        INSERT OR IGNORE INTO code_workspace_package_mappings (
+            id, set_id, package_name, ecosystem, repository_id, source_scope,
+            workspace_format, created_at_ms
+        )
+        SELECT id, set_id, package_name, ecosystem, repository_id, source_scope,
+               workspace_format, created_at_ms
+        FROM code_workspace_package_mappings_rebuild_legacy
+        ORDER BY created_at_ms DESC, id DESC;
+        DROP TABLE code_workspace_package_mappings_rebuild_legacy;
+        ",
+    )?;
+    Ok(())
+}
+
 fn table_has_columns(
     connection: &Connection,
     table: &str,
@@ -424,6 +487,36 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, St
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn table_has_unique_columns(
+    connection: &Connection,
+    table: &str,
+    expected_columns: &[&str],
+) -> Result<bool, StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA index_list({table})"))?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)? != 0))
+    })?;
+    let indexes = rows.collect::<Result<Vec<_>, _>>()?;
+
+    for (index_name, unique) in indexes {
+        if !unique {
+            continue;
+        }
+        let mut statement = connection.prepare(&format!("PRAGMA index_info({index_name})"))?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
+        let columns = rows.collect::<Result<Vec<_>, _>>()?;
+        if columns
+            .iter()
+            .map(String::as_str)
+            .eq(expected_columns.iter().copied())
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn table_column_info(
@@ -461,9 +554,12 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageErr
 #[cfg(test)]
 mod tests {
     use super::{
+        CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE, prepare_existing_database_once,
         schema_compatibility_error_is_retryable, schema_compatibility_error_message_is_retryable,
+        table_has_unique_columns,
     };
     use crate::storage::StorageError;
+    use rusqlite::Connection;
 
     #[test]
     fn schema_compatibility_retry_is_limited_to_transient_open_errors() {
@@ -479,5 +575,51 @@ mod tests {
         assert!(!schema_compatibility_error_is_retryable(
             &StorageError::InvalidInput("database is locked".to_owned())
         ));
+    }
+
+    #[test]
+    fn migration_rebuilds_legacy_workspace_package_mapping_uniqueness() {
+        let connection = Connection::open_in_memory().expect("connection should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE code_workspace_package_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    set_id TEXT NOT NULL,
+                    package_name TEXT NOT NULL,
+                    ecosystem TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    workspace_format TEXT NOT NULL,
+                    created_at_ms INTEGER NOT NULL,
+                    UNIQUE (set_id, package_name)
+                );
+                INSERT INTO code_workspace_package_mappings (
+                    set_id, package_name, ecosystem, repository_id, source_scope,
+                    workspace_format, created_at_ms
+                )
+                VALUES ('set-1', 'core', 'npm', 'repo', 'scope', 'pnpm', 1);
+                ",
+            )
+            .expect("legacy mapping table should create");
+
+        prepare_existing_database_once(&connection).expect("migration should run");
+
+        assert!(
+            table_has_unique_columns(
+                &connection,
+                "code_workspace_package_mappings",
+                CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE
+            )
+            .expect("unique key should inspect")
+        );
+        let row_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM code_workspace_package_mappings",
+                [],
+                |row| row.get(0),
+            )
+            .expect("row count should load");
+        assert_eq!(row_count, 1);
     }
 }

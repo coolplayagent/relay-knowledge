@@ -49,6 +49,7 @@ pub(super) fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -110,6 +111,7 @@ pub(super) fn snapshot_with_many_caller_candidate_ties() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -173,6 +175,7 @@ pub(super) fn snapshot_with_same_callee_context_noise() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -245,6 +248,7 @@ pub(super) fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
                 )
             },
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -283,6 +287,7 @@ pub(super) fn snapshot_with_eval_checkpoint_chunk() -> CodeIndexSnapshot {
             "class EvalCheckpointStore:\n    def ensure_initialized(self, signature):\n        raise ValueError(\"Checkpoint signature does not match\")\n\n    def append_result(self, result):\n        self._results_path.write_text(result.model_dump_json())",
             None,
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -339,6 +344,7 @@ pub(super) fn snapshot_with_cache_interface_chunk_noise() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![target, noise],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -395,6 +401,7 @@ pub(super) fn snapshot_with_recovery_manifest_chunk_noise() -> CodeIndexSnapshot
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![target, noise],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -445,6 +452,7 @@ pub(super) fn snapshot_with_related_callee_names() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

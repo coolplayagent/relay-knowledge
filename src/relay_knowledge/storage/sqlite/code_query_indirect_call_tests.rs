@@ -72,6 +72,7 @@ async fn callers_follow_designated_function_pointer_bindings() {
                 range(20, 24),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -180,6 +181,7 @@ async fn callers_merge_indirect_bindings_when_direct_calls_exist() {
                 range(20, 24),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -259,6 +261,7 @@ async fn callers_preserve_cross_file_indirect_bindings_with_receiver_context() {
                 range(30, 34),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -359,6 +362,7 @@ async fn indirect_callers_ignore_same_field_calls_in_other_files() {
                 range(40, 44),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;

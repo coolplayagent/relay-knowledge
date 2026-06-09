@@ -73,6 +73,7 @@ pub(super) async fn run_remote(
             let request = CodeIndexRequest {
                 repository: selector,
                 mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             };
             if *dry_run {
@@ -118,6 +119,7 @@ pub(super) async fn run_remote(
                     format,
                 )?,
                 mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             };
             let response = client

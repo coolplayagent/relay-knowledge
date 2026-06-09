@@ -43,6 +43,7 @@ async fn incremental_call_search_uses_cloned_symbol_signatures() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -121,6 +122,7 @@ async fn incremental_call_search_batches_cloned_symbol_signature_lookups() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -197,6 +199,7 @@ async fn incremental_path_cleanup_deletes_cloned_search_rows() {
             "src/doc.rs",
             "staleonly237xyz",
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -269,6 +272,7 @@ fn incremental_snapshot() -> CodeIndexSnapshot {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

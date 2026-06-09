@@ -8,6 +8,7 @@ pub(crate) const RESOLVE_CALL_TARGETS: &str = "finalizing:resolve_call_targets";
 pub(crate) const REFRESH_DEPENDENCIES: &str = "finalizing:refresh_dependencies";
 pub(crate) const REBUILD_REFERENCE_SEARCH: &str = "finalizing:rebuild_reference_search";
 pub(crate) const REBUILD_CALLS: &str = "finalizing:rebuild_calls";
+pub(crate) const RESOLVE_WORKSPACE_IMPORTS: &str = "finalizing:resolve_workspace_imports";
 pub(crate) const PUBLISH_SCOPE: &str = "finalizing:publish_scope";
 
 #[derive(Default)]

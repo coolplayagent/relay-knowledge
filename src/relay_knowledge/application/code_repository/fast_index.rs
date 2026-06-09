@@ -23,6 +23,9 @@ pub(super) async fn fresh_full_index_response(
     if request.mode != CodeIndexMode::Full {
         return Ok(None);
     }
+    if request.workspace_detection.enabled {
+        return Ok(None);
+    }
     let probe = fresh_full_index_probe(status, &request.repository).await?;
     let scoped_status = store
         .code_repository_scope_status(
@@ -58,6 +61,10 @@ pub(super) async fn fresh_full_index_response(
         .last_indexed_scope_id
         .clone()
         .unwrap_or_default();
+    store
+        .clear_code_workspace_state(scoped_status.repository_id.clone(), source_scope.clone())
+        .await
+        .map_err(storage_api_error)?;
     let software_projection = store
         .refresh_software_global_projection(source_scope.clone())
         .await

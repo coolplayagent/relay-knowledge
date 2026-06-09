@@ -103,6 +103,13 @@ change CLI, service, Web, indexing, retrieval, or release workflow behavior.
   refresh, worktree overlay indexing, symbol/reference/chunk retrieval, impact
   analysis, and thin multi-repository `repo-set` overlay queries without
   copying base facts.
+- Optional monorepo workspace detection for pnpm workspaces, Go workspaces
+  (`go.work`), and Cargo workspace members. When `CodeIndexRequest`
+  enables workspace detection, cross-repository import resolution maps
+  unresolved imports to sibling packages via a workspace package-mapping
+  table, providing `target_hint` metadata instead of silently dropping
+  cross-repo references. CLI indexing keeps the default disabled, so
+  single-repository indexing paths are completely unaffected.
 - Software global projection for repository-scoped files, documentation topics,
   config/code relationships, dependencies, and unresolved SDK/API usage, exposed
   through `repo software` without query-time repository scans.

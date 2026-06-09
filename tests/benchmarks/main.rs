@@ -45,6 +45,7 @@ async fn benchmark_code_repository_fast_paths() {
                 CodeIndexRequest {
                     repository: selector("bench", &base),
                     mode: CodeIndexMode::Full,
+                    workspace_detection: Default::default(),
                     freshness_policy: FreshnessPolicy::WaitUntilFresh,
                 },
                 context("benchmark-full-index"),
@@ -69,6 +70,7 @@ async fn benchmark_code_repository_fast_paths() {
             CodeIndexRequest {
                 repository: selector("bench", &head),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("benchmark-active-head"),
@@ -86,6 +88,7 @@ async fn benchmark_code_repository_fast_paths() {
                         repository: selector("bench", &head),
                         mode: CodeIndexMode::incremental(base.clone(), head.clone())
                             .expect("incremental mode should validate"),
+                        workspace_detection: Default::default(),
                         freshness_policy: FreshnessPolicy::WaitUntilFresh,
                     },
                     context("benchmark-incremental"),
@@ -105,6 +108,7 @@ async fn benchmark_code_repository_fast_paths() {
                 CodeIndexRequest {
                     repository: selector("bench", &head),
                     mode: CodeIndexMode::Full,
+                    workspace_detection: Default::default(),
                     freshness_policy: FreshnessPolicy::WaitUntilFresh,
                 },
                 context("benchmark-noop"),

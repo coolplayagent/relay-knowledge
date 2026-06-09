@@ -187,8 +187,19 @@ fn finalize_session_once(
         &session.source_scope,
         finalize::phases::PUBLISH_SCOPE,
     )?;
+    progress::mark_checkpoint_state(
+        connection,
+        &session.source_scope,
+        finalize::phases::RESOLVE_WORKSPACE_IMPORTS,
+    )?;
     let transaction = connection.transaction()?;
     update_repository_after_session(&transaction, session)?;
+    super::code_workspace::resolve_workspace_imports(
+        &transaction,
+        &session.workspaces,
+        &session.repository_id,
+        &session.source_scope,
+    )?;
     mark_checkpoint_completed(&transaction, &session.source_scope)?;
     transaction.commit()?;
 

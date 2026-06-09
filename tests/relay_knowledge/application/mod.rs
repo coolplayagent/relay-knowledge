@@ -6,6 +6,7 @@ mod code_repository_recovery;
 mod code_repository_set;
 mod code_repository_software;
 mod code_repository_source_layout;
+mod code_repository_workspace_cross_resolution;
 mod graphrag_evaluation;
 mod local_files;
 mod unified_api;

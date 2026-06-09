@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, collections::BTreeSet, path::Path};
 
-use crate::domain::{CodeIndexSnapshot, CodeRepositoryRegistration, CodeRepositorySelector};
+use crate::domain::{
+    CodeIndexSnapshot, CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeWorkspaceDetectionConfig,
+};
 
 use super::{
     CodeIndexError,
@@ -51,6 +54,7 @@ pub(super) fn build_filesystem_delta_snapshot(
     ref_selector: &str,
     previous_hashes: &BTreeMap<String, String>,
     base_resolved_commit_sha: Option<&str>,
+    workspace_detection: &CodeWorkspaceDetectionConfig,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let base_commit = base_resolved_commit_sha.ok_or_else(|| {
@@ -145,6 +149,13 @@ pub(super) fn build_filesystem_delta_snapshot(
     );
     build.base_resolved_commit_sha = Some(base_commit.to_owned());
     build.deleted_paths = deleted_paths;
+
+    build.detect_and_fill_workspaces(
+        root,
+        RepositorySourceKind::FileSystem,
+        &selected_entries,
+        workspace_detection,
+    );
 
     for entry in selected_entries {
         let bytes = source_snapshot_bytes(

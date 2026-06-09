@@ -77,6 +77,7 @@ async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
     let request = CodeIndexRequest {
         repository: selector("fixture", "HEAD"),
         mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
     };
 
@@ -89,7 +90,7 @@ async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
 
     reset_tracked_entries_call_count_for_root(observed_root.clone());
     let duplicate = service
-        .start_code_repository_index(request, context("start-git-active-duplicate"))
+        .start_code_repository_index(request.clone(), context("start-git-active-duplicate"))
         .await
         .expect("duplicate full index should reuse queued task");
 
@@ -98,6 +99,27 @@ async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
         first.task.as_ref().map(|task| task.task_id.as_str())
     );
     assert_eq!(tracked_entries_call_count_for_root(&observed_root), 0);
+
+    let workspace_request = CodeIndexRequest {
+        workspace_detection: crate::domain::CodeWorkspaceDetectionConfig::enabled_all(),
+        ..request.clone()
+    };
+    reset_tracked_entries_call_count_for_root(observed_root.clone());
+    let workspace_distinct = service
+        .start_code_repository_index(workspace_request, context("start-git-active-workspace"))
+        .await
+        .expect("workspace-aware full index request should queue separately");
+    assert_ne!(
+        workspace_distinct
+            .task
+            .as_ref()
+            .map(|task| task.task_id.as_str()),
+        first.task.as_ref().map(|task| task.task_id.as_str())
+    );
+    assert!(
+        tracked_entries_call_count_for_root(&observed_root) > 0,
+        "workspace-detection changes should still build a plan"
+    );
 
     let distinct_request = CodeIndexRequest {
         repository: CodeRepositorySelector::new(
@@ -108,6 +130,7 @@ async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
         )
         .expect("selector should validate"),
         mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
     };
     reset_tracked_entries_call_count_for_root(observed_root.clone());
@@ -129,6 +152,7 @@ async fn duplicate_active_filesystem_full_index_resolves_live_snapshot_before_re
     let request = CodeIndexRequest {
         repository: selector("fixture", "HEAD"),
         mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
     };
 
@@ -183,6 +207,7 @@ async fn queued_worktree_overlay_task_preserves_payload_ref_selector() {
     let overlay_request = CodeIndexRequest {
         repository: selector("fixture", "HEAD"),
         mode: CodeIndexMode::WorktreeOverlay,
+        workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::WaitUntilFresh,
     };
     let payload_json =
@@ -285,6 +310,7 @@ async fn allow_stale_query_reports_pending_freshness_and_source_read_requirement
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-code-query-pending-refresh"),
@@ -370,6 +396,7 @@ async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             },
             context("start-unmatched-active-head"),
@@ -392,6 +419,7 @@ async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
             skipped_unchanged_count: 0,
             deleted_paths: Vec::new(),
             tombstones: Vec::new(),
+            workspaces: Vec::new(),
             resource_budget: CodeIndexResourceBudget::default(),
         })
         .await
@@ -600,6 +628,7 @@ fn request(alias: &str, ref_selector: &str) -> CodeIndexRequest {
     CodeIndexRequest {
         repository: selector(alias, ref_selector),
         mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::WaitUntilFresh,
     }
 }

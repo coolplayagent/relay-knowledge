@@ -107,6 +107,7 @@ async fn register_and_index_fixture(
                 repository: CodeRepositorySelector::new(alias, "HEAD", Vec::new(), Vec::new())
                     .expect("selector should validate"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-index", "trace-index"),

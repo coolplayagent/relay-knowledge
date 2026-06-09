@@ -4,7 +4,10 @@ use std::{
     path::Path,
 };
 
-use crate::domain::{CodeIndexSnapshot, CodeRepositoryRegistration, CodeRepositorySelector};
+use crate::domain::{
+    CodeIndexSnapshot, CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeWorkspaceDetectionConfig,
+};
 
 use super::{
     CodeIndexError, MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS, changes,
@@ -15,30 +18,12 @@ use super::{
     parser::parse_indexed_file,
     scope,
     snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
-    source::{source_commit_is_filesystem, source_kind},
+    source::{RepositorySourceKind, source_commit_is_filesystem, source_kind},
     source_gitlink,
 };
 
-const WORKTREE_UNTRACKED_BROAD_SEGMENTS: &[&str] = &[
-    ".cache",
-    ".next",
-    ".nuxt",
-    ".parcel-cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    ".venv",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "target",
-    "third_party",
-    "vendor",
-    "venv",
-];
+#[path = "worktree_overlay_untracked.rs"]
+mod untracked;
 
 pub(super) fn build_worktree_overlay_snapshot(
     registration: &CodeRepositoryRegistration,
@@ -46,6 +31,7 @@ pub(super) fn build_worktree_overlay_snapshot(
     root: &Path,
     previous_hashes: &BTreeMap<String, String>,
     base_resolved_commit_sha: Option<&str>,
+    workspace_detection: &CodeWorkspaceDetectionConfig,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     if source_commit_is_filesystem(&selector.ref_selector)
         || base_resolved_commit_sha.is_some_and(source_commit_is_filesystem)
@@ -58,6 +44,7 @@ pub(super) fn build_worktree_overlay_snapshot(
             &selector.ref_selector,
             previous_hashes,
             base_resolved_commit_sha,
+            workspace_detection,
         );
     }
     let commit = resolve_ref(root, &selector.ref_selector)?;
@@ -74,7 +61,7 @@ pub(super) fn build_worktree_overlay_snapshot(
     )?;
     let changes = changes::worktree_changed_paths(&status);
     if changes.is_empty() {
-        return build_full_snapshot(registration, selector, root);
+        return build_full_snapshot(registration, selector, root, workspace_detection);
     }
     let overlay_scope = WorktreeOverlayScope::new(registration, selector, previous_hashes);
     let mut overlay_hash_input = Vec::new();
@@ -203,7 +190,7 @@ pub(super) fn build_worktree_overlay_snapshot(
         }
     }
     if overlay_hash_input.is_empty() {
-        return build_full_snapshot(registration, selector, root);
+        return build_full_snapshot(registration, selector, root, workspace_detection);
     }
 
     let overlay_hash = format!("{:016x}", stable_hash64(&overlay_hash_input));
@@ -224,13 +211,42 @@ pub(super) fn build_worktree_overlay_snapshot(
         skipped_unchanged_count,
     );
     build.base_resolved_commit_sha = Some(commit);
+    let workspace_entries =
+        workspace_overlay_entries(previous_hashes, &deleted_paths, &files_to_parse);
     build.deleted_paths = deleted_paths;
+
+    build.detect_and_fill_workspaces(
+        root,
+        RepositorySourceKind::FileSystem,
+        &workspace_entries,
+        workspace_detection,
+    );
 
     for (path, bytes) in files_to_parse {
         parse_indexed_file(&mut build, &path, &bytes)?;
     }
 
     Ok(build.finish())
+}
+
+fn workspace_overlay_entries(
+    previous_hashes: &BTreeMap<String, String>,
+    deleted_paths: &[String],
+    files_to_parse: &[(String, Vec<u8>)],
+) -> Vec<changes::GitTreeEntry> {
+    let deleted = deleted_paths.iter().collect::<BTreeSet<_>>();
+    let mut entries = previous_hashes
+        .keys()
+        .filter(|path| !deleted.contains(path))
+        .map(|path| (path.clone(), 0usize))
+        .collect::<BTreeMap<_, _>>();
+    for (path, bytes) in files_to_parse {
+        entries.insert(path.clone(), bytes.len());
+    }
+    entries
+        .into_iter()
+        .map(|(path, byte_count)| changes::GitTreeEntry { path, byte_count })
+        .collect()
 }
 
 struct WorktreeOverlayScope<'a> {
@@ -290,47 +306,8 @@ impl<'a> WorktreeOverlayScope<'a> {
     }
 
     fn untracked_selected(&self, path: &str) -> bool {
-        self.selected(path)
-            && (!worktree_untracked_path_contains_broad_segment(path)
-                || explicit_worktree_path_filter_covers(path, self.registration, self.selector))
+        self.selected(path) && untracked::allowed(path, self.registration, self.selector)
     }
-}
-
-fn worktree_untracked_path_contains_broad_segment(path: &str) -> bool {
-    normalize_worktree_path(path)
-        .split('/')
-        .any(|segment| WORKTREE_UNTRACKED_BROAD_SEGMENTS.contains(&segment))
-}
-
-fn explicit_worktree_path_filter_covers(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    registration
-        .path_filters
-        .iter()
-        .chain(selector.path_filters.iter())
-        .any(|filter| explicit_worktree_filter_matches_path(path, filter))
-}
-
-fn explicit_worktree_filter_matches_path(path: &str, filter: &str) -> bool {
-    let path = normalize_worktree_path(path);
-    let filter = normalize_worktree_path(filter);
-    if filter.is_empty() || filter == "." {
-        return false;
-    }
-
-    path == filter
-        || path.starts_with(&format!("{filter}/"))
-        || filter.starts_with(&format!("{path}/"))
-}
-
-fn normalize_worktree_path(path: &str) -> String {
-    path.replace('\\', "/")
-        .trim_start_matches("./")
-        .trim_matches('/')
-        .to_owned()
 }
 
 fn record_worktree_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {

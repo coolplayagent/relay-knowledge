@@ -45,6 +45,7 @@ async fn pure_hybrid_symbol_identity_uses_symbol_only_plan() {
             path,
             "ConnectorService lifecycle wiring ConnectorService",
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -95,6 +96,7 @@ async fn hybrid_symbol_plan_keeps_multi_term_flow_retrieval() {
             path,
             "ConnectorService lifecycle wiring ConnectorService",
         )],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -167,6 +169,7 @@ async fn dense_hybrid_chunk_plan_answers_before_symbol_noise() {
                 "worker.New setup keeps RegisterWorkflow RegisterActivity and InterruptCh in task queue order",
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -401,6 +404,7 @@ async fn rust_workflow_identifier_chunk_plan_answers_before_symbol_noise() {
                 "cross shard pipeline dispatch preserves rk_wide_bridge_dispatch and rk_wide_target_2047",
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -480,6 +484,7 @@ async fn language_scoped_workflow_chunk_plan_answers_before_symbol_noise() {
                 "provider panel renders the envelope payload after effect completion",
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -549,6 +554,7 @@ async fn query_language_scope_filters_chunk_candidates_before_fts_limit() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks,
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -629,6 +635,7 @@ async fn dense_structured_hybrid_chunk_plan_answers_before_symbol_noise() {
                 "mmap_region completes the SYSCALL_DEFINE6 mmap_pgoff allocation flow",
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -691,6 +698,7 @@ async fn multi_api_symbol_query_keeps_direct_identity_facets() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -759,6 +767,7 @@ async fn covered_multi_api_symbol_query_elides_fts_noise() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;

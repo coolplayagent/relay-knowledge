@@ -66,6 +66,7 @@ fn run_worker() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index"),
@@ -159,6 +160,7 @@ pub fn retry_policy_v2() -> u32 {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::incremental(first_commit, "HEAD")
                     .expect("incremental mode should validate"),
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("update"),
@@ -235,6 +237,7 @@ SELECT id FROM users;
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-sql-schema"),
@@ -325,6 +328,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-incremental-base"),
@@ -341,6 +345,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::incremental(initial.clone(), "HEAD")
                     .expect("incremental mode should validate"),
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-current-base"),
@@ -357,6 +362,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::incremental(initial, "HEAD")
                     .expect("incremental mode should validate"),
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-persisted-base"),
@@ -392,6 +398,7 @@ async fn duplicate_root_registration_preserves_existing_aliases() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-primary-alias"),
@@ -484,6 +491,7 @@ async fn health_graph_code_counters_include_repository_totals() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-health-totals"),
@@ -522,6 +530,7 @@ async fn full_index_reuses_fresh_matching_scope_without_rebuilding() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-full-noop-first"),
@@ -533,6 +542,7 @@ async fn full_index_reuses_fresh_matching_scope_without_rebuilding() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-full-noop-second"),
@@ -562,6 +572,7 @@ async fn repository_report_does_not_run_latency_samples_by_default() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-report-fast"),
@@ -615,6 +626,7 @@ pub fn caller_missing() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-unresolved-callee"),
@@ -669,6 +681,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-overlay"),
@@ -685,6 +698,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::WorktreeOverlay,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("overlay"),
@@ -750,6 +764,7 @@ async fn git_snapshot_queries_remain_isolated_after_indexing_another_branch() {
             CodeIndexRequest {
                 repository: selector("fixture", "branch-a"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-branch-a"),
@@ -761,6 +776,7 @@ async fn git_snapshot_queries_remain_isolated_after_indexing_another_branch() {
             CodeIndexRequest {
                 repository: selector("fixture", "branch-b"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-branch-b"),
@@ -834,6 +850,7 @@ async fn same_tree_hash_branches_reuse_scope_but_preserve_requested_ref_audit() 
             CodeIndexRequest {
                 repository: selector("fixture", "branch-a"),
                 mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             context("index-same-tree-a"),

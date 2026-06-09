@@ -2,6 +2,8 @@
 
 #[path = "web_code_api.rs"]
 mod web_code_api;
+#[path = "web_code_index_request.rs"]
+mod web_code_index_request;
 #[path = "web_model_config.rs"]
 mod web_model_config;
 
@@ -32,13 +34,14 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeQueryKind,
         CodeRepositorySelector, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
         CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
         FreshnessPolicy, IndexKind, ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest,
         WorkerKind,
     },
 };
+pub(super) use web_code_index_request::code_index_request;
 
 /// Builds the Web router without opening sockets.
 pub fn router(service: RelayKnowledgeService, max_request_body_bytes: u64) -> Router {
@@ -592,14 +595,6 @@ fn code_register_alias(payload: &Value) -> Result<String, WebError> {
     }
 }
 
-fn code_index_request(payload: &Value, mode: CodeIndexMode) -> Result<CodeIndexRequest, WebError> {
-    Ok(CodeIndexRequest {
-        repository: code_selector(payload)?,
-        mode,
-        freshness_policy: FreshnessPolicy::AllowStale,
-    })
-}
-
 fn file_index_request(payload: &Value) -> Result<FileIndexRequest, WebError> {
     Ok(FileIndexRequest {
         source_scope: optional_string_field(payload, "source_scope"),
@@ -920,7 +915,7 @@ struct ExecuteOperationResponse {
 }
 
 #[derive(Debug)]
-struct WebError {
+pub(in crate::interfaces) struct WebError {
     status: StatusCode,
     message: String,
 }

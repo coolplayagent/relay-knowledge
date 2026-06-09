@@ -69,6 +69,7 @@ async fn callees_rank_receiver_qualified_member_call_sites() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![caller_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -147,6 +148,7 @@ async fn callees_use_widest_caller_chunk_and_resolved_callee_body() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![narrow_caller_chunk, callee_chunk, wide_caller_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -238,6 +240,7 @@ async fn callees_preserve_execution_order_inside_matched_caller() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![caller_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -323,6 +326,7 @@ async fn callees_rank_local_callable_declaration_before_lambda_body_calls() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![caller_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -377,6 +381,7 @@ async fn callees_match_scoped_caller_query_from_symbol_signature() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -424,6 +429,7 @@ async fn callers_match_scoped_callee_query_from_symbol_signature() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -476,6 +482,7 @@ async fn callees_apply_direction_before_candidate_limit() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -528,6 +535,7 @@ async fn callees_use_exact_caller_identity_before_fts_candidate_window() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -609,6 +617,7 @@ async fn callers_rank_target_named_surface_above_generic_transport_wrappers() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![executor_chunk, redactor_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -711,6 +720,7 @@ async fn callers_rank_assigned_result_sites_above_plain_invocations() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![plain_chunk, test_chunk, assigned_chunk],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -775,6 +785,7 @@ async fn callers_rank_high_confidence_inferred_target_bindings() {
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![local_binding],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;

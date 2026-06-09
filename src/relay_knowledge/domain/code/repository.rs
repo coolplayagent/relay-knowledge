@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CodeDependencyRecord, CodeParseStatus, CodeParseStatusCounts, DomainError, FreshnessPolicy,
-    error::required_text,
+    CodeDependencyRecord, CodeMonorepoWorkspace, CodeParseStatus, CodeParseStatusCounts,
+    CodeWorkspaceDetectionConfig, DomainError, FreshnessPolicy, error::required_text,
 };
 
-const CODE_SNAPSHOT_FACT_VERSION: &str =
-    "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1";
+#[path = "repository_hash.rs"]
+mod repository_hash;
+
+const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1";
 
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(
@@ -16,14 +18,17 @@ pub fn code_snapshot_scope_id(
     language_filters: &[String],
 ) -> String {
     let mut input = Vec::new();
-    append_hash_part(&mut input, "git_snapshot");
-    append_hash_part(&mut input, repository_id);
-    append_hash_part(&mut input, tree_hash);
-    append_hash_list(&mut input, path_filters);
-    append_hash_list(&mut input, language_filters);
-    append_hash_part(&mut input, CODE_SNAPSHOT_FACT_VERSION);
+    repository_hash::append_hash_part(&mut input, "git_snapshot");
+    repository_hash::append_hash_part(&mut input, repository_id);
+    repository_hash::append_hash_part(&mut input, tree_hash);
+    repository_hash::append_hash_list(&mut input, path_filters);
+    repository_hash::append_hash_list(&mut input, language_filters);
+    repository_hash::append_hash_part(&mut input, CODE_SNAPSHOT_FACT_VERSION);
 
-    format!("git_snapshot:{:016x}", stable_hash64(&input))
+    format!(
+        "git_snapshot:{:016x}",
+        repository_hash::stable_hash64(&input)
+    )
 }
 
 pub fn code_snapshot_expected_scope_id(
@@ -156,6 +161,8 @@ impl CodeIndexMode {
 pub struct CodeIndexRequest {
     pub repository: CodeRepositorySelector,
     pub mode: CodeIndexMode,
+    #[serde(default)]
+    pub workspace_detection: CodeWorkspaceDetectionConfig,
     pub freshness_policy: FreshnessPolicy,
 }
 
@@ -525,6 +532,8 @@ pub struct CodeIndexSnapshot {
     pub dependencies: Vec<CodeDependencyRecord>,
     pub feature_flags: Vec<CodeFeatureFlagRecord>,
     pub chunks: Vec<RepositoryCodeChunkRecord>,
+    #[serde(default)]
+    pub workspaces: Vec<CodeMonorepoWorkspace>,
     pub diagnostics: Vec<CodeFileDiagnostic>,
 }
 
@@ -601,6 +610,8 @@ pub struct CodeIndexSession {
     pub skipped_unchanged_count: usize,
     pub deleted_paths: Vec<String>,
     pub tombstones: Vec<CodePathTombstone>,
+    #[serde(default)]
+    pub workspaces: Vec<CodeMonorepoWorkspace>,
     pub resource_budget: CodeIndexResourceBudget,
 }
 
@@ -969,29 +980,4 @@ fn normalize_filter_list(
 
 fn checked_u32(field: &'static str, value: usize) -> Result<u32, DomainError> {
     u32::try_from(value).map_err(|_| DomainError::invalid(field, "must fit in u32"))
-}
-
-fn append_hash_list(input: &mut Vec<u8>, values: &[String]) {
-    input.extend_from_slice(&(values.len() as u64).to_le_bytes());
-    for value in values {
-        append_hash_part(input, value);
-    }
-}
-
-fn append_hash_part(input: &mut Vec<u8>, value: &str) {
-    input.extend_from_slice(&(value.len() as u64).to_le_bytes());
-    input.extend_from_slice(value.as_bytes());
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }

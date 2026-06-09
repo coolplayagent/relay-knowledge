@@ -87,6 +87,7 @@ fn snapshot_with_feature_flags() -> CodeIndexSnapshot {
             line_range: RepositoryCodeRange { start: 1, end: 2 },
             symbol_snapshot_id: None,
         }],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

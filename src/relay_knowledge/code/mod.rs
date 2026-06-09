@@ -42,7 +42,9 @@ mod tests;
 mod worktree_overlay_tests;
 
 pub use error::CodeIndexError;
-pub use index::{CodeIndexPlan, prepare_full_index_plan};
+pub use index::{
+    CodeIndexPlan, prepare_full_index_plan, prepare_full_index_plan_with_workspace_detection,
+};
 pub use index::{
     build_index_snapshot, changed_paths_for_diff, changed_paths_for_diff_with_filters,
     changed_paths_for_diff_with_path_filters, deleted_symbol_names_for_diff,
@@ -64,12 +66,16 @@ pub(crate) use git::{
     git_ls_tree_full_scan_call_count_for_root, git_show_call_count_for_root,
     reset_git_ls_tree_full_scan_call_count_for_root, reset_git_show_call_count_for_root,
 };
+#[cfg(test)]
+pub(crate) use index::build_index_snapshot_with_base_commit;
 pub(crate) use index::changed_paths_for_filesystem_diff;
 #[cfg(test)]
 use index::impact_paths_from_changes;
 #[cfg(test)]
 pub(crate) use index::mutate_next_filesystem_full_snapshot_read;
-pub(crate) use index::{build_index_snapshot_with_base_commit, repository_uses_filesystem_source};
+pub(crate) use index::{
+    build_index_snapshot_with_workspace_detection, repository_uses_filesystem_source,
+};
 pub(crate) use registration::REGISTRATION_LANGUAGE_FILTER_ERROR;
 pub(crate) use search::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,

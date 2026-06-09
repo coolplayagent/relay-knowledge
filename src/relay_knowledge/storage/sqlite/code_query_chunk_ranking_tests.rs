@@ -106,6 +106,7 @@ async fn hybrid_chunks_rank_attached_symbol_identity() {
                 Some("target-symbol"),
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -167,6 +168,7 @@ async fn hybrid_chunks_rank_execution_flow_context_above_local_tool_helpers() {
                 None,
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -235,6 +237,7 @@ async fn hybrid_chunks_prefer_compact_high_coverage_usage() {
                 None,
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -331,6 +334,7 @@ async fn hybrid_chunks_prefer_complete_compact_api_sequences() {
                 None,
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -408,6 +412,7 @@ async fn hybrid_chunks_prefer_multi_callback_operation_tables() {
                 None,
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -505,6 +510,7 @@ async fn hybrid_chunks_rank_source_definition_bodies_above_declaration_surfaces(
                 None,
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -586,6 +592,7 @@ async fn hybrid_chunks_rank_local_query_term_proximity_above_scattered_matches()
                 None,
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -652,6 +659,7 @@ async fn hybrid_chunks_rank_exact_path_above_mention_only_hits() {
                 None,
             ),
         ],
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;

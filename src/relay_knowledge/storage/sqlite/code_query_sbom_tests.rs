@@ -59,6 +59,7 @@ async fn sbom_query_returns_dependency_inventory_hits() {
         dependencies: vec![serde, react],
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -122,6 +123,7 @@ async fn sbom_query_honors_path_and_language_filters() {
         ],
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -175,6 +177,7 @@ async fn sbom_query_deduplicates_shared_manifest_language_rows() {
         dependencies: vec![react_js, react_ts],
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -246,6 +249,7 @@ async fn sbom_query_applies_requested_limit_after_relevance_ranking() {
         ],
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;
@@ -301,6 +305,7 @@ async fn sbom_query_marks_lockfile_edges_as_locked() {
         dependencies: vec![locked],
         feature_flags: Vec::new(),
         chunks: Vec::new(),
+        workspaces: Vec::new(),
         diagnostics: Vec::new(),
     })
     .await;

@@ -62,6 +62,16 @@ const GRAPH_BM25_LABEL_GRAM_COLUMNS: &[&str] = &[
     "gram_size",
     "gram",
 ];
+const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
+    "set_id",
+    "package_name",
+    "ecosystem",
+    "repository_id",
+    "source_scope",
+    "workspace_format",
+    "created_at_ms",
+];
+const CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE: &[&str] = &["set_id", "package_name", "ecosystem"];
 
 pub(super) fn schema_initialization_is_current(
     connection: &Connection,
@@ -96,6 +106,7 @@ pub(super) fn schema_initialization_is_current(
             "graph_bm25_label_grams",
             GRAPH_BM25_LABEL_GRAM_COLUMNS,
         )?
+        || !workspace_package_mappings_current(connection)?
     {
         return Ok(false);
     }
@@ -162,6 +173,55 @@ fn table_has_columns(
     Ok(required_columns
         .iter()
         .all(|required| columns.iter().any(|column| column == required)))
+}
+
+fn workspace_package_mappings_current(connection: &Connection) -> Result<bool, StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_workspace_package_mappings",
+        CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS,
+    )? {
+        return Ok(false);
+    }
+    table_has_unique_columns(
+        connection,
+        "code_workspace_package_mappings",
+        CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE,
+    )
+}
+
+fn table_has_unique_columns(
+    connection: &Connection,
+    table: &str,
+    expected_columns: &[&str],
+) -> Result<bool, StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA index_list({table})"))?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)? != 0))
+    })?;
+    let indexes = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+
+    for (index_name, unique) in indexes {
+        if !unique {
+            continue;
+        }
+        let mut statement = connection.prepare(&format!("PRAGMA index_info({index_name})"))?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
+        let columns = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)?;
+        if columns
+            .iter()
+            .map(String::as_str)
+            .eq(expected_columns.iter().copied())
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn fact_evidence_links_are_current(connection: &Connection) -> Result<bool, StorageError> {
@@ -287,6 +347,38 @@ mod tests {
         assert!(
             !schema_initialization_is_current(&connection)
                 .expect("missing label gram table should be detected")
+        );
+    }
+
+    #[test]
+    fn schema_marker_requires_workspace_mapping_ecosystem_unique_key() {
+        let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+        let connection = store.connection.lock().expect("connection should lock");
+        mark_schema_initialization_current(&connection).expect("marker should write");
+        connection
+            .execute("DROP TABLE code_workspace_package_mappings", [])
+            .expect("workspace mappings should drop");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE code_workspace_package_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    set_id TEXT NOT NULL,
+                    package_name TEXT NOT NULL,
+                    ecosystem TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    workspace_format TEXT NOT NULL,
+                    created_at_ms INTEGER NOT NULL,
+                    UNIQUE (set_id, package_name)
+                );
+                ",
+            )
+            .expect("legacy workspace mappings should create");
+
+        assert!(
+            !schema_initialization_is_current(&connection)
+                .expect("legacy workspace mapping uniqueness should be detected")
         );
     }
 

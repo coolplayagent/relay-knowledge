@@ -427,6 +427,7 @@ pub fn retry_policy() -> u32 {
                 .expect("selector should validate"),
                 mode: CodeIndexMode::incremental(base_ref.clone(), head_ref.clone())
                     .expect("incremental refs should validate"),
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-update", "trace-update"),
@@ -682,6 +683,7 @@ async fn register_and_index_fixture(
                 )
                 .expect("selector should validate"),
                 mode,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-index", "trace-index"),
