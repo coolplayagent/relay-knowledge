@@ -219,6 +219,7 @@ fn snapshot_fixture(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        routes: Vec::new(),
         chunks: vec![RepositoryCodeChunkRecord {
             repository_id: repository_id.to_owned(),
             source_scope: source_scope.to_owned(),

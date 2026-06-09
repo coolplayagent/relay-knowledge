@@ -178,7 +178,7 @@ async fn checkpointed_batches_search_routes_and_persist_handler_roles() {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");
     let request = CodeRetrievalRequest::new(
-        "/api/users",
+        "endpoint /api/users",
         selector,
         CodeQueryKind::Hybrid,
         10,
@@ -244,7 +244,7 @@ async fn checkpointed_batches_search_unlinked_routes_as_unresolved_edges() {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");
     let request = CodeRetrievalRequest::new(
-        "/api/status",
+        "route /api/status",
         selector,
         CodeQueryKind::Hybrid,
         10,

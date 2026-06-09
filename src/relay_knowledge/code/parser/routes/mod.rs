@@ -2,7 +2,7 @@
 
 mod detect;
 
-pub(in crate::code::parser) use detect::detect_routes;
+pub(in crate::code::parser) use detect::{ANONYMOUS_ROUTE_HANDLER_NAME, detect_routes};
 
 #[cfg(test)]
 #[path = "tests.rs"]

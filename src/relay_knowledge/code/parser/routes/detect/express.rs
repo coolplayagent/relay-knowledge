@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::RouteCandidate;
 use super::shared::{
     extract_handler_name, extract_handler_name_from_arguments, extract_quoted_string,
 };
+use super::{ANONYMOUS_ROUTE_HANDLER_NAME, RouteCandidate};
 
 const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
 
@@ -73,7 +73,9 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
                 receiver_name: receiver_name.clone(),
                 local_url,
                 http_method: http_method.clone(),
-                handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
+                handler_name: handler
+                    .clone()
+                    .unwrap_or_else(|| ANONYMOUS_ROUTE_HANDLER_NAME.to_owned()),
                 line: index + 1,
             });
         }
@@ -178,7 +180,9 @@ fn record_express_route_chain(
                 receiver_name: receiver_name.clone(),
                 local_url: local_url.clone(),
                 http_method: http_method.clone(),
-                handler_name: handler.clone().unwrap_or_else(|| "anonymous".to_owned()),
+                handler_name: handler
+                    .clone()
+                    .unwrap_or_else(|| ANONYMOUS_ROUTE_HANDLER_NAME.to_owned()),
                 line,
             });
         }
@@ -748,7 +752,12 @@ fn materialize_express_routes(
             .unwrap_or_else(|| BTreeSet::from([String::new()]));
         for prefix in prefixes {
             let url = merge_url_parts(&prefix, &route_info.local_url);
-            let key = (url.clone(), route_info.http_method.clone());
+            let key = (
+                url.clone(),
+                route_info.http_method.clone(),
+                route_info.handler_name.clone(),
+                route_info.line,
+            );
             if seen.insert(key) {
                 routes.push(RouteCandidate {
                     url,

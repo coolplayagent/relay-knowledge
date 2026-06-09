@@ -11,6 +11,8 @@ pub(in crate::code::parser) struct RouteCandidate {
     pub(in crate::code::parser) line: usize,
 }
 
+pub(in crate::code::parser) const ANONYMOUS_ROUTE_HANDLER_NAME: &str = "anonymous";
+
 pub(in crate::code::parser) fn detect_routes(
     language_id: &str,
     content: &str,

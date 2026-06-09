@@ -17,7 +17,7 @@ use super::{
     manual::collect_manual_nodes,
     records::{records_from_captures, upsert_symbol},
     recovery,
-    routes::detect_routes,
+    routes::{ANONYMOUS_ROUTE_HANDLER_NAME, detect_routes},
     syntax::{extract_tag_captures_safely, parse_tree_safely},
     text::{count_lines, validate_text_content},
 };
@@ -104,6 +104,7 @@ pub(in crate::code) fn parse_indexed_file(
         add_file_chunk(build, path, &file_id, language.id, &content)?;
         record_dependencies(build, path, &file_id, &content)?;
         record_feature_flags(build, path, &file_id, language.id, &content, None)?;
+        record_routes(build, path, &file_id, language.id, &content);
         return Ok(());
     }
 
@@ -505,6 +506,13 @@ pub(in crate::code::parser) fn parse_syntax_file(
                 input.content,
                 None,
             )?;
+            record_routes(
+                build,
+                input.path,
+                input.file_id,
+                input.language.id,
+                input.content,
+            );
             return Ok(());
         }
     };
@@ -521,6 +529,13 @@ pub(in crate::code::parser) fn parse_syntax_file(
                 input.content,
                 None,
             )?;
+            record_routes(
+                build,
+                input.path,
+                input.file_id,
+                input.language.id,
+                input.content,
+            );
             return Ok(());
         }
     };
@@ -722,18 +737,20 @@ fn record_routes(
             framework: candidate.framework,
             line_range,
         });
-        annotate_route_handler_symbol(
-            build,
-            &symbol_index,
-            RouteHandlerAnnotation {
-                route_idx,
-                path,
-                handler_name: &candidate.handler_name,
-                url: &candidate.url,
-                http_method: &candidate.http_method,
-                route_line: candidate.line,
-            },
-        );
+        if candidate.handler_name != ANONYMOUS_ROUTE_HANDLER_NAME {
+            annotate_route_handler_symbol(
+                build,
+                &symbol_index,
+                RouteHandlerAnnotation {
+                    route_idx,
+                    path,
+                    handler_name: &candidate.handler_name,
+                    url: &candidate.url,
+                    http_method: &candidate.http_method,
+                    route_line: candidate.line,
+                },
+            );
+        }
     }
 }
 
@@ -922,6 +939,25 @@ mod tests {
             Some("before-route")
         );
         assert!(build.symbols[0].symbol_role.is_some());
+    }
+
+    #[test]
+    fn record_routes_leaves_anonymous_callbacks_unresolved() {
+        let mut build = route_test_build();
+        let mut symbol = route_symbol("anonymous-symbol", 1, 1);
+        symbol.name = "anonymous".to_owned();
+        build.symbols.push(symbol);
+
+        record_routes(
+            &mut build,
+            "src/routes.ts",
+            "routes-file",
+            "typescript",
+            "app.get('/health', (req, res) => res.end());\n",
+        );
+
+        assert!(build.routes[0].handler_symbol_snapshot_id.is_none());
+        assert!(build.symbols[0].symbol_role.is_none());
     }
 
     fn route_test_build() -> SnapshotBuild {

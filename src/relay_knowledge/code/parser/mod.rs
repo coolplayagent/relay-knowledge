@@ -112,3 +112,7 @@ mod text_only_topic_tests;
 #[cfg(test)]
 #[path = "tests/type_references.rs"]
 mod type_reference_tests;
+
+#[cfg(test)]
+#[path = "tests/route_fallback.rs"]
+mod route_fallback_tests;

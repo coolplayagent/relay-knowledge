@@ -40,10 +40,12 @@ fn detects_express_patch_route() {
 }
 
 #[test]
-fn deduplicates_express_routes() {
+fn preserves_distinct_express_route_registrations() {
     let source = "app.get('/users', list);\napp.get('/users', list2);\n";
     let routes = detect_routes("javascript", source);
-    assert_eq!(routes.len(), 1);
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.handler_name == "list"));
+    assert!(routes.iter().any(|route| route.handler_name == "list2"));
 }
 
 #[test]

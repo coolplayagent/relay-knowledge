@@ -4,6 +4,8 @@ use crate::{domain::CodeRouteRecord, storage::StorageError};
 
 use super::SearchDocumentInserter;
 
+const ROUTE_INTENT_SEARCH_TERMS: &str = "route endpoint http";
+
 pub(super) fn insert_records(
     transaction: &Transaction<'_>,
     records: &[CodeRouteRecord],
@@ -43,6 +45,7 @@ pub(super) fn insert_records(
             &record.path,
             &record.language_id,
             [
+                ROUTE_INTENT_SEARCH_TERMS,
                 record.url.as_str(),
                 http_method_terms.as_str(),
                 record.handler_name.as_str(),
