@@ -163,6 +163,83 @@ async fn concrete_endpoint_queries_match_parameterized_routes() {
 }
 
 #[tokio::test]
+async fn route_url_fallback_respects_query_http_method() {
+    let mut user_route = route("route-user", "route-file", "src/routes.ts", "getUser");
+    user_route.url = "/users/:id".to_owned();
+    user_route.http_method = "post".to_owned();
+    let store = store_with_routes(vec![user_route]).await;
+
+    let hits = store
+        .search_code(route_request("GET /users/42 missingtoken", 3))
+        .await
+        .expect("route fallback query should succeed");
+
+    assert!(
+        hits.iter()
+            .all(|hit| hit.edge_kind.as_deref() != Some("route")),
+        "GET query should not recall a POST-only parameterized route: {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn route_url_fallback_applies_path_filters_before_limit() {
+    let mut routes = Vec::new();
+    for index in 0..360 {
+        let path = format!("aaa/noise_{index:03}.ts");
+        let file_id = format!("noise-file-{index:03}");
+        let mut noise_route = route(
+            &format!("noise-route-{index:03}"),
+            &file_id,
+            &path,
+            "noiseUser",
+        );
+        noise_route.url = "/api/users/:id".to_owned();
+        noise_route.line_range = RepositoryCodeRange {
+            start: index + 1,
+            end: index + 1,
+        };
+        routes.push(noise_route);
+    }
+    let mut filtered_route = route(
+        "filtered-route",
+        "filtered-file",
+        "src/api/routes.ts",
+        "showUser",
+    );
+    filtered_route.url = "/api/users/:id".to_owned();
+    routes.push(filtered_route);
+    let store = store_with_routes(routes).await;
+    let selector = CodeRepositorySelector::new(
+        "repo",
+        "commit",
+        vec!["src/api".to_owned()],
+        vec!["typescript".to_owned()],
+    )
+    .expect("selector should validate");
+    let request = CodeRetrievalRequest::new(
+        "GET /api/users/42 missingtoken",
+        selector,
+        CodeQueryKind::Hybrid,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("route fallback query should succeed");
+
+    assert!(
+        hits.iter().any(|hit| {
+            hit.edge_kind.as_deref() == Some("route") && hit.path == "src/api/routes.ts"
+        }),
+        "path-scoped route should survive fallback candidate limiting: {hits:?}"
+    );
+    assert!(!hits.iter().any(|hit| hit.path.starts_with("aaa/")));
+}
+
+#[tokio::test]
 async fn exact_route_queries_rank_exact_urls_before_parameterized_routes() {
     let mut exact_route = route("route-users", "route-file", "src/routes.ts", "listUsers");
     exact_route.url = "/api/users".to_owned();

@@ -37,7 +37,6 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
                 router_names.insert(mount.router_name.clone());
                 mounts.push(mount);
             }
-            continue;
         }
         if express_route_start_position(trimmed).is_none() {
             continue;

@@ -213,6 +213,21 @@ fn expands_express_array_mount_paths() {
 }
 
 #[test]
+fn detects_express_routes_after_same_line_mounts() {
+    let source =
+        "app.use('/api', router); app.get('/health', health);\nrouter.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| {
+        route.url == "/health" && route.http_method == "get" && route.handler_name == "health"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/api/users" && route.http_method == "get" && route.handler_name == "listUsers"
+    }));
+}
+
+#[test]
 fn detects_spring_mapping_after_same_line_annotation() {
     let source =
         "@PreAuthorize(\"hasRole('ADMIN')\") @GetMapping(\"/admin\") public String admin() {\n";

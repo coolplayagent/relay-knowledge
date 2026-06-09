@@ -12,7 +12,9 @@ use super::{
     HitParts,
     code_query_support::{
         CandidateLayer, ScoreQuery, candidate_limit, escape_sql_like, fts_match_query,
-        fts_path_and_language_filter_sql, fts_values_for_limited_with_language, score_exact_path,
+        fts_path_and_language_filter_sql, fts_values_for_limited_with_language,
+        language_filter_sql_for_columns, path_filter_sql_for_column, push_language_filter_values,
+        push_path_filter_values, score_exact_path,
     },
     hit_from_parts, prepare_code_search_statement, required_scope, selected_row,
 };
@@ -42,6 +44,8 @@ pub(super) fn search_routes(
     let route_query = RouteQuery::new(&request.query);
     let route_limit = candidate_limit(request, CandidateLayer::Chunk);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let route_fallback_filter = route_fallback_filter_sql(status, request);
+    let route_fallback_method_filter = route_fallback_method_filter_sql(&route_query);
     let sql = format!(
         "
         SELECT route.file_id, route.path, route.language_id, route.url, route.http_method,
@@ -68,7 +72,12 @@ pub(super) fn search_routes(
                   record_id ASC
               LIMIT ?
               )
-              OR (? != '' AND route.url LIKE ? ESCAPE '\')
+              OR (
+                  ? != ''
+                  AND route.url LIKE ? ESCAPE '\\'
+                  {route_fallback_filter}
+                  {route_fallback_method_filter}
+              )
           )
         ORDER BY file.is_generated ASC, route.path ASC, route.line_start ASC, route.url ASC, route.http_method ASC
         LIMIT ?
@@ -82,7 +91,7 @@ pub(super) fn search_routes(
             request,
             &route_query.fts_query,
             route_limit,
-            route_query.fallback_like.as_deref(),
+            &route_query,
         )),
         |row| {
             Ok(RouteRow {
@@ -166,13 +175,40 @@ pub(super) fn search_routes(
     Ok(hits)
 }
 
+fn route_fallback_filter_sql(
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+) -> String {
+    let mut filter = String::new();
+    filter.push_str(&path_filter_sql_for_column("route.path", status, request));
+    filter.push_str(&language_filter_sql_for_columns(
+        "route.language_id",
+        "route.path",
+        status,
+        request,
+    ));
+    if request.exclude_generated {
+        filter.push_str(" AND file.is_generated = 0");
+    }
+
+    filter
+}
+
+fn route_fallback_method_filter_sql(route_query: &RouteQuery) -> &'static str {
+    if route_query.http_method.is_some() {
+        " AND (route.http_method = ? OR route.http_method = 'any')"
+    } else {
+        ""
+    }
+}
+
 fn route_fts_values(
     source_scope: &str,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
     fts_query: &str,
     limit: usize,
-    fallback_like: Option<&str>,
+    route_query: &RouteQuery,
 ) -> Vec<Value> {
     let mut values = fts_values_for_limited_with_language(
         source_scope,
@@ -183,9 +219,16 @@ fn route_fts_values(
         limit,
     );
     let final_limit = values.pop().unwrap_or(Value::Integer(limit as i64));
-    let fallback_like = fallback_like.unwrap_or("");
+    let fallback_like = route_query.fallback_like.as_deref().unwrap_or("");
     values.push(Value::Text(fallback_like.to_owned()));
     values.push(Value::Text(fallback_like.to_owned()));
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
+    if let Some(http_method) = &route_query.http_method {
+        values.push(Value::Text(http_method.clone()));
+    }
     values.push(final_limit);
     values
 }
@@ -193,6 +236,7 @@ fn route_fts_values(
 struct RouteQuery {
     fts_query: String,
     url: Option<String>,
+    http_method: Option<String>,
     fallback_like: Option<String>,
 }
 
@@ -202,6 +246,7 @@ impl RouteQuery {
         Self {
             fts_query: fts_match_query(&route_query_fts_text(query)),
             fallback_like: url.as_deref().and_then(route_url_fallback_like),
+            http_method: route_query_http_method(query),
             url,
         }
     }
@@ -229,6 +274,18 @@ impl RouteQuery {
             0.0
         }
     }
+}
+
+fn route_query_http_method(query: &str) -> Option<String> {
+    query.split_whitespace().find_map(|token| {
+        let token = token.trim_matches(|character: char| !character.is_ascii_alphabetic());
+        let method = token.to_ascii_lowercase();
+        matches!(
+            method.as_str(),
+            "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+        )
+        .then_some(method)
+    })
 }
 
 fn route_query_fts_text(query: &str) -> String {
