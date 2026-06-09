@@ -197,6 +197,18 @@ fn route_fallback_url_filter_sql(route_query: &RouteQuery) -> String {
                 route_url_segment_count_sql("route.url")
             ));
         }
+        if !route_query.all_parameterized_fallback_globs.is_empty() {
+            let globs = route_query
+                .all_parameterized_fallback_globs
+                .iter()
+                .map(|_| "route.url GLOB ?")
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            predicates.push(format!(
+                "{} = {segment_count} AND ({globs})",
+                route_url_segment_count_sql("route.url")
+            ));
+        }
     }
     format!("({})", predicates.join(" OR "))
 }
@@ -254,6 +266,13 @@ fn route_fts_values(
         values.push(Value::Text(url.clone()));
     }
     values.extend(route_query.fallback_likes.iter().cloned().map(Value::Text));
+    values.extend(
+        route_query
+            .all_parameterized_fallback_globs
+            .iter()
+            .cloned()
+            .map(Value::Text),
+    );
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
@@ -271,6 +290,7 @@ struct RouteQuery {
     http_method: Option<String>,
     url_segment_count: Option<usize>,
     fallback_likes: Vec<String>,
+    all_parameterized_fallback_globs: Vec<String>,
 }
 
 impl RouteQuery {
@@ -282,6 +302,10 @@ impl RouteQuery {
             fallback_likes: url
                 .as_deref()
                 .map(route_url_fallback_likes)
+                .unwrap_or_default(),
+            all_parameterized_fallback_globs: url
+                .as_deref()
+                .map(route_url_all_parameterized_fallback_globs)
                 .unwrap_or_default(),
             http_method: route_query_http_method(query),
             url_segment_count,
@@ -412,6 +436,27 @@ fn route_url_fallback_likes(url: &str) -> Vec<String> {
         likes.push(format!("/{}", pattern_segments.join("/")));
     }
     likes
+}
+
+fn route_url_all_parameterized_fallback_globs(url: &str) -> Vec<String> {
+    let segments = route_url_segments(url);
+    if segments.is_empty() || segments.len() > MAX_ROUTE_FALLBACK_SEGMENTS {
+        return Vec::new();
+    }
+    let mut globs = Vec::new();
+    for mask in 0usize..(1usize << segments.len()) {
+        let pattern_segments = (0..segments.len())
+            .map(|index| {
+                if mask & (1usize << index) == 0 {
+                    ":*"
+                } else {
+                    "{*}"
+                }
+            })
+            .collect::<Vec<_>>();
+        globs.push(format!("/{}", pattern_segments.join("/")));
+    }
+    globs
 }
 
 fn route_url_matches_parameterized_query(route_url: &str, query_url: &str) -> bool {

@@ -98,6 +98,24 @@ fn detects_flask_add_url_rule_positional_handlers() {
 }
 
 #[test]
+fn detects_prefixed_python_route_strings() {
+    let source = "@app.get(r'/health')\ndef health():\n    pass\n@router.get(u\"/users\")\ndef users():\n    pass\napp.add_url_rule(r'/submit', view_func=submit)\n@app.get(f'/dynamic/{tenant}')\ndef dynamic():\n    pass\n";
+    let routes = detect_routes("python", source);
+
+    assert_eq!(routes.len(), 3);
+    assert!(routes.iter().any(|route| {
+        route.url == "/health" && route.http_method == "get" && route.handler_name == "health"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/users" && route.http_method == "get" && route.handler_name == "users"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/submit" && route.http_method == "get" && route.handler_name == "submit"
+    }));
+    assert!(!routes.iter().any(|route| route.url.contains("dynamic")));
+}
+
+#[test]
 fn keeps_express_inline_final_handlers_anonymous() {
     let source = "app.get('/admin', requireAuth, (req, res) => res.send());\n";
     let routes = detect_routes("typescript", source);
@@ -472,6 +490,16 @@ fn ignores_spring_routes_inside_java_text_blocks() {
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/live");
     assert_eq!(routes[0].handler_name, "live");
+}
+
+#[test]
+fn preserves_spring_prefixes_across_public_nested_types() {
+    let source = "@RequestMapping(\"/api\")\npublic class UsersController {\npublic static class Helper {\n}\n@GetMapping(\"/users\")\npublic String users() {\n}\n}\n";
+    let routes = detect_routes("java", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/api/users");
+    assert_eq!(routes[0].handler_name, "users");
 }
 
 #[test]

@@ -226,6 +226,8 @@ fn strip_javascript_keyword<'a>(argument: &'a str, keyword: &str) -> Option<&'a 
 
 pub(in crate::code::parser) fn extract_quoted_string_python(s: &str) -> Option<String> {
     let s = s.trim_start();
+    let string_start = python_static_string_start(s)?;
+    let s = &s[string_start..];
     let quote_char = s.chars().next()?;
     if quote_char != '\'' && quote_char != '"' {
         return None;
@@ -249,4 +251,17 @@ pub(in crate::code::parser) fn extract_quoted_string_python(s: &str) -> Option<S
         result.push(c);
     }
     Some(result)
+}
+
+fn python_static_string_start(s: &str) -> Option<usize> {
+    let quote_index = s.find(['\'', '"'])?;
+    let prefix = &s[..quote_index];
+    if prefix
+        .chars()
+        .all(|character| matches!(character.to_ascii_lowercase(), 'r' | 'u' | 'b'))
+    {
+        Some(quote_index)
+    } else {
+        None
+    }
 }

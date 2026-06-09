@@ -723,12 +723,6 @@ fn line_declares_nested_java_helper_type(line: &str, brace_depth: usize) -> bool
         return false;
     }
     let declaration = line.split('{').next().unwrap_or(line).trim();
-    if declaration.starts_with("public class ")
-        || declaration.starts_with("public interface ")
-        || declaration.starts_with("public enum ")
-    {
-        return false;
-    }
     line_declares_java_type(declaration)
 }
 

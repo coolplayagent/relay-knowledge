@@ -296,6 +296,48 @@ async fn route_url_fallback_avoids_all_wildcard_candidate_noise() {
 }
 
 #[tokio::test]
+async fn route_url_fallback_recalls_all_parameterized_routes() {
+    let mut routes = Vec::new();
+    for index in 0..120 {
+        let path = format!("aaa/noise_{index:03}.ts");
+        let file_id = format!("noise-dynamic-file-{index:03}");
+        let mut noise_route = route(
+            &format!("noise-dynamic-route-{index:03}"),
+            &file_id,
+            &path,
+            "noiseDynamic",
+        );
+        noise_route.url = format!("/noise{index}/:id");
+        routes.push(noise_route);
+    }
+    let mut colon_route = route("route-org-repo", "route-file", "src/routes.ts", "getRepo");
+    colon_route.url = "/:org/:repo".to_owned();
+    let mut brace_route = route(
+        "route-tenant-item",
+        "brace-route-file",
+        "src/brace_routes.ts",
+        "getItem",
+    );
+    brace_route.url = "/{tenant}/{id}".to_owned();
+    routes.push(colon_route);
+    routes.push(brace_route);
+    let store = store_with_routes(routes).await;
+
+    let hits = store
+        .search_code(route_request("GET /acme/widget unmatched", 5))
+        .await
+        .expect("all-parameterized route fallback query should succeed");
+
+    assert!(hits.iter().any(|hit| {
+        hit.edge_kind.as_deref() == Some("route") && hit.excerpt.contains("GET /:org/:repo")
+    }));
+    assert!(hits.iter().any(|hit| {
+        hit.edge_kind.as_deref() == Some("route") && hit.excerpt.contains("GET /{tenant}/{id}")
+    }));
+    assert!(!hits.iter().any(|hit| hit.path.starts_with("aaa/")));
+}
+
+#[tokio::test]
 async fn route_url_fallback_applies_path_filters_before_limit() {
     let mut routes = Vec::new();
     for index in 0..360 {
