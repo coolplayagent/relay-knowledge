@@ -31,7 +31,8 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                     pending_annotations.clear();
                 }
                 pending_annotations.extend(spring_routes);
-                if let Some(method_name) = parse_java_method_def(annotation_tail) {
+                let method_tail = spring_tail_after_leading_annotations(annotation_tail);
+                if let Some(method_name) = parse_java_method_def(method_tail) {
                     record_spring_pending_routes(
                         &mut routes,
                         &mut seen,
@@ -40,7 +41,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                         method_name,
                         index + 1,
                     );
-                    update_java_brace_depth(annotation_tail, &mut brace_depth);
+                    update_java_brace_depth(method_tail, &mut brace_depth);
                 }
                 index += annotation_lines;
                 continue;
@@ -50,7 +51,8 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
             let (annotation_statement, annotation_lines) =
                 spring_annotation_statement_from_offset(&lines, index, 0);
             let annotation_tail = spring_statement_after_annotation(&annotation_statement);
-            if let Some(method_name) = parse_java_method_def(annotation_tail) {
+            let method_tail = spring_tail_after_leading_annotations(annotation_tail);
+            if let Some(method_name) = parse_java_method_def(method_tail) {
                 record_spring_pending_routes(
                     &mut routes,
                     &mut seen,
@@ -59,7 +61,7 @@ pub(in crate::code::parser) fn detect_spring_routes(content: &str) -> Vec<RouteC
                     method_name,
                     index + 1,
                 );
-                update_java_brace_depth(annotation_tail, &mut brace_depth);
+                update_java_brace_depth(method_tail, &mut brace_depth);
             } else {
                 update_java_brace_depth(&annotation_statement, &mut brace_depth);
             }
@@ -395,6 +397,20 @@ fn spring_statement_after_annotation(statement: &str) -> &str {
         }
     }
     ""
+}
+
+fn spring_tail_after_leading_annotations(mut tail: &str) -> &str {
+    loop {
+        let trimmed = tail.trim_start();
+        if !trimmed.starts_with('@') {
+            return trimmed;
+        }
+        let next_tail = spring_statement_after_annotation(trimmed);
+        if next_tail.len() == trimmed.len() {
+            return trimmed;
+        }
+        tail = next_tail;
+    }
 }
 
 fn parse_spring_route_annotation(line: &str) -> Option<Vec<SpringPendingAnnotation>> {

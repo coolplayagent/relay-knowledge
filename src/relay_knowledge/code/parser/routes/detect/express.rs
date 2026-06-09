@@ -17,7 +17,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
     let mut mounts = Vec::new();
     let mut router_names = BTreeSet::<String>::from(["app".to_owned(), "router".to_owned()]);
     let express_names = express_namespace_names(content);
-    let router_factory_imported = express_router_factory_is_imported(content);
+    let router_factory_names = express_router_factory_names(content);
     let lines = javascript_code_lines_without_comments(content);
     for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
@@ -25,7 +25,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
             continue;
         }
         if let Some(router_name) =
-            parse_express_router_alias(trimmed, router_factory_imported, &express_names)
+            parse_express_router_alias(trimmed, &router_factory_names, &express_names)
         {
             router_names.insert(router_name);
         }
@@ -597,7 +597,7 @@ fn express_router_name_is_router(receiver_name: &str, router_names: &BTreeSet<St
 
 fn parse_express_router_alias(
     line: &str,
-    router_factory_imported: bool,
+    router_factory_names: &BTreeSet<String>,
     express_names: &BTreeSet<String>,
 ) -> Option<String> {
     let (left, right) = line.split_once('=')?;
@@ -605,7 +605,9 @@ fn parse_express_router_alias(
     let uses_express_factory = express_names.iter().any(|name| {
         find_javascript_pattern_outside_strings(right, &format!("{name}.Router(")).is_some()
     });
-    let uses_imported_factory = router_factory_imported && right.starts_with("Router(");
+    let uses_imported_factory = router_factory_names
+        .iter()
+        .any(|name| right.starts_with(&format!("{name}(")));
     let uses_required_factory =
         find_javascript_pattern_outside_strings(right, "require('express').Router(").is_some()
             || find_javascript_pattern_outside_strings(right, "require(\"express\").Router(")
@@ -735,18 +737,75 @@ fn js_identifier_character(character: char) -> bool {
     character.is_ascii_alphanumeric() || character == '_' || character == '$'
 }
 
-fn express_router_factory_is_imported(content: &str) -> bool {
-    javascript_code_lines_without_comments(content)
-        .into_iter()
-        .any(|line| {
-            let line = line.trim();
-            find_javascript_pattern_outside_strings(line, "Router").is_some()
-                && ((line.starts_with("import ")
-                    && (line.contains("from 'express'") || line.contains("from \"express\"")))
-                    || (find_javascript_pattern_outside_strings(line, "require(").is_some()
-                        && (line.contains("require('express')")
-                            || line.contains("require(\"express\")"))))
-        })
+fn express_router_factory_names(content: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for line in javascript_code_lines_without_comments(content) {
+        let line = line.trim();
+        collect_express_router_import_names(line, &mut names);
+        collect_express_router_require_names(line, &mut names);
+    }
+    names
+}
+
+fn collect_express_router_import_names(line: &str, names: &mut BTreeSet<String>) {
+    let Some(rest) = line.strip_prefix("import ") else {
+        return;
+    };
+    if !express_imports_from_module(rest) {
+        return;
+    }
+    let Some(imports_start) = rest.find('{') else {
+        return;
+    };
+    let Some(imports_end) = rest[imports_start + 1..].find('}') else {
+        return;
+    };
+    let imports = &rest[imports_start + 1..imports_start + 1 + imports_end];
+    collect_express_router_named_bindings(imports, names);
+}
+
+fn collect_express_router_require_names(line: &str, names: &mut BTreeSet<String>) {
+    let Some((left, right)) = line.split_once('=') else {
+        return;
+    };
+    let right = right.trim_start();
+    if !right.starts_with("require('express')")
+        && !right.starts_with("require(\"express\")")
+        && !right.starts_with("require(`express`)")
+    {
+        return;
+    }
+    let Some(imports_start) = left.find('{') else {
+        return;
+    };
+    let Some(imports_end) = left[imports_start + 1..].find('}') else {
+        return;
+    };
+    let imports = &left[imports_start + 1..imports_start + 1 + imports_end];
+    collect_express_router_named_bindings(imports, names);
+}
+
+fn collect_express_router_named_bindings(imports: &str, names: &mut BTreeSet<String>) {
+    for binding in imports.split(',') {
+        let binding = binding.trim();
+        let Some(alias) = express_router_named_binding_alias(binding) else {
+            continue;
+        };
+        names.insert(alias);
+    }
+}
+
+fn express_router_named_binding_alias(binding: &str) -> Option<String> {
+    if binding == "Router" {
+        return Some("Router".to_owned());
+    }
+    if let Some(alias) = binding.strip_prefix("Router as ") {
+        return js_identifier_name(alias.trim());
+    }
+    if let Some(alias) = binding.strip_prefix("Router:") {
+        return js_identifier_name(alias.trim());
+    }
+    None
 }
 
 fn express_namespace_names(content: &str) -> BTreeSet<String> {

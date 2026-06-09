@@ -189,6 +189,17 @@ fn detects_express_namespace_import_router_factories() {
 }
 
 #[test]
+fn detects_aliased_express_router_import_factories() {
+    let source = "import { Router as ExpressRouter } from 'express';\nconst api = ExpressRouter();\napi.get('/users', listUsers);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/users");
+    assert_eq!(routes[0].http_method, "get");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
 fn continues_after_same_line_express_mounts() {
     let source = "const router = express.Router();\nrouter.get('/users', listUsers);\napp.use('/api', router); app.get('/health', health);\n";
     let routes = detect_routes("typescript", source);
@@ -227,6 +238,17 @@ fn detects_python_set_method_lists() {
 }
 
 #[test]
+fn dynamic_flask_methods_are_recorded_as_any() {
+    let source = "ALLOWED_METHODS = ['POST']\n@app.route('/submit', methods=ALLOWED_METHODS)\ndef submit():\n    pass\n";
+    let routes = detect_routes("python", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/submit");
+    assert_eq!(routes[0].http_method, "any");
+    assert_eq!(routes[0].handler_name, "submit");
+}
+
+#[test]
 fn expands_express_array_mount_paths() {
     let source = "app.use(['/api', '/v1'], router);\nrouter.get('/users', listUsers);\n";
     let routes = detect_routes("typescript", source);
@@ -260,6 +282,18 @@ fn detects_spring_mapping_after_same_line_annotation() {
 
     assert_eq!(routes.len(), 1);
     assert_eq!(routes[0].url, "/admin");
+    assert_eq!(routes[0].handler_name, "admin");
+}
+
+#[test]
+fn detects_spring_mapping_before_same_line_non_route_annotation() {
+    let source =
+        "@GetMapping(\"/admin\") @PreAuthorize(\"hasRole('ADMIN')\") public String admin() {\n";
+    let routes = detect_routes("java", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/admin");
+    assert_eq!(routes[0].http_method, "get");
     assert_eq!(routes[0].handler_name, "admin");
 }
 

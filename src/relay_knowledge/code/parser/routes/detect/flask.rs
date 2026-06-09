@@ -586,7 +586,7 @@ fn parse_flask_methods_decorator(line: &str) -> Option<Vec<String>> {
         }
     }
     let args_trimmed = trim_one_trailing_paren(args);
-    Some(extract_methods_list_python(args_trimmed))
+    Some(extract_explicit_methods_list_python(args_trimmed))
 }
 
 fn trim_one_trailing_paren(args: &str) -> &str {
@@ -599,7 +599,16 @@ fn extract_methods_from_flask_args(args: &str) -> Vec<String> {
         let dot_method = extract_shorthand_method_from_route(args);
         return dot_method;
     };
-    extract_methods_list_python(list_str)
+    extract_explicit_methods_list_python(list_str)
+}
+
+fn extract_explicit_methods_list_python(args: &str) -> Vec<String> {
+    let methods = extract_methods_list_python(args);
+    if methods.is_empty() {
+        vec!["any".to_owned()]
+    } else {
+        methods
+    }
 }
 
 fn extract_python_keyword_string(args: &str, keyword: &str) -> Option<String> {

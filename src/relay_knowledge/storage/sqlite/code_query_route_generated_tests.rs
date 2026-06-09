@@ -188,6 +188,31 @@ async fn route_url_fallback_respects_requested_http_method() {
 }
 
 #[tokio::test]
+async fn route_url_fallback_matches_middle_parameter_segments() {
+    let mut user_details_route = route(
+        "route-user-details",
+        "route-file",
+        "src/routes.ts",
+        "getUserDetails",
+    );
+    user_details_route.url = "/users/:id/details".to_owned();
+    let store = store_with_routes(vec![user_details_route]).await;
+
+    let hits = store
+        .search_code(route_request("GET /users/alice/details unmatched", 3))
+        .await
+        .expect("route fallback query should succeed");
+
+    assert!(
+        hits.iter().any(|hit| {
+            hit.edge_kind.as_deref() == Some("route")
+                && hit.excerpt.contains("GET /users/:id/details")
+        }),
+        "middle parameter route should match concrete endpoint query: {hits:?}"
+    );
+}
+
+#[tokio::test]
 async fn route_url_fallback_applies_path_filters_before_limit() {
     let mut routes = Vec::new();
     for index in 0..360 {

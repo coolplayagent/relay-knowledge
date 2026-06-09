@@ -19,6 +19,8 @@ use super::{
     hit_from_parts, prepare_code_search_statement, required_scope, selected_row,
 };
 
+const MAX_ROUTE_FALLBACK_SEGMENTS: usize = 6;
+
 struct RouteRow {
     file_id: String,
     path: String,
@@ -44,6 +46,7 @@ pub(super) fn search_routes(
     let route_query = RouteQuery::new(&request.query);
     let route_limit = candidate_limit(request, CandidateLayer::Chunk);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let route_fallback_url_filter = route_fallback_url_filter_sql(&route_query);
     let route_fallback_filter = route_fallback_filter_sql(status, request);
     let route_fallback_method_filter = route_fallback_method_filter_sql(&route_query);
     let sql = format!(
@@ -71,10 +74,9 @@ pub(super) fn search_routes(
                       bm25(code_repository_search) ASC,
                       record_id ASC
                   LIMIT ?
-                  )
+              )
               OR (
-                  ? != ''
-                  AND route.url LIKE ? ESCAPE '\\'
+                  {route_fallback_url_filter}
                   {route_fallback_filter}
                   {route_fallback_method_filter}
               )
@@ -118,6 +120,9 @@ pub(super) fn search_routes(
     let mut hits = Vec::new();
     for row in rows {
         let row = row.map_err(StorageError::from)?;
+        if !route_query.url_matches_recall_candidate(&row.url) {
+            continue;
+        }
         if !selected_row(
             &row.path,
             &row.language_id,
@@ -174,6 +179,24 @@ pub(super) fn search_routes(
     Ok(hits)
 }
 
+fn route_fallback_url_filter_sql(route_query: &RouteQuery) -> String {
+    let Some(segment_count) = route_query.url_segment_count else {
+        return "0".to_owned();
+    };
+    if route_query.fallback_likes.is_empty() {
+        return "0".to_owned();
+    }
+    let likes = route_query
+        .fallback_likes
+        .iter()
+        .map(|_| "route.url LIKE ? ESCAPE '\\'")
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    format!(
+        "(length(route.url) - length(replace(route.url, '/', ''))) = {segment_count} AND ({likes})"
+    )
+}
+
 fn route_fallback_filter_sql(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
@@ -217,9 +240,7 @@ fn route_fts_values(
         limit,
     );
     let final_limit = values.pop().unwrap_or(Value::Integer(limit as i64));
-    let fallback_like = route_query.fallback_like.as_deref().unwrap_or("");
-    values.push(Value::Text(fallback_like.to_owned()));
-    values.push(Value::Text(fallback_like.to_owned()));
+    values.extend(route_query.fallback_likes.iter().cloned().map(Value::Text));
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
@@ -235,16 +256,22 @@ struct RouteQuery {
     fts_query: String,
     url: Option<String>,
     http_method: Option<String>,
-    fallback_like: Option<String>,
+    url_segment_count: Option<usize>,
+    fallback_likes: Vec<String>,
 }
 
 impl RouteQuery {
     fn new(query: &str) -> Self {
         let url = route_query_url(query);
+        let url_segment_count = url.as_deref().map(|url| route_url_segments(url).len());
         Self {
             fts_query: fts_match_query(&route_query_fts_text(query)),
-            fallback_like: url.as_deref().and_then(route_url_fallback_like),
+            fallback_likes: url
+                .as_deref()
+                .map(route_url_fallback_likes)
+                .unwrap_or_default(),
             http_method: route_query_http_method(query),
+            url_segment_count,
             url,
         }
     }
@@ -271,6 +298,14 @@ impl RouteQuery {
         } else {
             0.0
         }
+    }
+
+    fn url_matches_recall_candidate(&self, route_url: &str) -> bool {
+        let Some(query_url) = self.url.as_deref() else {
+            return true;
+        };
+        query_url == route_url.to_ascii_lowercase()
+            || route_url_matches_parameterized_query(route_url, query_url)
     }
 }
 
@@ -342,13 +377,24 @@ fn route_url_fts_segments(url: &str) -> Vec<String> {
         .collect()
 }
 
-fn route_url_fallback_like(url: &str) -> Option<String> {
+fn route_url_fallback_likes(url: &str) -> Vec<String> {
     let segments = route_url_segments(url);
-    if segments.len() < 2 {
-        return None;
+    if segments.len() < 2 || segments.len() > MAX_ROUTE_FALLBACK_SEGMENTS {
+        return Vec::new();
     }
-    let prefix = format!("/{}", segments[..segments.len() - 1].join("/"));
-    Some(format!("{}/%", escape_sql_like(&prefix)))
+    let mut likes = Vec::new();
+    for mask in 1usize..(1usize << segments.len()) {
+        let mut pattern_segments = Vec::with_capacity(segments.len());
+        for (index, segment) in segments.iter().enumerate() {
+            if mask & (1usize << index) == 0 {
+                pattern_segments.push(escape_sql_like(segment));
+            } else {
+                pattern_segments.push("%".to_owned());
+            }
+        }
+        likes.push(format!("/{}", pattern_segments.join("/")));
+    }
+    likes
 }
 
 fn route_url_matches_parameterized_query(route_url: &str, query_url: &str) -> bool {
