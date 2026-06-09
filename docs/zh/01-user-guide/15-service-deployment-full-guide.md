@@ -97,19 +97,26 @@ relay-knowledge setup profile service --format json
 
 # 3. 预览安装计划
 relay-knowledge service plan install --format json
+relay-knowledge service lifecycle install --dry-run --format json
 ```
 
-`service plan install --format json` 输出关键字段：
+`service plan install --format json` 与 `service lifecycle install --dry-run --format json` 输出关键字段：
 
 | 字段 | 说明 |
 |------|------|
 | `platform` | `linux` / `macos` / `windows` |
 | `definition_path` | 平台 service definition 文件的写入路径 |
+| `binary_path` | lifecycle 将使用或复制到安装目录的二进制路径 |
 | `install_command` | 平台服务安装命令预览 |
 | `start_command` | 平台服务启动命令预览 |
 | `stop_command` | 平台服务停止命令预览 |
 | `uninstall_command` | 平台服务卸载命令预览 |
+| `lifecycle_steps` | 安装、升级、回滚或卸载的阶段化步骤 |
+| `rollback_steps` | lifecycle 执行失败后要尝试的回滚步骤 |
+| `permission_requirements` | systemd、launchd 或 Windows Service 的权限要求 |
+| `package_manifest_checks` | 包管理器 manifest 与同一 release tag/checksum 的校验要求 |
 | `runtime_state_paths` | 数据库、配置、状态、日志、缓存、shard 目录等路径 |
+| `checkpoint_path` | lifecycle checkpoint 文件路径 |
 | `warnings` | 备份/迁移/shard/卸载等操作提醒 |
 | `checksum` | service definition 的稳定校验值 |
 
@@ -131,6 +138,7 @@ relay-knowledge service definition write --format json
 ```
 
 这将生成 systemd service 文件 `relay-knowledge.service`，写入到平台约定的 service 目录。
+生成的 Linux unit 会引用包含空格的路径，并把字面 `$` 写成 `$$`，避免 systemd 在 `ExecStart=` 或 `Environment=` 中误展开安装目录、二进制路径或数据目录。
 
 ### 15.3.3 前台验证
 
@@ -172,7 +180,8 @@ relay-knowledge service running; code_index_workers=N
 systemctl --user daemon-reload
 
 # 2. 启用并启动服务
-systemctl --user enable --now relay-knowledge.service
+systemctl --user enable "<definition_path>"
+systemctl --user start relay-knowledge.service
 
 # 3. 查看服务状态
 systemctl --user status relay-knowledge.service
@@ -195,7 +204,8 @@ export RELAY_KNOWLEDGE_SERVICE_DIR=/etc/systemd/system
 relay-knowledge service definition write --format json
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now relay-knowledge.service
+sudo systemctl enable /etc/systemd/system/relay-knowledge.service
+sudo systemctl start relay-knowledge.service
 sudo systemctl status relay-knowledge.service
 sudo journalctl -u relay-knowledge.service -n 100 --no-pager
 ```
@@ -235,10 +245,11 @@ systemctl --user restart relay-knowledge.service
 ```bash
 relay-knowledge setup doctor --format json
 relay-knowledge service plan install --format json
+relay-knowledge service lifecycle install --dry-run --format json
 relay-knowledge service definition write --format json
 ```
 
-生成的 launchd plist 文件名为 `com.coolplayagent.relay-knowledge.plist`，写入在 `service_dir` 指定的路径下（默认为 `~/Library/Application Support/relay-knowledge/service/`）。
+生成的 launchd plist 文件名为 `com.coolplayagent.relay-knowledge.plist`，写入在 `service_dir` 指定的路径下（macOS 默认 `~/Library/LaunchAgents/`，以便 login 时由 launchd 重新加载）。
 
 ### 15.4.2 前台验证
 
@@ -284,6 +295,7 @@ launchctl unload "<definition_path>"
 ```powershell
 relay-knowledge setup doctor --format json
 relay-knowledge service plan install --format json
+relay-knowledge service lifecycle install --dry-run --format json
 relay-knowledge service definition write --format json
 ```
 
@@ -304,9 +316,11 @@ relay-knowledge service run --web --mcp streamable-http
 ```powershell
 # 从 service plan JSON 中获取 BinaryPathName
 relay-knowledge service plan install --format json
+relay-knowledge service lifecycle install --dry-run --format json
 
 # 创建 Windows Service
-New-Service relay-knowledge -BinaryPathName "<relay-knowledge 完整路径> service run --web --mcp streamable-http"
+$ErrorActionPreference = 'Stop'
+New-Service relay-knowledge -BinaryPathName '"<relay-knowledge 完整路径>" service run --web --mcp streamable-http' -ErrorAction Stop
 
 # 启动服务
 Start-Service relay-knowledge
@@ -326,7 +340,7 @@ relay-knowledge service doctor --format json
 
 ```powershell
 Stop-Service relay-knowledge
-Remove-Service relay-knowledge
+sc.exe delete relay-knowledge
 ```
 
 ---
@@ -473,6 +487,10 @@ sudo cp relay-knowledge /usr/local/bin/relay-knowledge
 
 # 5. 更新 service definition
 relay-knowledge service definition write --format json
+
+# 或使用显式 lifecycle dry-run/execute 闭环
+relay-knowledge service lifecycle upgrade --dry-run --target-version 1.2.3 --install-dir /opt/relay-knowledge --format json
+relay-knowledge service lifecycle upgrade --execute --target-version 1.2.3 --install-dir /opt/relay-knowledge --format json
 systemctl --user daemon-reload
 
 # 6. 启动服务（自动执行 schema/index migration）
@@ -535,6 +553,7 @@ relay-knowledge service doctor --format json
 ### 15.8.5 备份注意事项
 
 - 备份必须覆盖 `service plan install --format json` 中 `runtime_state_paths` 列出的**所有**路径。
+- 升级前应保存 `service lifecycle upgrade --dry-run --format json` 中的 `rollback_steps`、`checkpoint_path` 和 `package_manifest_checks`。
 - `partitioned_sqlite` 下必须同时备份主 SQLite 数据库和 `stores/repositories/` shard 目录。只备份主库会让代码事实不可见。
 
 ---
@@ -544,6 +563,11 @@ relay-knowledge service doctor --format json
 ### 15.9.1 回滚原则
 
 - 回滚时同时回滚**二进制**、**service definition** 和**数据迁移 checkpoint**。
+- upgrade checkpoint backup 使用 attempt-scoped 文件并原子发布 checkpoint；没有旧二进制或 service definition 备份时，失败回滚和显式 rollback 只删除本次确实复制或写入的目标文件，definition-only upgrade 不会删除当前运行的 binary。
+- uninstall 失败回滚和基于 uninstall checkpoint 的显式 rollback 会恢复被本次卸载删除的原 service definition，再重新注册 service。
+- Windows install 将 service 创建和 registry 环境写入拆成独立步骤；Windows/macOS upgrade 会在启动前刷新 SCM 或 launchd registration，使平台 service manager 使用更新后的 service definition。
+- restore、definition rewrite、unregister 或 service-registration rollback step 失败后，不会继续执行依赖的删除、reload 或 start 步骤。
+- 外部 service manager 和 doctor 子进程退出或超时后，stdout/stderr 收集也有边界，继承管道的 helper 不会让执行报告无限等待。
 - forward-only migration 必须在变更说明中写清楚，不能只替换旧二进制后宣称回滚完成。
 
 ### 15.9.2 回滚步骤
@@ -618,7 +642,7 @@ sudo rm /usr/local/bin/relay-knowledge
 
 ```powershell
 Stop-Service relay-knowledge
-Remove-Service relay-knowledge
+sc.exe delete relay-knowledge
 # 删除二进制文件
 # 运行时数据默认在 %LOCALAPPDATA%/relay-knowledge/，按需删除
 ```
@@ -794,7 +818,7 @@ relay-knowledge audit query --limit 50 --format json
 | data | `~/Library/Application Support/relay-knowledge/data` |
 | cache | `~/Library/Caches/relay-knowledge` |
 | logs | `~/Library/Logs/relay-knowledge` |
-| service | `~/Library/Application Support/relay-knowledge/service` |
+| service | `~/Library/LaunchAgents` |
 
 **Windows**：
 
@@ -816,7 +840,12 @@ relay-knowledge audit query --limit 50 --format json
 | `relay-knowledge setup doctor --format json` | 部署前预检 |
 | `relay-knowledge setup profile service --format json` | 查看 service 推荐配置 |
 | `relay-knowledge service plan install --format json` | 生成安装计划 |
+| `relay-knowledge service plan upgrade --target-version <version> --install-dir <path> --format json` | 生成升级计划 |
+| `relay-knowledge service lifecycle install --dry-run --format json` | dry-run 安装 lifecycle |
+| `relay-knowledge service lifecycle upgrade --execute --target-version <version> --install-dir <path> --format json` | 显式执行升级 lifecycle |
+| `relay-knowledge service lifecycle rollback --dry-run --install-dir <path> --format json` | 预览 rollback lifecycle |
 | `relay-knowledge service plan uninstall --format json` | 生成卸载计划 |
+| `relay-knowledge service lifecycle uninstall --dry-run --format json` | dry-run 卸载 lifecycle |
 | `relay-knowledge service definition write --format json` | 写入平台 service definition |
 | `relay-knowledge service run --web --mcp streamable-http` | 前台运行完整服务 |
 | `relay-knowledge service run --mcp streamable-http` | 前台运行 MCP 服务 |

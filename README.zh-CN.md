@@ -324,6 +324,8 @@ relay-knowledge audit query --limit 50 --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
 relay-knowledge service plan install --format json
+relay-knowledge service plan upgrade --target-version 1.2.3 --format json
+relay-knowledge service lifecycle install --dry-run --format json
 relay-knowledge service definition write --format json
 relay-knowledge service operator pause
 relay-knowledge setup doctor --format json

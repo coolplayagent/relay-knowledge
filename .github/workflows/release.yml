@@ -227,6 +227,8 @@ jobs:
           target/${{ matrix.target }}/release/${BIN_NAME} --version
           target/${{ matrix.target }}/release/${BIN_NAME} status --format json
           target/${{ matrix.target }}/release/${BIN_NAME} service doctor --format json
+          target/${{ matrix.target }}/release/${BIN_NAME} service plan upgrade --target-version "${{ needs.verify.outputs.version }}" --format json
+          target/${{ matrix.target }}/release/${BIN_NAME} service lifecycle install --dry-run --format json
 
       - name: Smoke test Windows x64 release binary
         if: matrix.target == 'x86_64-pc-windows-msvc'
@@ -236,6 +238,8 @@ jobs:
           target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe --version
           target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe status --format json
           target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe service doctor --format json
+          target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe service plan upgrade --target-version "${{ needs.verify.outputs.version }}" --format json
+          target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe service lifecycle install --dry-run --format json
 
       - name: Prepare archive directory
         shell: bash

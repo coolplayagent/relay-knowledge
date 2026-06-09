@@ -374,6 +374,7 @@ For local service operation:
 
 ```bash
 relay-knowledge service plan install --format json
+relay-knowledge service lifecycle install --dry-run --format json
 relay-knowledge service definition write --format json
 relay-knowledge service operator status --format json
 relay-knowledge service operator pause --format json

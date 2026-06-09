@@ -51,6 +51,9 @@ pub const MACOS_SERVICE_DEFINITION_FILE_NAME: &str = "com.coolplayagent.relay-kn
 /// Linux systemd service definition filename for installed background operation.
 pub const LINUX_SERVICE_DEFINITION_FILE_NAME: &str = "relay-knowledge.service";
 
+/// Lifecycle checkpoint filename stored beside generated service definitions.
+pub const SERVICE_LIFECYCLE_CHECKPOINT_FILE_NAME: &str = "relay-knowledge-service-lifecycle.json";
+
 /// Resident MCP adapter identity reported in unified API metadata.
 pub const MCP_ADAPTER_NAME: &str = "relay-knowledge-mcp";
 

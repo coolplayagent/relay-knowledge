@@ -891,6 +891,7 @@ fn service_definition_filename() -> &'static str {
 
 mod health;
 pub(crate) mod knowledge_map;
+mod lifecycle_plan;
 mod service_status;
 mod storage_diagnostics;
 mod storage_provider;

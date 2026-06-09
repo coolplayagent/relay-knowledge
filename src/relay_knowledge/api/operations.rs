@@ -17,11 +17,10 @@ use crate::{
         FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange, IndexKind, IndexStatus,
         LayoutRegion, ProposalConflictRecord, ProposalRecord, ProposalState, RerankDiagnostics,
         RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
-        RetrievedContextPack, ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorStatus,
-        SoftwareBuildTarget, SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement,
-        SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
-        SoftwareRelationship, SoftwareSdkUsage, SoftwareTopic, WorkerKind, WorkerStatus,
-        WorkerTaskRecord,
+        RetrievedContextPack, ServiceDefinitionPlan, ServiceOperatorStatus, SoftwareBuildTarget,
+        SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile,
+        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship,
+        SoftwareSdkUsage, SoftwareTopic, WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -633,19 +632,6 @@ pub struct AuditQueryApiRequest {
 pub struct AuditQueryResponse {
     pub metadata: ApiMetadata,
     pub events: Vec<crate::domain::AuditEventRecord>,
-}
-
-/// Service manager plan request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServicePlanRequest {
-    pub action: ServiceManagerAction,
-}
-
-/// Service manager plan response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServicePlanResponse {
-    pub metadata: ApiMetadata,
-    pub plan: ServiceDefinitionPlan,
 }
 
 /// Service definition write response.

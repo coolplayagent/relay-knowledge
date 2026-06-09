@@ -568,8 +568,11 @@ events, and silent-update operator state. Multimodal ingest queues
 embedding/OCR/vision/extractor work; `worker run-once` calls a configured HTTP
 endpoint when available or creates a deterministic fallback proposal;
 `proposal accept` commits through the same graph mutation path; and service
-manager commands generate platform service definitions without running
-privileged installation.
+manager commands now expose staged install, upgrade, rollback, and uninstall
+lifecycle plans. Dry-run is the default; explicit `service lifecycle ... --execute`
+runs local file steps and platform service-manager commands with rollback steps
+if a later stage fails, and failed executions return an operation error with the
+failed step id instead of a successful response.
 
 The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate
 for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous
@@ -627,6 +630,8 @@ relay-knowledge audit query --limit 50 --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
 relay-knowledge service plan install --format json
+relay-knowledge service plan upgrade --target-version 1.2.3 --format json
+relay-knowledge service lifecycle install --dry-run --format json
 relay-knowledge service definition write --format json
 relay-knowledge service operator pause
 relay-knowledge setup doctor --format json

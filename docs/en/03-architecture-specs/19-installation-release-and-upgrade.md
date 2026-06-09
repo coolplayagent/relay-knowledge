@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 2.6
-> Date: 2026-06-05
+> Document version: 2.7
+> Date: 2026-06-09
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -27,7 +27,7 @@ Installation and release are part of product architecture. Stable releases are v
 
 Installers or install scripts support version selection, install directory selection, dry run, checksum verification, service-definition generation, failure rollback, and uninstall plans. Runtime data is not written to release extraction directories by default.
 
-The service deployment installation experience must state the selected topology explicitly: `embedded_cli` installs no resident service, `resident_single_process` installs one platform service, and `resident_partitioned_sqlite` also includes the shard directory in backup/migration/uninstall confirmation. `service plan install|uninstall --format json` must list the primary database, config/state/log/cache paths, and partitioned shard-directory coverage requirements in `runtime_state_paths` and `warnings`; future `split_worker_preview` generates separate control-service and worker-service definitions with each process's permissions, environment variables, logs, and shutdown behavior.
+The service deployment installation experience must state the selected topology explicitly: `embedded_cli` installs no resident service, `resident_single_process` installs one platform service, and `resident_partitioned_sqlite` also includes the shard directory in backup/migration/uninstall confirmation. `service plan install|upgrade|rollback|uninstall --format json` must list the primary database, config/state/log/cache paths, service definition path, service name, permission requirements, failure rollback plan, and partitioned shard-directory coverage requirements in `runtime_state_paths`, `lifecycle_steps`, `rollback_steps`, `permission_requirements`, and `warnings`. `service lifecycle <action> --dry-run` is the default auditable output; only explicit `--execute` may write service definitions, checkpoints, or install directories and invoke systemd, launchd, or Windows Service commands. Future `split_worker_preview` generates separate control-service and worker-service definitions with each process's permissions, environment variables, logs, and shutdown behavior.
 
 Exact code-source fallback is implemented inside the product and must not require `rg` at runtime. Agent-facing setup notes may mention bounded `rg` or `grep -RIn` as manual inspection tools, but installers must not make recursive grep a service dependency or a replacement for indexed query behavior.
 
@@ -70,6 +70,8 @@ preflight doctor
 
 On failure, binary and service definitions roll back. Data migrations have checkpoints or clear forward-only documentation.
 
+`service lifecycle upgrade --execute` must follow the dry-run stages: record a rollback checkpoint, stop the service, copy the binary, write the service definition, refresh the platform service manager, start the service, and keep execution reports around post-upgrade doctor. Installs that write an explicit `--install-dir` must not overwrite an existing target binary; upgrades must checkpoint an existing target binary and remove the copied target binary during rollback when no prior binary backup existed. If any stage fails after mutating work starts, the implementation must attempt the declared `rollback_steps` for completed work; failures before any mutating step must not stop, disable, or uninstall an existing service. A lifecycle report may mark rollback complete only when every selected rollback step succeeds, and external service-manager or doctor child processes must have bounded execution time. When an `--execute` run records a failed step, the API/CLI operation must return an error with the failed step id instead of wrapping the failed report in a successful response. `service lifecycle rollback --execute` restores checkpointed binary and service-definition backups; when no checkpoint exists, the gap must be reported through warnings or execution errors rather than silently reporting success.
+
 `relay-knowledge version check` is a read-only diagnostic entry point that reports
 the current version, newest stable version, source, release URL, and diagnostics.
 Actual upgrades must still be performed explicitly by the user, installer, or
@@ -106,9 +108,11 @@ automatic silent upgrades.
 - Release-facing documentation has a dated `06-verification` audit covering
   navigation, inventory, link checks, and documentation-only change boundaries.
 - Service installation uses systemd, launchd, or Windows Service instead of unmanaged loops.
-- Uninstall removes binaries and service definitions while preserving runtime data unless the user explicitly confirms removal.
+- `service lifecycle <action> --dry-run` reports the service name, definition path, install directory, runtime paths, permission requirements, rollback plan, and package-manifest verification chain; `--execute` runs only when explicitly requested, executes rollback steps on failure, and returns an operation error for failed executions.
+- Uninstall removes service registration and service definitions while preserving runtime data unless the user explicitly confirms removal.
 - Partitioned SQLite shard directories participate in backup, migration, doctor, and uninstall confirmation.
 - Control-service and split-worker service definitions, runtime directories, logs, environment variables, and permission boundaries are diagnosable and rollbackable in plan/install/uninstall flows.
+- The release workflow or an equivalent gate must run a service lifecycle dry-run smoke so release binaries prove their service definition, rollback plan, and package-manifest checks do not drift from the release tag.
 
 ---
 

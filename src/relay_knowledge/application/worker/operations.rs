@@ -1,5 +1,4 @@
 use std::{
-    path::PathBuf,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -17,10 +16,9 @@ use crate::{
     },
     domain::{
         AuditStatus, EvidenceModality, EvidenceRecord, GraphVersion, ProposalState,
-        ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorState, WorkerBackendState,
-        WorkerKind, WorkerStatus, WorkerTaskRecord, normalize_actor,
+        ServiceManagerAction, ServiceOperatorState, WorkerBackendState, WorkerKind, WorkerStatus,
+        WorkerTaskRecord, normalize_actor,
     },
-    project::PROJECT_NAME,
     storage::{
         AuditQueryRequest, KnowledgeStore, NewAuditEvent, NewProposal, ProposalDecision,
         ProposalListRequest, ServiceOperatorUpdate, StorageError, WorkerTaskClaimRequest,
@@ -364,11 +362,19 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let plan = self.render_service_plan(request.action);
+        let plan = self
+            .render_service_plan_for_request(&request)
+            .map_err(ApiError::invalid_argument)?;
+        let execution = if request.execute {
+            Some(self.execute_service_plan(&plan).await?)
+        } else {
+            None
+        };
 
         Ok(ServicePlanResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             plan,
+            execution,
         })
     }
 
@@ -382,18 +388,16 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let plan = self.render_service_plan(ServiceManagerAction::Install);
-        let path = PathBuf::from(&plan.definition_path);
-        let contents = plan.definition.clone();
-        tokio::task::spawn_blocking(move || {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(path, contents)
-        })
-        .await
-        .map_err(|error| ApiError::storage_unavailable(error.to_string()))?
-        .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+        let plan = self
+            .render_service_plan_for_request(&ServicePlanRequest {
+                action: ServiceManagerAction::Install,
+                dry_run: true,
+                execute: false,
+                target_version: None,
+                install_dir: None,
+            })
+            .map_err(ApiError::invalid_argument)?;
+        self.write_service_definition_from_plan(&plan).await?;
 
         Ok(ServiceDefinitionWriteResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
@@ -537,72 +541,6 @@ impl RelayKnowledgeService {
             })
             .await;
     }
-
-    fn render_service_plan(&self, action: ServiceManagerAction) -> ServiceDefinitionPlan {
-        let definition_path = self
-            .runtime
-            .paths
-            .service_dir
-            .join(service_definition_filename())
-            .display()
-            .to_string();
-        let executable = std::env::current_exe()
-            .ok()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "relay-knowledge".to_owned());
-        let platform = if cfg!(target_os = "windows") {
-            "windows"
-        } else if cfg!(target_os = "macos") {
-            "macos"
-        } else {
-            "linux"
-        }
-        .to_owned();
-        let definition = service_definition(
-            &platform,
-            &executable,
-            &self.runtime.paths.data_dir.display().to_string(),
-        );
-        let checksum = format!("{:016x}", stable_hash64(definition.as_bytes()));
-        let mut runtime_state_paths = vec![
-            self.runtime.paths.database_file().display().to_string(),
-            self.runtime.paths.config_dir.display().to_string(),
-            self.runtime.paths.state_dir.display().to_string(),
-            self.runtime.paths.log_dir.display().to_string(),
-            self.runtime.paths.cache_dir.display().to_string(),
-        ];
-        let mut warnings = vec![
-            "service manager commands are a generated plan; privileged install, uninstall, backup, migration, and rollback remain caller-executed".to_owned(),
-        ];
-        if self.runtime.storage.topology == crate::storage::StorageTopology::PartitionedSqlite {
-            runtime_state_paths.push(
-                self.runtime
-                    .paths
-                    .repository_shards_dir()
-                    .display()
-                    .to_string(),
-            );
-            warnings.push(
-                "partitioned_sqlite backup, migration, rollback, and uninstall confirmation must include both the control database and repository shard directory"
-                    .to_owned(),
-            );
-        }
-
-        ServiceDefinitionPlan {
-            action,
-            platform: platform.clone(),
-            service_name: PROJECT_NAME.to_owned(),
-            definition_path,
-            install_command: install_command(&platform),
-            uninstall_command: uninstall_command(&platform),
-            start_command: start_command(&platform),
-            stop_command: stop_command(&platform),
-            runtime_state_paths,
-            warnings,
-            definition,
-            checksum,
-        }
-    }
 }
 
 fn worker_task_seeds(
@@ -706,133 +644,10 @@ fn interface_label(interface: InterfaceKind) -> &'static str {
     }
 }
 
-fn service_definition_filename() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "relay-knowledge-service.xml"
-    } else if cfg!(target_os = "macos") {
-        "com.coolplayagent.relay-knowledge.plist"
-    } else {
-        "relay-knowledge.service"
-    }
-}
-
-fn service_definition(platform: &str, executable: &str, data_dir: &str) -> String {
-    match platform {
-        "windows" => format!(
-            "<service><id>relay-knowledge</id><name>relay-knowledge</name><executable>{executable}</executable><arguments>service run --web --mcp streamable-http</arguments><env name=\"RELAY_KNOWLEDGE_DATA_DIR\" value=\"{data_dir}\"/></service>\n"
-        ),
-        "macos" => format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>Label</key><string>com.coolplayagent.relay-knowledge</string><key>ProgramArguments</key><array><string>{executable}</string><string>service</string><string>run</string><string>--web</string><string>--mcp</string><string>streamable-http</string></array><key>RunAtLoad</key><true/></dict></plist>\n"
-        ),
-        _ => format!(
-            "[Unit]\nDescription=relay-knowledge background service\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} service run --web --mcp streamable-http\nEnvironment=RELAY_KNOWLEDGE_DATA_DIR={data_dir}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
-        ),
-    }
-}
-
-fn install_command(platform: &str) -> Vec<String> {
-    match platform {
-        "windows" => vec![
-            "powershell".to_owned(),
-            "New-Service".to_owned(),
-            "relay-knowledge".to_owned(),
-        ],
-        "macos" => vec![
-            "launchctl".to_owned(),
-            "load".to_owned(),
-            "<definition_path>".to_owned(),
-        ],
-        _ => vec![
-            "systemctl".to_owned(),
-            "--user".to_owned(),
-            "enable".to_owned(),
-            "--now".to_owned(),
-            "relay-knowledge.service".to_owned(),
-        ],
-    }
-}
-
-fn uninstall_command(platform: &str) -> Vec<String> {
-    match platform {
-        "windows" => vec![
-            "powershell".to_owned(),
-            "Remove-Service".to_owned(),
-            "relay-knowledge".to_owned(),
-        ],
-        "macos" => vec![
-            "launchctl".to_owned(),
-            "unload".to_owned(),
-            "<definition_path>".to_owned(),
-        ],
-        _ => vec![
-            "systemctl".to_owned(),
-            "--user".to_owned(),
-            "disable".to_owned(),
-            "--now".to_owned(),
-            "relay-knowledge.service".to_owned(),
-        ],
-    }
-}
-
-fn start_command(platform: &str) -> Vec<String> {
-    match platform {
-        "windows" => vec![
-            "powershell".to_owned(),
-            "Start-Service".to_owned(),
-            "relay-knowledge".to_owned(),
-        ],
-        "macos" => vec![
-            "launchctl".to_owned(),
-            "start".to_owned(),
-            "com.coolplayagent.relay-knowledge".to_owned(),
-        ],
-        _ => vec![
-            "systemctl".to_owned(),
-            "--user".to_owned(),
-            "start".to_owned(),
-            "relay-knowledge.service".to_owned(),
-        ],
-    }
-}
-
-fn stop_command(platform: &str) -> Vec<String> {
-    match platform {
-        "windows" => vec![
-            "powershell".to_owned(),
-            "Stop-Service".to_owned(),
-            "relay-knowledge".to_owned(),
-        ],
-        "macos" => vec![
-            "launchctl".to_owned(),
-            "stop".to_owned(),
-            "com.coolplayagent.relay-knowledge".to_owned(),
-        ],
-        _ => vec![
-            "systemctl".to_owned(),
-            "--user".to_owned(),
-            "stop".to_owned(),
-            "relay-knowledge.service".to_owned(),
-        ],
-    }
-}
-
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| {
             u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
         })
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }

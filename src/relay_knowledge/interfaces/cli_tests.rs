@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::*;
 use crate::{
     application::RuntimeConfiguration,
+    domain::ServiceManagerAction,
     env::{EnvironmentConfig, PlatformKind},
     storage::SqliteGraphStore,
 };
@@ -206,9 +207,13 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
     assert_eq!(provider.action, CliAction::ProviderProbe);
     assert_eq!(
         service_plan.action,
-        CliAction::ServicePlan {
+        CliAction::ServicePlan(ServicePlanRequest {
             action: ServiceManagerAction::Uninstall,
-        }
+            dry_run: true,
+            execute: false,
+            target_version: None,
+            install_dir: None,
+        })
     );
     assert_eq!(
         service_worker.action,
@@ -786,9 +791,13 @@ async fn run_with_service_covers_operational_lifecycle_commands() {
     let service_plan = run_with_service(
         &service,
         CliCommand {
-            action: CliAction::ServicePlan {
+            action: CliAction::ServicePlan(ServicePlanRequest {
                 action: ServiceManagerAction::Install,
-            },
+                dry_run: true,
+                execute: false,
+                target_version: None,
+                install_dir: None,
+            }),
             format: OutputFormat::Text,
             remote_base_url: None,
             help: false,

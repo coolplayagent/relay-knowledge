@@ -317,12 +317,13 @@ fn setup_profile(profile: SetupProfile, metadata: ApiMetadata) -> SetupProfileRe
             }],
             commands: vec![
                 "relay-knowledge service plan install --format json",
+                "relay-knowledge service lifecycle install --dry-run --format json",
                 "relay-knowledge service definition write --format json",
                 "relay-knowledge service operator status --format json",
                 "relay-knowledge service doctor --format json",
             ],
             notes: vec![
-                "The CLI writes service definitions but does not execute privileged install commands.",
+                "`service lifecycle ... --execute` runs staged file and service-manager commands; dry-run remains the default.",
             ],
         },
         SetupProfile::ExternalEmbedding => SetupProfileResponse {

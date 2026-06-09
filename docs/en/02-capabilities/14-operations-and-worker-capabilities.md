@@ -18,13 +18,15 @@ relay-knowledge worker run-once --kind ocr --format json
 relay-knowledge proposal list --state proposed --format json
 relay-knowledge proposal accept <proposal-id> --by reviewer --reason reviewed
 relay-knowledge audit query --limit 50 --format json
+relay-knowledge service plan upgrade --target-version 1.2.3 --format json
+relay-knowledge service lifecycle install --dry-run --format json
 relay-knowledge service definition write --format json
 relay-knowledge service operator pause
 ```
 
 ## Competitive Features
 
-Workers can call an external HTTP worker contract or generate deterministic fallback proposals. Proposal accept/reject/supersede follows the same graph mutation path. Service-manager commands generate platform service definitions and do not perform privileged installation.
+Workers can call an external HTTP worker contract or generate deterministic fallback proposals. Proposal accept/reject/supersede follows the same graph mutation path. Service-manager commands generate dry-run install, upgrade, rollback, and uninstall plans by default; explicit `service lifecycle ... --execute` runs staged file and platform service-manager steps with rollback reporting.
 
 ## Command/API Entry Points
 

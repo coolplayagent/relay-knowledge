@@ -458,6 +458,10 @@ async fn service_plan_and_operator_state_are_shared_api_surfaces() {
         .service_plan(
             ServicePlanRequest {
                 action: ServiceManagerAction::Install,
+                dry_run: true,
+                execute: false,
+                target_version: None,
+                install_dir: None,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-plan", "trace"),
         )

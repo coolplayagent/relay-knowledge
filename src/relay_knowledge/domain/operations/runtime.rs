@@ -480,6 +480,8 @@ pub struct ServiceOperatorStatus {
 #[serde(rename_all = "snake_case")]
 pub enum ServiceManagerAction {
     Install,
+    Upgrade,
+    Rollback,
     Uninstall,
 }
 
@@ -488,6 +490,8 @@ impl ServiceManagerAction {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Install => "install",
+            Self::Upgrade => "upgrade",
+            Self::Rollback => "rollback",
             Self::Uninstall => "uninstall",
         }
     }
@@ -496,6 +500,8 @@ impl ServiceManagerAction {
     pub fn parse(value: &str) -> Result<Self, DomainError> {
         match value {
             "install" => Ok(Self::Install),
+            "upgrade" => Ok(Self::Upgrade),
+            "rollback" => Ok(Self::Rollback),
             "uninstall" => Ok(Self::Uninstall),
             _ => Err(DomainError::invalid(
                 "service_manager_action",
@@ -509,17 +515,75 @@ impl ServiceManagerAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceDefinitionPlan {
     pub action: ServiceManagerAction,
+    pub dry_run: bool,
     pub platform: String,
     pub service_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_dir: Option<String>,
+    pub binary_path: String,
     pub definition_path: String,
     pub definition: String,
     pub install_command: Vec<String>,
     pub uninstall_command: Vec<String>,
     pub start_command: Vec<String>,
     pub stop_command: Vec<String>,
+    pub lifecycle_steps: Vec<ServiceLifecycleStep>,
+    pub rollback_steps: Vec<ServiceLifecycleStep>,
+    pub permission_requirements: Vec<ServicePermissionRequirement>,
+    pub package_manifest_checks: Vec<ServicePackageManifestCheck>,
     pub runtime_state_paths: Vec<String>,
+    pub checkpoint_path: String,
     pub warnings: Vec<String>,
     pub checksum: String,
+}
+
+/// One staged service lifecycle action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceLifecycleStep {
+    pub id: String,
+    pub phase: String,
+    pub description: String,
+    pub command: Vec<String>,
+    pub writes_paths: Vec<String>,
+    pub removes_paths: Vec<String>,
+    pub requires_privilege: bool,
+}
+
+/// Permission requirement attached to a generated service lifecycle plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServicePermissionRequirement {
+    pub scope: String,
+    pub reason: String,
+}
+
+/// Package-manager release-manifest drift check described by the lifecycle plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServicePackageManifestCheck {
+    pub manager: String,
+    pub artifact_source: String,
+    pub verification: String,
+}
+
+/// Execution result for a lifecycle step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceLifecycleStepResult {
+    pub step_id: String,
+    pub status: String,
+    pub message: String,
+}
+
+/// Result of executing or dry-running a service lifecycle plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceLifecycleExecutionReport {
+    pub executed: bool,
+    pub dry_run: bool,
+    pub completed_steps: Vec<ServiceLifecycleStepResult>,
+    pub rollback_steps: Vec<ServiceLifecycleStepResult>,
+    pub rolled_back: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_step_id: Option<String>,
 }
 
 /// Normalizes a required actor identifier for lifecycle decisions.
@@ -640,6 +704,8 @@ mod tests {
         }
         for (action, value) in [
             (ServiceManagerAction::Install, "install"),
+            (ServiceManagerAction::Upgrade, "upgrade"),
+            (ServiceManagerAction::Rollback, "rollback"),
             (ServiceManagerAction::Uninstall, "uninstall"),
         ] {
             assert_eq!(action.as_str(), value);

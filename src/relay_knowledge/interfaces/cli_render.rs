@@ -270,8 +270,10 @@ where
             value["status"]["stale"].as_bool().unwrap_or(true)
         ),
         "service.plan" => format!(
-            "service_plan={} path={}",
+            "service_plan={} dry_run={} executed={} path={}",
             value["plan"]["action"].as_str().unwrap_or("install"),
+            value["plan"]["dry_run"].as_bool().unwrap_or(true),
+            value["execution"]["executed"].as_bool().unwrap_or(false),
             value["plan"]["definition_path"].as_str().unwrap_or("")
         ),
         "service.definition.write" => format!(
