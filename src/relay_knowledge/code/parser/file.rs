@@ -784,10 +784,9 @@ fn annotate_route_handler_symbol(
     annotation: RouteHandlerAnnotation<'_>,
 ) {
     let route_line = annotation.route_line as u32;
-    let Some(symbol_indices) = symbol_index.get(&(
-        annotation.path.to_owned(),
-        annotation.handler_name.to_owned(),
-    )) else {
+    let Some((symbol_name, symbol_indices)) =
+        route_handler_symbol_candidates(symbol_index, annotation.path, annotation.handler_name)
+    else {
         tracing::debug!(
             path = annotation.path,
             handler_name = annotation.handler_name,
@@ -799,8 +798,7 @@ fn annotate_route_handler_symbol(
         .iter()
         .copied()
         .filter(|idx| {
-            build.symbols[*idx].path == annotation.path
-                && build.symbols[*idx].name == annotation.handler_name
+            build.symbols[*idx].path == annotation.path && build.symbols[*idx].name == symbol_name
         })
         .min_by_key(|idx| build.symbols[*idx].line_range.start.abs_diff(route_line));
 
@@ -825,6 +823,23 @@ fn annotate_route_handler_symbol(
             "route handler symbol was not linked"
         );
     }
+}
+
+fn route_handler_symbol_candidates<'a>(
+    symbol_index: &'a BTreeMap<(String, String), Vec<usize>>,
+    path: &str,
+    handler_name: &str,
+) -> Option<(String, &'a Vec<usize>)> {
+    if let Some(symbol_indices) = symbol_index.get(&(path.to_owned(), handler_name.to_owned())) {
+        return Some((handler_name.to_owned(), symbol_indices));
+    }
+    let leaf_name = handler_name.rsplit('.').next()?;
+    if leaf_name == handler_name {
+        return None;
+    }
+    symbol_index
+        .get(&(path.to_owned(), leaf_name.to_owned()))
+        .map(|symbol_indices| (leaf_name.to_owned(), symbol_indices))
 }
 
 fn record_tree_sitter_failure(

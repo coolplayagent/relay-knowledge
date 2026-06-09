@@ -180,20 +180,30 @@ pub(super) fn search_routes(
 }
 
 fn route_fallback_url_filter_sql(route_query: &RouteQuery) -> String {
-    let Some(segment_count) = route_query.url_segment_count else {
-        return "0".to_owned();
-    };
-    if route_query.fallback_likes.is_empty() {
+    if route_query.url.is_none() {
         return "0".to_owned();
     }
-    let likes = route_query
-        .fallback_likes
-        .iter()
-        .map(|_| "route.url LIKE ? ESCAPE '\\'")
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let mut predicates = vec!["route.url = ?".to_owned()];
+    if let Some(segment_count) = route_query.url_segment_count {
+        if !route_query.fallback_likes.is_empty() {
+            let likes = route_query
+                .fallback_likes
+                .iter()
+                .map(|_| "route.url LIKE ? ESCAPE '\\'")
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            predicates.push(format!(
+                "{} = {segment_count} AND ({likes})",
+                route_url_segment_count_sql("route.url")
+            ));
+        }
+    }
+    format!("({})", predicates.join(" OR "))
+}
+
+fn route_url_segment_count_sql(column: &str) -> String {
     format!(
-        "(length(route.url) - length(replace(route.url, '/', ''))) = {segment_count} AND ({likes})"
+        "CASE WHEN trim({column}, '/') = '' THEN 0 ELSE length(trim({column}, '/')) - length(replace(trim({column}, '/'), '/', '')) + 1 END"
     )
 }
 
@@ -240,6 +250,9 @@ fn route_fts_values(
         limit,
     );
     let final_limit = values.pop().unwrap_or(Value::Integer(limit as i64));
+    if let Some(url) = &route_query.url {
+        values.push(Value::Text(url.clone()));
+    }
     values.extend(route_query.fallback_likes.iter().cloned().map(Value::Text));
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
@@ -366,7 +379,7 @@ fn normalized_route_url_token(token: &str) -> Option<String> {
     }
     let end = token.find(['?', '#']).unwrap_or(token.len());
     let path = &token[..end];
-    (path.len() > 1).then(|| path.to_ascii_lowercase())
+    (path == "/" || path.len() > 1).then(|| path.to_ascii_lowercase())
 }
 
 fn route_url_fts_segments(url: &str) -> Vec<String> {
@@ -383,7 +396,11 @@ fn route_url_fallback_likes(url: &str) -> Vec<String> {
         return Vec::new();
     }
     let mut likes = Vec::new();
+    let all_segments_mask = (1usize << segments.len()) - 1;
     for mask in 1usize..(1usize << segments.len()) {
+        if mask == all_segments_mask {
+            continue;
+        }
         let mut pattern_segments = Vec::with_capacity(segments.len());
         for (index, segment) in segments.iter().enumerate() {
             if mask & (1usize << index) == 0 {

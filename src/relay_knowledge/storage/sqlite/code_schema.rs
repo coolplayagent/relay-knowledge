@@ -12,6 +12,7 @@ use self::migrations::{
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
 pub(super) const GENERATED_DETECTION_REINDEX_MIGRATION: &str = "generated-detection-reindex-v1";
+pub(super) const ROUTE_EXTRACTION_REINDEX_MIGRATION: &str = "web-route-extraction-reindex-v1";
 const SEARCH_BACKFILL_MIGRATION: &str = "code-search-backfill-v1";
 const SEARCH_METADATA_BACKFILL_MIGRATION: &str = "code-search-metadata-backfill-v1";
 
@@ -484,6 +485,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     )?;
     super::code_generated::backfill_all_path_generated_flags(connection)?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
+    mark_legacy_route_extraction_scopes_stale_once(connection)?;
     if table_has_columns(
         connection,
         "code_repository_calls",
@@ -512,6 +514,45 @@ fn mark_legacy_generated_detection_scopes_stale_once(
     }
     super::code_generated::mark_all_generated_detection_scopes_stale(connection)?;
     mark_code_schema_migration(connection, GENERATED_DETECTION_REINDEX_MIGRATION)
+}
+
+fn mark_legacy_route_extraction_scopes_stale_once(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, ROUTE_EXTRACTION_REINDEX_MIGRATION)? {
+        return Ok(());
+    }
+    mark_all_code_scopes_with_files_stale(connection)?;
+    mark_code_schema_migration(connection, ROUTE_EXTRACTION_REINDEX_MIGRATION)
+}
+
+fn mark_all_code_scopes_with_files_stale(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute(
+        "
+        UPDATE code_repository_scopes
+        SET stale = 1
+        WHERE EXISTS (
+            SELECT 1
+            FROM code_repository_files file
+            WHERE file.source_scope = code_repository_scopes.source_scope
+        )
+        ",
+        [],
+    )?;
+    connection.execute(
+        "
+        UPDATE code_repositories
+        SET stale = 1
+        WHERE last_indexed_scope_id IN (
+            SELECT source_scope
+            FROM code_repository_scopes
+            WHERE stale != 0
+        )
+        ",
+        [],
+    )?;
+
+    Ok(())
 }
 
 fn backfill_code_repository_aliases(connection: &Connection) -> Result<(), StorageError> {

@@ -76,9 +76,29 @@ fn parse_express_router_mounts(
     line: &str,
     router_names: &BTreeSet<String>,
 ) -> Vec<ExpressRouterMount> {
-    let Some(use_pos) = find_javascript_pattern_outside_strings(line, ".use(") else {
-        return Vec::new();
-    };
+    let mut mounts = Vec::new();
+    let mut scan = line;
+    while let Some(use_pos) = find_javascript_pattern_outside_strings(scan, ".use(") {
+        mounts.extend(parse_express_router_mount_at(scan, use_pos, router_names));
+        let Some(after_use) = scan[use_pos..]
+            .split_once('(')
+            .map(|(_, args)| args.trim_start())
+        else {
+            break;
+        };
+        let Some(call_end) = javascript_call_end(after_use) else {
+            break;
+        };
+        scan = after_use.get(call_end..).unwrap_or("");
+    }
+    mounts
+}
+
+fn parse_express_router_mount_at(
+    line: &str,
+    use_pos: usize,
+    router_names: &BTreeSet<String>,
+) -> Vec<ExpressRouterMount> {
     let Some(receiver_name) = express_receiver_name(&line[..use_pos]) else {
         return Vec::new();
     };

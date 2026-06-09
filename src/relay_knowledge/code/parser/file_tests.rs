@@ -78,7 +78,7 @@ fn record_routes_leaves_anonymous_callbacks_unresolved() {
 }
 
 #[test]
-fn record_routes_does_not_leaf_link_member_expression_handlers() {
+fn record_routes_links_member_expression_handlers_by_leaf_name() {
     let mut build = route_test_build();
     let mut symbol = route_symbol("bare-list-symbol", 3, 3);
     symbol.name = "list".to_owned();
@@ -95,8 +95,11 @@ fn record_routes_does_not_leaf_link_member_expression_handlers() {
     );
 
     assert_eq!(build.routes[0].handler_name, "usersController.list");
-    assert!(build.routes[0].handler_symbol_snapshot_id.is_none());
-    assert!(build.symbols[0].symbol_role.is_none());
+    assert_eq!(
+        build.routes[0].handler_symbol_snapshot_id.as_deref(),
+        Some("bare-list-symbol")
+    );
+    assert!(build.symbols[0].symbol_role.is_some());
 }
 
 #[test]

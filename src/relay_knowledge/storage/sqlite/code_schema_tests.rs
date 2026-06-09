@@ -2,8 +2,9 @@ use rusqlite::Connection;
 
 use super::{
     CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION,
-    GENERATED_DETECTION_REINDEX_MIGRATION, SEARCH_BACKFILL_MIGRATION,
-    SEARCH_METADATA_BACKFILL_MIGRATION, code_schema_migration_applied, initialize_code_schema,
+    GENERATED_DETECTION_REINDEX_MIGRATION, ROUTE_EXTRACTION_REINDEX_MIGRATION,
+    SEARCH_BACKFILL_MIGRATION, SEARCH_METADATA_BACKFILL_MIGRATION, code_schema_migration_applied,
+    initialize_code_schema,
 };
 
 #[test]
@@ -196,6 +197,76 @@ fn generated_detection_migration_marks_existing_scopes_stale_once() {
 
     assert_eq!(repository_stale(&connection), 0);
     assert_eq!(scope_stale(&connection), 0);
+}
+
+#[test]
+fn route_extraction_migration_marks_non_fact_versioned_scopes_stale_once() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("code schema should initialize");
+    connection
+        .execute_batch(
+            "
+            DELETE FROM code_repository_schema_migrations
+            WHERE name = 'web-route-extraction-reindex-v1';
+            INSERT INTO code_repositories (
+                repository_id, alias, root_path, path_filters_json, language_filters_json,
+                last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                indexed_file_count, symbol_count, reference_count, chunk_count,
+                stale, degraded_reason
+            )
+            VALUES (
+                'repo', 'fixture', '/tmp/repo', '[]', '[]', 'manual:repo',
+                'manual', 'tree', 'fresh', 1, 1, 0, 0, 0, NULL
+            );
+            INSERT INTO code_repository_scopes (
+                source_scope, repository_id, resolved_commit_sha, tree_hash,
+                path_filters_json, language_filters_json, indexed_file_count,
+                symbol_count, reference_count, chunk_count, stale, degraded_reason
+            )
+            VALUES ('manual:repo', 'repo', 'manual', 'tree', '[]', '[]', 1, 1, 0, 0, 0, NULL);
+            INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, blob_hash,
+                byte_len, line_count, parse_status, is_generated, degraded_reason
+            )
+            VALUES ('repo', 'manual:repo', 'file', 'src/routes.ts', 'typescript', 'hash', 20, 1, 'parsed', 0, NULL);
+            ",
+        )
+        .expect("fresh manual scope should insert");
+
+    initialize_code_schema(&connection).expect("route extraction migration should run");
+    assert_eq!(repository_stale(&connection), 1);
+    let stale: i64 = connection
+        .query_row(
+            "SELECT stale FROM code_repository_scopes WHERE source_scope = 'manual:repo'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("manual scope stale flag should load");
+    assert_eq!(stale, 1);
+    assert!(
+        code_schema_migration_applied(&connection, ROUTE_EXTRACTION_REINDEX_MIGRATION)
+            .expect("migration marker should load")
+    );
+
+    connection
+        .execute_batch(
+            "
+            UPDATE code_repositories SET stale = 0 WHERE repository_id = 'repo';
+            UPDATE code_repository_scopes SET stale = 0 WHERE source_scope = 'manual:repo';
+            ",
+        )
+        .expect("stale flags should reset");
+    initialize_code_schema(&connection).expect("marked migration should skip");
+
+    assert_eq!(repository_stale(&connection), 0);
+    let stale: i64 = connection
+        .query_row(
+            "SELECT stale FROM code_repository_scopes WHERE source_scope = 'manual:repo'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("manual scope stale flag should load after skip");
+    assert_eq!(stale, 0);
 }
 
 #[test]

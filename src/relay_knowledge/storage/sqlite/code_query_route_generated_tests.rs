@@ -213,6 +213,89 @@ async fn route_url_fallback_matches_middle_parameter_segments() {
 }
 
 #[tokio::test]
+async fn route_url_fallback_matches_trailing_slash_parameterized_routes() {
+    let mut user_route = route("route-user", "route-file", "src/routes.ts", "getUser");
+    user_route.url = "/users/:slug/".to_owned();
+    let store = store_with_routes(vec![user_route]).await;
+
+    let hits = store
+        .search_code(route_request("GET /users/alice unmatched", 3))
+        .await
+        .expect("route fallback query should succeed");
+
+    assert!(
+        hits.iter().any(|hit| {
+            hit.edge_kind.as_deref() == Some("route") && hit.excerpt.contains("GET /users/:slug/")
+        }),
+        "trailing-slash parameter route should match concrete endpoint query: {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn route_url_fallback_recalls_root_endpoint() {
+    let mut routes = Vec::new();
+    for index in 0..40 {
+        let path = format!("aaa/noise_{index:03}.ts");
+        let file_id = format!("noise-root-file-{index:03}");
+        let mut noise_route = route(
+            &format!("noise-root-route-{index:03}"),
+            &file_id,
+            &path,
+            "noiseRoot",
+        );
+        noise_route.url = format!("/noise/{index}");
+        routes.push(noise_route);
+    }
+    let mut root_route = route("root-route", "root-file", "src/root.ts", "root");
+    root_route.url = "/".to_owned();
+    routes.push(root_route);
+    let store = store_with_routes(routes).await;
+
+    let hits = store
+        .search_code(route_request("GET / unmatched", 1))
+        .await
+        .expect("root route fallback query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].edge_kind.as_deref(), Some("route"));
+    assert!(hits[0].excerpt.contains("GET / -> root"));
+}
+
+#[tokio::test]
+async fn route_url_fallback_avoids_all_wildcard_candidate_noise() {
+    let mut routes = Vec::new();
+    for index in 0..360 {
+        let path = format!("aaa/noise_{index:03}.ts");
+        let file_id = format!("noise-user-file-{index:03}");
+        let mut noise_route = route(
+            &format!("noise-user-route-{index:03}"),
+            &file_id,
+            &path,
+            "noiseUser",
+        );
+        noise_route.url = format!("/noise{index}/:id");
+        routes.push(noise_route);
+    }
+    let mut user_route = route("route-user", "route-file", "src/routes.ts", "getUser");
+    user_route.url = "/users/:id".to_owned();
+    routes.push(user_route);
+    let store = store_with_routes(routes).await;
+
+    let hits = store
+        .search_code(route_request("GET /users/alice unmatched", 5))
+        .await
+        .expect("route fallback query should succeed");
+
+    assert!(
+        hits.iter().any(|hit| {
+            hit.edge_kind.as_deref() == Some("route") && hit.excerpt.contains("GET /users/:id")
+        }),
+        "stable-segment fallback should avoid all-wildcard noise before limit: {hits:?}"
+    );
+    assert!(!hits.iter().any(|hit| hit.path.starts_with("aaa/")));
+}
+
+#[tokio::test]
 async fn route_url_fallback_applies_path_filters_before_limit() {
     let mut routes = Vec::new();
     for index in 0..360 {

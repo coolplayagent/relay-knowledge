@@ -214,6 +214,20 @@ fn continues_after_same_line_express_mounts() {
 }
 
 #[test]
+fn detects_multiple_same_line_express_mounts() {
+    let source = "const aRouter = express.Router();\nconst bRouter = express.Router();\naRouter.get('/alpha', alpha);\nbRouter.get('/beta', beta);\napp.use('/a', aRouter); app.use('/b', bRouter);\n";
+    let routes = detect_routes("typescript", source);
+
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| {
+        route.url == "/a/alpha" && route.http_method == "get" && route.handler_name == "alpha"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.url == "/b/beta" && route.http_method == "get" && route.handler_name == "beta"
+    }));
+}
+
+#[test]
 fn detects_multiple_same_line_spring_mapping_annotations() {
     let source = "@GetMapping(\"/alpha\") @PostMapping(\"/beta\") public String handle() {\n}\n";
     let routes = detect_routes("java", source);
