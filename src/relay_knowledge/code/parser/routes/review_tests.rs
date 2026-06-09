@@ -404,7 +404,7 @@ fn uses_python_route_keyword_boundaries_for_include_prefix() {
 
 #[test]
 fn skips_unmounted_declared_python_routers() {
-    let source = "router = APIRouter(prefix='/internal')\n@router.get('/health')\ndef health():\n    pass\nbp = Blueprint('admin', __name__, url_prefix='/admin')\n@bp.route('/users')\ndef users():\n    pass\n";
+    let source = "internal = APIRouter(prefix='/internal')\n@internal.get('/health')\ndef health():\n    pass\nbp = Blueprint('admin', __name__, url_prefix='/admin')\n@bp.route('/users')\ndef users():\n    pass\n";
     let routes = detect_routes("python", source);
 
     assert!(routes.is_empty());
@@ -545,6 +545,16 @@ fn preserves_unresolved_express_mount_prefixes_for_custom_routers() {
 }
 
 #[test]
+fn preserves_unresolved_express_mount_prefixes_for_bare_router_modules() {
+    let source = "const router = express.Router();\nrouter.get('/users', listUsers);\n";
+    let routes = detect_routes("javascript", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/:mount/users");
+    assert_eq!(routes[0].handler_name, "listUsers");
+}
+
+#[test]
 fn detects_exported_express_router_aliases() {
     let source = "import { Router } from 'express';\nexport const usersRouter = Router();\nusersRouter.get('/users', listUsers);\n";
     let routes = detect_routes("typescript", source);
@@ -586,4 +596,15 @@ fn preserves_unresolved_python_mount_prefixes_for_exported_routers() {
     assert!(routes.iter().any(|route| {
         route.url == "/:mount/admin/settings" && route.handler_name == "settings"
     }));
+}
+
+#[test]
+fn preserves_unresolved_python_mount_prefixes_for_bare_router_modules() {
+    let source =
+        "router = APIRouter(prefix='/users')\n@router.get('/{id}')\ndef get_user():\n    pass\n";
+    let routes = detect_routes("python", source);
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].url, "/:mount/users/{id}");
+    assert_eq!(routes[0].handler_name, "get_user");
 }

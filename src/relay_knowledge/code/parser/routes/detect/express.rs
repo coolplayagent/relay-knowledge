@@ -32,6 +32,7 @@ pub(in crate::code::parser) fn detect_express_routes(content: &str) -> Vec<Route
         } else if let Some(router_name) =
             parse_express_router_alias(trimmed, &router_factory_names, &express_names)
         {
+            root_receiver_names.remove(&router_name);
             router_names.insert(router_name);
         }
         let mount_statement;
