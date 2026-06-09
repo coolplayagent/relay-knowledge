@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use crate::{
     domain::{
@@ -30,13 +30,19 @@ impl GraphStore for SqliteGraphStore {
     }
 
     fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection> {
-        self.run_read(inspect_graph)
+        let database_path = self.database_path.clone();
+        let maintenance = Arc::clone(&self.maintenance);
+        self.run_read(move |connection| {
+            inspect_graph(connection, database_path.as_deref(), &maintenance)
+        })
     }
 
     fn health_snapshot(&self, now_ms: u64) -> StorageFuture<'_, HealthStorageSnapshot> {
+        let database_path = self.database_path.clone();
+        let maintenance = Arc::clone(&self.maintenance);
         self.try_run_read(move |connection| {
             Ok(HealthStorageSnapshot {
-                graph: inspect_graph(connection)?,
+                graph: inspect_graph(connection, database_path.as_deref(), &maintenance)?,
                 repository_code_totals: code_report::repository_totals(connection)?,
                 indexes: indexing::index_statuses(connection)?,
                 index_cursors: indexing::index_cursors(connection)?,

@@ -186,6 +186,7 @@ task claim 和混合语言注册安全性。
 
 二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。
 SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
+批量代码索引的 snapshot apply 或 checkpointed finalize 成功后，SQLite 存储会 best-effort 执行 `PRAGMA optimize` 和 `PRAGMA wal_checkpoint(PASSIVE)`；`health --format json` 与 graph inspection 会在 `graph.sqlite` 中暴露 journal mode、WAL 大小、最近维护时间和维护错误。最近维护时间和错误会持久化到 SQLite，因此服务重启或一次性 worker 退出后仍可诊断上一轮维护结果。`partitioned_sqlite` 拓扑下这些字段会通过只读 shard 诊断聚合 control 数据库和所有 active repository shard 数据库；任一 active shard 无法检查时，聚合结果会保留 shard 错误并把 WAL 大小标记为未知，避免把部分总量误报为完整状态。
 
 默认存储拓扑是 `single_sqlite`。设置
 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` 后，全局控制状态仍写入主运行时数据库，代码仓库事实、checkpoint 和按 scope 的代码查询会路由到运行时数据目录下的每仓库 SQLite shard。多仓 `repo-set` overlay refresh 在跨 shard import/export 聚合实现前仍要求 `single_sqlite`。

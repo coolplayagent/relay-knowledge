@@ -178,6 +178,24 @@ impl SqliteShardCatalog {
         tokio::task::spawn_blocking(move || catalog_repository_ids(&control_path)).await?
     }
 
+    pub(super) async fn active_repository_database_paths(
+        &self,
+    ) -> Result<Vec<(String, PathBuf)>, StorageError> {
+        let control_path = self.control_path.clone();
+        let paths = self.paths.clone();
+        tokio::task::spawn_blocking(move || {
+            let repository_ids = catalog_repository_ids(&control_path)?;
+            Ok(repository_ids
+                .into_iter()
+                .map(|repository_id| {
+                    let db_path = paths.repository_shard_database_file(&repository_id);
+                    (repository_id, db_path)
+                })
+                .collect())
+        })
+        .await?
+    }
+
     pub(super) async fn topology_snapshot(&self) -> Result<StorageTopologySnapshot, StorageError> {
         let control_path = self.control_path.clone();
         let paths = self.paths.clone();

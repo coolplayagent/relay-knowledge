@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, TryLockError},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 mod code;
@@ -15,6 +15,7 @@ mod code_graph;
 mod file_index;
 mod helpers;
 mod indexing;
+mod maintenance;
 mod maven;
 mod operations;
 mod read_pool;
@@ -38,18 +39,20 @@ use crate::{
     },
 };
 use helpers::{count_rows, source_hash_for_evidence, stable_id, storage_version_range};
+use maintenance::{SqliteMaintenanceState, configure_writer_connection};
+pub(in crate::storage) use maintenance::{configure_connection, read_only_database_diagnostics};
 use read_pool::{
     ReadConnectionPool, lock_any_read_connection, lock_any_read_connection_until,
     lock_connection_until, try_lock_any_read_connection,
 };
-
-const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// SQLite implementation of graph facts, mutation log, and index metadata.
 #[derive(Debug, Clone)]
 pub struct SqliteGraphStore {
     connection: Arc<Mutex<Connection>>,
     read_pool: Option<Arc<ReadConnectionPool>>,
+    database_path: Option<PathBuf>,
+    maintenance: Arc<Mutex<SqliteMaintenanceState>>,
 }
 
 impl SqliteGraphStore {
@@ -61,7 +64,7 @@ impl SqliteGraphStore {
         }
 
         let connection = Connection::open(&path)?;
-        configure_connection(&connection)?;
+        configure_writer_connection(&connection)?;
         if !schema_marker::schema_initialization_is_current(&connection)? {
             schema_migration::prepare_existing_database(&connection)?;
             initialize_schema(&connection)?;
@@ -72,18 +75,22 @@ impl SqliteGraphStore {
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             read_pool: Some(Arc::new(read_pool)),
+            database_path: Some(path),
+            maintenance: Arc::new(Mutex::new(SqliteMaintenanceState::default())),
         })
     }
 
     /// Opens an in-memory database for isolated tests.
     pub fn open_in_memory() -> Result<Self, StorageError> {
         let connection = Connection::open_in_memory()?;
-        configure_connection(&connection)?;
+        configure_writer_connection(&connection)?;
         initialize_schema(&connection)?;
 
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             read_pool: None,
+            database_path: None,
+            maintenance: Arc::new(Mutex::new(SqliteMaintenanceState::default())),
         })
     }
 
@@ -230,15 +237,6 @@ impl SqliteGraphStore {
     }
 }
 
-pub(in crate::storage) fn configure_connection(
-    connection: &Connection,
-) -> Result<(), StorageError> {
-    connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
-    connection.execute_batch("PRAGMA foreign_keys = ON;")?;
-
-    Ok(())
-}
-
 fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     retry::retry_sqlite_transient(|| initialize_schema_once(connection))
 }
@@ -247,7 +245,6 @@ fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
         PRAGMA foreign_keys = ON;
-        PRAGMA journal_mode = WAL;
 
         CREATE TABLE IF NOT EXISTS graph_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -381,6 +378,7 @@ fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
     code_graph::initialize_schema(connection)?;
     operations::initialize_schema(connection)?;
     file_index::initialize_schema(connection)?;
+    maintenance::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
     retrieval::initialize_schema(connection)?;
     schema_marker::initialize_schema_marker(connection)?;
@@ -795,7 +793,11 @@ fn commit_batch(
     })
 }
 
-fn inspect_graph(connection: &mut Connection) -> Result<GraphInspection, StorageError> {
+fn inspect_graph(
+    connection: &mut Connection,
+    database_path: Option<&Path>,
+    maintenance_state: &Arc<Mutex<SqliteMaintenanceState>>,
+) -> Result<GraphInspection, StorageError> {
     Ok(GraphInspection {
         graph_version: current_graph_version(connection)?,
         entity_count: count_rows(connection, "entities")?,
@@ -809,6 +811,7 @@ fn inspect_graph(connection: &mut Connection) -> Result<GraphInspection, Storage
         code_reference_count: count_rows(connection, "code_references")?,
         code_chunk_count: count_rows(connection, "code_chunks")?,
         code_parse_status_counts: code_graph::parse_status_counts(connection)?,
+        sqlite: maintenance::diagnostics(connection, database_path, maintenance_state)?,
     })
 }
 

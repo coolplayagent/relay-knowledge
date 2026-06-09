@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use relay_knowledge::storage::{
-    CodeIndexTaskClaimRequest, CodeRepositorySetRefreshTaskSeed, CodeRepositoryStore,
+    CodeIndexTaskClaimRequest, CodeRepositorySetRefreshTaskSeed, CodeRepositoryStore, GraphStore,
     PartitionedSqliteKnowledgeStore, SqliteGraphStore,
 };
 
@@ -248,6 +248,50 @@ async fn partitioned_sqlite_totals_do_not_double_count_migrated_control_rows() {
     assert_eq!(totals.repository_count, 1);
     assert_eq!(totals.indexed_file_count, 1);
     assert_eq!(totals.chunk_count, 1);
+}
+
+#[tokio::test]
+async fn partitioned_sqlite_graph_diagnostics_include_shard_maintenance() {
+    let paths = runtime_paths();
+    let control_path = paths.database_file();
+    let store =
+        PartitionedSqliteKnowledgeStore::open(&control_path, paths.clone()).expect("store opens");
+    store
+        .upsert_code_repository(registration("repo-alpha", "alpha"))
+        .await
+        .expect("alpha registers");
+
+    let before = store
+        .inspect_graph()
+        .await
+        .expect("initial graph diagnostics load");
+    assert_eq!(before.sqlite.last_maintenance_at_ms, None);
+
+    store
+        .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
+        .await
+        .expect("alpha indexes");
+    drop(store);
+    let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store reopens");
+
+    let graph = store
+        .inspect_graph()
+        .await
+        .expect("graph diagnostics aggregate shards");
+    let health = store
+        .health_snapshot(0)
+        .await
+        .expect("health diagnostics aggregate shards");
+
+    assert_eq!(graph.sqlite.journal_mode, "wal");
+    assert!(graph.sqlite.wal_size_bytes.is_some());
+    assert!(graph.sqlite.last_maintenance_at_ms.is_some());
+    assert_eq!(graph.sqlite.last_maintenance_error, None);
+    assert_eq!(
+        health.graph.sqlite.last_maintenance_at_ms,
+        graph.sqlite.last_maintenance_at_ms
+    );
+    assert_eq!(health.graph.sqlite.last_maintenance_error, None);
 }
 
 #[tokio::test]
@@ -580,9 +624,23 @@ async fn partitioned_sqlite_totals_report_missing_active_shards() {
         .code_repository_totals()
         .await
         .expect_err("missing shard should be reported");
+    let graph = store
+        .inspect_graph()
+        .await
+        .expect("graph diagnostics should remain available");
 
     assert!(error.to_string().contains("repository shard"));
     assert!(error.to_string().contains("missing"));
+    assert_eq!(graph.sqlite.wal_size_bytes, None);
+    assert!(
+        graph
+            .sqlite
+            .last_maintenance_error
+            .as_deref()
+            .is_some_and(
+                |message| message.contains("repository shard") && message.contains("missing")
+            )
+    );
 }
 
 #[tokio::test]
