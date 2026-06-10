@@ -56,6 +56,41 @@ mod tests {
     }
 
     #[test]
+    fn missing_diff_rejects_without_zeroing_gate_stability() {
+        let observation = EvaluationObservation {
+            gates: vec![GateObservation {
+                name: "cargo_test".to_owned(),
+                passed: true,
+                duration_ms: 1,
+                message: "ok".to_owned(),
+            }],
+            cases: vec![
+                case("foundation", "foundational_capability", 1.0),
+                case("competitive", "competitive_capability", 1.0),
+                case("semantic", "semantic_vector", 1.0),
+            ],
+            metrics: vec![MetricObservation {
+                name: "query_p95_ms".to_owned(),
+                value: 95.0,
+                budget: Some(100.0),
+                lower_is_better: true,
+                key: true,
+            }],
+            generated_diff: false,
+        };
+
+        let score = score_evaluation(&observation, ScoreBaselines::default());
+
+        assert_eq!(score.stability, 1.0);
+        assert!(score.score > 0.95);
+        assert!(!score.accepted);
+        assert!(score
+            .reject_reasons
+            .iter()
+            .any(|reason| reason.contains("no candidate diff")));
+    }
+
+    #[test]
     fn fixed_gate_gets_bug_fix_priority() {
         let previous = serde_json::json!({
             "score": 0.9,

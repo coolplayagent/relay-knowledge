@@ -82,7 +82,7 @@ pub fn load_runs(paths: &HistoryPaths) -> Result<Vec<Value>, String> {
 pub fn previous_scored_run(paths: &HistoryPaths) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
     Ok(latest_scored_run(
-        runs.into_iter().filter(|run| !is_evaluate_run(run)),
+        runs.into_iter().filter(automated_baseline_run),
     ))
 }
 
@@ -95,7 +95,7 @@ pub fn previous_scored_run_for_workload(
     Ok(latest_scored_run(runs.into_iter().filter(|run| {
         run_profile(run) == profile
             && run_category_focus(run) == category_focus
-            && !is_evaluate_run(run)
+            && automated_baseline_run(run)
     })))
 }
 
@@ -224,6 +224,7 @@ pub fn make_run_record(input: RunRecordInput<'_>) -> Value {
         "degradations": input.score.degradations,
         "improvements": input.score.improvements,
         "metric_budget_failures": input.score.metric_budget_failures,
+        "generated_diff": input.observation.generated_diff,
         "report": input.report_path.display().to_string(),
         "commit": input.commit,
         "gates": input.observation.gates,
@@ -478,6 +479,23 @@ pub fn is_evaluate_run(run: &Value) -> bool {
         .is_some_and(|run_id| run_id.starts_with("manual-evaluate"))
 }
 
+fn automated_baseline_run(run: &Value) -> bool {
+    !is_evaluate_run(run) && !is_no_diff_run(run)
+}
+
+fn is_no_diff_run(run: &Value) -> bool {
+    run.get("generated_diff").and_then(Value::as_bool) == Some(false)
+        || run
+            .get("reject_reasons")
+            .and_then(Value::as_array)
+            .is_some_and(|reasons| {
+                reasons
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|reason| reason.contains("no candidate diff"))
+            })
+}
+
 fn adoption_status(committed: bool, score_accepted: bool) -> &'static str {
     if committed {
         "committed"
@@ -668,6 +686,26 @@ mod tests {
                 "score_accepted": true,
                 "committed": false,
                 "score": 0.99
+            }),
+            json!({
+                "run_id": "run-no-diff-3",
+                "timestamp": "3",
+                "profile": "fast",
+                "accepted": false,
+                "score_accepted": false,
+                "committed": false,
+                "generated_diff": false,
+                "score": 0.98
+            }),
+            json!({
+                "run_id": "run-legacy-no-diff-4",
+                "timestamp": "4",
+                "profile": "fast",
+                "accepted": false,
+                "score_accepted": false,
+                "committed": false,
+                "reject_reasons": ["codex produced no candidate diff"],
+                "score": 0.97
             }),
         ];
         fs::write(
