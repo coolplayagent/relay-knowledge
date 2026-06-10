@@ -269,7 +269,7 @@ foundational_capability * 0.17
 + stability * 0.19
 ```
 
-这些公式先得到 `base_score`。持久化的 `score` 是 `min(1.0, base_score + capability_ceiling_bonus)`。动态天花板 bonus 上限为 `0.06`，只使用 latest matching workload run 或同 profile best accepted run 中真实存在的 baseline component 字段；缺少 judge 输出不会产生 research bonus，bonus 也不能绕过失败 gate、缺失 diff 或受保护目标回退。
+这些公式先得到 `base_score`。持久化的 `score` 是 `min(1.0, base_score + capability_ceiling_bonus)`。动态天花板 bonus 上限为 `0.06`，只使用 latest matching workload run 或同 profile best accepted run 中真实存在的 baseline component 字段；缺少 judge 输出不会产生 research bonus，bonus 也不能绕过失败 gate、缺失 diff 或受保护目标回退。缺失 diff 仍会拒绝采纳，且无 diff 的 loop 记录不会作为后续 workload baseline；但当所选质量门通过时不会把 `stability` 组件归零。手动 `evaluate --use-current-candidate` 因此能在只验证当前基线时保持性能和 gate 分数可读。
 
 ### research judge
 

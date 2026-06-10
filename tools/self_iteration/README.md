@@ -269,7 +269,7 @@ foundational_capability * 0.17
 + stability * 0.19
 ```
 
-These formulas produce `base_score`. The persisted `score` is `min(1.0, base_score + capability_ceiling_bonus)`. The dynamic ceiling bonus is capped at `0.06` and uses only baseline component fields present in the latest matching workload run or best accepted run for the same profile. Missing judge output never creates a research bonus, and the bonus cannot override failed gates, missing diffs, or protected-objective regressions.
+These formulas produce `base_score`. The persisted `score` is `min(1.0, base_score + capability_ceiling_bonus)`. The dynamic ceiling bonus is capped at `0.06` and uses only baseline component fields present in the latest matching workload run or best accepted run for the same profile. Missing judge output never creates a research bonus, and the bonus cannot override failed gates, missing diffs, or protected-objective regressions. Missing diffs still reject adoption and no-diff loop records are ignored as future workload baselines, but they do not zero the `stability` component when the selected quality gates pass; manual `evaluate --use-current-candidate` runs therefore keep performance and gate scores readable even when they are only validating the current baseline.
 
 ### Research Judge
 
