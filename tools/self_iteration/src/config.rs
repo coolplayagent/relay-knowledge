@@ -590,9 +590,10 @@ fn non_empty_value(value: &str, name: &str) -> Result<String, String> {
 
 fn research_slug(value: &str) -> Result<String, String> {
     let slug = non_empty_value(value, "--research-slug")?;
-    if !slug.chars().all(|ch| {
-        ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_' | '.')
-    }) {
+    if !slug
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_' | '.'))
+    {
         return Err(
             "--research-slug may contain only lowercase ASCII letters, digits, '.', '-', or '_'"
                 .to_owned(),
@@ -696,9 +697,11 @@ mod tests {
 
     #[test]
     fn rejects_invalid_research_plan_metadata() {
-        let invalid_slug =
-            Config::parse(vec!["research-plan".to_owned(), "--research-slug=Graph DB".to_owned()])
-                .expect_err("invalid slug should fail");
+        let invalid_slug = Config::parse(vec![
+            "research-plan".to_owned(),
+            "--research-slug=Graph DB".to_owned(),
+        ])
+        .expect_err("invalid slug should fail");
         let invalid_date = Config::parse(vec![
             "research-plan".to_owned(),
             "--research-date".to_owned(),
