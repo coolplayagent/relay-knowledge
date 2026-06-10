@@ -781,6 +781,8 @@ pub struct CodeRepositoryScopeMetadata {
     pub tree_hash: String,
     pub path_filters: Vec<String>,
     pub language_filters: Vec<String>,
+    #[serde(default)]
+    pub indexed_file_count: usize,
     pub index_versions: Vec<String>,
     pub stale: bool,
 }
@@ -801,6 +803,7 @@ impl CodeRepositoryScopeMetadata {
             tree_hash: status.tree_hash.clone().unwrap_or_default(),
             path_filters: merged_filters(&status.path_filters, &selector.path_filters),
             language_filters: merged_filters(&status.language_filters, &selector.language_filters),
+            indexed_file_count: status.indexed_file_count,
             index_versions: vec![format!(
                 "code:{}:{}",
                 status
@@ -824,6 +827,7 @@ impl CodeRepositoryScopeMetadata {
             tree_hash: task.tree_hash.clone(),
             path_filters: task.path_filters.clone(),
             language_filters: task.language_filters.clone(),
+            indexed_file_count: 0,
             index_versions: vec![format!("code:{}:{}", task.source_scope, task.tree_hash)],
             stale: true,
         }

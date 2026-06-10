@@ -3,6 +3,7 @@ use std::{
     error::Error,
     fmt,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use axum::http::HeaderMap;
@@ -27,6 +28,8 @@ struct SessionState {
 struct SessionRecord {
     initialized: bool,
     last_used: u64,
+    created_at: Instant,
+    cold_start_recorded: bool,
 }
 
 struct SessionUse {
@@ -152,6 +155,19 @@ impl SessionRegistry {
         Ok(())
     }
 
+    pub(super) fn record_tools_list_cold_start(&self, session_id: &str) -> Option<u64> {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let record = active.issued.get_mut(session_id)?;
+        if record.cold_start_recorded {
+            return None;
+        }
+        record.cold_start_recorded = true;
+        Some(u64::try_from(record.created_at.elapsed().as_millis()).unwrap_or(u64::MAX))
+    }
+
     pub(super) fn terminate_session(&self, headers: &HeaderMap) -> Result<(), SessionLookupError> {
         let lookup = self.require_session(headers)?;
         self.active
@@ -198,6 +214,8 @@ impl SessionState {
             SessionRecord {
                 initialized,
                 last_used: revision,
+                created_at: Instant::now(),
+                cold_start_recorded: false,
             },
         );
         self.usage_order.push_back(SessionUse {

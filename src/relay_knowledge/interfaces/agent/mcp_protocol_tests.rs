@@ -426,6 +426,7 @@ async fn resources_and_prompts_cover_all_readonly_variants_and_errors() {
     assert_eq!(service_value["service_name"], "relay-knowledge");
     assert!(index_value["indexes"].as_array().expect("indexes").len() >= 3);
     assert!(metrics_text.contains("relay_knowledge_graph_version"));
+    assert!(metrics_text.contains("relay_knowledge_mcp_cold_start_total"));
     assert!(prompt_text.contains("relay_code_impact"));
     assert_eq!(unknown_resource["error"]["code"], -32602);
     assert_eq!(invalid_resource_params["error"]["code"], -32602);

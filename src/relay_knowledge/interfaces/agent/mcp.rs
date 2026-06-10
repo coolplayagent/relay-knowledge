@@ -54,14 +54,14 @@ use crate::{
 
 use super::{
     AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog, AgentAuditSink,
-    authorize_limit,
+    authorize_limit, validate_query_text,
 };
 use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
 use code_tools::run_code_tool;
 use tool_registry::{
     CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
     CODE_SOFTWARE_QUERY_TOOL, HEALTH_TOOL, INDEX_STATUS_TOOL, INSPECT_GRAPH_TOOL,
-    RETRIEVE_CONTEXT_TOOL, SERVICE_STATUS_TOOL, is_known_tool, tools_list_result,
+    RETRIEVE_CONTEXT_TOOL, SERVICE_STATUS_TOOL, is_known_tool,
 };
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -440,7 +440,7 @@ async fn handle_mcp_post(
     let mut pending_tool_audit = None;
     let result = match method {
         "ping" => json!({}),
-        "tools/list" => json!(tools_list_result()),
+        "tools/list" => metrics::tools_list_result(&server, &session),
         "resources/list" => resources::list_resources(&server),
         "resources/read" => {
             match resources::read_resource_with_timeout(&server, request.params, &request_id).await
@@ -679,6 +679,9 @@ async fn retrieve_context_tool(server: &McpServer, arguments: Value, request_id:
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
+    if let Err(error) = validate_query_text("query", &args.query) {
+        return tool_error_result(error);
+    }
     let policy = &server.agent.access_policy;
     let limit = match authorize_limit(args.limit, policy) {
         Ok(limit) => limit,
@@ -766,7 +769,11 @@ async fn inspect_graph_tool(server: &McpServer, arguments: Value, request_id: St
 }
 
 async fn health_tool(server: &McpServer, request_id: String) -> Value {
-    match server.service.health(request_context(request_id)).await {
+    match server
+        .service
+        .read_only_health(request_context(request_id))
+        .await
+    {
         Ok(response) => tool_success_result(
             format!(
                 "health={}",
@@ -781,7 +788,7 @@ async fn health_tool(server: &McpServer, request_id: String) -> Value {
 async fn service_status_tool(server: &McpServer, request_id: String) -> Value {
     match server
         .service
-        .service_status(request_context(request_id))
+        .read_only_service_status(request_context(request_id))
         .await
     {
         Ok(response) => tool_success_result("service status loaded", json!(response)),
@@ -813,7 +820,8 @@ fn initialize_result() -> Value {
         "serverInfo": {
             "name": PROJECT_NAME,
             "version": env!("CARGO_PKG_VERSION")
-        }
+        },
+        "instructions": "MCP tool schemas are static and storage is opened lazily on the first storage-backed tool call. For repository exploration, prefer relay_code_query or relay_code_repository_set_query and follow the explore_budget returned in structuredContent; budget tiers are 0-499 files: 1 call/15000 chars/5 files, 500-4999: 2/30000/10, 5000-14999: 3/45000/15, 15000+: 5/75000/25. Free-text queries are capped at 10000 characters and path filters at 4096 characters."
     })
 }
 
@@ -964,25 +972,23 @@ fn qos_message(reason: RejectReason) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "mcp_test_support.rs"]
-mod mcp_test_support;
-
-#[cfg(test)]
-#[path = "mcp_tests.rs"]
-mod mcp_tests;
-
-#[cfg(test)]
-#[path = "mcp_tool_tests.rs"]
-mod mcp_tool_tests;
-
-#[cfg(test)]
 #[path = "mcp_feature_flag_tool_tests.rs"]
 mod mcp_feature_flag_tool_tests;
-
 #[cfg(test)]
-#[path = "mcp_software_tool_tests.rs"]
-mod mcp_software_tool_tests;
-
+#[path = "mcp_issue_283_tests.rs"]
+mod mcp_issue_283_tests;
 #[cfg(test)]
 #[path = "mcp_protocol_tests.rs"]
 mod mcp_protocol_tests;
+#[cfg(test)]
+#[path = "mcp_software_tool_tests.rs"]
+mod mcp_software_tool_tests;
+#[cfg(test)]
+#[path = "mcp_test_support.rs"]
+mod mcp_test_support;
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod mcp_tests;
+#[cfg(test)]
+#[path = "mcp_tool_tests.rs"]
+mod mcp_tool_tests;

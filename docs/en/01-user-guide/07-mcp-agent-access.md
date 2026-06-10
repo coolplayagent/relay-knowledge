@@ -61,6 +61,8 @@ Clients must follow the MCP Streamable HTTP session flow:
 
 Missing session headers return HTTP 400. Unknown or retired session IDs return HTTP 404. Tool requests, `ping`, and `notifications/cancelled` are all bound to server-issued sessions.
 
+The `initialize` to `tools/list` discovery path is storage-cold: MCP registers static tool schemas and returns exploration instructions without opening SQLite or running schema migration. Storage is opened lazily on the first storage-backed tool call, and concurrent first calls share the service storage initialization guard. The first `tools/list` for each session records an initialize-to-tools-list cold-start sample in agent protocol metrics and `/mcp/metrics`.
+
 ## 7.4 Tools, Resources, and Prompts
 
 Current MCP tool surface:
@@ -81,6 +83,10 @@ Agent kind selection uses existing product kinds rather than a separate MCP taxo
 
 `relay_code_query` and `relay_code_feature_flags` return the same code graph freshness object as CLI and Web, including `freshness.state`, `freshness.index_lag`, `freshness.pending`, `freshness.cursor`, and `freshness.direct_source_read_required`. When direct source reads are required, agents must follow `freshness.agent_instructions` and verify `freshness.direct_source_read_paths` before using stale graph evidence for changed files.
 
+Code query responses include an `explore_budget` object derived from indexed repository size. Repositories below 500 indexed files budget 1 exploration call, 15,000 output characters, and 5 returned files; 500-4,999 files budget 2 calls, 30,000 characters, and 10 files; 5,000-14,999 files budget 3 calls, 45,000 characters, and 15 files; larger repositories budget 5 calls, 75,000 characters, and 25 files. MCP applies the file cap to `relay_code_query` and `relay_code_repository_set_query` results and reports truncation under `agent_output`.
+
+All MCP free-text queries are capped at 10,000 characters, and path filter entries are capped at 4,096 characters. `relay_code_query` and `relay_code_repository_set_query` also accept `include_code=true`; container-like class, struct, interface, enum, and trait hits are returned as compact signature-and-line outlines instead of large source bodies.
+
 Current MCP resource surface:
 
 - `relay://service/status`
@@ -100,10 +106,10 @@ Resources and prompts provide read-only diagnostics, context, and invocation tem
 
 MCP does not expose index refresh or repository indexing. Repository indexing must be triggered explicitly through `relay-knowledge repo index` or `relay-knowledge repo update`; derived index refresh must be triggered through CLI/Web operational workflows.
 
-Agent requests are recorded as bounded in-process audit events with runtime identity, scope, freshness, QoS decision, budget, truncation, result count, and status. Repository-set query audit entries record the `request.set_alias` value as the scope so multi-repository reads remain visible in the audit trail. See [Chapter 10](10-workers-proposals-audit.md) for persistent audit sink configuration.
+Agent requests are recorded as bounded in-process audit events with runtime identity, scope, freshness, QoS decision, budget, truncation, result count, and status. Durable audit writes do not open cold storage for discovery or read-only diagnostics; once a storage-backed tool has opened storage, audit events are mirrored to the durable store. Repository-set query audit entries record the `request.set_alias` value as the scope so multi-repository reads remain visible in the audit trail. See [Chapter 10](10-workers-proposals-audit.md) for persistent audit sink configuration.
 
 ## 7.6 Metrics Endpoint
 
-`GET /mcp/metrics` returns a Prometheus text-format snapshot covering current graph version, index refresh queue depth, dead-letter count, QoS in-flight/queued request count, and stale state for each index. The endpoint still enters through the MCP router and QoS admission.
+`GET /mcp/metrics` returns a Prometheus text-format snapshot covering current graph version, index refresh queue depth, dead-letter count, QoS in-flight/queued request count, MCP cold-start sample count and duration totals, and stale state for each index. The endpoint still enters through the MCP router and QoS admission.
 
 MCP clients should use Streamable HTTP `/mcp`. `/mcp/sse` and `/mcp/message` are no longer compatibility entry points.

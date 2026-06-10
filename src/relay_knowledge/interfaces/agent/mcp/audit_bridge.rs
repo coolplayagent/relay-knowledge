@@ -97,6 +97,9 @@ async fn persist_agent_audit_with_service(
     event: &AgentAuditEvent,
     graph_version: u64,
 ) {
+    if !service.storage_is_ready() {
+        return;
+    }
     let detail_json = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_owned());
     let status = match event.status {
         AgentAuditStatus::Completed => AuditStatus::Completed,
@@ -175,6 +178,7 @@ fn audit_source_scope(structured: &Value) -> Option<String> {
     structured["source_scope"]
         .as_str()
         .or_else(|| structured["scope"]["alias"].as_str())
+        .or_else(|| structured["status"]["repository_set"]["alias"].as_str())
         .or_else(|| structured["request"]["repository"]["repository"].as_str())
         .or_else(|| structured["request"]["set_alias"].as_str())
         .map(str::to_owned)
@@ -266,6 +270,13 @@ mod tests {
     fn audit_source_scope_reads_repository_set_query_response() {
         assert_eq!(
             audit_source_scope(&json!({"request": {"set_alias": "workspace"}})).as_deref(),
+            Some("workspace")
+        );
+        assert_eq!(
+            audit_source_scope(&json!({
+                "status": {"repository_set": {"alias": "workspace"}}
+            }))
+            .as_deref(),
             Some("workspace")
         );
     }

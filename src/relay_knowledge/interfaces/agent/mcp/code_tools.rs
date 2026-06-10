@@ -1,9 +1,19 @@
+mod agent_budget;
+
+use agent_budget::{apply_agent_code_budget, explore_budget};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::domain::{
-    CodeFeatureFlagRequest, CodeImpactRequest, CodeQueryKind, CodeRepositorySelector,
-    CodeRepositorySetQueryRequest, CodeRetrievalRequest, SoftwareGlobalKind, SoftwareGlobalRequest,
+use crate::{
+    domain::{
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeQueryKind, CodeRepositorySelector,
+        CodeRepositorySetQueryRequest, CodeRetrievalRequest, SoftwareGlobalKind,
+        SoftwareGlobalRequest,
+    },
+    interfaces::agent::{
+        MAX_AGENT_PATH_CHARS, MAX_AGENT_QUERY_CHARS, validate_optional_query_text,
+        validate_path_texts,
+    },
 };
 
 use super::{
@@ -13,7 +23,7 @@ use super::{
         CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
         CODE_SOFTWARE_QUERY_TOOL,
     },
-    tool_success_result,
+    tool_success_result, validate_query_text,
 };
 
 const CODE_QUERY_KIND_SCHEMA_VALUES: &[&str] = &[
@@ -51,6 +61,8 @@ struct CodeQueryArgs {
     freshness: Option<String>,
     #[serde(default)]
     exclude_generated: Option<bool>,
+    #[serde(default)]
+    include_code: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +128,8 @@ struct CodeRepositorySetQueryArgs {
     freshness: Option<String>,
     #[serde(default)]
     exclude_generated: Option<bool>,
+    #[serde(default)]
+    include_code: Option<bool>,
 }
 
 pub(super) async fn run_code_tool(
@@ -148,6 +162,9 @@ async fn code_software_query_tool(
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
+    if let Err(error) = validate_path_texts("path_filters", &args.path_filters) {
+        return tool_error_result(error);
+    }
     let repository = match server
         .scope_authorizer
         .authorize_scope(
@@ -217,6 +234,11 @@ async fn code_repository_set_query_tool(
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
+    if let Err(error) = validate_query_text("query", &args.query)
+        .and_then(|_| validate_path_texts("path_filters", &args.path_filters))
+    {
+        return tool_error_result(error);
+    }
     let repository_set = match server
         .scope_authorizer
         .authorize_repository_set_scope(
@@ -266,13 +288,25 @@ async fn code_repository_set_query_tool(
         .query_code_repository_set(request, request_context(request_id))
         .await
     {
-        Ok(response) => tool_success_result(
-            format!(
-                "repository set query returned {} result(s)",
-                response.results.len()
-            ),
-            json!(response),
-        ),
+        Ok(response) => {
+            let file_count = response
+                .status
+                .members
+                .iter()
+                .map(|member| member.indexed_file_count)
+                .sum();
+            let mut structured = json!(response);
+            apply_agent_code_budget(
+                &mut structured,
+                explore_budget(file_count),
+                args.include_code.unwrap_or(false),
+            );
+            let result_count = structured["results"].as_array().map_or(0, Vec::len);
+            tool_success_result(
+                format!("repository set query returned {result_count} result(s)"),
+                structured,
+            )
+        }
         Err(error) => api_error_result(error),
     }
 }
@@ -282,6 +316,11 @@ async fn code_query_tool(server: &McpServer, arguments: Value, request_id: Strin
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
+    if let Err(error) = validate_query_text("query", &args.query)
+        .and_then(|_| validate_path_texts("path_filters", &args.path_filters))
+    {
+        return tool_error_result(error);
+    }
     let repository = match server
         .scope_authorizer
         .authorize_scope(
@@ -333,10 +372,16 @@ async fn code_query_tool(server: &McpServer, arguments: Value, request_id: Strin
         .query_code_repository(request, request_context(request_id))
         .await
     {
-        Ok(response) => tool_success_result(
-            format!("code query returned {} result(s)", response.results.len()),
-            json!(response),
-        ),
+        Ok(response) => {
+            let budget = explore_budget(response.scope.indexed_file_count);
+            let mut structured = json!(response);
+            apply_agent_code_budget(&mut structured, budget, args.include_code.unwrap_or(false));
+            let result_count = structured["results"].as_array().map_or(0, Vec::len);
+            tool_success_result(
+                format!("code query returned {result_count} result(s)"),
+                structured,
+            )
+        }
         Err(error) => api_error_result(error),
     }
 }
@@ -350,6 +395,11 @@ async fn code_feature_flags_tool(
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
+    if let Err(error) = validate_optional_query_text("query", args.query.as_deref())
+        .and_then(|_| validate_path_texts("path_filters", &args.path_filters))
+    {
+        return tool_error_result(error);
+    }
     let repository = match server
         .scope_authorizer
         .authorize_scope(
@@ -411,6 +461,9 @@ async fn code_impact_tool(server: &McpServer, arguments: Value, request_id: Stri
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
+    if let Err(error) = validate_path_texts("path_filters", &args.path_filters) {
+        return tool_error_result(error);
+    }
     let repository = match server
         .scope_authorizer
         .authorize_scope(
@@ -468,16 +521,17 @@ pub(super) fn code_query_tool_definition() -> Value {
             "type": "object",
             "properties": {
                 "repository": {"type": "string", "minLength": 1},
-                "query": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_AGENT_QUERY_CHARS},
                 "kind": {
                     "type": "string",
                     "enum": CODE_QUERY_KIND_SCHEMA_VALUES
                 },
                 "limit": {"type": "integer", "minimum": 1},
                 "ref_selector": {"type": "string"},
-                "path_filters": {"type": "array", "items": {"type": "string"}},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
                 "exclude_generated": {"type": "boolean"},
+                "include_code": {"type": "boolean", "description": "When true, container-like class/struct/interface/enum hits are returned as compact outlines instead of full source bodies."},
                 "freshness": {
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
@@ -496,10 +550,10 @@ pub(super) fn code_feature_flags_tool_definition() -> Value {
             "type": "object",
             "properties": {
                 "repository": {"type": "string", "minLength": 1},
-                "query": {"type": "string"},
+                "query": {"type": "string", "maxLength": MAX_AGENT_QUERY_CHARS},
                 "limit": {"type": "integer", "minimum": 1},
                 "ref_selector": {"type": "string"},
-                "path_filters": {"type": "array", "items": {"type": "string"}},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
                 "freshness": {
                     "type": "string",
@@ -525,7 +579,7 @@ pub(super) fn code_software_query_tool_definition() -> Value {
                 },
                 "limit": {"type": "integer", "minimum": 1},
                 "ref_selector": {"type": "string"},
-                "path_filters": {"type": "array", "items": {"type": "string"}},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
                 "freshness": {
                     "type": "string",
@@ -548,7 +602,7 @@ pub(super) fn code_impact_tool_definition() -> Value {
                 "base_ref": {"type": "string", "minLength": 1},
                 "head_ref": {"type": "string", "minLength": 1},
                 "limit": {"type": "integer", "minimum": 1},
-                "path_filters": {"type": "array", "items": {"type": "string"}},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}}
             },
             "required": ["repository", "base_ref", "head_ref"]
@@ -564,15 +618,16 @@ pub(super) fn code_repository_set_query_tool_definition() -> Value {
             "type": "object",
             "properties": {
                 "repository_set": {"type": "string", "minLength": 1},
-                "query": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_AGENT_QUERY_CHARS},
                 "kind": {
                     "type": "string",
                     "enum": CODE_QUERY_KIND_SCHEMA_VALUES
                 },
                 "limit": {"type": "integer", "minimum": 1},
-                "path_filters": {"type": "array", "items": {"type": "string"}},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
                 "exclude_generated": {"type": "boolean"},
+                "include_code": {"type": "boolean", "description": "When true, container-like class/struct/interface/enum hits are returned as compact outlines instead of full source bodies."},
                 "freshness": {
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]

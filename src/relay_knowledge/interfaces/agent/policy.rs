@@ -2,6 +2,9 @@ use std::{error::Error, fmt};
 
 use crate::{api::AgentAccessPolicy, domain::SourceScope};
 
+pub const MAX_AGENT_QUERY_CHARS: usize = 10_000;
+pub const MAX_AGENT_PATH_CHARS: usize = 4_096;
+
 /// Stable adapter error categories for protocol-level governance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentAdapterErrorKind {
@@ -129,6 +132,50 @@ pub fn authorize_limit(
     }
 
     Ok(limit)
+}
+
+pub fn validate_query_text(field: &str, value: &str) -> Result<(), AgentAdapterError> {
+    validate_text_length(field, value, MAX_AGENT_QUERY_CHARS, "query text")
+}
+
+pub fn validate_optional_query_text(
+    field: &str,
+    value: Option<&str>,
+) -> Result<(), AgentAdapterError> {
+    if let Some(value) = value {
+        validate_query_text(field, value)?;
+    }
+
+    Ok(())
+}
+
+pub fn validate_path_text(field: &str, value: &str) -> Result<(), AgentAdapterError> {
+    validate_text_length(field, value, MAX_AGENT_PATH_CHARS, "path input")
+}
+
+pub fn validate_path_texts(field: &str, values: &[String]) -> Result<(), AgentAdapterError> {
+    for value in values {
+        validate_path_text(field, value)?;
+    }
+
+    Ok(())
+}
+
+fn validate_text_length(
+    field: &str,
+    value: &str,
+    max_chars: usize,
+    label: &str,
+) -> Result<(), AgentAdapterError> {
+    let count = value.chars().count();
+    if count > max_chars {
+        return Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::InvalidArgument,
+            format!("{field} {label} exceeds {max_chars} characters"),
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
