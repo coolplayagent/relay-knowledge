@@ -1,0 +1,160 @@
+{
+  "repositories": {
+    "agent_workflow_fixture": {
+      "generated_fixture": "agent_workflow_v1",
+      "alias": "agent-workflow-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "agent_register_index_budget_ms": 18000
+    }
+  },
+  "agent_workflow_cases": [
+    {
+      "id": "agent_definition_to_answer_context",
+      "repository": "agent_workflow_fixture",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "max_tool_calls": 2,
+      "max_source_reads": 4,
+      "max_output_chars": 70000,
+      "max_context_chars": 9000,
+      "min_evidence_hits": 2,
+      "max_text_fallback_ratio": 0.50,
+      "max_total_duration_ms": 2500,
+      "steps": [
+        {
+          "id": "rust_context_builder_definition",
+          "kind": "definition",
+          "query": "AgentContextPackBuilder",
+          "limit": 8,
+          "max_rank": 1,
+          "context_hit_limit": 3,
+          "expected": [
+            {
+              "path": "src/context.rs",
+              "excerpt_contains": "pub struct AgentContextPackBuilder"
+            }
+          ]
+        },
+        {
+          "id": "typescript_context_packet_definition",
+          "kind": "definition",
+          "query": "buildContextPacket",
+          "limit": 8,
+          "max_rank": 2,
+          "context_hit_limit": 3,
+          "expected": [
+            {
+              "path": "web/contextPacket.ts",
+              "excerpt_contains": "buildContextPacket"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent_cross_language_impact_trace",
+      "repository": "agent_workflow_fixture",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "max_tool_calls": 3,
+      "max_source_reads": 6,
+      "max_output_chars": 90000,
+      "max_context_chars": 12000,
+      "min_evidence_hits": 3,
+      "max_text_fallback_ratio": 0.60,
+      "max_total_duration_ms": 3500,
+      "steps": [
+        {
+          "id": "rust_issue_entrypoint",
+          "kind": "hybrid",
+          "query": "analyze issue entrypoint context builder freshness mode",
+          "limit": 8,
+          "max_rank": 2,
+          "context_hit_limit": 3,
+          "expected": [
+            {
+              "path": "src/orchestrator.rs",
+              "excerpt_contains": "analyze_issue_entrypoint"
+            }
+          ]
+        },
+        {
+          "id": "python_policy_budget",
+          "kind": "hybrid",
+          "query": "agent policy budget max tool calls source reads freshness",
+          "limit": 8,
+          "max_rank": 2,
+          "context_hit_limit": 3,
+          "expected": [
+            {
+              "path": "ops/policy_loader.py",
+              "excerpt_contains": "AGENT_POLICY_BUDGET"
+            }
+          ]
+        },
+        {
+          "id": "typescript_answer_renderer",
+          "kind": "references",
+          "query": "buildContextPacket renderAgentWorkflowAnswer",
+          "limit": 8,
+          "max_rank": 3,
+          "context_hit_limit": 3,
+          "expected": [
+            {
+              "path": "web/entry.ts",
+              "excerpt_contains": "buildContextPacket"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent_config_freshness_trace",
+      "repository": "agent_workflow_fixture",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "max_tool_calls": 2,
+      "max_source_reads": 5,
+      "max_output_chars": 80000,
+      "max_context_chars": 10000,
+      "min_evidence_hits": 2,
+      "max_text_fallback_ratio": 0.75,
+      "max_total_duration_ms": 5000,
+      "steps": [
+        {
+          "id": "config_budget_policy",
+          "kind": "hybrid",
+          "query": "agent workflow max output chars fallback policy bounded search",
+          "freshness": "wait-until-fresh",
+          "limit": 8,
+          "max_rank": 3,
+          "context_hit_limit": 3,
+          "expected": [
+            {
+              "path": "config/agent-eval.yaml",
+              "excerpt_contains": "max_output_chars"
+            }
+          ]
+        },
+        {
+          "id": "freshness_documentation",
+          "kind": "hybrid",
+          "query": "coding agent freshness allow stale diagnostics graph evidence",
+          "freshness": "allow-stale",
+          "limit": 8,
+          "max_rank": 3,
+          "context_hit_limit": 3,
+          "expected": [
+            {
+              "path": "docs/agent-workflow.md",
+              "excerpt_contains": "Freshness scenarios"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

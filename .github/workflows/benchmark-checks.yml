@@ -34,3 +34,39 @@ jobs:
 
       - name: Code repository benchmark regression gate
         run: cargo test --test benchmarks --all-features -- --nocapture
+
+  agent-workflow-regression:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    env:
+      RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS: agent_workflow_fixture
+      RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS: __agent_workflow_ci_only__
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+
+      - name: Build self-iteration harness
+        run: cargo build --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
+
+      - name: Coding-agent workflow regression gate
+        run: |
+          tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate \
+            --workspace . \
+            --profile fast \
+            --categories agent_workflows \
+            --use-current-candidate \
+            --jobs 2 \
+            --repo-jobs 1 \
+            --query-jobs 1 \
+            --command-timeout-seconds 180
+          report="$(ls -t .git/relay-knowledge-self-iteration/reports-v2/manual-evaluate-*.json | head -n 1)"
+          jq -e '
+            ([.evaluation.gates[] | select(.passed | not)] | length) == 0 and
+            ([.evaluation.cases[] | select(.passed | not)] | length) == 0 and
+            ([.evaluation.metrics[] | select((.name | startswith("agent_")) and .key and (.budget != null) and
+              ((.lower_is_better and (.value > .budget)) or
+               ((.lower_is_better | not) and (.value < .budget))))] | length) == 0
+          ' "$report"

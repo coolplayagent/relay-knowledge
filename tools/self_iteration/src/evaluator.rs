@@ -425,6 +425,35 @@ pub fn evaluate_candidate(
         }
     }
 
+    if selection.runs_agent_workflows(&config.profile) {
+        eprintln!(
+            "[self-iterate] agent workflow workload start profile={}",
+            config.profile
+        );
+        for report in evaluate_agent_workflows(
+            &runtime,
+            &run_home,
+            cases_config,
+            &repository_configs,
+            &config.profile,
+            config.categories.as_ref(),
+        )? {
+            commands.extend(report.commands.clone());
+            gates.extend(report.commands.iter().map(GateObservation::from_command));
+            gates.extend(report.gates.clone());
+            cases.extend(report.cases.clone());
+            metrics.extend(report.metrics.clone());
+            repo_reports.push(report);
+        }
+        eprintln!(
+            "[self-iterate] agent workflow workload done reports={} commands={} cases={} metrics={}",
+            repo_reports.len(),
+            commands.len(),
+            cases.len(),
+            metrics.len()
+        );
+    }
+
     if selection.runs_research_judge(&config.profile) {
         if let Some(suite) = cases_config
             .get("research_judge_suite")
@@ -1310,4 +1339,5 @@ where
 }
 
 include!("evaluator_repo_set.rs");
+include!("evaluator_agent.rs");
 include!("evaluator_tail.rs");

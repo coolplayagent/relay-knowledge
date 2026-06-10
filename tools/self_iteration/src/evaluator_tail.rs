@@ -306,6 +306,11 @@ impl WorkloadSelection {
         self.focused() || profile == "fast" || profile_runs_slow_suites(profile)
     }
 
+    fn runs_agent_workflows(&self, profile: &str) -> bool {
+        self.contains(EvaluationCategory::AgentWorkflows)
+            || (!self.focused() && profile_runs_slow_suites(profile))
+    }
+
     fn runs_research_judge(&self, profile: &str) -> bool {
         self.contains(EvaluationCategory::ResearchJudge)
             || (!self.focused() && profile_runs_slow_suites(profile))
@@ -324,6 +329,9 @@ impl WorkloadSelection {
         }
         if !self.runs_semantic_vector(profile) {
             skipped.push("semantic_vector");
+        }
+        if !self.runs_agent_workflows(profile) {
+            skipped.push("agent_workflows");
         }
         if !self.runs_research_judge(profile) {
             skipped.push("research_judge");
@@ -1558,6 +1566,17 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("config/flags.yaml", SOFTWARE_GLOBAL_FLAGS_YAML),
             ("tests/smoke.rs", SOFTWARE_GLOBAL_SMOKE_RS),
             ("templates/deployment.yaml.j2", SOFTWARE_GLOBAL_TEMPLATE),
+        ]),
+        "agent_workflow_v1" => Ok(vec![
+            ("Cargo.toml", AGENT_WORKFLOW_CARGO_TOML),
+            ("src/lib.rs", AGENT_WORKFLOW_CORE_LIB_RS),
+            ("src/context.rs", AGENT_WORKFLOW_CORE_CONTEXT_RS),
+            ("src/orchestrator.rs", AGENT_WORKFLOW_CORE_ORCHESTRATOR_RS),
+            ("web/contextPacket.ts", AGENT_WORKFLOW_WEB_CONTEXT_TS),
+            ("web/entry.ts", AGENT_WORKFLOW_WEB_ENTRY_TS),
+            ("ops/policy_loader.py", AGENT_WORKFLOW_OPS_POLICY_PY),
+            ("config/agent-eval.yaml", AGENT_WORKFLOW_CONFIG_YAML),
+            ("docs/agent-workflow.md", AGENT_WORKFLOW_DOC_MD),
         ]),
         other => Err(format!("unknown generated repository fixture: {other}")),
     }
