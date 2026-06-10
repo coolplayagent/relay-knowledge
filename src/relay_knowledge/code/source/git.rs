@@ -198,10 +198,7 @@ pub(in crate::code) fn git_batch_blobs(
         .iter()
         .any(|path| path.contains('\n') || path.contains('\r'))
     {
-        return paths
-            .iter()
-            .map(|path| git_bytes(root, ["show", &format!("{commit}:{path}")]))
-            .collect();
+        return git_blobs_one_path_at_a_time(root, commit, paths);
     }
 
     let output = cat_file_output(root, ["cat-file", "--batch"], commit, paths)?;
@@ -213,6 +210,7 @@ pub(in crate::code) fn git_batch_blobs(
     }
 
     parse_cat_file_batch(paths, &output.stdout)
+        .or_else(|_| git_blobs_one_path_at_a_time(root, commit, paths))
 }
 
 pub(in crate::code) fn git_batch_blob_sizes(
@@ -224,16 +222,7 @@ pub(in crate::code) fn git_batch_blob_sizes(
         .iter()
         .any(|path| path.contains('\n') || path.contains('\r'))
     {
-        return paths
-            .iter()
-            .map(|path| {
-                let object = format!("{commit}:{path}");
-                match git_bytes(root, ["cat-file", "-s", &object]) {
-                    Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).trim().parse::<usize>().ok()),
-                    Err(_) => Ok(None),
-                }
-            })
-            .collect();
+        return git_blob_sizes_one_path_at_a_time(root, commit, paths);
     }
 
     let output = cat_file_output(root, ["cat-file", "--batch-check"], commit, paths)?;
@@ -245,6 +234,35 @@ pub(in crate::code) fn git_batch_blob_sizes(
     }
 
     parse_cat_file_batch_sizes(paths, &output.stdout)
+        .or_else(|_| git_blob_sizes_one_path_at_a_time(root, commit, paths))
+}
+
+fn git_blobs_one_path_at_a_time(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+) -> Result<Vec<Vec<u8>>, CodeIndexError> {
+    paths
+        .iter()
+        .map(|path| git_bytes(root, ["show", &format!("{commit}:{path}")]))
+        .collect()
+}
+
+fn git_blob_sizes_one_path_at_a_time(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+) -> Result<Vec<Option<usize>>, CodeIndexError> {
+    paths
+        .iter()
+        .map(|path| {
+            let object = format!("{commit}:{path}");
+            match git_bytes(root, ["cat-file", "-s", &object]) {
+                Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).trim().parse::<usize>().ok()),
+                Err(_) => Ok(None),
+            }
+        })
+        .collect()
 }
 
 fn cat_file_output<const N: usize>(
@@ -392,6 +410,11 @@ fn parse_cat_file_batch(paths: &[String], bytes: &[u8]) -> Result<Vec<Vec<u8>>, 
                 ))
             })?;
         let header = String::from_utf8_lossy(&bytes[offset..header_end]);
+        if header.ends_with(" missing") {
+            return Err(CodeIndexError::InvalidInput(format!(
+                "git cat-file batch object is missing for {path}"
+            )));
+        }
         let mut parts = header.split_whitespace();
         let _object = parts.next();
         let object_kind = parts.next();
@@ -491,6 +514,61 @@ mod tests {
         .expect("batch blob sizes should load");
 
         assert_eq!(sizes, vec![Some("pub fn alpha() {}\n".len()), None]);
+    }
+
+    #[test]
+    fn batch_blob_parser_reports_missing_object_before_size_parse() {
+        let paths = ["framework/CMakeLists.txt".to_owned()];
+        let error = parse_cat_file_batch(
+            &paths,
+            b"c965924bc65adc4edcc08965db0119f8ec218321:framework/CMakeLists.txt missing\n",
+        )
+        .expect_err("missing object header should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("git cat-file batch object is missing for framework/CMakeLists.txt"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn one_path_size_fallback_keeps_batch_parse_errors_from_blocking_reads() {
+        let repo = TestRepo::create("batch-size-fallback");
+        repo.write(
+            "framework/CMakeLists.txt",
+            "cmake_minimum_required(VERSION 3.16)\n",
+        );
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "base"]);
+        let commit = repo.git_text(["rev-parse", "HEAD"]);
+        let paths = ["framework/CMakeLists.txt".to_owned()];
+
+        let sizes = parse_cat_file_batch_sizes(&paths, b"not-a-valid-batch-check-row\n")
+            .or_else(|_| git_blob_sizes_one_path_at_a_time(&repo.root, &commit, &paths))
+            .expect("fallback size read should succeed");
+
+        assert_eq!(
+            sizes,
+            vec![Some("cmake_minimum_required(VERSION 3.16)\n".len())]
+        );
+    }
+
+    #[test]
+    fn one_path_blob_fallback_keeps_batch_parse_errors_from_blocking_reads() {
+        let repo = TestRepo::create("batch-blob-fallback");
+        repo.write("framework/CMakeLists.txt", "add_subdirectory(core)\n");
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "base"]);
+        let commit = repo.git_text(["rev-parse", "HEAD"]);
+        let paths = ["framework/CMakeLists.txt".to_owned()];
+
+        let blobs = parse_cat_file_batch(&paths, b"not-a-valid-batch-row\n")
+            .or_else(|_| git_blobs_one_path_at_a_time(&repo.root, &commit, &paths))
+            .expect("fallback blob read should succeed");
+
+        assert_eq!(blobs, vec![b"add_subdirectory(core)\n".to_vec()]);
     }
 
     #[test]
