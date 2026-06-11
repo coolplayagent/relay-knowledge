@@ -127,6 +127,7 @@ fn search_import_identifier_rows(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer(
         candidate_limit(request, CandidateLayer::Import) as i64,
     ));
@@ -181,6 +182,17 @@ fn search_import_path_rows(
     let direct_limit =
         candidate_limit(request, CandidateLayer::Import).min(IMPORT_PATH_DIRECT_LIMIT);
     let path_filter = path_filter_sql_for_column("i.path", status, request);
+    let mut query_path_clauses = Vec::new();
+    push_query_path_substring_filter_sql(
+        &mut query_path_clauses,
+        "i.path",
+        &request.query_path_substrings,
+    );
+    let query_path_filter = if query_path_clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", query_path_clauses.join(" AND "))
+    };
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
     let generated_filter = if request.exclude_generated {
@@ -202,6 +214,7 @@ fn search_import_path_rows(
               OR lower(coalesce(i.target_hint, '')) LIKE ? ESCAPE '\\'
           )
           {path_filter}
+          {query_path_filter}
           {language_filter}
           {generated_filter}
         ORDER BY f.is_generated ASC, i.path ASC, i.line_start ASC
@@ -215,8 +228,10 @@ fn search_import_path_rows(
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer((direct_limit + 1) as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
@@ -707,8 +722,21 @@ fn import_path_like(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{import_excerpt, import_identifier_patterns, import_resolution_confidence_bonus};
-    use crate::domain::CodeQueryKind;
+    use rusqlite::params;
+
+    use super::{
+        import_excerpt, import_identifier_patterns, import_resolution_confidence_bonus,
+        search_import_path_rows,
+    };
+    use crate::{
+        domain::{
+            CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector,
+            CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
+        },
+        storage::{SqliteGraphStore, code::CodeRepositoryStore},
+    };
+
+    const TEST_SCOPE: &str = "code:test:import-direct-path:commit:tree";
 
     #[test]
     fn grouped_go_import_excerpts_include_source_like_siblings() {
@@ -776,5 +804,94 @@ mod tests {
             import_resolution_confidence_bonus(2.0, "resolved", 8_000, CodeQueryKind::Hybrid),
             0.0
         );
+    }
+
+    #[tokio::test]
+    async fn import_path_direct_rows_apply_inline_path_before_gate() {
+        let store = SqliteGraphStore::open_in_memory().expect("store should open");
+        store
+            .upsert_code_repository(
+                CodeRepositoryRegistration::new(
+                    "repo",
+                    "fixture",
+                    "/tmp/repo",
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .expect("registration should validate"),
+            )
+            .await
+            .expect("repository should persist");
+        store
+            .run(|connection| {
+                connection.execute(
+                    "
+                    INSERT INTO code_repository_files (
+                        repository_id, source_scope, file_id, path, language_id, blob_hash,
+                        byte_len, line_count, parse_status, is_generated, degraded_reason
+                    )
+                    VALUES
+                        ('repo', ?1, 'api-file', 'src/api.rs', 'rust', 'api-hash', 1, 1, 'parsed', 0, NULL),
+                        ('repo', ?1, 'storage-file', 'src/storage/use.rs', 'rust', 'storage-hash', 1, 1, 'parsed', 0, NULL)
+                    ",
+                    params![TEST_SCOPE],
+                )?;
+                connection.execute(
+                    "
+                    INSERT INTO code_repository_imports (
+                        repository_id, source_scope, import_id, file_id, path, module,
+                        target_hint, resolution_state, confidence_basis_points,
+                        confidence_tier, line_start, line_end
+                    )
+                    VALUES
+                        ('repo', ?1, 'api-import', 'api-file', 'src/api.rs', 'shared/module', NULL, 'unresolved', 5000, 'inferred', 1, 1),
+                        ('repo', ?1, 'storage-import', 'storage-file', 'src/storage/use.rs', 'shared/module', NULL, 'unresolved', 5000, 'inferred', 1, 1)
+                    ",
+                    params![TEST_SCOPE],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("fixture rows should insert");
+        let request = CodeRetrievalRequest::new(
+            "path:storage shared/module",
+            CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+                .expect("selector should validate"),
+            CodeQueryKind::Imports,
+            5,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate");
+        let status = CodeRepositoryStatus {
+            repository_id: "repo".to_owned(),
+            alias: "repo".to_owned(),
+            root_path: "/tmp/repo".to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            last_indexed_scope_id: Some(TEST_SCOPE.to_owned()),
+            last_indexed_commit: Some("commit".to_owned()),
+            tree_hash: Some("tree".to_owned()),
+            state: "fresh".to_owned(),
+            indexed_file_count: 2,
+            symbol_count: 0,
+            reference_count: 0,
+            chunk_count: 0,
+            stale: false,
+            degraded_reason: None,
+        };
+
+        let paths = store
+            .run(move |connection| {
+                let rows = search_import_path_rows(connection, &status, &request)?;
+                Ok(rows
+                    .rows
+                    .into_iter()
+                    .map(|row| row.path)
+                    .collect::<Vec<_>>())
+            })
+            .await
+            .expect("direct import lookup should run");
+
+        assert_eq!(paths, ["src/storage/use.rs"]);
     }
 }

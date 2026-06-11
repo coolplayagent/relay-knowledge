@@ -136,6 +136,156 @@ async fn symbol_fts_queries_prefer_handwritten_rows_before_candidate_limit() {
     );
 }
 
+#[tokio::test]
+async fn symbol_fts_queries_apply_kind_before_candidate_limit() {
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..801 {
+        let file_id = format!("class-file-{index:03}");
+        let path = format!("src/noise/retry_{index:03}.rs");
+        files.push(file(&file_id, &path));
+        let mut class_symbol = symbol_with_signature(
+            &format!("aaa-retry-class-{index:03}"),
+            &file_id,
+            &path,
+            "class RetryAlphaBetaGamma",
+        );
+        class_symbol.kind = "class".to_owned();
+        class_symbol.name = format!("RetryAlphaBetaGamma{index:03}");
+        class_symbol.qualified_name = class_symbol.name.clone();
+        class_symbol.canonical_symbol_id = format!("repo://repo/src::noise::{}", class_symbol.name);
+        symbols.push(class_symbol);
+    }
+    files.push(file("function-file", "src/storage/retry.rs"));
+    symbols.push(symbol_with_signature(
+        "zzz-retry-function",
+        "function-file",
+        "src/storage/retry.rs",
+        "fn retry_alpha_beta_gamma()",
+    ));
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols,
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        routes: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "kind:function retry alpha beta gamma",
+        selector,
+        CodeQueryKind::Definition,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("symbol FTS query should keep matching function rows");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/storage/retry.rs");
+    assert_eq!(
+        hits[0].canonical_symbol_id.as_deref(),
+        Some("repo://repo/src::storage::retry.rs::Recover")
+    );
+}
+
+#[tokio::test]
+async fn symbol_identity_gate_filters_hits_before_skipping_fts() {
+    let files = vec![
+        file("api-file", "src/api.rs"),
+        file("storage-file", "src/storage/search.rs"),
+    ];
+    let mut direct_symbol = symbol_with_signature(
+        "api-search-code",
+        "api-file",
+        "src/api.rs",
+        "fn SearchCode()",
+    );
+    direct_symbol.name = "SearchCode".to_owned();
+    direct_symbol.qualified_name = "SearchCode".to_owned();
+    direct_symbol.canonical_symbol_id = "repo://repo/src::api.rs::SearchCode".to_owned();
+    let mut fts_symbol = symbol_with_signature(
+        "storage-recover",
+        "storage-file",
+        "src/storage/search.rs",
+        "fn recover_search_code(input: SearchCode)",
+    );
+    fts_symbol.name = "RecoverSearchCode".to_owned();
+    fts_symbol.qualified_name = "storage::RecoverSearchCode".to_owned();
+    fts_symbol.canonical_symbol_id =
+        "repo://repo/src::storage::search.rs::RecoverSearchCode".to_owned();
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: vec![direct_symbol, fts_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        routes: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "path:storage SearchCode",
+        selector,
+        CodeQueryKind::Definition,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("symbol query should continue to FTS after filtered identity hits");
+
+    assert!(hits.iter().any(|hit| hit.path == "src/storage/search.rs"));
+    assert!(!hits.iter().any(|hit| hit.path == "src/api.rs"));
+}
+
 async fn store_with_generated_symbol_fixture() -> SqliteGraphStore {
     let mut files = Vec::new();
     let mut symbols = Vec::new();

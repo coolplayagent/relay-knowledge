@@ -142,6 +142,33 @@ fn hybrid_chunk_gate_keeps_graph_expansion_for_sparse_or_fallback_hits() {
 }
 
 #[test]
+fn hybrid_chunk_gate_uses_inline_filtered_hits() {
+    let request = hybrid_gate_request(
+        "path:storage tsx provider panel effect run provider envelope payload",
+        12,
+    );
+    let hits = vec![
+        chunk_gate_hit_with_language(
+            "typescript",
+            "function ProviderPanel() {\nReact.useEffect(() => runProvider(envelope.payload));\n}",
+        ),
+        chunk_gate_hit_with_language("typescript", "export { ProviderPanel } from './component';"),
+        chunk_gate_hit_with_language(
+            "typescript",
+            "return sendEnvelope(runtime, payload) from provider flow",
+        ),
+    ];
+
+    let filtered_hits = filtered_hits_for_gate(&hits, &request);
+
+    assert!(filtered_hits.is_empty());
+    assert!(!hybrid_chunk_results_can_answer_without_graph_expansion(
+        &request,
+        &filtered_hits
+    ));
+}
+
+#[test]
 fn hybrid_chunk_gate_keeps_inline_lambda_intent_for_broad_expansion() {
     let request = hybrid_gate_request("kotlin lambda request handler timeout default trim", 12);
     let hits = vec![

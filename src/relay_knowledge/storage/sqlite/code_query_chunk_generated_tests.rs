@@ -80,6 +80,73 @@ async fn chunk_queries_prefer_handwritten_fts_rows_before_candidate_limit() {
     );
 }
 
+#[tokio::test]
+async fn chunk_queries_apply_inline_path_before_candidate_limit() {
+    let mut files = Vec::new();
+    let mut chunks = Vec::new();
+    for index in 0..901 {
+        let file_id = format!("noise-file-{index:03}");
+        let path = format!("src/noise/chunk_{index:03}.rs");
+        files.push(file(&file_id, &path));
+        chunks.push(chunk(
+            &format!("aaa-noise-chunk-{index:03}"),
+            &file_id,
+            &path,
+        ));
+    }
+    files.push(file("storage-file", "src/storage/query.rs"));
+    chunks.push(chunk(
+        "zzz-storage-chunk",
+        "storage-file",
+        "src/storage/query.rs",
+    ));
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        routes: Vec::new(),
+        chunks,
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "path:storage render invoice ledger",
+        selector,
+        CodeQueryKind::Definition,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("inline path filter should reach matching chunk rows");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/storage/query.rs");
+}
+
 fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
         repository_id: "repo".to_owned(),

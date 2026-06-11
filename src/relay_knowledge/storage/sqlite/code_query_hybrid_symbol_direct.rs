@@ -16,7 +16,7 @@ use crate::storage::sqlite::code::{
     },
     code_query::code_query_rows::SymbolRow,
     code_query::code_query_support::*,
-    code_query::{dedupe_sort_truncate, prepare_code_search_statement, required_scope},
+    code_query::{filter_dedupe_sort_truncate, prepare_code_search_statement, required_scope},
 };
 
 pub(super) fn search_hybrid_direct_symbol_hits(
@@ -35,7 +35,7 @@ pub(super) fn search_hybrid_direct_symbol_hits(
         return Ok(None);
     }
     let mut hits = symbol_rows_to_hits(status, request, rows, api_identities);
-    dedupe_sort_truncate(&mut hits, request.limit);
+    filter_dedupe_sort_truncate(&mut hits, request);
     if hybrid_direct_symbol_hits_can_answer_without_fts(request, &hits) {
         Ok(Some(hits))
     } else {
@@ -54,6 +54,7 @@ fn search_hybrid_direct_symbol_rows(
     }
     let path_filter = path_filter_sql_for_column("path", status, request);
     let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let kind_filter = kind_filter_sql_for_column("kind", request);
     let generated_filter = if request.exclude_generated {
         "AND coalesce((
                    SELECT file.is_generated
@@ -73,6 +74,8 @@ fn search_hybrid_direct_symbol_rows(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
+    push_kind_filter_values(&mut values, request);
     let limit = request.limit.saturating_mul(8).clamp(24, 96);
     values.push(rusqlite::types::Value::Integer(limit as i64));
     let sql = format!(
@@ -93,6 +96,7 @@ fn search_hybrid_direct_symbol_rows(
           {generated_filter}
           {path_filter}
           {language_filter}
+          {kind_filter}
         ORDER BY is_generated ASC,
                  path ASC,
                  line_start ASC,

@@ -5,6 +5,7 @@ use super::super::{
     code_query_support::{
         fts_match_query, fts_path_and_language_filter_sql, language_filter_sql_for_columns,
         path_filter_sql_for_column, push_language_filter_values, push_path_filter_values,
+        push_query_path_substring_filter_values,
     },
     prepare_code_search_statement, required_scope,
 };
@@ -87,6 +88,7 @@ pub(super) fn search_indirect_call_identity_rows(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer((direct_limit + 1) as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
@@ -146,8 +148,10 @@ fn search_indirect_call_bindings(
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer((INDIRECT_CALL_BINDING_LIMIT + 1) as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;

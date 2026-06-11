@@ -24,8 +24,9 @@ use super::{
     code_query_rows::SymbolRow,
     code_query_support::*,
     code_search_plannable_outage_reason, code_search_read_model_unavailable_reason,
-    dedupe_sort_truncate, hit_from_parts, mark_hits_degraded, prepare_code_search_statement,
-    required_scope, selected_row,
+    filter_dedupe_sort_truncate, has_query_field_hit_filters, hit_from_parts, mark_hits_degraded,
+    prepare_code_search_statement, query_field_filtered_hits_for_gate, required_scope,
+    selected_row,
 };
 
 #[path = "code_query_hybrid_symbol_direct.rs"]
@@ -90,22 +91,56 @@ pub(super) fn search_symbols(
             })
             .collect::<Vec<_>>();
         identity_hits = symbol_rows_to_hits(status, request, rows, &api_identities);
-        if identity_hits_can_answer_without_fts(request, identity, identity_hits.len(), saturated) {
-            dedupe_sort_truncate(&mut identity_hits, request.limit);
+        let filtered_identity_hits = has_query_field_hit_filters(request)
+            .then(|| query_field_filtered_hits_for_gate(&identity_hits, request));
+        let identity_gate_hit_count = filtered_identity_hits
+            .as_ref()
+            .map_or(identity_hits.len(), Vec::len);
+        if identity_hits_can_answer_without_fts(
+            request,
+            identity,
+            identity_gate_hit_count,
+            saturated,
+        ) {
+            if let Some(mut hits) = filtered_identity_hits {
+                hits.truncate(request.limit);
+                return Ok(hits);
+            }
+            filter_dedupe_sort_truncate(&mut identity_hits, request);
             return Ok(identity_hits);
         }
-        if identity_miss_can_answer_without_fts(request, saturated, identity) {
+        let field_filters_removed_identity_hits =
+            identity_gate_hit_count == 0 && !identity_hits.is_empty();
+        if identity_miss_can_answer_without_fts(request, saturated, identity)
+            && !field_filters_removed_identity_hits
+        {
             return Ok(Vec::new());
         }
     }
 
     let api_identity_rows =
         search_hybrid_api_identity_rows(connection, status, request, &api_identities)?;
-    if api_identity_rows_can_answer_without_fts(request, &api_identities, &api_identity_rows) {
-        let mut hits =
-            symbol_rows_to_hits(status, request, api_identity_rows.rows, &api_identities);
-        dedupe_sort_truncate(&mut hits, request.limit);
-        return Ok(hits);
+    let api_identity_can_answer =
+        api_identity_rows_can_answer_without_fts(request, &api_identities, &api_identity_rows);
+    let api_identity_hits =
+        symbol_rows_to_hits(status, request, api_identity_rows.rows, &api_identities);
+    if api_identity_can_answer {
+        let filtered_api_hits = has_query_field_hit_filters(request)
+            .then(|| query_field_filtered_hits_for_gate(&api_identity_hits, request));
+        if let Some(mut hits) = filtered_api_hits {
+            if hits.is_empty() {
+                identity_hits.extend(api_identity_hits);
+            } else {
+                hits.truncate(request.limit);
+                return Ok(hits);
+            }
+        } else {
+            let mut hits = api_identity_hits;
+            filter_dedupe_sort_truncate(&mut hits, request);
+            return Ok(hits);
+        }
+    } else {
+        identity_hits.extend(api_identity_hits);
     }
     if let Some(reason) = direct_symbol_recovery_reason
         && let Some(mut hits) = hybrid_symbol_direct::search_hybrid_direct_symbol_hits(
@@ -136,28 +171,16 @@ pub(super) fn search_symbols(
                 return Ok(hits);
             }
             let mut hits = identity_hits;
-            hits.extend(symbol_rows_to_hits(
-                status,
-                request,
-                api_identity_rows.rows,
-                &api_identities,
-            ));
             if hits.is_empty() {
                 return Err(error);
             }
             mark_hits_degraded(&mut hits, &reason);
-            dedupe_sort_truncate(&mut hits, request.limit);
+            filter_dedupe_sort_truncate(&mut hits, request);
             return Ok(hits);
         }
     };
     let mut hits = symbol_rows_to_hits(status, request, symbol_fts_rows, &api_identities);
     hits.extend(identity_hits);
-    hits.extend(symbol_rows_to_hits(
-        status,
-        request,
-        api_identity_rows.rows,
-        &api_identities,
-    ));
 
     Ok(hits)
 }
@@ -225,6 +248,7 @@ fn symbol_identity_name_exists(
 ) -> Result<bool, StorageError> {
     let path_filter = path_filter_sql_for_column("path", status, request);
     let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let kind_filter = kind_filter_sql_for_column("kind", request);
     let sql = format!(
         "
         SELECT 1
@@ -233,6 +257,7 @@ fn symbol_identity_name_exists(
           AND name = ?
           {path_filter}
           {language_filter}
+          {kind_filter}
         LIMIT 1
         "
     );
@@ -244,6 +269,8 @@ fn symbol_identity_name_exists(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
+    push_kind_filter_values(&mut values, request);
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
     let mut rows = statement.query(params_from_iter(values))?;
@@ -280,6 +307,7 @@ fn search_symbol_identity_rows_by_name(
 ) -> Result<SymbolIdentityRows, StorageError> {
     let path_filter = path_filter_sql_for_column("path", status, request);
     let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let kind_filter = kind_filter_sql_for_column("kind", request);
     let scoped_filter = if scoped_pattern.is_some() {
         "AND (
                    lower(qualified_name) LIKE ? ESCAPE '\\'
@@ -326,6 +354,7 @@ fn search_symbol_identity_rows_by_name(
           {generated_filter}
           {path_filter}
           {language_filter}
+          {kind_filter}
         ORDER BY is_generated ASC, path ASC, line_start ASC
         LIMIT ?
         "
@@ -345,6 +374,8 @@ fn search_symbol_identity_rows_by_name(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
+    push_kind_filter_values(&mut values, request);
     values.push(rusqlite::types::Value::Integer((direct_limit + 1) as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
@@ -448,6 +479,8 @@ fn search_symbol_fts_rows(
 ) -> Result<Vec<SymbolRow>, StorageError> {
     let fts_query = symbol_fts_match_query_for_request(request);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let kind_filter = kind_filter_sql_for_column("code_repository_symbols.kind", request);
+    let inner_kind_filter = kind_filter_sql_for_column("search_symbol.kind", request);
     let exclude_generated_flag = usize::from(request.exclude_generated);
     let sql = format!(
         "
@@ -478,27 +511,51 @@ fn search_symbol_fts_rows(
                 AND document_kind = 'symbol'
                 {fts_filter}
                 AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
+                AND (
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM code_repository_symbols search_symbol
+                        WHERE search_symbol.source_scope = code_repository_search.source_scope
+                          AND search_symbol.symbol_snapshot_id = code_repository_search.record_id
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM code_repository_symbols search_symbol
+                        WHERE search_symbol.source_scope = code_repository_search.source_scope
+                          AND search_symbol.symbol_snapshot_id = code_repository_search.record_id
+                          {inner_kind_filter}
+                    )
+                )
               ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
                   bm25(code_repository_search) ASC,
                   record_id ASC
               LIMIT ?
           )
+          {kind_filter}
         ORDER BY is_generated ASC, path ASC, line_start ASC
         LIMIT ?
         "
     );
     let mut statement = prepare_code_search_statement(connection, &sql)?;
-    let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
-            required_scope(status)?,
-            status,
-            request,
-            &fts_query,
-            candidate_limit(request, CandidateLayer::Symbol),
-            candidate_limit(request, CandidateLayer::Symbol),
-        )),
-        row_to_symbol,
-    )?;
+    let mut values = fts_values_for_limited_with_language(
+        required_scope(status)?,
+        status,
+        request,
+        &fts_query,
+        candidate_limit(request, CandidateLayer::Symbol),
+        candidate_limit(request, CandidateLayer::Symbol),
+    );
+    let limit = values
+        .pop()
+        .expect("symbol fts values should include the outer limit");
+    let fts_limit = values
+        .pop()
+        .expect("symbol fts values should include the fts limit");
+    push_kind_filter_values(&mut values, request);
+    values.push(fts_limit);
+    push_kind_filter_values(&mut values, request);
+    values.push(limit);
+    let rows = statement.query_map(params_from_iter(values), row_to_symbol)?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)

@@ -277,6 +277,7 @@ fn route_fts_values(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     if let Some(http_method) = &route_query.http_method {
         values.push(Value::Text(http_method.clone()));
     }

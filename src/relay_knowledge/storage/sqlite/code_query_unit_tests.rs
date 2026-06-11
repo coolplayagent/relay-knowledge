@@ -157,6 +157,26 @@ fn plannable_search_outage_returns_existing_partial_hits() {
 }
 
 #[test]
+fn plannable_search_outage_propagates_when_filters_remove_partial_hits() {
+    let request = code_search_request("path:storage rk_handler", CodeQueryKind::Hybrid);
+    let mut hits = vec![partial_code_hit(
+        "src/lib.rs",
+        CodeRetrievalLayer::Symbol,
+        4.0,
+    )];
+
+    let result = append_hits_or_return_partial_on_search_outage(
+        &mut hits,
+        &request,
+        Err(code_search_unavailable_error()),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(hits.len(), 1);
+    assert!(hits[0].degraded_reason.is_none());
+}
+
+#[test]
 fn non_plannable_search_outage_propagates_instead_of_returning_partial_hits() {
     let request = code_search_request("find rk_handler", CodeQueryKind::Hybrid);
     let mut hits = vec![partial_code_hit(

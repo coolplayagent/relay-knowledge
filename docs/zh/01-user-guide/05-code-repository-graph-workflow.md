@@ -115,6 +115,14 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
+Agent 也可以把结构化过滤标签直接写进 `--query`，例如
+`--query "kind:function,method lang:rust path:storage name:query search_code"`。
+已识别标签包括 `kind:`、`lang:` 或 `language:`、`path:` 和 `name:`；未知
+`prefix:value` 会保留为普通检索文本。查询内 language filter 与显式
+`--language` 取交集，并下推到 SQL 候选选择；查询内 symbol kind filter
+下推到 symbol SQL。查询内 `path:` 和 `name:` 在打分之后、截断之前做后过滤，
+用于收窄返回路径、符号名或 SBOM 包 identity，不改变已索引 scope。
+
 结果包含 repository id、alias、`scope_id`、requested ref、resolved commit、tree hash、path、language、byte range、line range、symbol/file id、retrieval layer、index version、freshness、score 和 excerpt。
 
 JSON 响应还包含顶层 `freshness` 对象，用于图谱新鲜度治理。它会报告 `state`（`fresh`、`pending`、`stale` 或 `degraded`）、graph version、实际服务的 source scope、请求 ref 与服务 ref 的 lag、checkpoint cursor 计数、待处理 code-index task 和队列状态、stale/degraded reason，以及是否必须直接读取源码。当 `--freshness allow-stale` 在较新的 ref 已排队或运行索引时返回上一版 completed index，`metadata.stale`、`scope.stale` 和 `freshness.direct_source_read_required` 都会为 true；agent 在编辑或引用变化文件前，必须按 `freshness.direct_source_read_paths` 直接读取源码。`--freshness wait-until-fresh` 会抑制 stale 代码图谱答案，在请求 scope 完成索引前返回错误。

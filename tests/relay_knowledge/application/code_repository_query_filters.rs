@@ -656,6 +656,99 @@ pub fn test_retry_policy() -> u32 {
     assert!(path_error.message.contains("requested filters"));
 }
 
+#[tokio::test]
+async fn query_field_qualifiers_narrow_code_results() {
+    let root = create_non_git_source_dir("code-query-field-qualifiers");
+    write_source_file(
+        &root,
+        "src/storage/query.rs",
+        "pub fn search_code() -> u32 { 1 }\n",
+    );
+    write_source_file(
+        &root,
+        "src/api/query.rs",
+        "pub fn search_code_api() -> u32 { 2 }\n",
+    );
+    write_source_file(
+        &root,
+        "src/storage/query.py",
+        "def search_code():\n    return 3\n",
+    );
+    let service = service_with_memory_store().await;
+    register_non_git_fixture(&service, &root, "field-tags", "register-field-tags").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("field-tags", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-field-tags"),
+        )
+        .await
+        .expect("repository should index");
+
+    let narrowed = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "kind:function lang:rust path:storage name:search search_code",
+                selector("field-tags", "HEAD"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-field-tags-narrowed"),
+        )
+        .await
+        .expect("field-qualified query should run");
+    let language_conflict = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "lang:rust search_code",
+                language_selector("field-tags", "HEAD", "python"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-field-tags-language-conflict"),
+        )
+        .await
+        .expect("conflicting language filters should return no matches");
+    let path_name = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "path:api name:api search_code",
+                selector("field-tags", "HEAD"),
+                CodeQueryKind::Hybrid,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-field-tags-path-name"),
+        )
+        .await
+        .expect("path and name qualifiers should run");
+
+    assert!(
+        narrowed
+            .results
+            .iter()
+            .all(|hit| hit.path == "src/storage/query.rs" && hit.language_id == "rust")
+    );
+    assert!(!narrowed.results.is_empty());
+    assert!(language_conflict.results.is_empty());
+    assert!(!path_name.results.is_empty());
+    assert!(
+        path_name
+            .results
+            .iter()
+            .all(|hit| hit.path == "src/api/query.rs")
+    );
+}
+
 fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
     CodeRepositorySelector::new(alias, ref_selector, Vec::new(), Vec::new())
         .expect("selector should validate")

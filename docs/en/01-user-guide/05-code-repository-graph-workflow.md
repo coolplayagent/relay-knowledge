@@ -115,6 +115,16 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
+Agents can also put structured filters inside `--query`, for example
+`--query "kind:function,method lang:rust path:storage name:query search_code"`.
+Recognized labels are `kind:`, `lang:` or `language:`, `path:`, and `name:`.
+Unknown `prefix:value` tokens stay in the search text. Inline language filters
+intersect explicit `--language` values and are pushed into SQL candidate
+selection; inline symbol kind filters are pushed into symbol SQL. Inline `path:`
+and `name:` filters are applied after scoring and before result truncation, so
+they narrow returned paths, symbol names, or SBOM package identities without
+changing the indexed scope.
+
 Results include repository id, alias, `scope_id`, requested ref, resolved commit, tree hash, path, language, byte range, line range, symbol/file id, retrieval layer, index version, freshness, score, and excerpt.
 
 The JSON response also includes a top-level `freshness` object for graph governance. It reports `state` (`fresh`, `pending`, `stale`, or `degraded`), graph version, served source scope, requested-versus-served ref lag, checkpoint cursor counts, pending code-index task and queue state, stale/degraded reasons, and whether direct source reads are required. If `--freshness allow-stale` serves the last completed index while a newer ref is queued or running, `metadata.stale`, `scope.stale`, and `freshness.direct_source_read_required` are all true; agents must read the returned `freshness.direct_source_read_paths` from source before editing or citing changed files. `--freshness wait-until-fresh` suppresses stale code graph answers and returns an error until the requested scope is indexed.

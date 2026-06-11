@@ -11,6 +11,88 @@ use super::{
 
 const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1-generated-files-v1-web-routes-v1";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FieldQualifiers {
+    search_text: String,
+    kind_filters: Vec<String>,
+    language_filters: Vec<String>,
+    path_substrings: Vec<String>,
+    name_substrings: Vec<String>,
+}
+
+fn parse_field_qualifiers(query: &str) -> FieldQualifiers {
+    let mut plain_terms = Vec::new();
+    let mut qualifiers = FieldQualifiers {
+        search_text: String::new(),
+        kind_filters: Vec::new(),
+        language_filters: Vec::new(),
+        path_substrings: Vec::new(),
+        name_substrings: Vec::new(),
+    };
+
+    for token in query.split_whitespace() {
+        if !push_field_qualifier(token, &mut qualifiers) {
+            plain_terms.push(token);
+        }
+    }
+
+    qualifiers.search_text = plain_terms.join(" ");
+    if qualifiers.search_text.is_empty() && !query.trim().is_empty() {
+        qualifiers.search_text = query.trim().to_owned();
+    }
+
+    qualifiers
+}
+
+fn push_field_qualifier(token: &str, qualifiers: &mut FieldQualifiers) -> bool {
+    let Some((prefix, value)) = token.split_once(':') else {
+        return false;
+    };
+    if value.trim().is_empty() {
+        return false;
+    }
+    if value.starts_with(':') {
+        return false;
+    }
+
+    match prefix.to_ascii_lowercase().as_str() {
+        "kind" => {
+            extend_qualifier_values(&mut qualifiers.kind_filters, value, true);
+            true
+        }
+        "lang" | "language" => {
+            extend_qualifier_values(&mut qualifiers.language_filters, value, true);
+            true
+        }
+        "path" => {
+            extend_qualifier_values(&mut qualifiers.path_substrings, value, false);
+            true
+        }
+        "name" => {
+            extend_qualifier_values(&mut qualifiers.name_substrings, value, false);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn extend_qualifier_values(values: &mut Vec<String>, raw_value: &str, ascii_lowercase: bool) {
+    for value in raw_value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let value = if ascii_lowercase {
+            value.to_ascii_lowercase()
+        } else {
+            value.to_owned()
+        };
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+}
+
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(
     repository_id: &str,
@@ -189,6 +271,14 @@ pub struct CodeRetrievalRequest {
     pub freshness_policy: FreshnessPolicy,
     #[serde(default)]
     pub exclude_generated: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_kind_filters: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_language_filters: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_path_substrings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_name_substrings: Vec<String>,
 }
 
 impl CodeRetrievalRequest {
@@ -206,13 +296,19 @@ impl CodeRetrievalRequest {
             _ => return Err(DomainError::invalid("limit", "must be 50 or less")),
         };
 
+        let qualifiers = parse_field_qualifiers(&required_text("query", query)?);
+
         Ok(Self {
-            query: required_text("query", query)?,
+            query: qualifiers.search_text,
             repository,
             code_query_kind,
             limit,
             freshness_policy,
             exclude_generated: false,
+            query_kind_filters: qualifiers.kind_filters,
+            query_language_filters: qualifiers.language_filters,
+            query_path_substrings: qualifiers.path_substrings,
+            query_name_substrings: qualifiers.name_substrings,
         })
     }
 }
@@ -711,11 +807,63 @@ pub struct CodeFeatureFlagGraph {
 
 #[cfg(test)]
 mod fact_version_tests {
-    use super::CODE_SNAPSHOT_FACT_VERSION;
+    use super::{
+        CODE_SNAPSHOT_FACT_VERSION, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
+        FreshnessPolicy, parse_field_qualifiers,
+    };
 
     #[test]
     fn code_snapshot_fact_version_includes_generated_and_web_route_facts() {
         assert!(CODE_SNAPSHOT_FACT_VERSION.contains("generated-files-v1"));
         assert!(CODE_SNAPSHOT_FACT_VERSION.contains("web-routes-v1"));
+    }
+
+    #[test]
+    fn field_qualifiers_strip_known_tags_and_keep_search_text() {
+        let parsed = parse_field_qualifiers(
+            "kind:function,method lang:rust path:storage name:query search_code",
+        );
+
+        assert_eq!(parsed.search_text, "search_code");
+        assert_eq!(parsed.kind_filters, ["function", "method"]);
+        assert_eq!(parsed.language_filters, ["rust"]);
+        assert_eq!(parsed.path_substrings, ["storage"]);
+        assert_eq!(parsed.name_substrings, ["query"]);
+    }
+
+    #[test]
+    fn field_qualifiers_keep_unknown_tags_as_plain_text() {
+        let parsed = parse_field_qualifiers("owner:runtime lang:rust refresh");
+
+        assert_eq!(parsed.search_text, "owner:runtime refresh");
+        assert_eq!(parsed.language_filters, ["rust"]);
+    }
+
+    #[test]
+    fn field_qualifiers_keep_double_colon_paths_as_plain_text() {
+        let parsed = parse_field_qualifiers("path:storage path::normalize_filter name::Worker");
+
+        assert_eq!(parsed.search_text, "path::normalize_filter name::Worker");
+        assert_eq!(parsed.path_substrings, ["storage"]);
+        assert!(parsed.name_substrings.is_empty());
+    }
+
+    #[test]
+    fn retrieval_request_carries_inline_filters_from_query_text() {
+        let request = CodeRetrievalRequest::new(
+            "language:Rust kind:Function path:storage name:query search_code",
+            CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new())
+                .expect("selector validates"),
+            CodeQueryKind::Hybrid,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request validates");
+
+        assert_eq!(request.query, "search_code");
+        assert_eq!(request.query_language_filters, ["rust"]);
+        assert_eq!(request.query_kind_filters, ["function"]);
+        assert_eq!(request.query_path_substrings, ["storage"]);
+        assert_eq!(request.query_name_substrings, ["query"]);
     }
 }

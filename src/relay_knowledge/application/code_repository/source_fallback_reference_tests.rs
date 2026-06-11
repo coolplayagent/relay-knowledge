@@ -49,6 +49,21 @@ fn reference_fallback_uses_scope_candidates_for_multi_term_query_without_hits() 
 }
 
 #[test]
+fn reference_fallback_preserves_cpp_header_language_intersection() {
+    let request = request(
+        "lang:cpp RK_TRACE_NOTE",
+        CodeQueryKind::References,
+        vec!["include/driver_ops.h".to_owned()],
+    );
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[])
+        .expect("cpp query over c-scoped headers should plan source fallback");
+
+    assert_eq!(plan.language_filters, ["__relay_c_cpp_header_only__"]);
+    assert_eq!(plan.paths, ["include/driver_ops.h"]);
+}
+
+#[test]
 fn reference_grep_fallback_ranks_usage_before_array_declaration() {
     let request = request("rk_pipeline", CodeQueryKind::References, Vec::new());
     let mut results = vec![hit("src/pipeline.c", "int rk_dispatch(void);")];

@@ -16,8 +16,9 @@ use super::{
     },
     code_query_rows::ReferenceRow,
     code_query_support::*,
-    code_search_plannable_outage_reason, dedupe_sort_truncate, hit_from_parts, mark_hits_degraded,
-    prepare_code_search_statement, required_scope, selected_row,
+    code_search_plannable_outage_reason, filter_dedupe_sort_truncate, has_query_field_hit_filters,
+    hit_from_parts, mark_hits_degraded, prepare_code_search_statement,
+    query_field_filtered_hits_for_gate, required_scope, selected_row,
 };
 
 const REFERENCE_ASSIGNMENT_USAGE_BONUS: f64 = 1.4;
@@ -63,13 +64,22 @@ pub(super) fn search_references(
             })
             .collect::<Vec<_>>();
         identity_hits = reference_rows_to_hits(status, request, rows);
+        let filtered_identity_hits = has_query_field_hit_filters(request)
+            .then(|| query_field_filtered_hits_for_gate(&identity_hits, request));
+        let identity_gate_hit_count = filtered_identity_hits
+            .as_ref()
+            .map_or(identity_hits.len(), Vec::len);
         if reference_identity_hits_can_answer_without_fts(
             request,
             identity,
-            identity_hits.len(),
+            identity_gate_hit_count,
             saturated,
         ) {
-            dedupe_sort_truncate(&mut identity_hits, request.limit);
+            if let Some(mut hits) = filtered_identity_hits {
+                hits.truncate(request.limit);
+                return Ok(hits);
+            }
+            filter_dedupe_sort_truncate(&mut identity_hits, request);
             return Ok(identity_hits);
         }
     }
@@ -84,7 +94,7 @@ pub(super) fn search_references(
                 return Err(error);
             }
             mark_hits_degraded(&mut identity_hits, &reason);
-            dedupe_sort_truncate(&mut identity_hits, request.limit);
+            filter_dedupe_sort_truncate(&mut identity_hits, request);
             return Ok(identity_hits);
         }
     };
@@ -125,6 +135,7 @@ fn search_reference_identity_rows(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer((direct_limit + 1) as i64));
 
     let mut statement = prepare_code_search_statement(connection, &sql)?;
