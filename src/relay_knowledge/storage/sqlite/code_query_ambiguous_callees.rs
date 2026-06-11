@@ -14,7 +14,7 @@ use super::{
         path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
     },
     code_query_rows::CallRow,
-    dedupe_sort_truncate, escape_sql_like, hit_from_parts, prepare_code_search_statement,
+    escape_sql_like, filter_dedupe_sort_truncate, hit_from_parts, prepare_code_search_statement,
     required_scope, selected_row,
 };
 
@@ -133,7 +133,7 @@ pub(super) fn search_ambiguous_callee_implementation_hits(
             })
         })
         .collect::<Vec<_>>();
-    dedupe_sort_truncate(&mut hits, request.limit);
+    filter_dedupe_sort_truncate(&mut hits, request);
 
     Ok(hits)
 }

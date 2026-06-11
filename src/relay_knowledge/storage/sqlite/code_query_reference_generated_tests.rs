@@ -224,6 +224,63 @@ async fn references_prefer_handwritten_direct_rows_before_candidate_limit() {
     );
 }
 
+#[tokio::test]
+async fn references_identity_gate_filters_hits_before_skipping_fts() {
+    let files = vec![
+        file("api-file", "src/api.rs", "rust"),
+        file("storage-file", "src/storage/use.rs", "rust"),
+    ];
+    let direct_reference = reference("api-reference", "api-file", "src/api.rs");
+    let mut fts_reference = reference("storage-reference", "storage-file", "src/storage/use.rs");
+    fts_reference.name = "StorageUse".to_owned();
+    fts_reference.target_hint = Some("SharedThing".to_owned());
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: vec![direct_reference, fts_reference],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        routes: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "path:storage SharedThing",
+        selector,
+        CodeQueryKind::References,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("reference query should continue to FTS after filtered identity hits");
+
+    assert!(hits.iter().any(|hit| hit.path == "src/storage/use.rs"));
+    assert!(!hits.iter().any(|hit| hit.path == "src/api.rs"));
+}
+
 async fn delete_search_row(store: &SqliteGraphStore, document_kind: &str, path: &str) {
     store
         .run({

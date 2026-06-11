@@ -10,10 +10,10 @@ use crate::{
 
 use super::{
     CandidateLayer, ScoreQuery, candidate_limit, fts_match_query, push_language_filter_values,
-    push_path_filter_values, selected_row,
+    push_path_filter_values, push_query_path_substring_filter_values, selected_row,
 };
 use super::{
-    HitParts, code_query_rows::DependencyRow, dedupe_sort_truncate,
+    HitParts, code_query_rows::DependencyRow, filter_dedupe_sort_truncate,
     fts_path_and_language_filter_sql, hit_from_parts, prepare_code_search_statement,
     required_scope,
 };
@@ -144,7 +144,7 @@ pub(super) fn search_sbom(
             })
         })
         .collect::<Vec<_>>();
-    dedupe_sort_truncate(&mut hits, request.limit.max(1));
+    filter_dedupe_sort_truncate(&mut hits, request);
 
     Ok(hits)
 }
@@ -167,8 +167,10 @@ fn sbom_query_values(
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer(candidate_limit as i64));
     values.push(Value::Text(source_scope.to_owned()));
     values.push(Value::Text(request.query.trim().to_owned()));

@@ -889,8 +889,10 @@ pub(super) fn fts_values_for_limited_with_language(
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer(fts_limit as i64));
     values.push(Value::Integer(limit as i64));
 

@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use crate::{
     domain::{
         CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
-        RepositoryCodeRange, StalenessHint,
+        CodeRetrievalRequest, RepositoryCodeRange, StalenessHint,
     },
     storage::StorageError,
 };
@@ -81,7 +81,7 @@ pub(super) fn selected_row(
     language_id: &str,
     is_generated: bool,
     status: &CodeRepositoryStatus,
-    request: &crate::domain::CodeRetrievalRequest,
+    request: &CodeRetrievalRequest,
 ) -> bool {
     if request.exclude_generated && is_generated {
         return false;
@@ -90,6 +90,7 @@ pub(super) fn selected_row(
         && path_filter_allows(path, &request.repository.path_filters)
         && language_filter_allows_path(path, language_id, &status.language_filters)
         && language_filter_allows_path(path, language_id, &request.repository.language_filters)
+        && language_filter_allows_path(path, language_id, &request.query_language_filters)
 }
 
 pub(super) fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {
@@ -209,6 +210,87 @@ pub(super) fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usiz
             .then_with(|| left.line_range.start.cmp(&right.line_range.start))
     });
     hits.truncate(limit);
+}
+
+pub(super) fn filter_dedupe_sort_truncate(
+    hits: &mut Vec<CodeRetrievalHit>,
+    request: &CodeRetrievalRequest,
+) {
+    hits.retain(|hit| query_field_filters_allow_hit(hit, request));
+    dedupe_sort_truncate(hits, request.limit);
+}
+
+pub(super) fn filtered_hits_for_gate(
+    hits: &[CodeRetrievalHit],
+    request: &CodeRetrievalRequest,
+) -> Vec<CodeRetrievalHit> {
+    let mut filtered = hits.to_vec();
+    filter_dedupe_sort_truncate(&mut filtered, request);
+    filtered
+}
+
+pub(super) fn query_field_filtered_hits_for_gate(
+    hits: &[CodeRetrievalHit],
+    request: &CodeRetrievalRequest,
+) -> Vec<CodeRetrievalHit> {
+    let mut filtered = hits.to_vec();
+    filtered.retain(|hit| query_field_filters_allow_hit(hit, request));
+    dedupe_sort_truncate(&mut filtered, usize::MAX);
+    filtered
+}
+
+pub(super) fn has_query_field_hit_filters(request: &CodeRetrievalRequest) -> bool {
+    !request.query_kind_filters.is_empty()
+        || !request.query_path_substrings.is_empty()
+        || !request.query_name_substrings.is_empty()
+}
+
+fn query_field_filters_allow_hit(hit: &CodeRetrievalHit, request: &CodeRetrievalRequest) -> bool {
+    kind_filters_allow_hit(hit, &request.query_kind_filters)
+        && path_substrings_allow_hit(&hit.path, &request.query_path_substrings)
+        && name_substrings_allow_hit(hit, &request.query_name_substrings)
+}
+
+fn kind_filters_allow_hit(hit: &CodeRetrievalHit, filters: &[String]) -> bool {
+    filters.is_empty()
+        || (hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
+            && hit.symbol_snapshot_id.is_some()
+            && hit.canonical_symbol_id.is_some()
+            && hit.edge_kind.is_none())
+}
+
+fn path_substrings_allow_hit(path: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|filter| contains_ignore_ascii_case(path, filter))
+}
+
+fn name_substrings_allow_hit(hit: &CodeRetrievalHit, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters.iter().any(|filter| {
+            hit.canonical_symbol_id
+                .as_deref()
+                .is_some_and(|symbol_id| contains_ignore_ascii_case(symbol_id, filter))
+                || sbom_dependency_name(hit)
+                    .is_some_and(|package_name| contains_ignore_ascii_case(package_name, filter))
+        })
+}
+
+fn sbom_dependency_name(hit: &CodeRetrievalHit) -> Option<&str> {
+    if hit.retrieval_layers.contains(&CodeRetrievalLayer::Sbom)
+        && hit.edge_kind.as_deref() == Some("dependency")
+    {
+        hit.edge_target_hint.as_deref()
+    } else {
+        None
+    }
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
 }
 
 pub(super) fn mark_hits_degraded(hits: &mut [CodeRetrievalHit], reason: &str) {

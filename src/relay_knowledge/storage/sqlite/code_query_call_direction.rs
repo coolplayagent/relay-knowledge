@@ -2,6 +2,7 @@ use rusqlite::types::Value;
 
 use super::code_query_support::{
     candidate_patterns, push_language_filter_values, push_path_filter_values,
+    push_query_path_substring_filter_values,
 };
 use crate::domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest};
 
@@ -20,8 +21,10 @@ pub(super) fn fts_values_for_limited_with_language_and_call_direction(
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     push_call_direction_filter_values(&mut values, request);
     values.push(Value::Integer(fts_limit as i64));
     values.push(Value::Integer(limit as i64));

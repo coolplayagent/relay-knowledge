@@ -41,3 +41,6 @@ mod reference_generated_tests;
 
 #[path = "code_query_excerpt_tests.rs"]
 mod excerpt_tests;
+
+#[path = "code_query_field_filter_tests.rs"]
+mod field_filter_tests;

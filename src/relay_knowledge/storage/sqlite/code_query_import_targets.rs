@@ -280,6 +280,7 @@ fn search_imports_by_target_hint_chunk(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     values.push(Value::Integer(
         candidate_limit(request, CandidateLayer::Import) as i64,
     ));

@@ -20,7 +20,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_scope(
         return Ok(Vec::new());
     }
     let path_filter = path_filter_sql_for_column("path", path_filters);
-    let language_filter = language_filter_sql_for_column("language_id", language_filters);
+    let language_filter = language_filter_sql_for_columns("language_id", "path", language_filters);
     let generated_filter = generated_filter_sql(exclude_generated, "is_generated");
     let sql = format!(
         "
@@ -110,7 +110,7 @@ fn file_candidate_paths_from_search(
         return Ok(Vec::new());
     };
     let path_filter = path_filter_sql_for_column("path", path_filters);
-    let language_filter = language_filter_sql_for_column("language_id", language_filters);
+    let language_filter = language_filter_sql_for_columns("language_id", "path", language_filters);
     let generated_filter = search_generated_filter_sql(exclude_generated);
     let sql = format!(
         "
@@ -158,7 +158,8 @@ fn file_candidate_paths_from_indexed_content(
     }
 
     let path_filter = path_filter_sql_for_column("f.path", path_filters);
-    let language_filter = language_filter_sql_for_column("f.language_id", language_filters);
+    let language_filter =
+        language_filter_sql_for_columns("f.language_id", "f.path", language_filters);
     let generated_filter = generated_filter_sql(exclude_generated, "f.is_generated");
     let term_filter = terms
         .iter()
@@ -331,10 +332,22 @@ fn path_filter_sql_for_column(column: &str, filters: &[String]) -> String {
     }
 }
 
-fn language_filter_sql_for_column(column: &str, filters: &[String]) -> String {
+fn language_filter_sql_for_columns(
+    language_column: &str,
+    path_column: &str,
+    filters: &[String],
+) -> String {
     let clauses = filters
         .iter()
-        .map(|_| format!("{column} = ?"))
+        .map(|filter| {
+            if filter == "__relay_c_cpp_header_only__" {
+                format!(
+                    "({language_column} IN ('c', 'cpp') AND (lower({path_column}) LIKE '%.h' OR lower({path_column}) LIKE '%.hh' OR lower({path_column}) LIKE '%.hpp' OR lower({path_column}) LIKE '%.hxx'))"
+                )
+            } else {
+                format!("{language_column} = ?")
+            }
+        })
         .collect::<Vec<_>>();
     if clauses.is_empty() {
         String::new()
@@ -354,7 +367,13 @@ fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
 }
 
 fn push_language_filter_values(values: &mut Vec<Value>, filters: &[String]) {
-    values.extend(filters.iter().cloned().map(Value::Text));
+    values.extend(
+        filters
+            .iter()
+            .filter(|filter| filter.as_str() != "__relay_c_cpp_header_only__")
+            .cloned()
+            .map(Value::Text),
+    );
 }
 
 fn normalized_sql_path_filter(filter: &str) -> Option<String> {

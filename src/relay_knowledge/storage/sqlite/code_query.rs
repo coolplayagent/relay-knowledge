@@ -84,8 +84,9 @@ const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_query_hits::selected_row;
 pub(super) use super::code_query_hits::{
-    HitParts, chunk_layers, dedupe_sort_truncate, hit_from_parts, mark_hits_degraded,
-    required_repository, required_scope,
+    HitParts, chunk_layers, dedupe_sort_truncate, filter_dedupe_sort_truncate,
+    filtered_hits_for_gate, has_query_field_hit_filters, hit_from_parts, mark_hits_degraded,
+    query_field_filtered_hits_for_gate, required_repository, required_scope,
 };
 use super::code_query_prepare::{
     code_search_error_can_use_empty_results, code_search_plannable_outage_reason,
@@ -193,21 +194,17 @@ fn search_code_with_status(
             Ok(mut chunk_hits) => {
                 searched_chunks = true;
                 retain_query_language_scoped_workflow_hits(request, &mut chunk_hits);
-                if hybrid_chunk_results_can_answer_without_graph_expansion(request, &chunk_hits)
-                    || hybrid_direct_results_can_answer_without_graph_expansion(
-                        request,
-                        &chunk_hits,
-                    )
-                {
+                let mut filtered_chunk_hits = filtered_hits_for_gate(&chunk_hits, request);
+                if hybrid_hits_can_answer_without_graph_expansion(request, &filtered_chunk_hits) {
                     if let Some(partial_hits) = append_hits_or_return_partial_on_search_outage(
-                        &mut chunk_hits,
+                        &mut filtered_chunk_hits,
                         request,
                         search_routes(connection, status, request),
                     )? {
                         return Ok(partial_hits);
                     }
-                    hits.extend(chunk_hits);
-                    dedupe_sort_truncate(&mut hits, request.limit);
+                    hits.extend(filtered_chunk_hits);
+                    filter_dedupe_sort_truncate(&mut hits, request);
                     return Ok(hits);
                 }
                 hits.extend(chunk_hits);
@@ -240,7 +237,7 @@ fn search_code_with_status(
             }
         }
         if hybrid_symbol_query_can_answer_without_non_symbol_layers(request, &hits) {
-            dedupe_sort_truncate(&mut hits, request.limit);
+            filter_dedupe_sort_truncate(&mut hits, request);
             return Ok(hits);
         }
     }
@@ -253,9 +250,9 @@ fn search_code_with_status(
         }
     }
     if request.code_query_kind == CodeQueryKind::Hybrid {
-        if hybrid_exact_path_query_can_defer_to_source_fallback(request, &hits) {
-            dedupe_sort_truncate(&mut hits, request.limit);
-            return Ok(hits);
+        let filtered_hits = filtered_hits_for_gate(&hits, request);
+        if hybrid_exact_path_query_can_defer_to_source_fallback(request, &filtered_hits) {
+            return Ok(filtered_hits);
         }
         if !searched_chunks {
             let chunk_hits = search_chunks(connection, status, request);
@@ -265,14 +262,13 @@ fn search_code_with_status(
                 return Ok(partial_hits);
             }
         }
-        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits)
-            || hybrid_direct_results_can_answer_without_graph_expansion(request, &hits)
-        {
-            dedupe_sort_truncate(&mut hits, request.limit);
+        let filtered_hits = filtered_hits_for_gate(&hits, request);
+        if hybrid_hits_can_answer_without_graph_expansion(request, &filtered_hits) {
+            filter_dedupe_sort_truncate(&mut hits, request);
             return Ok(hits);
         }
         if hybrid_query_can_skip_graph_expansion(request, &hits) {
-            dedupe_sort_truncate(&mut hits, request.limit);
+            filter_dedupe_sort_truncate(&mut hits, request);
             return Ok(hits);
         }
         let reference_hits = search_references(connection, status, request);
@@ -299,7 +295,7 @@ fn search_code_with_status(
             }
             mark_hits_degraded(&mut hits, &reason);
         }
-        dedupe_sort_truncate(&mut hits, request.limit);
+        filter_dedupe_sort_truncate(&mut hits, request);
         return Ok(hits);
     }
     if request.code_query_kind == CodeQueryKind::References {
@@ -317,7 +313,7 @@ fn search_code_with_status(
     if request.code_query_kind == CodeQueryKind::Imports {
         hits.extend(search_imports(connection, status, request)?);
     }
-    dedupe_sort_truncate(&mut hits, request.limit);
+    filter_dedupe_sort_truncate(&mut hits, request);
 
     Ok(hits)
 }
@@ -332,17 +328,21 @@ fn append_hits_or_return_partial_on_search_outage(
             hits.extend(layer_hits);
             Ok(None)
         }
-        Err(error) if !hits.is_empty() => {
+        Err(error) => {
             let Some(reason) = code_search_plannable_outage_reason(request, &error)
                 .or_else(|| hybrid_chunk_first_search_outage_reason(request, &error))
             else {
                 return Err(error);
             };
+            let filtered_hits = filtered_hits_for_gate(hits, request);
+            if filtered_hits.is_empty() {
+                return Err(error);
+            }
+            *hits = filtered_hits;
             mark_hits_degraded(hits, &reason);
-            dedupe_sort_truncate(hits, request.limit);
+            filter_dedupe_sort_truncate(hits, request);
             Ok(Some(std::mem::take(hits)))
         }
-        Err(error) => Err(error),
     }
 }
 
@@ -496,6 +496,14 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
     )
 }
 
+fn hybrid_hits_can_answer_without_graph_expansion(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+) -> bool {
+    hybrid_chunk_results_can_answer_without_graph_expansion(request, hits)
+        || hybrid_direct_results_can_answer_without_graph_expansion(request, hits)
+}
+
 fn hybrid_chunk_results_have_collective_dense_coverage(
     terms: &[String],
     hits: &[CodeRetrievalHit],
@@ -608,9 +616,8 @@ fn search_chunks(
                 strict_hybrid_chunk_candidate_limit(request),
             )?;
             retain_query_language_scoped_workflow_hits(request, &mut hits);
-            if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits)
-                || hybrid_direct_results_can_answer_without_graph_expansion(request, &hits)
-            {
+            let filtered_hits = filtered_hits_for_gate(&hits, request);
+            if hybrid_hits_can_answer_without_graph_expansion(request, &filtered_hits) {
                 return Ok(hits);
             }
             narrow_hits =
@@ -630,9 +637,8 @@ fn search_chunks(
         )?;
         retain_query_language_scoped_workflow_hits(request, &mut hits);
         narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
-        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &narrow_hits)
-            || hybrid_direct_results_can_answer_without_graph_expansion(request, &narrow_hits)
-        {
+        let filtered_narrow_hits = filtered_hits_for_gate(&narrow_hits, request);
+        if hybrid_hits_can_answer_without_graph_expansion(request, &filtered_narrow_hits) {
             return Ok(narrow_hits);
         }
     }
@@ -678,12 +684,11 @@ fn search_chunks(
         retain_query_language_scoped_workflow_hits(request, &mut hits);
         narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
     }
-    if chunk_first
-        && !narrow_hits.is_empty()
-        && (hybrid_chunk_results_can_answer_without_graph_expansion(request, &narrow_hits)
-            || hybrid_direct_results_can_answer_without_graph_expansion(request, &narrow_hits))
-    {
-        return Ok(narrow_hits);
+    if chunk_first && !narrow_hits.is_empty() {
+        let filtered_narrow_hits = filtered_hits_for_gate(&narrow_hits, request);
+        if hybrid_hits_can_answer_without_graph_expansion(request, &filtered_narrow_hits) {
+            return Ok(narrow_hits);
+        }
     }
 
     let fts_query = if request.code_query_kind == CodeQueryKind::Hybrid {
@@ -977,8 +982,10 @@ fn chunk_fts_values_for_limited_with_language(
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
     push_language_filter_values(&mut values, query_language_filters);
     values.push(Value::Integer(fts_limit as i64));
     values.push(Value::Integer(limit as i64));

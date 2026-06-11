@@ -2,7 +2,7 @@ use crate::{
     domain::{
         CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
-        RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
     storage::code::CodeRepositoryStore,
@@ -218,6 +218,73 @@ async fn callees_prefer_handwritten_direct_rows_before_candidate_limit() {
     );
 }
 
+#[tokio::test]
+async fn calls_identity_gate_filters_hits_before_skipping_fts() {
+    let files = vec![
+        file("api-file", "src/api.ts", "typescript"),
+        file("storage-file", "src/storage/call.ts", "typescript"),
+    ];
+    let mut direct_call = call("api-call", "api-file", "src/api.ts");
+    direct_call.caller_name = Some("TargetCaller".to_owned());
+    direct_call.callee_name = "ApiCallee".to_owned();
+    let mut fts_call = call("storage-call", "storage-file", "src/storage/call.ts");
+    fts_call.caller_name = Some("StorageCaller".to_owned());
+    fts_call.caller_symbol_snapshot_id = Some("storage-caller".to_owned());
+    fts_call.callee_name = "StorageCallee".to_owned();
+    fts_call.target_hint = Some("TargetCaller".to_owned());
+    let storage_caller = caller_symbol(
+        "storage-caller",
+        "storage-file",
+        "src/storage/call.ts",
+        "function StorageCaller(input: TargetCaller)",
+    );
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: vec![storage_caller],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![direct_call, fts_call],
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        routes: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["typescript".to_owned()])
+            .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "path:storage TargetCaller",
+        selector,
+        CodeQueryKind::Callees,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("call query should continue to FTS after filtered identity hits");
+
+    assert!(hits.iter().any(|hit| hit.path == "src/storage/call.ts"));
+    assert!(!hits.iter().any(|hit| hit.path == "src/api.ts"));
+}
+
 async fn delete_search_row(store: &SqliteGraphStore, document_kind: &str, path: &str) {
     store
         .run({
@@ -292,6 +359,31 @@ fn call(call_id: &str, file_id: &str, path: &str) -> CodeCallRecord {
         confidence_basis_points: 2_500,
         confidence_tier: "ambiguous".to_owned(),
         line_range: RepositoryCodeRange { start: 1, end: 1 },
+    }
+}
+
+fn caller_symbol(
+    symbol_snapshot_id: &str,
+    file_id: &str,
+    path: &str,
+    signature: &str,
+) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+        canonical_symbol_id: format!("repo://repo/{}::StorageCaller", path.replace('/', "::")),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "typescript".to_owned(),
+        name: "StorageCaller".to_owned(),
+        qualified_name: "StorageCaller".to_owned(),
+        kind: "function".to_owned(),
+        signature: signature.to_owned(),
+        doc_comment: None,
+        byte_range: RepositoryCodeRange { start: 1, end: 1 },
+        line_range: RepositoryCodeRange { start: 1, end: 1 },
+        symbol_role: None,
     }
 }
 

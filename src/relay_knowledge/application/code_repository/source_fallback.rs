@@ -74,10 +74,16 @@ pub(super) fn plan_code_grep_fallback(
     results: &[CodeRetrievalHit],
 ) -> Option<CodeGrepFallbackPlan> {
     let commit = status.last_indexed_commit.clone()?;
+    if !request.query_kind_filters.is_empty() {
+        return None;
+    }
     let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
-    let language_filters = merged_filters(
-        &status.language_filters,
-        &request.repository.language_filters,
+    let language_filters = query_language_filters(
+        merged_filters(
+            &status.language_filters,
+            &request.repository.language_filters,
+        ),
+        &request.query_language_filters,
     );
     match request.code_query_kind {
         CodeQueryKind::Definition => {
@@ -229,6 +235,9 @@ pub(super) fn append_code_grep_fallback(
     let base_fallback_score = grep_score(plan.kind, score_bounds);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
+        if !query_field_filters_allow_match(request, &matched.path, &matched.excerpt) {
+            continue;
+        }
         let fallback_score = generated_adjusted_fallback_score(
             source_grep_match_score(request, plan, &matched, score_bounds, base_fallback_score),
             matched.is_generated,
@@ -306,6 +315,9 @@ pub(super) fn append_definition_source_fallback(
     let best_score = results.first().map_or(0.0, |hit| hit.score);
     let metadata = path_metadata(results);
     for declaration in declarations {
+        if !query_field_filters_allow_match(request, &declaration.path, &declaration.excerpt) {
+            continue;
+        }
         let declaration_score =
             generated_adjusted_fallback_score(best_score + 4.0, declaration.is_generated);
         if let Some(existing) = results.iter_mut().find(|hit| {
@@ -849,6 +861,71 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     merged
 }
 
+fn query_language_filters(base_filters: Vec<String>, query_filters: &[String]) -> Vec<String> {
+    const NO_MATCHING_LANGUAGE_FILTER: &str = "__relay_no_matching_language__";
+    const C_CPP_HEADER_LANGUAGE_FILTER: &str = "__relay_c_cpp_header_only__";
+
+    if query_filters.is_empty() {
+        return base_filters;
+    }
+    if base_filters.is_empty() {
+        return query_filters.to_vec();
+    }
+
+    let mut intersection = Vec::new();
+    for query_filter in query_filters {
+        for base_filter in &base_filters {
+            if base_filter == query_filter && !intersection.contains(query_filter) {
+                intersection.push(query_filter.clone());
+            } else if c_cpp_header_language_overlap(base_filter, query_filter)
+                && !intersection
+                    .iter()
+                    .any(|filter| filter == C_CPP_HEADER_LANGUAGE_FILTER)
+            {
+                intersection.push(C_CPP_HEADER_LANGUAGE_FILTER.to_owned());
+            }
+        }
+    }
+    let mut intersection = merged_filters(&[], &intersection);
+    if intersection.is_empty() {
+        intersection.push(NO_MATCHING_LANGUAGE_FILTER.to_owned());
+    }
+    intersection
+}
+
+fn c_cpp_header_language_overlap(base_filter: &str, query_filter: &str) -> bool {
+    matches!((base_filter, query_filter), ("c", "cpp") | ("cpp", "c"))
+}
+
+fn query_field_filters_allow_match(
+    request: &CodeRetrievalRequest,
+    path: &str,
+    excerpt: &str,
+) -> bool {
+    request.query_kind_filters.is_empty()
+        && filters_match_text(&request.query_path_substrings, path)
+        && source_fallback_name_filters_match(request, excerpt)
+}
+
+fn source_fallback_name_filters_match(request: &CodeRetrievalRequest, excerpt: &str) -> bool {
+    request.query_name_substrings.is_empty()
+        || request.query_name_substrings.iter().any(|filter| {
+            text_matches_filter(&request.query, filter) || text_matches_filter(excerpt, filter)
+        })
+}
+
+fn filters_match_text(filters: &[String], text: &str) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|filter| text_matches_filter(text, filter))
+}
+
+fn text_matches_filter(text: &str, filter: &str) -> bool {
+    text.to_ascii_lowercase()
+        .contains(&filter.to_ascii_lowercase())
+}
+
 struct HitPathMetadata {
     language_id: String,
     symbol_snapshot_id: Option<String>,
@@ -896,6 +973,10 @@ mod reference_tests;
 #[cfg(test)]
 #[path = "source_fallback_generated_tests.rs"]
 mod generated_tests;
+
+#[cfg(test)]
+#[path = "source_fallback_filter_tests.rs"]
+mod filter_tests;
 
 #[cfg(test)]
 #[path = "source_fallback_surface_tests.rs"]

@@ -176,6 +176,59 @@ fn hybrid_grep_fallback_uses_text_fallback_for_non_symbol_coverage() {
 }
 
 #[test]
+fn hybrid_grep_fallback_skips_inline_kind_filters() {
+    let request = request(
+        "kind:struct ConnectorService",
+        CodeQueryKind::Hybrid,
+        Vec::new(),
+    );
+
+    assert!(plan_code_grep_fallback(&status(), &request, &[]).is_none());
+}
+
+#[test]
+fn source_fallback_append_skips_inline_kind_filters() {
+    let request = request(
+        "kind:struct ConnectorService",
+        CodeQueryKind::Hybrid,
+        Vec::new(),
+    );
+    let plan = CodeGrepFallbackPlan {
+        commit: "commit".to_owned(),
+        query: "ConnectorService".to_owned(),
+        paths: Vec::new(),
+        path_filters: Vec::new(),
+        language_filters: vec!["rust".to_owned()],
+        limit: 10,
+        kind: SourceGrepKind::Hybrid,
+        identity: None,
+        exclude_generated: false,
+        needs_scope_paths: false,
+    };
+    let mut results = Vec::new();
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/service.rs".to_owned(),
+                language_id: "rust".to_owned(),
+                excerpt: "pub fn ConnectorService() {}".to_owned(),
+                byte_range: RepositoryCodeRange { start: 0, end: 27 },
+                line_range: RepositoryCodeRange { start: 1, end: 1 },
+                is_generated: false,
+            }],
+            degraded_reason: None,
+        },
+    );
+
+    assert!(results.is_empty());
+}
+
+#[test]
 fn hybrid_fallback_uses_exact_file_filter_without_scope_path_lookup() {
     let request = request(
         "RK_PIPELINE_NOTE",
