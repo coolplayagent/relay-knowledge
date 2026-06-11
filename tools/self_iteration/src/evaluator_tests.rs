@@ -97,7 +97,7 @@ mod tests {
         assert!(profile_runs_repository_sets("fast"));
         assert_eq!(
             WorkloadSelection { categories: None }.skipped_suites("fast"),
-            vec!["file_fixtures", "research_judge"]
+            vec!["file_fixtures", "agent_workflows", "research_judge"]
         );
     }
 
@@ -114,6 +114,29 @@ mod tests {
         assert!(selection.runs_repository_workload("fast"));
         assert!(selection.runs_repository_sets("fast"));
         assert!(selection.runs_semantic_vector("fast"));
+        assert!(!selection.runs_agent_workflows("fast"));
+        assert!(!selection.runs_file_fixtures("fast"));
+        assert!(!selection.runs_research_judge("fast"));
+        assert_eq!(
+            selection.skipped_suites("fast"),
+            vec!["file_fixtures", "agent_workflows", "research_judge"]
+        );
+    }
+
+    #[test]
+    fn focused_agent_workflows_runs_agent_suite() {
+        let config = Config::parse(vec![
+            "evaluate".to_owned(),
+            "--categories".to_owned(),
+            "agent_workflows".to_owned(),
+        ])
+        .expect("config should parse");
+        let selection = WorkloadSelection::new(&config);
+
+        assert!(selection.runs_repository_workload("fast"));
+        assert!(selection.runs_repository_sets("fast"));
+        assert!(selection.runs_semantic_vector("fast"));
+        assert!(selection.runs_agent_workflows("fast"));
         assert!(!selection.runs_file_fixtures("fast"));
         assert!(!selection.runs_research_judge("fast"));
         assert_eq!(
@@ -140,6 +163,7 @@ mod tests {
         assert!(selection.runs_repository_sets("full"));
         assert!(selection.runs_file_fixtures("full"));
         assert!(selection.runs_semantic_vector("full"));
+        assert!(selection.runs_agent_workflows("full"));
         assert!(!selection.runs_research_judge("full"));
         assert_eq!(selection.skipped_suites("full"), vec!["research_judge"]);
     }
@@ -672,6 +696,8 @@ mod tests {
             "index_performance_wide_mixed_files_v1",
         )
         .expect("wide index performance fixture should write");
+        create_generated_repository_files(&root.join("agent_workflow"), "agent_workflow_v1")
+            .expect("agent workflow fixture should write");
 
         assert!(!root.join("c/.relay-knowledge-fixture-version").exists());
         assert!(!root.join("typescript/.relay-knowledge-fixture-version").exists());
@@ -724,6 +750,11 @@ mod tests {
             root.join("wide_index_performance/crates/perf_core/src/bridge.rs"),
         )
         .expect("wide index performance bridge source");
+        let agent_context = std::fs::read_to_string(root.join("agent_workflow/src/context.rs"))
+            .expect("agent workflow context source");
+        let agent_policy =
+            std::fs::read_to_string(root.join("agent_workflow/ops/policy_loader.py"))
+                .expect("agent workflow policy source");
         assert!(c_source.contains(".read = rk_driver_read"));
         assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
         assert!(c_macro_source.contains("RK_HTTP_HANDLER(rk_http_access_handler)"));
@@ -750,6 +781,8 @@ mod tests {
         assert!(performance_tail.contains("rk_perf_target_1023"));
         assert!(wide_performance_tail.contains("rk_wide_target_2047"));
         assert!(wide_performance_bridge.contains("rk_wide_bridge_dispatch"));
+        assert!(agent_context.contains("AgentContextPackBuilder"));
+        assert!(agent_policy.contains("AGENT_POLICY_BUDGET"));
 
         std::fs::remove_dir_all(&root).expect("cleanup fixture");
     }

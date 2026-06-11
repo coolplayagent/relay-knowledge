@@ -31,6 +31,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 | Run at most 3 loop iterations | `./self-iterate.sh --max-iterations 3` |
 | Score the current working-tree diff without Codex | `./self-iterate.sh evaluate --use-current-candidate --profile fast` |
 | Focus semantic/vector work | `./self-iterate.sh once --profile fast --categories semantic_vector` |
+| Run coding-agent workflow regressions | `./self-iterate.sh evaluate --use-current-candidate --profile fast --categories agent_workflows` |
 | Focus multiple categories | `./self-iterate.sh once --profile fast --categories semantic_vector,competitive` |
 | Run the full legacy gates and workload | `./self-iterate.sh once --profile full` |
 | Validate launcher and prompt only | `./self-iterate.sh once --profile smoke --dry-run-codex` |
@@ -49,7 +50,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 | `--categories ...` | You want a round to focus one score family | Keeps explicit `guardrail=true` bottom-line cases. |
 | `--strategy unattended-layered` | You want 1-2 days of unattended progress | Combines smoke exploration, fast validation, macro explore escalation, and deep checks. |
 
-Supported categories are `foundational`, `competitive`, `semantic_vector`, `file_fixtures`, `repository_sets`, `research_judge`, `performance`, and `all`. `--exclude-categories` subtracts categories after `all` expansion, for example `--categories all --exclude-categories research_judge`.
+Supported categories are `foundational`, `competitive`, `semantic_vector`, `file_fixtures`, `repository_sets`, `agent_workflows`, `research_judge`, `performance`, and `all`. `--exclude-categories` subtracts categories after `all` expansion, for example `--categories all --exclude-categories research_judge`.
 
 ### Output Locations
 
@@ -201,6 +202,7 @@ The prompt injects only bounded summaries, so long-running iteration does not gr
 | Default sampling | First 8 normal query cases per repository, while always preserving explicit `guardrail=true` cases. |
 | Repository sets | 2 cross-repository threshold cases from `temporal_go_workspace`. |
 | Semantic/vector | 1 guardrail query. |
+| Coding-agent workflows | Skipped by default in `fast`; run with `--categories agent_workflows` or by the PR benchmark workflow. |
 | Cache reuse | Reuses `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce registration and indexing cost. |
 
 `fast` does not run product release build, full clippy, full tests, local file fixtures, or the research judge by default. `full` and `exhaustive` restore those rails and run complete repository evaluation, repository-set cases, local file fixtures, semantic/vector fixtures, and the research judge.
@@ -216,6 +218,7 @@ Key fast guardrail responsibilities:
 | `code_index_sqlite_lock_cases` | Protect duplicate-process SQLite lock avoidance, active-task reuse, and concurrent claims for distinct task fingerprints. |
 | Syntax and layout fixtures | Protect external-import unresolved metadata, C/C++ recoverable parser errors, non-top-level `src/` layouts, project aliases reusing one indexed scope, and source/text fallback guardrails. |
 | `software_global_fixture` | Ensures `repo software` projections come from indexed evidence, not package caches, cloud APIs, SDK directories, or unindexed external source. |
+| `agent_workflow_fixture` | Replays coding-agent issue-analysis tasks over generated Rust, TypeScript, Python, YAML, and Markdown evidence, with budgets for tool calls, source reads, output/context size, evidence count, fallback ratio, and total latency. |
 
 Override the default subset with:
 
@@ -227,6 +230,12 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 ```
 
 `full` and `exhaustive` also run `index_performance_wide_mixed_files`, which generates 2048 Rust target files and cross-shard bridge queries, then records cold `*_index_ms`, `*_register_index_ms`, and query p50/p95/max metrics to raise the performance bar with a wider workload.
+
+### Coding-Agent Workflow Gate
+
+`--categories agent_workflows` runs deterministic end-to-end coding-agent scenarios from `cases/agent_workflow_targets.json`. The fixture covers definition lookup, cross-language impact tracing, configuration-to-documentation tracing, and freshness policy checks. Each scenario executes bounded `repo query` steps and fails when expected evidence is missing, context/output grows beyond the case budget, too many unique source files must be read, text fallback dominates the evidence pack, or total query latency exceeds the threshold.
+
+The PR benchmark workflow runs this category as `agent-workflow-regression` with the generated fixture isolated through `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=agent_workflow_fixture`. After the evaluation run it checks the generated JSON report and fails when any gate, case, or agent workflow metric budget fails; the score-vs-history adoption decision is not used for this CI gate. This keeps the CI cost bounded while still exercising the agent-facing behavior.
 
 ### Category Focus
 

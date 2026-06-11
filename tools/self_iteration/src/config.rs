@@ -90,17 +90,19 @@ pub enum EvaluationCategory {
     SemanticVector,
     FileFixtures,
     RepositorySets,
+    AgentWorkflows,
     ResearchJudge,
     Performance,
 }
 
 impl EvaluationCategory {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Foundational,
         Self::Competitive,
         Self::SemanticVector,
         Self::FileFixtures,
         Self::RepositorySets,
+        Self::AgentWorkflows,
         Self::ResearchJudge,
         Self::Performance,
     ];
@@ -116,6 +118,9 @@ impl EvaluationCategory {
             "repository_sets" | "repository-sets" | "repo_sets" | "repo-sets" => {
                 Ok(Self::RepositorySets)
             }
+            "agent_workflows" | "agent-workflows" | "agent" | "coding_agent" | "coding-agent" => {
+                Ok(Self::AgentWorkflows)
+            }
             "research_judge" | "research-judge" | "judge" => Ok(Self::ResearchJudge),
             "performance" => Ok(Self::Performance),
             other => Err(format!("invalid evaluation category: {other}")),
@@ -129,6 +134,7 @@ impl EvaluationCategory {
             Self::SemanticVector => "semantic_vector",
             Self::FileFixtures => "file_fixtures",
             Self::RepositorySets => "repository_sets",
+            Self::AgentWorkflows => "agent_workflows",
             Self::ResearchJudge => "research_judge",
             Self::Performance => "performance",
         }
@@ -764,6 +770,7 @@ mod tests {
                 "semantic_vector",
                 "file_fixtures",
                 "repository_sets",
+                "agent_workflows",
                 "research_judge",
                 "performance"
             ]
@@ -792,13 +799,14 @@ mod tests {
                 "semantic_vector",
                 "file_fixtures",
                 "repository_sets",
+                "agent_workflows",
                 "performance"
             ]
         );
         assert_eq!(
             config.category_focus_key().as_deref(),
             Some(
-                "foundational,competitive,semantic_vector,file_fixtures,repository_sets,performance"
+                "foundational,competitive,semantic_vector,file_fixtures,repository_sets,agent_workflows,performance"
             )
         );
     }
@@ -825,6 +833,7 @@ mod tests {
                 "semantic_vector",
                 "file_fixtures",
                 "repository_sets",
+                "agent_workflows",
                 "performance"
             ]
         );

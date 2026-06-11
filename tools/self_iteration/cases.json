@@ -10,6 +10,7 @@
     "cases/repository_typescript_syntax_fixture_targets.json",
     "cases/repository_nonstandard_layout_targets.json",
     "cases/repository_software_global_targets.json",
+    "cases/agent_workflow_targets.json",
     "cases/repository_typescript_targets.json",
     "cases/repository_bash_syntax_fixture_targets.json",
     "cases/repository_bash_targets.json",

@@ -31,6 +31,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 | 连续运行最多 3 轮 | `./self-iterate.sh --max-iterations 3` |
 | 评估当前工作树 diff，不调用 Codex | `./self-iterate.sh evaluate --use-current-candidate --profile fast` |
 | 聚焦 semantic/vector | `./self-iterate.sh once --profile fast --categories semantic_vector` |
+| 运行 coding-agent 工作流回归 | `./self-iterate.sh evaluate --use-current-candidate --profile fast --categories agent_workflows` |
 | 聚焦多个类别 | `./self-iterate.sh once --profile fast --categories semantic_vector,competitive` |
 | 运行完整旧门禁和 workload | `./self-iterate.sh once --profile full` |
 | 只验证启动器和 prompt | `./self-iterate.sh once --profile smoke --dry-run-codex` |
@@ -49,7 +50,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 | `--categories ...` | 想让一轮聚焦某个分数族 | 仍保留显式 `guardrail=true` 底线 case。 |
 | `--strategy unattended-layered` | 需要 1-2 天无人值守推进 | 用 smoke 探索、fast 验证、macro explore 升级和深度检查组合运行。 |
 
-支持的 category：`foundational`、`competitive`、`semantic_vector`、`file_fixtures`、`repository_sets`、`research_judge`、`performance`、`all`。`--exclude-categories` 会在 `all` 展开后移除指定类别，例如 `--categories all --exclude-categories research_judge`。
+支持的 category：`foundational`、`competitive`、`semantic_vector`、`file_fixtures`、`repository_sets`、`agent_workflows`、`research_judge`、`performance`、`all`。`--exclude-categories` 会在 `all` 展开后移除指定类别，例如 `--categories all --exclude-categories research_judge`。
 
 ### 输出产物
 
@@ -201,6 +202,7 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 | 默认取样 | 普通仓库默认取前 8 条 query case，并始终保留显式 `guardrail=true` case。 |
 | repository-set | 默认保留 `temporal_go_workspace` 的 2 条跨仓门槛 case。 |
 | semantic/vector | 默认运行 1 条 guardrail query。 |
+| coding-agent 工作流 | `fast` 默认跳过；通过 `--categories agent_workflows` 或 PR benchmark workflow 运行。 |
 | 复用缓存 | 复用 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/`，减少重复注册和索引成本。 |
 
 `fast` 默认不跑产品 release build、全量 clippy、全量 test、本地文件 fixture 或 research judge。`full`/`exhaustive` 会恢复这些 rail，并运行完整仓库评估、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
@@ -216,6 +218,7 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 | `code_index_sqlite_lock_cases` | 保护重复进程 SQLite lock 避免、active-task 复用和不同 task fingerprint 的并发 claim。 |
 | syntax 与 layout fixture | 保护 external import unresolved metadata、C/C++ 可恢复 parser error、非顶层 `src/` 布局、project alias 复用同一 indexed scope 和 source/text fallback 底线。 |
 | `software_global_fixture` | 确保 `repo software` 投影事实来自已索引证据，不扫描包缓存、云 API、SDK 目录或未索引外部源码。 |
+| `agent_workflow_fixture` | 用生成式 Rust、TypeScript、Python、YAML 和 Markdown 证据重放 coding-agent issue 分析任务，并约束工具调用、源码读取、输出/context 大小、证据数量、fallback 比例和总延迟。 |
 
 若要调整默认子集，可设置：
 
@@ -227,6 +230,12 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 ```
 
 `full` 和 `exhaustive` 额外运行 `index_performance_wide_mixed_files`，它生成 2048 个 Rust 目标文件与跨 shard bridge 查询，并记录 cold `*_index_ms`、`*_register_index_ms`、query p50/p95/max 指标，用更宽的 workload 提高性能门槛。
+
+### coding-agent 工作流门禁
+
+`--categories agent_workflows` 会运行 `cases/agent_workflow_targets.json` 中的确定性端到端 coding-agent 场景。fixture 覆盖定义定位、跨语言影响追踪、配置到文档追踪和 freshness policy 检查。每个场景执行有界 `repo query` 步骤；当期望证据缺失、context/output 超过预算、需要读取的唯一源码文件过多、text fallback 在证据包中过高，或总查询延迟超过阈值时失败。
+
+PR benchmark workflow 会以 `agent-workflow-regression` job 运行该 category，并通过 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=agent_workflow_fixture` 将运行范围限制到生成式 fixture。evaluation 结束后，workflow 会检查生成的 JSON report，只要任一 gate、case 或 agent workflow metric budget 失败就让 CI 失败；该 CI 门禁不使用 score-vs-history 的采纳决策。这样能控制 CI 成本，同时覆盖 agent-facing 行为。
 
 ### category 聚焦
 
