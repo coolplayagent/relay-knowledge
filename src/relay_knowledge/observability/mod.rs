@@ -384,6 +384,27 @@ impl AgentProtocolMetrics {
             .add(1, &[KeyValue::new("protocol", protocol.to_owned())]);
     }
 
+    /// Records the first initialize-to-tools/list discovery latency for a session.
+    pub fn record_cold_start(&self, protocol: &str, duration_ms: u64) {
+        {
+            let mut inner = self
+                .inner
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            inner.cold_start_total = inner.cold_start_total.saturating_add(1);
+            inner.cold_start_duration_ms_total = inner
+                .cold_start_duration_ms_total
+                .saturating_add(duration_ms);
+        }
+        global::meter(PROJECT_NAME)
+            .u64_histogram("relay_agent_protocol_cold_start_duration_ms")
+            .build()
+            .record(
+                duration_ms,
+                &[KeyValue::new("protocol", protocol.to_owned())],
+            );
+    }
+
     /// Returns an in-process metric snapshot for diagnostics and tests.
     pub fn snapshot(&self) -> AgentProtocolMetricsSnapshot {
         self.inner
@@ -401,6 +422,10 @@ pub struct AgentProtocolMetricsSnapshot {
     pub rejections_total: u64,
     pub cancelled_total: u64,
     pub context_truncated_total: u64,
+    #[serde(default)]
+    pub cold_start_total: u64,
+    #[serde(default)]
+    pub cold_start_duration_ms_total: u64,
 }
 
 fn signal_endpoint(base: &str, path: &str) -> String {
@@ -508,6 +533,7 @@ mod tests {
         metrics.record_request("mcp", "resources/read", "ok", 34, true);
         metrics.record_rejection("mcp", "qos");
         metrics.record_cancelled("acp");
+        metrics.record_cold_start("mcp", 56);
 
         assert_eq!(
             metrics.snapshot(),
@@ -517,6 +543,8 @@ mod tests {
                 rejections_total: 1,
                 cancelled_total: 1,
                 context_truncated_total: 1,
+                cold_start_total: 1,
+                cold_start_duration_ms_total: 56,
             }
         );
     }

@@ -787,6 +787,15 @@ requests and `notifications/cancelled` stay bound to the issued session.
 Missing session headers are rejected with HTTP 400; unknown or evicted session
 IDs are rejected with HTTP 404.
 
+MCP discovery is storage-cold: `initialize`, `notifications/initialized`, and
+`tools/list` register and return static schemas without opening SQLite. Storage
+opens lazily on the first storage-backed tool call, and the first `tools/list`
+per session records an initialize-to-tools-list cold-start metric. Code query
+tools return an `explore_budget` based on indexed file count, cap oversized
+result sets for agent context, reject free-text queries over 10,000 characters
+and path filters over 4,096 characters, and return compact outlines for
+container types when `include_code=true`.
+
 The MCP tool surface includes graph retrieval, graph inspection, health,
 service status, index status, authorized code graph queries, authorized
 software global-model queries, repository-set code graph queries, and

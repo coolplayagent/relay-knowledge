@@ -698,6 +698,11 @@ impl RelayKnowledgeService {
         self.storage.get().await
     }
 
+    /// Returns whether graph storage has already been opened by this service.
+    pub fn storage_is_ready(&self) -> bool {
+        self.storage.ready_store().is_some()
+    }
+
     /// Runs one split-worker preview code-index attempt through durable task leases.
     pub async fn run_code_index_worker_preview(
         &self,

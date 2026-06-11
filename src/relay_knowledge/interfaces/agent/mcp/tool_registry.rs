@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+use crate::interfaces::agent::MAX_AGENT_QUERY_CHARS;
+
 use super::code_tools::{
     code_feature_flags_tool_definition, code_impact_tool_definition, code_query_tool_definition,
     code_software_query_tool_definition,
@@ -59,7 +61,7 @@ fn retrieve_context_tool_definition() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_AGENT_QUERY_CHARS},
                 "source_scope": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1},
                 "freshness": {

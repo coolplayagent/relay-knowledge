@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::{
     McpMethodError, McpServer, admit_mcp_request, endpoint_child, http_contract::validate_origin,
-    request_context,
+    request_context, state::SessionLookup,
 };
 
 pub(super) fn metrics_endpoint(endpoint: &str) -> String {
@@ -61,6 +61,7 @@ pub(super) async fn prometheus_metrics(
         .await
         .map_err(McpMethodError::api)?;
     let qos = server.qos.snapshot();
+    let agent_metrics = server.metrics.snapshot();
     let mut output = String::new();
     push_metric(
         &mut output,
@@ -92,6 +93,18 @@ pub(super) async fn prometheus_metrics(
         "Current queued MCP request count.",
         qos.queued_requests,
     );
+    push_metric(
+        &mut output,
+        "relay_knowledge_mcp_cold_start_total",
+        "Recorded MCP initialize-to-tools-list cold start samples.",
+        agent_metrics.cold_start_total,
+    );
+    push_metric(
+        &mut output,
+        "relay_knowledge_mcp_cold_start_duration_ms_total",
+        "Total MCP initialize-to-tools-list cold start latency in milliseconds.",
+        agent_metrics.cold_start_duration_ms_total,
+    );
     for index in &health.indexes {
         output.push_str(&format!(
             "relay_knowledge_index_stale{{kind=\"{}\"}} {}\n",
@@ -101,6 +114,25 @@ pub(super) async fn prometheus_metrics(
     }
 
     Ok(output)
+}
+
+pub(super) fn record_tools_list_cold_start(server: &McpServer, session: &SessionLookup) {
+    if let Some(duration_ms) = server
+        .sessions
+        .record_tools_list_cold_start(session.session_id())
+    {
+        server.metrics.record_cold_start("mcp", duration_ms);
+        tracing::info!(
+            protocol = "mcp",
+            duration_ms,
+            "recorded initialize_to_tools_list cold start"
+        );
+    }
+}
+
+pub(super) fn tools_list_result(server: &McpServer, session: &SessionLookup) -> serde_json::Value {
+    record_tools_list_cold_start(server, session);
+    super::tool_registry::tools_list_result()
 }
 
 fn push_metric(
