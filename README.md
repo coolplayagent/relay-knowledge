@@ -418,6 +418,11 @@ That opt-in is path-specific: `--path src` must not hash `node_modules/` or
 `target/`, while `--path build` or `--path build/generated.rs` opts into the
 matching broad directory and `--path .` opts into the whole root.
 
+`--path` is the CLI flag for a path filter. Use it during `repo register` to
+store the indexed scope, and during `repo query` or `repo feature-flags` to
+narrow reads inside that scope. `repo index` does not accept `--path`; it
+indexes the registered scope for the selected `--ref`.
+
 Default non-Git scans descend only into directories that can contribute
 whitelist content. Filtered non-Git scans descend only into requested paths and
 bounded discoverable source roots, so unrelated siblings such as `private/` are
@@ -440,6 +445,9 @@ files from previously discovered roots.
 Non-Git moving-ref resolution uses the effective path and language filters for
 the indexed scope. Non-Git impact path collection uses the same effective
 indexed filesystem filters, including explicit broad-directory opt-ins.
+For the normal non-Git workflow, register with the desired `--path` filter,
+then use `repo index <alias> --ref HEAD` and query `--ref HEAD`; the indexed
+commit recorded in status is the resulting `filesystem:<hash>` snapshot.
 
 Git ref normalization for query/status paths uses cheap ref/tree resolution
 instead of walking the full tracked tree. Git branch, tag, and worktree

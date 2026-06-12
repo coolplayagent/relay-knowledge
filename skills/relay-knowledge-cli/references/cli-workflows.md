@@ -122,7 +122,7 @@ the runtime cache directory.
 
 ## Code Repository Index Query Flow
 
-Register a Git worktree:
+Register a Git worktree or non-Git source directory:
 
 ```bash
 relay-knowledge repo register /path/to/repo \
@@ -133,7 +133,10 @@ relay-knowledge repo register /path/to/repo \
 
 Registration keeps the full language surface of the selected paths. Apply
 language filters at query time instead of passing `--language` to
-`repo register`.
+`repo register`. The `--path` flag is the CLI spelling for a path filter:
+`repo register --path` stores the indexed scope, while query-time `--path`
+narrows reads inside that indexed scope. Do not pass `--path` to `repo index`;
+indexing uses the registered scope plus `--ref`.
 
 Preview and index:
 
@@ -141,6 +144,17 @@ Preview and index:
 relay-knowledge repo scope preview core --ref HEAD --format json
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo status core --format json
+```
+
+For non-Git source directories, keep the normal selector as `HEAD`. Indexing
+resolves it into a `filesystem:<hash>` snapshot, and queries should use `HEAD`
+after indexing unless an explicit stored `filesystem:<hash>` from
+`repo status` is required for audit or diff work.
+
+```powershell
+relay-knowledge repo register "D:/workspace/hello" --alias hello --path "云存储服务开发部" --format json
+relay-knowledge repo index hello --ref HEAD --format json
+relay-knowledge repo query hello --query "关键词" --kind hybrid --ref HEAD --format json
 ```
 
 When `repo index` returns a durable task handle and no managed service is
@@ -283,12 +297,17 @@ If `repo update` cannot find an indexed base, first run:
 relay-knowledge repo index core --ref main --format json
 ```
 
-For uncommitted worktree analysis:
+For uncommitted Git worktree analysis:
 
 ```bash
 relay-knowledge repo index core --ref worktree --format json
 relay-knowledge repo query core --query retry_policy --ref worktree --format json
 ```
+
+Do not use `--ref worktree` for non-Git source directories. After editing a
+non-Git directory, rerun `repo index <alias> --ref HEAD`; for diff-aware
+`repo update`, read the previous `filesystem:<hash>` from `repo status` and use
+that value as `--base` with `--head HEAD`.
 
 ## Knowledge Graph Query Flow
 
