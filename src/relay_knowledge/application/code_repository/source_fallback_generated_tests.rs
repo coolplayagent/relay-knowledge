@@ -20,6 +20,7 @@ fn source_grep_fallback_demotes_generated_matches_without_excluding_them() {
         kind: SourceGrepKind::References,
         identity: None,
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     };
     let mut results = Vec::new();

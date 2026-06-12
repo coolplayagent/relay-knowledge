@@ -21,6 +21,7 @@ use super::{
     cli_render::render_response,
     repo_cli::{self, RepoCommand},
 };
+use crate::interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request};
 
 pub(super) fn supports(action: &CliAction) -> bool {
     matches!(
@@ -63,6 +64,12 @@ pub(super) async fn run_remote(
             ref_selector,
             dry_run,
         } => {
+            let selected_mode = mode_for_index_ref(ref_selector);
+            let mode = if *dry_run {
+                CodeIndexMode::Full
+            } else {
+                selected_mode.clone()
+            };
             let selector = repo_cli::selector(
                 alias.clone(),
                 ref_selector.clone(),
@@ -71,9 +78,9 @@ pub(super) async fn run_remote(
                 format,
             )?;
             let request = CodeIndexRequest {
-                repository: selector,
-                mode: CodeIndexMode::Full,
-        workspace_detection: Default::default(),
+                repository: selector_for_index_request(selector, &selected_mode),
+                mode,
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             };
             if *dry_run {
@@ -119,7 +126,7 @@ pub(super) async fn run_remote(
                     format,
                 )?,
                 mode: CodeIndexMode::Full,
-        workspace_detection: Default::default(),
+                workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             };
             let response = client

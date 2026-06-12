@@ -51,6 +51,8 @@ mod code_workspace;
 
 #[path = "code_tasks.rs"]
 mod code_tasks;
+#[path = "code_tasks_worktree.rs"]
+mod code_tasks_worktree;
 
 #[path = "code_search.rs"]
 mod code_search;
@@ -433,6 +435,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
     ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
         self.run_read(move |connection| {
             code_snapshot::file_fingerprints_for_scope(connection, &source_scope)
+        })
+    }
+
+    fn code_file_fingerprints_for_paths(
+        &self,
+        source_scope: String,
+        paths: Vec<String>,
+    ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
+        self.run_read(move |connection| {
+            code_snapshot::file_fingerprints_for_paths(connection, &source_scope, &paths)
         })
     }
 

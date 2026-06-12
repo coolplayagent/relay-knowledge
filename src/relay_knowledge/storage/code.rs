@@ -343,6 +343,18 @@ pub trait CodeRepositoryStore: Send + Sync {
         })
     }
 
+    fn code_file_fingerprints_for_paths(
+        &self,
+        source_scope: String,
+        paths: Vec<String>,
+    ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
+        Box::pin(async move {
+            let mut fingerprints = self.code_file_fingerprints_for_scope(source_scope).await?;
+            fingerprints.retain(|fingerprint| paths.iter().any(|path| path == &fingerprint.path));
+            Ok(fingerprints)
+        })
+    }
+
     fn code_file_candidate_paths_for_scope(
         &self,
         source_scope: String,

@@ -682,7 +682,7 @@ fn worktree_overlay_intersects_submodule_child_scopes_before_expansion() {
     .expect("disjoint overlay should build");
 
     assert!(snapshot.files.is_empty());
-    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
     assert_eq!(tracked_entries_call_count_for_root(&submodule.path), 0);
 }
 

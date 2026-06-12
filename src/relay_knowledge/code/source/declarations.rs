@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
 
 use crate::{
     code::generated_detection,
@@ -53,6 +56,46 @@ pub(crate) fn source_declarations_for_identity(
     } else {
         None
     };
+    source_declarations_for_identity_with_hashes(
+        &root,
+        commit,
+        paths,
+        identity,
+        exclude_generated,
+        filesystem_hashes.as_ref(),
+    )
+}
+
+pub(crate) fn source_declarations_for_identity_from_worktree_overlay(
+    registration: &CodeRepositoryRegistration,
+    expected_hashes: BTreeMap<String, String>,
+    paths: Vec<String>,
+    identity: &str,
+    exclude_generated: bool,
+) -> Result<Vec<SourceDeclarationMatch>, CodeIndexError> {
+    if !simple_source_identifier(identity) {
+        return Ok(Vec::new());
+    }
+
+    let root = PathBuf::from(&registration.root_path);
+    source_declarations_for_identity_with_hashes(
+        &root,
+        "filesystem:worktree-overlay-fallback",
+        paths,
+        identity,
+        exclude_generated,
+        Some(&expected_hashes),
+    )
+}
+
+fn source_declarations_for_identity_with_hashes(
+    root: &Path,
+    commit: &str,
+    paths: Vec<String>,
+    identity: &str,
+    exclude_generated: bool,
+    expected_hashes: Option<&BTreeMap<String, String>>,
+) -> Result<Vec<SourceDeclarationMatch>, CodeIndexError> {
     let mut seen = BTreeSet::new();
     let mut files_inspected = 0usize;
     let mut files_considered = 0usize;
@@ -70,12 +113,9 @@ pub(crate) fn source_declarations_for_identity(
             continue;
         }
         files_inspected += 1;
-        let Ok(bytes) = source_bytes_after_content_verification(
-            &root,
-            commit,
-            &path,
-            filesystem_hashes.as_ref(),
-        ) else {
+        let Ok(bytes) =
+            source_bytes_after_content_verification(root, commit, &path, expected_hashes)
+        else {
             continue;
         };
         if bytes.len() > MAX_SOURCE_DECLARATION_BYTES {

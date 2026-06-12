@@ -109,10 +109,14 @@ pub(super) fn repo_index() -> CliCommandSpec {
         ],
         &[
             "relay-knowledge repo index core --ref HEAD --format json",
+            "relay-knowledge repo index core --ref worktree --format json",
             "relay-knowledge repo index core --reset --format json",
         ],
         &[
             "`--dry-run` returns a scope preview instead of writing index state.",
+            "`--ref worktree` indexes uncommitted and untracked files in the current Git worktree as a bounded overlay over the checked-out HEAD scope; queries that need those facts must also use `--ref worktree`.",
+            "`--ref worktree` requires a matching checked-out HEAD base index; run `repo index <alias> --ref HEAD` before the first worktree overlay.",
+            "`--ref worktree --dry-run` previews the checked-out HEAD scope used as the overlay base and does not write overlay index state.",
             "`--reset` clears stale task leases and retry state for unfinished repository tasks without deleting completed indexed scopes or reviving terminal dead-letter history.",
             "Cold full indexes return a durable task handle and the CLI runs one bounded worker attempt before returning; service mode continues unfinished background tasks and `repo status` reports checkpoints.",
         ],

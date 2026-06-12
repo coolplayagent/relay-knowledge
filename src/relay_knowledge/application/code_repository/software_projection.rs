@@ -11,6 +11,7 @@ use super::support::{
     active_index_matches_request, indexed_commit_for_selector, latest_compatible_code_scope_status,
     required_code_repository, resolved_code_scope_status, storage_api_error,
 };
+use super::worktree_freshness::ensure_worktree_overlay_matches_current_worktree;
 
 impl RelayKnowledgeService {
     /// Reads the repository-scoped software global dependency and SDK projection.
@@ -66,6 +67,10 @@ impl RelayKnowledgeService {
 
         let requested_ref = request.repository.ref_selector.clone();
         let mut request = software_request_at_indexed_ref(request, &status).await?;
+        if requested_ref == "worktree" {
+            ensure_worktree_overlay_matches_current_worktree(&store, &status, &request.repository)
+                .await?;
+        }
         let mut served_stale_scope = false;
         let scoped_status =
             match resolved_code_scope_status(&store, &status, &request.repository).await {

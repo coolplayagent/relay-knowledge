@@ -54,6 +54,49 @@ async fn retention_prunes_auto_workspace_members_without_pruning_user_set_member
     assert!(pruned.retained_scopes.contains(&"scope-user".to_owned()));
 }
 
+#[tokio::test]
+async fn retention_keeps_active_worktree_overlay_base_scope() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            for scope in ["scope-base", "scope-worktree", "scope-old"] {
+                insert_scope(connection, scope)?;
+            }
+            update_scope_commit(connection, "scope-base", "base-commit", "base-tree")?;
+            update_scope_commit(
+                connection,
+                "scope-worktree",
+                "worktree:base-commit:overlay",
+                "worktree:overlay",
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("fixtures should insert");
+
+    let pruned = store
+        .run(|connection| {
+            code_tasks::prune_scopes(
+                connection,
+                CodeScopeRetentionRequest {
+                    repository_id: "repo".to_owned(),
+                    active_scope: "scope-worktree".to_owned(),
+                    retain_recent_successful_scopes: 0,
+                },
+            )
+        })
+        .await
+        .expect("prune should run");
+
+    assert!(
+        pruned
+            .retained_scopes
+            .contains(&"scope-worktree".to_owned())
+    );
+    assert!(pruned.retained_scopes.contains(&"scope-base".to_owned()));
+    assert!(pruned.pruned_scopes.contains(&"scope-old".to_owned()));
+}
+
 async fn registered_store() -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     store
@@ -90,6 +133,23 @@ fn insert_scope(
         VALUES ('repo', ?1, ?2, 'src/lib.rs', 'rust', 'blob', 1, 1, 'parsed', NULL)
         ",
         params![scope, format!("file-{scope}")],
+    )?;
+    Ok(())
+}
+
+fn update_scope_commit(
+    connection: &mut rusqlite::Connection,
+    scope: &str,
+    commit: &str,
+    tree_hash: &str,
+) -> Result<(), crate::storage::StorageError> {
+    connection.execute(
+        "
+        UPDATE code_repository_scopes
+        SET resolved_commit_sha = ?2, tree_hash = ?3
+        WHERE source_scope = ?1
+        ",
+        params![scope, commit, tree_hash],
     )?;
     Ok(())
 }

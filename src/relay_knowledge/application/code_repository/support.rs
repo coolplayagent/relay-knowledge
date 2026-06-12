@@ -3,10 +3,8 @@ use std::path::PathBuf;
 use crate::{
     api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse},
     code::{
-        CodeIndexError, SOURCE_GREP_CANDIDATE_FILE_LIMIT, prepare_full_index_plan,
-        repository_uses_filesystem_source, resolve_repository_ref_with_filters,
-        resolve_repository_snapshot_with_filters, source_declarations_for_identity,
-        source_grep_matches,
+        CodeIndexError, prepare_full_index_plan, repository_uses_filesystem_source,
+        resolve_repository_ref_with_filters, resolve_repository_snapshot_with_filters,
     },
     domain::{
         CodeFeatureFlagRequest, CodeIndexCheckpoint, CodeIndexMode, CodeIndexRequest,
@@ -20,9 +18,7 @@ use crate::{
     },
 };
 
-use super::source_fallback::{
-    append_code_grep_fallback, append_definition_source_fallback, plan_code_grep_fallback,
-};
+pub(super) use super::source_fallback_execution::apply_code_grep_fallback;
 
 pub(super) const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
 pub(super) const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
@@ -40,6 +36,14 @@ pub(super) struct FreshFullIndexProbe {
     pub(super) tree_hash: String,
     pub(super) path_filters: Vec<String>,
     pub(super) language_filters: Vec<String>,
+}
+
+pub(super) fn requested_index_ref_for_response(request: &CodeIndexRequest) -> String {
+    if request.mode == CodeIndexMode::WorktreeOverlay {
+        "worktree".to_owned()
+    } else {
+        request.repository.ref_selector.clone()
+    }
 }
 
 pub(super) async fn required_code_repository(
@@ -350,18 +354,22 @@ pub(super) async fn previous_index_state_for_index(
     status: &CodeRepositoryStatus,
     request: &CodeIndexRequest,
 ) -> Result<PreviousIndexState, ApiError> {
-    let CodeIndexMode::Incremental { base_ref, .. } = &request.mode else {
-        let fingerprints = store
-            .code_file_fingerprints(status.repository_id.clone())
-            .await
-            .map_err(storage_api_error)?;
-        return Ok(PreviousIndexState {
-            fingerprints,
-            base_resolved_commit_sha: status.last_indexed_commit.clone(),
-        });
+    let base_ref = match &request.mode {
+        CodeIndexMode::Incremental { base_ref, .. } => base_ref.as_str(),
+        CodeIndexMode::WorktreeOverlay => request.repository.ref_selector.as_str(),
+        CodeIndexMode::Full => {
+            let fingerprints = store
+                .code_file_fingerprints(status.repository_id.clone())
+                .await
+                .map_err(storage_api_error)?;
+            return Ok(PreviousIndexState {
+                fingerprints,
+                base_resolved_commit_sha: status.last_indexed_commit.clone(),
+            });
+        }
     };
     let base_commit =
-        resolve_code_ref_for_selector(status, &request.repository, base_ref.clone()).await?;
+        resolve_code_ref_for_selector(status, &request.repository, base_ref.to_owned()).await?;
     let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
     let language_filters = merged_filters(
         &status.language_filters,
@@ -377,12 +385,28 @@ pub(super) async fn previous_index_state_for_index(
         .await
         .map_err(storage_api_error)?
         .ok_or_else(|| {
+            if request.mode == CodeIndexMode::WorktreeOverlay {
+                return ApiError::invalid_argument(format!(
+                    "worktree overlay for code repository '{}' requires an indexed {} base scope; run repo index --ref {} before repo index --ref worktree",
+                    status.alias, base_ref, base_ref
+                ));
+            }
             ApiError::invalid_argument(format!(
                 "incremental base ref '{}' resolves to {}, but code repository '{}' has no matching indexed base scope; run repo index --ref {} before repo update",
                 base_ref, base_commit, status.alias, base_ref
             ))
         })?;
     if base_scope.stale {
+        if request.mode == CodeIndexMode::WorktreeOverlay {
+            return Err(ApiError::invalid_argument(format!(
+                "worktree overlay base ref '{}' resolves to a stale indexed scope {}; refresh or reindex the base before repo index --ref worktree",
+                base_ref,
+                base_scope
+                    .last_indexed_scope_id
+                    .as_deref()
+                    .unwrap_or("unscoped")
+            )));
+        }
         return Err(ApiError::invalid_argument(format!(
             "incremental base ref '{}' resolves to a stale indexed scope {}; refresh or reindex the base before repo update",
             base_ref,
@@ -399,6 +423,12 @@ pub(super) async fn previous_index_state_for_index(
         ))
     })?;
     if !code_scope_matches_current_fact_version(&base_scope) {
+        if request.mode == CodeIndexMode::WorktreeOverlay {
+            return Err(ApiError::invalid_argument(format!(
+                "worktree overlay base ref '{}' resolves to scope '{}' built with an older code fact version; run repo index --ref {} before repo index --ref worktree",
+                base_ref, source_scope, base_ref
+            )));
+        }
         return Err(ApiError::invalid_argument(format!(
             "incremental base ref '{}' resolves to scope '{}' built with an older code fact version; run repo index --ref {} before repo update",
             base_ref, source_scope, base_ref
@@ -415,83 +445,36 @@ pub(super) async fn previous_index_state_for_index(
     })
 }
 
-pub(super) async fn apply_code_grep_fallback(
+pub(super) async fn active_full_index_task_for_request(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
-    base_status: &CodeRepositoryStatus,
-    scoped_status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-    results: &mut Vec<crate::domain::CodeRetrievalHit>,
-) -> Result<Option<String>, ApiError> {
-    let Some(plan) = plan_code_grep_fallback(scoped_status, request, results) else {
+    status: &CodeRepositoryStatus,
+    request: &CodeIndexRequest,
+    payload_json: &str,
+) -> Result<Option<CodeIndexTaskRecord>, ApiError> {
+    let Some(active_task) = store
+        .active_code_index_task(status.repository_id.clone())
+        .await
+        .map_err(storage_api_error)?
+    else {
         return Ok(None);
     };
-    let plan = if plan.needs_scope_paths() {
-        let source_scope = scoped_status
-            .last_indexed_scope_id
-            .as_deref()
-            .ok_or_else(|| {
-                ApiError::invalid_argument(format!(
-                    "code repository '{}' does not have an indexed source scope",
-                    scoped_status.alias
-                ))
-            })?;
-        let paths = match store
-            .code_file_candidate_paths_for_query_scope(
-                source_scope.to_owned(),
-                plan.query.clone(),
-                plan.path_filters.clone(),
-                plan.language_filters.clone(),
-                plan.exclude_generated,
-                SOURCE_GREP_CANDIDATE_FILE_LIMIT.saturating_add(1),
-            )
-            .await
-        {
-            Ok(paths) => paths,
-            Err(error) => {
-                return Ok(Some(format!(
-                    "source fallback candidate path lookup unavailable: {error}"
-                )));
-            }
-        };
-        plan.with_scope_paths(paths)
-    } else {
-        plan
-    };
-    let registration = registration_from_status(base_status);
-    let commit = plan.commit.clone();
-    let source_request = plan.source_request();
-    let outcome =
-        run_blocking_code(move || source_grep_matches(&registration, &commit, source_request))
-            .await?;
-    let had_matches = !outcome.matches.is_empty();
-    let fallback_degraded_reason =
-        append_code_grep_fallback(scoped_status, request, results, &plan, outcome);
-    if !had_matches
-        && plan.kind == crate::code::SourceGrepKind::Definition
-        && let Some(identity) = &plan.identity
+    if !active_task.state.is_unfinished()
+        || active_task.mode != CodeIndexMode::Full
+        || active_task.payload_json != payload_json
     {
-        let registration = registration_from_status(base_status);
-        let commit = plan.commit.clone();
-        let paths = plan.paths.clone();
-        let path_filters = plan.path_filters.clone();
-        let language_filters = plan.language_filters.clone();
-        let identity = identity.clone();
-        let declarations = run_blocking_code(move || {
-            source_declarations_for_identity(
-                &registration,
-                &commit,
-                paths,
-                &path_filters,
-                &language_filters,
-                &identity,
-                plan.exclude_generated,
-            )
-        })
-        .await?;
-        append_definition_source_fallback(scoped_status, request, results, declarations);
+        return Ok(None);
     }
-
-    Ok(fallback_degraded_reason)
+    let resolved = resolve_code_ref_for_selector(
+        status,
+        &request.repository,
+        request.repository.ref_selector.clone(),
+    )
+    .await?;
+    if resolved == active_task.resolved_commit_sha {
+        Ok(Some(active_task))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(super) async fn retrieval_request_at_indexed_ref(
@@ -829,6 +812,10 @@ pub(super) async fn indexed_commit_for_selector(
                     status.alias
                 ))
             });
+        }
+        let root = PathBuf::from(status.root_path.clone());
+        if run_blocking_code(move || repository_uses_filesystem_source(&root)).await? {
+            return resolve_code_ref_for_selector(status, selector, ref_selector).await;
         }
         return Err(ApiError::invalid_argument(format!(
             "code repository '{}' has no active worktree overlay",

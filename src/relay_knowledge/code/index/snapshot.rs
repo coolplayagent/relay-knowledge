@@ -430,10 +430,22 @@ impl SnapshotBuild {
         entries: &[GitTreeEntry],
         config: &crate::domain::CodeWorkspaceDetectionConfig,
     ) {
+        let commit = self.commit.clone();
+        self.detect_and_fill_workspaces_at_commit(root_path, kind, &commit, entries, config);
+    }
+
+    pub(in crate::code) fn detect_and_fill_workspaces_at_commit(
+        &mut self,
+        root_path: &Path,
+        kind: RepositorySourceKind,
+        source_commit: &str,
+        entries: &[GitTreeEntry],
+        config: &crate::domain::CodeWorkspaceDetectionConfig,
+    ) {
         self.workspaces = detect_workspaces_for_source_snapshot(
             root_path,
             kind,
-            &self.commit,
+            source_commit,
             entries,
             &self.path_filters,
             config,

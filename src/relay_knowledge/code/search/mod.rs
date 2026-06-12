@@ -114,6 +114,52 @@ pub(crate) fn source_grep_matches(
     )
 }
 
+pub(crate) fn source_grep_matches_from_worktree_overlay(
+    registration: &CodeRepositoryRegistration,
+    expected_hashes: BTreeMap<String, String>,
+    request: SourceGrepRequest,
+) -> Result<SourceGrepOutcome, CodeIndexError> {
+    if request.limit == 0 || request.query.trim().is_empty() {
+        return Ok(SourceGrepOutcome {
+            matches: Vec::new(),
+            degraded_reason: None,
+        });
+    }
+    let candidates = selected_candidate_paths(&request);
+    if candidates.paths.is_empty() {
+        return Ok(SourceGrepOutcome {
+            matches: Vec::new(),
+            degraded_reason: candidates.degraded_reason,
+        });
+    }
+    let mut tree = TempSourceTree::create()?;
+    let root = PathBuf::from(&registration.root_path);
+    let materialized = materialize_source_blobs_per_path(
+        &root,
+        "filesystem:worktree-overlay-fallback",
+        &candidates.paths,
+        &mut tree,
+        MAX_GREP_BYTES,
+        Some(&expected_hashes),
+        request.exclude_generated,
+    )?;
+    let degraded_reason = candidates
+        .degraded_reason
+        .or(materialized.degraded_reason.clone());
+    if materialized.file_count == 0 {
+        return Ok(SourceGrepOutcome {
+            matches: Vec::new(),
+            degraded_reason,
+        });
+    }
+    source_grep_matches_from_materialized_tree(
+        &tree.root,
+        &candidates.paths,
+        &request,
+        degraded_reason,
+    )
+}
+
 fn source_grep_matches_from_materialized_tree(
     root: &Path,
     paths: &[String],

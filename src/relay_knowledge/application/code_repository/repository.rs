@@ -34,18 +34,21 @@ use super::freshness::{
     CodeFeatureFlagFreshnessContext, CodeQueryFreshnessContext,
     code_feature_flag_freshness_diagnostics, code_query_freshness_diagnostics,
 };
+use super::queue::queue_worktree_overlay_index_task;
 use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
-    CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
-    apply_code_grep_fallback, code_index_worker_lease_owner, code_status_checkpoint,
-    feature_flag_request_at_indexed_ref, index_start_from_completed, indexed_source_scope,
-    latest_compatible_code_scope_status, missing_indexed_source_scope_error, now_millis,
-    previous_index_state_for_index, recover_code_index_task_leases,
+    CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request,
+    active_index_matches_request, apply_code_grep_fallback, code_index_worker_lease_owner,
+    code_status_checkpoint, feature_flag_request_at_indexed_ref, index_start_from_completed,
+    indexed_source_scope, latest_compatible_code_scope_status, missing_indexed_source_scope_error,
+    now_millis, previous_index_state_for_index, recover_code_index_task_leases,
     recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
-    registration_from_status, required_code_repository, resolve_code_ref_for_selector,
-    resolved_code_scope_status, retrieval_request_at_indexed_ref, run_blocking_code,
-    storage_api_error,
+    registration_from_status, requested_index_ref_for_response, required_code_repository,
+    resolve_code_ref_for_selector, resolved_code_scope_status, retrieval_request_at_indexed_ref,
+    run_blocking_code, storage_api_error,
 };
+use super::worktree_freshness::ensure_worktree_overlay_matches_current_worktree;
+use super::worktree_ref::pending_worktree_overlay_base_commit;
 
 impl RelayKnowledgeService {
     /// Registers a Git repository as a code source.
@@ -141,6 +144,7 @@ impl RelayKnowledgeService {
         {
             return Ok(response);
         }
+        let requested_ref = requested_index_ref_for_response(&request);
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
         let summary = if request.mode == CodeIndexMode::Full {
@@ -201,7 +205,7 @@ impl RelayKnowledgeService {
             scope: crate::api::CodeRepositoryScopeMetadata::from_status(
                 &status,
                 &request.repository,
-                request.repository.ref_selector.clone(),
+                requested_ref,
             ),
             summary,
             status,
@@ -268,16 +272,22 @@ impl RelayKnowledgeService {
         {
             return Ok(index_start_from_completed(response, None));
         }
-        if request.mode != CodeIndexMode::Full {
+        if matches!(request.mode, CodeIndexMode::Incremental { .. }) {
             let response = self.index_code_repository(request, context).await?;
             return Ok(index_start_from_completed(response, None));
         }
         recover_code_index_task_leases(&store, now_millis()).await?;
+        if request.mode == CodeIndexMode::WorktreeOverlay {
+            let requested_ref = requested_index_ref_for_response(&request);
+            let task = queue_worktree_overlay_index_task(&store, &status, &request).await?;
+            return self
+                .index_start_response_from_task(&store, status, task, requested_ref, &context)
+                .await;
+        }
         let payload_json = serde_json::to_string(&request)
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
-        if let Some(active_task) = self
-            .active_full_index_task_for_request(&store, &status, &request, &payload_json)
-            .await?
+        if let Some(active_task) =
+            active_full_index_task_for_request(&store, &status, &request, &payload_json).await?
         {
             return self
                 .index_start_response_from_task(
@@ -358,39 +368,6 @@ impl RelayKnowledgeService {
         .await
     }
 
-    async fn active_full_index_task_for_request(
-        &self,
-        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
-        status: &CodeRepositoryStatus,
-        request: &CodeIndexRequest,
-        payload_json: &str,
-    ) -> Result<Option<crate::domain::CodeIndexTaskRecord>, ApiError> {
-        let Some(active_task) = store
-            .active_code_index_task(status.repository_id.clone())
-            .await
-            .map_err(storage_api_error)?
-        else {
-            return Ok(None);
-        };
-        if !active_task.state.is_unfinished()
-            || active_task.mode != CodeIndexMode::Full
-            || active_task.payload_json != payload_json
-        {
-            return Ok(None);
-        }
-        let resolved = resolve_code_ref_for_selector(
-            status,
-            &request.repository,
-            request.repository.ref_selector.clone(),
-        )
-        .await?;
-        if resolved == active_task.resolved_commit_sha {
-            Ok(Some(active_task))
-        } else {
-            Ok(None)
-        }
-    }
-
     async fn index_start_response_from_task(
         &self,
         store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
@@ -466,7 +443,13 @@ impl RelayKnowledgeService {
                 return Err(ApiError::invalid_argument(message));
             }
         };
-        if task.mode != CodeIndexMode::WorktreeOverlay {
+        if task.mode == CodeIndexMode::WorktreeOverlay {
+            if let Some(base_commit) =
+                pending_worktree_overlay_base_commit(&task.resolved_commit_sha)
+            {
+                request.repository.ref_selector = base_commit.to_owned();
+            }
+        } else {
             request.repository.ref_selector = task.resolved_commit_sha.clone();
         }
         let lease_context = CodeIndexTaskLeaseContext {
@@ -587,6 +570,10 @@ impl RelayKnowledgeService {
         }
         let requested_ref = request.repository.ref_selector.clone();
         let mut request = retrieval_request_at_indexed_ref(request, &status).await?;
+        if requested_ref == "worktree" {
+            ensure_worktree_overlay_matches_current_worktree(&store, &status, &request.repository)
+                .await?;
+        }
         let requested_resolved_ref = request.repository.ref_selector.clone();
         let freshness_target = request.repository.clone();
         let mut served_stale_scope = false;
@@ -720,6 +707,10 @@ impl RelayKnowledgeService {
         }
         let requested_ref = request.repository.ref_selector.clone();
         let mut request = feature_flag_request_at_indexed_ref(request, &status).await?;
+        if requested_ref == "worktree" {
+            ensure_worktree_overlay_matches_current_worktree(&store, &status, &request.repository)
+                .await?;
+        }
         let requested_resolved_ref = request.repository.ref_selector.clone();
         let freshness_target = request.repository.clone();
         let mut served_stale_scope = false;

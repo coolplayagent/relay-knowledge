@@ -1,29 +1,21 @@
-use std::{
-    ffi::OsString,
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fs, sync::Arc};
 
 use crate::{
     api::{
         CodeRepositoryFreshnessDiagnostics, CodeRepositoryFreshnessState, CodeRepositoryIndexLag,
-        CodeRepositoryPendingIndexWork, CodeRepositoryRegisterRequest, InterfaceKind,
-        RequestContext,
+        CodeRepositoryPendingIndexWork, CodeRepositoryRegisterRequest,
     },
-    application::{RelayKnowledgeService, RuntimeConfiguration},
     code::{reset_tracked_entries_call_count_for_root, tracked_entries_call_count_for_root},
     domain::{
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
-        CodeIndexSession, CodeQueryKind, CodeRepositorySelector, CodeRetrievalHit,
-        CodeRetrievalLayer, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeRange,
-        StalenessHint,
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
+        CodeIndexResourceBudget, CodeIndexSession, CodeQueryKind, CodeRepositorySelector,
+        CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, FreshnessPolicy,
+        RepositoryCodeRange, SoftwareGlobalKind, SoftwareGlobalRequest, StalenessHint,
     },
-    env::{EnvironmentConfig, PlatformKind},
-    storage::{CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeRepositoryStore, SqliteGraphStore},
 };
+
+use super::repository_test_support::*;
 
 static TRACKED_ENTRIES_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -245,8 +237,8 @@ async fn duplicate_active_filesystem_full_index_resolves_live_snapshot_before_re
 }
 
 #[tokio::test]
-async fn queued_worktree_overlay_task_preserves_payload_ref_selector() {
-    let repo = FixtureRepo::create("queued-worktree-overlay-payload-ref");
+async fn queued_worktree_overlay_task_pins_payload_to_queued_base() {
+    let repo = FixtureRepo::create("queued-worktree-overlay-pinned-base");
     repo.write("src/lib.rs", "pub fn overlay_policy() -> u32 { 1 }\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
@@ -261,64 +253,332 @@ async fn queued_worktree_overlay_task_preserves_payload_ref_selector() {
         )
         .await
         .expect("base index should succeed");
+    let queued_base = repo.git_text(["rev-parse", "HEAD"]);
+
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::WorktreeOverlay,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("start-queued-overlay-pinned-base"),
+        )
+        .await
+        .expect("worktree overlay should queue");
+    let task = started.task.expect("overlay task should be queued");
+    let payload: CodeIndexRequest =
+        serde_json::from_str(&task.payload_json).expect("task payload should deserialize");
+    assert_eq!(task.ref_selector, queued_base);
+    assert_eq!(payload.repository.ref_selector, queued_base);
+
+    repo.write("src/lib.rs", "pub fn overlay_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "advance-head-before-worker"]);
+
+    let error = service
+        .run_code_index_task_once(Some(task.task_id), context("run-stale-queued-overlay"))
+        .await
+        .expect_err("queued overlay should reject a different checked-out HEAD");
+    assert!(error.message.contains("checked-out HEAD"));
+}
+
+#[tokio::test]
+async fn worktree_overlay_requires_indexed_head_base_scope() {
+    let repo = FixtureRepo::create("worktree-overlay-requires-base");
+    repo.write("src/lib.rs", "pub fn base_required() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-worktree-base-required").await;
+    let error = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::WorktreeOverlay,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-worktree-without-base"),
+        )
+        .await
+        .expect_err("worktree overlay should require a HEAD base scope");
+
+    assert!(
+        error
+            .message
+            .contains("requires an indexed HEAD base scope")
+    );
+}
+
+#[tokio::test]
+async fn clean_worktree_overlay_query_uses_persisted_worktree_scope() {
+    let repo = FixtureRepo::create("clean-worktree-overlay-query");
     repo.write(
         "src/lib.rs",
-        "pub fn overlay_policy() -> u32 { 2 }\npub fn overlay_policy_v2() -> u32 { overlay_policy() }\n",
+        "pub fn clean_worktree_policy() -> u32 { 1 }\n",
     );
-    let overlay_request = CodeIndexRequest {
-        repository: selector("fixture", "HEAD"),
-        mode: CodeIndexMode::WorktreeOverlay,
-        workspace_detection: Default::default(),
-        freshness_policy: FreshnessPolicy::WaitUntilFresh,
-    };
-    let payload_json =
-        serde_json::to_string(&overlay_request).expect("overlay request should serialize");
-    let status = store
-        .code_repository_status("fixture".to_owned())
-        .await
-        .expect("status should load")
-        .expect("repository should exist");
-    let task = store
-        .queue_code_index_task(CodeIndexTaskSeed {
-            repository_id: status.repository_id.clone(),
-            alias: status.alias.clone(),
-            ref_selector: "HEAD".to_owned(),
-            resolved_commit_sha: "invalid-ref-if-worker-overrides-payload".to_owned(),
-            tree_hash: "worktree:pending:test".to_owned(),
-            source_scope: format!("watcher:{}", status.repository_id),
-            path_filters: status.path_filters.clone(),
-            language_filters: status.language_filters.clone(),
-            mode: CodeIndexMode::WorktreeOverlay,
-            input_fingerprint: "queued-worktree-overlay-payload-ref".to_owned(),
-            resource_budget: CodeIndexResourceBudget::default(),
-            payload_json,
-            now_ms: 1,
-        })
-        .await
-        .expect("overlay task should queue");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
 
-    let completed = service
-        .run_code_index_task_once(Some(task.task_id.clone()), context("run-queued-overlay"))
+    register_fixture_repo(&service, &repo, "register-clean-worktree-overlay").await;
+    service
+        .index_code_repository(
+            request("fixture", "HEAD"),
+            context("index-clean-worktree-base"),
+        )
         .await
-        .expect("worker should preserve payload ref for worktree overlay")
-        .expect("worker should claim the queued task");
+        .expect("base index should succeed");
+    let overlay = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::WorktreeOverlay,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-clean-worktree-overlay"),
+        )
+        .await
+        .expect("clean worktree overlay should reuse the HEAD snapshot");
 
-    assert_eq!(completed.task_id, task.task_id);
+    assert_eq!(overlay.scope.requested_ref, "worktree");
+    assert!(overlay.summary.resolved_commit_sha.starts_with("worktree:"));
+    assert!(overlay.summary.tree_hash.starts_with("worktree:"));
+
     let query = service
         .query_code_repository(
             CodeRetrievalRequest::new(
-                "overlay_policy_v2",
+                "clean_worktree_policy",
                 selector("fixture", "worktree"),
                 CodeQueryKind::Definition,
                 10,
                 FreshnessPolicy::AllowStale,
             )
             .expect("query request should validate"),
-            context("query-queued-overlay"),
+            context("query-clean-worktree-overlay"),
         )
         .await
-        .expect("explicit worktree query should succeed");
+        .expect("worktree query should read the persisted clean overlay scope");
     assert!(query.results.iter().any(|hit| hit.path == "src/lib.rs"));
+}
+
+#[tokio::test]
+async fn start_worktree_overlay_queues_task_and_query_revalidates_worktree() {
+    let repo = FixtureRepo::create("queued-worktree-overlay-revalidation");
+    repo.write(
+        "src/lib.rs",
+        "pub fn queued_worktree_policy() -> u32 { 1 }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-queued-worktree-revalidation").await;
+    service
+        .index_code_repository(
+            request("fixture", "HEAD"),
+            context("index-head-before-overlay"),
+        )
+        .await
+        .expect("HEAD index should succeed");
+    repo.write("src/worktree.rs", "pub fn queued_overlay_policy() {}\n");
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::WorktreeOverlay,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-worktree-overlay-task"),
+        )
+        .await
+        .expect("worktree overlay should queue");
+    let task_id = started.task.as_ref().expect("queued task").task_id.clone();
+    assert_eq!(started.scope.requested_ref, "worktree");
+
+    service
+        .run_code_index_task_once(Some(task_id), context("run-worktree-overlay-task"))
+        .await
+        .expect("queued overlay should run");
+    repo.write("src/later.rs", "pub fn later_worktree_policy() {}\n");
+    let error = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "later_worktree_policy",
+                selector("fixture", "worktree"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-stale-worktree-overlay"),
+        )
+        .await
+        .expect_err("changed worktree should require overlay reindex");
+
+    assert!(error.message.contains("worktree overlay is stale"));
+
+    let error = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                selector("fixture", "worktree"),
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("feature flag request should validate"),
+            context("feature-flags-stale-worktree-overlay"),
+        )
+        .await
+        .expect_err("feature flags should require overlay reindex");
+    assert!(error.message.contains("worktree overlay is stale"));
+
+    let error = service
+        .software_global_projection(
+            SoftwareGlobalRequest::new(
+                selector("fixture", "worktree"),
+                SoftwareGlobalKind::All,
+                FreshnessPolicy::AllowStale,
+                10,
+            )
+            .expect("software request should validate"),
+            context("software-stale-worktree-overlay"),
+        )
+        .await
+        .expect_err("software projection should require overlay reindex");
+    assert!(error.message.contains("worktree overlay is stale"));
+}
+
+#[tokio::test]
+async fn worktree_overlay_freshness_uses_persisted_scope_filters() {
+    let repo = FixtureRepo::create("filtered-worktree-overlay-freshness");
+    repo.write(
+        "src/selected.rs",
+        "pub fn selected_overlay_policy() -> u32 { 1 }\n",
+    );
+    repo.write("src/ignored.rs", "pub fn ignored_overlay_policy() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-filtered-worktree-overlay"),
+        )
+        .await
+        .expect("repository should register");
+    let scoped_head = CodeRepositorySelector::new(
+        "fixture",
+        "HEAD",
+        vec!["src/selected.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("selector should validate");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: scoped_head.clone(),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-filtered-worktree-base"),
+        )
+        .await
+        .expect("filtered base index should succeed");
+    repo.write(
+        "src/selected.rs",
+        "pub fn selected_overlay_policy_v2() -> u32 { 2 }\n",
+    );
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: scoped_head,
+                mode: CodeIndexMode::WorktreeOverlay,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-filtered-worktree-overlay"),
+        )
+        .await
+        .expect("filtered worktree overlay should index");
+    repo.write("src/ignored.rs", "pub fn ignored_overlay_policy_v2() {}\n");
+
+    let scoped_worktree = CodeRepositorySelector::new(
+        "fixture",
+        "worktree",
+        vec!["src/selected.rs".to_owned()],
+        Vec::new(),
+    )
+    .expect("selector should validate");
+    let query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "selected_overlay_policy_v2",
+                scoped_worktree,
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-filtered-worktree-overlay"),
+        )
+        .await
+        .expect("filtered worktree query should ignore out-of-scope changes");
+
+    assert!(
+        query
+            .results
+            .iter()
+            .any(|hit| hit.path == "src/selected.rs")
+    );
+}
+
+#[tokio::test]
+async fn worktree_query_rejects_dirty_worktree_after_head_only_index() {
+    let repo = FixtureRepo::create("dirty-worktree-query-with-head-only-index");
+    repo.write("src/lib.rs", "pub fn head_only_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-head-only-worktree").await;
+    service
+        .index_code_repository(
+            request("fixture", "HEAD"),
+            context("index-head-only-worktree"),
+        )
+        .await
+        .expect("HEAD index should succeed");
+    repo.write("src/worktree.rs", "pub fn unindexed_worktree_policy() {}\n");
+
+    let error = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "unindexed_worktree_policy",
+                selector("fixture", "worktree"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-head-only-dirty-worktree"),
+        )
+        .await
+        .expect_err("worktree query must not fall back to a plain HEAD index");
+
+    assert!(error.message.contains("has no active worktree overlay"));
 }
 
 #[tokio::test]
@@ -649,171 +909,4 @@ async fn filesystem_impact_reports_deleted_base_paths_from_stored_fingerprints()
         impact.path_groups.in_scope_changed_paths,
         ["src/api.rs".to_owned()]
     );
-}
-
-async fn register_fixture_repo(service: &RelayKnowledgeService, repo: &FixtureRepo, name: &str) {
-    service
-        .register_code_repository(
-            CodeRepositoryRegisterRequest {
-                root_path: repo.path.display().to_string(),
-                alias: "fixture".to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: Vec::new(),
-            },
-            context(name),
-        )
-        .await
-        .expect("repository should register");
-}
-
-async fn register_fixture_source(
-    service: &RelayKnowledgeService,
-    source: &FixtureSourceDir,
-    name: &str,
-) {
-    service
-        .register_code_repository(
-            CodeRepositoryRegisterRequest {
-                root_path: source.path.display().to_string(),
-                alias: "fixture".to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: Vec::new(),
-            },
-            context(name),
-        )
-        .await
-        .expect("source directory should register");
-}
-
-fn request(alias: &str, ref_selector: &str) -> CodeIndexRequest {
-    CodeIndexRequest {
-        repository: selector(alias, ref_selector),
-        mode: CodeIndexMode::Full,
-        workspace_detection: Default::default(),
-        freshness_policy: FreshnessPolicy::WaitUntilFresh,
-    }
-}
-
-fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
-    CodeRepositorySelector::new(alias, ref_selector, Vec::new(), Vec::new())
-        .expect("selector should validate")
-}
-
-fn context(name: &str) -> RequestContext {
-    RequestContext::with_ids(
-        InterfaceKind::Cli,
-        format!("req-{name}"),
-        format!("trace-{name}"),
-    )
-}
-
-async fn service_with_memory_store() -> RelayKnowledgeService {
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-    service_with_store(store).await
-}
-
-async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKnowledgeService {
-    let runtime_root = std::env::temp_dir().join("relay-knowledge-code-repository-runtime");
-    let home_dir = runtime_root.join("home");
-    let temp_dir = runtime_root.join("tmp");
-    let relay_home = runtime_root.join("relay");
-    for directory in [&home_dir, &temp_dir, &relay_home] {
-        fs::create_dir_all(directory).expect("runtime test directory should be created");
-    }
-    let environment = EnvironmentConfig::from_pairs(
-        PlatformKind::current(),
-        [
-            (OsString::from("HOME"), home_dir.into_os_string()),
-            (OsString::from("TEMP"), temp_dir.clone().into_os_string()),
-            (OsString::from("TMP"), temp_dir.clone().into_os_string()),
-            (OsString::from("TMPDIR"), temp_dir.into_os_string()),
-            (
-                OsString::from("RELAY_KNOWLEDGE_HOME"),
-                relay_home.into_os_string(),
-            ),
-        ],
-    )
-    .expect("environment should parse");
-    let runtime = RuntimeConfiguration::from_environment(&environment)
-        .await
-        .expect("runtime should compose");
-
-    RelayKnowledgeService::with_store(runtime, store)
-}
-
-struct FixtureRepo {
-    path: PathBuf,
-}
-
-impl FixtureRepo {
-    fn create(name: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock should be after epoch")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("relay-knowledge-{name}-{nanos}"));
-        fs::create_dir_all(path.join("src")).expect("repo directory should be created");
-        let repo = Self { path };
-        repo.git(["init"]);
-        repo.git(["config", "user.email", "relay@example.invalid"]);
-        repo.git(["config", "user.name", "Relay Test"]);
-        repo
-    }
-
-    fn write(&self, relative: &str, content: &str) {
-        let path = self.path.join(relative);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("parent directory should exist");
-        }
-        fs::write(path, content).expect("fixture file should be written");
-    }
-
-    fn git<const N: usize>(&self, args: [&str; N]) {
-        let output = git_command(&self.path, args)
-            .output()
-            .expect("git should run");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
-        let output = git_command(&self.path, args)
-            .output()
-            .expect("git should run");
-        assert!(output.status.success());
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
-    }
-}
-
-fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
-    let mut command = Command::new("git");
-    command.current_dir(path).args(args);
-    command
-}
-
-struct FixtureSourceDir {
-    path: PathBuf,
-}
-
-impl FixtureSourceDir {
-    fn create(name: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock should be after epoch")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("relay-knowledge-{name}-{nanos}"));
-        fs::create_dir_all(path.join("src")).expect("source directory should be created");
-        Self { path }
-    }
-
-    fn write(&self, relative: &str, content: &str) {
-        let path = self.path.join(relative);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("parent directory should exist");
-        }
-        fs::write(path, content).expect("fixture file should be written");
-    }
 }

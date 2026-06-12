@@ -36,7 +36,9 @@ pub(super) use candidate_paths::candidate_path_fts_query;
 pub(super) use candidate_paths::{
     file_candidate_paths_for_query_scope, file_candidate_paths_for_scope,
 };
-pub(super) use fingerprints::{file_fingerprints, file_fingerprints_for_scope};
+pub(super) use fingerprints::{
+    file_fingerprints, file_fingerprints_for_paths, file_fingerprints_for_scope,
+};
 
 const IMPORT_SCHEMA: &str = "relay_import";
 
