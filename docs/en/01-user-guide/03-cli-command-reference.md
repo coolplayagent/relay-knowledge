@@ -102,7 +102,7 @@ relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset]
 relay-knowledge repo index-worker [--task-id <id>]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>
-relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports|sbom]
+relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports|sbom] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
@@ -146,6 +146,14 @@ Kind values are scoped to their command family:
 Do not pass kind values across command families. Use `repo impact` for impact
 analysis and `repo feature-flags` for feature flags; they are not
 `repo query --kind` values.
+
+`--path` is the CLI flag for a path filter. `repo register --path` stores the
+indexed scope, while `repo query --path` and `repo feature-flags --path` narrow
+reads inside that indexed scope. `repo index` does not accept `--path`; it uses
+the registered scope and the selected `--ref`. Non-Git source directories use
+`HEAD` for the normal moving filesystem snapshot, and status records the
+resolved `filesystem:<hash>` commit. `worktree` is a Git worktree-overlay
+selector, not the default for non-Git directories.
 
 Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. Non-interactive agents can run `repo index-worker --task-id <id> --format json` as an explicit single-shot drain command for queued or retrying tasks; `service worker run [--task-id <id>] --format json` is the split-worker preview entrypoint and claims at most one durable code-index task, completing or failing it through task id, lease owner, and attempt count checks; `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running. `repo index <alias> --reset --format json` clears unfinished task leases for the repository without deleting completed indexed scopes or reviving terminal dead-letter history. Index writes use one live writer per repository; queries, reports, graph reads, file queries, and health diagnostics use bounded read-only connections to read committed snapshots where SQLite WAL permits it.
 

@@ -42,6 +42,12 @@ relay-knowledge repo index repo --ref HEAD --dry-run --format json
 
 preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。clean Git index 以 tracked tree 为权威：只要目录在注册和请求的 path scope 内，Git 跟踪的 `.cloudbuild/`、`.cid/`、`.build_config/`、`build/`、`dist/`、`vendor/` 和 `third_party/` 都可以进入索引。非 Git source directory 默认按白名单扫描根层支持文件和 `src/`、`include/`、`lib/`、`Sources/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`docs/`、`config/` 等 source-like roots；`build/`、`dist/`、`target/`、`node_modules/`、`vendor/`、`third_party/`、cache、virtualenv 和 coverage 目录只有显式 `--path` opt in 才会进入。这个 opt in 是路径特异的：`--path src` 不会扫描兄弟级 `node_modules/` 或 `target/`，只有 `--path build` 或 `build/` 下的路径才允许该宽泛目录进入，`--path .` 则允许整个 root。默认非 Git scan 会跳过不会贡献白名单内容的目录；带过滤条件的非 Git scan 会在读取前跳过无关兄弟目录。若目录含 Git metadata 但 Git 因 unsafe ownership 或 metadata 损坏无法解析，注册会失败，而不是回退为非 Git 索引。默认 `--path src` 注册仍只会扩展到已发现 source root，例如 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 和嵌套 JVM source root；精确请求 path filter 仍只收窄查询。`filesystem:` snapshot id 绑定到 discovery 后实际进入索引的文件，因此未索引文件变化不会让 scoped ref 失效，后台 worker 重放排队 synthetic ref 前也会重新校验，full-index batch 和 incremental delta 接受 live bytes 前会校验计划文件 hash，moving-ref resolution 使用与 indexed scope 相同的 path 和 language filters。显式已存储 `filesystem:` ref 在本地编辑后仍可查询；只有 source fallback 读取要求 live tree 仍匹配。保留的默认 preset 是文件级保护，用于二进制/媒体资产和 `*.jsonl` 数据集转储。`uv.lock` 这类锁文件快照可以贡献 SBOM 依赖事实，但不会展开成源码 chunk 或配置符号。Git worktree overlay 使用 Git status，因此被 `.gitignore` 忽略的 untracked 文件不会进入索引，除非 Git 自身报告它们；未跟踪的宽泛依赖、缓存或构建目录不会递归展开，除非显式 path filter opt in；脏 submodule 工作区不会被读取，需先提交 submodule 并更新父仓 gitlink。
 
+`--path` 是注册期或查询期 scope，不是索引期参数。用
+`repo register <path> --path <filter>` 选择源码范围，然后运行不带
+`--path` 的 `repo index <alias> --ref HEAD`。非 Git 目录的常规移动文件
+系统 selector 是 `HEAD`，会解析为 `filesystem:<hash>` 快照；`worktree`
+只用于 Git worktree overlay。
+
 对 `--ref worktree`，已提交的 submodule 更新会在父仓 gitlink 已 staged 时进入 overlay；如果父仓 gitlink 尚未 staged，但 submodule worktree 的 `HEAD` 已移动，也会进入 overlay。当两种状态同时存在时，overlay 会采用已检出的 submodule worktree `HEAD`，让 worktree snapshot 与磁盘上的文件一致。deinit 后只要 `.git/modules` 中仍有 staged submodule commit 对象也会读取；submodule 内未提交的脏内容仍会被忽略。
 
 ## 5.3 建立代码图谱索引
@@ -208,7 +214,7 @@ relay-knowledge repo update repo --base main --head HEAD --format json
 
 ## 5.6 Worktree Overlay
 
-需要索引未提交工作区时使用 `--ref worktree`:
+需要索引未提交 Git 工作区时使用 `--ref worktree`:
 
 ```bash
 relay-knowledge repo index repo --ref worktree --format json

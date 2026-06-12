@@ -42,6 +42,12 @@ relay-knowledge repo index repo --ref HEAD --dry-run --format json
 
 Preview is useful after narrowing registered `--path` values so unrelated directories are not written into the code graph. Clean Git indexing reads the tracked tree as the authority: tracked directories such as `.cloudbuild/`, `.cid/`, `.build_config/`, `build/`, `dist/`, `vendor/`, and `third_party/` are eligible when they are inside the registered and requested path scope. Non-Git source directories default to whitelist scanning for root-level supported files and source-like roots such as `src/`, `include/`, `lib/`, `Sources/`, `packages/`, `modules/`, `plugins/`, `extensions/`, `docs/`, and `config/`; `build/`, `dist/`, `target/`, `node_modules/`, `vendor/`, `third_party/`, cache, virtualenv, and coverage directories enter only when an explicit `--path` opts in. The opt-in is path-specific: `--path src` does not scan sibling `node_modules/` or `target/`, while `--path build` or a path inside `build/` permits that broad directory and `--path .` permits the whole root. Default non-Git scans skip directories that cannot contribute whitelist content, and filtered non-Git scans skip unrelated sibling directories before reading them. If a directory contains Git metadata but Git cannot resolve it because of unsafe ownership or corrupt metadata, registration fails instead of falling back to non-Git indexing. A default `--path src` registration still expands only to discovered source roots such as `external_deps/`, `packages/`, `modules/`, `plugins/`, `extensions/`, `Sources/`, `lib/`, and nested JVM source roots; precise request path filters still narrow queries. The `filesystem:` snapshot id is scoped to the files that are actually indexed after that discovery step, so edits to unindexed files do not invalidate the scoped ref, queued synthetic refs are verified before background workers replay them, full-index batches and incremental deltas verify planned file hashes before accepting live bytes, and moving-ref resolution uses the same path and language filters as the indexed scope. Explicit stored `filesystem:` refs remain queryable after local edits; only source fallback reads require the live tree to still match. The remaining default preset is file-level protection for binary/media assets and `*.jsonl` dataset dumps. Lockfile snapshots such as `uv.lock` can contribute SBOM dependency facts without being expanded into source chunks or configuration symbols. Git worktree overlays use Git status, so untracked files ignored by `.gitignore` are not indexed unless Git reports them, untracked broad dependency/cache/build directories are not recursively expanded unless an explicit path filter opts in, and dirty submodule worktrees are not read until the submodule commit and parent gitlink are updated.
 
+`--path` is registered or query-time scope, not an index-time option. Use
+`repo register <path> --path <filter>` to select the source scope, then run
+`repo index <alias> --ref HEAD` without `--path`. For non-Git directories,
+`HEAD` is the normal moving filesystem selector and resolves to a
+`filesystem:<hash>` snapshot; `worktree` is only for Git worktree overlays.
+
 For `--ref worktree`, a committed submodule update is included when either the parent gitlink is staged or the submodule worktree `HEAD` has moved while the parent gitlink is still unstaged. When both states exist, the overlay reflects the checked-out submodule worktree `HEAD` so the worktree snapshot matches the files on disk. Staged submodule commits remain readable after deinit when the committed objects are available through `.git/modules`; uncommitted dirty content inside the submodule is still ignored.
 
 ## 5.3 Build the Code Graph Index
@@ -210,7 +216,7 @@ The incremental path reads `git diff --name-status --find-renames -z` and rebuil
 
 ## 5.6 Worktree Overlay
 
-Use `--ref worktree` to index uncommitted work:
+Use `--ref worktree` to index uncommitted Git work:
 
 ```bash
 relay-knowledge repo index repo --ref worktree --format json

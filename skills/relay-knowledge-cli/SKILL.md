@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: "Use relay-knowledge local CLI as an agent knowledge backend for repository knowledge graphs and GraphRAG: repo query --kind hybrid/symbol/definition/references/callers/callees/imports/sbom; repo software --kind dependencies/sdks/files/topics/relationships/build/iac/design/all; feature flags/config gates; indexing, impact, setup, install/upgrade diagnostics. Use for 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, 软件依赖, SDK/API, 代码地图, definitions, references, usage, impact. For large cold repo indexing, do not treat CLI timeouts as failure: capture repo index task ids when returned, recover missing ids from repo status <alias>, let service drain active tasks, or run bounded repo index-worker attempts for queued/retrying tasks. Use repo update/index refresh results or status diagnostics instead of assuming task ids. Prefer graph CLI before grep/ripgrep/rg/plain text search unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP setup/tools, ACP adapters, or protocol-level agent access."
+description: "Use relay-knowledge local CLI as an agent knowledge backend for repository knowledge graphs and GraphRAG: repo query --kind hybrid/symbol/definition/references/callers/callees/imports/sbom; repo software --kind dependencies/sdks/files/topics/relationships/build/iac/design/all; feature flags/config gates; indexing, impact, setup, install/upgrade diagnostics. Use for 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, 软件依赖, SDK/API, 代码地图, definitions, references, usage, impact. For large cold repo indexing, do not treat CLI timeouts as failure: capture repo index task ids when returned, recover missing ids from repo status alias, let service drain active tasks, or run bounded repo index-worker attempts for queued/retrying tasks. Use repo update/index refresh results or status diagnostics instead of assuming task ids. Prefer graph CLI before grep/ripgrep/rg/plain text search unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP setup/tools, ACP adapters, or protocol-level agent access."
 metadata:
   version: 1.1.10
   openclaw:
@@ -241,6 +241,14 @@ Treat kind values as command-local. Do not pass `repo software` kinds to
 (`repo`, `file`, `doc`, `config`, `db`, `ci`, `runtime`, `wiki`,
 `monitoring`) as repository query kinds.
 
+Use `--path` only where the CLI supports a path filter: `repo register` stores
+the indexed scope, while `repo query` and `repo feature-flags` narrow reads
+inside an already indexed scope. Do not pass `--path` to `repo index`,
+`repo scope preview`, `repo update`, `repo impact`, or `repo software`; those
+commands use the registered scope plus their ref arguments. For non-Git source
+directories, use `--ref HEAD` for the normal moving filesystem snapshot. The
+`worktree` selector is for Git worktree overlays only.
+
 ### `repo query --kind` Code Retrieval
 
 Choose the command-local query kind from the user's intent:
@@ -273,6 +281,17 @@ relay-knowledge repo register /path/to/repo \
 relay-knowledge repo scope preview core --ref HEAD --format json
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo status core --format json
+```
+
+Non-Git source directories use the same registered path filter and `HEAD`
+selector flow. The resulting indexed commit is a `filesystem:<hash>` snapshot;
+query `HEAD` after indexing unless you intentionally copy an explicit
+`filesystem:<hash>` from `repo status`.
+
+```powershell
+relay-knowledge repo register "D:/workspace/hello" --alias hello --path "云存储服务开发部" --format json
+relay-knowledge repo index hello --ref HEAD --format json
+relay-knowledge repo query hello --query "关键词" --kind hybrid --ref HEAD --format json
 ```
 
 Use `repo status` after cold full indexing because initial indexing may return a
