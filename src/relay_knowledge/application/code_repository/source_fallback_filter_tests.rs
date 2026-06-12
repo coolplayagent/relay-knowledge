@@ -65,6 +65,7 @@ fn definition_plan(query: &str) -> CodeGrepFallbackPlan {
         kind: SourceGrepKind::Definition,
         identity: Some(query.to_owned()),
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     }
 }

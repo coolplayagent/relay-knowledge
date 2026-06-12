@@ -124,6 +124,99 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
 }
 
 #[tokio::test]
+async fn remote_repo_index_worktree_ref_posts_overlay_request() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("listener addr should resolve");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        let mut buffer = vec![0; 4096];
+        let count = stream.read(&mut buffer).await.expect("request should read");
+        let request = String::from_utf8_lossy(&buffer[..count]);
+        assert!(request.starts_with("POST /api/v1/code/repositories/fixture/index HTTP/1.1"));
+        assert!(request.contains("x-relay-request-id: req-remote-worktree-index"));
+        assert!(request.contains("\"mode\":\"worktree_overlay\""));
+        assert!(request.contains("\"repository\":\"fixture\""));
+        assert!(request.contains("\"ref_selector\":\"HEAD\""));
+        let response = json!({
+            "metadata": {
+                "trace_id": "trace-remote-worktree-index",
+                "request_id": "req-remote-worktree-index",
+                "graph_version": 1,
+                "stale": false
+            },
+            "scope": {
+                "scope_id": "git_snapshot:0000000000000001",
+                "repository_id": "repo:fixture",
+                "alias": "fixture",
+                "requested_ref": "worktree",
+                "resolved_commit_sha": "worktree:abc",
+                "tree_hash": "tree",
+                "path_filters": [],
+                "language_filters": [],
+                "indexed_file_count": 1,
+                "index_versions": ["code:git_snapshot:0000000000000001:tree"],
+                "stale": false
+            },
+            "summary": null,
+            "status": {
+                "repository_id": "repo:fixture",
+                "alias": "fixture",
+                "root_path": "/tmp/fixture",
+                "path_filters": [],
+                "language_filters": [],
+                "last_indexed_scope_id": "git_snapshot:0000000000000001",
+                "last_indexed_commit": "worktree:abc",
+                "tree_hash": "tree",
+                "state": "indexed",
+                "indexed_file_count": 1,
+                "symbol_count": 1,
+                "reference_count": 0,
+                "chunk_count": 0,
+                "stale": false
+            },
+            "task": null,
+            "checkpoint": null
+        })
+        .to_string();
+        let response_head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            response.len()
+        );
+        stream
+            .write_all(response_head.as_bytes())
+            .await
+            .expect("response head should write");
+        stream
+            .write_all(response.as_bytes())
+            .await
+            .expect("response body should write");
+    });
+    let action = CliAction::Repo(repo_cli::RepoCommand::Index {
+        alias: "fixture".to_owned(),
+        ref_selector: "worktree".to_owned(),
+        dry_run: false,
+    });
+
+    let output = remote_cli::run_remote(
+        &NetworkEnvOverrides::default(),
+        &format!("http://{addr}"),
+        &action,
+        context("remote-worktree-index"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("remote worktree index should run")
+    .expect("repo index should be supported");
+
+    let value: Value = serde_json::from_str(output.trim()).expect("remote output should be JSON");
+    assert_eq!(value["scope"]["requested_ref"], "worktree");
+    assert_eq!(value["scope"]["resolved_commit_sha"], "worktree:abc");
+    server.await.expect("server task should finish");
+}
+
+#[tokio::test]
 async fn remote_repo_software_posts_stable_code_api_and_kind() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

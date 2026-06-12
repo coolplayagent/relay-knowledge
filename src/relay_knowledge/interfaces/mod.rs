@@ -3,3 +3,5 @@
 pub mod agent;
 pub mod cli;
 pub mod web;
+
+mod code_index_mode;

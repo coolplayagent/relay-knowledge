@@ -38,6 +38,9 @@ mod test_fixtures;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+#[path = "tests/source/worktree_overlay_review.rs"]
+mod worktree_overlay_review_tests;
+#[cfg(test)]
 #[path = "tests/source/worktree_overlay.rs"]
 mod worktree_overlay_tests;
 
@@ -69,6 +72,8 @@ pub(crate) use git::{
 #[cfg(test)]
 pub(crate) use index::build_index_snapshot_with_base_commit;
 pub(crate) use index::changed_paths_for_filesystem_diff;
+pub(crate) use index::clean_worktree_overlay_hash;
+pub(crate) use index::compute_worktree_overlay_identity;
 #[cfg(test)]
 use index::impact_paths_from_changes;
 #[cfg(test)]
@@ -79,7 +84,7 @@ pub(crate) use index::{
 pub(crate) use registration::REGISTRATION_LANGUAGE_FILTER_ERROR;
 pub(crate) use search::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
-    SourceGrepRequest, source_grep_matches,
+    SourceGrepRequest, source_grep_matches, source_grep_matches_from_worktree_overlay,
 };
 #[cfg(test)]
 use source::gitlink as source_gitlink;
@@ -87,7 +92,8 @@ pub(crate) use source::roots as source_roots;
 use source::{changes, declarations as source_declarations, git, layout as scope};
 pub(crate) use source_declarations::{
     SourceDeclarationMatch, safe_git_blob_path, simple_source_identifier,
-    source_declarations_for_identity, source_line_defines_identity,
+    source_declarations_for_identity, source_declarations_for_identity_from_worktree_overlay,
+    source_line_defines_identity,
 };
 
 use common::{generated_detection, ids, languages};

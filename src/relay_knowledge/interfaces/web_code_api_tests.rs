@@ -85,7 +85,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
         rejected_incremental["message"]
             .as_str()
             .expect("message should render")
-            .contains("full index mode")
+            .contains("full or worktree overlay index mode")
     );
 
     let index = request_json(

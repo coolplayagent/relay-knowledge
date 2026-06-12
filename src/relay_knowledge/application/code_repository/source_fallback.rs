@@ -20,6 +20,7 @@ use super::source_fallback_surface::{
     hybrid_exact_path_source_fallback, hybrid_source_surface_fallback,
     source_type_declaration_line_matches_query,
 };
+use super::source_fallback_worktree::source_fallback_commit;
 use super::source_surface::hit_has_complete_source_surface;
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
@@ -39,6 +40,7 @@ pub(super) struct CodeGrepFallbackPlan {
     pub(super) kind: SourceGrepKind,
     pub(super) identity: Option<String>,
     pub(super) exclude_generated: bool,
+    pub(super) read_worktree_overlay: bool,
     needs_scope_paths: bool,
 }
 
@@ -73,7 +75,7 @@ pub(super) fn plan_code_grep_fallback(
     request: &CodeRetrievalRequest,
     results: &[CodeRetrievalHit],
 ) -> Option<CodeGrepFallbackPlan> {
-    let commit = status.last_indexed_commit.clone()?;
+    let commit = source_fallback_commit(status)?;
     if !request.query_kind_filters.is_empty() {
         return None;
     }
@@ -101,7 +103,7 @@ pub(super) fn plan_code_grep_fallback(
             }
             let paths = definition_source_candidate_paths(request, results, &identity);
             Some(CodeGrepFallbackPlan {
-                commit,
+                commit: commit.commit.clone(),
                 query: identity.clone(),
                 needs_scope_paths: paths.is_empty(),
                 paths,
@@ -111,6 +113,7 @@ pub(super) fn plan_code_grep_fallback(
                 kind: SourceGrepKind::Definition,
                 identity: Some(identity),
                 exclude_generated: request.exclude_generated,
+                read_worktree_overlay: commit.read_worktree_overlay,
             })
         }
         CodeQueryKind::References => {
@@ -128,7 +131,7 @@ pub(super) fn plan_code_grep_fallback(
                 .collect::<Vec<_>>();
             let needs_scope_paths = paths.is_empty();
             Some(CodeGrepFallbackPlan {
-                commit,
+                commit: commit.commit.clone(),
                 query: identity,
                 paths,
                 path_filters,
@@ -137,6 +140,7 @@ pub(super) fn plan_code_grep_fallback(
                 kind: SourceGrepKind::References,
                 identity: None,
                 exclude_generated: request.exclude_generated,
+                read_worktree_overlay: commit.read_worktree_overlay,
                 needs_scope_paths,
             })
         }
@@ -150,7 +154,7 @@ pub(super) fn plan_code_grep_fallback(
             };
             let needs_scope_paths = local_relative_query || paths.is_empty();
             Some(CodeGrepFallbackPlan {
-                commit,
+                commit: commit.commit.clone(),
                 query,
                 paths,
                 path_filters,
@@ -159,13 +163,14 @@ pub(super) fn plan_code_grep_fallback(
                 kind: SourceGrepKind::Imports,
                 identity: None,
                 exclude_generated: request.exclude_generated,
+                read_worktree_overlay: commit.read_worktree_overlay,
                 needs_scope_paths,
             })
         }
         CodeQueryKind::Hybrid => {
             if let Some((query, paths)) = hybrid_exact_path_source_fallback(request, results) {
                 return Some(CodeGrepFallbackPlan {
-                    commit,
+                    commit: commit.commit.clone(),
                     query,
                     paths,
                     path_filters,
@@ -174,12 +179,13 @@ pub(super) fn plan_code_grep_fallback(
                     kind: SourceGrepKind::Hybrid,
                     identity: None,
                     exclude_generated: request.exclude_generated,
+                    read_worktree_overlay: commit.read_worktree_overlay,
                     needs_scope_paths: false,
                 });
             }
             if let Some((identity, paths)) = hybrid_source_surface_fallback(request, results) {
                 return Some(CodeGrepFallbackPlan {
-                    commit,
+                    commit: commit.commit.clone(),
                     query: identity,
                     paths,
                     path_filters,
@@ -188,6 +194,7 @@ pub(super) fn plan_code_grep_fallback(
                     kind: SourceGrepKind::Hybrid,
                     identity: None,
                     exclude_generated: request.exclude_generated,
+                    read_worktree_overlay: commit.read_worktree_overlay,
                     needs_scope_paths: false,
                 });
             }
@@ -205,7 +212,7 @@ pub(super) fn plan_code_grep_fallback(
                 .collect::<Vec<_>>();
             let needs_scope_paths = paths.is_empty();
             Some(CodeGrepFallbackPlan {
-                commit,
+                commit: commit.commit.clone(),
                 query: identity,
                 paths,
                 path_filters,
@@ -214,6 +221,7 @@ pub(super) fn plan_code_grep_fallback(
                 kind: SourceGrepKind::Hybrid,
                 identity: None,
                 exclude_generated: request.exclude_generated,
+                read_worktree_overlay: commit.read_worktree_overlay,
                 needs_scope_paths,
             })
         }

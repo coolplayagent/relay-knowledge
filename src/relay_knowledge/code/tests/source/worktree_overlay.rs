@@ -50,7 +50,16 @@ fn clean_worktree_overlay_rebuilds_clean_commit_snapshot() {
     .expect("clean overlay should index clean commit");
 
     assert!(snapshot.full_replace);
-    assert_eq!(snapshot.resolved_commit_sha, head);
+    assert!(
+        snapshot
+            .resolved_commit_sha
+            .starts_with(&format!("worktree:{head}:"))
+    );
+    assert!(snapshot.tree_hash.starts_with("worktree:"));
+    assert_eq!(
+        snapshot.base_resolved_commit_sha.as_deref(),
+        Some(head.as_str())
+    );
     assert_eq!(snapshot.files.len(), 1);
 }
 
@@ -101,7 +110,7 @@ fn worktree_overlay_hash_ignores_out_of_scope_changes() {
     .expect("second overlay should index");
 
     assert_eq!(first.tree_hash, second.tree_hash);
-    assert!(!first.resolved_commit_sha.starts_with("worktree:"));
+    assert!(first.resolved_commit_sha.starts_with("worktree:"));
     assert!(first.files.iter().any(|file| file.path == "src/lib.rs"));
 }
 
@@ -140,6 +149,59 @@ fn worktree_overlay_indexes_untracked_files_under_new_directories() {
             .iter()
             .any(|file| file.path == "src/generated/temp.rs")
     );
+}
+
+#[test]
+fn worktree_overlay_bounds_untracked_directory_expansion() {
+    let repo = TempGitRepo::create("overlay-untracked-directory-budget");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    for index in 0..=CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH {
+        repo.write(
+            &format!("src/generated/file_{index}.rs"),
+            "fn generated() {}\n",
+        );
+    }
+
+    let error = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect_err("oversized untracked directory should be rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains("worktree overlay changes exceed")
+    );
+}
+
+#[test]
+fn worktree_overlay_reinserts_staged_untracked_file_with_same_content() {
+    let repo = TempGitRepo::create("overlay-rm-cached-same-content");
+    let content = "fn retained() -> u32 { 1 }\n";
+    repo.write("src/lib.rs", content);
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.git(["rm", "--cached", "src/lib.rs"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        vec![CodeFileFingerprint {
+            path: "src/lib.rs".to_owned(),
+            blob_hash: stable_content_hash(content.as_bytes()),
+        }],
+    )
+    .expect("staged untracking should keep the worktree file indexed");
+
+    assert_eq!(snapshot.changed_path_count, 2);
+    assert!(!snapshot.deleted_paths.contains(&"src/lib.rs".to_owned()));
+    assert!(!snapshot.full_replace);
 }
 
 #[test]
@@ -832,7 +894,7 @@ fn worktree_overlay_skips_untracked_nested_git_repositories() {
             .all(|file| !file.path.starts_with("src/vendor/"))
     );
     assert!(snapshot.full_replace);
-    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
 }
 
 #[test]

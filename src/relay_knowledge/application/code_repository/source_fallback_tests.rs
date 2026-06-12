@@ -1,4 +1,5 @@
 use super::*;
+use crate::code::clean_worktree_overlay_hash;
 use crate::domain::{RepositoryCodeRange, code_snapshot_scope_id};
 
 #[test]
@@ -203,6 +204,7 @@ fn source_fallback_append_skips_inline_kind_filters() {
         kind: SourceGrepKind::Hybrid,
         identity: None,
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     };
     let mut results = Vec::new();
@@ -285,6 +287,7 @@ fn hybrid_source_refresh_prefers_type_declaration_over_member_surface() {
         kind: SourceGrepKind::Hybrid,
         identity: None,
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     };
     let mut result = hit("db/db_impl.h", "DBImpl& operator=(const DBImpl&) = delete;");
@@ -589,6 +592,7 @@ fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes()
         kind: SourceGrepKind::Imports,
         identity: None,
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     };
 
@@ -688,6 +692,7 @@ fn import_fallback_treats_import_call_queries_as_dynamic_import_intent() {
             kind: SourceGrepKind::Imports,
             identity: None,
             exclude_generated: false,
+            read_worktree_overlay: false,
             needs_scope_paths: false,
         };
 
@@ -752,6 +757,7 @@ fn import_fallback_keeps_graph_imports_before_dynamic_text_for_non_dynamic_queri
             kind: SourceGrepKind::Imports,
             identity: None,
             exclude_generated: false,
+            read_worktree_overlay: false,
             needs_scope_paths: false,
         };
 
@@ -882,6 +888,35 @@ fn import_fallback_skips_dot_prefixed_local_unresolved_import_graph_hits() {
     import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
 
     assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
+}
+
+#[test]
+fn fallback_plan_reads_clean_worktree_overlay_from_base_commit() {
+    let mut status = status();
+    let clean_hash = clean_worktree_overlay_hash("base-commit");
+    status.last_indexed_commit = Some(format!("worktree:base-commit:{clean_hash}"));
+    status.tree_hash = Some(format!("worktree:{clean_hash}"));
+    let request = request("rk_read_fn", CodeQueryKind::Definition, Vec::new());
+
+    let plan = plan_code_grep_fallback(&status, &request, &[])
+        .expect("worktree overlay should still allow source fallback");
+
+    assert_eq!(plan.commit, "base-commit");
+    assert!(!plan.read_worktree_overlay);
+}
+
+#[test]
+fn fallback_plan_reads_dirty_worktree_overlay_from_live_worktree() {
+    let mut status = status();
+    status.last_indexed_commit = Some("worktree:base-commit:dirty-overlay".to_owned());
+    status.tree_hash = Some("worktree:dirty-overlay".to_owned());
+    let request = request("rk_read_fn", CodeQueryKind::Definition, Vec::new());
+
+    let plan = plan_code_grep_fallback(&status, &request, &[])
+        .expect("dirty worktree overlay should allow source fallback");
+
+    assert_eq!(plan.commit, "worktree:base-commit:dirty-overlay");
+    assert!(plan.read_worktree_overlay);
 }
 
 fn request(query: &str, kind: CodeQueryKind, path_filters: Vec<String>) -> CodeRetrievalRequest {

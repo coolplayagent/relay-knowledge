@@ -9,6 +9,7 @@ use crate::{
         CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
         FreshnessPolicy, SoftwareGlobalKind, SoftwareGlobalRequest,
     },
+    interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request},
 };
 
 use super::{
@@ -169,10 +170,16 @@ pub async fn run_repo(
             ref_selector,
             dry_run,
         } => {
+            let selected_mode = mode_for_index_ref(&ref_selector);
+            let mode = if dry_run {
+                CodeIndexMode::Full
+            } else {
+                selected_mode.clone()
+            };
             let selector = selector(alias, ref_selector, Vec::new(), Vec::new(), format)?;
             let request = CodeIndexRequest {
-                repository: selector.clone(),
-                mode: CodeIndexMode::Full,
+                repository: selector_for_index_request(selector.clone(), &selected_mode),
+                mode,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
             };
@@ -979,5 +986,11 @@ pub(super) fn selector(
 }
 
 #[cfg(test)]
+#[path = "repo_cli_test_support.rs"]
+mod test_support;
+#[cfg(test)]
 #[path = "repo_cli_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "repo_cli_worktree_tests.rs"]
+mod worktree_tests;

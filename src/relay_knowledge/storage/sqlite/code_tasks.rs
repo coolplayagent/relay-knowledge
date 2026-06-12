@@ -14,6 +14,7 @@ use crate::{
     },
 };
 
+use super::code_tasks_worktree::active_worktree_base_scopes;
 use super::{code_cleanup::delete_scope_index, code_status::parse_json_list};
 
 const TASK_RECORD_COLUMNS: &str = "
@@ -748,6 +749,9 @@ fn retention_summary(
     let mut retained = BTreeSet::new();
     if !active_scope.is_empty() {
         retained.insert(active_scope.to_owned());
+    }
+    for scope in active_worktree_base_scopes(connection, repository_id, active_scope)? {
+        retained.insert(scope);
     }
     for scope in
         recent_successful_scopes(connection, repository_id, retain_recent_successful_scopes)?

@@ -37,6 +37,7 @@ use crate::code::{
 pub use deleted_symbols::deleted_symbol_names_for_diff;
 pub(crate) use filesystem_delta::changed_paths_for_filesystem_diff;
 use full_snapshot::build_full_snapshot;
+pub(crate) use full_snapshot::clean_worktree_overlay_hash;
 #[cfg(test)]
 pub(crate) use full_snapshot::mutate_next_filesystem_full_snapshot_read;
 use incremental::{IncrementalSnapshotRequest, build_incremental_snapshot};
@@ -114,6 +115,27 @@ pub(crate) fn build_index_snapshot_with_workspace_detection(
             workspace_detection,
         ),
     }
+}
+
+pub(crate) fn compute_worktree_overlay_identity(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    previous_hashes: Vec<CodeFileFingerprint>,
+    base_resolved_commit_sha: Option<String>,
+) -> Result<(String, String), CodeIndexError> {
+    let root = PathBuf::from(&registration.root_path);
+    let previous_hashes = previous_hashes
+        .into_iter()
+        .map(|fingerprint| (fingerprint.path, fingerprint.blob_hash))
+        .collect::<BTreeMap<_, _>>();
+
+    worktree_overlay::worktree_overlay_identity(
+        registration,
+        selector,
+        &root,
+        &previous_hashes,
+        base_resolved_commit_sha.as_deref(),
+    )
 }
 
 pub fn changed_paths_for_diff(

@@ -13,6 +13,7 @@ use crate::{
         CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
         CodeRepositorySelector, CodeRetrievalRequest, SoftwareGlobalRequest,
     },
+    interfaces::code_index_mode::normalize_index_request,
 };
 
 use super::{WebState, api_error_response};
@@ -65,11 +66,15 @@ async fn code_repository_index(
     if let Some(error) = path_alias_error(&alias, &request.repository) {
         return api_error_response(error);
     }
-    if request.mode != CodeIndexMode::Full {
+    if !matches!(
+        request.mode,
+        CodeIndexMode::Full | CodeIndexMode::WorktreeOverlay
+    ) {
         return api_error_response(ApiError::invalid_argument(
-            "remote code repository index API accepts only full index mode",
+            "remote code repository index API accepts only full or worktree overlay index mode",
         ));
     }
+    let request = normalize_index_request(request);
     match state
         .service
         .start_code_repository_index(request, api_context(&headers))

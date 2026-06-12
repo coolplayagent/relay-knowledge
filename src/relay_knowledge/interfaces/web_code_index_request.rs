@@ -6,13 +6,20 @@ use crate::domain::{
 };
 
 use super::{WebError, code_selector};
+use crate::interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request};
 
 pub(in crate::interfaces) fn code_index_request(
     payload: &Value,
     mode: CodeIndexMode,
 ) -> Result<CodeIndexRequest, WebError> {
+    let repository = code_selector(payload)?;
+    let mode = if mode == CodeIndexMode::Full {
+        mode_for_index_ref(&repository.ref_selector)
+    } else {
+        mode
+    };
     Ok(CodeIndexRequest {
-        repository: code_selector(payload)?,
+        repository: selector_for_index_request(repository, &mode),
         mode,
         workspace_detection: workspace_detection_config(payload)?,
         freshness_policy: FreshnessPolicy::AllowStale,
@@ -123,6 +130,20 @@ mod tests {
         assert_eq!(
             request.repository,
             CodeRepositorySelector::new("relay", "main", Vec::new(), Vec::new()).expect("selector")
+        );
+    }
+
+    #[test]
+    fn maps_worktree_ref_to_overlay_request() {
+        let mut payload = payload();
+        payload["ref"] = json!("worktree");
+
+        let request = code_index_request(&payload, CodeIndexMode::Full).expect("request");
+
+        assert_eq!(request.mode, CodeIndexMode::WorktreeOverlay);
+        assert_eq!(
+            request.repository,
+            CodeRepositorySelector::new("relay", "HEAD", Vec::new(), Vec::new()).expect("selector")
         );
     }
 

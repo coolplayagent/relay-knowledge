@@ -23,6 +23,7 @@ fn hybrid_source_surface_refreshes_match_inside_structured_line_range() {
         kind: SourceGrepKind::Hybrid,
         identity: None,
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     };
     let mut workflow_result = hit(

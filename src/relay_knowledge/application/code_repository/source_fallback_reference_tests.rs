@@ -77,6 +77,7 @@ fn reference_grep_fallback_ranks_usage_before_array_declaration() {
         kind: SourceGrepKind::References,
         identity: None,
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     };
     let outcome = SourceGrepOutcome {
@@ -135,6 +136,7 @@ fn reference_grep_fallback_ranks_declaration_first_for_typedef_intent() {
         kind: SourceGrepKind::References,
         identity: None,
         exclude_generated: false,
+        read_worktree_overlay: false,
         needs_scope_paths: false,
     };
     let mut results = Vec::new();
