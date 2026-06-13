@@ -687,6 +687,13 @@ in another command just because the flag name is the same:
   `repo`, `file`, `doc`, `config`, `db`, `ci`, `runtime`, `wiki`, or
   `monitoring`.
 
+Knowledge-map commands that read or write `.knowledge/knowledge-map.yaml`
+discover the repository root from the process start directory. Discovery walks
+up to the first `.git` or `.knowledge` marker and falls back to the nearest
+`AGENTS.md` for compatibility. If no repository marker is found, the command
+fails with a stable error instead of writing runtime state into the current
+directory. `map agent-snippet` does not require repository-root discovery.
+
 CLI parameter meaning is part of the public contract. Skills and other LLM tools
 should inspect `relay-knowledge help --format json` before issuing commands. It
 describes each command path, operation, read/write effect, required parameters,

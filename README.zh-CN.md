@@ -372,6 +372,11 @@ pattern，未声明导出的私有文件不会获得合成 package subpath alias
   `repo`、`file`、`doc`、`config`、`db`、`ci`、`runtime`、`wiki` 或
   `monitoring`。
 
+读取或写入 `.knowledge/knowledge-map.yaml` 的 knowledge-map 命令会从进程启动目录
+发现仓库根：先向上查找 `.git` 或 `.knowledge` 标记，找不到时兼容 fallback 到最近的
+`AGENTS.md`。如果没有发现仓库标记，命令会返回稳定错误，不会把 runtime state 写进当前
+目录。`map agent-snippet` 不需要仓库根发现。
+
 CLI 参数含义是公开契约的一部分。Skills 和其它 LLM 工具在发出命令前应先读取
 `relay-knowledge help --format json`；该输出会描述每条 command path、operation、读写影响、必填参数、默认值、允许值、可重复性、示例和注意事项。
 

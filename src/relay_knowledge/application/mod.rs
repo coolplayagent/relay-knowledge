@@ -16,7 +16,6 @@ pub use runtime::{
     AgentRuntimeConfig, FileIndexRootConfig, FileIndexRuntimeConfig, RetrievalRuntimeConfigError,
     RuntimeConfiguration, RuntimeConfigurationError, WorkerRuntimeConfig,
 };
-pub(crate) use service::knowledge_map::knowledge_map_service;
 pub use service::{AgentDurableAuditInput, RelayKnowledgeService};
 pub use update::{
     UpdateRuntimeConfig, UpdateRuntimeConfigError, UpdateSource, VersionCheckResponse,
