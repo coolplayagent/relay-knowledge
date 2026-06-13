@@ -28,6 +28,7 @@ pub(super) fn runtime_status_with_model_profiles(
     model_profiles: ModelProfileRuntimeSummary,
 ) -> RuntimeStatus {
     let network = runtime.network.current();
+    let qos = runtime.network.qos_runtime().diagnostics_snapshot();
 
     RuntimeStatus {
         config_dir: path_string(&runtime.paths.config_dir),
@@ -49,6 +50,15 @@ pub(super) fn runtime_status_with_model_profiles(
         qos_max_connections: network.qos.max_connections,
         qos_max_in_flight_requests: network.qos.max_in_flight_requests,
         qos_max_queue_depth: network.qos.max_queue_depth,
+        qos_current_connections: qos.usage.connections,
+        qos_current_in_flight_requests: qos.usage.in_flight_requests,
+        qos_current_queued_requests: qos.usage.queued_requests,
+        qos_admitted_total: qos.admitted_total,
+        qos_queued_total: qos.queued_total,
+        qos_rejected_total: qos.rejected_total,
+        qos_timed_out_total: qos.timed_out_total,
+        qos_cancelled_total: qos.cancelled_total,
+        qos_dropped_total: qos.dropped_total,
         worker_embedding_endpoint_configured: runtime.workers.embedding_endpoint.is_some(),
         worker_ocr_endpoint_configured: runtime.workers.ocr_endpoint.is_some(),
         worker_vision_endpoint_configured: runtime.workers.vision_endpoint.is_some(),

@@ -499,7 +499,14 @@ impl RelayKnowledgeService {
             WORKER_MAX_ATTEMPTS,
             self.runtime.workers.max_in_flight,
         );
-        let response = crate::net::http::post_json(&network.http, endpoint, &payload).await;
+        let response = crate::net::http::post_json_with_qos(
+            &network.http,
+            &self.runtime.network.qos_runtime(),
+            &network.qos,
+            endpoint,
+            &payload,
+        )
+        .await;
         match response {
             Ok(value) => match proposal_from_worker_response(
                 task,

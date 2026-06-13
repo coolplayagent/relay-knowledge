@@ -90,6 +90,7 @@ impl McpServer {
         agent: AgentRuntimeConfig,
     ) -> Self {
         let metrics = service.observability().agent_metrics();
+        let qos = network.qos_runtime();
         let audit = if agent.audit_sink_enabled {
             AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
                 .map(AgentAuditLog::with_sink)
@@ -102,7 +103,7 @@ impl McpServer {
             service,
             network,
             agent,
-            qos: QosRuntime::default(),
+            qos,
             audit,
             metrics,
             cancellations: CancellationRegistry::default(),

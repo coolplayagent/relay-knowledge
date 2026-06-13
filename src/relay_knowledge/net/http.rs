@@ -31,7 +31,7 @@ use axum::{
 };
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tower::Service;
+use tower::{Layer, Service};
 
 use crate::{
     env::NetworkEnvOverrides,
@@ -331,6 +331,7 @@ impl Error for HttpServeError {}
 #[derive(Debug)]
 pub enum HttpClientError {
     InvalidUrl(String),
+    QosRejected(RejectReason),
     Io(io::Error),
     Timeout,
     InvalidResponse,
@@ -342,6 +343,11 @@ impl fmt::Display for HttpClientError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidUrl(value) => write!(formatter, "invalid HTTP worker URL: {value}"),
+            Self::QosRejected(reason) => write!(
+                formatter,
+                "HTTP worker request rejected by QoS: {}",
+                reason.as_str()
+            ),
             Self::Io(error) => write!(formatter, "HTTP worker request failed: {error}"),
             Self::Timeout => write!(formatter, "HTTP worker request timed out"),
             Self::InvalidResponse => write!(formatter, "HTTP worker returned invalid response"),
@@ -357,6 +363,56 @@ impl fmt::Display for HttpClientError {
 
 impl Error for HttpClientError {}
 
+/// Error raised by QoS-gated outbound reqwest calls.
+#[derive(Debug)]
+pub enum QosHttpClientError {
+    QosRejected(RejectReason),
+    Transport(reqwest::Error),
+}
+
+impl QosHttpClientError {
+    /// Returns whether the transport layer reported a timeout.
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::Transport(error) if error.is_timeout())
+    }
+}
+
+impl fmt::Display for QosHttpClientError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::QosRejected(reason) => {
+                write!(formatter, "request rejected by QoS: {}", reason.as_str())
+            }
+            Self::Transport(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl Error for QosHttpClientError {}
+
+/// Sends an outbound reqwest request after acquiring a QoS request permit.
+pub async fn send_request_with_qos(
+    qos: &QosRuntime,
+    policy: &QosPolicy,
+    request: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, QosHttpClientError> {
+    let permit = qos
+        .admit_request(policy)
+        .map_err(QosHttpClientError::QosRejected)?;
+    let result = request.send().await;
+    drop(permit);
+
+    match result {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            if error.is_timeout() {
+                qos.record_timed_out();
+            }
+            Err(QosHttpClientError::Transport(error))
+        }
+    }
+}
+
 /// Posts a JSON payload through the network boundary using the configured timeout.
 pub async fn post_json(
     config: &HttpConfig,
@@ -370,6 +426,26 @@ pub async fn post_json(
         .map_err(|_| HttpClientError::Timeout)??;
 
     serde_json::from_slice(&response).map_err(HttpClientError::ResponseJson)
+}
+
+/// Posts JSON through the raw worker HTTP helper after outbound QoS admission.
+pub async fn post_json_with_qos(
+    config: &HttpConfig,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
+    url: &str,
+    payload: &Value,
+) -> Result<Value, HttpClientError> {
+    let permit = qos
+        .admit_request(policy)
+        .map_err(HttpClientError::QosRejected)?;
+    let result = post_json(config, url, payload).await;
+    drop(permit);
+    if matches!(result, Err(HttpClientError::Timeout)) {
+        qos.record_timed_out();
+    }
+
+    result
 }
 
 struct JsonHttpRequest {
@@ -480,7 +556,7 @@ pub async fn serve_router(
         .await
         .map_err(HttpServeError::Bind)?;
 
-    serve_listener(listener, router, config, shutdown).await
+    serve_listener(listener, router, config, None, shutdown).await
 }
 
 /// Starts an async HTTP server whose accepted connections consume QoS permits.
@@ -494,15 +570,25 @@ pub async fn serve_router_with_qos(
     let listener = tokio::net::TcpListener::bind(config.bind_address.to_string())
         .await
         .map_err(HttpServeError::Bind)?;
-    let listener = QosTcpListener::new(listener, qos, policy);
+    let listener = QosTcpListener::new(listener, qos.clone(), policy);
 
-    serve_listener(listener, router, config, shutdown).await
+    serve_listener(listener, router, config, Some(qos), shutdown).await
+}
+
+/// Adds per-request QoS admission to an Axum router without opening sockets.
+pub fn router_with_qos_request_admission(
+    router: Router,
+    qos: QosRuntime,
+    policy: QosPolicy,
+) -> Router {
+    router.layer(QosRequestLayer::new(qos, policy))
 }
 
 async fn serve_listener<L>(
     listener: L,
     router: Router,
     config: HttpConfig,
+    timeout_qos: Option<QosRuntime>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), HttpServeError>
 where
@@ -516,7 +602,7 @@ where
     };
     let server = axum::serve(
         listener,
-        HttpMakeService::new(router, config.request_timeout),
+        HttpMakeService::new(router, config.request_timeout, timeout_qos),
     )
     .with_graceful_shutdown(graceful_shutdown)
     .into_future();
@@ -538,14 +624,16 @@ struct HttpMakeService {
     router: Router,
     request_timeout: Duration,
     next_connection_id: Arc<AtomicU64>,
+    timeout_qos: Option<QosRuntime>,
 }
 
 impl HttpMakeService {
-    fn new(router: Router, request_timeout: Duration) -> Self {
+    fn new(router: Router, request_timeout: Duration, timeout_qos: Option<QosRuntime>) -> Self {
         Self {
             router,
             request_timeout,
             next_connection_id: Arc::new(AtomicU64::new(1)),
+            timeout_qos,
         }
     }
 }
@@ -569,6 +657,7 @@ where
             self.router.clone(),
             connection_id,
             self.request_timeout,
+            self.timeout_qos.clone(),
         )))
     }
 }
@@ -577,14 +666,21 @@ struct HttpConnectionService<S> {
     inner: S,
     connection_id: HttpConnectionId,
     request_timeout: Duration,
+    timeout_qos: Option<QosRuntime>,
 }
 
 impl<S> HttpConnectionService<S> {
-    fn new(inner: S, connection_id: HttpConnectionId, request_timeout: Duration) -> Self {
+    fn new(
+        inner: S,
+        connection_id: HttpConnectionId,
+        request_timeout: Duration,
+        timeout_qos: Option<QosRuntime>,
+    ) -> Self {
         Self {
             inner,
             connection_id,
             request_timeout,
+            timeout_qos,
         }
     }
 }
@@ -598,6 +694,7 @@ where
             inner: self.inner.clone(),
             connection_id: self.connection_id,
             request_timeout: self.request_timeout,
+            timeout_qos: self.timeout_qos.clone(),
         }
     }
 }
@@ -619,11 +716,85 @@ where
         request.extensions_mut().insert(self.connection_id);
         let future = self.inner.call(request);
         let request_timeout = self.request_timeout;
+        let timeout_qos = self.timeout_qos.clone();
         Box::pin(async move {
             match tokio::time::timeout(request_timeout, future).await {
                 Ok(result) => result,
-                Err(_) => Ok((StatusCode::REQUEST_TIMEOUT, "request timed out").into_response()),
+                Err(_) => {
+                    if let Some(qos) = timeout_qos {
+                        qos.record_timed_out();
+                    }
+                    Ok((StatusCode::REQUEST_TIMEOUT, "request timed out").into_response())
+                }
             }
+        })
+    }
+}
+
+#[derive(Clone)]
+struct QosRequestLayer {
+    qos: QosRuntime,
+    policy: QosPolicy,
+}
+
+impl QosRequestLayer {
+    fn new(qos: QosRuntime, policy: QosPolicy) -> Self {
+        Self { qos, policy }
+    }
+}
+
+impl<S> Layer<S> for QosRequestLayer {
+    type Service = QosRequestService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        QosRequestService {
+            inner,
+            qos: self.qos.clone(),
+            policy: self.policy.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct QosRequestService<S> {
+    inner: S,
+    qos: QosRuntime,
+    policy: QosPolicy,
+}
+
+impl<S> Service<Request> for QosRequestService<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Send,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(context)
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        let permit = match self.qos.admit_request(&self.policy) {
+            Ok(permit) => permit,
+            Err(reason) => {
+                return Box::pin(async move {
+                    Ok((StatusCode::TOO_MANY_REQUESTS, reason.as_str()).into_response())
+                });
+            }
+        };
+        let qos = self.qos.clone();
+        let future = self.inner.call(request);
+        Box::pin(async move {
+            let result = future.await;
+            drop(permit);
+            if let Ok(response) = &result {
+                if response.status() == StatusCode::REQUEST_TIMEOUT {
+                    qos.record_timed_out();
+                }
+            }
+            result
         })
     }
 }
@@ -657,8 +828,10 @@ impl Listener for QosTcpListener {
                             address,
                         );
                     }
-                    Err(RejectReason::ConnectionBudgetExceeded) => drop(stream),
-                    Err(_) => drop(stream),
+                    Err(_) => {
+                        self.qos.record_dropped();
+                        drop(stream)
+                    }
                 },
                 Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
             }

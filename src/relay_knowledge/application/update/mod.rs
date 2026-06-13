@@ -6,15 +6,21 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+mod http_fetch;
+
 use reqwest::{StatusCode, header};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     env::{RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO, RELAY_KNOWLEDGE_UPDATE_SOURCES, UpdateEnvOverrides},
-    net::{NetworkRuntime, http},
+    net::{
+        NetworkRuntime, http,
+        qos::{QosPolicy, QosRuntime},
+    },
     paths::RuntimePaths,
     project::{GITHUB_REPOSITORY_FULL_NAME, PROJECT_NAME},
 };
+use http_fetch::qos_transport_diagnostic;
 
 pub const DEFAULT_UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const VERSION_CHECK_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -280,8 +286,18 @@ async fn fetch_latest_version(
     let mut candidates = Vec::new();
     let mut diagnostics = Vec::new();
     let max_response_bytes = network_config.http.max_request_body_bytes;
+    let qos = network.qos_runtime();
     for source in &config.sources {
-        match fetch_source(&client, config, *source, max_response_bytes).await {
+        match fetch_source(
+            &client,
+            &qos,
+            &network_config.qos,
+            config,
+            *source,
+            max_response_bytes,
+        )
+        .await
+        {
             Ok(candidate) => candidates.push(candidate),
             Err(diagnostic) => diagnostics.push(diagnostic),
         }
@@ -292,27 +308,33 @@ async fn fetch_latest_version(
 
 async fn fetch_source(
     client: &reqwest::Client,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
     config: &UpdateRuntimeConfig,
     source: UpdateSource,
     max_response_bytes: u64,
 ) -> Result<ReleaseCandidate, VersionCheckDiagnostic> {
     match source {
         UpdateSource::Github => {
-            fetch_github_release(client, &config.github_repo, max_response_bytes).await
+            fetch_github_release(client, qos, policy, &config.github_repo, max_response_bytes).await
         }
-        UpdateSource::CratesIo => fetch_crates_release(client, max_response_bytes).await,
+        UpdateSource::CratesIo => {
+            fetch_crates_release(client, qos, policy, max_response_bytes).await
+        }
     }
 }
 
 async fn fetch_github_release(
     client: &reqwest::Client,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
     repo: &str,
     max_response_bytes: u64,
 ) -> Result<ReleaseCandidate, VersionCheckDiagnostic> {
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let response = send_json_request(client, &url)
+    let response = send_json_request(client, qos, policy, &url)
         .await
-        .map_err(|error| transport_diagnostic(UpdateSource::Github, error))?;
+        .map_err(|error| qos_transport_diagnostic(UpdateSource::Github, error))?;
     let status = response.status();
     if !status.is_success() {
         return Err(status_diagnostic(UpdateSource::Github, status));
@@ -329,12 +351,14 @@ async fn fetch_github_release(
 
 async fn fetch_crates_release(
     client: &reqwest::Client,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
     max_response_bytes: u64,
 ) -> Result<ReleaseCandidate, VersionCheckDiagnostic> {
     let url = format!("https://crates.io/api/v1/crates/{PROJECT_NAME}");
-    let response = send_json_request(client, &url)
+    let response = send_json_request(client, qos, policy, &url)
         .await
-        .map_err(|error| transport_diagnostic(UpdateSource::CratesIo, error))?;
+        .map_err(|error| qos_transport_diagnostic(UpdateSource::CratesIo, error))?;
     let status = response.status();
     if !status.is_success() {
         return Err(status_diagnostic(UpdateSource::CratesIo, status));
@@ -412,17 +436,22 @@ fn append_limited_response_body(
 
 async fn send_json_request(
     client: &reqwest::Client,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
     url: &str,
-) -> Result<reqwest::Response, reqwest::Error> {
-    client
-        .get(url)
-        .header(
-            header::USER_AGENT,
-            format!("{PROJECT_NAME}/{}", env!("CARGO_PKG_VERSION")),
-        )
-        .timeout(VERSION_CHECK_REQUEST_TIMEOUT)
-        .send()
-        .await
+) -> Result<reqwest::Response, http::QosHttpClientError> {
+    http::send_request_with_qos(
+        qos,
+        policy,
+        client
+            .get(url)
+            .header(
+                header::USER_AGENT,
+                format!("{PROJECT_NAME}/{}", env!("CARGO_PKG_VERSION")),
+            )
+            .timeout(VERSION_CHECK_REQUEST_TIMEOUT),
+    )
+    .await
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,8 +1,9 @@
 use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
-use axum::{Router, routing::get};
+use axum::{Router, body::Body, routing::get};
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tower::ServiceExt;
 
 #[test]
 fn parses_overridden_http_bind_address() {
@@ -153,6 +154,84 @@ async fn post_json_sends_bounded_worker_request() {
     server.await.expect("server task should finish");
 }
 
+#[tokio::test]
+async fn post_json_with_qos_rejects_when_outbound_budget_is_exhausted() {
+    let config = HttpConfig::new(
+        HttpBindAddress::parse("127.0.0.1:8791").expect("bind should parse"),
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        1024,
+        HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+    )
+    .expect("config should build");
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(1, 1, 1).expect("policy should build");
+    let _permit = qos
+        .admit_request(&policy)
+        .expect("first request should consume budget");
+
+    let error = post_json_with_qos(
+        &config,
+        &qos,
+        &policy,
+        "http://127.0.0.1:1/worker",
+        &json!({"task": "ocr"}),
+    )
+    .await
+    .expect_err("exhausted request budget should reject before transport");
+
+    assert!(matches!(
+        error,
+        HttpClientError::QosRejected(RejectReason::RequestBudgetExceeded)
+    ));
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
+}
+
+#[tokio::test]
+async fn qos_request_layer_rejects_excess_web_requests() {
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let (request_started, request_started_waiter) = tokio::sync::oneshot::channel();
+    let request_started = Arc::new(std::sync::Mutex::new(Some(request_started)));
+    let router = router_with_qos_request_admission(
+        Router::new()
+            .route(
+                "/hold",
+                get(move || signal_pending_route(request_started.clone())),
+            )
+            .route("/ok", get(|| async { "ok" })),
+        qos.clone(),
+        policy,
+    );
+    let first = tokio::spawn(
+        router.clone().oneshot(
+            axum::http::Request::builder()
+                .uri("/hold")
+                .body(Body::empty())
+                .expect("request should build"),
+        ),
+    );
+
+    tokio::time::timeout(Duration::from_secs(5), request_started_waiter)
+        .await
+        .expect("handler should start")
+        .expect("request should signal startup");
+    let response = router
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/ok")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
+
+    first.abort();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_router_enforces_graceful_shutdown_timeout() {
     let bind = "127.0.0.1:8791";
@@ -173,7 +252,7 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         get(move || signal_pending_route(request_started.clone())),
     );
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
-    let server = tokio::spawn(serve_listener(listener, router, config, async {
+    let server = tokio::spawn(serve_listener(listener, router, config, None, async {
         let _ = shutdown_waiter.await;
     }));
 
@@ -308,9 +387,15 @@ async fn serve_router_with_qos_rejects_excess_connections() {
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
     let server_qos = qos.clone();
     let listener = QosTcpListener::new(listener, server_qos, policy);
-    let server = tokio::spawn(serve_listener(listener, router, config, async {
-        let _ = shutdown_waiter.await;
-    }));
+    let server = tokio::spawn(serve_listener(
+        listener,
+        router,
+        config,
+        Some(qos.clone()),
+        async {
+            let _ = shutdown_waiter.await;
+        },
+    ));
 
     let first = connect_with_retry(&bind).await;
     wait_for_connection_count(&qos, 1).await;

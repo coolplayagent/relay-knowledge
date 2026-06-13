@@ -27,7 +27,7 @@ use crate::{
     },
     retrieval::{
         RetrievalPlan,
-        provider::{EmbeddingRequest, ProviderRetryClass, embedding_provider},
+        provider::{EmbeddingRequest, ProviderRetryClass, embedding_provider_with_qos},
         read_model_backend_statuses,
     },
     storage::{
@@ -589,7 +589,12 @@ impl RelayKnowledgeService {
             ApiError::invalid_argument(format!("failed to build HTTP client: {error}"))
         })?;
         let provider_name = remote.provider.as_str().to_owned();
-        let provider = embedding_provider(remote, client);
+        let provider = embedding_provider_with_qos(
+            remote,
+            client,
+            self.runtime.network.qos_runtime(),
+            network.qos,
+        );
         let started = Instant::now();
         let result = provider
             .embed(EmbeddingRequest {

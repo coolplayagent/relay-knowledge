@@ -10,6 +10,10 @@ use serde_json::{Value, json};
 use tokio::fs;
 
 use super::*;
+use crate::net::{
+    http::{QosHttpClientError, send_request_with_qos},
+    qos::{QosPolicy, QosRuntime},
+};
 
 pub(super) fn profile_response(
     file: Option<StoredProfileFile>,
@@ -253,11 +257,24 @@ pub(super) async fn write_json<T: Serialize>(
         .map_err(ModelProviderError::from)
 }
 
+#[cfg(test)]
 pub(super) async fn send_probe_request(
     client: &reqwest::Client,
     profile: &StoredModelProfile,
     request_timeout: Option<Duration>,
-) -> Result<reqwest::Response, reqwest::Error> {
+) -> Result<reqwest::Response, QosHttpClientError> {
+    let qos = QosRuntime::default();
+    let policy = default_test_qos_policy();
+    send_probe_request_with_qos(client, &qos, &policy, profile, request_timeout).await
+}
+
+pub(super) async fn send_probe_request_with_qos(
+    client: &reqwest::Client,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
+    profile: &StoredModelProfile,
+    request_timeout: Option<Duration>,
+) -> Result<reqwest::Response, QosHttpClientError> {
     let request = match profile.provider {
         ModelProviderKind::Anthropic => client
             .post(format!(
@@ -294,7 +311,7 @@ pub(super) async fn send_probe_request(
                 "messages": [{"role": "user", "content": "relay-knowledge provider probe"}]
             })),
     };
-    apply_request_timeout(request, request_timeout).send().await
+    send_request_with_qos(qos, policy, apply_request_timeout(request, request_timeout)).await
 }
 
 fn uses_embedding_probe(profile: &StoredModelProfile) -> bool {
@@ -309,23 +326,49 @@ fn is_embedding_model_name(model: &str) -> bool {
         || normalized.starts_with("e5-")
 }
 
+#[cfg(test)]
 pub(super) async fn send_discovery_request(
     client: &reqwest::Client,
     profile: &StoredModelProfile,
     request_timeout: Option<Duration>,
-) -> Result<reqwest::Response, reqwest::Error> {
+) -> Result<reqwest::Response, QosHttpClientError> {
+    let qos = QosRuntime::default();
+    let policy = default_test_qos_policy();
+    send_discovery_request_with_qos(client, &qos, &policy, profile, request_timeout).await
+}
+
+pub(super) async fn send_discovery_request_with_qos(
+    client: &reqwest::Client,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
+    profile: &StoredModelProfile,
+    request_timeout: Option<Duration>,
+) -> Result<reqwest::Response, QosHttpClientError> {
     let url = match profile.provider {
         ModelProviderKind::Anthropic => {
             format!("{}/v1/models", profile.base_url.trim_end_matches('/'))
         }
         _ => format!("{}/models", profile.base_url.trim_end_matches('/')),
     };
-    apply_request_timeout(
-        client.get(url).headers(auth_headers(profile)),
-        request_timeout,
+    send_request_with_qos(
+        qos,
+        policy,
+        apply_request_timeout(
+            client.get(url).headers(auth_headers(profile)),
+            request_timeout,
+        ),
     )
-    .send()
     .await
+}
+
+#[cfg(test)]
+fn default_test_qos_policy() -> QosPolicy {
+    QosPolicy::new(
+        crate::net::qos::DEFAULT_MAX_CONNECTIONS,
+        crate::net::qos::DEFAULT_MAX_IN_FLIGHT_REQUESTS,
+        crate::net::qos::DEFAULT_MAX_QUEUE_DEPTH,
+    )
+    .expect("default QoS policy should validate")
 }
 
 pub(super) fn provider_http_client(
@@ -386,7 +429,7 @@ pub(super) async fn probe_result_from_http(
     profile: StoredModelProfile,
     started: Instant,
     checked_at_ms: u64,
-    response: Result<reqwest::Response, reqwest::Error>,
+    response: Result<reqwest::Response, QosHttpClientError>,
 ) -> ModelConnectivityProbeResult {
     match response {
         Ok(response) => {
@@ -418,7 +461,7 @@ pub(super) async fn discovery_result_from_http(
     profile: StoredModelProfile,
     started: Instant,
     checked_at_ms: u64,
-    response: Result<reqwest::Response, reqwest::Error>,
+    response: Result<reqwest::Response, QosHttpClientError>,
 ) -> ModelDiscoveryResult {
     match response {
         Ok(response) => {
@@ -506,7 +549,7 @@ pub(super) fn transport_probe_result(
     profile: StoredModelProfile,
     started: Instant,
     checked_at_ms: u64,
-    error: reqwest::Error,
+    error: QosHttpClientError,
 ) -> ModelConnectivityProbeResult {
     ModelConnectivityProbeResult {
         ok: false,
