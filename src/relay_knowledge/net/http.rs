@@ -22,6 +22,8 @@ use std::{
     time::Duration,
 };
 
+mod qos_client;
+
 use axum::{
     Router,
     extract::Request,
@@ -37,6 +39,12 @@ use crate::{
     env::NetworkEnvOverrides,
     net::qos::{QosPermit, QosPolicy, QosRuntime, RejectReason},
 };
+
+pub use qos_client::{QosHttpClientError, QosHttpResponse, send_request_with_qos};
+
+tokio::task_local! {
+    static QOS_REQUEST_CONTEXT: ();
+}
 
 pub const DEFAULT_HTTP_BIND: &str = "127.0.0.1:8791";
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -362,56 +370,6 @@ impl fmt::Display for HttpClientError {
 }
 
 impl Error for HttpClientError {}
-
-/// Error raised by QoS-gated outbound reqwest calls.
-#[derive(Debug)]
-pub enum QosHttpClientError {
-    QosRejected(RejectReason),
-    Transport(reqwest::Error),
-}
-
-impl QosHttpClientError {
-    /// Returns whether the transport layer reported a timeout.
-    pub fn is_timeout(&self) -> bool {
-        matches!(self, Self::Transport(error) if error.is_timeout())
-    }
-}
-
-impl fmt::Display for QosHttpClientError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::QosRejected(reason) => {
-                write!(formatter, "request rejected by QoS: {}", reason.as_str())
-            }
-            Self::Transport(error) => error.fmt(formatter),
-        }
-    }
-}
-
-impl Error for QosHttpClientError {}
-
-/// Sends an outbound reqwest request after acquiring a QoS request permit.
-pub async fn send_request_with_qos(
-    qos: &QosRuntime,
-    policy: &QosPolicy,
-    request: reqwest::RequestBuilder,
-) -> Result<reqwest::Response, QosHttpClientError> {
-    let permit = qos
-        .admit_request(policy)
-        .map_err(QosHttpClientError::QosRejected)?;
-    let result = request.send().await;
-    drop(permit);
-
-    match result {
-        Ok(response) => Ok(response),
-        Err(error) => {
-            if error.is_timeout() {
-                qos.record_timed_out();
-            }
-            Err(QosHttpClientError::Transport(error))
-        }
-    }
-}
 
 /// Posts a JSON payload through the network boundary using the configured timeout.
 pub async fn post_json(
@@ -787,7 +745,7 @@ where
         let qos = self.qos.clone();
         let future = self.inner.call(request);
         Box::pin(async move {
-            let result = future.await;
+            let result = QOS_REQUEST_CONTEXT.scope((), future).await;
             drop(permit);
             if let Ok(response) = &result {
                 if response.status() == StatusCode::REQUEST_TIMEOUT {
@@ -797,6 +755,10 @@ where
             result
         })
     }
+}
+
+fn qos_request_context_active() -> bool {
+    QOS_REQUEST_CONTEXT.try_with(|_| ()).is_ok()
 }
 
 struct QosTcpListener {

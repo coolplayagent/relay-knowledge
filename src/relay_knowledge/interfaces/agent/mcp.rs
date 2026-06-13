@@ -591,6 +591,7 @@ fn handle_notification(server: &McpServer, method: &str, params: Value, namespac
         if let Ok(cancel) = serde_json::from_value::<CancelParams>(params) {
             if let Some(request_id) = request_id_key(namespace, &cancel.request_id) {
                 server.cancellations.cancel(&request_id);
+                server.qos.record_cancelled();
             }
         }
     }

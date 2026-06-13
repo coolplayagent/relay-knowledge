@@ -470,7 +470,7 @@ fn repository_url(
 }
 
 async fn decode_response<R>(
-    response: reqwest::Response,
+    response: http::QosHttpResponse,
     format: OutputFormat,
 ) -> Result<R, CliError>
 where

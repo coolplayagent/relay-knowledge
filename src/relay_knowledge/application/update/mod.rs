@@ -374,7 +374,7 @@ async fn fetch_crates_release(
 }
 
 async fn read_json_response<T>(
-    response: reqwest::Response,
+    response: http::QosHttpResponse,
     source: UpdateSource,
     max_response_bytes: u64,
 ) -> Result<T, VersionCheckDiagnostic>
@@ -439,7 +439,7 @@ async fn send_json_request(
     qos: &QosRuntime,
     policy: &QosPolicy,
     url: &str,
-) -> Result<reqwest::Response, http::QosHttpClientError> {
+) -> Result<http::QosHttpResponse, http::QosHttpClientError> {
     http::send_request_with_qos(
         qos,
         policy,

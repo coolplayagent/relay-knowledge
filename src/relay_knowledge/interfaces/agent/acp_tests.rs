@@ -155,6 +155,7 @@ async fn local_acp_prompt_can_be_cancelled_and_releases_qos() {
         "cancelled"
     );
     assert_eq!(adapter.qos_snapshot().in_flight_requests, 0);
+    assert_eq!(adapter.qos_diagnostics_snapshot().cancelled_total, 1);
     assert_eq!(
         adapter
             .audit_snapshot()

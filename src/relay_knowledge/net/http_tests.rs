@@ -188,6 +188,40 @@ async fn post_json_with_qos_rejects_when_outbound_budget_is_exhausted() {
 }
 
 #[tokio::test]
+async fn send_request_with_qos_holds_permit_until_body_is_consumed() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let (release_body, wait_for_release) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+            .await
+            .expect("headers should write");
+        let _ = wait_for_release.await;
+        stream.write_all(b"ok").await.expect("body should write");
+    });
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let client = reqwest::Client::new();
+
+    let response = send_request_with_qos(&qos, &policy, client.get(format!("http://{addr}/slow")))
+        .await
+        .expect("response headers should arrive");
+
+    assert_eq!(qos.diagnostics_snapshot().usage.in_flight_requests, 1);
+    release_body.send(()).expect("body release should send");
+    assert_eq!(
+        response.text().await.expect("body should read"),
+        "ok".to_owned()
+    );
+    assert_eq!(qos.diagnostics_snapshot().usage.in_flight_requests, 0);
+    server.await.expect("server task should finish");
+}
+
+#[tokio::test]
 async fn qos_request_layer_rejects_excess_web_requests() {
     let qos = QosRuntime::default();
     let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
@@ -230,6 +264,66 @@ async fn qos_request_layer_rejects_excess_web_requests() {
     assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
 
     first.abort();
+}
+
+#[tokio::test]
+async fn qos_request_layer_does_not_double_charge_nested_outbound_request() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        let mut buffer = [0; 512];
+        let _ = stream.read(&mut buffer).await.expect("request should read");
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .await
+            .expect("response should write");
+    });
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let client = reqwest::Client::new();
+    let url = format!("http://{addr}/catalog");
+    let router = router_with_qos_request_admission(
+        Router::new().route(
+            "/nested",
+            get({
+                let client = client.clone();
+                let qos = qos.clone();
+                let policy = policy.clone();
+                move || {
+                    let client = client.clone();
+                    let qos = qos.clone();
+                    let policy = policy.clone();
+                    let url = url.clone();
+                    async move {
+                        let response = send_request_with_qos(&qos, &policy, client.get(url))
+                            .await
+                            .expect("nested outbound request should not be double charged");
+                        response.text().await.expect("nested body should read")
+                    }
+                }
+            }),
+        ),
+        qos.clone(),
+        policy,
+    );
+
+    let response = router
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/nested")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(qos.diagnostics_snapshot().admitted_total, 1);
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 0);
+    server.await.expect("server task should finish");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

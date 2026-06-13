@@ -11,7 +11,7 @@ use tokio::fs;
 
 use super::*;
 use crate::net::{
-    http::{QosHttpClientError, send_request_with_qos},
+    http::{QosHttpClientError, QosHttpResponse, send_request_with_qos},
     qos::{QosPolicy, QosRuntime},
 };
 
@@ -262,7 +262,7 @@ pub(super) async fn send_probe_request(
     client: &reqwest::Client,
     profile: &StoredModelProfile,
     request_timeout: Option<Duration>,
-) -> Result<reqwest::Response, QosHttpClientError> {
+) -> Result<QosHttpResponse, QosHttpClientError> {
     let qos = QosRuntime::default();
     let policy = default_test_qos_policy();
     send_probe_request_with_qos(client, &qos, &policy, profile, request_timeout).await
@@ -274,7 +274,7 @@ pub(super) async fn send_probe_request_with_qos(
     policy: &QosPolicy,
     profile: &StoredModelProfile,
     request_timeout: Option<Duration>,
-) -> Result<reqwest::Response, QosHttpClientError> {
+) -> Result<QosHttpResponse, QosHttpClientError> {
     let request = match profile.provider {
         ModelProviderKind::Anthropic => client
             .post(format!(
@@ -331,7 +331,7 @@ pub(super) async fn send_discovery_request(
     client: &reqwest::Client,
     profile: &StoredModelProfile,
     request_timeout: Option<Duration>,
-) -> Result<reqwest::Response, QosHttpClientError> {
+) -> Result<QosHttpResponse, QosHttpClientError> {
     let qos = QosRuntime::default();
     let policy = default_test_qos_policy();
     send_discovery_request_with_qos(client, &qos, &policy, profile, request_timeout).await
@@ -343,7 +343,7 @@ pub(super) async fn send_discovery_request_with_qos(
     policy: &QosPolicy,
     profile: &StoredModelProfile,
     request_timeout: Option<Duration>,
-) -> Result<reqwest::Response, QosHttpClientError> {
+) -> Result<QosHttpResponse, QosHttpClientError> {
     let url = match profile.provider {
         ModelProviderKind::Anthropic => {
             format!("{}/v1/models", profile.base_url.trim_end_matches('/'))
@@ -429,7 +429,7 @@ pub(super) async fn probe_result_from_http(
     profile: StoredModelProfile,
     started: Instant,
     checked_at_ms: u64,
-    response: Result<reqwest::Response, QosHttpClientError>,
+    response: Result<QosHttpResponse, QosHttpClientError>,
 ) -> ModelConnectivityProbeResult {
     match response {
         Ok(response) => {
@@ -461,7 +461,7 @@ pub(super) async fn discovery_result_from_http(
     profile: StoredModelProfile,
     started: Instant,
     checked_at_ms: u64,
-    response: Result<reqwest::Response, QosHttpClientError>,
+    response: Result<QosHttpResponse, QosHttpClientError>,
 ) -> ModelDiscoveryResult {
     match response {
         Ok(response) => {

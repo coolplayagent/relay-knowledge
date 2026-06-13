@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{EmbeddingProviderKind, RemoteEmbeddingConfig};
 use crate::net::{
-    http::{QosHttpClientError, send_request_with_qos},
+    http::{QosHttpClientError, QosHttpResponse, send_request_with_qos},
     qos::{QosPolicy, QosRuntime},
 };
 
@@ -134,7 +134,7 @@ impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
 async fn send_embedding_request(
     qos: &Option<(QosRuntime, QosPolicy)>,
     request: reqwest::RequestBuilder,
-) -> Result<reqwest::Response, EmbeddingTransportError> {
+) -> Result<QosHttpResponse, EmbeddingTransportError> {
     match qos {
         Some((qos, policy)) => send_request_with_qos(qos, policy, request)
             .await
@@ -142,6 +142,7 @@ async fn send_embedding_request(
         None => request
             .send()
             .await
+            .map(QosHttpResponse::without_permit)
             .map_err(EmbeddingTransportError::Reqwest),
     }
 }
