@@ -6,8 +6,6 @@ use crate::{
 
 use super::{CliError, ServiceMcpTransport, files_cli};
 
-const MCP_CANCELLATION_BYPASS_MAX_BODY_BYTES: usize = 4096;
-
 pub(super) async fn run_service(
     mcp: ServiceMcpTransport,
     web_enabled: bool,
@@ -68,29 +66,23 @@ pub(super) async fn run_service(
             &network_config.http,
             runtime.agent.access_policy.allow_remote_clients,
         )?;
-        let mut router = web::router(service.clone(), network_config.http.max_request_body_bytes);
-        let cancellation_bypasses = if runtime.agent.mcp_streamable_http_enabled {
+        let web_router = web::router(service.clone(), network_config.http.max_request_body_bytes);
+        let mut router = crate::net::http::router_with_qos_request_admission(
+            web_router,
+            qos.clone(),
+            network_config.qos.clone(),
+        );
+        if runtime.agent.mcp_streamable_http_enabled {
             let mcp_server = McpServer::new(
                 service.clone(),
                 runtime.network.clone(),
                 runtime.agent.clone(),
             );
-            let cancellation_bypass =
-                mcp_server.cancellation_qos_bypass(MCP_CANCELLATION_BYPASS_MAX_BODY_BYTES);
             let mcp_router = mcp_server
                 .checked_router()
                 .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
             router = router.merge(mcp_router);
-            vec![cancellation_bypass]
-        } else {
-            Vec::new()
-        };
-        let router = crate::net::http::router_with_qos_request_admission_bypass(
-            router,
-            qos.clone(),
-            network_config.qos.clone(),
-            cancellation_bypasses,
-        );
+        }
         crate::net::http::serve_router_with_qos(
             router,
             network_config.http,

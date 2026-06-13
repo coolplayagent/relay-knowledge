@@ -8,10 +8,10 @@ use std::{
 mod state;
 
 mod audit_bridge;
-mod cancellation_bypass;
 mod code_tools;
 mod http_contract;
 mod metrics;
+mod notifications;
 mod prompts;
 mod resources;
 mod scope_authorization;
@@ -240,7 +240,7 @@ struct InspectGraphArgs {
 }
 
 #[derive(Debug, Deserialize)]
-struct CancelParams {
+pub(super) struct CancelParams {
     #[serde(rename = "requestId")]
     request_id: Value,
 }
@@ -409,10 +409,14 @@ async fn handle_mcp_post(
         if request.id.is_some() {
             return json_rpc_error(id, -32600, "notifications must not include an id");
         }
+        if method == "notifications/cancelled" {
+            notifications::handle_notification(&server, method, request.params, &namespace);
+            return StatusCode::ACCEPTED.into_response();
+        }
         let Ok(permit) = admit_mcp_request(&server) else {
             return StatusCode::TOO_MANY_REQUESTS.into_response();
         };
-        handle_notification(&server, method, request.params, &namespace);
+        notifications::handle_notification(&server, method, request.params, &namespace);
         drop(permit);
         return StatusCode::ACCEPTED.into_response();
     }
@@ -585,17 +589,6 @@ fn invalid_request_id_response() -> Response {
 
 fn session_create_error(id: Value, error: SessionCreateError) -> Response {
     json_rpc_error(id, -32603, format!("failed to create MCP session: {error}"))
-}
-
-fn handle_notification(server: &McpServer, method: &str, params: Value, namespace: &str) {
-    if method == "notifications/cancelled" {
-        if let Ok(cancel) = serde_json::from_value::<CancelParams>(params) {
-            if let Some(request_id) = request_id_key(namespace, &cancel.request_id) {
-                server.cancellations.cancel(&request_id);
-                server.qos.record_cancelled();
-            }
-        }
-    }
 }
 
 fn admit_mcp_request(server: &McpServer) -> Result<QosPermit, RejectReason> {

@@ -180,6 +180,7 @@ impl QosRuntime {
         }
 
         state.usage.in_flight_requests += 1;
+        state.counters.queued_total = state.counters.queued_total.saturating_add(1);
         state.counters.admitted_total = state.counters.admitted_total.saturating_add(1);
         Ok(QosPermit {
             runtime: self.clone(),

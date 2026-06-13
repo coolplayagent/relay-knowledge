@@ -43,7 +43,6 @@ use crate::{
     net::qos::{QosPermit, QosPolicy, QosRuntime, RejectReason},
 };
 
-pub use qos_admission::QosRequestBypass;
 pub use qos_client::{QosHttpClientError, QosHttpResponse, send_request_with_qos};
 
 tokio::task_local! {
@@ -548,17 +547,7 @@ pub fn router_with_qos_request_admission(
     qos: QosRuntime,
     policy: QosPolicy,
 ) -> Router {
-    router.layer(QosRequestLayer::new(qos, policy, Vec::new()))
-}
-
-/// Adds per-request QoS admission with bounded priority bypass rules.
-pub fn router_with_qos_request_admission_bypass(
-    router: Router,
-    qos: QosRuntime,
-    policy: QosPolicy,
-    bypasses: Vec<QosRequestBypass>,
-) -> Router {
-    router.layer(QosRequestLayer::new(qos, policy, bypasses))
+    router.layer(QosRequestLayer::new(qos, policy))
 }
 
 async fn serve_listener<L>(

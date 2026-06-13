@@ -102,7 +102,7 @@ pub(super) async fn prometheus_metrics(
     push_metric(
         &mut output,
         "relay_knowledge_qos_queued_total",
-        "Cumulative queued network work count.",
+        "Cumulative work admitted through the queued QoS path.",
         qos.queued_total,
     );
     push_metric(

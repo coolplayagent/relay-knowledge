@@ -336,7 +336,7 @@ impl CancellationRegistry {
         )
     }
 
-    pub(super) fn cancel(&self, request_id: &str) {
+    pub(super) fn cancel(&self, request_id: &str) -> bool {
         if let Some(sender) = self
             .active
             .lock()
@@ -346,7 +346,9 @@ impl CancellationRegistry {
             .map(|entry| entry.sender.clone())
         {
             let _ = sender.send(true);
+            return true;
         }
+        false
     }
 
     fn finish(&self, request_id: &str, token: u64) {

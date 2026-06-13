@@ -491,7 +491,7 @@ async fn metrics_exporter_shares_mcp_router_without_compat_routes() {
 }
 
 #[tokio::test]
-async fn cancellation_notifications_bypass_occupied_web_qos_slot() {
+async fn headerless_cancellation_notifications_cancel_occupied_mcp_qos_slot() {
     let (server, _service) = server_and_service_with_store(
         [
             ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
@@ -500,13 +500,7 @@ async fn cancellation_notifications_bypass_occupied_web_qos_slot() {
         Arc::new(SlowSearchStore),
     )
     .await;
-    let policy = server.network.current().qos;
-    let router = crate::net::http::router_with_qos_request_admission_bypass(
-        server.clone().router(),
-        server.qos.clone(),
-        policy,
-        vec![server.cancellation_qos_bypass(4096)],
-    );
+    let router = server.clone().router();
     let session_id = {
         let mut setup_router = router.clone();
         initialize_session(&mut setup_router).await
@@ -535,7 +529,7 @@ async fn cancellation_notifications_bypass_occupied_web_qos_slot() {
 
     wait_for_web_in_flight(&server, 1).await;
     let mut cancel_router = router.clone();
-    let cancelled = raw_mcp_request_with_content_length(
+    let cancelled = raw_mcp_request_at_endpoint(
         &mut cancel_router,
         "/mcp",
         json!({
@@ -546,7 +540,7 @@ async fn cancellation_notifications_bypass_occupied_web_qos_slot() {
                 "reason": "test"
             }
         }),
-        session_id.as_str(),
+        Some(session_id.as_str()),
     )
     .await;
     let slow_response = slow_request.await.expect("slow request should finish");
@@ -558,7 +552,31 @@ async fn cancellation_notifications_bypass_occupied_web_qos_slot() {
 }
 
 #[tokio::test]
-async fn cancellation_bypass_requires_initialized_session() {
+async fn late_cancellation_notifications_do_not_increment_cancelled_total() {
+    let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    let mut router = server.clone().router();
+    let session_id = initialize_session(&mut router).await;
+
+    let cancelled = raw_mcp_request(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {
+                "requestId": "missing",
+                "reason": "late"
+            }
+        }),
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+
+    assert_eq!(cancelled.0, StatusCode::ACCEPTED);
+    assert_eq!(server.qos.diagnostics_snapshot().cancelled_total, 0);
+}
+
+#[tokio::test]
+async fn cancellation_priority_requires_initialized_session() {
     let (server, _service) = server_and_service_with_store(
         [
             ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
@@ -567,13 +585,7 @@ async fn cancellation_bypass_requires_initialized_session() {
         Arc::new(SlowSearchStore),
     )
     .await;
-    let policy = server.network.current().qos;
-    let router = crate::net::http::router_with_qos_request_admission_bypass(
-        server.clone().router(),
-        server.qos.clone(),
-        policy,
-        vec![server.cancellation_qos_bypass(4096)],
-    );
+    let router = server.clone().router();
     let session_id = {
         let mut setup_router = router.clone();
         initialize_session(&mut setup_router).await
@@ -602,7 +614,7 @@ async fn cancellation_bypass_requires_initialized_session() {
 
     wait_for_web_in_flight(&server, 1).await;
     let mut cancel_router = router.clone();
-    let rejected = raw_mcp_request_with_content_length(
+    let rejected = raw_mcp_request_at_endpoint(
         &mut cancel_router,
         "/mcp",
         json!({
@@ -613,19 +625,108 @@ async fn cancellation_bypass_requires_initialized_session() {
                 "reason": "test"
             }
         }),
-        "rk-unknown",
+        Some("rk-unknown"),
+    )
+    .await;
+    let mut cancel_router = router.clone();
+    let _ = raw_mcp_request_at_endpoint(
+        &mut cancel_router,
+        "/mcp",
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": "slow", "reason": "test"}
+        }),
+        Some(session_id.as_str()),
     )
     .await;
     let slow_response = slow_request.await.expect("slow request should finish");
 
-    assert_eq!(rejected.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(rejected.0, StatusCode::NOT_FOUND);
     assert_eq!(slow_response.0, StatusCode::OK);
-    assert_eq!(server.qos.diagnostics_snapshot().cancelled_total, 0);
-    assert_eq!(server.qos.diagnostics_snapshot().rejected_total, 1);
+    assert_eq!(server.qos.diagnostics_snapshot().cancelled_total, 1);
+    assert_eq!(server.qos.diagnostics_snapshot().rejected_total, 0);
 }
 
 #[tokio::test]
-async fn cancellation_bypass_uses_configured_mcp_endpoint() {
+async fn service_style_mcp_qos_rejection_stays_json_rpc() {
+    let (server, service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "1"),
+        ],
+        Arc::new(SlowSearchStore),
+    )
+    .await;
+    let network = server.network.current();
+    let web_router =
+        crate::interfaces::web::router(service.clone(), network.http.max_request_body_bytes);
+    let router = crate::net::http::router_with_qos_request_admission(
+        web_router,
+        server.qos.clone(),
+        network.qos,
+    )
+    .merge(server.clone().router());
+    let session_id = {
+        let mut setup_router = router.clone();
+        initialize_session(&mut setup_router).await
+    };
+    let mut slow_router = router.clone();
+    let slow_session_id = session_id.clone();
+    let slow_request = tokio::spawn(async move {
+        raw_mcp_request(
+            &mut slow_router,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "slow",
+                "method": "tools/call",
+                "params": {
+                    "name": "relay_retrieve_context",
+                    "arguments": {"query": "slow", "source_scope": "docs"}
+                }
+            }),
+            [(MCP_SESSION_ID_HEADER, slow_session_id.as_str())],
+        )
+        .await
+    });
+
+    wait_for_web_in_flight(&server, 1).await;
+    let mut rejected_router = router.clone();
+    let rejected = raw_mcp_request(
+        &mut rejected_router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "qos",
+            "method": "tools/call",
+            "params": {"name": "relay_health", "arguments": {}}
+        }),
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+    let mut cancel_router = router.clone();
+    let _ = raw_mcp_request_at_endpoint(
+        &mut cancel_router,
+        "/mcp",
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": "slow", "reason": "test"}
+        }),
+        Some(session_id.as_str()),
+    )
+    .await;
+    let _ = slow_request.await.expect("slow request should finish");
+
+    assert_eq!(rejected.0, StatusCode::OK);
+    assert_eq!(rejected.1["result"]["isError"], true);
+    assert_eq!(
+        rejected.1["result"]["structuredContent"]["error_kind"],
+        "qos_rejected"
+    );
+}
+
+#[tokio::test]
+async fn cancellation_priority_uses_configured_mcp_endpoint() {
     let (server, _service) = server_and_service_with_store(
         [
             ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
@@ -635,13 +736,7 @@ async fn cancellation_bypass_uses_configured_mcp_endpoint() {
         Arc::new(SlowSearchStore),
     )
     .await;
-    let policy = server.network.current().qos;
-    let router = crate::net::http::router_with_qos_request_admission_bypass(
-        server.clone().router(),
-        server.qos.clone(),
-        policy,
-        vec![server.cancellation_qos_bypass(4096)],
-    );
+    let router = server.clone().router();
     let session_id = {
         let mut setup_router = router.clone();
         initialize_session_at_endpoint(&mut setup_router, "/relay-mcp").await
@@ -671,7 +766,7 @@ async fn cancellation_bypass_uses_configured_mcp_endpoint() {
 
     wait_for_web_in_flight(&server, 1).await;
     let mut cancel_router = router.clone();
-    let cancelled = raw_mcp_request_with_content_length(
+    let cancelled = raw_mcp_request_at_endpoint(
         &mut cancel_router,
         "/relay-mcp",
         json!({
@@ -682,7 +777,7 @@ async fn cancellation_bypass_uses_configured_mcp_endpoint() {
                 "reason": "test"
             }
         }),
-        session_id.as_str(),
+        Some(session_id.as_str()),
     )
     .await;
     let slow_response = slow_request.await.expect("slow request should finish");
@@ -729,41 +824,6 @@ async fn wait_for_web_in_flight(server: &McpServer, expected: usize) {
     }
 
     panic!("Web QoS in-flight count did not reach {expected}");
-}
-
-async fn raw_mcp_request_with_content_length(
-    router: &mut Router,
-    endpoint: &str,
-    payload: Value,
-    session_id: &str,
-) -> (StatusCode, Value) {
-    let body = payload.to_string();
-    let response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(endpoint)
-                .header(header::CONTENT_TYPE, "application/json")
-                .header(header::ACCEPT, "application/json, text/event-stream")
-                .header(MCP_PROTOCOL_VERSION_HEADER, MCP_PROTOCOL_VERSION)
-                .header(MCP_SESSION_ID_HEADER, session_id)
-                .header(header::CONTENT_LENGTH, body.len().to_string())
-                .body(Body::from(body))
-                .expect("request should build"),
-        )
-        .await
-        .expect("router should respond");
-    let status = response.status();
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("response body should be readable");
-    if body.is_empty() {
-        return (status, Value::Null);
-    }
-
-    let value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    (status, value)
 }
 
 async fn initialize_session_at_endpoint(router: &mut Router, endpoint: &str) -> String {
