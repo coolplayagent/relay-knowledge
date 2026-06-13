@@ -22,6 +22,7 @@ use std::{
     time::Duration,
 };
 
+mod qos_admission;
 mod qos_client;
 
 use axum::{
@@ -33,13 +34,16 @@ use axum::{
 };
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tower::{Layer, Service};
+use tower::Service;
+
+use qos_admission::QosRequestLayer;
 
 use crate::{
     env::NetworkEnvOverrides,
     net::qos::{QosPermit, QosPolicy, QosRuntime, RejectReason},
 };
 
+pub use qos_admission::QosRequestBypass;
 pub use qos_client::{QosHttpClientError, QosHttpResponse, send_request_with_qos};
 
 tokio::task_local! {
@@ -544,7 +548,17 @@ pub fn router_with_qos_request_admission(
     qos: QosRuntime,
     policy: QosPolicy,
 ) -> Router {
-    router.layer(QosRequestLayer::new(qos, policy))
+    router.layer(QosRequestLayer::new(qos, policy, Vec::new()))
+}
+
+/// Adds per-request QoS admission with bounded priority bypass rules.
+pub fn router_with_qos_request_admission_bypass(
+    router: Router,
+    qos: QosRuntime,
+    policy: QosPolicy,
+    bypasses: Vec<QosRequestBypass>,
+) -> Router {
+    router.layer(QosRequestLayer::new(qos, policy, bypasses))
 }
 
 async fn serve_listener<L>(
@@ -690,68 +704,6 @@ where
                     Ok((StatusCode::REQUEST_TIMEOUT, "request timed out").into_response())
                 }
             }
-        })
-    }
-}
-
-#[derive(Clone)]
-struct QosRequestLayer {
-    qos: QosRuntime,
-    policy: QosPolicy,
-}
-
-impl QosRequestLayer {
-    fn new(qos: QosRuntime, policy: QosPolicy) -> Self {
-        Self { qos, policy }
-    }
-}
-
-impl<S> Layer<S> for QosRequestLayer {
-    type Service = QosRequestService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        QosRequestService {
-            inner,
-            qos: self.qos.clone(),
-            policy: self.policy.clone(),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct QosRequestService<S> {
-    inner: S,
-    qos: QosRuntime,
-    policy: QosPolicy,
-}
-
-impl<S> Service<Request> for QosRequestService<S>
-where
-    S: Service<Request, Response = Response, Error = Infallible> + Send,
-    S::Future: Send + 'static,
-{
-    type Response = Response;
-    type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(context)
-    }
-
-    fn call(&mut self, request: Request) -> Self::Future {
-        let permit = match self.qos.admit_request(&self.policy) {
-            Ok(permit) => permit,
-            Err(reason) => {
-                return Box::pin(async move {
-                    Ok((StatusCode::TOO_MANY_REQUESTS, reason.as_str()).into_response())
-                });
-            }
-        };
-        let future = self.inner.call(request);
-        Box::pin(async move {
-            let result = QOS_REQUEST_CONTEXT.scope((), future).await;
-            drop(permit);
-            result
         })
     }
 }

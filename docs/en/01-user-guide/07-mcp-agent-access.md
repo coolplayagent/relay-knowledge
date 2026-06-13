@@ -61,6 +61,8 @@ Clients must follow the MCP Streamable HTTP session flow:
 
 Missing session headers return HTTP 400. Unknown or retired session IDs return HTTP 404. Tool requests, `ping`, and `notifications/cancelled` are all bound to server-issued sessions.
 
+When Web/API/MCP share one HTTP service, `notifications/cancelled` uses a bounded priority admission path so a client can cancel an active tool call even when the normal in-flight request budget is saturated. The bypass applies only to small `/mcp` JSON notifications that already carry a valid session.
+
 The `initialize` to `tools/list` discovery path is storage-cold: MCP registers static tool schemas and returns exploration instructions without opening SQLite or running schema migration. Storage is opened lazily on the first storage-backed tool call, and concurrent first calls share the service storage initialization guard. The first `tools/list` for each session records an initialize-to-tools-list cold-start sample in agent protocol metrics and `/mcp/metrics`.
 
 ## 7.4 Tools, Resources, and Prompts

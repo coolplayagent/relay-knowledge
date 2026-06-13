@@ -1,10 +1,15 @@
+use axum::http::Method;
+
 use crate::{
     api::{InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     interfaces::{agent::mcp::McpServer, web},
+    net::http::QosRequestBypass,
 };
 
 use super::{CliError, ServiceMcpTransport, files_cli};
+
+const MCP_CANCELLATION_BYPASS_MAX_BODY_BYTES: usize = 4096;
 
 pub(super) async fn run_service(
     mcp: ServiceMcpTransport,
@@ -77,10 +82,22 @@ pub(super) async fn run_service(
             .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
             router = router.merge(mcp_router);
         }
-        let router = crate::net::http::router_with_qos_request_admission(
+        let cancellation_bypasses = if runtime.agent.mcp_streamable_http_enabled {
+            vec![QosRequestBypass::json_field(
+                Method::POST,
+                "/mcp",
+                "method",
+                "notifications/cancelled",
+                MCP_CANCELLATION_BYPASS_MAX_BODY_BYTES,
+            )]
+        } else {
+            Vec::new()
+        };
+        let router = crate::net::http::router_with_qos_request_admission_bypass(
             router,
             qos.clone(),
             network_config.qos.clone(),
+            cancellation_bypasses,
         );
         crate::net::http::serve_router_with_qos(
             router,
