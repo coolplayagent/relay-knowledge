@@ -42,12 +42,15 @@ pub(super) async fn handle_metrics_get(
             error.message,
         )
             .into_response(),
-        Err(_) => (
-            StatusCode::REQUEST_TIMEOUT,
-            [(header::CONTENT_TYPE, "text/plain")],
-            "metrics endpoint exceeded max_runtime_ms".to_owned(),
-        )
-            .into_response(),
+        Err(_) => {
+            server.qos.record_timed_out();
+            (
+                StatusCode::REQUEST_TIMEOUT,
+                [(header::CONTENT_TYPE, "text/plain")],
+                "metrics endpoint exceeded max_runtime_ms".to_owned(),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -60,7 +63,7 @@ pub(super) async fn prometheus_metrics(
         .health(request_context(request_id.to_owned()))
         .await
         .map_err(McpMethodError::api)?;
-    let qos = server.qos.snapshot();
+    let qos = server.qos.diagnostics_snapshot();
     let agent_metrics = server.metrics.snapshot();
     let mut output = String::new();
     push_metric(
@@ -85,13 +88,49 @@ pub(super) async fn prometheus_metrics(
         &mut output,
         "relay_knowledge_qos_in_flight_requests",
         "Current admitted MCP request count.",
-        qos.in_flight_requests,
+        qos.usage.in_flight_requests,
     );
     push_metric(
         &mut output,
         "relay_knowledge_qos_queued_requests",
         "Current queued MCP request count.",
-        qos.queued_requests,
+        qos.usage.queued_requests,
+    );
+    push_metric(
+        &mut output,
+        "relay_knowledge_qos_admitted_total",
+        "Cumulative admitted network work count.",
+        qos.admitted_total,
+    );
+    push_metric(
+        &mut output,
+        "relay_knowledge_qos_queued_total",
+        "Cumulative work admitted through the queued QoS path.",
+        qos.queued_total,
+    );
+    push_metric(
+        &mut output,
+        "relay_knowledge_qos_rejected_total",
+        "Cumulative QoS rejection count.",
+        qos.rejected_total,
+    );
+    push_metric(
+        &mut output,
+        "relay_knowledge_qos_timed_out_total",
+        "Cumulative network timeout count.",
+        qos.timed_out_total,
+    );
+    push_metric(
+        &mut output,
+        "relay_knowledge_qos_cancelled_total",
+        "Cumulative cancelled network work count.",
+        qos.cancelled_total,
+    );
+    push_metric(
+        &mut output,
+        "relay_knowledge_qos_dropped_total",
+        "Cumulative dropped network work count.",
+        qos.dropped_total,
     );
     push_metric(
         &mut output,

@@ -40,6 +40,16 @@ QoS policy covers at least:
 - Timeouts, cancellation, and retry backoff.
 - Overload responses and dropped-work observability.
 
+The network path inventory must stay aligned with implementation. The current unified entry points are:
+
+| Path | Direction | QoS entry point | Overload behavior and observability |
+| --- | --- | --- | --- |
+| Web HTTP API and static assets | inbound | `net::http` listener connection admission and Web router request admission | Request budget exhaustion returns `429`; status/MCP metrics expose current usage plus cumulative admitted, rejected, timed_out, cancelled, and dropped counts |
+| MCP Streamable HTTP and `/mcp/metrics` | inbound | `net::http` listener connection admission and MCP method admission | JSON-RPC tool calls return a QoS error, HTTP endpoints return `429`; audit/metrics record admitted/rejected/timeout/cancel outcomes |
+| Model catalog, provider probe/discovery, remote embedding, update checks, remote CLI, worker HTTP endpoints | outbound | `net::http` outbound request admission | Request permits are acquired before send; over-budget work maps to stable network/QoS errors and records rejected, while transport timeout records timed_out |
+
+QoS diagnostics use low-cardinality fields. `*_total` values are process-lifetime counters; `current_*` values are gauges for active connections, in-flight requests, and queued requests. Raw URLs, IPs, request ids, user ids, and secrets must not appear in QoS metric labels.
+
 ## 5. Bootstrap Model
 
 CLI, Web, and service mode share the same application services. Startup order is fixed:

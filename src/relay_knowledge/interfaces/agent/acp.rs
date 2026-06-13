@@ -47,6 +47,7 @@ impl LocalAcpSessionAdapter {
         network: NetworkRuntime,
         agent: AgentRuntimeConfig,
     ) -> Self {
+        let qos = network.qos_runtime();
         let metrics = service.observability().agent_metrics();
         let audit = if agent.audit_sink_enabled {
             AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
@@ -60,7 +61,7 @@ impl LocalAcpSessionAdapter {
             service,
             network,
             agent,
-            qos: QosRuntime::default(),
+            qos,
             audit,
             metrics,
             sessions: AcpSessionRegistry::default(),
@@ -280,6 +281,7 @@ impl LocalAcpSessionAdapter {
                         failed_prompt(session_id, request_id.clone(), updates, adapter_error, elapsed_millis(started))
                     }
                     Err(_) => {
+                        self.qos.record_timed_out();
                         let adapter_error = AgentAdapterError::new(
                             AgentAdapterErrorKind::Timeout,
                             "ACP prompt exceeded max_runtime_ms",
@@ -304,6 +306,7 @@ impl LocalAcpSessionAdapter {
                 }
             }
             _ = wait_for_cancellation(&mut cancellation) => {
+                self.qos.record_cancelled();
                 let adapter_error = AgentAdapterError::new(
                     AgentAdapterErrorKind::Cancelled,
                     "ACP prompt was cancelled",
@@ -345,6 +348,11 @@ impl LocalAcpSessionAdapter {
     #[cfg(test)]
     pub fn qos_snapshot(&self) -> crate::net::qos::QosSnapshot {
         self.qos.snapshot()
+    }
+
+    #[cfg(test)]
+    pub fn qos_diagnostics_snapshot(&self) -> crate::net::qos::QosDiagnosticsSnapshot {
+        self.qos.diagnostics_snapshot()
     }
 
     fn admit_request(&self) -> Result<QosPermit, AgentAdapterError> {
@@ -848,6 +856,7 @@ fn api_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
     match kind {
         ErrorKind::InvalidArgument => AgentAdapterErrorKind::InvalidArgument,
         ErrorKind::StorageUnavailable => AgentAdapterErrorKind::StorageUnavailable,
+        ErrorKind::QosRejected => AgentAdapterErrorKind::QosRejected,
         ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
         ErrorKind::Internal => AgentAdapterErrorKind::Internal,
     }

@@ -2,7 +2,6 @@ use crate::{
     api::{InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     interfaces::{agent::mcp::McpServer, web},
-    net::qos::QosRuntime,
 };
 
 use super::{CliError, ServiceMcpTransport, files_cli};
@@ -62,25 +61,32 @@ pub(super) async fn run_service(
     ));
     if web_enabled {
         let network_config = runtime.network.current();
+        let qos = runtime.network.qos_runtime();
         ensure_web_remote_bind_allowed(
             &network_config.http,
             runtime.agent.access_policy.allow_remote_clients,
         )?;
-        let mut router = web::router(service.clone(), network_config.http.max_request_body_bytes);
+        let web_router = web::router(service.clone(), network_config.http.max_request_body_bytes);
+        let mut router = crate::net::http::router_with_qos_request_admission(
+            web_router,
+            qos.clone(),
+            network_config.qos.clone(),
+        );
         if runtime.agent.mcp_streamable_http_enabled {
-            let mcp_router = McpServer::new(
+            let mcp_server = McpServer::new(
                 service.clone(),
                 runtime.network.clone(),
                 runtime.agent.clone(),
-            )
-            .checked_router()
-            .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
+            );
+            let mcp_router = mcp_server
+                .checked_router()
+                .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
             router = router.merge(mcp_router);
         }
         crate::net::http::serve_router_with_qos(
             router,
             network_config.http,
-            QosRuntime::default(),
+            qos,
             network_config.qos,
             service_shutdown_signal(),
         )

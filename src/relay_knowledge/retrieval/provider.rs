@@ -3,6 +3,10 @@ use std::{error::Error, fmt, future::Future, pin::Pin};
 use serde::{Deserialize, Serialize};
 
 use super::{EmbeddingProviderKind, RemoteEmbeddingConfig};
+use crate::net::{
+    http::{QosHttpClientError, QosHttpResponse, send_request_with_qos},
+    qos::{QosPolicy, QosRuntime},
+};
 
 const PROVIDER_ERROR_MESSAGE_LIMIT: usize = 240;
 
@@ -60,10 +64,30 @@ pub fn embedding_provider(
     config: RemoteEmbeddingConfig,
     client: reqwest::Client,
 ) -> Box<dyn EmbeddingProvider> {
+    embedding_provider_with_optional_qos(config, client, None)
+}
+
+/// Builds the configured remote embedding provider with outbound QoS admission.
+pub fn embedding_provider_with_qos(
+    config: RemoteEmbeddingConfig,
+    client: reqwest::Client,
+    qos: QosRuntime,
+    policy: QosPolicy,
+) -> Box<dyn EmbeddingProvider> {
+    embedding_provider_with_optional_qos(config, client, Some((qos, policy)))
+}
+
+fn embedding_provider_with_optional_qos(
+    config: RemoteEmbeddingConfig,
+    client: reqwest::Client,
+    qos: Option<(QosRuntime, QosPolicy)>,
+) -> Box<dyn EmbeddingProvider> {
     match config.provider {
-        EmbeddingProviderKind::OpenAiCompatible => {
-            Box::new(OpenAiCompatibleEmbeddingProvider { config, client })
-        }
+        EmbeddingProviderKind::OpenAiCompatible => Box::new(OpenAiCompatibleEmbeddingProvider {
+            config,
+            client,
+            qos,
+        }),
         EmbeddingProviderKind::Echo => Box::new(EchoEmbeddingProvider { config }),
     }
 }
@@ -71,14 +95,17 @@ pub fn embedding_provider(
 struct OpenAiCompatibleEmbeddingProvider {
     config: RemoteEmbeddingConfig,
     client: reqwest::Client,
+    qos: Option<(QosRuntime, QosPolicy)>,
 }
 
 impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
     fn embed(&self, request: EmbeddingRequest) -> EmbeddingFuture<'_, Vec<EmbeddingVector>> {
         Box::pin(async move {
             validate_request(&request)?;
+            let expected_count = request.inputs.len();
+            let expected_dimension = request.dimension;
             let url = embeddings_url(&self.config.base_url);
-            let response = self
+            let request_builder = self
                 .client
                 .post(url)
                 .bearer_auth(&self.config.api_key)
@@ -86,8 +113,8 @@ impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
                 .json(&OpenAiEmbeddingRequest {
                     model: &request.model,
                     input: &request.inputs,
-                })
-                .send()
+                });
+            let response = send_embedding_request(&self.qos, request_builder)
                 .await
                 .map_err(transport_error)?;
             let status = response.status();
@@ -99,9 +126,30 @@ impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
                 .await
                 .map_err(|error| permanent_error("invalid_response_json", error.to_string()))?;
 
-            parse_embedding_response(payload, request.inputs.len(), request.dimension)
+            parse_embedding_response(payload, expected_count, expected_dimension)
         })
     }
+}
+
+async fn send_embedding_request(
+    qos: &Option<(QosRuntime, QosPolicy)>,
+    request: reqwest::RequestBuilder,
+) -> Result<QosHttpResponse, EmbeddingTransportError> {
+    match qos {
+        Some((qos, policy)) => send_request_with_qos(qos, policy, request)
+            .await
+            .map_err(EmbeddingTransportError::Qos),
+        None => request
+            .send()
+            .await
+            .map(QosHttpResponse::unmetered)
+            .map_err(EmbeddingTransportError::Reqwest),
+    }
+}
+
+enum EmbeddingTransportError {
+    Reqwest(reqwest::Error),
+    Qos(QosHttpClientError),
 }
 
 struct EchoEmbeddingProvider {
@@ -287,7 +335,7 @@ fn status_error(status_code: u16, body: Option<String>) -> EmbeddingProviderErro
     }
 }
 
-fn transport_error(error: reqwest::Error) -> EmbeddingProviderError {
+fn transport_error(error: EmbeddingTransportError) -> EmbeddingProviderError {
     let code = if error.is_timeout() {
         "network_timeout"
     } else {
@@ -296,9 +344,34 @@ fn transport_error(error: reqwest::Error) -> EmbeddingProviderError {
 
     EmbeddingProviderError {
         retry: ProviderRetryClass::Retryable,
-        status_code: error.status().map(|status| status.as_u16()),
+        status_code: error.status_code(),
         code: code.to_owned(),
         message: error.to_string(),
+    }
+}
+
+impl EmbeddingTransportError {
+    fn is_timeout(&self) -> bool {
+        match self {
+            Self::Reqwest(error) => error.is_timeout(),
+            Self::Qos(error) => error.is_timeout(),
+        }
+    }
+
+    fn status_code(&self) -> Option<u16> {
+        match self {
+            Self::Reqwest(error) => error.status().map(|status| status.as_u16()),
+            Self::Qos(_) => None,
+        }
+    }
+}
+
+impl fmt::Display for EmbeddingTransportError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Reqwest(error) => error.fmt(formatter),
+            Self::Qos(error) => error.fmt(formatter),
+        }
     }
 }
 
@@ -591,6 +664,7 @@ mod tests {
                 std::time::Duration::from_secs(5),
             ),
             client: reqwest::Client::new(),
+            qos: None,
         };
 
         let vectors = provider
@@ -677,6 +751,7 @@ mod tests {
                 .timeout(std::time::Duration::from_secs(5))
                 .build()
                 .expect("client should build"),
+            qos: None,
         };
 
         let error = provider

@@ -493,6 +493,7 @@ pub(super) fn api_error_response(error: ApiError) -> Response {
     let status = match error.error_kind {
         ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
         ErrorKind::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorKind::QosRejected => StatusCode::TOO_MANY_REQUESTS,
         ErrorKind::Timeout => StatusCode::REQUEST_TIMEOUT,
         ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -938,6 +939,7 @@ impl From<ApiError> for WebError {
         let status = match error.error_kind {
             ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
             ErrorKind::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorKind::QosRejected => StatusCode::TOO_MANY_REQUESTS,
             ErrorKind::Timeout => StatusCode::GATEWAY_TIMEOUT,
             ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };

@@ -39,6 +39,7 @@ impl NetworkConfig {
 #[derive(Debug, Clone)]
 pub struct NetworkRuntime {
     inner: Arc<RwLock<NetworkConfig>>,
+    qos: qos::QosRuntime,
 }
 
 impl NetworkRuntime {
@@ -46,6 +47,7 @@ impl NetworkRuntime {
     pub fn from_config(config: NetworkConfig) -> Self {
         Self {
             inner: Arc::new(RwLock::new(config)),
+            qos: qos::QosRuntime::default(),
         }
     }
 
@@ -60,6 +62,11 @@ impl NetworkRuntime {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    /// Returns the shared QoS runtime counters for network adapters.
+    pub fn qos_runtime(&self) -> qos::QosRuntime {
+        self.qos.clone()
     }
 
     /// Replaces the active network configuration after validating overrides.

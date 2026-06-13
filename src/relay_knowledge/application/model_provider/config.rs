@@ -63,8 +63,9 @@ impl RelayKnowledgeService {
     /// Returns the cached or refreshed public model catalog.
     pub async fn model_catalog(&self, refresh: bool) -> Result<ModelCatalogResult, ApiError> {
         let network = self.runtime.network.current();
+        let qos = self.runtime.network.qos_runtime();
         self.model_provider_config()
-            .catalog(&network.http, refresh)
+            .catalog_with_qos(&network.http, &qos, &network.qos, refresh)
             .await
             .map_err(model_provider_api_error)
     }
@@ -75,8 +76,15 @@ impl RelayKnowledgeService {
         request: ModelConnectivityProbeRequest,
     ) -> Result<ModelConnectivityProbeResult, ApiError> {
         let network = self.runtime.network.current();
+        let qos = self.runtime.network.qos_runtime();
         self.model_provider_config()
-            .probe(&network.http, &self.runtime.retrieval, request)
+            .probe_with_qos(
+                &network.http,
+                &qos,
+                &network.qos,
+                &self.runtime.retrieval,
+                request,
+            )
             .await
             .map_err(model_provider_api_error)
     }
@@ -87,8 +95,15 @@ impl RelayKnowledgeService {
         request: ModelDiscoveryRequest,
     ) -> Result<ModelDiscoveryResult, ApiError> {
         let network = self.runtime.network.current();
+        let qos = self.runtime.network.qos_runtime();
         self.model_provider_config()
-            .discover(&network.http, &self.runtime.retrieval, request)
+            .discover_with_qos(
+                &network.http,
+                &qos,
+                &network.qos,
+                &self.runtime.retrieval,
+                request,
+            )
             .await
             .map_err(model_provider_api_error)
     }

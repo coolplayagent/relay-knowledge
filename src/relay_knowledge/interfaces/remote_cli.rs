@@ -13,7 +13,10 @@ use crate::{
         CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalRequest,
     },
     env::NetworkEnvOverrides,
-    net::{NetworkConfig, http},
+    net::{
+        NetworkConfig, http,
+        qos::{QosPolicy, QosRuntime},
+    },
 };
 
 use super::{
@@ -317,6 +320,8 @@ pub(super) async fn run_remote(
 struct RemoteCliClient {
     base_url: String,
     client: reqwest::Client,
+    qos: QosRuntime,
+    qos_policy: QosPolicy,
     context: RequestContext,
     format: OutputFormat,
 }
@@ -337,6 +342,8 @@ impl RemoteCliClient {
         Ok(Self {
             base_url,
             client,
+            qos: QosRuntime::default(),
+            qos_policy: network.qos,
             context,
             format,
         })
@@ -353,15 +360,17 @@ impl RemoteCliClient {
         R: DeserializeOwned,
     {
         let url = repository_url(&self.base_url, alias, suffix, self.format)?;
-        let response = self
-            .client
-            .post(url)
-            .header("x-relay-request-id", &self.context.request_id)
-            .header("x-relay-trace-id", &self.context.trace_id)
-            .json(request)
-            .send()
-            .await
-            .map_err(|error| transport_error(error, self.format))?;
+        let response = http::send_request_with_qos(
+            &self.qos,
+            &self.qos_policy,
+            self.client
+                .post(url)
+                .header("x-relay-request-id", &self.context.request_id)
+                .header("x-relay-trace-id", &self.context.trace_id)
+                .json(request),
+        )
+        .await
+        .map_err(|error| qos_transport_error(error, self.format))?;
 
         decode_response(response, self.format).await
     }
@@ -372,14 +381,16 @@ impl RemoteCliClient {
     {
         let mut url = repository_url(&self.base_url, alias, "status", self.format)?;
         url.query_pairs_mut().append_pair("ref", ref_selector);
-        let response = self
-            .client
-            .get(url)
-            .header("x-relay-request-id", &self.context.request_id)
-            .header("x-relay-trace-id", &self.context.trace_id)
-            .send()
-            .await
-            .map_err(|error| transport_error(error, self.format))?;
+        let response = http::send_request_with_qos(
+            &self.qos,
+            &self.qos_policy,
+            self.client
+                .get(url)
+                .header("x-relay-request-id", &self.context.request_id)
+                .header("x-relay-trace-id", &self.context.trace_id),
+        )
+        .await
+        .map_err(|error| qos_transport_error(error, self.format))?;
 
         decode_response(response, self.format).await
     }
@@ -389,14 +400,16 @@ impl RemoteCliClient {
         R: DeserializeOwned,
     {
         let url = repository_url(&self.base_url, alias, suffix, self.format)?;
-        let response = self
-            .client
-            .get(url)
-            .header("x-relay-request-id", &self.context.request_id)
-            .header("x-relay-trace-id", &self.context.trace_id)
-            .send()
-            .await
-            .map_err(|error| transport_error(error, self.format))?;
+        let response = http::send_request_with_qos(
+            &self.qos,
+            &self.qos_policy,
+            self.client
+                .get(url)
+                .header("x-relay-request-id", &self.context.request_id)
+                .header("x-relay-trace-id", &self.context.trace_id),
+        )
+        .await
+        .map_err(|error| qos_transport_error(error, self.format))?;
 
         decode_response(response, self.format).await
     }
@@ -457,7 +470,7 @@ fn repository_url(
 }
 
 async fn decode_response<R>(
-    response: reqwest::Response,
+    response: http::QosHttpResponse,
     format: OutputFormat,
 ) -> Result<R, CliError>
 where
@@ -508,6 +521,23 @@ fn transport_error(error: reqwest::Error, format: OutputFormat) -> CliError {
     )
 }
 
+fn qos_transport_error(error: http::QosHttpClientError, format: OutputFormat) -> CliError {
+    let error_kind = if error.is_timeout() {
+        ErrorKind::Timeout
+    } else {
+        ErrorKind::StorageUnavailable
+    };
+
+    CliError::api_failed(
+        ApiError {
+            error_kind,
+            message: format!("remote service request failed: {error}"),
+            metadata: None,
+        },
+        format,
+    )
+}
+
 fn invalid_remote_url(message: String, format: OutputFormat) -> CliError {
     CliError::invalid_api_argument(format!("invalid remote service URL: {message}"), format)
 }
@@ -515,6 +545,7 @@ fn invalid_remote_url(message: String, format: OutputFormat) -> CliError {
 fn status_error(status: StatusCode, body: std::borrow::Cow<'_, str>) -> ApiError {
     let error_kind = match status {
         StatusCode::BAD_REQUEST => ErrorKind::InvalidArgument,
+        StatusCode::TOO_MANY_REQUESTS => ErrorKind::QosRejected,
         StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => ErrorKind::Timeout,
         StatusCode::SERVICE_UNAVAILABLE => ErrorKind::StorageUnavailable,
         _ => ErrorKind::Internal,
@@ -530,5 +561,21 @@ fn status_error(status: StatusCode, body: std::borrow::Cow<'_, str>) -> ApiError
         error_kind,
         message,
         metadata: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_error_maps_http_429_to_qos_rejected() {
+        let error = status_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            std::borrow::Cow::Borrowed("request budget exhausted"),
+        );
+
+        assert_eq!(error.error_kind, ErrorKind::QosRejected);
+        assert!(error.message.contains("request budget exhausted"));
     }
 }

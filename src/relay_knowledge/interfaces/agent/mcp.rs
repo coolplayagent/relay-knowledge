@@ -11,6 +11,7 @@ mod audit_bridge;
 mod code_tools;
 mod http_contract;
 mod metrics;
+mod notifications;
 mod prompts;
 mod resources;
 mod scope_authorization;
@@ -90,6 +91,7 @@ impl McpServer {
         agent: AgentRuntimeConfig,
     ) -> Self {
         let metrics = service.observability().agent_metrics();
+        let qos = network.qos_runtime();
         let audit = if agent.audit_sink_enabled {
             AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
                 .map(AgentAuditLog::with_sink)
@@ -102,7 +104,7 @@ impl McpServer {
             service,
             network,
             agent,
-            qos: QosRuntime::default(),
+            qos,
             audit,
             metrics,
             cancellations: CancellationRegistry::default(),
@@ -238,7 +240,7 @@ struct InspectGraphArgs {
 }
 
 #[derive(Debug, Deserialize)]
-struct CancelParams {
+pub(super) struct CancelParams {
     #[serde(rename = "requestId")]
     request_id: Value,
 }
@@ -280,6 +282,7 @@ impl McpMethodError {
             kind: match error.error_kind {
                 ErrorKind::InvalidArgument => "invalid_argument",
                 ErrorKind::StorageUnavailable => "storage_unavailable",
+                ErrorKind::QosRejected => "qos_rejected",
                 ErrorKind::Timeout => "timeout",
                 ErrorKind::Internal => "internal",
             },
@@ -407,10 +410,14 @@ async fn handle_mcp_post(
         if request.id.is_some() {
             return json_rpc_error(id, -32600, "notifications must not include an id");
         }
+        if method == "notifications/cancelled" {
+            notifications::handle_notification(&server, method, request.params, &namespace);
+            return StatusCode::ACCEPTED.into_response();
+        }
         let Ok(permit) = admit_mcp_request(&server) else {
             return StatusCode::TOO_MANY_REQUESTS.into_response();
         };
-        handle_notification(&server, method, request.params, &namespace);
+        notifications::handle_notification(&server, method, request.params, &namespace);
         drop(permit);
         return StatusCode::ACCEPTED.into_response();
     }
@@ -585,18 +592,11 @@ fn session_create_error(id: Value, error: SessionCreateError) -> Response {
     json_rpc_error(id, -32603, format!("failed to create MCP session: {error}"))
 }
 
-fn handle_notification(server: &McpServer, method: &str, params: Value, namespace: &str) {
-    if method == "notifications/cancelled" {
-        if let Ok(cancel) = serde_json::from_value::<CancelParams>(params) {
-            if let Some(request_id) = request_id_key(namespace, &cancel.request_id) {
-                server.cancellations.cancel(&request_id);
-            }
-        }
-    }
-}
-
 fn admit_mcp_request(server: &McpServer) -> Result<QosPermit, RejectReason> {
     let policy = server.network.current().qos;
+    if crate::net::http::qos_request_context_active() {
+        return Ok(QosPermit::already_admitted(server.qos.clone()));
+    }
     server.qos.admit_queued_request(&policy)
 }
 
@@ -614,10 +614,13 @@ async fn run_cancellable_tool_call(
     let result = tokio::select! {
         result = tokio::time::timeout(timeout, tool) => match result {
             Ok(value) => value,
-            Err(_) => tool_error_result(AgentAdapterError::new(
-                AgentAdapterErrorKind::Timeout,
-                "MCP tool call exceeded max_runtime_ms",
-            )),
+            Err(_) => {
+                server.qos.record_timed_out();
+                tool_error_result(AgentAdapterError::new(
+                    AgentAdapterErrorKind::Timeout,
+                    "MCP tool call exceeded max_runtime_ms",
+                ))
+            }
         },
         _ = wait_for_cancellation(&mut cancellation) => {
             tool_error_result(AgentAdapterError::new(
@@ -856,6 +859,7 @@ fn agent_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
     match kind {
         ErrorKind::InvalidArgument => AgentAdapterErrorKind::InvalidArgument,
         ErrorKind::StorageUnavailable => AgentAdapterErrorKind::StorageUnavailable,
+        ErrorKind::QosRejected => AgentAdapterErrorKind::QosRejected,
         ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
         ErrorKind::Internal => AgentAdapterErrorKind::Internal,
     }

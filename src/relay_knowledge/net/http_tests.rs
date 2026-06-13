@@ -1,8 +1,13 @@
 use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    body::{Body, to_bytes},
+    routing::{get, post},
+};
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tower::ServiceExt;
 
 #[test]
 fn parses_overridden_http_bind_address() {
@@ -153,6 +158,346 @@ async fn post_json_sends_bounded_worker_request() {
     server.await.expect("server task should finish");
 }
 
+#[tokio::test]
+async fn post_json_with_qos_rejects_when_outbound_budget_is_exhausted() {
+    let config = HttpConfig::new(
+        HttpBindAddress::parse("127.0.0.1:8791").expect("bind should parse"),
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        1024,
+        HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+    )
+    .expect("config should build");
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(1, 1, 1).expect("policy should build");
+    let _permit = qos
+        .admit_request(&policy)
+        .expect("first request should consume budget");
+
+    let error = post_json_with_qos(
+        &config,
+        &qos,
+        &policy,
+        "http://127.0.0.1:1/worker",
+        &json!({"task": "ocr"}),
+    )
+    .await
+    .expect_err("exhausted request budget should reject before transport");
+
+    assert!(matches!(
+        error,
+        HttpClientError::QosRejected(RejectReason::RequestBudgetExceeded)
+    ));
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
+}
+
+#[tokio::test]
+async fn post_json_with_qos_reuses_outer_http_request_admission() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        let mut buffer = [0; 512];
+        let _ = stream.read(&mut buffer).await.expect("request should read");
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+            )
+            .await
+            .expect("response should write");
+    });
+    let config = HttpConfig::new(
+        HttpBindAddress::parse("127.0.0.1:8791").expect("bind should parse"),
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        1024,
+        HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+    )
+    .expect("config should build");
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let url = format!("http://{addr}/worker");
+    let router = router_with_qos_request_admission(
+        Router::new().route(
+            "/nested-worker",
+            post({
+                let config = config.clone();
+                let qos = qos.clone();
+                let policy = policy.clone();
+                move || {
+                    let config = config.clone();
+                    let qos = qos.clone();
+                    let policy = policy.clone();
+                    let url = url.clone();
+                    async move {
+                        post_json_with_qos(&config, &qos, &policy, &url, &json!({"task": "ocr"}))
+                            .await
+                            .expect("nested raw worker call should not be double charged")
+                            .to_string()
+                    }
+                }
+            }),
+        ),
+        qos.clone(),
+        policy,
+    );
+
+    let response = router
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/nested-worker")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(qos.diagnostics_snapshot().admitted_total, 1);
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 0);
+    server.await.expect("server task should finish");
+}
+
+#[tokio::test]
+async fn send_request_with_qos_holds_permit_until_body_is_consumed() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let (release_body, wait_for_release) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+            .await
+            .expect("headers should write");
+        let _ = wait_for_release.await;
+        stream.write_all(b"ok").await.expect("body should write");
+    });
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let client = reqwest::Client::new();
+
+    let response = send_request_with_qos(&qos, &policy, client.get(format!("http://{addr}/slow")))
+        .await
+        .expect("response headers should arrive");
+
+    assert_eq!(qos.diagnostics_snapshot().usage.in_flight_requests, 1);
+    release_body.send(()).expect("body release should send");
+    assert_eq!(
+        response.text().await.expect("body should read"),
+        "ok".to_owned()
+    );
+    assert_eq!(qos.diagnostics_snapshot().usage.in_flight_requests, 0);
+    server.await.expect("server task should finish");
+}
+
+#[tokio::test]
+async fn qos_response_records_timeout_while_reading_body() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+            .await
+            .expect("headers should write");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    });
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let client = reqwest::Client::new();
+
+    let response = send_request_with_qos(
+        &qos,
+        &policy,
+        client
+            .get(format!("http://{addr}/slow"))
+            .timeout(Duration::from_millis(50)),
+    )
+    .await
+    .expect("response headers should arrive");
+    let error = response
+        .text()
+        .await
+        .expect_err("body read should time out");
+
+    assert!(error.is_timeout());
+    assert_eq!(qos.diagnostics_snapshot().timed_out_total, 1);
+    assert_eq!(qos.diagnostics_snapshot().usage.in_flight_requests, 0);
+    server.await.expect("server task should finish");
+}
+
+#[tokio::test]
+async fn qos_request_layer_rejects_excess_web_requests() {
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let (request_started, request_started_waiter) = tokio::sync::oneshot::channel();
+    let request_started = Arc::new(std::sync::Mutex::new(Some(request_started)));
+    let router = router_with_qos_request_admission(
+        Router::new()
+            .route(
+                "/hold",
+                get(move || signal_pending_route(request_started.clone())),
+            )
+            .route("/ok", get(|| async { "ok" }))
+            .route("/api/ok", get(|| async { "ok" })),
+        qos.clone(),
+        policy,
+    );
+    let first = tokio::spawn(
+        router.clone().oneshot(
+            axum::http::Request::builder()
+                .uri("/hold")
+                .body(Body::empty())
+                .expect("request should build"),
+        ),
+    );
+
+    tokio::time::timeout(Duration::from_secs(5), request_started_waiter)
+        .await
+        .expect("handler should start")
+        .expect("request should signal startup");
+    let response = router
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/ok")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let error: serde_json::Value =
+        serde_json::from_slice(&body).expect("API QoS rejection should be JSON");
+    assert_eq!(error["error_kind"], "qos_rejected");
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
+
+    first.abort();
+}
+
+#[tokio::test]
+async fn qos_request_layer_does_not_double_charge_nested_outbound_request() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        let mut buffer = [0; 512];
+        let _ = stream.read(&mut buffer).await.expect("request should read");
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .await
+            .expect("response should write");
+    });
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let client = reqwest::Client::new();
+    let url = format!("http://{addr}/catalog");
+    let router = router_with_qos_request_admission(
+        Router::new().route(
+            "/nested",
+            get({
+                let client = client.clone();
+                let qos = qos.clone();
+                let policy = policy.clone();
+                move || {
+                    let client = client.clone();
+                    let qos = qos.clone();
+                    let policy = policy.clone();
+                    let url = url.clone();
+                    async move {
+                        let response = send_request_with_qos(&qos, &policy, client.get(url))
+                            .await
+                            .expect("nested outbound request should not be double charged");
+                        response.text().await.expect("nested body should read")
+                    }
+                }
+            }),
+        ),
+        qos.clone(),
+        policy,
+    );
+
+    let response = router
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/nested")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(qos.diagnostics_snapshot().admitted_total, 1);
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 0);
+    server.await.expect("server task should finish");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn server_timeout_with_qos_request_layer_counts_once() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let bind = listener
+        .local_addr()
+        .expect("listener should expose address")
+        .to_string();
+    let config = HttpConfig::new(
+        HttpBindAddress::parse(&bind).expect("bind should parse"),
+        Duration::from_millis(20),
+        Duration::from_secs(5),
+        1024,
+        HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+    )
+    .expect("config should build");
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 8, 8).expect("policy should build");
+    let router = router_with_qos_request_admission(
+        Router::new().route(
+            "/hold",
+            get(|| async { std::future::pending::<&'static str>().await }),
+        ),
+        qos.clone(),
+        policy,
+    );
+    let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(serve_listener(
+        listener,
+        router,
+        config,
+        Some(qos.clone()),
+        async {
+            let _ = shutdown_waiter.await;
+        },
+    ));
+
+    let response = reqwest::Client::new()
+        .get(format!("http://{bind}/hold"))
+        .send()
+        .await
+        .expect("server should respond with timeout");
+
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(qos.diagnostics_snapshot().timed_out_total, 1);
+    let _ = shutdown.send(());
+    server
+        .await
+        .expect("server task should join")
+        .expect("server should stop");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_router_enforces_graceful_shutdown_timeout() {
     let bind = "127.0.0.1:8791";
@@ -173,7 +518,7 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         get(move || signal_pending_route(request_started.clone())),
     );
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
-    let server = tokio::spawn(serve_listener(listener, router, config, async {
+    let server = tokio::spawn(serve_listener(listener, router, config, None, async {
         let _ = shutdown_waiter.await;
     }));
 
@@ -308,9 +653,15 @@ async fn serve_router_with_qos_rejects_excess_connections() {
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
     let server_qos = qos.clone();
     let listener = QosTcpListener::new(listener, server_qos, policy);
-    let server = tokio::spawn(serve_listener(listener, router, config, async {
-        let _ = shutdown_waiter.await;
-    }));
+    let server = tokio::spawn(serve_listener(
+        listener,
+        router,
+        config,
+        Some(qos.clone()),
+        async {
+            let _ = shutdown_waiter.await;
+        },
+    ));
 
     let first = connect_with_retry(&bind).await;
     wait_for_connection_count(&qos, 1).await;

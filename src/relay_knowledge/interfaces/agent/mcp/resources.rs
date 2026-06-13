@@ -75,6 +75,7 @@ pub(super) async fn read_resource_with_timeout(
     match tokio::time::timeout(timeout, read_resource(server, params, request_id)).await {
         Ok(result) => result,
         Err(_) => {
+            server.qos.record_timed_out();
             record_mcp_method_audit(
                 server,
                 McpMethodAudit {

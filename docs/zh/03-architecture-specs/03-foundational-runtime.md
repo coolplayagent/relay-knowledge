@@ -40,6 +40,16 @@ QoS policy 至少覆盖：
 - timeout、cancellation、retry backoff。
 - overload response 与 dropped work 观测。
 
+网络路径清单必须随实现保持同步。当前统一接入点如下：
+
+| 路径 | 方向 | QoS 接入点 | 过载行为与观测 |
+| --- | --- | --- | --- |
+| Web HTTP API 与静态资源 | inbound | `net::http` listener connection admission 与 Web router request admission | 超过 request budget 返回 `429`；status/MCP metrics 暴露 current usage 与累计 admitted、rejected、timed_out、cancelled、dropped |
+| MCP Streamable HTTP 与 `/mcp/metrics` | inbound | `net::http` listener connection admission 与 MCP method admission | JSON-RPC 工具调用返回 QoS error，HTTP endpoint 返回 `429`；audit/metrics 记录 admitted/rejected/timeout/cancel |
+| Model catalog、provider probe/discovery、remote embedding、update check、remote CLI、worker HTTP endpoint | outbound | `net::http` outbound request admission | 发送前获取 request permit；超预算映射为稳定 network/QoS 错误并记录 rejected，transport timeout 记录 timed_out |
+
+QoS 诊断计数使用低基数字段。`*_total` 是进程生命周期内累计 counter；`current_*` 是当前连接、in-flight request 与 queued request gauge。不得把原始 URL、IP、request id、用户 id 或 secret 放进 QoS metric label。
+
 ## 5. 启动模型
 
 CLI、Web 和 service mode 共享同一组 application services。启动顺序固定：

@@ -1,13 +1,9 @@
 # relay-knowledge HTTP API 参考
-
 > 文档版本: 1.0
 > 编制日期: 2026-06-06
 > 适用范围: relay-knowledge API 完整参考
-
 ## 1. 概述
-
 relay-knowledge 通过统一的 HTTP API 层暴露知识图谱能力，包含控制面诊断、代码仓库索引与检索、知识图谱操作以及 MCP Streamable HTTP 代理协议。
-
 ### 1.1 Base URL
 
 ```
@@ -15,9 +11,7 @@ http://localhost:8080
 ```
 
 服务启动时默认监听 `0.0.0.0:8080`，实际地址由 `RELAY_KNOWLEDGE_HTTP_BIND` 环境变量和 `RELAY_KNOWLEDGE_HTTP_PORT` 配置决定。
-
 ### 1.2 API 版本
-
 当前所有 API 路径均以 `/api/v1/` 为前缀（部分旧端点使用 `/api/` 无版本前缀）。版本策略为路径版本化，未来不兼容变更将通过 `/api/v2/` 暴露。
 
 ### 1.3 认证
@@ -67,6 +61,7 @@ X-Relay-Trace-Id: trace-abc123
 | --- | --- | --- |
 | `invalid_argument` | 400 BAD_REQUEST | 请求参数无效 |
 | `storage_unavailable` | 503 SERVICE_UNAVAILABLE | 存储层不可用 |
+| `qos_rejected` | 429 TOO_MANY_REQUESTS | QoS 准入预算耗尽 |
 | `timeout` | 504 GATEWAY_TIMEOUT | 操作超时 |
 | `internal` | 500 INTERNAL_SERVER_ERROR | 内部错误 |
 
@@ -80,7 +75,6 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 ---
 
 ## 3. 成功响应通用字段
-
 所有成功响应均包含 `metadata`（ApiMetadata 结构）：
 
 ```json
@@ -120,12 +114,18 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
     "qos_max_connections": 512,
     "qos_max_in_flight_requests": 64,
     "qos_max_queue_depth": 128,
+    "qos_current_connections": 3,
+    "qos_current_in_flight_requests": 2,
+    "qos_current_queued_requests": 0,
+    "qos_admitted_total": 1024,
+    "qos_queued_total": 128,
+    "qos_rejected_total": 7,
+    "qos_timed_out_total": 2,
+    "qos_cancelled_total": 1,
+    "qos_dropped_total": 0,
     "silent_updates_enabled": true,
     "semantic_backend_mode": "embedded",
-    "vector_backend_mode": "embedded",
-    "embedding_provider": "openai",
-    "text_embedding_model": "text-embedding-3-small",
-    "embedding_dimension": 1536
+    "vector_backend_mode": "embedded"
   }
 }
 ```

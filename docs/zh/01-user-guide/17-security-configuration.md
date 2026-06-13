@@ -51,11 +51,11 @@ relay-knowledge service run --mcp streamable-http
 `QosRuntime` 在三个层面执行准入检查，每个检查都是原子操作（`Arc<Mutex<QosSnapshot>>`）：
 
 1. **`reserve_queue`** — 先占排队槽位，仅检查 `queued_requests < max_queue_depth`。
-2. **`admit_queued_request`** — 从排队转入在途，同时检查排队预算和在途请求预算。
+2. **`admit_queued_request`** — 从排队转入在途，同时检查排队预算和在途请求预算，并推进 `qos_queued_total`/`relay_knowledge_qos_queued_total`。
 3. **`admit_request`** — 直接请求准入（非排队路径），检查 `in_flight_requests < max_in_flight_requests`。
 4. **`admit_connection`** — 新 TCP 连接准入，检查 `connections < max_connections`。
 
-MCP 请求通过 `admit_queued_request` 进入，Web/HTTP 路由通过 `admit_connection` + `admit_request` 进入。
+MCP 请求通过 `admit_queued_request` 进入，Web/HTTP 路由通过 `admit_connection` + `admit_request` 进入。已校验 session 的 MCP `notifications/cancelled` 使用协议层优先路径，避免普通请求预算满载时无法取消活跃工具调用。MCP 与本地 ACP 工作触发 runtime budget 超时时，会计入 QoS timeout 诊断。
 
 每种准入检查返回 `QosPermit`，该 permit 在 drop 时自动释放对应的预算计数（使用 `saturating_sub` 防止下溢），确保即使 panic 也不会泄漏预算。
 
