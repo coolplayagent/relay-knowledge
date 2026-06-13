@@ -282,6 +282,7 @@ impl McpMethodError {
             kind: match error.error_kind {
                 ErrorKind::InvalidArgument => "invalid_argument",
                 ErrorKind::StorageUnavailable => "storage_unavailable",
+                ErrorKind::QosRejected => "qos_rejected",
                 ErrorKind::Timeout => "timeout",
                 ErrorKind::Internal => "internal",
             },
@@ -858,6 +859,7 @@ fn agent_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
     match kind {
         ErrorKind::InvalidArgument => AgentAdapterErrorKind::InvalidArgument,
         ErrorKind::StorageUnavailable => AgentAdapterErrorKind::StorageUnavailable,
+        ErrorKind::QosRejected => AgentAdapterErrorKind::QosRejected,
         ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
         ErrorKind::Internal => AgentAdapterErrorKind::Internal,
     }

@@ -60,6 +60,7 @@ async fn default_router_can_be_constructed() {
 async fn api_error_response_maps_stable_status_codes() {
     let invalid = api_error_response(ApiError::invalid_argument("bad"));
     let storage = api_error_response(ApiError::storage_unavailable("down"));
+    let qos = api_error_response(ApiError::qos_rejected("busy"));
     let timeout = api_error_response(ApiError {
         error_kind: ErrorKind::Timeout,
         message: "slow".to_owned(),
@@ -73,6 +74,7 @@ async fn api_error_response_maps_stable_status_codes() {
 
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     assert_eq!(storage.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(qos.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(timeout.status(), StatusCode::REQUEST_TIMEOUT);
     assert_eq!(internal.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }

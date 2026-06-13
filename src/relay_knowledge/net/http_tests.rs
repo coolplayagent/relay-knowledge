@@ -2,7 +2,7 @@ use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
 use axum::{
     Router,
-    body::Body,
+    body::{Body, to_bytes},
     routing::{get, post},
 };
 use serde_json::json;
@@ -345,7 +345,8 @@ async fn qos_request_layer_rejects_excess_web_requests() {
                 "/hold",
                 get(move || signal_pending_route(request_started.clone())),
             )
-            .route("/ok", get(|| async { "ok" })),
+            .route("/ok", get(|| async { "ok" }))
+            .route("/api/ok", get(|| async { "ok" })),
         qos.clone(),
         policy,
     );
@@ -365,7 +366,7 @@ async fn qos_request_layer_rejects_excess_web_requests() {
     let response = router
         .oneshot(
             axum::http::Request::builder()
-                .uri("/ok")
+                .uri("/api/ok")
                 .body(Body::empty())
                 .expect("request should build"),
         )
@@ -373,6 +374,12 @@ async fn qos_request_layer_rejects_excess_web_requests() {
         .expect("router should respond");
 
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let error: serde_json::Value =
+        serde_json::from_slice(&body).expect("API QoS rejection should be JSON");
+    assert_eq!(error["error_kind"], "qos_rejected");
     assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
 
     first.abort();

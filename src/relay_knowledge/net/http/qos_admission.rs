@@ -7,12 +7,12 @@ use std::{
 
 use axum::{
     extract::Request,
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use tower::{Layer, Service};
 
-use crate::net::qos::{QosPolicy, QosRuntime};
+use crate::net::qos::{QosPolicy, QosRuntime, RejectReason};
 
 #[derive(Clone)]
 pub(crate) struct QosRequestLayer {
@@ -67,7 +67,7 @@ where
             let permit = match qos.admit_request(&policy) {
                 Ok(permit) => permit,
                 Err(reason) => {
-                    return Ok((StatusCode::TOO_MANY_REQUESTS, reason.as_str()).into_response());
+                    return Ok(qos_rejection_response(request.uri().path(), reason));
                 }
             };
             let result = super::QOS_REQUEST_CONTEXT
@@ -77,4 +77,21 @@ where
             result
         })
     }
+}
+
+fn qos_rejection_response(path: &str, reason: RejectReason) -> Response {
+    if path == "/api" || path.starts_with("/api/") {
+        let body = format!(
+            r#"{{"error_kind":"qos_rejected","message":"QoS request admission rejected: {}"}}"#,
+            reason.as_str()
+        );
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::CONTENT_TYPE, "application/json")],
+            body,
+        )
+            .into_response();
+    }
+
+    (StatusCode::TOO_MANY_REQUESTS, reason.as_str()).into_response()
 }

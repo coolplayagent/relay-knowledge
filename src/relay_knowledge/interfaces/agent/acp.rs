@@ -856,6 +856,7 @@ fn api_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
     match kind {
         ErrorKind::InvalidArgument => AgentAdapterErrorKind::InvalidArgument,
         ErrorKind::StorageUnavailable => AgentAdapterErrorKind::StorageUnavailable,
+        ErrorKind::QosRejected => AgentAdapterErrorKind::QosRejected,
         ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
         ErrorKind::Internal => AgentAdapterErrorKind::Internal,
     }

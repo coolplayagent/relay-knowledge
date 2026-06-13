@@ -545,6 +545,7 @@ fn invalid_remote_url(message: String, format: OutputFormat) -> CliError {
 fn status_error(status: StatusCode, body: std::borrow::Cow<'_, str>) -> ApiError {
     let error_kind = match status {
         StatusCode::BAD_REQUEST => ErrorKind::InvalidArgument,
+        StatusCode::TOO_MANY_REQUESTS => ErrorKind::QosRejected,
         StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => ErrorKind::Timeout,
         StatusCode::SERVICE_UNAVAILABLE => ErrorKind::StorageUnavailable,
         _ => ErrorKind::Internal,
@@ -560,5 +561,21 @@ fn status_error(status: StatusCode, body: std::borrow::Cow<'_, str>) -> ApiError
         error_kind,
         message,
         metadata: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_error_maps_http_429_to_qos_rejected() {
+        let error = status_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            std::borrow::Cow::Borrowed("request budget exhausted"),
+        );
+
+        assert_eq!(error.error_kind, ErrorKind::QosRejected);
+        assert!(error.message.contains("request budget exhausted"));
     }
 }
