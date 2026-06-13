@@ -27,6 +27,8 @@
 
 安装目录、release 解压目录、当前工作目录和仓库目录不得默认承载运行时状态。用户显式配置路径时，`paths` 负责规范化、权限检查和诊断。
 
+仓库局部 contract（例如 `.knowledge/knowledge-map.yaml`）不属于 runtime state。进程入口可以把 cwd 作为 bootstrap 输入，仓库根发现策略必须收敛在 `paths` 的 repository-root contract 中；application service 只能接收已经解析好的仓库根路径。
+
 ## 4. 网络和 QoS 边界
 
 `net` 拥有所有网络能力；`net::http` 拥有 HTTP client/server；`net::qos` 拥有准入控制和资源预算。应用服务请求网络资源时只表达意图、来源、tenant、优先级和预算，不直接创建 socket 或 client。

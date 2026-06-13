@@ -27,6 +27,8 @@ Business modules receive typed config and must not call `std::env`.
 
 Installation directories, release extraction directories, current working directories, and repository roots do not store runtime state by default. When users configure paths explicitly, `paths` owns normalization, permission checks, and diagnostics.
 
+Repository-local contracts such as `.knowledge/knowledge-map.yaml` are not runtime state. Process entry points may pass cwd as a bootstrap input, but repository-root discovery policy must stay inside the `paths` repository-root contract; application services receive an already resolved repository root.
+
 ## 4. Network and QoS Boundary
 
 `net` owns all network capabilities; `net::http` owns HTTP clients and servers; `net::qos` owns admission and resource budgets. Application services request network capability by intent, source, tenant, priority, and budget, not by constructing sockets or clients.

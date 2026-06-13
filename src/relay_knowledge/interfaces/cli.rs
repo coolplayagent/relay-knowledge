@@ -11,7 +11,7 @@ mod files_cli;
 #[path = "knowledge_cli.rs"]
 mod knowledge_cli;
 #[path = "map_cli.rs"]
-mod map_cli;
+pub(crate) mod map_cli;
 #[path = "ops_cli.rs"]
 mod ops_cli;
 #[path = "remote_cli.rs"]
@@ -375,14 +375,14 @@ impl CliError {
         Self::InvalidFormat(format.to_owned())
     }
 
-    pub(super) fn api_failed(error: ApiError, format: OutputFormat) -> Self {
+    pub(crate) fn api_failed(error: ApiError, format: OutputFormat) -> Self {
         Self::ApiError {
             error: Box::new(error),
             format,
         }
     }
 
-    pub(super) fn invalid_api_argument(message: impl Into<String>, format: OutputFormat) -> Self {
+    pub(crate) fn invalid_api_argument(message: impl Into<String>, format: OutputFormat) -> Self {
         Self::api_failed(ApiError::invalid_argument(message), format)
     }
 
@@ -562,8 +562,8 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    let command = CliCommand::parse(args)?;
-    run_command(command).await
+    let output = crate::bootstrap::cli::run_process(args, false).await?;
+    Ok(output.stdout)
 }
 
 /// Rendered stdout/stderr for the process entry point.
@@ -576,19 +576,13 @@ pub struct CliProcessOutput {
 /// Runs the CLI command and renders only the command result.
 pub async fn run_process<I, S>(
     args: I,
-    _interactive_text_output: bool,
+    interactive_text_output: bool,
 ) -> Result<CliProcessOutput, CliError>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    let command = CliCommand::parse(args)?;
-    let stdout = run_command(command).await?;
-
-    Ok(CliProcessOutput {
-        stdout,
-        stderr: String::new(),
-    })
+    crate::bootstrap::cli::run_process(args, interactive_text_output).await
 }
 
 /// Renders best-effort process-only notices after primary command output is emitted.
@@ -601,7 +595,7 @@ where
     version_cli::update_notice_for_process(&command, interactive_text_output).await
 }
 
-async fn run_command(command: CliCommand) -> Result<String, CliError> {
+pub(crate) async fn run_command(command: CliCommand) -> Result<String, CliError> {
     if let CliAction::Help { path } = &command.action {
         return cli_spec::render_help(path, command.format);
     }
@@ -613,7 +607,7 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
     }
     if let CliAction::Map(map_command) = command.action.clone() {
         let context = RequestContext::for_interface(InterfaceKind::Cli);
-        return map_cli::run_map(map_command, context, command.format).await;
+        return map_cli::run_map(map_command, None, context, command.format).await;
     }
 
     let context = RequestContext::for_interface(InterfaceKind::Cli);
@@ -814,7 +808,7 @@ pub async fn run_with_service(
                 format,
             )
         }
-        CliAction::Map(command) => map_cli::run_map(command, context, format).await,
+        CliAction::Map(command) => map_cli::run_map(command, None, context, format).await,
         CliAction::Repo(command) => repo_cli::run_repo(service, command, context, format).await,
         CliAction::RepoSet(command) => {
             repo_set_cli::run_repo_set(service, command, context, format).await

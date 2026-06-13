@@ -1,9 +1,6 @@
 use crate::{
     api::ApiError,
-    application::{
-        KnowledgeMapService, KnowledgeMapServiceError, KnowledgeMapSourceAddRequest,
-        knowledge_map_service,
-    },
+    application::{KnowledgeMapService, KnowledgeMapServiceError, KnowledgeMapSourceAddRequest},
     domain::{KnowledgeMapChange, KnowledgeMapSourceKind},
 };
 
@@ -31,6 +28,12 @@ pub enum MapCommand {
     AgentSnippet,
 }
 
+impl MapCommand {
+    pub(crate) fn needs_repository_root(&self) -> bool {
+        !matches!(self, Self::AgentSnippet)
+    }
+}
+
 pub(super) fn parse_map(tokens: &[String]) -> Result<CliAction, CliError> {
     match tokens.first().map(String::as_str) {
         Some("init") if tokens.len() == 1 => Ok(CliAction::Map(MapCommand::Init)),
@@ -45,14 +48,15 @@ pub(super) fn parse_map(tokens: &[String]) -> Result<CliAction, CliError> {
     }
 }
 
-pub(super) async fn run_map(
+pub(crate) async fn run_map(
     command: MapCommand,
+    service: Option<&KnowledgeMapService>,
     context: crate::api::RequestContext,
     format: OutputFormat,
 ) -> Result<String, CliError> {
     match command {
         MapCommand::Init => {
-            let service = map_service(format)?;
+            let service = map_service(service, format)?;
             let response = service
                 .init(&context)
                 .await
@@ -65,7 +69,7 @@ pub(super) async fn run_map(
             )
         }
         MapCommand::Show { topic } => {
-            let service = map_service(format)?;
+            let service = map_service(service, format)?;
             let response = service
                 .show(&context, topic)
                 .await
@@ -78,7 +82,7 @@ pub(super) async fn run_map(
             )
         }
         MapCommand::Route { topic } => {
-            let service = map_service(format)?;
+            let service = map_service(service, format)?;
             let response = service
                 .route(&context, topic)
                 .await
@@ -91,7 +95,7 @@ pub(super) async fn run_map(
             )
         }
         MapCommand::SourceAdd { request } => {
-            let service = map_service(format)?;
+            let service = map_service(service, format)?;
             let response = service
                 .add_source(&context, request)
                 .await
@@ -104,7 +108,7 @@ pub(super) async fn run_map(
             )
         }
         MapCommand::SourceUpdate { change } => {
-            let service = map_service(format)?;
+            let service = map_service(service, format)?;
             let response = service
                 .update_source(&context, change)
                 .await
@@ -117,7 +121,7 @@ pub(super) async fn run_map(
             )
         }
         MapCommand::SourceRemove { id } => {
-            let service = map_service(format)?;
+            let service = map_service(service, format)?;
             let response = service
                 .remove_source(&context, id)
                 .await
@@ -130,7 +134,7 @@ pub(super) async fn run_map(
             )
         }
         MapCommand::Validate => {
-            let service = map_service(format)?;
+            let service = map_service(service, format)?;
             let response = service
                 .validate(&context)
                 .await
@@ -155,10 +159,16 @@ pub(super) async fn run_map(
     }
 }
 
-fn map_service(format: OutputFormat) -> Result<KnowledgeMapService, CliError> {
-    knowledge_map_service()
-        .map_err(ApiError::invalid_argument)
-        .map_err(|error| CliError::api_failed(error, format))
+fn map_service(
+    service: Option<&KnowledgeMapService>,
+    format: OutputFormat,
+) -> Result<&KnowledgeMapService, CliError> {
+    service.ok_or_else(|| {
+        CliError::api_failed(
+            ApiError::invalid_argument("knowledge map repository root was not resolved"),
+            format,
+        )
+    })
 }
 
 fn map_error(

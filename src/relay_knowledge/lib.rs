@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod application;
+pub mod bootstrap;
 pub mod code;
 pub mod domain;
 pub mod env;

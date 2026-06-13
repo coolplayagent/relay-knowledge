@@ -20,7 +20,10 @@ use crate::{
     },
 };
 
+mod repository_root;
+
 pub use crate::project::APP_DIR_NAME;
+pub use repository_root::{RepositoryRootDiscoveryError, discover_repository_root};
 
 /// Resolved runtime directories used by CLI, Web, services, and future workers.
 #[derive(Debug, Clone, PartialEq, Eq)]

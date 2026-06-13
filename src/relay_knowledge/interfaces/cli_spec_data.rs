@@ -337,7 +337,10 @@ fn map_init() -> CliCommandSpec {
         &[],
         &[],
         &["relay-knowledge map init --format json"],
-        &["Creates the default knowledge map and leaves AGENTS.md edits explicit."],
+        &[
+            "Creates the default knowledge map and leaves AGENTS.md edits explicit.",
+            "The repository root is discovered from the process start directory by walking up to .git or .knowledge, with AGENTS.md as a compatibility fallback.",
+        ],
     )
 }
 
@@ -359,7 +362,9 @@ fn map_show() -> CliCommandSpec {
             &[],
         )],
         &["relay-knowledge map show --topic build --format json"],
-        &[],
+        &[
+            "The repository root is discovered from the process start directory before reading .knowledge/knowledge-map.yaml."
+        ],
     )
 }
 
@@ -389,7 +394,10 @@ fn map_source_add() -> CliCommandSpec {
         &[
             "relay-knowledge map source add --id build-cargo --topic build --kind config --uri Cargo.toml --scope repo --format json"
         ],
-        &["Updates the default knowledge map and records a map history entry."],
+        &[
+            "Updates the default knowledge map and records a map history entry.",
+            "The repository root is discovered from the process start directory before writing .knowledge/knowledge-map.yaml.",
+        ],
     )
 }
 
@@ -405,7 +413,10 @@ fn map_source_update() -> CliCommandSpec {
         &[
             "relay-knowledge map source update --id build-cargo --description \"Cargo package manifest\" --format json"
         ],
-        &["The source id is stable and cannot be changed by update."],
+        &[
+            "The source id is stable and cannot be changed by update.",
+            "The repository root is discovered from the process start directory before writing .knowledge/knowledge-map.yaml.",
+        ],
     )
 }
 
@@ -427,7 +438,10 @@ fn map_source_remove() -> CliCommandSpec {
             &[],
         )],
         &["relay-knowledge map source remove --id build-cargo --format json"],
-        &["Routes referencing the source are pruned during removal."],
+        &[
+            "Routes referencing the source are pruned during removal.",
+            "The repository root is discovered from the process start directory before writing .knowledge/knowledge-map.yaml.",
+        ],
     )
 }
 
@@ -441,7 +455,10 @@ fn map_validate() -> CliCommandSpec {
         &[],
         &[],
         &["relay-knowledge map validate --format json"],
-        &["Checks the default knowledge map and the AGENTS.md reference."],
+        &[
+            "Checks the default knowledge map and the AGENTS.md reference.",
+            "The repository root is discovered from the process start directory before reading .knowledge/knowledge-map.yaml.",
+        ],
     )
 }
 
