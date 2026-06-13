@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    FreshnessPolicy, FusionDiagnostics, IndexStatus, RetrievalBackendStatus, RetrievalHit,
-    RetrievalMode, RetrievedContextPack,
+    ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexStatus, RetrievalBackendStatus,
+    RetrievalHit, RetrievalMode, RetrievedContextPack,
 };
 use crate::project::{ACP_LOCAL_ADAPTER_NAME, MCP_ADAPTER_NAME};
 use crate::storage::{IndexCursor, IndexRefreshDiagnostics};
@@ -219,6 +219,44 @@ pub struct AgentRetrievalResult {
     pub budget_used: AgentBudgetUsed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct AgentResultKey {
+    result_id: String,
+    source_scope: String,
+    source_path: Option<String>,
+}
+
+impl AgentResultKey {
+    fn from_hit(hit: &RetrievalHit) -> Self {
+        Self {
+            result_id: hit.evidence_id.clone(),
+            source_scope: hit.source_scope.clone(),
+            source_path: agent_hit_source_path(hit),
+        }
+    }
+
+    fn from_item(item: &ContextPackItem) -> Self {
+        Self {
+            result_id: item.result_id.clone(),
+            source_scope: item.source_scope.clone(),
+            source_path: item
+                .source_path
+                .clone()
+                .or_else(|| item.code_artifact.as_ref().and_then(agent_artifact_path)),
+        }
+    }
+}
+
+fn agent_hit_source_path(hit: &RetrievalHit) -> Option<String> {
+    hit.source_path
+        .clone()
+        .or_else(|| hit.code_artifact.as_ref().and_then(agent_artifact_path))
+}
+
+fn agent_artifact_path(artifact: &crate::domain::CodeGraphArtifact) -> Option<String> {
+    (!artifact.path.is_empty()).then(|| artifact.path.clone())
+}
+
 impl AgentRetrievalResult {
     /// Builds the canonical agent result and applies the context byte budget.
     pub fn from_retrieval(
@@ -247,7 +285,12 @@ impl AgentRetrievalResult {
         let item_bytes = context_pack
             .items
             .iter()
-            .map(|item| (item.result_id.clone(), serialized_context_bytes(item)))
+            .map(|item| {
+                (
+                    AgentResultKey::from_item(item),
+                    serialized_context_bytes(item),
+                )
+            })
             .collect::<HashMap<_, _>>();
         let mut context_bytes = serialized_context_bytes(&context_pack.backend_statuses)
             .saturating_add(serialized_context_bytes(&backend_statuses));
@@ -261,12 +304,9 @@ impl AgentRetrievalResult {
         let mut results = Vec::new();
 
         for hit in response_results {
-            let hit_bytes = serialized_context_bytes(&hit).saturating_add(
-                item_bytes
-                    .get(hit.evidence_id.as_str())
-                    .copied()
-                    .unwrap_or_default(),
-            );
+            let hit_key = AgentResultKey::from_hit(&hit);
+            let hit_bytes = serialized_context_bytes(&hit)
+                .saturating_add(item_bytes.get(&hit_key).copied().unwrap_or_default());
             if context_bytes.saturating_add(hit_bytes) > max_context_bytes {
                 truncated = true;
                 continue;
@@ -276,14 +316,46 @@ impl AgentRetrievalResult {
         }
         let returned_count = results.len();
         rerank.returned_count = returned_count;
-        let retained_result_ids = results
+        let retained_result_keys = results
             .iter()
-            .map(|hit| hit.evidence_id.as_str())
+            .map(AgentResultKey::from_hit)
             .collect::<HashSet<_>>();
         context_pack.truncated = truncated;
         context_pack
             .items
-            .retain(|item| retained_result_ids.contains(item.result_id.as_str()));
+            .retain(|item| retained_result_keys.contains(&AgentResultKey::from_item(item)));
+        if let Some(trace) = &mut context_pack.provenance_trace {
+            trace.retain_hits(results.iter());
+            trace.mark_citations_for_hits(results.iter());
+            trace.truncated |= truncated;
+            trace.apply_budget(
+                returned_count
+                    .saturating_mul(4)
+                    .max(returned_count + 8)
+                    .min(64),
+            );
+            if trace.truncated {
+                truncated = true;
+                context_pack.truncated = true;
+            }
+        }
+        if let Some(trace) = &mut context_pack.provenance_trace {
+            let mut trace_bytes = serialized_context_bytes(trace);
+            if context_bytes.saturating_add(trace_bytes) > max_context_bytes {
+                trace.apply_budget(returned_count.max(1));
+                trace.truncated = true;
+                truncated = true;
+                context_pack.truncated = true;
+                trace_bytes = serialized_context_bytes(trace);
+            }
+            if context_bytes.saturating_add(trace_bytes) > max_context_bytes {
+                context_pack.provenance_trace = None;
+                truncated = true;
+                context_pack.truncated = true;
+            } else {
+                context_bytes += trace_bytes;
+            }
+        }
 
         Self {
             metadata,
@@ -342,9 +414,10 @@ mod tests {
     use crate::{
         api::InterfaceKind,
         domain::{
-            ContextPackItem, FusionDiagnostics, GraphVersion, RerankDiagnostics, RerankMode,
+            ConfidenceScore, ContextGraphFact, ContextGraphFactKind, ContextPackItem, FactStatus,
+            FusionDiagnostics, GraphVersion, GraphVersionRange, RerankDiagnostics, RerankMode,
             RetrievalBackendState, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
-            RetrievedContextPack, RetrieverSource,
+            RetrievedContextPack, RetrieverSource, TraversalProvenanceTrace,
         },
     };
 
@@ -377,6 +450,7 @@ mod tests {
                 freshness: FreshnessPolicy::AllowStale,
                 truncated: false,
                 backend_statuses: Vec::new(),
+                provenance_trace: None,
                 items,
             },
             retrieval_mode: RetrievalMode::Hybrid,
@@ -447,6 +521,7 @@ mod tests {
                 freshness: FreshnessPolicy::AllowStale,
                 truncated: false,
                 backend_statuses: backend_statuses.clone(),
+                provenance_trace: None,
                 items: Vec::new(),
             },
             retrieval_mode: RetrievalMode::Hybrid,
@@ -487,6 +562,334 @@ mod tests {
     }
 
     #[test]
+    fn omits_trace_before_dropping_cited_results_when_context_budget_is_tight() {
+        let results = vec![hit("ev-1", "grounded answer content")];
+        let items = vec![pack_item("ev-1")];
+        let mut trace = TraversalProvenanceTrace::from_hits(
+            GraphVersion::new(1),
+            Some("docs".to_owned()),
+            "direct_context_lookup".to_owned(),
+            &results,
+        );
+        trace.mark_citations(["ev-1"]);
+        let max_context_bytes = serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&results[0])
+            + serialized_context_bytes(&items[0]);
+        let response = crate::api::HybridRetrievalResponse {
+            metadata: ApiMetadata {
+                trace_id: "trace".to_owned(),
+                request_id: "req".to_owned(),
+                graph_version: 1,
+                index_version: None,
+                indexed_graph_version: None,
+                stale: false,
+            },
+            context_pack: RetrievedContextPack {
+                graph_version: GraphVersion::new(1),
+                source_scope: Some("docs".to_owned()),
+                freshness: FreshnessPolicy::AllowStale,
+                truncated: false,
+                backend_statuses: Vec::new(),
+                provenance_trace: Some(trace),
+                items,
+            },
+            retrieval_mode: RetrievalMode::Hybrid,
+            source_scope: Some("docs".to_owned()),
+            freshness: FreshnessPolicy::AllowStale,
+            results,
+            fusion: FusionDiagnostics {
+                algorithm: "reciprocal_rank_fusion".to_owned(),
+                k: 60.0,
+                candidate_count: 1,
+            },
+            rerank: rerank_diagnostics(1, 1),
+            backend_statuses: Vec::new(),
+            truncated: false,
+            budget_used: RetrievalBudgetUsed {
+                limit: 1,
+                candidate_count: 1,
+                returned_count: 1,
+                context_bytes: 0,
+            },
+            degraded_reason: None,
+            indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
+        };
+
+        let result = AgentRetrievalResult::from_retrieval(
+            response,
+            RuntimeIdentity::mcp(Some("call-1".to_owned())),
+            max_context_bytes,
+            4,
+        );
+
+        assert!(result.truncated);
+        assert_eq!(result.results.len(), 1);
+        assert!(result.context_pack.provenance_trace.is_none());
+    }
+
+    #[test]
+    fn reports_truncated_agent_result_when_trace_is_budgeted_but_retained() {
+        let mut result_hit = hit("ev-1", "grounded answer content");
+        result_hit.graph_facts = (0..16)
+            .map(|index| graph_fact(index, "ev-1"))
+            .collect::<Vec<_>>();
+        result_hit.retriever_sources = vec![RetrieverSource::GraphPath];
+        let results = vec![result_hit];
+        let items = vec![pack_item("ev-1")];
+        let mut trace = TraversalProvenanceTrace::from_hits(
+            GraphVersion::new(1),
+            Some("docs".to_owned()),
+            "direct_context_lookup".to_owned(),
+            &results,
+        );
+        trace.mark_citations(["ev-1"]);
+        let mut budgeted_trace = trace.clone();
+        budgeted_trace.apply_budget(9);
+        budgeted_trace.apply_budget(1);
+        budgeted_trace.truncated = true;
+        let max_context_bytes = serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&results[0])
+            + serialized_context_bytes(&items[0])
+            + serialized_context_bytes(&budgeted_trace);
+        let response = crate::api::HybridRetrievalResponse {
+            metadata: ApiMetadata {
+                trace_id: "trace".to_owned(),
+                request_id: "req".to_owned(),
+                graph_version: 1,
+                index_version: None,
+                indexed_graph_version: None,
+                stale: false,
+            },
+            context_pack: RetrievedContextPack {
+                graph_version: GraphVersion::new(1),
+                source_scope: Some("docs".to_owned()),
+                freshness: FreshnessPolicy::AllowStale,
+                truncated: false,
+                backend_statuses: Vec::new(),
+                provenance_trace: Some(trace),
+                items,
+            },
+            retrieval_mode: RetrievalMode::Hybrid,
+            source_scope: Some("docs".to_owned()),
+            freshness: FreshnessPolicy::AllowStale,
+            results,
+            fusion: FusionDiagnostics {
+                algorithm: "reciprocal_rank_fusion".to_owned(),
+                k: 60.0,
+                candidate_count: 1,
+            },
+            rerank: rerank_diagnostics(1, 1),
+            backend_statuses: Vec::new(),
+            truncated: false,
+            budget_used: RetrievalBudgetUsed {
+                limit: 1,
+                candidate_count: 1,
+                returned_count: 1,
+                context_bytes: 0,
+            },
+            degraded_reason: None,
+            indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
+        };
+
+        let result = AgentRetrievalResult::from_retrieval(
+            response,
+            RuntimeIdentity::mcp(Some("call-1".to_owned())),
+            max_context_bytes,
+            4,
+        );
+
+        assert!(result.truncated);
+        assert!(result.context_pack.truncated);
+        assert!(
+            result
+                .context_pack
+                .provenance_trace
+                .as_ref()
+                .is_some_and(|trace| trace.truncated)
+        );
+    }
+
+    #[test]
+    fn reports_truncated_agent_result_when_trace_items_are_budgeted() {
+        let mut result_hit = hit("ev-1", "grounded answer content");
+        result_hit.graph_facts = (0..16)
+            .map(|index| graph_fact(index, "ev-1"))
+            .collect::<Vec<_>>();
+        result_hit.retriever_sources = vec![RetrieverSource::GraphPath];
+        let results = vec![result_hit];
+        let items = vec![pack_item("ev-1")];
+        let mut trace = TraversalProvenanceTrace::from_hits(
+            GraphVersion::new(1),
+            Some("docs".to_owned()),
+            "direct_context_lookup".to_owned(),
+            &results,
+        );
+        trace.mark_citations(["ev-1"]);
+        let response = crate::api::HybridRetrievalResponse {
+            metadata: ApiMetadata {
+                trace_id: "trace".to_owned(),
+                request_id: "req".to_owned(),
+                graph_version: 1,
+                index_version: None,
+                indexed_graph_version: None,
+                stale: false,
+            },
+            context_pack: RetrievedContextPack {
+                graph_version: GraphVersion::new(1),
+                source_scope: Some("docs".to_owned()),
+                freshness: FreshnessPolicy::AllowStale,
+                truncated: false,
+                backend_statuses: Vec::new(),
+                provenance_trace: Some(trace),
+                items,
+            },
+            retrieval_mode: RetrievalMode::Hybrid,
+            source_scope: Some("docs".to_owned()),
+            freshness: FreshnessPolicy::AllowStale,
+            results,
+            fusion: FusionDiagnostics {
+                algorithm: "reciprocal_rank_fusion".to_owned(),
+                k: 60.0,
+                candidate_count: 1,
+            },
+            rerank: rerank_diagnostics(1, 1),
+            backend_statuses: Vec::new(),
+            truncated: false,
+            budget_used: RetrievalBudgetUsed {
+                limit: 1,
+                candidate_count: 1,
+                returned_count: 1,
+                context_bytes: 0,
+            },
+            degraded_reason: None,
+            indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
+        };
+
+        let result = AgentRetrievalResult::from_retrieval(
+            response,
+            RuntimeIdentity::mcp(Some("call-1".to_owned())),
+            usize::MAX,
+            4,
+        );
+
+        assert!(result.truncated);
+        assert!(result.context_pack.truncated);
+        assert!(
+            result
+                .context_pack
+                .provenance_trace
+                .as_ref()
+                .is_some_and(|trace| trace.truncated)
+        );
+    }
+
+    #[test]
+    fn filters_dropped_hits_from_agent_trace_before_byte_budget() {
+        let retained_hit = hit("ev-1", "grounded answer content");
+        let mut dropped_hit = hit("ev-2", "omitted answer content");
+        dropped_hit.graph_facts = (0..32)
+            .map(|index| graph_fact(index, "ev-2"))
+            .collect::<Vec<_>>();
+        dropped_hit.retriever_sources = vec![RetrieverSource::GraphPath];
+        let results = vec![retained_hit, dropped_hit];
+        let items = vec![pack_item("ev-1"), pack_item("ev-2")];
+        let mut trace = TraversalProvenanceTrace::from_hits(
+            GraphVersion::new(1),
+            Some("docs".to_owned()),
+            "direct_context_lookup".to_owned(),
+            &results,
+        );
+        trace.mark_citations(["ev-1", "ev-2"]);
+        let mut retained_trace = trace.clone();
+        retained_trace.retain_hits([&results[0]]);
+        retained_trace.mark_citations_for_hits([&results[0]]);
+        retained_trace.truncated = true;
+        retained_trace.apply_budget(9);
+        let max_context_bytes = serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&results[0])
+            + serialized_context_bytes(&items[0])
+            + serialized_context_bytes(&retained_trace);
+        let response = crate::api::HybridRetrievalResponse {
+            metadata: ApiMetadata {
+                trace_id: "trace".to_owned(),
+                request_id: "req".to_owned(),
+                graph_version: 1,
+                index_version: None,
+                indexed_graph_version: None,
+                stale: false,
+            },
+            context_pack: RetrievedContextPack {
+                graph_version: GraphVersion::new(1),
+                source_scope: Some("docs".to_owned()),
+                freshness: FreshnessPolicy::AllowStale,
+                truncated: false,
+                backend_statuses: Vec::new(),
+                provenance_trace: Some(trace),
+                items,
+            },
+            retrieval_mode: RetrievalMode::Hybrid,
+            source_scope: Some("docs".to_owned()),
+            freshness: FreshnessPolicy::AllowStale,
+            results,
+            fusion: FusionDiagnostics {
+                algorithm: "reciprocal_rank_fusion".to_owned(),
+                k: 60.0,
+                candidate_count: 2,
+            },
+            rerank: rerank_diagnostics(2, 2),
+            backend_statuses: Vec::new(),
+            truncated: false,
+            budget_used: RetrievalBudgetUsed {
+                limit: 2,
+                candidate_count: 2,
+                returned_count: 2,
+                context_bytes: 0,
+            },
+            degraded_reason: None,
+            indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
+        };
+
+        let result = AgentRetrievalResult::from_retrieval(
+            response,
+            RuntimeIdentity::mcp(Some("call-1".to_owned())),
+            max_context_bytes,
+            4,
+        );
+
+        assert!(result.truncated);
+        assert_eq!(result.results.len(), 1);
+        assert_eq!(result.results[0].evidence_id, "ev-1");
+        let trace = result
+            .context_pack
+            .provenance_trace
+            .as_ref()
+            .expect("retained-only trace should fit");
+        assert!(
+            trace
+                .cited_evidence
+                .iter()
+                .all(|evidence| evidence.evidence_id == "ev-1")
+        );
+        assert!(
+            trace
+                .ranking_contributions
+                .iter()
+                .all(|contribution| contribution.result_id == "ev-1")
+        );
+    }
+
+    #[test]
     fn rejects_zero_policy_budgets() {
         let error = AgentAccessPolicy::new(Vec::new(), false, 0, 1, 1, false).expect_err("zero");
 
@@ -524,6 +927,20 @@ mod tests {
             retriever_sources: Vec::new(),
             ranking: Vec::new(),
             rerank: None,
+        }
+    }
+
+    fn graph_fact(index: usize, evidence_id: &str) -> ContextGraphFact {
+        ContextGraphFact {
+            fact_id: format!("fact-{index}"),
+            kind: ContextGraphFactKind::Relation,
+            subject: format!("source-{index}"),
+            predicate: "supports".to_owned(),
+            object: Some(format!("target-{index}")),
+            evidence_ids: vec![evidence_id.to_owned()],
+            confidence: ConfidenceScore { basis_points: 9000 },
+            status: FactStatus::Accepted,
+            version_range: GraphVersionRange::open_from(GraphVersion::new(1)),
         }
     }
 

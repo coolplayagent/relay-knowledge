@@ -4,18 +4,18 @@ use crate::{
     domain::{
         CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
         CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RetrievalHit,
     },
     storage::{
         AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
         CodeSymbolSearchRequest, FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus,
         FileIndexRootUpdate, FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest,
-        GraphCanvasStorageSnapshot, GraphInspection, GraphSearchRequest, GraphStore,
-        HealthStorageSnapshot, IndexCursor, IndexRefreshClaimRequest, IndexRefreshCompletion,
-        IndexRefreshDiagnostics, IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask,
-        IndexStore, MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal,
-        ProposalDecision, ProposalListRequest, ServiceOperatorUpdate, StorageFuture,
-        WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
+        GraphCanvasStorageSnapshot, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
+        GraphStore, HealthStorageSnapshot, IndexCursor, IndexRefreshClaimRequest,
+        IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
+        IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
+        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
+        StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure,
+        WorkerTaskSeed,
     },
 };
 
@@ -59,7 +59,7 @@ impl GraphStore for SqliteGraphStore {
         self.run_read(move |connection| canvas::graph_canvas(connection, request))
     }
 
-    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
+    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
         self.run_read(move |connection| retrieval::search_graph(connection, request))
     }
 

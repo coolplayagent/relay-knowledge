@@ -9,15 +9,16 @@ use crate::{
         CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSnapshot, CodeIndexSummary,
         CodeIndexTaskRecord, CodeReferenceRecord, CodeRepositoryRegistration, CodeRepositoryStatus,
         CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord,
-        CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus, RetrievalHit,
+        CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
         CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
         CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
         CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
-        MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
+        GraphStore, IndexStore, MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError,
+        StorageFuture,
     },
 };
 
@@ -77,27 +78,23 @@ async fn local_acp_prompt_returns_progress_context_artifact_and_audit() {
 
     assert!(capabilities.meta.relay_knowledge.graph_retrieval);
     assert_eq!(response.stop_reason, AcpStopReason::Completed);
+    let artifact = response
+        .context_artifact
+        .as_ref()
+        .expect("artifact should be present");
+    let result = artifact
+        .result
+        .as_ref()
+        .expect("graph retrieval result should be present");
+    assert_eq!(result.runtime_identity.protocol, AgentProtocolKind::Acp);
+    assert_eq!(result.results[0].evidence_id, "ev-acp");
     assert_eq!(
-        response
-            .context_artifact
+        result
+            .context_pack
+            .provenance_trace
             .as_ref()
-            .expect("artifact should be present")
-            .result
-            .as_ref()
-            .expect("graph retrieval result should be present")
-            .runtime_identity
-            .protocol,
-        AgentProtocolKind::Acp
-    );
-    assert_eq!(
-        response
-            .context_artifact
-            .as_ref()
-            .unwrap()
-            .result
-            .as_ref()
-            .unwrap()
-            .results[0]
+            .expect("trace should be present")
+            .cited_evidence[0]
             .evidence_id,
         "ev-acp"
     );
@@ -535,10 +532,10 @@ impl GraphStore for SlowSearchStore {
         })
     }
 
-    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
-        Box::pin(async {
+    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
+        Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            Ok(Vec::new())
+            Ok(GraphSearchOutcome::from_hits(&request, Vec::new()))
         })
     }
 
@@ -671,7 +668,7 @@ impl GraphStore for SearchFailStore {
         })
     }
 
-    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
+    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
         Box::pin(async {
             Err(StorageError::InvalidInput(
                 "search storage unavailable".to_owned(),

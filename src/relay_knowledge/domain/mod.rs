@@ -120,6 +120,8 @@ pub use retrieval::{
     FusionDiagnostics, RECIPROCAL_RANK_FUSION_K, RankingSignal, RerankDiagnostics, RerankMode,
     RerankModeError, RerankSignal, RetrievalBackendState, RetrievalBackendStatus,
     RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
+    TraversalProvenanceTrace, TraversalRankingContribution, TraversalTraceEdge,
+    TraversalTraceEvidence, TraversalTraceNode, TraversalTraceNodeKind, TraversalTraceRedaction,
 };
 pub use software::{
     SoftwareBuildTarget, SoftwareBuildTargetInput, SoftwareComponent, SoftwareComponentInput,

@@ -31,7 +31,7 @@ When an agent needs access to a knowledge scope, explicitly configure scope poli
 
 ## 8.4 Context Artifact
 
-An ACP prompt response can include a context artifact. The artifact gives the caller the retrieved context pack, ranking, graph facts, source spans, budget, and truncation state instead of compressing retrieval details into an unauditable natural-language summary.
+An ACP prompt response can include a context artifact. The artifact gives the caller the retrieved context pack, ranking, graph facts, source spans, `provenance_trace`, budget, and truncation state instead of compressing retrieval details into an unauditable natural-language summary. `provenance_trace` lists cited evidence, visited-but-uncited context, visited nodes/edges, ranking contributions, stale/degraded state, and authorization redaction results.
 
 Callers should preserve source, freshness, degraded reason, and audit correlation from the artifact so later runs can reproduce or explain agent output.
 

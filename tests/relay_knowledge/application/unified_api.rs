@@ -13,15 +13,16 @@ use relay_knowledge::{
         CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord,
         CommitReceipt, ConfidenceScore, ContextGraphFactKind, EvidenceSpan, FactStatus,
         FreshnessPolicy, GraphMutationBatch, GraphVersion, GraphVersionRange, IndexKind,
-        IndexStatus, RetrievalBackendState, RetrievalHit, RetrieverSource,
+        IndexStatus, RetrievalBackendState, RetrieverSource,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
         CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
         CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
         CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
-        MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
+        GraphStore, IndexStore, MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError,
+        StorageFuture,
     },
 };
 
@@ -366,6 +367,23 @@ async fn structured_facts_and_backend_statuses_reach_context_pack() {
     assert_eq!(item.graph_paths[0].nodes, ["relay-knowledge", "BM25"]);
     assert_eq!(item.graph_paths[0].edges[0].fact_id, "rel-rich");
     assert_eq!(item.graph_paths[0].edges[0].evidence_ids, ["ev-rich"]);
+    let trace = response
+        .context_pack
+        .provenance_trace
+        .as_ref()
+        .expect("context pack should include traversal trace");
+    assert!(
+        trace
+            .cited_evidence
+            .iter()
+            .any(|item| item.evidence_id == "ev-rich")
+    );
+    assert!(trace.visited_nodes.iter().any(|node| node.label == "BM25"));
+    assert!(trace.visited_edges.iter().any(|edge| {
+        edge.edge_id == "relation:rel-rich"
+            && edge.predicate.as_deref() == Some("uses")
+            && edge.evidence_ids == ["ev-rich"]
+    }));
     let claim = item
         .graph_facts
         .iter()
@@ -446,8 +464,8 @@ impl GraphStore for RefreshFailStore {
         })
     }
 
-    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
-        Box::pin(async { Ok(Vec::new()) })
+    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
+        Box::pin(async move { Ok(GraphSearchOutcome::from_hits(&request, Vec::new())) })
     }
 
     fn current_graph_version(&self) -> StorageFuture<'_, GraphVersion> {

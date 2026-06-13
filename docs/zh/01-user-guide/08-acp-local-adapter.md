@@ -31,7 +31,7 @@ ACP 使用本地 adapter identity，并携带 untrusted client identity 进入 a
 
 ## 8.4 Context Artifact
 
-ACP prompt response 可以返回 context artifact。artifact 用于把检索到的 context pack、ranking、graph facts、source span、budget 和 truncation 状态交给调用方，而不是把检索细节压成不可审计的自然语言摘要。
+ACP prompt response 可以返回 context artifact。artifact 用于把检索到的 context pack、ranking、graph facts、source span、`provenance_trace`、budget 和 truncation 状态交给调用方，而不是把检索细节压成不可审计的自然语言摘要。`provenance_trace` 会列出 cited evidence、visited-but-uncited context、visited nodes/edges、ranking contributions、stale/degraded 状态和授权裁剪结果。
 
 调用方应保留 artifact 中的 source、freshness、degraded reason 和 audit correlation，便于后续复现或解释 agent 输出。
 
