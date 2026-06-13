@@ -61,7 +61,7 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 缺失 session header 会返回 HTTP 400。未知或已淘汰 session id 会返回 HTTP 404。工具请求、`ping` 和 `notifications/cancelled` 都绑定到服务端签发的 session。
 
-当 Web/API/MCP 共用同一个 HTTP service 时，`notifications/cancelled` 会走有界优先 admission 路径，使客户端在普通 in-flight request budget 已满时仍能取消正在运行的工具调用。该 bypass 只适用于已经携带有效 session 的小型 `/mcp` JSON notification。
+当 Web/API/MCP 共用同一个 HTTP service 时，`notifications/cancelled` 会在已配置的 MCP endpoint 上走有界优先 admission 路径，使客户端在普通 in-flight request budget 已满时仍能取消正在运行的工具调用。该 bypass 只适用于已经携带有效且已 initialized session 的小型 JSON notification。
 
 `initialize` 到 `tools/list` 的发现路径保持 storage-cold：MCP 只注册静态 tool schema 并返回探索提示，不打开 SQLite，也不执行 schema migration。第一次需要存储的 tool call 才会延迟打开存储；多个并发首次调用共享 service 侧的存储初始化保护。每个 session 的首次 `tools/list` 会把 initialize-to-tools-list cold-start 样本记录到 agent protocol metrics 和 `/mcp/metrics`。
 

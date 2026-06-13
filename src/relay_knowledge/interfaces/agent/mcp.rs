@@ -8,6 +8,7 @@ use std::{
 mod state;
 
 mod audit_bridge;
+mod cancellation_bypass;
 mod code_tools;
 mod http_contract;
 mod metrics;

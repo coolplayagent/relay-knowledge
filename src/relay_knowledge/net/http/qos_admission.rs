@@ -9,7 +9,7 @@ use std::{
 use axum::{
     body::{Body, to_bytes},
     extract::Request,
-    http::{Method, StatusCode, header},
+    http::{Method, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
 use serde_json::Value;
@@ -17,31 +17,54 @@ use tower::{Layer, Service};
 
 use crate::net::qos::{QosPolicy, QosRuntime};
 
+type BypassValidator = Arc<dyn Fn(&Parts, &[u8]) -> bool + Send + Sync>;
+
 /// Bounded request-body predicate for priority control traffic.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct QosRequestBypass {
     method: Method,
-    path: &'static str,
+    path: String,
     json_field: &'static str,
     json_value: &'static str,
     max_body_bytes: usize,
+    validator: Option<BypassValidator>,
 }
 
 impl QosRequestBypass {
     /// Matches a small JSON request whose top-level string field has a value.
     pub fn json_field(
         method: Method,
-        path: &'static str,
+        path: impl Into<String>,
         json_field: &'static str,
         json_value: &'static str,
         max_body_bytes: usize,
     ) -> Self {
-        Self {
+        Self::json_field_with_validator(
             method,
             path,
             json_field,
             json_value,
             max_body_bytes,
+            |_parts, _body| true,
+        )
+    }
+
+    /// Matches a small JSON request and then applies an owner-specific validator.
+    pub fn json_field_with_validator(
+        method: Method,
+        path: impl Into<String>,
+        json_field: &'static str,
+        json_value: &'static str,
+        max_body_bytes: usize,
+        validator: impl Fn(&Parts, &[u8]) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            method,
+            path: path.into(),
+            json_field,
+            json_value,
+            max_body_bytes,
+            validator: Some(Arc::new(validator)),
         }
     }
 
@@ -68,6 +91,12 @@ impl QosRequestBypass {
                     .map(str::to_owned)
             })
             .is_some_and(|value| value == self.json_value)
+    }
+
+    fn validates(&self, parts: &Parts, body: &[u8]) -> bool {
+        self.validator
+            .as_ref()
+            .is_none_or(|validator| validator(parts, body))
     }
 }
 
@@ -172,6 +201,7 @@ async fn inspect_bypass_request(
         parts.method == bypass.method
             && parts.uri.path() == bypass.path
             && bypass.matches_body(bytes.as_ref())
+            && bypass.validates(&parts, bytes.as_ref())
     });
     (Request::from_parts(parts, Body::from(bytes)), bypassed)
 }

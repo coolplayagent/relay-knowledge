@@ -1,10 +1,7 @@
-use axum::http::Method;
-
 use crate::{
     api::{InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     interfaces::{agent::mcp::McpServer, web},
-    net::http::QosRequestBypass,
 };
 
 use super::{CliError, ServiceMcpTransport, files_cli};
@@ -72,24 +69,19 @@ pub(super) async fn run_service(
             runtime.agent.access_policy.allow_remote_clients,
         )?;
         let mut router = web::router(service.clone(), network_config.http.max_request_body_bytes);
-        if runtime.agent.mcp_streamable_http_enabled {
-            let mcp_router = McpServer::new(
+        let cancellation_bypasses = if runtime.agent.mcp_streamable_http_enabled {
+            let mcp_server = McpServer::new(
                 service.clone(),
                 runtime.network.clone(),
                 runtime.agent.clone(),
-            )
-            .checked_router()
-            .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
+            );
+            let cancellation_bypass =
+                mcp_server.cancellation_qos_bypass(MCP_CANCELLATION_BYPASS_MAX_BODY_BYTES);
+            let mcp_router = mcp_server
+                .checked_router()
+                .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
             router = router.merge(mcp_router);
-        }
-        let cancellation_bypasses = if runtime.agent.mcp_streamable_http_enabled {
-            vec![QosRequestBypass::json_field(
-                Method::POST,
-                "/mcp",
-                "method",
-                "notifications/cancelled",
-                MCP_CANCELLATION_BYPASS_MAX_BODY_BYTES,
-            )]
+            vec![cancellation_bypass]
         } else {
             Vec::new()
         };

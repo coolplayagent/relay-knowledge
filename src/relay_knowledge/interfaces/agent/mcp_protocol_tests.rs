@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     body::{Body, to_bytes},
-    http::{Method, Request, StatusCode, header},
+    http::{HeaderMap, Request, StatusCode, header},
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -505,13 +505,7 @@ async fn cancellation_notifications_bypass_occupied_web_qos_slot() {
         server.clone().router(),
         server.qos.clone(),
         policy,
-        vec![crate::net::http::QosRequestBypass::json_field(
-            Method::POST,
-            "/mcp",
-            "method",
-            "notifications/cancelled",
-            4096,
-        )],
+        vec![server.cancellation_qos_bypass(4096)],
     );
     let session_id = {
         let mut setup_router = router.clone();
@@ -543,6 +537,143 @@ async fn cancellation_notifications_bypass_occupied_web_qos_slot() {
     let mut cancel_router = router.clone();
     let cancelled = raw_mcp_request_with_content_length(
         &mut cancel_router,
+        "/mcp",
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {
+                "requestId": "slow",
+                "reason": "test"
+            }
+        }),
+        session_id.as_str(),
+    )
+    .await;
+    let slow_response = slow_request.await.expect("slow request should finish");
+
+    assert_eq!(cancelled.0, StatusCode::ACCEPTED);
+    assert_eq!(slow_response.0, StatusCode::OK);
+    assert_eq!(server.qos.diagnostics_snapshot().cancelled_total, 1);
+    assert_eq!(server.qos.diagnostics_snapshot().rejected_total, 0);
+}
+
+#[tokio::test]
+async fn cancellation_bypass_requires_initialized_session() {
+    let (server, _service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "1"),
+        ],
+        Arc::new(SlowSearchStore),
+    )
+    .await;
+    let policy = server.network.current().qos;
+    let router = crate::net::http::router_with_qos_request_admission_bypass(
+        server.clone().router(),
+        server.qos.clone(),
+        policy,
+        vec![server.cancellation_qos_bypass(4096)],
+    );
+    let session_id = {
+        let mut setup_router = router.clone();
+        initialize_session(&mut setup_router).await
+    };
+    let mut slow_router = router.clone();
+    let slow_session_id = session_id.clone();
+    let slow_request = tokio::spawn(async move {
+        raw_mcp_request(
+            &mut slow_router,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "slow",
+                "method": "tools/call",
+                "params": {
+                    "name": "relay_retrieve_context",
+                    "arguments": {
+                        "query": "slow",
+                        "source_scope": "docs"
+                    }
+                }
+            }),
+            [(MCP_SESSION_ID_HEADER, slow_session_id.as_str())],
+        )
+        .await
+    });
+
+    wait_for_web_in_flight(&server, 1).await;
+    let mut cancel_router = router.clone();
+    let rejected = raw_mcp_request_with_content_length(
+        &mut cancel_router,
+        "/mcp",
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {
+                "requestId": "slow",
+                "reason": "test"
+            }
+        }),
+        "rk-unknown",
+    )
+    .await;
+    let slow_response = slow_request.await.expect("slow request should finish");
+
+    assert_eq!(rejected.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(slow_response.0, StatusCode::OK);
+    assert_eq!(server.qos.diagnostics_snapshot().cancelled_total, 0);
+    assert_eq!(server.qos.diagnostics_snapshot().rejected_total, 1);
+}
+
+#[tokio::test]
+async fn cancellation_bypass_uses_configured_mcp_endpoint() {
+    let (server, _service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "1"),
+            ("RELAY_KNOWLEDGE_MCP_ENDPOINT", "/relay-mcp"),
+        ],
+        Arc::new(SlowSearchStore),
+    )
+    .await;
+    let policy = server.network.current().qos;
+    let router = crate::net::http::router_with_qos_request_admission_bypass(
+        server.clone().router(),
+        server.qos.clone(),
+        policy,
+        vec![server.cancellation_qos_bypass(4096)],
+    );
+    let session_id = {
+        let mut setup_router = router.clone();
+        initialize_session_at_endpoint(&mut setup_router, "/relay-mcp").await
+    };
+    let mut slow_router = router.clone();
+    let slow_session_id = session_id.clone();
+    let slow_request = tokio::spawn(async move {
+        raw_mcp_request_at_endpoint(
+            &mut slow_router,
+            "/relay-mcp",
+            json!({
+                "jsonrpc": "2.0",
+                "id": "slow",
+                "method": "tools/call",
+                "params": {
+                    "name": "relay_retrieve_context",
+                    "arguments": {
+                        "query": "slow",
+                        "source_scope": "docs"
+                    }
+                }
+            }),
+            Some(slow_session_id.as_str()),
+        )
+        .await
+    });
+
+    wait_for_web_in_flight(&server, 1).await;
+    let mut cancel_router = router.clone();
+    let cancelled = raw_mcp_request_with_content_length(
+        &mut cancel_router,
+        "/relay-mcp",
         json!({
             "jsonrpc": "2.0",
             "method": "notifications/cancelled",
@@ -602,6 +733,7 @@ async fn wait_for_web_in_flight(server: &McpServer, expected: usize) {
 
 async fn raw_mcp_request_with_content_length(
     router: &mut Router,
+    endpoint: &str,
     payload: Value,
     session_id: &str,
 ) -> (StatusCode, Value) {
@@ -611,7 +743,7 @@ async fn raw_mcp_request_with_content_length(
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/mcp")
+                .uri(endpoint)
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::ACCEPT, "application/json, text/event-stream")
                 .header(MCP_PROTOCOL_VERSION_HEADER, MCP_PROTOCOL_VERSION)
@@ -632,4 +764,88 @@ async fn raw_mcp_request_with_content_length(
 
     let value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     (status, value)
+}
+
+async fn initialize_session_at_endpoint(router: &mut Router, endpoint: &str) -> String {
+    let (status, headers, response) = raw_mcp_response_at_endpoint(
+        router,
+        endpoint,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "init",
+            "method": "initialize",
+            "params": initialize_params()
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
+    let session_id = headers
+        .get(MCP_SESSION_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .expect("initialize should issue a session")
+        .to_owned();
+    let initialized = raw_mcp_request_at_endpoint(
+        router,
+        endpoint,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+        Some(session_id.as_str()),
+    )
+    .await;
+    assert_eq!(initialized.0, StatusCode::ACCEPTED);
+    session_id
+}
+
+async fn raw_mcp_request_at_endpoint(
+    router: &mut Router,
+    endpoint: &str,
+    payload: Value,
+    session_id: Option<&str>,
+) -> (StatusCode, Value) {
+    let (status, _headers, value) =
+        raw_mcp_response_at_endpoint(router, endpoint, payload, session_id).await;
+    (status, value)
+}
+
+async fn raw_mcp_response_at_endpoint(
+    router: &mut Router,
+    endpoint: &str,
+    payload: Value,
+    session_id: Option<&str>,
+) -> (StatusCode, HeaderMap, Value) {
+    let body = payload.to_string();
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri(endpoint)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream")
+        .header(MCP_PROTOCOL_VERSION_HEADER, MCP_PROTOCOL_VERSION);
+    if let Some(session_id) = session_id {
+        builder = builder.header(MCP_SESSION_ID_HEADER, session_id);
+    }
+    let response = router
+        .clone()
+        .oneshot(
+            builder
+                .body(Body::from(body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
+    if body.is_empty() {
+        return (status, headers, Value::Null);
+    }
+
+    let value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    (status, headers, value)
 }
