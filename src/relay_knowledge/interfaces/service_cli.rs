@@ -66,11 +66,7 @@ pub(super) async fn run_service(
             &network_config.http,
             runtime.agent.access_policy.allow_remote_clients,
         )?;
-        let mut router = crate::net::http::router_with_qos_request_admission(
-            web::router(service.clone(), network_config.http.max_request_body_bytes),
-            qos.clone(),
-            network_config.qos.clone(),
-        );
+        let mut router = web::router(service.clone(), network_config.http.max_request_body_bytes);
         if runtime.agent.mcp_streamable_http_enabled {
             let mcp_router = McpServer::new(
                 service.clone(),
@@ -81,6 +77,11 @@ pub(super) async fn run_service(
             .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
             router = router.merge(mcp_router);
         }
+        let router = crate::net::http::router_with_qos_request_admission(
+            router,
+            qos.clone(),
+            network_config.qos.clone(),
+        );
         crate::net::http::serve_router_with_qos(
             router,
             network_config.http,

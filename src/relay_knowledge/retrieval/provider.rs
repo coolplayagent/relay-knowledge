@@ -142,7 +142,7 @@ async fn send_embedding_request(
         None => request
             .send()
             .await
-            .map(QosHttpResponse::without_permit)
+            .map(QosHttpResponse::unmetered)
             .map_err(EmbeddingTransportError::Reqwest),
     }
 }

@@ -37,20 +37,31 @@ impl Error for QosHttpClientError {}
 /// Reqwest response that keeps the QoS request permit until the body is consumed.
 pub struct QosHttpResponse {
     inner: reqwest::Response,
+    qos: Option<QosRuntime>,
     _permit: Option<QosPermit>,
 }
 
 impl QosHttpResponse {
-    fn with_permit(inner: reqwest::Response, permit: QosPermit) -> Self {
+    fn with_permit(inner: reqwest::Response, qos: QosRuntime, permit: QosPermit) -> Self {
         Self {
             inner,
+            qos: Some(qos),
             _permit: Some(permit),
         }
     }
 
-    pub fn without_permit(inner: reqwest::Response) -> Self {
+    fn without_permit(inner: reqwest::Response, qos: QosRuntime) -> Self {
         Self {
             inner,
+            qos: Some(qos),
+            _permit: None,
+        }
+    }
+
+    pub fn unmetered(inner: reqwest::Response) -> Self {
+        Self {
+            inner,
+            qos: None,
             _permit: None,
         }
     }
@@ -67,22 +78,31 @@ impl QosHttpResponse {
     where
         T: DeserializeOwned,
     {
-        self.inner.json::<T>().await
+        let qos = self.qos.clone();
+        record_body_timeout(qos.as_ref(), self.inner.json::<T>().await)
     }
 
     pub async fn text(self) -> Result<String, reqwest::Error> {
-        self.inner.text().await
+        let qos = self.qos.clone();
+        record_body_timeout(qos.as_ref(), self.inner.text().await)
     }
 
     pub async fn bytes(self) -> Result<Vec<u8>, reqwest::Error> {
-        self.inner.bytes().await.map(|bytes| bytes.to_vec())
+        let qos = self.qos.clone();
+        record_body_timeout(
+            qos.as_ref(),
+            self.inner.bytes().await.map(|bytes| bytes.to_vec()),
+        )
     }
 
     pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>, reqwest::Error> {
-        self.inner
-            .chunk()
-            .await
-            .map(|chunk| chunk.map(|bytes| bytes.to_vec()))
+        record_body_timeout(
+            self.qos.as_ref(),
+            self.inner
+                .chunk()
+                .await
+                .map(|chunk| chunk.map(|bytes| bytes.to_vec())),
+        )
     }
 }
 
@@ -100,7 +120,7 @@ pub async fn send_request_with_qos(
         .admit_request(policy)
         .map_err(QosHttpClientError::QosRejected)?;
     match request.send().await {
-        Ok(response) => Ok(QosHttpResponse::with_permit(response, permit)),
+        Ok(response) => Ok(QosHttpResponse::with_permit(response, qos.clone(), permit)),
         Err(error) => {
             if error.is_timeout() {
                 qos.record_timed_out();
@@ -115,7 +135,7 @@ async fn send_request_without_new_permit(
     request: reqwest::RequestBuilder,
 ) -> Result<QosHttpResponse, QosHttpClientError> {
     match request.send().await {
-        Ok(response) => Ok(QosHttpResponse::without_permit(response)),
+        Ok(response) => Ok(QosHttpResponse::without_permit(response, qos.clone())),
         Err(error) => {
             if error.is_timeout() {
                 qos.record_timed_out();
@@ -123,4 +143,16 @@ async fn send_request_without_new_permit(
             Err(QosHttpClientError::Transport(error))
         }
     }
+}
+
+fn record_body_timeout<T>(
+    qos: Option<&QosRuntime>,
+    result: Result<T, reqwest::Error>,
+) -> Result<T, reqwest::Error> {
+    if matches!(&result, Err(error) if error.is_timeout()) {
+        if let Some(qos) = qos {
+            qos.record_timed_out();
+        }
+    }
+    result
 }

@@ -599,6 +599,9 @@ fn handle_notification(server: &McpServer, method: &str, params: Value, namespac
 
 fn admit_mcp_request(server: &McpServer) -> Result<QosPermit, RejectReason> {
     let policy = server.network.current().qos;
+    if crate::net::http::qos_request_context_active() {
+        return server.qos.reserve_queue(&policy);
+    }
     server.qos.admit_queued_request(&policy)
 }
 

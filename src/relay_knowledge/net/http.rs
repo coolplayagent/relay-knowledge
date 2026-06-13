@@ -757,7 +757,7 @@ where
     }
 }
 
-fn qos_request_context_active() -> bool {
+pub(crate) fn qos_request_context_active() -> bool {
     QOS_REQUEST_CONTEXT.try_with(|_| ()).is_ok()
 }
 
