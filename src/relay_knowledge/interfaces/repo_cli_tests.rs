@@ -56,6 +56,48 @@ fn parses_repo_query_exclude_generated_flag() {
 }
 
 #[test]
+fn parses_repo_context_with_budget_and_code_controls() {
+    let command = parse_repo(&[
+        "context".to_owned(),
+        "core".to_owned(),
+        "--query".to_owned(),
+        "RetryPolicy".to_owned(),
+        "callers".to_owned(),
+        "--ref".to_owned(),
+        "main".to_owned(),
+        "--path".to_owned(),
+        "src".to_owned(),
+        "--language".to_owned(),
+        "rust".to_owned(),
+        "--freshness".to_owned(),
+        "wait-until-fresh".to_owned(),
+        "--limit".to_owned(),
+        "7".to_owned(),
+        "--max-context-bytes".to_owned(),
+        "4096".to_owned(),
+        "--no-code".to_owned(),
+        "--exclude-generated".to_owned(),
+    ])
+    .expect("repo context should parse");
+
+    assert_eq!(
+        command,
+        RepoCommand::Context {
+            alias: "core".to_owned(),
+            query: "RetryPolicy callers".to_owned(),
+            limit: 7,
+            ref_selector: "main".to_owned(),
+            path_filters: vec!["src".to_owned()],
+            language_filters: vec!["rust".to_owned()],
+            freshness: FreshnessPolicy::WaitUntilFresh,
+            max_context_bytes: 4096,
+            include_code: false,
+            exclude_generated: true,
+        }
+    );
+}
+
+#[test]
 fn parses_repo_feature_flags_with_optional_filter_and_scope() {
     let command = parse_repo(&[
         "feature-flags".to_owned(),

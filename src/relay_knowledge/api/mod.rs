@@ -19,7 +19,7 @@ pub use agent::{
 };
 pub(crate) use code_repository::CodeRepositoryFreshnessInput;
 pub use code_repository::{
-    CodeRepositoryFreshnessCursor, CodeRepositoryFreshnessDiagnostics,
+    CodeGraphContextResponse, CodeRepositoryFreshnessCursor, CodeRepositoryFreshnessDiagnostics,
     CodeRepositoryFreshnessState, CodeRepositoryIndexLag, CodeRepositoryPendingIndexWork,
 };
 pub use context::{InterfaceKind, RequestContext};

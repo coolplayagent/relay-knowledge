@@ -10,8 +10,8 @@ use serde::Deserialize;
 use crate::{
     api::{ApiError, InterfaceKind, RequestContext},
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
-        CodeRepositorySelector, CodeRetrievalRequest, SoftwareGlobalRequest,
+        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
+        CodeIndexRequest, CodeRepositorySelector, CodeRetrievalRequest, SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::normalize_index_request,
 };
@@ -31,6 +31,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/query",
             post(code_repository_query),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/context",
+            post(code_repository_context),
         )
         .route(
             "/api/v1/code/repositories/{alias}/feature-flags",
@@ -122,6 +126,28 @@ async fn code_repository_query(
     match state
         .service
         .query_code_repository(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_context(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<CodeGraphContextRequest>,
+) -> Response {
+    if let Some(error) = normalize_context_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .codegraph_context(request, api_context(&headers))
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -277,6 +303,27 @@ fn normalize_query_request(request: &mut CodeRetrievalRequest) -> Option<ApiErro
     ) {
         Ok(mut validated) => {
             validated.exclude_generated = exclude_generated;
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_context_request(request: &mut CodeGraphContextRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match CodeGraphContextRequest::new(
+        request.repository.clone(),
+        std::mem::take(&mut request.query),
+        request.limit,
+        request.freshness_policy,
+        request.max_context_bytes,
+        request.include_code,
+        request.exclude_generated,
+    ) {
+        Ok(validated) => {
             *request = validated;
             None
         }

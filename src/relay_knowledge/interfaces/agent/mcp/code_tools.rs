@@ -6,9 +6,11 @@ use serde_json::{Value, json};
 
 use crate::{
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRepositorySetQueryRequest, CodeRetrievalRequest, SoftwareGlobalKind,
-        SoftwareGlobalRequest,
+        CODEGRAPH_CONTEXT_DEFAULT_LIMIT, CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES,
+        CODEGRAPH_CONTEXT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_LIMIT, CODEGRAPH_CONTEXT_MIN_BYTES,
+        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeQueryKind,
+        CodeRepositorySelector, CodeRepositorySetQueryRequest, CodeRetrievalRequest,
+        SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     interfaces::agent::{
         MAX_AGENT_PATH_CHARS, MAX_AGENT_QUERY_CHARS, validate_optional_query_text,
@@ -20,8 +22,8 @@ use super::{
     AgentAdapterError, AgentAdapterErrorKind, McpServer, api_error_result, authorize_limit,
     domain_argument_error, invalid_arguments, parse_freshness, request_context, tool_error_result,
     tool_registry::{
-        CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
-        CODE_SOFTWARE_QUERY_TOOL,
+        CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL,
+        CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL,
     },
     tool_success_result, validate_query_text,
 };
@@ -63,6 +65,28 @@ struct CodeQueryArgs {
     exclude_generated: Option<bool>,
     #[serde(default)]
     include_code: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodeContextArgs {
+    repository: String,
+    query: String,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    ref_selector: Option<String>,
+    #[serde(default)]
+    path_filters: Vec<String>,
+    #[serde(default)]
+    language_filters: Vec<String>,
+    #[serde(default)]
+    freshness: Option<String>,
+    #[serde(default)]
+    max_context_bytes: Option<usize>,
+    #[serde(default)]
+    include_code: Option<bool>,
+    #[serde(default)]
+    exclude_generated: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +164,7 @@ pub(super) async fn run_code_tool(
 ) -> Value {
     match name {
         CODE_QUERY_TOOL => code_query_tool(server, arguments, request_id).await,
+        CODE_CONTEXT_TOOL => code_context_tool(server, arguments, request_id).await,
         CODE_FEATURE_FLAGS_TOOL => code_feature_flags_tool(server, arguments, request_id).await,
         CODE_SOFTWARE_QUERY_TOOL => code_software_query_tool(server, arguments, request_id).await,
         CODE_IMPACT_TOOL => code_impact_tool(server, arguments, request_id).await,
@@ -150,6 +175,87 @@ pub(super) async fn run_code_tool(
             AgentAdapterErrorKind::UnsupportedOperation,
             "unknown code tool",
         )),
+    }
+}
+
+async fn code_context_tool(server: &McpServer, arguments: Value, request_id: String) -> Value {
+    let args = match serde_json::from_value::<CodeContextArgs>(arguments) {
+        Ok(args) => args,
+        Err(error) => return tool_error_result(invalid_arguments(error)),
+    };
+    if let Err(error) = validate_query_text("query", &args.query)
+        .and_then(|_| validate_path_texts("path_filters", &args.path_filters))
+    {
+        return tool_error_result(error);
+    }
+    let repository = match server
+        .scope_authorizer
+        .authorize_scope(
+            &server.service,
+            &server.agent.access_policy,
+            Some(args.repository),
+        )
+        .await
+    {
+        Ok(Some(repository)) => repository,
+        Ok(None) => {
+            return tool_error_result(AgentAdapterError::new(
+                AgentAdapterErrorKind::InvalidScope,
+                "repository is required for relay_codegraph_context",
+            ));
+        }
+        Err(error) => return tool_error_result(error),
+    };
+    let limit = match authorize_code_context_limit(args.limit, &server.agent.access_policy) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
+    let max_context_bytes = match authorize_code_context_bytes(
+        args.max_context_bytes,
+        server.agent.access_policy.max_context_bytes,
+    ) {
+        Ok(max_context_bytes) => max_context_bytes,
+        Err(error) => return tool_error_result(error),
+    };
+    let freshness = match parse_freshness(args.freshness.as_deref()) {
+        Ok(freshness) => freshness,
+        Err(error) => return tool_error_result(error),
+    };
+    let selector = match CodeRepositorySelector::new(
+        repository,
+        args.ref_selector.unwrap_or_else(|| "HEAD".to_owned()),
+        args.path_filters,
+        args.language_filters,
+    ) {
+        Ok(selector) => selector,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+    let request = match CodeGraphContextRequest::new(
+        selector,
+        args.query,
+        limit,
+        freshness,
+        max_context_bytes,
+        args.include_code.unwrap_or(true),
+        args.exclude_generated.unwrap_or(false),
+    ) {
+        Ok(request) => request,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+
+    match server
+        .service
+        .codegraph_context(request, request_context(request_id))
+        .await
+    {
+        Ok(response) => tool_success_result(
+            format!(
+                "codegraph context returned {} entry point(s)",
+                response.pack.entry_points.len()
+            ),
+            json!(response),
+        ),
+        Err(error) => api_error_result(error),
     }
 }
 
@@ -542,6 +648,32 @@ pub(super) fn code_query_tool_definition() -> Value {
     })
 }
 
+pub(super) fn code_context_tool_definition() -> Value {
+    json!({
+        "name": CODE_CONTEXT_TOOL,
+        "description": "Build one bounded codegraph context pack for an authorized indexed repository, including entry points, references, call/import paths, impact hints, code excerpts, and freshness diagnostics. This tool does not trigger indexing or refresh.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repository": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_AGENT_QUERY_CHARS},
+                "limit": {"type": "integer", "minimum": 1},
+                "ref_selector": {"type": "string"},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
+                "language_filters": {"type": "array", "items": {"type": "string"}},
+                "max_context_bytes": {"type": "integer", "minimum": CODEGRAPH_CONTEXT_MIN_BYTES},
+                "include_code": {"type": "boolean"},
+                "exclude_generated": {"type": "boolean"},
+                "freshness": {
+                    "type": "string",
+                    "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
+                }
+            },
+            "required": ["repository", "query"]
+        }
+    })
+}
+
 pub(super) fn code_feature_flags_tool_definition() -> Value {
     json!({
         "name": CODE_FEATURE_FLAGS_TOOL,
@@ -655,6 +787,75 @@ fn parse_code_query_kind(value: &str) -> Result<CodeQueryKind, AgentAdapterError
     }
 }
 
+fn authorize_context_bytes(
+    requested: Option<usize>,
+    max_context_bytes: usize,
+) -> Result<usize, AgentAdapterError> {
+    let value = requested.unwrap_or(max_context_bytes);
+    if value == 0 {
+        return Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::InvalidArgument,
+            "max_context_bytes must be greater than zero",
+        ));
+    }
+    if value > max_context_bytes {
+        return Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::LimitExceeded,
+            format!("max_context_bytes {value} exceeds MCP max_context_bytes {max_context_bytes}"),
+        ));
+    }
+
+    Ok(value)
+}
+
+fn authorize_code_context_bytes(
+    requested: Option<usize>,
+    max_context_bytes: usize,
+) -> Result<usize, AgentAdapterError> {
+    let value = match requested {
+        Some(value) => authorize_context_bytes(Some(value), max_context_bytes)?,
+        None => CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES.min(max_context_bytes),
+    };
+    if value < CODEGRAPH_CONTEXT_MIN_BYTES {
+        return Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::LimitExceeded,
+            format!(
+                "MCP max_context_bytes {max_context_bytes} is below codegraph context minimum {CODEGRAPH_CONTEXT_MIN_BYTES}"
+            ),
+        ));
+    }
+    if value > CODEGRAPH_CONTEXT_MAX_BYTES {
+        return Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::LimitExceeded,
+            format!(
+                "max_context_bytes {value} exceeds codegraph context max_context_bytes {CODEGRAPH_CONTEXT_MAX_BYTES}"
+            ),
+        ));
+    }
+
+    Ok(value)
+}
+
+fn authorize_code_context_limit(
+    limit: Option<usize>,
+    policy: &crate::api::AgentAccessPolicy,
+) -> Result<usize, AgentAdapterError> {
+    let value = match limit {
+        Some(limit) => authorize_limit(Some(limit), policy)?,
+        None => CODEGRAPH_CONTEXT_DEFAULT_LIMIT.min(policy.max_limit),
+    };
+    if value > CODEGRAPH_CONTEXT_MAX_LIMIT {
+        return Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::LimitExceeded,
+            format!(
+                "limit {value} exceeds codegraph context max_limit {CODEGRAPH_CONTEXT_MAX_LIMIT}"
+            ),
+        ));
+    }
+
+    Ok(value)
+}
+
 fn parse_software_query_kind(value: &str) -> Result<SoftwareGlobalKind, AgentAdapterError> {
     match value {
         "dependency" | "dependencies" => Ok(SoftwareGlobalKind::Dependencies),
@@ -690,10 +891,14 @@ fn software_projection_result_count(response: &crate::api::SoftwareGlobalRespons
 #[cfg(test)]
 mod tests {
     use super::{
-        code_query_tool_definition, code_repository_set_query_tool_definition,
-        code_software_query_tool_definition, parse_code_query_kind, parse_software_query_kind,
+        authorize_code_context_limit, code_query_tool_definition,
+        code_repository_set_query_tool_definition, code_software_query_tool_definition,
+        parse_code_query_kind, parse_software_query_kind,
     };
-    use crate::domain::{CodeQueryKind, SoftwareGlobalKind};
+    use crate::{
+        api::AgentAccessPolicy,
+        domain::{CODEGRAPH_CONTEXT_DEFAULT_LIMIT, CodeQueryKind, SoftwareGlobalKind},
+    };
 
     #[test]
     fn agent_kind_aliases_normalize_to_existing_code_and_software_kinds() {
@@ -760,5 +965,17 @@ mod tests {
                 "schema should advertise {alias}"
             );
         }
+    }
+
+    #[test]
+    fn code_context_limit_uses_codegraph_default_when_policy_allows_more() {
+        let policy = AgentAccessPolicy::new(Vec::new(), true, 50, 65_536, 1_000, false)
+            .expect("policy should be valid");
+
+        assert_eq!(
+            authorize_code_context_limit(None, &policy).expect("default should pass"),
+            CODEGRAPH_CONTEXT_DEFAULT_LIMIT
+        );
+        assert!(authorize_code_context_limit(Some(21), &policy).is_err());
     }
 }

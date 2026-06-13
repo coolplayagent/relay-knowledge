@@ -224,6 +224,13 @@ where
             "results={}",
             value["results"].as_array().map_or(0, Vec::len)
         ),
+        "code.repo.context" => format!(
+            "entry_points={} related_symbols={} graph_paths={} truncated={}",
+            value["entry_points"].as_array().map_or(0, Vec::len),
+            value["related_symbols"].as_array().map_or(0, Vec::len),
+            value["graph_paths"].as_array().map_or(0, Vec::len),
+            value["truncated"].as_bool().unwrap_or(false)
+        ),
         "code.repo.feature_flags" => format!(
             "feature_flags={} degraded={}",
             value["flags"].as_array().map_or(0, Vec::len),

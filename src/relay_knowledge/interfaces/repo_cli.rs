@@ -1,12 +1,9 @@
 use crate::{
-    api::{
-        ApiStreamEvent, CodeRepositoryIndexStartResponse, CodeRepositoryRegisterRequest,
-        CodeRepositoryReportResponse, RequestContext, StreamEventKind,
-    },
+    api::{CodeRepositoryRegisterRequest, CodeRepositoryReportResponse, RequestContext},
     application::RelayKnowledgeService,
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
-        CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
+        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
+        CodeIndexRequest, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
         FreshnessPolicy, SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request},
@@ -16,9 +13,19 @@ use super::{
     CliError, OutputFormat, parse_freshness, render_response, serialize_line, value_after,
 };
 
+#[path = "repo_cli_index.rs"]
+mod repo_cli_index;
+#[path = "repo_cli_query.rs"]
+mod repo_cli_query;
 #[path = "repo_cli_report.rs"]
 mod repo_cli_report;
 
+use repo_cli_index::{
+    CodeIndexWorkerRunResponse, finish_started_index_task, render_index_worker_response,
+};
+#[cfg(test)]
+use repo_cli_query::parse_query_kind;
+use repo_cli_query::{parse_context, parse_query};
 use repo_cli_report::render_markdown_report;
 
 /// Parsed `repo` CLI command.
@@ -64,6 +71,18 @@ pub enum RepoCommand {
         freshness: FreshnessPolicy,
         exclude_generated: bool,
     },
+    Context {
+        alias: String,
+        query: String,
+        limit: usize,
+        ref_selector: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+        freshness: FreshnessPolicy,
+        max_context_bytes: usize,
+        include_code: bool,
+        exclude_generated: bool,
+    },
     FeatureFlags {
         alias: String,
         query: Option<String>,
@@ -94,12 +113,6 @@ pub enum RepoCommand {
     },
 }
 
-#[derive(serde::Serialize)]
-struct CodeIndexWorkerRunResponse {
-    claimed: bool,
-    task: Option<crate::domain::CodeIndexTaskRecord>,
-}
-
 pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
     match tokens.first().map(String::as_str) {
         Some("register") => parse_register(&tokens[1..]),
@@ -109,6 +122,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("scope") => parse_scope(&tokens[1..]),
         Some("update") => parse_update(&tokens[1..]),
         Some("query") => parse_query(&tokens[1..]),
+        Some("context") => parse_context(&tokens[1..]),
         Some("feature-flags") => parse_feature_flags(&tokens[1..]),
         Some("impact") => parse_impact(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
@@ -324,6 +338,40 @@ pub async fn run_repo(
                 format,
             )
         }
+        RepoCommand::Context {
+            alias,
+            query,
+            limit,
+            ref_selector,
+            path_filters,
+            language_filters,
+            freshness,
+            max_context_bytes,
+            include_code,
+            exclude_generated,
+        } => {
+            let request = CodeGraphContextRequest::new(
+                selector(alias, ref_selector, path_filters, language_filters, format)?,
+                query,
+                limit,
+                freshness,
+                max_context_bytes,
+                include_code,
+                exclude_generated,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = service
+                .codegraph_context(request, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "code.repo.context",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
         RepoCommand::FeatureFlags {
             alias,
             query,
@@ -446,80 +494,6 @@ pub(super) fn render_report_response(
         response,
         format,
     )
-}
-
-fn render_index_worker_response(
-    response: &CodeIndexWorkerRunResponse,
-    format: OutputFormat,
-) -> Result<String, CliError> {
-    if format != OutputFormat::StreamingJson {
-        return serialize_line(response);
-    }
-    let payload = serde_json::to_value(response)
-        .map_err(|error| CliError::RenderFailed(error.to_string()))?;
-    let events = [
-        index_worker_event(StreamEventKind::Started, "index worker started", None),
-        index_worker_event(StreamEventKind::Item, "index worker result", Some(payload)),
-        index_worker_event(StreamEventKind::Completed, "index worker completed", None),
-    ];
-    let mut output = String::new();
-    for event in events {
-        output.push_str(&serialize_line(&event)?);
-    }
-
-    Ok(output)
-}
-
-fn index_worker_event(
-    event: StreamEventKind,
-    message: &str,
-    payload: Option<serde_json::Value>,
-) -> ApiStreamEvent {
-    ApiStreamEvent {
-        event,
-        operation: "code.repo.index_worker".to_owned(),
-        message: Some(message.to_owned()),
-        project_name: None,
-        runtime: None,
-        payload,
-        error_kind: None,
-        metadata: None,
-    }
-}
-
-async fn finish_started_index_task(
-    service: &RelayKnowledgeService,
-    response: &mut CodeRepositoryIndexStartResponse,
-    selector: CodeRepositorySelector,
-    context: RequestContext,
-    format: OutputFormat,
-) -> Result<(), CliError> {
-    let Some(task_id) = response.task.as_ref().map(|task| task.task_id.clone()) else {
-        return Ok(());
-    };
-    if response.task.as_ref().map(|task| task.state) != Some(CodeIndexTaskState::Running) {
-        let completed = service
-            .run_code_index_task_once(Some(task_id), context.clone())
-            .await
-            .map_err(|error| CliError::api_failed(error, format))?;
-        if let Some(task) = completed {
-            response.task = Some(task);
-        }
-    }
-    let requested_ref = selector.ref_selector.clone();
-    let status = service
-        .code_repository_status(selector.clone(), context)
-        .await
-        .map_err(|error| CliError::api_failed(error, format))?;
-    response.status = status.status;
-    response.scope = crate::api::CodeRepositoryScopeMetadata::from_status(
-        &response.status,
-        &selector,
-        requested_ref,
-    );
-    response.checkpoint = status.checkpoint;
-
-    Ok(())
 }
 
 fn parse_register(tokens: &[String]) -> Result<RepoCommand, CliError> {
@@ -679,77 +653,6 @@ fn parse_update(tokens: &[String]) -> Result<RepoCommand, CliError> {
         alias,
         base_ref: base_ref.ok_or(CliError::MissingValue("--base"))?,
         head_ref: head_ref.ok_or(CliError::MissingValue("--head"))?,
-    })
-}
-
-fn parse_query(tokens: &[String]) -> Result<RepoCommand, CliError> {
-    let alias = positional_alias(tokens)?;
-    let mut query = None;
-    let mut kind = CodeQueryKind::Hybrid;
-    let mut limit = 10;
-    let mut ref_selector = "HEAD".to_owned();
-    let mut path_filters = Vec::new();
-    let mut language_filters = Vec::new();
-    let mut freshness = FreshnessPolicy::AllowStale;
-    let mut exclude_generated = false;
-    let mut index = 1;
-    while index < tokens.len() {
-        match tokens[index].as_str() {
-            "--query" => {
-                let (value, next_index) = collect_query_value(tokens, index, "--query")?;
-                query = Some(value);
-                index = next_index;
-            }
-            "--kind" => {
-                kind = parse_query_kind(&value_after(tokens, index, "--kind")?)?;
-                index += 2;
-            }
-            "--limit" => {
-                let value = value_after(tokens, index, "--limit")?;
-                limit = value
-                    .parse::<usize>()
-                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
-                index += 2;
-            }
-            "--ref" => {
-                ref_selector = value_after(tokens, index, "--ref")?;
-                index += 2;
-            }
-            "--path" => {
-                path_filters.push(value_after(tokens, index, "--path")?);
-                index += 2;
-            }
-            "--language" => {
-                language_filters.push(value_after(tokens, index, "--language")?);
-                index += 2;
-            }
-            "--freshness" => {
-                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
-                index += 2;
-            }
-            "--exclude-generated" => {
-                exclude_generated = true;
-                index += 1;
-            }
-            other if !other.starts_with('-') && query.is_none() => {
-                let (value, next_index) = collect_positional_query(tokens, index);
-                query = Some(value);
-                index = next_index;
-            }
-            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
-        }
-    }
-
-    Ok(RepoCommand::Query {
-        alias,
-        query: query.ok_or(CliError::MissingValue("--query"))?,
-        kind,
-        limit,
-        ref_selector,
-        path_filters,
-        language_filters,
-        freshness,
-        exclude_generated,
     })
 }
 
@@ -943,20 +846,6 @@ fn positional_alias(tokens: &[String]) -> Result<String, CliError> {
         .filter(|value| !value.starts_with('-'))
         .cloned()
         .ok_or(CliError::MissingValue("<alias>"))
-}
-
-fn parse_query_kind(value: &str) -> Result<CodeQueryKind, CliError> {
-    match value {
-        "hybrid" => Ok(CodeQueryKind::Hybrid),
-        "symbol" => Ok(CodeQueryKind::Symbol),
-        "definition" => Ok(CodeQueryKind::Definition),
-        "references" => Ok(CodeQueryKind::References),
-        "callers" => Ok(CodeQueryKind::Callers),
-        "callees" => Ok(CodeQueryKind::Callees),
-        "imports" => Ok(CodeQueryKind::Imports),
-        "sbom" => Ok(CodeQueryKind::Sbom),
-        other => Err(CliError::InvalidCodeQueryKind(other.to_owned())),
-    }
 }
 
 fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {

@@ -21,6 +21,7 @@
 | feature-flags | config source、guards_code/read edge、source range、confidence |
 | explanation | doc comment、body chunk、semantic/vector similarity |
 | impact | changeset diff、reverse dependency、test edge、risk score |
+| context | 有界 hybrid/definition/symbol seed，加 reference、call 和 import 展开 |
 
 ## 3. Ranking Signals
 
@@ -39,6 +40,8 @@ FTS 和 source-fallback candidate window 必须先应用 scope/path/language fil
 内部 exact-text source fallback 与 Git 快照读取一样运行在 blocking-worker 边界之后，并受存储侧候选路径上限、候选文件数、命中数和单行长度预算约束。当前实现的兜底预算是最多 256 个候选文件、8 MiB 物化 blob 和单行 4096 字节。它搜索已索引 commit 内容，而不是脏工作树；对非 Git `filesystem:` commit，兜底在读取文件前必须验证 live source tree 仍解析到同一个 scoped synthetic commit，若不匹配则报告兜底降级，不能读取另一个 live 快照的当前字节来掩盖 stale。显式已存储 `filesystem:` ref 可以按身份进入 storage lookup，但 source-byte materialization 仍必须受 live-tree 校验保护。当兜底需要宽 scope 路径时，存储层必须先用 query、path filter 和 language filter 在已索引 FTS read model 中收敛候选文件，只有 query 没有索引候选时才退回有界 scope 枚举。如果结构化代码搜索过程中 FTS read model 临时不可用，结构化词法层在重试后可以返回空候选集，让有界 source-text fallback 继续执行，而不是让整个查询失败；候选路径查询还可以使用 indexed path 和 chunk content 保持 query-aware，无法产生 query-aware 候选时暴露降级而不是扫描按字典序截断的文件前缀。这样排序靠后的相关文件仍可被召回，但不会扩大全局候选文件预算。候选 blob 应优先通过 `git cat-file --batch-check` 做 size preflight，并在 byte budget 内通过 `git cat-file --batch` 成批读取，batch 不可用或包含异常对象时保留逐路径 skip 回退。物化搜索树必须包含已索引的 dot-path 候选；内部 scanner 按固定字符串逐行匹配、跳过包含 NUL byte 的二进制 blob，并在非 definition 查询命中超长行时返回命中附近的有界 excerpt。超大 blob 超出物化预算时只跳过当前候选，不阻断后续仍能装入预算的小文件；definition 兜底先按定义行过滤，再执行返回命中数上限；import 兜底可以给本地相对导入查询中的可执行 `import(...)` 动态导入源码行 source-line shape bonus，使运行时导入使用可以排在规范化静态 import 摘要之前，但不能提升纯注释命中。候选路径不可用、候选文件预算或物化预算耗尽时，查询仍保持有效，并通过 degraded reason 暴露诊断，不能绕过 freshness 或授权边界。产品运行时不依赖 `rg` 或递归 shell out 到 `grep`；`rg`/`grep -RIn` 只作为 agent/维护者调查 workspace 时的有界搜索工具写入文档。
 
 Repository-set 查询必须把每个 member 视为独立的有界 retrieval workflow：单仓 SQLite 读模型访问仍通过 storage 边界串行化，member 级 structured search、dependency-symbol fallback 与 source-text fallback 可以在小并发上限内异步推进。并发上限是背压合同的一部分，不能随 member 数量无限扩张；Hybrid member 的 source-text fallback 用最终 set limit 判断结构化窗口是否不足，不能因为 per-member fanout 深度更大就自动填充 grep 结果；单仓 Hybrid planner 可以在 symbol+chunk 已用非 text-fallback chunk 充分覆盖多项查询序列时跳过 reference/call/import graph expansion，但必须保留 Definition/References/Imports/Callers/Callees 的显式查询语义；overlay evidence、bridge bonus、dedupe、diversity 和 final top-k 仍在所有 member outcome 汇合后统一执行，以避免跨仓排序语义随调度顺序变化。正 priority member 只有在 member/hit fresh 且存在支持 priority 的 resolved 或 ambiguous overlay evidence 时，才可以因结果 path 或 excerpt 命中 query 的非泛化 domain term 获得有界 domain-affinity bonus；zero-priority member 不获得该提升，且该 bonus 不能绕过 freshness、member fanout、fallback 或最终 top-k 预算。
+
+Codegraph context packing 不引入独立排序模型。Entry points 保留 hybrid、definition 和 symbol 查询的排序；扩展命中继承 references、callers、callees 和 imports 各自查询类型的排序。Packer 只执行去重、多样性和字节预算截断，并记录每项进入 pack 时对应的 retrieval layer 与 score。
 
 候选窗口应输出可观测字段：每个 layer 的 pre-filter count、post-filter count、score count、truncation reason 和耗时。影响分析、caller/callee 和 import 查询必须随 changed path、seed symbol、module hint 和 edge confidence 扩展，而不是随完整 scope table size 扩展。
 

@@ -3,14 +3,15 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     api::{
-        ApiError, CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
-        CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
-        CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
-        CodeRepositoryStatusResponse, ErrorKind, RequestContext, SoftwareGlobalResponse,
+        ApiError, CodeGraphContextResponse, CodeRepositoryFeatureFlagsResponse,
+        CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse,
+        CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
+        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, ErrorKind,
+        RequestContext, SoftwareGlobalResponse,
     },
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
-        CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalRequest,
+        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
+        CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalRequest,
     },
     env::NetworkEnvOverrides,
     net::{
@@ -33,6 +34,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
             RepoCommand::Index { .. }
                 | RepoCommand::ScopePreview { .. }
                 | RepoCommand::Query { .. }
+                | RepoCommand::Context { .. }
                 | RepoCommand::FeatureFlags { .. }
                 | RepoCommand::Impact { .. }
                 | RepoCommand::Report { .. }
@@ -180,6 +182,46 @@ pub(super) async fn run_remote(
 
             render_response(
                 "code.repo.query",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::Context {
+            alias,
+            query,
+            limit,
+            ref_selector,
+            path_filters,
+            language_filters,
+            freshness,
+            max_context_bytes,
+            include_code,
+            exclude_generated,
+        } => {
+            let request = CodeGraphContextRequest::new(
+                repo_cli::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    path_filters.clone(),
+                    language_filters.clone(),
+                    format,
+                )?,
+                query.clone(),
+                *limit,
+                *freshness,
+                *max_context_bytes,
+                *include_code,
+                *exclude_generated,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, CodeGraphContextResponse>(alias, "context", &request)
+                .await?;
+
+            render_response(
+                "code.repo.context",
                 response.metadata.clone(),
                 &response,
                 format,

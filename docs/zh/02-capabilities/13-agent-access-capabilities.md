@@ -20,11 +20,11 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --web --mcp 
 
 ## 竞争力特性
 
-MCP tools 暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query 和授权 code impact。MCP resources 暴露 service、health、index 和 metrics 只读上下文，prompts 提供 retrieval 与 code-impact 模板。
+MCP tools 暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query、one-call codegraph context pack 和授权 code impact。MCP resources 暴露 service、health、index 和 metrics 只读上下文，prompts 提供 retrieval 与 code-impact 模板。
 
 ## 命令/API 入口
 
-MCP 不暴露任意 repository indexing；仓库索引需要用户主动运行 `repo index` 或 `repo update`。本地 ACP session adapter 复用相同检索 contract，支持 progress、cancellation、context artifact、QoS admission 和 audit。
+MCP 不暴露任意 repository indexing；仓库索引需要用户主动运行 `repo index` 或 `repo update`。`relay_codegraph_context` 复用 `relay_code_query` 的 scope 授权、limit 授权、freshness 解析和 audit 行为，但只报告 stale、pending 或 degraded 状态，不启动索引。本地 ACP session adapter 复用相同检索 contract；带 repository 的 prompt 调用共享 codegraph context service，并返回支持 progress、cancellation、QoS admission 和 audit 的 context artifact。
 
 ## 降级与诊断
 

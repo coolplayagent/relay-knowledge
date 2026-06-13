@@ -9,13 +9,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
+#[path = "acp_prompt_context.rs"]
+mod acp_prompt_context;
+
 use crate::{
     api::{
-        AgentProtocolKind, AgentRetrievalResult, ErrorKind, HybridRetrievalRequest, InterfaceKind,
-        RequestContext, RuntimeIdentity,
+        AgentProtocolKind, AgentRetrievalResult, CodeGraphContextResponse, ErrorKind,
+        HybridRetrievalRequest, InterfaceKind, RequestContext, RuntimeIdentity,
     },
     application::{AgentRuntimeConfig, RelayKnowledgeService},
-    domain::FreshnessPolicy,
+    domain::{CodeGraphContextRequest, CodeRepositorySelector, FreshnessPolicy},
     net::{
         NetworkRuntime,
         qos::{QosPermit, QosRuntime, RejectReason},
@@ -27,6 +30,7 @@ use super::{
     AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog,
     AgentAuditQosDecision, AgentAuditSink, AgentAuditStatus, authorize_limit, authorize_scope,
 };
+use acp_prompt_context::{authorize_codegraph_limit, authorize_context_bytes, run_mapped_prompt};
 
 /// Local ACP session adapter for resident relay-knowledge processes.
 #[derive(Clone)]
@@ -208,22 +212,16 @@ impl LocalAcpSessionAdapter {
         );
         let service = self.service.clone();
         let request_timeout = Duration::from_millis(self.agent.access_policy.max_runtime_ms);
-        let source_scope = mapped.source_scope.clone();
+        let source_scope = mapped.audit_scope();
         let freshness = mapped.freshness;
         let limit = mapped.limit;
-        let max_context_bytes = self.agent.access_policy.max_context_bytes;
-        let retrieval = service.retrieve_context(mapped.into_retrieval_request(), context);
+        let retrieval =
+            run_mapped_prompt(service, mapped, context, identity, elapsed_millis(started));
 
         let response = tokio::select! {
             result = tokio::time::timeout(request_timeout, retrieval) => {
                 match result {
-                    Ok(Ok(response)) => {
-                        let result = AgentRetrievalResult::from_retrieval(
-                            response,
-                            identity,
-                            max_context_bytes,
-                            elapsed_millis(started),
-                        );
+                    Ok(Ok(result)) => {
                         let artifact_id = format!("relay-context:{session_id}:{request_id}");
                         updates.push(AcpSessionUpdate::meta(
                             &request_id,
@@ -241,8 +239,8 @@ impl LocalAcpSessionAdapter {
                             source_scope: source_scope.as_deref(),
                             freshness: Some(crate::api::freshness_label(freshness)),
                             limit: Some(limit),
-                            result_count: Some(result.results.len()),
-                            truncated: result.truncated,
+                            result_count: Some(result.result_count()),
+                            truncated: result.truncated(),
                             elapsed_ms: elapsed_millis(started),
                             error_kind: None,
                         });
@@ -252,7 +250,8 @@ impl LocalAcpSessionAdapter {
                             updates,
                             context_artifact: Some(AcpContextArtifact {
                                 artifact_id,
-                                result,
+                                result: result.retrieval,
+                                codegraph_context: result.codegraph,
                             }),
                             stop_reason: AcpStopReason::Completed,
                             error: None,
@@ -481,16 +480,30 @@ pub struct AcpPromptMeta {
     pub relay_knowledge: Option<AcpRelayKnowledgePrompt>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpRelayKnowledgePrompt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ref_selector: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_filters: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub language_filters: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub freshness: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_context_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_code: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_generated: Option<bool>,
 }
 
 /// ACP prompt response containing bounded progress and an optional context artifact.
@@ -509,7 +522,10 @@ pub struct AcpPromptResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AcpContextArtifact {
     pub artifact_id: String,
-    pub result: AgentRetrievalResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<AgentRetrievalResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codegraph_context: Option<CodeGraphContextResponse>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -736,11 +752,24 @@ impl AcpSessionRegistry {
 struct MappedPromptRequest {
     query: String,
     source_scope: Option<String>,
+    repository: Option<String>,
+    ref_selector: Option<String>,
+    path_filters: Vec<String>,
+    language_filters: Vec<String>,
     limit: usize,
     freshness: FreshnessPolicy,
+    max_context_bytes: usize,
+    include_code: bool,
+    exclude_generated: bool,
 }
 
 impl MappedPromptRequest {
+    fn audit_scope(&self) -> Option<String> {
+        self.repository
+            .clone()
+            .or_else(|| self.source_scope.clone())
+    }
+
     fn into_retrieval_request(self) -> HybridRetrievalRequest {
         HybridRetrievalRequest {
             query: self.query,
@@ -748,6 +777,35 @@ impl MappedPromptRequest {
             limit: self.limit,
             freshness: self.freshness,
         }
+    }
+
+    fn into_codegraph_request(self) -> Result<Option<CodeGraphContextRequest>, AgentAdapterError> {
+        let Some(repository) = self.repository else {
+            return Ok(None);
+        };
+        let selector = CodeRepositorySelector::new(
+            repository,
+            self.ref_selector.unwrap_or_else(|| "HEAD".to_owned()),
+            self.path_filters,
+            self.language_filters,
+        )
+        .map_err(|error| {
+            AgentAdapterError::new(AgentAdapterErrorKind::InvalidScope, error.to_string())
+        })?;
+
+        CodeGraphContextRequest::new(
+            selector,
+            self.query,
+            self.limit,
+            self.freshness,
+            self.max_context_bytes,
+            self.include_code,
+            self.exclude_generated,
+        )
+        .map(Some)
+        .map_err(|error| {
+            AgentAdapterError::new(AgentAdapterErrorKind::InvalidArgument, error.to_string())
+        })
     }
 }
 
@@ -758,15 +816,29 @@ fn map_prompt_request(
     let relay = request
         .meta
         .and_then(|meta| meta.relay_knowledge)
-        .unwrap_or(AcpRelayKnowledgePrompt {
-            query: None,
-            source_scope: None,
-            limit: None,
-            freshness: None,
-        });
+        .unwrap_or_default();
     let query = relay.query.unwrap_or(request.prompt);
-    let source_scope = authorize_scope(relay.source_scope, &agent.access_policy)?;
-    let limit = authorize_limit(relay.limit, &agent.access_policy)?;
+    let requested_source_scope = relay.source_scope;
+    let requested_repository = relay.repository;
+    let repository = requested_repository
+        .map(|repository| authorize_scope(Some(repository), &agent.access_policy))
+        .transpose()?
+        .flatten();
+    let source_scope = if requested_source_scope.is_some() || repository.is_none() {
+        authorize_scope(requested_source_scope, &agent.access_policy)?
+    } else {
+        None
+    };
+    let limit = if repository.is_some() {
+        authorize_codegraph_limit(relay.limit, &agent.access_policy)?
+    } else {
+        authorize_limit(relay.limit, &agent.access_policy)?
+    };
+    let max_context_bytes = authorize_context_bytes(
+        relay.max_context_bytes,
+        agent.access_policy.max_context_bytes,
+        repository.is_some(),
+    )?;
     let freshness = parse_freshness(relay.freshness.as_deref())?;
 
     if query.trim().is_empty() {
@@ -779,8 +851,15 @@ fn map_prompt_request(
     Ok(MappedPromptRequest {
         query,
         source_scope,
+        repository,
+        ref_selector: relay.ref_selector,
+        path_filters: relay.path_filters,
+        language_filters: relay.language_filters,
         limit,
         freshness,
+        max_context_bytes,
+        include_code: relay.include_code.unwrap_or(true),
+        exclude_generated: relay.exclude_generated.unwrap_or(false),
     })
 }
 

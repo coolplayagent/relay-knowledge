@@ -112,6 +112,37 @@
       ]
     },
     {
+      "id": "agent_one_call_codegraph_context_pack",
+      "repository": "agent_workflow_fixture",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "max_tool_calls": 1,
+      "max_source_reads": 4,
+      "max_output_chars": 70000,
+      "max_context_chars": 12000,
+      "min_evidence_hits": 1,
+      "max_text_fallback_ratio": 0.50,
+      "max_total_duration_ms": 3000,
+      "steps": [
+        {
+          "id": "one_call_context_pack",
+          "command": "context",
+          "query": "AgentContextPackBuilder analyze_issue_entrypoint freshness mode",
+          "freshness": "wait-until-fresh",
+          "limit": 8,
+          "max_context_bytes": 12000,
+          "max_rank": 3,
+          "context_hit_limit": 6,
+          "expected": [
+            {
+              "path": "src/context.rs",
+              "excerpt_contains": "AgentContextPackBuilder"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "agent_config_freshness_trace",
       "repository": "agent_workflow_fixture",
       "objective": "competitive_capability",

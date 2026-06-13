@@ -333,7 +333,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 | `code.repo.register` | 注册代码仓库 | `root_path`；可选 `alias`, `path_filters`, `language_filters` |
 | `code.repo.index` | 全量索引 | `alias`；可选 `ref`, `path_filters`, `language_filters` |
 | `code.repo.update` | 增量索引 | `alias`, `base_ref`, `head_ref` |
-| `code.repo.query` | 查询代码仓库 | `alias`, `query`, `kind`, `freshness`, `limit` |
+| `code.repo.query` / `code.repo.context` | 查询代码仓库 / 打包 one-call codegraph context | `alias`, `query`, `kind` 或 context budget, `freshness`, `limit` |
 | `code.repo.feature_flags` | 特性标志查询 | `alias`, `freshness`, `limit`；可选 `query` |
 | `code.repo.impact` | 变更影响分析 | `alias`, `base_ref`, `head_ref`, `limit` |
 | `code.repo.software` | 软件全局投影 | `alias`, `kind`, `freshness`, `limit` |
@@ -986,7 +986,7 @@ HTTP 请求默认超时 30 秒，可通过 `RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT
 | POST | `/api/web/operations/execute` | 统一操作执行 |
 | POST | `/api/v1/code/repositories/{alias}/index` | 仓库全量索引 |
 | POST | `/api/v1/code/repositories/{alias}/scope/preview` | 索引范围预览 |
-| POST | `/api/v1/code/repositories/{alias}/query` | 仓库代码查询 |
+| POST | `/api/v1/code/repositories/{alias}/query` / `/context` | 仓库代码查询 / codegraph context pack |
 | POST | `/api/v1/code/repositories/{alias}/feature-flags` | 特性标志查询 |
 | POST | `/api/v1/code/repositories/{alias}/impact` | 变更影响分析 |
 | GET | `/api/v1/code/repositories/{alias}/report` | 仓库索引报告 |

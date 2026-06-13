@@ -364,7 +364,7 @@ Local CLIs can query a deployed resident service with `--remote <base-url>` or
 durable tasks to the service and return task/status/checkpoint JSON; the remote
 `service run --web` worker pool drains those tasks rather than the local CLI
 running `repo index-worker`. Remote read-only repository graph commands
-(`repo query`, `repo feature-flags`, `repo impact`, `repo report`, and
+(`repo query`, `repo context`, `repo feature-flags`, `repo impact`, `repo report`, and
 `repo software`) read service-host index state and preserve their CLI `--kind`
 arguments. Remote maintenance commands such as
 `repo index --reset` and `repo index-worker` are rejected by a remote-selected
@@ -375,7 +375,7 @@ retrieval settings are validated only when a command falls back to local state.
 Distinct task fingerprints are queued and leased independently, while identical
 full-index fingerprints reuse the active task.
 
-`repo query` and `repo feature-flags` with `allow-stale` continue serving the
+`repo query`, `repo context`, and `repo feature-flags` with `allow-stale` continue serving the
 latest compatible completed scope when the requested ref and filters are still
 being indexed, marking the response stale rather than blocking behind the
 writer.
@@ -615,6 +615,7 @@ relay-knowledge repo index relay-knowledge --ref main --format json
 relay-knowledge repo index-worker --task-id <task-id> --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo context relay-knowledge --query "retry_policy callers imports" --ref HEAD --path src --freshness wait-until-fresh --limit 8 --max-context-bytes 16384 --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo query relay-knowledge --query retry_policy --kind definition --freshness wait-until-fresh --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo software relay-knowledge --kind relationships --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
@@ -812,10 +813,14 @@ and path filters over 4,096 characters, and return compact outlines for
 container types when `include_code=true`.
 
 The MCP tool surface includes graph retrieval, graph inspection, health,
-service status, index status, authorized code graph queries, authorized
+service status, index status, authorized code graph queries, one-call codegraph
+context packs, authorized
 software global-model queries, repository-set code graph queries, and
 authorized code impact analysis. Agent-facing kind selection reuses existing
 product kinds: `relay_code_query` handles code graph kinds,
+`relay_codegraph_context` composes bounded hybrid/definition/symbol entry
+queries with references, callers, callees, imports, snippets, budget, freshness,
+and truncation diagnostics,
 `relay_software_query` handles software global-model kinds, and
 `relay_code_feature_flags` handles configuration-driven feature flags. Common
 agent aliases such as `dependency`, `configuration`, and `models` normalize to

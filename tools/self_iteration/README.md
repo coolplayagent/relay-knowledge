@@ -233,7 +233,7 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 
 ### Coding-Agent Workflow Gate
 
-`--categories agent_workflows` runs deterministic end-to-end coding-agent scenarios from `cases/agent_workflow_targets.json`. The fixture covers definition lookup, cross-language impact tracing, configuration-to-documentation tracing, and freshness policy checks. Each scenario executes bounded `repo query` steps and fails when expected evidence is missing, context/output grows beyond the case budget, too many unique source files must be read, text fallback dominates the evidence pack, or total query latency exceeds the threshold.
+`--categories agent_workflows` runs deterministic end-to-end coding-agent scenarios from `cases/agent_workflow_targets.json`. The fixture covers definition lookup, one-call `repo context` packing, cross-language impact tracing, configuration-to-documentation tracing, and freshness policy checks. Each scenario executes bounded `repo query` or `repo context` steps and fails when expected evidence is missing, context/output grows beyond the case budget, too many unique source files must be read, text fallback dominates the evidence pack, too many tool calls are needed, or total query latency exceeds the threshold.
 
 The PR benchmark workflow runs this category as `agent-workflow-regression` with the generated fixture isolated through `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=agent_workflow_fixture`. After the evaluation run it checks the generated JSON report and fails when any gate, case, or agent workflow metric budget fails; the score-vs-history adoption decision is not used for this CI gate. This keeps the CI cost bounded while still exercising the agent-facing behavior.
 
