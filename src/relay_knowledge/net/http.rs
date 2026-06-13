@@ -747,16 +747,10 @@ where
                 });
             }
         };
-        let qos = self.qos.clone();
         let future = self.inner.call(request);
         Box::pin(async move {
             let result = QOS_REQUEST_CONTEXT.scope((), future).await;
             drop(permit);
-            if let Ok(response) = &result {
-                if response.status() == StatusCode::REQUEST_TIMEOUT {
-                    qos.record_timed_out();
-                }
-            }
             result
         })
     }

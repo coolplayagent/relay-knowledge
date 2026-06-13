@@ -439,6 +439,59 @@ async fn qos_request_layer_does_not_double_charge_nested_outbound_request() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn server_timeout_with_qos_request_layer_counts_once() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let bind = listener
+        .local_addr()
+        .expect("listener should expose address")
+        .to_string();
+    let config = HttpConfig::new(
+        HttpBindAddress::parse(&bind).expect("bind should parse"),
+        Duration::from_millis(20),
+        Duration::from_secs(5),
+        1024,
+        HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+    )
+    .expect("config should build");
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 8, 8).expect("policy should build");
+    let router = router_with_qos_request_admission(
+        Router::new().route(
+            "/hold",
+            get(|| async { std::future::pending::<&'static str>().await }),
+        ),
+        qos.clone(),
+        policy,
+    );
+    let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(serve_listener(
+        listener,
+        router,
+        config,
+        Some(qos.clone()),
+        async {
+            let _ = shutdown_waiter.await;
+        },
+    ));
+
+    let response = reqwest::Client::new()
+        .get(format!("http://{bind}/hold"))
+        .send()
+        .await
+        .expect("server should respond with timeout");
+
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(qos.diagnostics_snapshot().timed_out_total, 1);
+    let _ = shutdown.send(());
+    server
+        .await
+        .expect("server task should join")
+        .expect("server should stop");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_router_enforces_graceful_shutdown_timeout() {
     let bind = "127.0.0.1:8791";
     let listener =
