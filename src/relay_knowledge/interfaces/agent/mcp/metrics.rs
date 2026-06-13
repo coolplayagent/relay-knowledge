@@ -42,12 +42,15 @@ pub(super) async fn handle_metrics_get(
             error.message,
         )
             .into_response(),
-        Err(_) => (
-            StatusCode::REQUEST_TIMEOUT,
-            [(header::CONTENT_TYPE, "text/plain")],
-            "metrics endpoint exceeded max_runtime_ms".to_owned(),
-        )
-            .into_response(),
+        Err(_) => {
+            server.qos.record_timed_out();
+            (
+                StatusCode::REQUEST_TIMEOUT,
+                [(header::CONTENT_TYPE, "text/plain")],
+                "metrics endpoint exceeded max_runtime_ms".to_owned(),
+            )
+                .into_response()
+        }
     }
 }
 

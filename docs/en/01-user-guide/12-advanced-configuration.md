@@ -143,7 +143,7 @@ metadata response bodies are capped by `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`.
 When update checks are disabled, source, repository, and interval overrides are
 ignored so a notice-only setting cannot block runtime loading.
 
-Non-loopback HTTP binds should also configure MCP remote-client policy and origin/scope restrictions. QoS budget is admission control, not authentication; it limits connections, in-flight requests, queue depth, timeouts, and overload behavior. MCP requests use the queued admission path, so `qos_queued_total` and the matching Prometheus metric count work admitted through that queue-budget gate even when the request can enter active execution immediately.
+Non-loopback HTTP binds should also configure MCP remote-client policy and origin/scope restrictions. QoS budget is admission control, not authentication; it limits connections, in-flight requests, queue depth, timeouts, and overload behavior. Runtime budget expirations for MCP and local ACP work are included in the QoS timeout diagnostics. MCP requests use the queued admission path, so `qos_queued_total` and the matching Prometheus metric count work admitted through that queue-budget gate even when the request can enter active execution immediately.
 
 ## 12.6 MCP Policy
 

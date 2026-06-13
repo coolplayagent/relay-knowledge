@@ -260,6 +260,10 @@ async fn local_acp_prompt_reports_policy_qos_timeout_and_service_errors() {
         timed_out.error.as_ref().expect("error").error_kind,
         "timeout"
     );
+    assert_eq!(
+        timeout_adapter.qos_diagnostics_snapshot().timed_out_total,
+        1
+    );
 
     let (failing_adapter, _service) = adapter_and_service_with_store(
         [("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")],

@@ -543,9 +543,24 @@ async fn headerless_cancellation_notifications_cancel_occupied_mcp_qos_slot() {
         Some(session_id.as_str()),
     )
     .await;
+    let duplicate_cancelled = raw_mcp_request_at_endpoint(
+        &mut cancel_router,
+        "/mcp",
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {
+                "requestId": "slow",
+                "reason": "retry"
+            }
+        }),
+        Some(session_id.as_str()),
+    )
+    .await;
     let slow_response = slow_request.await.expect("slow request should finish");
 
     assert_eq!(cancelled.0, StatusCode::ACCEPTED);
+    assert_eq!(duplicate_cancelled.0, StatusCode::ACCEPTED);
     assert_eq!(slow_response.0, StatusCode::OK);
     assert_eq!(server.qos.diagnostics_snapshot().cancelled_total, 1);
     assert_eq!(server.qos.diagnostics_snapshot().rejected_total, 0);
@@ -723,6 +738,39 @@ async fn service_style_mcp_qos_rejection_stays_json_rpc() {
         rejected.1["result"]["structuredContent"]["error_kind"],
         "qos_rejected"
     );
+}
+
+#[tokio::test]
+async fn mcp_tool_runtime_timeout_increments_qos_timeout_total() {
+    let (server, _service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "1"),
+        ],
+        Arc::new(SlowSearchStore),
+    )
+    .await;
+    let mut router = server.clone().router();
+
+    let response = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "slow",
+            "method": "tools/call",
+            "params": {
+                "name": "relay_retrieve_context",
+                "arguments": {"query": "slow", "source_scope": "docs"}
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        response["result"]["structuredContent"]["error_kind"],
+        "timeout"
+    );
+    assert_eq!(server.qos.diagnostics_snapshot().timed_out_total, 1);
 }
 
 #[tokio::test]

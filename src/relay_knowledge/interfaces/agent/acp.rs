@@ -281,6 +281,7 @@ impl LocalAcpSessionAdapter {
                         failed_prompt(session_id, request_id.clone(), updates, adapter_error, elapsed_millis(started))
                     }
                     Err(_) => {
+                        self.qos.record_timed_out();
                         let adapter_error = AgentAdapterError::new(
                             AgentAdapterErrorKind::Timeout,
                             "ACP prompt exceeded max_runtime_ms",

@@ -112,6 +112,6 @@ Agent requests are recorded as bounded in-process audit events with runtime iden
 
 ## 7.6 Metrics Endpoint
 
-`GET /mcp/metrics` returns a Prometheus text-format snapshot covering current graph version, index refresh queue depth, dead-letter count, QoS in-flight/queued request count, MCP cold-start sample count and duration totals, and stale state for each index. The endpoint still enters through the MCP router and QoS admission.
+`GET /mcp/metrics` returns a Prometheus text-format snapshot covering current graph version, index refresh queue depth, dead-letter count, QoS in-flight/queued request count, MCP cold-start sample count and duration totals, and stale state for each index. Runtime budget expirations for MCP tool calls, resource reads, metrics reads, and local ACP prompts increment `relay_knowledge_qos_timed_out_total`. The endpoint still enters through the MCP router and QoS admission.
 
 MCP clients should use Streamable HTTP `/mcp`. `/mcp/sse` and `/mcp/message` are no longer compatibility entry points.

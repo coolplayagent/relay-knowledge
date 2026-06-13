@@ -308,6 +308,7 @@ struct CancellationState {
 struct CancellationEntry {
     sender: watch::Sender<bool>,
     token: u64,
+    cancelled: bool,
 }
 
 impl CancellationRegistry {
@@ -322,9 +323,14 @@ impl CancellationRegistry {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let token = active.next_token;
         active.next_token = active.next_token.wrapping_add(1);
-        active
-            .entries
-            .insert(request_id.clone(), CancellationEntry { sender, token });
+        active.entries.insert(
+            request_id.clone(),
+            CancellationEntry {
+                sender,
+                token,
+                cancelled: false,
+            },
+        );
 
         (
             receiver,
@@ -337,18 +343,23 @@ impl CancellationRegistry {
     }
 
     pub(super) fn cancel(&self, request_id: &str) -> bool {
-        if let Some(sender) = self
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .entries
-            .get(request_id)
-            .map(|entry| entry.sender.clone())
-        {
-            let _ = sender.send(true);
-            return true;
-        }
-        false
+        let sender = {
+            let mut active = self
+                .active
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(entry) = active.entries.get_mut(request_id) else {
+                return false;
+            };
+            if entry.cancelled {
+                return false;
+            }
+            entry.cancelled = true;
+            entry.sender.clone()
+        };
+
+        let _ = sender.send(true);
+        true
     }
 
     fn finish(&self, request_id: &str, token: u64) {
@@ -480,6 +491,15 @@ mod tests {
         }
 
         assert!(sessions.usage_history_len() <= MAX_TRACKED_SESSIONS * 2);
+    }
+
+    #[test]
+    fn cancellation_requests_are_idempotent_while_active() {
+        let registry = CancellationRegistry::default();
+        let (_receiver, _registration) = registry.register("string:call".to_owned());
+
+        assert!(registry.cancel("string:call"));
+        assert!(!registry.cancel("string:call"));
     }
 
     fn create_session(sessions: &SessionRegistry) -> String {

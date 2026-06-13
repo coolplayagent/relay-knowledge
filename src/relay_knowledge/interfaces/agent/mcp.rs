@@ -613,10 +613,13 @@ async fn run_cancellable_tool_call(
     let result = tokio::select! {
         result = tokio::time::timeout(timeout, tool) => match result {
             Ok(value) => value,
-            Err(_) => tool_error_result(AgentAdapterError::new(
-                AgentAdapterErrorKind::Timeout,
-                "MCP tool call exceeded max_runtime_ms",
-            )),
+            Err(_) => {
+                server.qos.record_timed_out();
+                tool_error_result(AgentAdapterError::new(
+                    AgentAdapterErrorKind::Timeout,
+                    "MCP tool call exceeded max_runtime_ms",
+                ))
+            }
         },
         _ = wait_for_cancellation(&mut cancellation) => {
             tool_error_result(AgentAdapterError::new(
