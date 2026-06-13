@@ -1,5 +1,3 @@
-use reqwest::StatusCode;
-
 use super::{UpdateSource, VersionCheckDiagnostic};
 
 pub(super) fn diagnostic(
@@ -14,27 +12,6 @@ pub(super) fn diagnostic(
         message: message.into(),
         retryable,
     }
-}
-
-pub(super) fn transport_diagnostic(
-    source: UpdateSource,
-    error: reqwest::Error,
-) -> VersionCheckDiagnostic {
-    diagnostic(Some(source), "transport_failed", error.to_string(), true)
-}
-
-pub(super) fn status_diagnostic(
-    source: UpdateSource,
-    status: StatusCode,
-) -> VersionCheckDiagnostic {
-    diagnostic(
-        Some(source),
-        "http_status",
-        format!("release metadata request returned HTTP {}", status.as_u16()),
-        status.is_server_error()
-            || status == StatusCode::REQUEST_TIMEOUT
-            || status == StatusCode::TOO_MANY_REQUESTS,
-    )
 }
 
 pub(super) fn response_body_too_large_diagnostic(
