@@ -328,6 +328,114 @@ pub(super) fn repo_query() -> CliCommandSpec {
     )
 }
 
+pub(super) fn repo_context() -> CliCommandSpec {
+    command!(
+        &["repo", "context"],
+        "relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]",
+        "Build a one-call codegraph context pack for coding agents.",
+        "code.repo.context",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[],
+        )],
+        &[
+            opt(
+                "--query",
+                Some("text"),
+                true,
+                false,
+                "Context request text; multiple unflagged words after --query are joined.",
+                None,
+                &[],
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed Git ref or worktree selector.",
+                Some("HEAD"),
+                &[],
+            ),
+            opt(
+                "--path",
+                Some("filter"),
+                false,
+                true,
+                "Restricts context to indexed path prefix.",
+                None,
+                &[],
+            ),
+            opt(
+                "--language",
+                Some("id"),
+                false,
+                true,
+                "Restricts context to language id.",
+                None,
+                &[],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls index freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum entry, related-symbol, and graph-path count per group.",
+                Some("8"),
+                &[],
+            ),
+            opt(
+                "--max-context-bytes",
+                Some("n"),
+                false,
+                false,
+                "Maximum serialized context pack size.",
+                Some("65536"),
+                &[],
+            ),
+            opt(
+                "--no-code",
+                None,
+                false,
+                false,
+                "Omit code excerpts while keeping provenance and graph evidence.",
+                None,
+                &[],
+            ),
+            opt(
+                "--exclude-generated",
+                None,
+                false,
+                false,
+                "Exclude generated files from context evidence.",
+                None,
+                &[],
+            ),
+        ],
+        &[
+            "relay-knowledge repo context core --query \"retry_policy callers imports\" --format json",
+        ],
+        &[
+            "The command orchestrates existing code graph queries and does not trigger repository indexing or refresh.",
+            "JSON includes entry_points, related_symbols, graph_paths, impact_hints, code_excerpts, freshness, budget, and truncation diagnostics.",
+        ],
+    )
+}
+
 pub(super) fn repo_feature_flags() -> CliCommandSpec {
     command!(
         &["repo", "feature-flags"],

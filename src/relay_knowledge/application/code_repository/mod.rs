@@ -1,3 +1,4 @@
+mod context;
 mod fast_index;
 mod freshness;
 mod queue;

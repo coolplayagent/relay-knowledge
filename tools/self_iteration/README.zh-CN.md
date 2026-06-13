@@ -233,7 +233,7 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 
 ### coding-agent 工作流门禁
 
-`--categories agent_workflows` 会运行 `cases/agent_workflow_targets.json` 中的确定性端到端 coding-agent 场景。fixture 覆盖定义定位、跨语言影响追踪、配置到文档追踪和 freshness policy 检查。每个场景执行有界 `repo query` 步骤；当期望证据缺失、context/output 超过预算、需要读取的唯一源码文件过多、text fallback 在证据包中过高，或总查询延迟超过阈值时失败。
+`--categories agent_workflows` 会运行 `cases/agent_workflow_targets.json` 中的确定性端到端 coding-agent 场景。fixture 覆盖定义定位、one-call `repo context` 打包、跨语言影响追踪、配置到文档追踪和 freshness policy 检查。每个场景执行有界 `repo query` 或 `repo context` 步骤；当期望证据缺失、context/output 超过预算、需要读取的唯一源码文件过多、text fallback 在证据包中过高、工具调用数过多，或总查询延迟超过阈值时失败。
 
 PR benchmark workflow 会以 `agent-workflow-regression` job 运行该 category，并通过 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=agent_workflow_fixture` 将运行范围限制到生成式 fixture。evaluation 结束后，workflow 会检查生成的 JSON report，只要任一 gate、case 或 agent workflow metric budget 失败就让 CI 失败；该 CI 门禁不使用 score-vs-history 的采纳决策。这样能控制 CI 成本，同时覆盖 agent-facing 行为。
 

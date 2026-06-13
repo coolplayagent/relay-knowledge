@@ -20,11 +20,11 @@ The default MCP address is `http://127.0.0.1:8791/mcp`. Clients initialize, stor
 
 ## Competitive Features
 
-MCP tools expose retrieve context, inspect graph, health, service status, index status, authorized code graph query, and authorized code impact. MCP resources expose service, health, index, and metrics read-only context; prompts provide retrieval and code-impact templates.
+MCP tools expose retrieve context, inspect graph, health, service status, index status, authorized code graph query, one-call codegraph context packs, and authorized code impact. MCP resources expose service, health, index, and metrics read-only context; prompts provide retrieval and code-impact templates.
 
 ## Command/API Entry Points
 
-MCP does not expose arbitrary repository indexing; users explicitly run `repo index` or `repo update`. The local ACP session adapter reuses the same retrieval contract and supports progress, cancellation, context artifacts, QoS admission, and audit.
+MCP does not expose arbitrary repository indexing; users explicitly run `repo index` or `repo update`. `relay_codegraph_context` shares `relay_code_query` scope authorization, limit authorization, freshness parsing, and audit behavior, but only reports stale, pending, or degraded state instead of starting indexing. The local ACP session adapter reuses the same retrieval contract; repository-scoped prompts call the shared codegraph context service and return context artifacts with progress, cancellation, QoS admission, and audit.
 
 ## Degradation and Diagnostics
 

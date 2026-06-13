@@ -68,6 +68,7 @@ async fn local_acp_prompt_returns_progress_context_artifact_and_audit() {
                         source_scope: Some("docs".to_owned()),
                         limit: Some(2),
                         freshness: Some("wait-until-fresh".to_owned()),
+                        ..AcpRelayKnowledgePrompt::default()
                     }),
                 }),
             },
@@ -82,12 +83,22 @@ async fn local_acp_prompt_returns_progress_context_artifact_and_audit() {
             .as_ref()
             .expect("artifact should be present")
             .result
+            .as_ref()
+            .expect("graph retrieval result should be present")
             .runtime_identity
             .protocol,
         AgentProtocolKind::Acp
     );
     assert_eq!(
-        response.context_artifact.as_ref().unwrap().result.results[0].evidence_id,
+        response
+            .context_artifact
+            .as_ref()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .results[0]
+            .evidence_id,
         "ev-acp"
     );
     assert!(
@@ -104,6 +115,69 @@ async fn local_acp_prompt_returns_progress_context_artifact_and_audit() {
     assert_eq!(event.freshness.as_deref(), Some("wait-until-fresh"));
     assert_eq!(event.result_count, Some(1));
     assert_eq!(event.status, AgentAuditStatus::Completed);
+}
+
+#[tokio::test]
+async fn local_acp_prompt_honors_per_prompt_context_byte_budget() {
+    let (adapter, service) =
+        adapter_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    service
+        .ingest(
+            IngestRequest {
+                source_scope: "docs".to_owned(),
+                evidence: vec![IngestEvidence {
+                    id: Some("ev-acp-budget".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
+                    content: "ACP prompt context byte budget should truncate retrieval artifacts"
+                        .to_owned(),
+                    entity_labels: vec!["ACPBudget".to_owned()],
+                    extraction: None,
+                }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
+            },
+            RequestContext::with_ids(
+                InterfaceKind::Cli,
+                "req-budget-ingest",
+                "trace-budget-ingest",
+            ),
+        )
+        .await
+        .expect("ingest should succeed");
+    let session = adapter
+        .new_session(AcpSessionRequest::default())
+        .expect("session should start");
+
+    let response = adapter
+        .prompt(
+            &session.session_id,
+            AcpPromptRequest {
+                prompt: "context byte budget".to_owned(),
+                request_id: Some("turn-budget".to_owned()),
+                meta: Some(AcpPromptMeta {
+                    relay_knowledge: Some(AcpRelayKnowledgePrompt {
+                        query: Some("context byte budget".to_owned()),
+                        source_scope: Some("docs".to_owned()),
+                        limit: Some(1),
+                        max_context_bytes: Some(1),
+                        ..AcpRelayKnowledgePrompt::default()
+                    }),
+                }),
+            },
+        )
+        .await;
+
+    let result = response
+        .context_artifact
+        .as_ref()
+        .and_then(|artifact| artifact.result.as_ref())
+        .expect("retrieval artifact should be present");
+    assert!(result.truncated);
+    assert!(result.results.is_empty());
 }
 
 #[tokio::test]
@@ -134,6 +208,7 @@ async fn local_acp_prompt_can_be_cancelled_and_releases_qos() {
                             source_scope: Some("docs".to_owned()),
                             limit: Some(1),
                             freshness: Some("allow-stale".to_owned()),
+                            ..AcpRelayKnowledgePrompt::default()
                         }),
                     }),
                 },
@@ -163,6 +238,68 @@ async fn local_acp_prompt_can_be_cancelled_and_releases_qos() {
             .expect("cancel should audit")
             .status,
         AgentAuditStatus::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn local_acp_repository_prompt_can_omit_source_scope() {
+    let (adapter, _service) = adapter_and_service([
+        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+        ("RELAY_KNOWLEDGE_MCP_MAX_LIMIT", "50"),
+    ])
+    .await;
+
+    let mapped = map_prompt_request(
+        &adapter.agent,
+        AcpPromptRequest {
+            prompt: "retry policy".to_owned(),
+            request_id: Some("turn-repo-only".to_owned()),
+            meta: Some(AcpPromptMeta {
+                relay_knowledge: Some(AcpRelayKnowledgePrompt {
+                    query: Some("retry policy".to_owned()),
+                    repository: Some("docs".to_owned()),
+                    ..AcpRelayKnowledgePrompt::default()
+                }),
+            }),
+        },
+    )
+    .expect("repository authorization should stand alone");
+
+    assert_eq!(mapped.repository.as_deref(), Some("docs"));
+    assert_eq!(mapped.source_scope, None);
+    assert_eq!(mapped.limit, crate::domain::CODEGRAPH_CONTEXT_DEFAULT_LIMIT);
+}
+
+#[tokio::test]
+async fn local_acp_repository_prompt_requires_repository_scope_authorization() {
+    let (adapter, _service) =
+        adapter_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    let session = adapter
+        .new_session(AcpSessionRequest::default())
+        .expect("session should start");
+
+    let response = adapter
+        .prompt(
+            &session.session_id,
+            AcpPromptRequest {
+                prompt: "retry policy".to_owned(),
+                request_id: Some("turn-repo-auth".to_owned()),
+                meta: Some(AcpPromptMeta {
+                    relay_knowledge: Some(AcpRelayKnowledgePrompt {
+                        query: Some("retry policy".to_owned()),
+                        source_scope: Some("docs".to_owned()),
+                        repository: Some("private-repo".to_owned()),
+                        ..AcpRelayKnowledgePrompt::default()
+                    }),
+                }),
+            },
+        )
+        .await;
+
+    assert_eq!(response.stop_reason, AcpStopReason::Failed);
+    assert_eq!(
+        response.error.as_ref().expect("error").error_kind,
+        "permission_denied"
     );
 }
 
@@ -226,6 +363,7 @@ async fn local_acp_prompt_reports_policy_qos_timeout_and_service_errors() {
                         source_scope: Some("docs".to_owned()),
                         limit: Some(1),
                         freshness: None,
+                        ..AcpRelayKnowledgePrompt::default()
                     }),
                 }),
             },
@@ -357,6 +495,7 @@ fn scoped_prompt(request_id: &str, source_scope: &str, query: &str) -> AcpPrompt
                 source_scope: Some(source_scope.to_owned()),
                 limit: Some(1),
                 freshness: Some("allow-stale".to_owned()),
+                ..AcpRelayKnowledgePrompt::default()
             }),
         }),
     }

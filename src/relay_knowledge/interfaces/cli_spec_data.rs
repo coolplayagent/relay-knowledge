@@ -112,6 +112,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         cli_spec_repo::repo_scope_preview(),
         cli_spec_repo::repo_update(),
         cli_spec_repo::repo_query(),
+        cli_spec_repo::repo_context(),
         cli_spec_repo::repo_feature_flags(),
         cli_spec_repo::repo_impact(),
         cli_spec_repo::repo_status(),

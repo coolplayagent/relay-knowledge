@@ -316,10 +316,10 @@ fn run_agent_workflow_case(
             commands.push(command);
             continue;
         };
-        let hits = score_array_field(&payload, "results");
+        let hits = agent_step_hits(&payload, step);
         let expected = score_array_field(step, "expected");
         let forbidden = score_array_field(step, "forbidden");
-        let assessment = assess_ranked_hits(step, hits, expected, forbidden);
+        let assessment = assess_ranked_hits(step, &hits, expected, forbidden);
         if best_rank.is_none_or(|rank| assessment.rank.is_some_and(|step_rank| step_rank < rank)) {
             best_rank = assessment.rank;
         }
@@ -330,8 +330,11 @@ fn run_agent_workflow_case(
                 assessment.failures.join("; ")
             ));
         }
-        metrics.evidence_hits += matched_expected_count(hits, expected);
-        for hit in hits.iter().take(number_or(step, "context_hit_limit", 3) as usize) {
+        metrics.evidence_hits += matched_expected_count(&hits, expected);
+        for hit in hits
+            .iter()
+            .take(number_or(step, "context_hit_limit", 3) as usize)
+        {
             metrics.total_context_hits += 1;
             metrics.context_chars += hit_context_chars(hit);
             if let Some(path) = hit.get("path").and_then(Value::as_str) {
@@ -373,6 +376,17 @@ fn run_agent_workflow_case(
         score_override: Some(if passed { 1.0 } else { 0.0 }),
     };
     (commands, observation, metrics)
+}
+
+fn agent_step_hits(payload: &Value, step: &Value) -> Vec<Value> {
+    if string_or(step, "command", "query") != "context" {
+        return score_array_field(payload, "results").to_vec();
+    }
+
+    ["entry_points", "related_symbols", "graph_paths"]
+        .iter()
+        .flat_map(|field| score_array_field(payload, field).iter().cloned())
+        .collect()
 }
 
 fn failed_agent_workflow_case(
@@ -468,6 +482,10 @@ fn push_max_budget_failure(failures: &mut Vec<String>, case: &Value, field: &str
 }
 
 fn agent_query_command(binary: &Path, alias: &str, ref_selector: &str, step: &Value) -> Vec<String> {
+    if string_or(step, "command", "query") == "context" {
+        return agent_context_command(binary, alias, ref_selector, step);
+    }
+
     let mut command = vec![
         binary.display().to_string(),
         "repo".to_owned(),
@@ -489,6 +507,52 @@ fn agent_query_command(binary: &Path, alias: &str, ref_selector: &str, step: &Va
     }
     for language in string_vec(step, "language_filters") {
         command.extend(["--language".to_owned(), language]);
+    }
+    command.extend(["--format".to_owned(), "json".to_owned()]);
+    command
+}
+
+fn agent_context_command(
+    binary: &Path,
+    alias: &str,
+    ref_selector: &str,
+    step: &Value,
+) -> Vec<String> {
+    let mut command = vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "context".to_owned(),
+        alias.to_owned(),
+        "--query".to_owned(),
+        string_or(step, "query", "").to_owned(),
+        "--ref".to_owned(),
+        string_or(step, "ref", ref_selector).to_owned(),
+        "--freshness".to_owned(),
+        string_or(step, "freshness", "wait-until-fresh").to_owned(),
+        "--limit".to_owned(),
+        number_or(step, "limit", 10).to_string(),
+        "--max-context-bytes".to_owned(),
+        number_or(step, "max_context_bytes", 16384).to_string(),
+    ];
+    for path in string_vec(step, "path_filters") {
+        command.extend(["--path".to_owned(), path]);
+    }
+    for language in string_vec(step, "language_filters") {
+        command.extend(["--language".to_owned(), language]);
+    }
+    if step
+        .get("include_code")
+        .and_then(Value::as_bool)
+        .is_some_and(|include_code| !include_code)
+    {
+        command.push("--no-code".to_owned());
+    }
+    if step
+        .get("exclude_generated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        command.push("--exclude-generated".to_owned());
     }
     command.extend(["--format".to_owned(), "json".to_owned()]);
     command

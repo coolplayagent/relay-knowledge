@@ -4,6 +4,8 @@
 mod code;
 #[path = "code/call_targets.rs"]
 pub(crate) mod code_call_targets;
+#[path = "code/context.rs"]
+mod code_context;
 #[path = "code/dependencies.rs"]
 mod code_dependency;
 #[path = "code/repository.rs"]
@@ -49,6 +51,12 @@ pub use code::{
     CodeGraphCommitReceipt, CodeParseStatus, CodeParseStatusCounts, CodeRange, CodeReferenceFields,
     CodeReferenceKind, CodeReferenceRecord, CodeResolutionState, CodeSymbolKind, CodeSymbolRecord,
     RouteHandlerRole, SymbolRole,
+};
+pub use code_context::{
+    CODEGRAPH_CONTEXT_DEFAULT_LIMIT, CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES,
+    CODEGRAPH_CONTEXT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_LIMIT, CODEGRAPH_CONTEXT_MIN_BYTES,
+    CodeGraphCodeExcerpt, CodeGraphContextBudget, CodeGraphContextPack, CodeGraphContextProvenance,
+    CodeGraphContextRequest, CodeGraphImpactHint,
 };
 pub use code_dependency::CodeDependencyRecord;
 pub use code_repository::{

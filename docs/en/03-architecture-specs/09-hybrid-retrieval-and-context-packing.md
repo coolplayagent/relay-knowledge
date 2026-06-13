@@ -61,6 +61,8 @@ A context pack is the stable evidence bundle for agents and UI. It includes quer
 
 Packing favors diversity and citability. Duplicate hits from the same parent evidence, symbol, or source span merge; low-confidence expansions do not displace direct evidence.
 
+The codegraph context pack is a specialized one-call orchestration for coding agents. It runs bounded hybrid, definition, and symbol entry queries, expands top seeds through references, callers, callees, and imports, then deduplicates by file, symbol, edge, and line span before enforcing `max_context_bytes`. Its response separates entry points, related symbols, graph paths, impact hints, and code excerpts, each with retrieval layer, score, line range, and provenance. It reuses the existing code graph read model and freshness policy; it does not add storage schema, start background refresh, or replace diff-based impact analysis.
+
 ## 6. Acceptance Criteria
 
 - Exact-term, conceptual, multi-hop, temporal, and code-symbol queries have corresponding retriever signals.

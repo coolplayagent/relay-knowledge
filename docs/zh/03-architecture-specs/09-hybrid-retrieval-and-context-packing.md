@@ -61,6 +61,8 @@ Context pack 是 agent 和 UI 的稳定证据包。它包含：query metadata、
 
 Context packing 优先保证多样性和可引用性：同一父 evidence、同一 symbol、同一 source span 的重复命中会合并；低置信扩展不能挤掉直接 evidence。
 
+Codegraph context pack 是面向 coding agent 的 one-call 编排。它执行有界 hybrid、definition 和 symbol 入口查询，围绕 top seed 通过 references、callers、callees 和 imports 展开，再按文件、符号、edge 与 line span 去重，并执行 `max_context_bytes` 预算。响应拆分 entry points、related symbols、graph paths、impact hints 和 code excerpts，每项都带 retrieval layer、score、line range 和 provenance。它复用既有 code graph 读模型和 freshness policy；不新增存储 schema，不启动后台 refresh，也不替代基于 diff 的 impact analysis。
+
 ## 6. 验收标准
 
 - 精确术语、概念相似、多跳关系、时间事实和代码符号查询都有对应 retriever 信号。

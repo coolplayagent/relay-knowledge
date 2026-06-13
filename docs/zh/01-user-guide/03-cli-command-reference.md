@@ -100,6 +100,7 @@ relay-knowledge repo index-worker [--task-id <id>]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>
 relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports|sbom] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
@@ -156,6 +157,8 @@ Kind 取值按命令家族隔离：
 `files index` 会把已配置或显式传入的授权本机 root 扫描进有界文件定位索引。显式 root 必须是绝对路径，并且必须被 `RELAY_KNOWLEDGE_FILE_INDEX_ROOTS` 授权；省略 `--root` 时扫描配置中的 root。`files query` 读取已提交的文件索引，不会 shell out 到 Everything、Spotlight、Windows Search、locate、`rg` 或 `grep`。JSON 响应包含 `freshness.state`、`freshness.index_lag`、`freshness.cursors`、`freshness.stale_reason`、`freshness.degraded_reason`、`freshness.bounded_rescan_required`、`freshness.direct_source_read_required`、`freshness.direct_source_read_paths` 和 `freshness.agent_instructions`。`--freshness wait-until-fresh` 会在 file index 仍为 pending、stale、degraded 或 overflow 时抑制答案，直到有界扫描完成。`--freshness allow-stale` 可以返回带这些诊断的已索引路径；当 `direct_source_read_required=true` 时，agent 在编辑或引用变化文件前必须直接读取返回路径。
 
 `repo query` 的 `definition`、`references` 和 `hybrid` 查询先走已索引 tree-sitter 图和 SQLite FTS 读模型。`--freshness allow-stale` 在目标 ref 正在 full indexing 且尚未 finalize 时，会继续读取上一个已完成 committed scope，并在响应中标记 stale/degraded reason；`wait-until-fresh` 仍会要求目标 scope 新鲜。JSON 响应包含 `freshness.state`、`freshness.index_lag`、`freshness.pending`、`freshness.cursor`、`freshness.direct_source_read_required` 和 `freshness.agent_instructions`，让 agent 能看到 checkpoint 进度，并知道哪些返回路径在编辑或引用前必须直接读取源码。只有这些结构化层存在明确召回缺口时，查询才会在同一 indexed commit 上启动有界内部 exact-text source fallback；命中会在 JSON 中标记 `retrieval_layers=["lexical","text_fallback"]`，definition 兜底还会带 `definition`。候选路径查询、候选文件数、物化字节或单行长度预算耗尽只会降级兜底层，并通过 `degraded_reason` 暴露，不会让结构化代码图结果失效。
+
+`repo context` 是面向 coding agent 的 one-call context pack，复用同一个已提交 code graph 读模型。它先执行有界 hybrid、definition 和 symbol 入口查询，再围绕 top seed 展开 references、callers、callees 和 imports。JSON 响应暴露 `entry_points`、`related_symbols`、`graph_paths`、`impact_hints`、`code_excerpts`、`retrieval_layers`、`budget`、`truncated`、`freshness` 和 `diagnostics`。`--max-context-bytes` 限制证据包大小，`--no-code` 会移除代码摘录但保留 provenance；该命令不会启动 repository indexing 或 refresh。
 
 `repo query --query` 支持内联过滤标签，例如 `kind:function`、`lang:rust` 或 `language:rust`、`path:storage`、`name:query`。未知 `prefix:value` 会保留为普通检索文本。查询内 language filter 与显式 `--language` 取交集；`kind` 和 language 收窄 SQL 候选，`path` 和 `name` 在打分后、截断前过滤命中。`name:` 匹配符号 identity 和 SBOM 包 identity，不匹配任意 excerpt 文本。
 

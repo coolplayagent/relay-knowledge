@@ -34,11 +34,11 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeQueryKind,
-        CodeRepositorySelector, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
-        CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
-        FreshnessPolicy, IndexKind, ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest,
-        WorkerKind,
+        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
+        CodeQueryKind, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,
+        CodeRepositorySetCreateRequest, CodeRepositorySetQueryRequest,
+        CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest, FreshnessPolicy, IndexKind,
+        ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest, WorkerKind,
     },
 };
 pub(super) use web_code_index_request::code_index_request;
@@ -373,6 +373,12 @@ async fn dispatch_operation(
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
+        "code.repo.context" => {
+            let response = service
+                .codegraph_context(code_context_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
         "code.repo.feature_flags" => {
             let response = service
                 .query_code_repository_feature_flags(code_feature_flag_request(payload)?, context)
@@ -627,6 +633,19 @@ fn code_query_request(payload: &Value) -> Result<CodeRetrievalRequest, WebError>
     .map_err(|error| WebError::bad_request(error.to_string()))?;
     request.exclude_generated = optional_bool_field(payload, "exclude_generated")?.unwrap_or(false);
     Ok(request)
+}
+
+fn code_context_request(payload: &Value) -> Result<CodeGraphContextRequest, WebError> {
+    CodeGraphContextRequest::new(
+        code_selector(payload)?,
+        string_field(payload, "query")?,
+        usize_field(payload, "limit")?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+        usize_field(payload, "max_context_bytes")?,
+        optional_bool_field(payload, "include_code")?.unwrap_or(true),
+        optional_bool_field(payload, "exclude_generated")?.unwrap_or(false),
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
 }
 
 fn code_feature_flag_request(payload: &Value) -> Result<CodeFeatureFlagRequest, WebError> {

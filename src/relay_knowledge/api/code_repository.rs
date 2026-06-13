@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    CodeIndexCheckpoint, CodeIndexTaskQueueStatus, CodeIndexTaskRecord, FreshnessPolicy,
+    CodeGraphContextBudget, CodeGraphContextPack, CodeGraphContextRequest, CodeIndexCheckpoint,
+    CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeRetrievalLayer, FreshnessPolicy,
 };
+
+use super::{ApiMetadata, CodeRepositoryScopeMetadata};
 
 /// Freshness state for a code repository graph answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +245,25 @@ impl CodeRepositoryFreshnessDiagnostics {
 
         Self::code_query(input)
     }
+
+    pub(crate) fn merge_direct_source_read_paths(
+        &mut self,
+        paths: impl IntoIterator<Item = String>,
+    ) {
+        let mut merged = self
+            .direct_source_read_paths
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        merged.extend(paths);
+        self.direct_source_read_paths = merged.into_iter().collect();
+        self.agent_instructions = source_read_instructions(
+            self.direct_source_read_required,
+            &self.index_lag.requested_ref,
+            &self.index_lag.served_ref,
+            &self.direct_source_read_paths,
+        );
+    }
 }
 
 pub(crate) struct CodeRepositoryFreshnessInput {
@@ -257,6 +279,24 @@ pub(crate) struct CodeRepositoryFreshnessInput {
     pub pending: CodeRepositoryPendingIndexWork,
     pub cursor: Option<CodeRepositoryFreshnessCursor>,
     pub direct_source_read_paths: Vec<String>,
+}
+
+/// Agent-facing one-call code graph context response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeGraphContextResponse {
+    pub metadata: ApiMetadata,
+    pub query: String,
+    pub repository_scope: CodeRepositoryScopeMetadata,
+    #[serde(default = "CodeRepositoryFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: CodeRepositoryFreshnessDiagnostics,
+    pub budget: CodeGraphContextBudget,
+    pub truncated: bool,
+    pub retrieval_layers: Vec<CodeRetrievalLayer>,
+    pub request: CodeGraphContextRequest,
+    #[serde(flatten)]
+    pub pack: CodeGraphContextPack,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
 }
 
 fn freshness_state(
@@ -296,4 +336,39 @@ fn source_read_instructions(
     }
 
     instructions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn freshness_merge_adds_returned_context_paths_to_agent_instructions() {
+        let mut freshness =
+            CodeRepositoryFreshnessDiagnostics::code_query(CodeRepositoryFreshnessInput {
+                graph_version: 1,
+                freshness_policy: FreshnessPolicy::AllowStale,
+                source_scope: Some("scope".to_owned()),
+                requested_ref: "HEAD".to_owned(),
+                requested_resolved_ref: "new".to_owned(),
+                served_ref: "old".to_owned(),
+                scope_stale: true,
+                stale_reason: Some("active index".to_owned()),
+                degraded_reason: None,
+                pending: CodeRepositoryPendingIndexWork::default(),
+                cursor: None,
+                direct_source_read_paths: vec!["src/lib.rs".to_owned()],
+            });
+
+        freshness
+            .merge_direct_source_read_paths(["src/main.rs".to_owned(), "src/lib.rs".to_owned()]);
+
+        assert_eq!(
+            freshness.direct_source_read_paths,
+            vec!["src/lib.rs".to_owned(), "src/main.rs".to_owned()]
+        );
+        assert!(freshness.agent_instructions.iter().any(|instruction| {
+            instruction.contains("src/lib.rs") && instruction.contains("src/main.rs")
+        }));
+    }
 }
