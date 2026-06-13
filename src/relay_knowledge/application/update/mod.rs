@@ -6,8 +6,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-mod http_fetch;
-
 use reqwest::{StatusCode, header};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -20,7 +18,6 @@ use crate::{
     paths::RuntimePaths,
     project::{GITHUB_REPOSITORY_FULL_NAME, PROJECT_NAME},
 };
-use http_fetch::qos_transport_diagnostic;
 
 pub const DEFAULT_UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const VERSION_CHECK_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -630,6 +627,22 @@ fn diagnostic(
         message: message.into(),
         retryable,
     }
+}
+
+fn qos_transport_diagnostic(
+    source: UpdateSource,
+    error: http::QosHttpClientError,
+) -> VersionCheckDiagnostic {
+    diagnostic(
+        Some(source),
+        if error.is_timeout() {
+            "network_timeout"
+        } else {
+            "network_error"
+        },
+        error.to_string(),
+        true,
+    )
 }
 
 fn transport_diagnostic(source: UpdateSource, error: reqwest::Error) -> VersionCheckDiagnostic {
