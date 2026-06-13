@@ -1,6 +1,10 @@
 use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
-use axum::{Router, body::Body, routing::get};
+use axum::{
+    Router,
+    body::Body,
+    routing::{get, post},
+};
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tower::ServiceExt;
@@ -185,6 +189,76 @@ async fn post_json_with_qos_rejects_when_outbound_budget_is_exhausted() {
         HttpClientError::QosRejected(RejectReason::RequestBudgetExceeded)
     ));
     assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
+}
+
+#[tokio::test]
+async fn post_json_with_qos_reuses_outer_http_request_admission() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        let mut buffer = [0; 512];
+        let _ = stream.read(&mut buffer).await.expect("request should read");
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+            )
+            .await
+            .expect("response should write");
+    });
+    let config = HttpConfig::new(
+        HttpBindAddress::parse("127.0.0.1:8791").expect("bind should parse"),
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        1024,
+        HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+    )
+    .expect("config should build");
+    let qos = QosRuntime::default();
+    let policy = QosPolicy::new(8, 1, 8).expect("policy should build");
+    let url = format!("http://{addr}/worker");
+    let router = router_with_qos_request_admission(
+        Router::new().route(
+            "/nested-worker",
+            post({
+                let config = config.clone();
+                let qos = qos.clone();
+                let policy = policy.clone();
+                move || {
+                    let config = config.clone();
+                    let qos = qos.clone();
+                    let policy = policy.clone();
+                    let url = url.clone();
+                    async move {
+                        post_json_with_qos(&config, &qos, &policy, &url, &json!({"task": "ocr"}))
+                            .await
+                            .expect("nested raw worker call should not be double charged")
+                            .to_string()
+                    }
+                }
+            }),
+        ),
+        qos.clone(),
+        policy,
+    );
+
+    let response = router
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/nested-worker")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(qos.diagnostics_snapshot().admitted_total, 1);
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 0);
+    server.await.expect("server task should finish");
 }
 
 #[tokio::test]

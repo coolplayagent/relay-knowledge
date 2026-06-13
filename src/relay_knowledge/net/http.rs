@@ -394,9 +394,14 @@ pub async fn post_json_with_qos(
     url: &str,
     payload: &Value,
 ) -> Result<Value, HttpClientError> {
-    let permit = qos
-        .admit_request(policy)
-        .map_err(HttpClientError::QosRejected)?;
+    let permit = if qos_request_context_active() {
+        None
+    } else {
+        Some(
+            qos.admit_request(policy)
+                .map_err(HttpClientError::QosRejected)?,
+        )
+    };
     let result = post_json(config, url, payload).await;
     drop(permit);
     if matches!(result, Err(HttpClientError::Timeout)) {

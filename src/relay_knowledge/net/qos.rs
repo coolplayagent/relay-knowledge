@@ -281,6 +281,9 @@ impl QosRuntime {
     }
 
     fn release(&self, kind: QosPermitKind) {
+        if matches!(kind, QosPermitKind::Noop) {
+            return;
+        }
         let mut state = self
             .state
             .lock()
@@ -295,6 +298,7 @@ impl QosRuntime {
             QosPermitKind::Queue => {
                 state.usage.queued_requests = state.usage.queued_requests.saturating_sub(1);
             }
+            QosPermitKind::Noop => {}
         }
     }
 }
@@ -310,6 +314,7 @@ enum QosPermitKind {
     Connection,
     Request,
     Queue,
+    Noop,
 }
 
 /// Admission permit that releases its QoS budget on drop.
@@ -318,6 +323,17 @@ pub struct QosPermit {
     runtime: QosRuntime,
     kind: QosPermitKind,
     released: bool,
+}
+
+impl QosPermit {
+    /// Creates a permit for nested work already charged to an outer QoS boundary.
+    pub(crate) fn already_admitted(runtime: QosRuntime) -> Self {
+        Self {
+            runtime,
+            kind: QosPermitKind::Noop,
+            released: false,
+        }
+    }
 }
 
 impl Drop for QosPermit {

@@ -238,6 +238,67 @@ async fn qos_rejection_returns_tool_error_and_releases_permit() {
 }
 
 #[tokio::test]
+async fn nested_web_mcp_requests_do_not_consume_queue_budget() {
+    let (server, _service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "10"),
+            ("RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH", "1"),
+        ],
+        Arc::new(SlowSearchStore),
+    )
+    .await;
+    let policy = server.network.current().qos;
+    let router = crate::net::http::router_with_qos_request_admission(
+        server.clone().router(),
+        server.qos.clone(),
+        policy,
+    );
+    let session_id = {
+        let mut setup_router = router.clone();
+        initialize_session(&mut setup_router).await
+    };
+    let mut slow_router = router.clone();
+    let slow_session_id = session_id.clone();
+    let slow_request = tokio::spawn(async move {
+        raw_mcp_request(
+            &mut slow_router,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "slow",
+                "method": "tools/call",
+                "params": {
+                    "name": "relay_retrieve_context",
+                    "arguments": {
+                        "query": "slow",
+                        "source_scope": "docs"
+                    }
+                }
+            }),
+            [(MCP_SESSION_ID_HEADER, slow_session_id.as_str())],
+        )
+        .await
+    });
+    wait_for_mcp_in_flight(&server, 1).await;
+    let mut second_router = router.clone();
+    let response = call_mcp_with_session(
+        &mut second_router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "list-tools",
+            "method": "tools/list"
+        }),
+        &session_id,
+    )
+    .await;
+    let slow_response = slow_request.await.expect("slow request task should join");
+
+    assert!(response["result"]["tools"].is_array());
+    assert_eq!(slow_response.0, StatusCode::OK);
+    assert_eq!(server.qos.diagnostics_snapshot().rejected_total, 0);
+}
+
+#[tokio::test]
 async fn notifications_and_protocol_errors_use_http_contract() {
     let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
     let mut router = server.router();
@@ -848,6 +909,17 @@ async fn method_level_reads_are_recorded_in_durable_audit() {
     let metrics = service.observability().status().agent_protocol;
     assert_eq!(metrics.requests_total, 3);
     assert_eq!(metrics.rejections_total, 0);
+}
+
+async fn wait_for_mcp_in_flight(server: &McpServer, expected: usize) {
+    for _ in 0..50 {
+        if server.qos_snapshot().in_flight_requests == expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    panic!("MCP QoS in-flight count did not reach {expected}");
 }
 
 #[test]
