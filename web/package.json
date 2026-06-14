@@ -8,7 +8,7 @@
     "dev": "npm run build && python3 -m http.server 4173 -d dist"
   },
   "devDependencies": {
-    "esbuild": "^0.27.0",
+    "esbuild": "^0.28.1",
     "typescript": "^5.9.3"
   },
   "dependencies": {
