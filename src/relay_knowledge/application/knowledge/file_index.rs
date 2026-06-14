@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{BTreeSet, VecDeque},
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -9,23 +9,35 @@ use tokio::sync::{Semaphore, oneshot};
 
 use crate::{
     api::{
-        ApiError, ApiMetadata, FileIndexFreshnessState, FileIndexRequest, FileIndexResponse,
-        FileQueryRequest, FileQueryResponse, RequestContext,
+        ApiError, ApiMetadata, FileContentQueryRequest, FileContentQueryResponse,
+        FileIndexFreshnessState, FileIndexRequest, FileIndexResponse, FileQueryRequest,
+        FileQueryResponse, RequestContext,
     },
     domain::{FreshnessPolicy, GraphVersion},
     storage::{
-        FileIndexEntry, FileIndexRoot, FileIndexRootUpdate, FileIndexScanSummary,
-        FileSearchRequest, StorageError,
+        FileContentSearchRequest, FileIndexEntry, FileIndexRoot, FileIndexRootUpdate,
+        FileIndexScanSummary, FileSearchRequest, StorageError,
     },
 };
 
 use crate::application::{FileIndexRootConfig, service::RelayKnowledgeService};
+
+#[path = "file_content_budget.rs"]
+mod file_content_budget;
+#[path = "file_content_extract.rs"]
+mod file_content_extract;
+#[path = "file_content_read.rs"]
+mod file_content_read;
+
+use file_content_extract::{file_content_entry, text_content_extension};
+use file_content_read::MAX_CONTENT_INDEX_BYTES;
 
 use super::file_freshness::{FileFreshnessContext, file_freshness_diagnostics};
 
 pub const DEFAULT_FILE_QUERY_LIMIT: usize = 20;
 const MAX_FILE_QUERY_LIMIT: usize = 500;
 const MAX_CONCURRENT_FILE_SCANS: usize = 4;
+const MAX_CONTENT_SCAN_BYTES: usize = 64 * 1024 * 1024;
 static FILE_SCAN_LIMITER: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 #[derive(Clone)]
@@ -79,6 +91,18 @@ impl RelayKnowledgeService {
             summary.missing_file_count = summary
                 .missing_file_count
                 .saturating_add(status.missing_file_count);
+            summary.indexed_content_count = summary
+                .indexed_content_count
+                .saturating_add(status.indexed_content_count);
+            summary.skipped_content_count = summary
+                .skipped_content_count
+                .saturating_add(status.skipped_content_count);
+            summary.unchanged_content_count = summary
+                .unchanged_content_count
+                .saturating_add(status.unchanged_content_count);
+            summary.stale_content_cursor_count = summary
+                .stale_content_cursor_count
+                .saturating_add(status.stale_content_cursor_count);
             summary.scan_error_count = summary
                 .scan_error_count
                 .saturating_add(status.scan_error_count);
@@ -164,7 +188,8 @@ impl RelayKnowledgeService {
                 root_id: root_id.clone(),
                 graph_version: GraphVersion::ZERO.get(),
                 query_degraded_reason: Some(degraded_reason.clone()),
-                returned_hits: &[],
+                returned_paths: &[],
+                content_required: false,
             });
             return Ok(FileQueryResponse {
                 metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
@@ -187,7 +212,8 @@ impl RelayKnowledgeService {
             root_id: root_id.clone(),
             graph_version: GraphVersion::ZERO.get(),
             query_degraded_reason: None,
-            returned_hits: &[],
+            returned_paths: &[],
+            content_required: false,
         });
         if request.freshness_policy == FreshnessPolicy::WaitUntilFresh
             && freshness.state != FileIndexFreshnessState::Fresh
@@ -219,7 +245,8 @@ impl RelayKnowledgeService {
                     root_id: root_id.clone(),
                     graph_version: GraphVersion::ZERO.get(),
                     query_degraded_reason: Some(degraded_reason.clone()),
-                    returned_hits: &[],
+                    returned_paths: &[],
+                    content_required: false,
                 });
                 return Ok(FileQueryResponse {
                     metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
@@ -238,6 +265,10 @@ impl RelayKnowledgeService {
         let mut results = results;
         let truncated = results.len() > limit;
         results.truncate(limit);
+        let result_paths = results
+            .iter()
+            .map(|hit| hit.path.clone())
+            .collect::<Vec<_>>();
         let freshness = file_freshness_diagnostics(FileFreshnessContext {
             file_index_enabled: self.runtime.file_index.enabled,
             configured_roots: &configured_roots,
@@ -247,10 +278,155 @@ impl RelayKnowledgeService {
             root_id: root_id.clone(),
             graph_version: GraphVersion::ZERO.get(),
             query_degraded_reason: None,
-            returned_hits: &results,
+            returned_paths: &result_paths,
+            content_required: false,
         });
 
         Ok(FileQueryResponse {
+            metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
+            query,
+            source_scope,
+            root_id,
+            freshness,
+            results,
+            truncated,
+            duration_ms: elapsed_ms(started),
+            degraded_reason: None,
+        })
+    }
+
+    /// Queries the local file-content read model with provenance and role isolation.
+    pub async fn query_file_content(
+        &self,
+        request: FileContentQueryRequest,
+        context: RequestContext,
+    ) -> Result<FileContentQueryResponse, ApiError> {
+        let query = required_query(request.query).map_err(ApiError::invalid_argument)?;
+        let limit = bounded_limit(request.limit).map_err(ApiError::invalid_argument)?;
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let started = Instant::now();
+        let source_scope =
+            normalize_optional_text(request.source_scope).map_err(ApiError::invalid_argument)?;
+        let root_id =
+            normalize_optional_text(request.root_id).map_err(ApiError::invalid_argument)?;
+        let configured_roots = self
+            .runtime
+            .file_index
+            .roots
+            .iter()
+            .map(file_index_root_from_config)
+            .collect::<Vec<_>>();
+        let diagnostics = store
+            .file_index_diagnostics()
+            .await
+            .map_err(storage_api_error)?;
+        if request.freshness_policy == FreshnessPolicy::GraphOnly {
+            let degraded_reason = "graph_only freshness policy selected".to_owned();
+            let freshness = file_freshness_diagnostics(FileFreshnessContext {
+                file_index_enabled: self.runtime.file_index.enabled,
+                configured_roots: &configured_roots,
+                diagnostics: &diagnostics,
+                freshness_policy: request.freshness_policy,
+                source_scope: source_scope.clone(),
+                root_id: root_id.clone(),
+                graph_version: GraphVersion::ZERO.get(),
+                query_degraded_reason: Some(degraded_reason.clone()),
+                returned_paths: &[],
+                content_required: true,
+            });
+            return Ok(FileContentQueryResponse {
+                metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
+                query,
+                source_scope,
+                root_id,
+                freshness,
+                results: Vec::new(),
+                truncated: false,
+                duration_ms: elapsed_ms(started),
+                degraded_reason: Some(degraded_reason),
+            });
+        }
+        let freshness = file_freshness_diagnostics(FileFreshnessContext {
+            file_index_enabled: self.runtime.file_index.enabled,
+            configured_roots: &configured_roots,
+            diagnostics: &diagnostics,
+            freshness_policy: request.freshness_policy,
+            source_scope: source_scope.clone(),
+            root_id: root_id.clone(),
+            graph_version: GraphVersion::ZERO.get(),
+            query_degraded_reason: None,
+            returned_paths: &[],
+            content_required: true,
+        });
+        if request.freshness_policy == FreshnessPolicy::WaitUntilFresh
+            && freshness.state != FileIndexFreshnessState::Fresh
+        {
+            return Err(ApiError::invalid_argument(format!(
+                "file content index is {}; run files index before querying with wait_until_fresh",
+                file_freshness_state_label(freshness.state)
+            )));
+        }
+        let results = match store
+            .search_file_content(FileContentSearchRequest {
+                query: query.clone(),
+                source_scope: source_scope.clone(),
+                root_id: root_id.clone(),
+                authorized_roots: configured_roots.clone(),
+                limit: limit.saturating_add(1),
+                timeout_ms: query_timeout_ms(self.runtime.file_index.query_timeout),
+            })
+            .await
+        {
+            Ok(results) => results,
+            Err(error) if storage_error_timed_out(&error) => {
+                let degraded_reason = "file content query timed out".to_owned();
+                let freshness = file_freshness_diagnostics(FileFreshnessContext {
+                    file_index_enabled: self.runtime.file_index.enabled,
+                    configured_roots: &configured_roots,
+                    diagnostics: &diagnostics,
+                    freshness_policy: request.freshness_policy,
+                    source_scope: source_scope.clone(),
+                    root_id: root_id.clone(),
+                    graph_version: GraphVersion::ZERO.get(),
+                    query_degraded_reason: Some(degraded_reason.clone()),
+                    returned_paths: &[],
+                    content_required: true,
+                });
+                return Ok(FileContentQueryResponse {
+                    metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
+                    query,
+                    source_scope,
+                    root_id,
+                    freshness,
+                    results: Vec::new(),
+                    truncated: false,
+                    duration_ms: elapsed_ms(started),
+                    degraded_reason: Some(degraded_reason),
+                });
+            }
+            Err(error) => return Err(storage_api_error(error)),
+        };
+        let mut results = results;
+        let truncated = results.len() > limit;
+        results.truncate(limit);
+        let result_paths = results
+            .iter()
+            .map(|hit| hit.path.clone())
+            .collect::<Vec<_>>();
+        let freshness = file_freshness_diagnostics(FileFreshnessContext {
+            file_index_enabled: self.runtime.file_index.enabled,
+            configured_roots: &configured_roots,
+            diagnostics: &diagnostics,
+            freshness_policy: request.freshness_policy,
+            source_scope: source_scope.clone(),
+            root_id: root_id.clone(),
+            graph_version: GraphVersion::ZERO.get(),
+            query_degraded_reason: None,
+            returned_paths: &result_paths,
+            content_required: true,
+        });
+
+        Ok(FileContentQueryResponse {
             metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
             query,
             source_scope,
@@ -383,8 +559,11 @@ fn scan_worker_busy_file_index_root_update(
     FileIndexRootUpdate {
         root: storage_root(root.scope_id, root.root_id, &root.root_path),
         entries: Vec::new(),
+        processed_content_paths: BTreeSet::new(),
+        content_entries: Vec::new(),
         scan_error_count: 1,
         truncated: true,
+        content_truncated: false,
         last_error: Some("file index scan worker is still busy".to_owned()),
         now_ms,
     }
@@ -394,8 +573,11 @@ fn timed_out_file_index_root_update(root: FileIndexRootConfig, now_ms: u64) -> F
     FileIndexRootUpdate {
         root: storage_root(root.scope_id, root.root_id, &root.root_path),
         entries: Vec::new(),
+        processed_content_paths: BTreeSet::new(),
+        content_entries: Vec::new(),
         scan_error_count: 1,
         truncated: true,
+        content_truncated: false,
         last_error: Some("file index scan timed out".to_owned()),
         now_ms,
     }
@@ -408,8 +590,12 @@ fn scan_root(
 ) -> Result<FileIndexRootUpdate, StorageError> {
     let root_path = root.root_path;
     let mut entries = Vec::new();
+    let mut processed_content_paths = BTreeSet::new();
+    let mut content_entries = Vec::new();
+    let mut content_scan_bytes = 0usize;
     let mut scan_error_count = 0usize;
     let mut truncated = false;
+    let mut content_truncated = false;
     let mut last_error = None;
     let canonical_root = match std::fs::canonicalize(&root_path) {
         Ok(path) => path,
@@ -417,8 +603,11 @@ fn scan_root(
             return Ok(FileIndexRootUpdate {
                 root: storage_root(root.scope_id, root.root_id, &root_path),
                 entries,
+                processed_content_paths,
+                content_entries,
                 scan_error_count: 1,
                 truncated: false,
+                content_truncated: false,
                 last_error: Some(error.to_string()),
                 now_ms,
             });
@@ -485,13 +674,46 @@ fn scan_root(
                 }
             };
             if file_type.is_file() && metadata.len() <= budget.max_file_bytes {
-                entries.push(file_entry(
+                let entry = file_entry(
                     &root.scope_id,
                     &root.root_id,
                     &canonical_root,
                     &path,
                     &metadata,
-                ));
+                );
+                if text_content_extension(entry.extension.as_deref()) {
+                    if metadata.len() > MAX_CONTENT_INDEX_BYTES {
+                        processed_content_paths.insert(entry.path.clone());
+                    } else if content_scan_bytes < MAX_CONTENT_SCAN_BYTES {
+                        if file_content_budget::reserve_content_read_with_budget(
+                            &mut content_scan_bytes,
+                            metadata.len(),
+                            MAX_CONTENT_SCAN_BYTES,
+                        ) {
+                            last_error.get_or_insert_with(|| {
+                                "file content scan byte budget exceeded".to_owned()
+                            });
+                            content_truncated = true;
+                        } else {
+                            processed_content_paths.insert(entry.path.clone());
+                            if let Some(content_entry) = file_content_entry(
+                                &entry,
+                                &metadata,
+                                &canonical_root,
+                                now_ms,
+                                GraphVersion::ZERO.get(),
+                            ) {
+                                content_entries.push(content_entry);
+                            }
+                        }
+                    } else if content_scan_bytes >= MAX_CONTENT_SCAN_BYTES {
+                        last_error.get_or_insert_with(|| {
+                            "file content scan byte budget exceeded".to_owned()
+                        });
+                        content_truncated = true;
+                    }
+                }
+                entries.push(entry);
             }
         }
     }
@@ -499,8 +721,11 @@ fn scan_root(
     Ok(FileIndexRootUpdate {
         root: storage_root(root.scope_id, root.root_id, &canonical_root),
         entries,
+        processed_content_paths,
+        content_entries,
         scan_error_count,
         truncated,
+        content_truncated,
         last_error,
         now_ms,
     })
@@ -521,6 +746,10 @@ fn summary_from_diagnostics(
         root_count: diagnostics.root_count,
         indexed_file_count: diagnostics.indexed_file_count,
         missing_file_count: diagnostics.missing_file_count,
+        indexed_content_count: diagnostics.indexed_content_count,
+        skipped_content_count: diagnostics.skipped_content_count,
+        unchanged_content_count: diagnostics.unchanged_content_count,
+        stale_content_cursor_count: diagnostics.stale_content_cursor_count,
         scan_error_count: diagnostics.scan_error_count,
         truncated_root_count: diagnostics.truncated_root_count,
         roots: diagnostics.roots,
@@ -645,7 +874,12 @@ fn query_timeout_ms(timeout: std::time::Duration) -> u64 {
 }
 
 fn storage_error_timed_out(error: &StorageError) -> bool {
-    matches!(error, StorageError::InvalidInput(message) if message.contains("file query timed out"))
+    matches!(
+        error,
+        StorageError::InvalidInput(message)
+            if message.contains("file query timed out")
+                || message.contains("file content query timed out")
+    )
 }
 
 fn file_freshness_state_label(state: FileIndexFreshnessState) -> &'static str {
@@ -664,306 +898,5 @@ fn storage_api_error(error: StorageError) -> ApiError {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    use crate::{
-        application::RuntimeConfiguration,
-        env::{EnvironmentConfig, PlatformKind},
-        storage::{KnowledgeStore, SqliteGraphStore},
-    };
-
-    use super::*;
-
-    #[tokio::test]
-    async fn scan_roots_respects_budget_excludes_and_metadata() {
-        let fixture = TempFixture::new("scan-budget");
-        fixture.write("docs/report.pdf", "pdf");
-        fixture.write("target/generated.txt", "generated");
-        fixture.write(".hidden/secret.txt", "secret");
-        fixture.write("deep/a/b/c/too-deep.txt", "deep");
-        fixture.write("large.bin", "too large for budget");
-        fixture.write("notes/skipme.txt", "configured exclusion");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink("/", fixture.path().join("escape"))
-            .expect("symlink fixture should be created");
-
-        let updates = scan_roots(
-            vec![FileIndexRootConfig::new(
-                "local-files",
-                fixture.path().to_path_buf(),
-            )],
-            ScanBudget {
-                max_depth: 2,
-                max_file_bytes: 8,
-                max_files_per_root: 10,
-                excludes: vec!["skipme".to_owned()],
-            },
-            42,
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("scan should complete");
-
-        let update = updates.into_iter().next().expect("one root is scanned");
-        assert_eq!(update.root.scope_id, "local-files");
-        assert_eq!(update.now_ms, 42);
-        assert!(update.truncated);
-        assert_eq!(update.scan_error_count, 0);
-        assert_eq!(update.entries.len(), 1);
-        let entry = &update.entries[0];
-        assert_eq!(entry.file_name, "report.pdf");
-        assert_eq!(entry.extension.as_deref(), Some("pdf"));
-        assert!(entry.relative_path.ends_with("docs/report.pdf"));
-        assert!(entry.parent_dir.ends_with("docs"));
-        assert_eq!(entry.size_bytes, 3);
-        assert!(entry.fingerprint.starts_with("3:"));
-    }
-
-    #[tokio::test]
-    async fn scan_roots_reports_missing_roots_and_file_count_truncation() {
-        let fixture = TempFixture::new("scan-truncated");
-        fixture.write("first.txt", "one");
-        fixture.write("second.txt", "two");
-        let missing = fixture.path().join("missing");
-
-        let updates = scan_roots(
-            vec![
-                FileIndexRootConfig::new("local-files", fixture.path().to_path_buf()),
-                FileIndexRootConfig::new("local-files", missing),
-            ],
-            ScanBudget {
-                max_depth: 4,
-                max_file_bytes: 128,
-                max_files_per_root: 1,
-                excludes: Vec::new(),
-            },
-            7,
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("scan should complete");
-
-        let truncated = updates
-            .iter()
-            .find(|update| update.root.root_path == fixture.path().to_string_lossy())
-            .expect("fixture root should be present");
-        assert!(truncated.truncated);
-        assert_eq!(truncated.entries.len(), 1);
-
-        let missing = updates
-            .iter()
-            .find(|update| update.root.root_path.ends_with("missing"))
-            .expect("missing root should be reported");
-        assert_eq!(missing.scan_error_count, 1);
-        assert!(missing.entries.is_empty());
-        assert!(missing.last_error.is_some());
-    }
-
-    #[tokio::test]
-    async fn scan_timeout_returns_degraded_root_update() {
-        let fixture = TempFixture::new("scan-timeout");
-
-        let update = scan_root_with_timeout(
-            FileIndexRootConfig::new("local-files", fixture.path().to_path_buf()),
-            ScanBudget {
-                max_depth: 4,
-                max_file_bytes: 128,
-                max_files_per_root: 1,
-                excludes: Vec::new(),
-            },
-            9,
-            Duration::ZERO,
-        )
-        .await
-        .expect("timeout update should be produced");
-
-        assert_eq!(update.scan_error_count, 1);
-        assert!(update.truncated);
-        assert!(update.entries.is_empty());
-        assert_eq!(
-            update.last_error.as_deref(),
-            Some("file index scan timed out")
-        );
-    }
-
-    #[test]
-    fn scan_worker_busy_update_reports_bounded_backpressure() {
-        let update = scan_worker_busy_file_index_root_update(
-            FileIndexRootConfig::new("local-files", PathBuf::from("/opt/docs")),
-            11,
-        );
-
-        assert_eq!(update.scan_error_count, 1);
-        assert!(update.truncated);
-        assert!(update.entries.is_empty());
-        assert_eq!(
-            update.last_error.as_deref(),
-            Some("file index scan worker is still busy")
-        );
-        assert_eq!(update.now_ms, 11);
-    }
-
-    #[test]
-    fn query_validation_helpers_reject_unbounded_inputs() {
-        assert_eq!(required_query("  quarter  ".to_owned()).unwrap(), "quarter");
-        assert!(required_query(" \t ".to_owned()).is_err());
-        assert_eq!(bounded_limit(1).unwrap(), 1);
-        assert!(bounded_limit(0).is_err());
-        assert!(bounded_limit(MAX_FILE_QUERY_LIMIT + 1).is_err());
-        assert_eq!(
-            normalize_optional_text(Some(" root ".to_owned())).unwrap(),
-            Some("root".to_owned())
-        );
-        assert!(normalize_optional_text(Some(" ".to_owned())).is_err());
-        assert_eq!(normalize_optional_text(None).unwrap(), None);
-    }
-
-    #[test]
-    fn query_timeout_helpers_map_runtime_budget_and_storage_errors() {
-        assert_eq!(query_timeout_ms(std::time::Duration::from_millis(125)), 125);
-        assert!(storage_error_timed_out(&StorageError::InvalidInput(
-            "file query timed out waiting for storage lock".to_owned()
-        )));
-        assert!(!storage_error_timed_out(&StorageError::InvalidInput(
-            "different validation failure".to_owned()
-        )));
-    }
-
-    #[tokio::test]
-    async fn explicit_roots_must_match_authorized_runtime_roots() {
-        let fixture = TempFixture::new("authorized-roots");
-        let service = service_for_root(fixture.path()).await;
-        let authorized = service
-            .file_index_roots_from_request(FileIndexRequest {
-                source_scope: Some("local-files".to_owned()),
-                roots: vec![fixture.path().join(".").to_string_lossy().to_string()],
-            })
-            .expect("configured root spelling should be authorized");
-        assert_eq!(authorized.len(), 1);
-
-        let denied = service
-            .file_index_roots_from_request(FileIndexRequest {
-                source_scope: Some("local-files".to_owned()),
-                roots: vec![fixture.path().join("other").to_string_lossy().to_string()],
-            })
-            .expect_err("unconfigured root should be denied");
-        assert!(denied.contains("is not configured"));
-
-        let relative = service
-            .file_index_roots_from_request(FileIndexRequest {
-                source_scope: Some("local-files".to_owned()),
-                roots: vec!["relative/docs".to_owned()],
-            })
-            .expect_err("relative roots should be denied");
-        assert!(relative.contains("absolute path"));
-    }
-
-    #[tokio::test]
-    async fn same_path_roots_remain_distinct_across_scopes() {
-        let fixture = TempFixture::new("scope-roots");
-        let home = fixture.path().join("home");
-        let documents = home.join("Documents");
-        fs::create_dir_all(&documents).expect("documents directory should be created");
-        let environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HOME", home.to_string_lossy().to_string()),
-                ("TMPDIR", "/tmp".to_owned()),
-                (
-                    "RELAY_KNOWLEDGE_FILE_INDEX_ROOTS",
-                    documents.to_string_lossy().to_string(),
-                ),
-                (
-                    "RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS",
-                    "120000".to_owned(),
-                ),
-            ],
-        )
-        .expect("environment should parse");
-        let runtime = RuntimeConfiguration::from_environment(&environment)
-            .await
-            .expect("runtime should compose");
-        assert_eq!(runtime.file_index.scan_timeout, Duration::from_secs(120));
-
-        let matching_roots = runtime
-            .file_index
-            .roots
-            .iter()
-            .filter(|root| root.root_path.as_path() == documents.as_path())
-            .collect::<Vec<_>>();
-        assert_eq!(matching_roots.len(), 2);
-        assert_ne!(matching_roots[0].scope_id, matching_roots[1].scope_id);
-    }
-
-    struct TempFixture {
-        root: PathBuf,
-    }
-
-    impl TempFixture {
-        fn new(name: &str) -> Self {
-            let suffix = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time should be valid")
-                .as_nanos();
-            let root = std::env::temp_dir().join(format!(
-                "relay-knowledge-{name}-{}-{suffix}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&root).expect("fixture root should be created");
-
-            Self { root }
-        }
-
-        fn path(&self) -> &Path {
-            &self.root
-        }
-
-        fn write(&self, relative: &str, content: &str) {
-            let path = self.root.join(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).expect("fixture parent should be created");
-            }
-            fs::write(path, content).expect("fixture file should be written");
-        }
-    }
-
-    impl Drop for TempFixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
-    async fn service_for_root(root: &Path) -> RelayKnowledgeService {
-        let home = root.join("home");
-        fs::create_dir_all(&home).expect("home should be created");
-        let relay_home = root.join("relay");
-        let environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HOME", home.to_string_lossy().to_string()),
-                ("TMPDIR", "/tmp".to_owned()),
-                (
-                    "RELAY_KNOWLEDGE_HOME",
-                    relay_home.to_string_lossy().to_string(),
-                ),
-                (
-                    "RELAY_KNOWLEDGE_FILE_INDEX_ROOTS",
-                    root.to_string_lossy().to_string(),
-                ),
-            ],
-        )
-        .expect("environment should parse");
-        let runtime = RuntimeConfiguration::from_environment(&environment)
-            .await
-            .expect("runtime should compose");
-        let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"))
-            as Arc<dyn KnowledgeStore>;
-
-        RelayKnowledgeService::with_store(runtime, store)
-    }
-}
+#[path = "file_index_tests.rs"]
+mod tests;

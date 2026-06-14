@@ -6,7 +6,7 @@ use crate::{
         FileIndexLag,
     },
     domain::FreshnessPolicy,
-    storage::{FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus, FileSearchHit},
+    storage::{FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus},
 };
 
 pub(super) struct FileFreshnessContext<'a> {
@@ -18,7 +18,8 @@ pub(super) struct FileFreshnessContext<'a> {
     pub(super) root_id: Option<String>,
     pub(super) graph_version: u64,
     pub(super) query_degraded_reason: Option<String>,
-    pub(super) returned_hits: &'a [FileSearchHit],
+    pub(super) returned_paths: &'a [String],
+    pub(super) content_required: bool,
 }
 
 pub(super) fn file_freshness_diagnostics(
@@ -36,6 +37,9 @@ pub(super) fn file_freshness_diagnostics(
         context.source_scope.as_deref(),
         context.root_id.as_deref(),
     );
+    let root_overflow = |status: &&FileIndexRootStatus| {
+        status.truncated || (context.content_required && status.content_truncated)
+    };
     let cursors = selected
         .iter()
         .map(|status| FileIndexFreshnessCursor {
@@ -47,7 +51,7 @@ pub(super) fn file_freshness_diagnostics(
             indexed_file_count: status.indexed_file_count,
             missing_file_count: status.missing_file_count,
             scan_error_count: status.scan_error_count,
-            overflow: status.truncated,
+            overflow: status.truncated || (context.content_required && status.content_truncated),
             last_error: status.last_error.clone(),
         })
         .collect::<Vec<_>>();
@@ -56,7 +60,7 @@ pub(super) fn file_freshness_diagnostics(
         .filter(|status| status.last_indexed_at_ms.is_none())
         .count()
         .saturating_add(pending_roots.len());
-    let overflow_root_count = selected.iter().filter(|status| status.truncated).count();
+    let overflow_root_count = selected.iter().filter(root_overflow).count();
     let scan_error_count = selected
         .iter()
         .map(|status| status.scan_error_count)
@@ -93,14 +97,20 @@ pub(super) fn file_freshness_diagnostics(
             | FileIndexFreshnessState::Degraded
             | FileIndexFreshnessState::Overflow
     );
-    let direct_source_read_paths = returned_paths(context.returned_hits);
+    let direct_source_read_paths = unique_paths(context.returned_paths);
+    let content_read_model_cursors = content_cursors_for_selection(
+        &context.diagnostics.content_cursors,
+        context.source_scope.as_deref(),
+        context.root_id.as_deref(),
+        &direct_source_read_paths,
+    );
 
     FileIndexFreshnessDiagnostics {
         state,
         freshness_policy: context.freshness_policy,
         graph_version: context.graph_version,
-        source_scope: context.source_scope,
-        root_id: context.root_id,
+        source_scope: context.source_scope.clone(),
+        root_id: context.root_id.clone(),
         stale_reason,
         degraded_reason,
         index_lag: FileIndexLag {
@@ -121,6 +131,7 @@ pub(super) fn file_freshness_diagnostics(
             bounded_rescan_required,
             direct_source_read_required,
         ),
+        content_read_model_cursors,
     }
 }
 
@@ -213,11 +224,33 @@ fn stale_reason_for_state(
     }
 }
 
-fn returned_paths(hits: &[FileSearchHit]) -> Vec<String> {
-    hits.iter()
-        .map(|hit| hit.path.clone())
+fn unique_paths(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .cloned()
         .collect::<BTreeSet<_>>()
         .into_iter()
+        .collect()
+}
+
+fn content_cursors_for_selection(
+    cursors: &[crate::storage::FileContentReadModelCursor],
+    source_scope: Option<&str>,
+    root_id: Option<&str>,
+    returned_paths: &[String],
+) -> Vec<crate::storage::FileContentReadModelCursor> {
+    if returned_paths.is_empty() {
+        return Vec::new();
+    }
+    let returned_paths = returned_paths.iter().collect::<BTreeSet<_>>();
+    cursors
+        .iter()
+        .filter(|cursor| {
+            source_scope.is_none_or(|scope| cursor.source_scope == scope)
+                && root_id.is_none_or(|filter| cursor.root_id == filter)
+                && returned_paths.contains(&cursor.path)
+        })
+        .cloned()
         .collect()
 }
 
@@ -250,5 +283,99 @@ fn state_label(state: FileIndexFreshnessState) -> &'static str {
         FileIndexFreshnessState::Stale => "stale",
         FileIndexFreshnessState::Degraded => "degraded",
         FileIndexFreshnessState::Overflow => "overflow",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_freshness_ignores_content_only_overflow() {
+        let configured_roots = vec![root()];
+        let diagnostics = diagnostics_with_status(root_status(false, true));
+
+        let freshness = file_freshness_diagnostics(FileFreshnessContext {
+            file_index_enabled: true,
+            configured_roots: &configured_roots,
+            diagnostics: &diagnostics,
+            freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            source_scope: None,
+            root_id: None,
+            graph_version: 0,
+            query_degraded_reason: None,
+            returned_paths: &[],
+            content_required: false,
+        });
+
+        assert_eq!(freshness.state, FileIndexFreshnessState::Fresh);
+        assert_eq!(freshness.index_lag.overflow_root_count, 0);
+        assert!(!freshness.cursors[0].overflow);
+    }
+
+    #[test]
+    fn content_freshness_reports_content_only_overflow() {
+        let configured_roots = vec![root()];
+        let diagnostics = diagnostics_with_status(root_status(false, true));
+
+        let freshness = file_freshness_diagnostics(FileFreshnessContext {
+            file_index_enabled: true,
+            configured_roots: &configured_roots,
+            diagnostics: &diagnostics,
+            freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            source_scope: None,
+            root_id: None,
+            graph_version: 0,
+            query_degraded_reason: None,
+            returned_paths: &[],
+            content_required: true,
+        });
+
+        assert_eq!(freshness.state, FileIndexFreshnessState::Overflow);
+        assert_eq!(freshness.index_lag.overflow_root_count, 1);
+        assert!(freshness.cursors[0].overflow);
+    }
+
+    fn diagnostics_with_status(status: FileIndexRootStatus) -> FileIndexDiagnostics {
+        FileIndexDiagnostics {
+            root_count: 1,
+            indexed_file_count: status.indexed_file_count,
+            missing_file_count: status.missing_file_count,
+            indexed_content_count: status.indexed_content_count,
+            skipped_content_count: status.skipped_content_count,
+            unchanged_content_count: status.unchanged_content_count,
+            stale_content_cursor_count: status.stale_content_cursor_count,
+            scan_error_count: status.scan_error_count,
+            truncated_root_count: usize::from(status.truncated),
+            roots: vec![status],
+            content_cursors: Vec::new(),
+        }
+    }
+
+    fn root() -> FileIndexRoot {
+        FileIndexRoot {
+            scope_id: "local-files".to_owned(),
+            root_id: "root-a".to_owned(),
+            root_path: "/workspace".to_owned(),
+        }
+    }
+
+    fn root_status(truncated: bool, content_truncated: bool) -> FileIndexRootStatus {
+        FileIndexRootStatus {
+            scope_id: "local-files".to_owned(),
+            root_id: "root-a".to_owned(),
+            root_path: "/workspace".to_owned(),
+            indexed_file_count: 1,
+            missing_file_count: 0,
+            scan_error_count: 0,
+            truncated,
+            content_truncated,
+            indexed_content_count: 1,
+            skipped_content_count: 0,
+            unchanged_content_count: 0,
+            stale_content_cursor_count: 0,
+            last_indexed_at_ms: Some(10),
+            last_error: None,
+        }
     }
 }

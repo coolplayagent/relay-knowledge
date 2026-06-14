@@ -4,6 +4,24 @@ use super::render_text;
 fn render_text_covers_operational_and_code_repository_summaries() {
     let cases = [
         (
+            "files.content",
+            serde_json::json!({
+                "results": [
+                    {
+                        "path": "/docs/runbook.md",
+                        "content_role": "user_source",
+                    },
+                    {
+                        "path": "/docs/schema.sql",
+                        "content_role": "user_source",
+                    },
+                ],
+                "truncated": true,
+                "duration_ms": 17,
+            }),
+            "results=2 truncated=true duration_ms=17\n",
+        ),
+        (
             "worker.run_once",
             serde_json::json!({
                 "task": {"task_id": "task:1"},

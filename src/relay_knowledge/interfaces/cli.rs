@@ -269,6 +269,13 @@ pub enum CliAction {
         limit: usize,
         freshness: FreshnessPolicy,
     },
+    FilesContentQuery {
+        query: String,
+        source_scope: Option<String>,
+        root_id: Option<String>,
+        limit: usize,
+        freshness: FreshnessPolicy,
+    },
     GraphInspect,
     IndexRefresh {
         kinds: Vec<IndexKind>,
@@ -847,6 +854,7 @@ pub async fn run_with_service(
         CliAction::WorkerStatus { .. }
         | CliAction::FilesIndex { .. }
         | CliAction::FilesQuery { .. }
+        | CliAction::FilesContentQuery { .. }
         | CliAction::WorkerRunOnce { .. }
         | CliAction::ProposalList { .. }
         | CliAction::ProposalShow { .. }

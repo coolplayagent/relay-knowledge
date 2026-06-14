@@ -85,6 +85,57 @@ const CODE_REPOSITORY_FILES_COLUMNS: &[&str] = &[
     "is_generated",
     "degraded_reason",
 ];
+const FILE_INDEX_ROOT_COLUMNS: &[&str] = &[
+    "scope_id",
+    "root_id",
+    "root_path",
+    "indexed_file_count",
+    "missing_file_count",
+    "scan_error_count",
+    "truncated",
+    "content_truncated",
+    "indexed_content_count",
+    "skipped_content_count",
+    "unchanged_content_count",
+    "stale_content_cursor_count",
+    "last_indexed_at_ms",
+    "last_error",
+];
+const FILE_CONTENT_ENTRY_COLUMNS: &[&str] = &[
+    "entry_key",
+    "scope_id",
+    "root_id",
+    "path",
+    "relative_path",
+    "fingerprint",
+    "content_hash",
+    "indexed_at_ms",
+    "graph_version",
+    "status",
+    "skipped_reason",
+];
+const FILE_CONTENT_CHUNK_COLUMNS: &[&str] = &[
+    "chunk_id",
+    "entry_key",
+    "chunk_index",
+    "start_byte",
+    "end_byte",
+    "start_line",
+    "end_line",
+    "content",
+];
+const FILE_CONTENT_CURSOR_COLUMNS: &[&str] = &[
+    "cursor_key",
+    "kind",
+    "scope_id",
+    "root_id",
+    "path",
+    "content_hash",
+    "indexed_graph_version",
+    "state",
+    "stale_reason",
+    "updated_at_ms",
+];
 
 pub(super) fn schema_initialization_is_current(
     connection: &Connection,
@@ -130,6 +181,23 @@ pub(super) fn schema_initialization_is_current(
             "code_repository_files",
             CODE_REPOSITORY_FILES_COLUMNS,
         )?
+        || !table_has_columns(connection, "file_index_roots", FILE_INDEX_ROOT_COLUMNS)?
+        || !table_has_columns(
+            connection,
+            "file_content_entries",
+            FILE_CONTENT_ENTRY_COLUMNS,
+        )?
+        || !table_has_columns(
+            connection,
+            "file_content_chunks",
+            FILE_CONTENT_CHUNK_COLUMNS,
+        )?
+        || !table_has_columns(
+            connection,
+            "file_content_cursors",
+            FILE_CONTENT_CURSOR_COLUMNS,
+        )?
+        || !table_has_columns(connection, "file_content_search", &["chunk_id", "content"])?
     {
         return Ok(false);
     }
@@ -370,6 +438,22 @@ mod tests {
         assert!(
             !schema_initialization_is_current(&connection)
                 .expect("missing label gram table should be detected")
+        );
+    }
+
+    #[test]
+    fn schema_marker_requires_file_content_schema() {
+        let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+        let connection = store.connection.lock().expect("connection should lock");
+        mark_schema_initialization_current(&connection).expect("marker should write");
+
+        connection
+            .execute("DROP TABLE file_content_entries", [])
+            .expect("file content table should drop");
+
+        assert!(
+            !schema_initialization_is_current(&connection)
+                .expect("missing file content table should be detected")
         );
     }
 

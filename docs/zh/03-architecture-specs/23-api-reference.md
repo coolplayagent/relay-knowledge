@@ -322,6 +322,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 | `index.refresh` | 刷新派生索引 | `kinds`（字符串数组，如 `["bm25","semantic"]`） |
 | `files.index` | 索引本地文件 | 可选 `source_scope`, `roots` |
 | `files.query` | 查询索引文件 | `query`, `limit`；可选 `source_scope`, `root_id`, `freshness` |
+| `files.content` | 查询授权本地文件内容片段 | `query`, `limit`；可选 `source_scope`, `root_id`, `freshness` |
 | `worker.status` | worker 状态 | 可选 `kind` |
 | `worker.run-once` | 单次执行 worker | 可选 `kind` |
 | `proposal.list` | 列出提案 | `limit`；可选 `state` |
@@ -349,12 +350,10 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 | `provider.embedding.probe` | 嵌入提供者探测 | 无 |
 
 **freshness 枚举值**：`allow-stale`、`wait-until-fresh`、`graph-only`
-
 **code query kind 枚举值**：`hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`
-
 **index kind 枚举值**：`bm25`、`semantic`、`vector`
-
 **software kind 枚举值**：`dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`all`
+**files.content 契约**：该 operation 只查询已授权 root 内的文本内容 read model。请求字段为 `query`、`limit`，以及可选的 `source_scope`、`root_id`、`freshness`。响应包含 `freshness` 诊断、`truncated`、`duration_ms`、可选 `degraded_reason`，以及 `results[]`。每个命中必须携带 `scope_id`、`root_id`、`path`、`relative_path`、`chunk_id`、`excerpt`、`span`、`fingerprint`、`content_hash`、`graph_version`、`indexed_graph_version`、`freshness_cursor`、`rank`、`score`、`ranking_signals` 和 `fact_candidates`。`content_role` 固定表示非可信来源内容（当前为 `user_source`）；CLI、Web 和 agent adapter 只能把 `excerpt` 当作带 provenance 的引用数据，不能拼接为 system/developer 指令。
 
 **响应 200**：
 
