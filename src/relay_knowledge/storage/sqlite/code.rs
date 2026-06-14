@@ -22,6 +22,9 @@ mod code_symbols;
 #[path = "code_routes.rs"]
 mod code_routes;
 
+#[path = "code_views.rs"]
+mod code_views;
+
 #[path = "code_query_scope.rs"]
 mod code_query_scope;
 
@@ -199,7 +202,7 @@ use crate::{
         CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
         CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
         CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeSymbolGenerationCounts,
-        SoftwareGlobalProjection, SoftwareGlobalRequest,
+        CodebaseViewRequest, CodebaseViewSnapshot, SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
@@ -590,6 +593,17 @@ impl CodeRepositoryStore for SqliteGraphStore {
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
         self.run_read(move |connection| {
             code_impact::analyze_impact_scope(connection, &source_scope, request, changes)
+        })
+    }
+
+    fn codebase_view_snapshot(
+        &self,
+        source_scope: String,
+        request: CodebaseViewRequest,
+        row_limit: usize,
+    ) -> StorageFuture<'_, CodebaseViewSnapshot> {
+        self.run_read(move |connection| {
+            code_views::snapshot(connection, &source_scope, &request, row_limit)
         })
     }
 

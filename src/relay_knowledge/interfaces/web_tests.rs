@@ -13,7 +13,7 @@ use tower::ServiceExt;
 use crate::{
     api::{IngestEvidenceExtraction, IngestRequest},
     application::RelayKnowledgeService,
-    domain::{CodeIndexMode, CodeQueryKind, EvidenceModality, FreshnessPolicy},
+    domain::{CodeIndexMode, CodeQueryKind, CodebaseViewKind, EvidenceModality, FreshnessPolicy},
     env::{EnvironmentConfig, PlatformKind},
 };
 
@@ -797,6 +797,18 @@ fn request_builders_parse_web_payload_variants() {
     let software = code_software_request(&software_payload).expect("software");
     assert_eq!(software.kind, SoftwareGlobalKind::Dependencies);
     assert_eq!(software.freshness_policy, FreshnessPolicy::WaitUntilFresh);
+
+    let view_payload = json!({
+        "alias": "relay",
+        "ref": "main",
+        "kind": "dependency-tour",
+        "freshness": "wait-until-fresh",
+        "limit": 7,
+        "changed_paths": ["src/lib.rs"]
+    });
+    let view = web_code_view_request::code_view_request(&view_payload).expect("view");
+    assert_eq!(view.view_kind, CodebaseViewKind::DependencyTour);
+    assert_eq!(view.changed_paths, ["src/lib.rs"]);
 
     let index = code_index_request(&payload, CodeIndexMode::Full).expect("index");
     assert!(matches!(index.mode, CodeIndexMode::Full));

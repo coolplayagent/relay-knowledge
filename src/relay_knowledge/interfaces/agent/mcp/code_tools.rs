@@ -1,6 +1,8 @@
 mod agent_budget;
+mod codebase_view;
 
 use agent_budget::{apply_agent_code_budget, explore_budget};
+pub(super) use codebase_view::definition as codebase_view_tool_definition;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -23,7 +25,7 @@ use super::{
     domain_argument_error, invalid_arguments, parse_freshness, request_context, tool_error_result,
     tool_registry::{
         CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL,
-        CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL,
+        CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL, CODEBASE_VIEW_TOOL,
     },
     tool_success_result, validate_query_text,
 };
@@ -167,6 +169,7 @@ pub(super) async fn run_code_tool(
         CODE_CONTEXT_TOOL => code_context_tool(server, arguments, request_id).await,
         CODE_FEATURE_FLAGS_TOOL => code_feature_flags_tool(server, arguments, request_id).await,
         CODE_SOFTWARE_QUERY_TOOL => code_software_query_tool(server, arguments, request_id).await,
+        CODEBASE_VIEW_TOOL => codebase_view::run(server, arguments, request_id).await,
         CODE_IMPACT_TOOL => code_impact_tool(server, arguments, request_id).await,
         CODE_REPOSITORY_SET_QUERY_TOOL => {
             code_repository_set_query_tool(server, arguments, request_id).await

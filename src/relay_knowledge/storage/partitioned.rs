@@ -742,17 +742,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         source_scope: String,
         request: CodeFeatureFlagRequest,
     ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
-                return shard
-                    .search_code_feature_flags_scope(source_scope, request)
-                    .await;
-            }
-            this.control
-                .search_code_feature_flags_scope(source_scope, request)
-                .await
-        })
+        routing::search_code_feature_flags_scope(self.clone(), source_scope, request)
     }
 
     fn search_code_scope(
@@ -760,13 +750,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         source_scope: String,
         request: CodeRetrievalRequest,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
-                return shard.search_code_scope(source_scope, request).await;
-            }
-            this.control.search_code_scope(source_scope, request).await
-        })
+        routing::search_code_scope(self.clone(), source_scope, request)
     }
 
     fn analyze_code_impact(
@@ -804,17 +788,16 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         request: crate::domain::CodeImpactRequest,
         changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
-                return shard
-                    .analyze_code_impact_scope(source_scope, request, changes)
-                    .await;
-            }
-            this.control
-                .analyze_code_impact_scope(source_scope, request, changes)
-                .await
-        })
+        routing::analyze_code_impact_scope(self.clone(), source_scope, request, changes)
+    }
+
+    fn codebase_view_snapshot(
+        &self,
+        source_scope: String,
+        request: crate::domain::CodebaseViewRequest,
+        row_limit: usize,
+    ) -> StorageFuture<'_, crate::domain::CodebaseViewSnapshot> {
+        routing::codebase_view_snapshot(self.clone(), source_scope, request, row_limit)
     }
 
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {

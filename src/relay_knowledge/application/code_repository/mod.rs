@@ -19,5 +19,6 @@ mod source_fallback_worktree;
 mod source_surface;
 mod support;
 mod tasks;
+mod views;
 mod worktree_freshness;
 mod worktree_ref;
