@@ -25,7 +25,9 @@ pub use code_repository::{
 pub use context::{InterfaceKind, RequestContext};
 pub use error::{ApiError, ErrorKind};
 pub use file_index::{
-    FileIndexFreshnessCursor, FileIndexFreshnessDiagnostics, FileIndexFreshnessState, FileIndexLag,
+    FileContentQueryRequest, FileContentQueryResponse, FileIndexFreshnessCursor,
+    FileIndexFreshnessDiagnostics, FileIndexFreshnessState, FileIndexLag, FileIndexRequest,
+    FileIndexResponse, FileQueryRequest, FileQueryResponse,
 };
 pub use metadata::ApiMetadata;
 pub use operations::{
@@ -38,7 +40,6 @@ pub use operations::{
     CodeRepositorySetCreateResponse, CodeRepositorySetQueryResponse,
     CodeRepositorySetRefreshResponse, CodeRepositorySetRemoveResponse,
     CodeRepositorySetStatusResponse, CodeRepositoryStatusResponse, EmbeddingProviderProbeResponse,
-    FileIndexRequest, FileIndexResponse, FileQueryRequest, FileQueryResponse,
     GRAPH_CANVAS_DEFAULT_LIMIT, GRAPH_CANVAS_MAX_LIMIT, GraphCanvasEdge, GraphCanvasKind,
     GraphCanvasNode, GraphCanvasRequest, GraphCanvasResponse, GraphCanvasSummary,
     GraphInspectionRequest, GraphInspectionResponse, HealthResponse, HybridRetrievalRequest,

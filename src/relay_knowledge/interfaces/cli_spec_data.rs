@@ -1,6 +1,6 @@
 use super::{
-    CliCommandSpec, CliOptionSpec, CommandEffect, arg, cli_spec_repo, cli_spec_repo_set,
-    command_syntax, opt,
+    CliCommandSpec, CliOptionSpec, CommandEffect, arg, cli_spec_files, cli_spec_repo,
+    cli_spec_repo_set, command_syntax, opt,
 };
 
 pub(super) fn command_specs() -> Vec<CliCommandSpec> {
@@ -103,8 +103,9 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
             &["relay-knowledge query SQLite --freshness wait-until-fresh --format json"],
             &["`graph-only` bypasses derived indexes and reads graph facts only."],
         ),
-        files_index(),
-        files_query(),
+        cli_spec_files::files_index(),
+        cli_spec_files::files_query(),
+        cli_spec_files::files_content(),
         cli_spec_repo::repo_register(),
         cli_spec_repo::repo_remove(),
         cli_spec_repo::repo_index(),
@@ -815,97 +816,6 @@ fn service_worker() -> CliCommandSpec {
         &[
             "Claims at most one queued code-index task and completes or fails it through the storage lease contract.",
         ],
-    )
-}
-
-fn files_index() -> CliCommandSpec {
-    command!(
-        &["files", "index"],
-        "relay-knowledge files index [--root <path>] [--source <scope>]",
-        "Scan authorized local file roots into the file-location index.",
-        "files.index",
-        CommandEffect::WritesIndexes,
-        &[],
-        &[
-            opt(
-                "--root",
-                Some("path"),
-                false,
-                true,
-                "Absolute root to scan. Omit to scan configured roots.",
-                None,
-                &[],
-            ),
-            opt(
-                "--source",
-                Some("scope"),
-                false,
-                false,
-                "Source scope assigned to explicit roots.",
-                Some("local-files"),
-                &[],
-            ),
-        ],
-        &["relay-knowledge files index --root /opt/docs --source local-files --format json"],
-        &["Configured roots are absolute paths controlled by RELAY_KNOWLEDGE_FILE_INDEX_ROOTS."],
-    )
-}
-
-fn files_query() -> CliCommandSpec {
-    command!(
-        &["files", "query"],
-        "relay-knowledge files query <text> [--source <scope>] [--root <root-id>] [--freshness <policy>] [--limit <n>]",
-        "Query the local file-location index.",
-        "files.query",
-        CommandEffect::ReadOnly,
-        &[arg(
-            "text",
-            true,
-            false,
-            "File name, extension, directory, or path text.",
-            None,
-            &[],
-        )],
-        &[
-            opt(
-                "--source",
-                Some("scope"),
-                false,
-                false,
-                "Restricts results to one file source scope.",
-                None,
-                &[],
-            ),
-            opt(
-                "--root",
-                Some("root-id"),
-                false,
-                false,
-                "Restricts results to one indexed root.",
-                None,
-                &[],
-            ),
-            opt(
-                "--freshness",
-                Some("policy"),
-                false,
-                false,
-                "Controls file-index freshness.",
-                Some("allow-stale"),
-                &["allow-stale", "wait-until-fresh", "graph-only"],
-            ),
-            opt(
-                "--limit",
-                Some("n"),
-                false,
-                false,
-                "Maximum result count.",
-                Some("20"),
-                &[],
-            ),
-        ],
-        &["relay-knowledge files query design pdf --source local-files --format json"],
-        &["Queries are bounded by RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS."],
     )
 }
 

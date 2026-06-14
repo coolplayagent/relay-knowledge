@@ -7,15 +7,16 @@ use crate::{
     },
     storage::{
         AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeRepositoryStore, CodeSymbolSearchRequest, FileIndexDiagnostics, FileIndexRoot,
-        FileIndexRootStatus, FileIndexRootUpdate, FileSearchHit, FileSearchRequest,
-        GraphCanvasStorageRequest, GraphCanvasStorageSnapshot, GraphInspection, GraphSearchOutcome,
-        GraphSearchRequest, GraphStore, HealthStorageSnapshot, IndexCursor,
-        IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
-        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
-        MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal, ProposalDecision,
-        ProposalListRequest, ServiceOperatorUpdate, StorageError, StorageFuture,
-        WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
+        CodeRepositoryStore, CodeSymbolSearchRequest, FileContentSearchHit,
+        FileContentSearchRequest, FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus,
+        FileIndexRootUpdate, FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest,
+        GraphCanvasStorageSnapshot, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
+        GraphStore, HealthStorageSnapshot, IndexCursor, IndexRefreshClaimRequest,
+        IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
+        IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
+        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
+        StorageError, StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion,
+        WorkerTaskFailure, WorkerTaskSeed,
     },
 };
 
@@ -280,6 +281,13 @@ impl IndexStore for PartitionedSqliteKnowledgeStore {
 
     fn search_files(&self, request: FileSearchRequest) -> StorageFuture<'_, Vec<FileSearchHit>> {
         self.control.search_files(request)
+    }
+
+    fn search_file_content(
+        &self,
+        request: FileContentSearchRequest,
+    ) -> StorageFuture<'_, Vec<FileContentSearchHit>> {
+        self.control.search_file_content(request)
     }
 
     fn file_index_diagnostics(&self) -> StorageFuture<'_, FileIndexDiagnostics> {

@@ -13,6 +13,7 @@ mod canvas;
 mod canvas_code;
 mod code_graph;
 mod file_index;
+mod file_index_content;
 mod helpers;
 mod indexing;
 mod maintenance;

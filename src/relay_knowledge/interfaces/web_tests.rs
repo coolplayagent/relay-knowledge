@@ -762,7 +762,7 @@ fn request_builders_parse_web_payload_variants() {
     assert_eq!(query.code_query_kind, CodeQueryKind::Definition);
     assert_eq!(query.freshness_policy, FreshnessPolicy::WaitUntilFresh);
 
-    let file_query = file_query_request(&json!({
+    let file_query = web_files::file_query_request(&json!({
         "query": "design",
         "source_scope": "local-files",
         "root_id": "root-1",
@@ -774,8 +774,8 @@ fn request_builders_parse_web_payload_variants() {
     assert_eq!(file_query.root_id.as_deref(), Some("root-1"));
     assert_eq!(file_query.freshness_policy, FreshnessPolicy::WaitUntilFresh);
 
-    let default_file_query =
-        file_query_request(&json!({"query": "design", "limit": 7})).expect("default file query");
+    let default_file_query = web_files::file_query_request(&json!({"query": "design", "limit": 7}))
+        .expect("default file query");
     assert_eq!(
         default_file_query.freshness_policy,
         FreshnessPolicy::AllowStale

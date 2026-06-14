@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::FreshnessPolicy;
 
+use super::ApiMetadata;
+
+use crate::storage::FileContentReadModelCursor;
+
 /// Freshness state for local file-index answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,6 +69,8 @@ pub struct FileIndexFreshnessDiagnostics {
     pub direct_source_read_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_instructions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content_read_model_cursors: Vec<FileContentReadModelCursor>,
 }
 
 impl FileIndexFreshnessDiagnostics {
@@ -83,6 +89,85 @@ impl FileIndexFreshnessDiagnostics {
             bounded_rescan_required: false,
             direct_source_read_paths: Vec::new(),
             agent_instructions: Vec::new(),
+            content_read_model_cursors: Vec::new(),
         }
     }
+}
+
+/// Bounded local file indexing request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileIndexRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(default)]
+    pub roots: Vec<String>,
+}
+
+/// Local file indexing response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileIndexResponse {
+    pub metadata: ApiMetadata,
+    pub summary: crate::storage::FileIndexScanSummary,
+}
+
+/// Bounded local file-location query request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileQueryRequest {
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    pub limit: usize,
+    #[serde(default)]
+    pub freshness_policy: FreshnessPolicy,
+}
+
+/// Local file-location query response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileQueryResponse {
+    pub metadata: ApiMetadata,
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    #[serde(default = "FileIndexFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: FileIndexFreshnessDiagnostics,
+    pub results: Vec<crate::storage::FileSearchHit>,
+    pub truncated: bool,
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
+/// Bounded local file-content query request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileContentQueryRequest {
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    pub limit: usize,
+    #[serde(default)]
+    pub freshness_policy: FreshnessPolicy,
+}
+
+/// Local file-content query response with untrusted-source role isolation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileContentQueryResponse {
+    pub metadata: ApiMetadata,
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    #[serde(default = "FileIndexFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: FileIndexFreshnessDiagnostics,
+    pub results: Vec<crate::storage::FileContentSearchHit>,
+    pub truncated: bool,
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }

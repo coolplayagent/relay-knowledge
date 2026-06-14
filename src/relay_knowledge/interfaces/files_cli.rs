@@ -1,5 +1,5 @@
 use crate::{
-    api::{FileIndexRequest, FileQueryRequest, RequestContext},
+    api::{FileContentQueryRequest, FileIndexRequest, FileQueryRequest, RequestContext},
     application::{DEFAULT_FILE_QUERY_LIMIT, RelayKnowledgeService},
 };
 
@@ -11,6 +11,7 @@ pub(super) fn parse_files(tokens: &[String]) -> Result<CliAction, CliError> {
     match tokens.first().map(String::as_str) {
         Some("index") => parse_files_index(&tokens[1..]),
         Some("query") => parse_files_query(&tokens[1..]),
+        Some("content") => parse_files_content_query(&tokens[1..]),
         other => Err(CliError::UnexpectedArgument(
             other.unwrap_or("files").to_owned(),
         )),
@@ -64,6 +65,35 @@ pub(super) async fn run_files(
 
             render_response("files.query", response.metadata.clone(), &response, format).map(Some)
         }
+        CliAction::FilesContentQuery {
+            query,
+            source_scope,
+            root_id,
+            limit,
+            freshness,
+        } => {
+            let response = service
+                .query_file_content(
+                    FileContentQueryRequest {
+                        query: query.clone(),
+                        source_scope: source_scope.clone(),
+                        root_id: root_id.clone(),
+                        limit: *limit,
+                        freshness_policy: *freshness,
+                    },
+                    context,
+                )
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "files.content",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
         _ => Ok(None),
     }
 }
@@ -110,6 +140,14 @@ fn parse_files_index(tokens: &[String]) -> Result<CliAction, CliError> {
 }
 
 fn parse_files_query(tokens: &[String]) -> Result<CliAction, CliError> {
+    parse_file_text_query(tokens, false)
+}
+
+fn parse_files_content_query(tokens: &[String]) -> Result<CliAction, CliError> {
+    parse_file_text_query(tokens, true)
+}
+
+fn parse_file_text_query(tokens: &[String], content: bool) -> Result<CliAction, CliError> {
     let mut query = None;
     let mut source_scope = None;
     let mut root_id = None;
@@ -155,13 +193,24 @@ fn parse_files_query(tokens: &[String]) -> Result<CliAction, CliError> {
         }
     }
 
-    Ok(CliAction::FilesQuery {
-        query: query.ok_or(CliError::MissingValue("query"))?,
-        source_scope,
-        root_id,
-        limit,
-        freshness,
-    })
+    let query = query.ok_or(CliError::MissingValue("query"))?;
+    if content {
+        Ok(CliAction::FilesContentQuery {
+            query,
+            source_scope,
+            root_id,
+            limit,
+            freshness,
+        })
+    } else {
+        Ok(CliAction::FilesQuery {
+            query,
+            source_scope,
+            root_id,
+            limit,
+            freshness,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -260,6 +309,25 @@ mod tests {
             }
         );
 
+        let content = parse_files(&[
+            "content".to_owned(),
+            "database".to_owned(),
+            "runbook".to_owned(),
+            "--source".to_owned(),
+            "local-files".to_owned(),
+        ])
+        .expect("content query should parse");
+        assert_eq!(
+            content,
+            CliAction::FilesContentQuery {
+                query: "database runbook".to_owned(),
+                source_scope: Some("local-files".to_owned()),
+                root_id: None,
+                limit: DEFAULT_FILE_QUERY_LIMIT,
+                freshness: crate::domain::FreshnessPolicy::AllowStale
+            }
+        );
+
         assert!(matches!(
             parse_files(&[
                 "query".to_owned(),
@@ -316,6 +384,23 @@ mod tests {
         .expect("query command should run")
         .expect("query command should render");
         assert!(queried.contains("quarterly-design.pdf"));
+
+        let content = run_files(
+            &service,
+            &CliAction::FilesContentQuery {
+                query: "pdf".to_owned(),
+                source_scope: Some("local-files".to_owned()),
+                root_id: None,
+                limit: 5,
+                freshness: crate::domain::FreshnessPolicy::AllowStale,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-files-content", "trace-files"),
+            OutputFormat::Json,
+        )
+        .await
+        .expect("content command should run")
+        .expect("content command should render");
+        assert!(content.contains("\"results\""));
 
         assert!(
             run_files(
