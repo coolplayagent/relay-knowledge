@@ -73,6 +73,12 @@ where
             value["truncated"].as_bool().unwrap_or(false),
             value["duration_ms"].as_u64().unwrap_or(0)
         ),
+        "files.content" => format!(
+            "results={} truncated={} duration_ms={}",
+            value["results"].as_array().map_or(0, Vec::len),
+            value["truncated"].as_bool().unwrap_or(false),
+            value["duration_ms"].as_u64().unwrap_or(0)
+        ),
         "graph.inspect" => format!(
             "graph_version={} entities={} evidence={} code_files={} code_symbols={} repo_code_files={} repo_code_symbols={}",
             value["graph"]["graph_version"].as_u64().unwrap_or(0),

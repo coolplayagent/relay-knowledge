@@ -38,8 +38,10 @@ pub use code::{
     CodeScopeRetentionRequest,
 };
 pub use file_index::{
-    FileIndexDiagnostics, FileIndexEntry, FileIndexRoot, FileIndexRootStatus, FileIndexRootUpdate,
-    FileIndexScanSummary, FileSearchHit, FileSearchRequest,
+    FileContentChunk, FileContentEntry, FileContentReadModelCursor, FileContentSearchHit,
+    FileContentSearchRequest, FileIndexDiagnostics, FileIndexEntry, FileIndexRoot,
+    FileIndexRootStatus, FileIndexRootUpdate, FileIndexScanSummary, FileKnowledgeFactCandidate,
+    FileSearchHit, FileSearchRequest,
 };
 pub use partitioned::PartitionedSqliteKnowledgeStore;
 pub use sqlite::SqliteGraphStore;
@@ -342,6 +344,13 @@ pub trait IndexStore: Send + Sync {
     }
 
     fn search_files(&self, _request: FileSearchRequest) -> StorageFuture<'_, Vec<FileSearchHit>> {
+        unavailable_file_index_storage()
+    }
+
+    fn search_file_content(
+        &self,
+        _request: FileContentSearchRequest,
+    ) -> StorageFuture<'_, Vec<FileContentSearchHit>> {
         unavailable_file_index_storage()
     }
 
