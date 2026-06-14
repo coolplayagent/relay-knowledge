@@ -1,8 +1,11 @@
 use std::{fs, path::PathBuf};
 
-use relay_knowledge::storage::{
-    CodeIndexTaskClaimRequest, CodeRepositorySetRefreshTaskSeed, CodeRepositoryStore, GraphStore,
-    PartitionedSqliteKnowledgeStore, SqliteGraphStore,
+use relay_knowledge::{
+    domain::{CodeRepositorySelector, CodebaseViewKind, CodebaseViewRequest, FreshnessPolicy},
+    storage::{
+        CodeIndexTaskClaimRequest, CodeRepositorySetRefreshTaskSeed, CodeRepositoryStore,
+        GraphStore, PartitionedSqliteKnowledgeStore, SqliteGraphStore,
+    },
 };
 
 use super::support::*;
@@ -64,6 +67,42 @@ async fn partitioned_sqlite_routes_repository_code_facts_to_shards() {
     assert_eq!(totals.repository_count, 2);
     assert_eq!(totals.indexed_file_count, 2);
     assert_eq!(totals.chunk_count, 2);
+}
+
+#[tokio::test]
+async fn partitioned_sqlite_routes_codebase_view_snapshots_to_shards() {
+    let paths = runtime_paths();
+    let control_path = paths.database_file();
+    let store =
+        PartitionedSqliteKnowledgeStore::open(&control_path, paths.clone()).expect("store opens");
+
+    let alpha_scope = "scope-alpha".to_owned();
+    store
+        .upsert_code_repository(registration("repo-alpha", "alpha"))
+        .await
+        .expect("alpha registers");
+    store
+        .apply_code_index_snapshot(snapshot("repo-alpha", &alpha_scope, "alpha needle"))
+        .await
+        .expect("alpha indexes");
+
+    let request = CodebaseViewRequest::new(
+        CodeRepositorySelector::new("alpha", "HEAD", Vec::new(), Vec::new())
+            .expect("selector validates"),
+        CodebaseViewKind::ArchitectureLayers,
+        FreshnessPolicy::AllowStale,
+        10,
+        Vec::new(),
+    )
+    .expect("request validates");
+    let view_snapshot = store
+        .codebase_view_snapshot(alpha_scope, request, 20)
+        .await
+        .expect("snapshot reads from shard");
+
+    assert_eq!(control_code_file_count(&control_path), 0);
+    assert_eq!(view_snapshot.files.len(), 1);
+    assert_eq!(view_snapshot.files[0].path, "src/lib.rs");
 }
 
 #[tokio::test]

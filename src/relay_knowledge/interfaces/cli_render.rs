@@ -243,6 +243,19 @@ where
                 .map_or(0, Vec::len),
             value["results"].as_array().map_or(0, Vec::len)
         ),
+        "code.repo.view" => format!(
+            "view={} nodes={} edges={} sections={} evidence={} stale={} degraded={}",
+            value["request"]["view_kind"].as_str().unwrap_or("unknown"),
+            value["nodes"].as_array().map_or(0, Vec::len),
+            value["edges"].as_array().map_or(0, Vec::len),
+            value["sections"].as_array().map_or(0, Vec::len),
+            value["evidence"].as_array().map_or(0, Vec::len),
+            value["metadata"]["stale"]
+                .as_bool()
+                .or_else(|| value["freshness"]["scope_stale"].as_bool())
+                .unwrap_or(false),
+            value["degraded_reason"].as_str().unwrap_or("none")
+        ),
         "code.repo.status" => format!(
             "repo={} files={} symbols={} stale={} task={} checkpoint={}",
             value["status"]["alias"].as_str().unwrap_or(""),

@@ -103,6 +103,8 @@ fn environment_remote_base_url_only_selects_supported_repo_commands() {
     let repo_software =
         CliCommand::parse(["repo", "software", "org/repo", "--kind", "relationships"])
             .expect("repo software should parse");
+    let repo_view = CliCommand::parse(["repo", "view", "org/repo", "--kind", "dependency-tour"])
+        .expect("repo view should parse");
     let repo_reset = CliCommand::parse(["repo", "index", "--reset", "org/repo"])
         .expect("repo reset should parse");
     let repo_worker =
@@ -113,6 +115,7 @@ fn environment_remote_base_url_only_selects_supported_repo_commands() {
     assert!(!remote_environment_needed(&status));
     assert!(remote_environment_needed(&repo_status));
     assert!(remote_environment_needed(&repo_software));
+    assert!(remote_environment_needed(&repo_view));
     assert!(remote_environment_needed(&repo_reset));
     assert!(remote_environment_needed(&repo_worker));
     assert!(remote_environment_needed(&explicit_status));

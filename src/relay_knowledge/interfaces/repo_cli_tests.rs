@@ -98,6 +98,41 @@ fn parses_repo_context_with_budget_and_code_controls() {
 }
 
 #[test]
+fn parses_repo_view_with_filters_and_changed_paths() {
+    let command = parse_repo(&[
+        "view".to_owned(),
+        "core".to_owned(),
+        "--kind".to_owned(),
+        "affected-scope".to_owned(),
+        "--ref".to_owned(),
+        "worktree".to_owned(),
+        "--path".to_owned(),
+        "src".to_owned(),
+        "--language".to_owned(),
+        "rust".to_owned(),
+        "--freshness".to_owned(),
+        "wait-until-fresh".to_owned(),
+        "--limit".to_owned(),
+        "12".to_owned(),
+        "--changed-path".to_owned(),
+        "src/lib.rs".to_owned(),
+    ])
+    .expect("repo view should parse");
+
+    let RepoCommand::View(command) = command else {
+        panic!("expected view command");
+    };
+    assert_eq!(command.alias, "core");
+    assert_eq!(command.kind, crate::domain::CodebaseViewKind::AffectedScope);
+    assert_eq!(command.ref_selector, "worktree");
+    assert_eq!(command.path_filters, ["src"]);
+    assert_eq!(command.language_filters, ["rust"]);
+    assert_eq!(command.freshness, FreshnessPolicy::WaitUntilFresh);
+    assert_eq!(command.limit, 12);
+    assert_eq!(command.changed_paths, ["src/lib.rs"]);
+}
+
+#[test]
 fn parses_repo_feature_flags_with_optional_filter_and_scope() {
     let command = parse_repo(&[
         "feature-flags".to_owned(),

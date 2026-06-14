@@ -2,6 +2,7 @@
 
 mod agent;
 mod code_repository;
+mod codebase_views;
 mod context;
 mod error;
 mod file_index;
@@ -22,6 +23,7 @@ pub use code_repository::{
     CodeGraphContextResponse, CodeRepositoryFreshnessCursor, CodeRepositoryFreshnessDiagnostics,
     CodeRepositoryFreshnessState, CodeRepositoryIndexLag, CodeRepositoryPendingIndexWork,
 };
+pub use codebase_views::CodebaseViewResponse;
 pub use context::{InterfaceKind, RequestContext};
 pub use error::{ApiError, ErrorKind};
 pub use file_index::{
