@@ -512,7 +512,7 @@ pub(super) fn parse_fact_status(value: &str) -> Result<FactStatus, StorageError>
     FactStatus::parse(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
 }
 
-fn version_range(
+pub(super) fn version_range(
     valid_from: u64,
     valid_until: Option<u64>,
 ) -> Result<GraphVersionRange, StorageError> {

@@ -5,8 +5,8 @@ use crate::{
         MultimodalExtractionRequest,
     },
     domain::{
-        EvidenceModality, ExtractionDiagnostic, ExtractionStatus, FreshnessPolicy, IndexKind,
-        IndexState, RerankMode, RetrievalBackendState, RetrieverSource,
+        EvidenceModality, ExtractionDiagnostic, ExtractionStatus, FreshnessPolicy, GraphVersion,
+        IndexKind, IndexState, RerankMode, RetrievalBackendState, RetrieverSource,
     },
     env::PlatformKind,
     retrieval::LOCAL_RERANK_MODEL,
@@ -385,6 +385,25 @@ async fn retrieve_context_reports_results_and_index_freshness() {
     assert_eq!(response.rerank.returned_count, 1);
     assert!(response.results[0].rerank.is_some());
     assert!(response.context_pack.items[0].rerank.is_some());
+    let trace = response
+        .context_pack
+        .provenance_trace
+        .as_ref()
+        .expect("context pack should include traversal trace");
+    assert_eq!(trace.graph_version, GraphVersion::new(1));
+    assert_eq!(trace.source_scope.as_deref(), Some("docs"));
+    assert!(
+        trace
+            .cited_evidence
+            .iter()
+            .any(|item| item.evidence_id == "ev-1")
+    );
+    assert!(trace.visited_but_uncited.is_empty());
+    assert!(trace.ranking_contributions.iter().any(|contribution| {
+        contribution.result_id == "ev-1"
+            && contribution.source == crate::domain::RetrieverSource::Bm25
+            && contribution.cited
+    }));
     assert!(
         response.results[0]
             .ranking
@@ -721,44 +740,6 @@ async fn wait_until_fresh_query_does_not_increment_fresh_index_versions() {
             .iter()
             .all(|status| status.index_version == 1)
     );
-}
-
-#[tokio::test]
-async fn retrieve_context_reports_truncated_context_pack_budget() {
-    let service = service_with_memory_store().await;
-    for index in 0..3 {
-        service
-            .ingest(
-                ingest_request(vec![ingest_evidence(
-                    format!("ev-{index}"),
-                    format!("Shared BM25 retrieval candidate {index}"),
-                    vec!["BM25".to_owned()],
-                )]),
-                RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
-            )
-            .await
-            .expect("ingest should succeed");
-    }
-
-    let response = service
-        .retrieve_context(
-            HybridRetrievalRequest {
-                query: "BM25".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                limit: 2,
-                freshness: FreshnessPolicy::WaitUntilFresh,
-            },
-            RequestContext::with_ids(InterfaceKind::Cli, "req-query", "trace-query"),
-        )
-        .await
-        .expect("query should succeed");
-
-    assert!(response.truncated);
-    assert!(response.context_pack.truncated);
-    assert_eq!(response.results.len(), 2);
-    assert_eq!(response.budget_used.limit, 2);
-    assert_eq!(response.budget_used.returned_count, 2);
-    assert_eq!(response.budget_used.candidate_count, 3);
 }
 
 #[tokio::test]

@@ -57,7 +57,7 @@ Graph expansion 从高置信候选出发，只在预算内扩展：
 
 ## 5. Context Pack
 
-Context pack 是 agent 和 UI 的稳定证据包。它包含：query metadata、retriever sources、rank explanations、context items、source spans、graph paths、structured facts、code artifacts、local file artifacts、freshness、degraded state、budget 和 truncation reason。
+Context pack 是 agent 和 UI 的稳定证据包。它包含：query metadata、retriever sources、rank explanations、context items、source spans、graph paths、structured facts、code artifacts、local file artifacts、freshness、degraded state、budget、truncation reason 和 traversal provenance trace。`provenance_trace` 是 query-time 的有界解释对象，不持久化为后台任务；它必须在授权 scope 内记录 graph version、routed intent、visited nodes/edges、cited evidence、visited-but-uncited context、ranking contributions、stale/degraded 状态和 redaction/truncation 摘要。Storage search outcome 返回前必须先应用 request-level trace budget；application/agent adapter 在 rerank 和 citation marking 之后再应用最终 context budget，确保 cited evidence 仍可审计。Response-level truncation flag 必须包含 trace budget truncation，不能只反映 result count truncation。
 
 Context packing 优先保证多样性和可引用性：同一父 evidence、同一 symbol、同一 source span 的重复命中会合并；低置信扩展不能挤掉直接 evidence。
 

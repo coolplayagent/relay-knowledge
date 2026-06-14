@@ -134,9 +134,15 @@ async fn graph_path_scores_all_supporting_evidence() {
 
     let hits = search(&store, "late matching retriever").await;
 
+    let path_hit = hits
+        .iter()
+        .find(|hit| hit.retriever_sources.contains(&RetrieverSource::GraphPath))
+        .expect("graph path hit should be returned");
     assert!(
-        hits.iter()
-            .any(|hit| { hit.retriever_sources.contains(&RetrieverSource::GraphPath) })
+        path_hit
+            .graph_facts
+            .iter()
+            .any(|fact| fact.fact_id == "rel-multi-support")
     );
 }
 
@@ -509,4 +515,5 @@ async fn search_at(
         })
         .await
         .expect("search should succeed")
+        .hits
 }

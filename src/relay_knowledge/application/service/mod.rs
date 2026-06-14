@@ -366,7 +366,7 @@ impl RelayKnowledgeService {
             }
         }
         let candidate_limit = self.runtime.retrieval.rerank.candidate_limit(plan.limit);
-        let results = store
+        let search_outcome = store
             .search(GraphSearchRequest {
                 query: plan.query.clone(),
                 source_scope: plan.source_scope.clone(),
@@ -376,8 +376,12 @@ impl RelayKnowledgeService {
             })
             .await
             .map_err(storage_api_error)?;
-        let (mut results, mut rerank) = self.runtime.retrieval.rerank.rerank(&plan.query, results);
-        let truncated = results.len() > plan.limit;
+        let (mut results, mut rerank) = self
+            .runtime
+            .retrieval
+            .rerank
+            .rerank(&plan.query, search_outcome.hits);
+        let result_truncated = results.len() > plan.limit;
         results.truncate(plan.limit);
         rerank.returned_count = results.len();
         if rerank.degraded {
@@ -385,12 +389,24 @@ impl RelayKnowledgeService {
                 degraded_reasons.push(reason.clone());
             }
         }
+        let degraded_reason = (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; "));
+        let mut provenance_trace = search_outcome.trace;
+        provenance_trace.mark_citations_for_hits(results.iter());
+        provenance_trace.stale = degraded_reasons
+            .iter()
+            .any(|reason| reason.contains("behind the graph version"));
+        provenance_trace.degraded_reason = degraded_reason.clone();
+        provenance_trace.truncated |= result_truncated;
+        provenance_trace.apply_budget(plan.limit.saturating_mul(4).max(plan.limit + 8).min(64));
+        let truncated = result_truncated || provenance_trace.truncated;
+
         let context_pack = RetrievedContextPack {
             graph_version,
             source_scope: plan.source_scope.clone(),
             freshness: plan.freshness,
             truncated,
             backend_statuses: backend_statuses.clone(),
+            provenance_trace: Some(provenance_trace),
             items: results
                 .iter()
                 .map(|hit| ContextPackItem {
@@ -423,7 +439,6 @@ impl RelayKnowledgeService {
             k: RECIPROCAL_RANK_FUSION_K,
             candidate_count: budget_used.candidate_count,
         };
-        let degraded_reason = (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; "));
 
         Ok(HybridRetrievalResponse {
             metadata,
@@ -825,6 +840,13 @@ fn retrieval_context_bytes(
 ) -> usize {
     serialized_context_bytes(&context_pack.backend_statuses)
         .saturating_add(serialized_context_bytes(backend_statuses))
+        .saturating_add(
+            context_pack
+                .provenance_trace
+                .as_ref()
+                .map(serialized_context_bytes)
+                .unwrap_or_default(),
+        )
         .saturating_add(results.iter().map(serialized_context_bytes).sum::<usize>())
         .saturating_add(
             context_pack
@@ -926,3 +948,6 @@ mod operations_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod trace_tests;

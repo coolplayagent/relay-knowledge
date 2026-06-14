@@ -1,13 +1,16 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    domain::{RetrievalHit, RetrieverSource},
+    domain::{
+        ConfidenceScore, ContextGraphFact, ContextGraphFactKind, RetrievalHit, RetrieverSource,
+    },
     storage::{GraphSearchRequest, StorageError},
 };
 
 use super::{
-    ScoredHit, context::entities_for_evidence, evidence_group_key, overlap_score,
-    parse_string_array, sort_scored_hits, token_signature,
+    ScoredHit,
+    context::{entities_for_evidence, parse_fact_status, version_range},
+    evidence_group_key, overlap_score, parse_string_array, sort_scored_hits, token_signature,
 };
 
 pub(super) fn path_candidates(
@@ -30,7 +33,9 @@ fn collect_relation_paths(
 ) -> Result<(), StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT gr.id, src.label, gr.relation_type, dst.label, gr.evidence_ids_json
+        SELECT gr.id, src.label, gr.relation_type, dst.label, gr.evidence_ids_json,
+               gr.confidence_basis_points, gr.status, gr.valid_from_graph_version,
+               gr.valid_until_graph_version
         FROM graph_relations gr
         INNER JOIN entities src ON src.id = gr.source_entity_id
         INNER JOIN entities dst ON dst.id = gr.target_entity_id
@@ -48,11 +53,15 @@ fn collect_relation_paths(
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
             row.get::<_, String>(4)?,
+            row.get::<_, u16>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, u64>(7)?,
+            row.get::<_, Option<u64>>(8)?,
         ))
     })?;
-    for (id, source, relation_type, target, evidence_ids_json) in rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?
+    for (id, source, relation_type, target, evidence_ids_json, confidence, status, from, until) in
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)?
     {
         let Some(context) = SupportContext::load(connection, &evidence_ids_json, request)? else {
             continue;
@@ -69,11 +78,25 @@ fn collect_relation_paths(
                 "{source} -[{relation_type}]-> {target}\n{}",
                 context.content
             );
+            let graph_fact = ContextGraphFact {
+                fact_id: id.clone(),
+                kind: ContextGraphFactKind::Relation,
+                subject: source,
+                predicate: relation_type,
+                object: Some(target),
+                evidence_ids: context.evidence_ids.clone(),
+                confidence: ConfidenceScore {
+                    basis_points: confidence,
+                },
+                status: parse_fact_status(&status)?,
+                version_range: version_range(from, until)?,
+            };
             hits.push(context.scored(
                 content,
                 RetrieverSource::GraphPath,
                 score,
                 format!("relation path {id} supported by scoped evidence"),
+                Some(graph_fact),
             ));
         }
     }
@@ -88,7 +111,9 @@ fn collect_claim_paths(
 ) -> Result<(), StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT gc.id, ent.label, gc.predicate, gc.object, gc.evidence_ids_json
+        SELECT gc.id, ent.label, gc.predicate, gc.object, gc.evidence_ids_json,
+               gc.confidence_basis_points, gc.status, gc.valid_from_graph_version,
+               gc.valid_until_graph_version
         FROM graph_claims gc
         INNER JOIN entities ent ON ent.id = gc.subject_entity_id
         WHERE gc.status = 'accepted'
@@ -105,9 +130,13 @@ fn collect_claim_paths(
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
             row.get::<_, String>(4)?,
+            row.get::<_, u16>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, u64>(7)?,
+            row.get::<_, Option<u64>>(8)?,
         ))
     })?;
-    for (id, subject, predicate, object, evidence_ids_json) in rows
+    for (id, subject, predicate, object, evidence_ids_json, confidence, status, from, until) in rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?
     {
@@ -123,11 +152,25 @@ fn collect_claim_paths(
         );
         if score > 0.0 {
             let content = format!("claim {subject} {predicate} {object}\n{}", context.content);
+            let graph_fact = ContextGraphFact {
+                fact_id: id.clone(),
+                kind: ContextGraphFactKind::Claim,
+                subject,
+                predicate,
+                object: Some(object),
+                evidence_ids: context.evidence_ids.clone(),
+                confidence: ConfidenceScore {
+                    basis_points: confidence,
+                },
+                status: parse_fact_status(&status)?,
+                version_range: version_range(from, until)?,
+            };
             hits.push(context.scored(
                 content,
                 RetrieverSource::GraphPath,
                 score,
                 format!("schema-guided claim path {id} supported by scoped evidence"),
+                Some(graph_fact),
             ));
         }
     }
@@ -164,6 +207,7 @@ fn collect_event_paths(
                 "event {}{}: {}\n{}",
                 event.event_type, occurred, event.labels, context.content
             );
+            let graph_fact = event.graph_fact(&context)?;
             hits.push(context.scored(
                 content,
                 RetrieverSource::GraphPath,
@@ -172,6 +216,7 @@ fn collect_event_paths(
                     "schema-guided event path {} supported by scoped evidence",
                     event.id
                 ),
+                Some(graph_fact),
             ));
         }
     }
@@ -216,11 +261,13 @@ pub(super) fn temporal_candidates(
             "temporal event {}{}: {}\n{}",
             event.event_type, occurred, event.labels, context.content
         );
+        let graph_fact = event.graph_fact(&context)?;
         hits.push(context.scored(
             content,
             RetrieverSource::Temporal,
             score,
             format!("temporal event {} matched query time constraints", event.id),
+            Some(graph_fact),
         ));
     }
     sort_scored_hits(&mut hits);
@@ -296,7 +343,32 @@ struct EventRow {
     event_type: String,
     occurred_at: Option<String>,
     evidence_ids_json: String,
+    confidence: u16,
+    status: String,
+    valid_from_graph_version: u64,
+    valid_until_graph_version: Option<u64>,
     labels: String,
+}
+
+impl EventRow {
+    fn graph_fact(&self, context: &SupportContext) -> Result<ContextGraphFact, StorageError> {
+        Ok(ContextGraphFact {
+            fact_id: self.id.clone(),
+            kind: ContextGraphFactKind::Event,
+            subject: self.labels.clone(),
+            predicate: self.event_type.clone(),
+            object: self.occurred_at.clone(),
+            evidence_ids: context.evidence_ids.clone(),
+            confidence: ConfidenceScore {
+                basis_points: self.confidence,
+            },
+            status: parse_fact_status(&self.status)?,
+            version_range: version_range(
+                self.valid_from_graph_version,
+                self.valid_until_graph_version,
+            )?,
+        })
+    }
 }
 
 fn load_events(
@@ -306,7 +378,8 @@ fn load_events(
     let mut statement = connection.prepare(
         "
         SELECT ge.id, ge.event_type, ge.occurred_at, ge.evidence_ids_json,
-               group_concat(ent.label, ' ')
+               ge.confidence_basis_points, ge.status, ge.valid_from_graph_version,
+               ge.valid_until_graph_version, group_concat(ent.label, ' ')
         FROM graph_events ge
         INNER JOIN graph_event_entities gee ON gee.event_id = ge.id
         INNER JOIN entities ent ON ent.id = gee.entity_id
@@ -314,7 +387,9 @@ fn load_events(
           AND ge.created_graph_version <= ?1
           AND ge.valid_from_graph_version <= ?1
           AND (ge.valid_until_graph_version IS NULL OR ge.valid_until_graph_version >= ?1)
-        GROUP BY ge.id, ge.event_type, ge.occurred_at, ge.evidence_ids_json
+        GROUP BY ge.id, ge.event_type, ge.occurred_at, ge.evidence_ids_json,
+                 ge.confidence_basis_points, ge.status, ge.valid_from_graph_version,
+                 ge.valid_until_graph_version
         ORDER BY ge.occurred_at DESC, ge.id ASC
         ",
     )?;
@@ -324,7 +399,11 @@ fn load_events(
             event_type: row.get(1)?,
             occurred_at: row.get(2)?,
             evidence_ids_json: row.get(3)?,
-            labels: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            confidence: row.get(4)?,
+            status: row.get(5)?,
+            valid_from_graph_version: row.get(6)?,
+            valid_until_graph_version: row.get(7)?,
+            labels: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
         })
     })?;
 
@@ -339,6 +418,7 @@ struct SupportContext {
     source_path: Option<String>,
     content: String,
     entity_labels: Vec<String>,
+    evidence_ids: Vec<String>,
     modality: String,
 }
 
@@ -356,6 +436,7 @@ impl SupportContext {
                 source_path: None,
                 content: String::new(),
                 entity_labels: Vec::new(),
+                evidence_ids: Vec::new(),
                 modality: "text_span".to_owned(),
             }));
         }
@@ -418,6 +499,7 @@ impl SupportContext {
                 .into_iter()
                 .map(|entity| entity.label)
                 .collect(),
+            evidence_ids: vec![evidence_id.to_owned()],
             modality,
         }))
     }
@@ -428,6 +510,7 @@ impl SupportContext {
         source: RetrieverSource,
         score: f64,
         explanation: String,
+        graph_fact: Option<ContextGraphFact>,
     ) -> ScoredHit {
         ScoredHit {
             key: evidence_group_key(&self.group_id),
@@ -439,7 +522,7 @@ impl SupportContext {
                 content,
                 entity_labels: self.entity_labels,
                 entities: Vec::new(),
-                graph_facts: Vec::new(),
+                graph_facts: graph_fact.into_iter().collect(),
                 code_artifact: None,
                 retriever_sources: Vec::new(),
                 ranking: Vec::new(),
@@ -462,6 +545,11 @@ impl SupportContext {
         }
         if self.source_path.is_none() {
             self.source_path = other.source_path;
+        }
+        for evidence_id in other.evidence_ids {
+            if !self.evidence_ids.contains(&evidence_id) {
+                self.evidence_ids.push(evidence_id);
+            }
         }
         for label in other.entity_labels {
             if !self.entity_labels.contains(&label) {

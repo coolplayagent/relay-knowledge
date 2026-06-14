@@ -82,6 +82,10 @@ async fn retrieve_context_returns_canonical_structured_content() {
     assert_eq!(structured["freshness"], "wait-until-fresh");
     assert_eq!(structured["retrieval_mode"], "hybrid");
     assert_eq!(structured["results"][0]["evidence_id"], "ev-mcp");
+    assert_eq!(
+        structured["context_pack"]["provenance_trace"]["cited_evidence"][0]["evidence_id"],
+        "ev-mcp"
+    );
     assert_eq!(structured["runtime_identity"]["protocol"], "mcp");
 }
 

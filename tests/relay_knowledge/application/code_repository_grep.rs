@@ -16,16 +16,16 @@ use relay_knowledge::{
         CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
         CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord, CommitReceipt,
         FreshnessPolicy, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RepositoryCodeRange, RetrievalHit, code_snapshot_scope_id,
+        RepositoryCodeRange, code_snapshot_scope_id,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
         CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
         CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
         CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
-        KnowledgeStore, MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError,
-        StorageFuture,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
+        GraphStore, IndexStore, KnowledgeStore, MutationLogEntry, MutationLogStore,
+        SqliteGraphStore, StorageError, StorageFuture,
     },
 };
 
@@ -492,7 +492,7 @@ impl GraphStore for CandidatePathUnavailableStore {
         unsupported("candidate fixture does not inspect graphs")
     }
 
-    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
+    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
         unsupported("candidate fixture does not search graphs")
     }
 

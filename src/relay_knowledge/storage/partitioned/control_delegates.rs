@@ -3,19 +3,19 @@ use crate::{
         AuditEventRecord, CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt,
         CodeIndexSnapshot, CodeReferenceRecord, CodeRepositoryStatus, CodeSymbolRecord,
         CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus, ProposalState,
-        RetrievalHit, ServiceOperatorStatus, WorkerStatus, WorkerTaskRecord,
+        ServiceOperatorStatus, WorkerStatus, WorkerTaskRecord,
     },
     storage::{
         AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
         CodeRepositoryStore, CodeSymbolSearchRequest, FileIndexDiagnostics, FileIndexRoot,
         FileIndexRootStatus, FileIndexRootUpdate, FileSearchHit, FileSearchRequest,
-        GraphCanvasStorageRequest, GraphCanvasStorageSnapshot, GraphInspection, GraphSearchRequest,
-        GraphStore, HealthStorageSnapshot, IndexCursor, IndexRefreshClaimRequest,
-        IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
-        IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
-        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
-        StorageError, StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion,
-        WorkerTaskFailure, WorkerTaskSeed,
+        GraphCanvasStorageRequest, GraphCanvasStorageSnapshot, GraphInspection, GraphSearchOutcome,
+        GraphSearchRequest, GraphStore, HealthStorageSnapshot, IndexCursor,
+        IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
+        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
+        MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal, ProposalDecision,
+        ProposalListRequest, ServiceOperatorUpdate, StorageError, StorageFuture,
+        WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
     },
 };
 
@@ -100,7 +100,7 @@ impl GraphStore for PartitionedSqliteKnowledgeStore {
         self.control.graph_canvas(request)
     }
 
-    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
+    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
         self.control.search(request)
     }
 

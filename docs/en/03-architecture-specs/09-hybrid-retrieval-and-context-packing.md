@@ -57,7 +57,7 @@ Expansion results carry path provenance; they are not returned as opaque related
 
 ## 5. Context Pack
 
-A context pack is the stable evidence bundle for agents and UI. It includes query metadata, retriever sources, rank explanations, context items, source spans, graph paths, structured facts, code artifacts, local file artifacts, freshness, degraded state, budgets, and truncation reasons.
+A context pack is the stable evidence bundle for agents and UI. It includes query metadata, retriever sources, rank explanations, context items, source spans, graph paths, structured facts, code artifacts, local file artifacts, freshness, degraded state, budgets, truncation reasons, and a traversal provenance trace. `provenance_trace` is a bounded query-time explanation object, not a persisted background task; within the authorized scope it records the graph version, routed intent, visited nodes/edges, cited evidence, visited-but-uncited context, ranking contributions, stale/degraded state, and redaction/truncation summary. Storage search outcomes apply the request-level trace budget before returning, and application/agent adapters re-apply final context budgets after rerank and citation marking so cited evidence remains auditable. Response-level truncation flags include trace budget truncation, not only result-count truncation.
 
 Packing favors diversity and citability. Duplicate hits from the same parent evidence, symbol, or source span merge; low-confidence expansions do not displace direct evidence.
 

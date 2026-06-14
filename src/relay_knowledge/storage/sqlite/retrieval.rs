@@ -20,7 +20,7 @@ use crate::{
         RetrievalHit, RetrieverSource,
     },
     retrieval::terms::extend_normalized_terms,
-    storage::{GraphSearchRequest, StorageError},
+    storage::{GraphSearchOutcome, GraphSearchRequest, StorageError},
 };
 
 #[path = "retrieval/context.rs"]
@@ -606,7 +606,7 @@ fn replace_vector_document(
 pub(super) fn search_graph(
     connection: &mut Connection,
     request: GraphSearchRequest,
-) -> Result<Vec<RetrievalHit>, StorageError> {
+) -> Result<GraphSearchOutcome, StorageError> {
     if request.limit == 0 {
         return Err(StorageError::InvalidInput(
             "search limit must be greater than zero".to_owned(),
@@ -672,7 +672,7 @@ pub(super) fn search_graph(
     });
     hits.truncate(request.limit);
 
-    Ok(hits)
+    Ok(GraphSearchOutcome::from_hits(&request, hits))
 }
 
 fn bm25_candidates(

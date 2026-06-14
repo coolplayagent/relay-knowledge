@@ -20,9 +20,9 @@ use crate::{
         CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
         CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
         CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexCursor,
-        IndexRefreshDiagnostics, IndexStore, KnowledgeStore, MutationLogEntry, MutationLogStore,
-        StorageError, StorageFuture,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
+        GraphStore, IndexCursor, IndexRefreshDiagnostics, IndexStore, KnowledgeStore,
+        MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
     },
 };
 
@@ -148,7 +148,7 @@ impl GraphStore for GraphOnlySearchStore {
         })
     }
 
-    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
+    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
         Box::pin(async move {
             assert_eq!(request.source_scope.as_deref(), Some("docs"));
             assert!(
@@ -162,7 +162,7 @@ impl GraphStore for GraphOnlySearchStore {
                     .contains(&crate::domain::RetrieverSource::Vector)
             );
 
-            Ok(vec![RetrievalHit {
+            let hits = vec![RetrievalHit {
                 evidence_id: "ev-graph-only".to_owned(),
                 source_scope: "docs".to_owned(),
                 source_path: None,
@@ -176,7 +176,8 @@ impl GraphStore for GraphOnlySearchStore {
                 ranking: Vec::new(),
                 rerank: None,
                 score: 1.0,
-            }])
+            }];
+            Ok(GraphSearchOutcome::from_hits(&request, hits))
         })
     }
 
@@ -284,7 +285,7 @@ impl GraphStore for SlowLegacyHealthStore {
         })
     }
 
-    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
+    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
         unsupported("slow health fixture does not search")
     }
 

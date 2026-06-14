@@ -88,7 +88,7 @@ fn retrieve_context_prompt(arguments: &HashMap<String, Value>) -> Result<Value, 
     Ok(prompt_result(
         "Retrieve Graph Context",
         format!(
-            "Use relay_retrieve_context with query `{query}`, source_scope `{source_scope}`, freshness `{freshness}`, and limit `{limit}`. Cite returned evidence ids, source spans, graph facts, graph_paths, backend status, and truncation metadata in the answer."
+            "Use relay_retrieve_context with query `{query}`, source_scope `{source_scope}`, freshness `{freshness}`, and limit `{limit}`. Cite returned evidence ids, source spans, graph facts, graph_paths, provenance_trace cited_evidence, visited_but_uncited, ranking_contributions, backend status, and truncation metadata in the answer."
         ),
     ))
 }

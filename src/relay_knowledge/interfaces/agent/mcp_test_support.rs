@@ -6,14 +6,14 @@ use crate::{
         CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSnapshot, CodeIndexSummary,
         CodeIndexTaskRecord, CodeReferenceRecord, CodeRepositoryRegistration, CodeRepositoryStatus,
         CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord,
-        CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus, RetrievalHit,
+        CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
     },
     storage::{
         CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
         CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
         CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
-        MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
+        GraphStore, IndexStore, MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
     },
 };
 
@@ -52,10 +52,10 @@ impl GraphStore for SlowSearchStore {
         })
     }
 
-    fn search(&self, _request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
-        Box::pin(async {
+    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, GraphSearchOutcome> {
+        Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            Ok(Vec::new())
+            Ok(GraphSearchOutcome::from_hits(&request, Vec::new()))
         })
     }
 
