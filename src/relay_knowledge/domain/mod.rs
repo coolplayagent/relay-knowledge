@@ -21,6 +21,8 @@ mod code_repository_set;
 mod code_repository_tests;
 #[path = "code/staleness.rs"]
 mod code_staleness;
+#[path = "code/views.rs"]
+mod code_views;
 #[path = "code/workspace.rs"]
 mod code_workspace;
 #[path = "core/entity.rs"]
@@ -86,6 +88,11 @@ pub use code_repository_set::{
     CodeRepositorySetStatus,
 };
 pub use code_staleness::StalenessHint;
+pub use code_views::{
+    CodebaseViewBudget, CodebaseViewCall, CodebaseViewDependency, CodebaseViewEdge,
+    CodebaseViewEvidence, CodebaseViewFile, CodebaseViewKind, CodebaseViewNode,
+    CodebaseViewRequest, CodebaseViewSection, CodebaseViewSnapshot, CodebaseViewSymbol,
+};
 pub use code_workspace::{
     CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
     CodeWorkspaceMember, CodeWorkspacePackageMapping,

@@ -8,7 +8,8 @@ use crate::domain::{
     CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
     CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
     CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
-    CodeSymbolGenerationCounts, SoftwareGlobalProjection, SoftwareGlobalRequest,
+    CodeSymbolGenerationCounts, CodebaseViewRequest, CodebaseViewSnapshot,
+    SoftwareGlobalProjection, SoftwareGlobalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -493,6 +494,19 @@ pub trait CodeRepositoryStore: Send + Sync {
         Box::pin(async move {
             Err(StorageError::InvalidInput(format!(
                 "code impact analysis for source scope '{source_scope}' is unavailable"
+            )))
+        })
+    }
+
+    fn codebase_view_snapshot(
+        &self,
+        source_scope: String,
+        _request: CodebaseViewRequest,
+        _row_limit: usize,
+    ) -> StorageFuture<'_, CodebaseViewSnapshot> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "codebase view snapshot for source scope '{source_scope}' is unavailable"
             )))
         })
     }

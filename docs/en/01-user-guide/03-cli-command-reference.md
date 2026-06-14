@@ -6,7 +6,7 @@ This chapter is an executable command index. Workflow details live in later chap
 
 When `--format json` or `--format streaming-json` is requested, parse diagnostics and runtime API failures written to stderr are JSON. Runtime API failures use the stable API error shape with `error_kind`, `message`, and optional `metadata`; text and markdown formats keep human-readable stderr messages.
 
-To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode covers `repo index`, `repo scope preview`, `repo status`, `repo query`, `repo feature-flags`, `repo impact`, `repo report`, and `repo software` for repositories already registered on the service host. `repo index --reset` and `repo index-worker` are rejected while remote mode is selected and must be run on the service host; unrelated local commands such as `status` and `health` keep using local runtime state when only the environment variable is set.
+To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode covers `repo index`, `repo scope preview`, `repo status`, `repo query`, `repo feature-flags`, `repo impact`, `repo report`, `repo software`, and `repo view` for repositories already registered on the service host. `repo index --reset` and `repo index-worker` are rejected while remote mode is selected and must be run on the service host; unrelated local commands such as `status` and `health` keep using local runtime state when only the environment variable is set.
 
 ## 3.1 Common Status Commands
 
@@ -108,6 +108,7 @@ relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--pat
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo view <alias> [--kind architecture-layers|business-domains|dependency-tour|process-flow|affected-scope] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--changed-path <path>]
 relay-knowledge repo status <alias>
 relay-knowledge graph inspect
 relay-knowledge index refresh [--kind bm25|semantic|vector]
@@ -138,6 +139,8 @@ Kind values are scoped to their command family:
   `definition`, `references`, `callers`, `callees`, `imports`, `sbom`.
 - `repo software --kind`: `dependencies`, `sdks`, `files`, `topics`,
   `relationships`, `build`, `iac`, `design`, `all`.
+- `repo view --kind`: `architecture-layers`, `business-domains`,
+  `dependency-tour`, `process-flow`, `affected-scope`.
 - `index refresh --kind`: `bm25`, `semantic`, `vector`; omitting `--kind`
   requests all supported index families.
 - `worker status|run-once --kind`: `embedding`, `ocr`, `vision`, `extractor`.
@@ -176,7 +179,9 @@ After a bulk code-index snapshot apply or checkpointed finalize succeeds, SQLite
 
 `repo software` reads the software global-model projection for the selected repository scope. `--kind dependencies` returns package components derived from manifests and lockfiles plus `dependency_usages` that link declared packages to matching code/config import evidence; `--kind sdks` returns unresolved external import/include targets as SDK or API-surface usage candidates; `--kind files` returns whole-file nodes for code, config, docs, build manifests, deployments, tests, and templates; `--kind topics` returns topics extracted from Markdown/spec headings and `.knowledge/knowledge-map.yaml`; `--kind relationships` returns cross-domain edges such as `documents`, `depends_on`, `uses_sdk`, and `configures`. `--kind build` returns package, script, target, feature, module, profile, plugin, goal, and job entries extracted from Cargo, npm, Python, Go, Maven effective `pom.xml`, Gradle, CMake, Makefile, and CI workflow evidence. `--kind iac` returns deployment and infrastructure resources extracted from Dockerfile, Compose, Kubernetes YAML, Helm charts, Terraform, systemd, launchd, and CI workflow evidence. `--kind design` returns evidence-backed software systems, modules, components, interfaces, and capabilities from README files, architecture/design Markdown, and package/module manifests. The command does not execute build tools, scan package caches, SDK directories, cloud APIs, unindexed external source, or whole-repository docs at query time; rerun `repo index` or `repo update` to refresh the projection after source-scope changes.
 
-Agent-facing MCP kind access reuses the same kind families rather than introducing parallel names. `relay_code_query` covers code graph kinds, `relay_software_query` covers software global-model kinds, and `relay_code_feature_flags` covers configuration-driven feature flags. Common agent aliases are normalized to existing kinds: `dependency` to `dependencies`, `configuration` to `relationships`, and `model` or `models` to `design`.
+`repo view` returns graph-derived codebase understanding views as JSON. `architecture-layers`, `business-domains`, `dependency-tour`, and `process-flow` are derived from indexed files, symbols, imports, calls, routes, dependencies, and feature flags in the selected repository scope. `affected-scope` requires one or more `--changed-path` values in deterministic v1 and returns changed files, affected modules, call edges, and nearby test/config/doc candidates. The response includes `nodes`, `edges`, `sections`, `evidence`, freshness diagnostics, and truncation budget metadata; section narratives are short derived explanations backed by evidence ids, not persisted graph facts or AI-generated source of truth.
+
+Agent-facing MCP kind access reuses the same kind families rather than introducing parallel names. `relay_code_query` covers code graph kinds, `relay_software_query` covers software global-model kinds, `relay_code_feature_flags` covers configuration-driven feature flags, and `relay_codebase_view` covers the `repo view` kind family. Common agent aliases are normalized to existing kinds: `dependency` to `dependencies`, `configuration` to `relationships`, and `model` or `models` to `design`.
 
 `map` commands maintain the repository-local `.knowledge/knowledge-map.yaml` knowledge navigation contract. The YAML stores topic, source, route, and history metadata only; it does not copy authoritative knowledge out of documents, code, config, CI, runtime systems, or external sources. One topic can contain multiple sources, and `map source add` appends distinct source ids to that topic route order. LLM agents should use `map show` and `map route` to locate sources, maintain the contract through `map source add/update/remove`, and run `map validate --format json` after changes. AGENTS.md should keep only a stable reference such as `Knowledge map: .knowledge/knowledge-map.yaml`.
 

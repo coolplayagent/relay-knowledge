@@ -4,22 +4,20 @@
 mod web_code_api;
 #[path = "web_code_index_request.rs"]
 mod web_code_index_request;
+#[path = "web_code_view_request.rs"]
+mod web_code_view_request;
 #[path = "web_model_config.rs"]
 mod web_model_config;
 
-use std::{
-    path::{Component, Path, PathBuf},
-    sync::Arc,
-};
+use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
-use axum::{
-    Json, Router,
-    body::Body,
-    extract::{Path as AxumPath, Query, State},
-    http::{StatusCode, header},
-    response::{IntoResponse, Response},
-    routing::{get, post},
-};
+use axum::body::Body;
+use axum::extract::{Path as AxumPath, Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tower_http::limit::RequestBodyLimitLayer;
@@ -388,6 +386,12 @@ async fn dispatch_operation(
         "code.repo.impact" => {
             let response = service
                 .impact_code_repository(code_impact_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "code.repo.view" => {
+            let response = service
+                .codebase_view(web_code_view_request::code_view_request(payload)?, context)
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }

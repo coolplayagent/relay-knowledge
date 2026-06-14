@@ -5,8 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod state;
-
 mod audit_bridge;
 mod code_tools;
 mod http_contract;
@@ -15,6 +13,7 @@ mod notifications;
 mod prompts;
 mod resources;
 mod scope_authorization;
+mod state;
 mod tool_registry;
 
 use axum::{
@@ -61,8 +60,9 @@ use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
 use code_tools::run_code_tool;
 use tool_registry::{
     CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL,
-    CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL, HEALTH_TOOL, INDEX_STATUS_TOOL,
-    INSPECT_GRAPH_TOOL, RETRIEVE_CONTEXT_TOOL, SERVICE_STATUS_TOOL, is_known_tool,
+    CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL, CODEBASE_VIEW_TOOL, HEALTH_TOOL,
+    INDEX_STATUS_TOOL, INSPECT_GRAPH_TOOL, RETRIEVE_CONTEXT_TOOL, SERVICE_STATUS_TOOL,
+    is_known_tool,
 };
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -667,7 +667,8 @@ async fn run_tool_call(server: &McpServer, params: ToolCallParams, request_id: S
         | CODE_FEATURE_FLAGS_TOOL
         | CODE_IMPACT_TOOL
         | CODE_REPOSITORY_SET_QUERY_TOOL
-        | CODE_SOFTWARE_QUERY_TOOL => {
+        | CODE_SOFTWARE_QUERY_TOOL
+        | CODEBASE_VIEW_TOOL => {
             run_code_tool(server, params.name.as_str(), params.arguments, request_id).await
         }
         _ => json!({

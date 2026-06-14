@@ -659,7 +659,42 @@ curl -s http://localhost:8080/api/web/operations/execute \
 }
 ```
 
-### 6.8 GET /api/v1/code/repositories/{alias}/status
+### 6.8 POST /api/v1/code/repositories/{alias}/views
+
+返回从版本化代码图事实派生的代码库理解视图；自然语言叙述只引用 `evidence`，不能写回事实表。
+
+**请求体**：
+
+```json
+{
+  "repository": { "repository": "my-project", "ref_selector": "HEAD", "path_filters": [], "language_filters": [] },
+  "view_kind": "dependency_tour",
+  "freshness_policy": "allow_stale",
+  "limit": 20,
+  "changed_paths": []
+}
+```
+
+`view_kind` 枚举：`architecture_layers`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope`。`repository.path_filters`、`repository.language_filters` 可缩小已索引范围；`affected_scope` 必须提供 `changed_paths`。
+
+**响应 200**：
+
+```json
+{
+  "metadata": { "..." },
+  "scope": { "..." },
+  "freshness": { "state": "fresh", "..." },
+  "request": { "view_kind": "dependency_tour", "..." },
+  "graph_version": 42,
+  "nodes": [{ "id": "module:api", "..." }],
+  "edges": [{ "edge_kind": "depends_on", "..." }],
+  "sections": [{ "evidence_ids": ["evidence:1"], "..." }],
+  "evidence": [{ "path": "Cargo.toml", "..." }],
+  "budget": { "limit": 20, "snapshot_truncated": false }
+}
+```
+
+### 6.9 GET /api/v1/code/repositories/{alias}/status
 
 获取仓库索引状态。
 
@@ -690,45 +725,6 @@ curl -s http://localhost:8080/api/web/operations/execute \
   "checkpoint": { "..." },
   "retention": { "..." }
 }
-```
-
-### curl 示例
-
-```bash
-# 注册代码仓库 (通过 Web operations)
-curl -s http://localhost:8080/api/web/operations/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "snapshot": {
-      "name": "register",
-      "command": "注册仓库",
-      "payload": {
-        "operation": "code.repo.register",
-        "root_path": "/home/user/my-project",
-        "alias": "my-project"
-      }
-    }
-  }' | jq .
-
-# 代码仓库索引
-curl -s http://localhost:8080/api/v1/code/repositories/my-project/index \
-  -H "Content-Type: application/json" \
-  -H "X-Relay-Request-Id: my-req-001" \
-  -d '{"repository": "my-project", "mode": "Full", "freshness_policy": "AllowStale"}' | jq .
-
-# 代码仓库查询
-curl -s http://localhost:8080/api/v1/code/repositories/my-project/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "handle_request",
-    "repository": "my-project",
-    "code_query_kind": "Hybrid",
-    "limit": 10,
-    "freshness_policy": "AllowStale"
-  }' | jq .
-
-# 仓库状态
-curl -s "http://localhost:8080/api/v1/code/repositories/my-project/status?ref=HEAD" | jq .
 ```
 
 ---
@@ -991,6 +987,7 @@ HTTP 请求默认超时 30 秒，可通过 `RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT
 | POST | `/api/v1/code/repositories/{alias}/impact` | 变更影响分析 |
 | GET | `/api/v1/code/repositories/{alias}/report` | 仓库索引报告 |
 | POST | `/api/v1/code/repositories/{alias}/software` | 软件全局投影 |
+| POST | `/api/v1/code/repositories/{alias}/views` | 代码库理解派生视图 |
 | GET | `/api/v1/code/repositories/{alias}/status` | 仓库索引状态 |
 | POST | `/api/web/model/config/upload` | 模型配置上传 |
 | POST | `/api/web/model/config/apply` | 模型配置应用 |

@@ -1,5 +1,5 @@
 use crate::{
-    api::{CodeRepositoryRegisterRequest, CodeRepositoryReportResponse, RequestContext},
+    api::{CodeRepositoryRegisterRequest, RequestContext},
     application::RelayKnowledgeService,
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
@@ -26,7 +26,7 @@ use repo_cli_index::{
 #[cfg(test)]
 use repo_cli_query::parse_query_kind;
 use repo_cli_query::{parse_context, parse_query};
-use repo_cli_report::render_markdown_report;
+pub(super) use repo_cli_report::render_report_response;
 
 /// Parsed `repo` CLI command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +111,7 @@ pub enum RepoCommand {
         freshness: FreshnessPolicy,
         limit: usize,
     },
+    View(super::repo_cli_view::RepoViewCommand),
 }
 
 pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
@@ -128,6 +129,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("status") => parse_status(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
         Some("software") => parse_software(&tokens[1..]),
+        Some("view") => super::repo_cli_view::parse_view(&tokens[1..]).map(RepoCommand::View),
         Some(other) => Err(CliError::UnexpectedArgument(other.to_owned())),
         None => Err(CliError::UnexpectedArgument("repo".to_owned())),
     }
@@ -477,23 +479,10 @@ pub async fn run_repo(
                 format,
             )
         }
+        RepoCommand::View(command) => {
+            super::repo_cli_view::run_view(service, command, context, format).await
+        }
     }
-}
-
-pub(super) fn render_report_response(
-    response: &CodeRepositoryReportResponse,
-    format: OutputFormat,
-) -> Result<String, CliError> {
-    if format == OutputFormat::Markdown {
-        return render_markdown_report(response);
-    }
-
-    render_response(
-        "code.repo.report",
-        response.metadata.clone(),
-        response,
-        format,
-    )
 }
 
 fn parse_register(tokens: &[String]) -> Result<RepoCommand, CliError> {
@@ -863,7 +852,7 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
     }
 }
 
-pub(super) fn selector(
+pub(crate) fn selector(
     alias: String,
     ref_selector: impl Into<String>,
     path_filters: Vec<String>,

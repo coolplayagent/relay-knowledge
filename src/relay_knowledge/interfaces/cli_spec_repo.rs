@@ -563,6 +563,103 @@ pub(super) fn repo_impact() -> CliCommandSpec {
     )
 }
 
+pub(super) fn repo_view() -> CliCommandSpec {
+    command!(
+        &["repo", "view"],
+        "relay-knowledge repo view <alias> [--kind architecture-layers|business-domains|dependency-tour|process-flow|affected-scope] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>] [--changed-path <path>]",
+        "Read an evidence-backed codebase understanding view derived from indexed graph facts.",
+        "code.repo.view",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[],
+        )],
+        &[
+            opt(
+                "--kind",
+                Some("kind"),
+                false,
+                false,
+                "View family to derive.",
+                Some("architecture-layers"),
+                &[
+                    "architecture-layers",
+                    "business-domains",
+                    "dependency-tour",
+                    "process-flow",
+                    "affected-scope",
+                ],
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed Git ref or worktree selector.",
+                Some("HEAD"),
+                &[],
+            ),
+            opt(
+                "--path",
+                Some("filter"),
+                false,
+                true,
+                "Restricts the selected repository scope by path prefix.",
+                None,
+                &[],
+            ),
+            opt(
+                "--language",
+                Some("id"),
+                false,
+                true,
+                "Restricts the selected repository scope by language id.",
+                None,
+                &[],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls code graph freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum node, edge, and section count requested from the API.",
+                Some("20"),
+                &[],
+            ),
+            opt(
+                "--changed-path",
+                Some("path"),
+                false,
+                true,
+                "Changed path used by affected-scope deterministic v1.",
+                None,
+                &[],
+            ),
+        ],
+        &[
+            "relay-knowledge repo view core --kind dependency-tour --freshness wait-until-fresh --format json",
+            "relay-knowledge repo view core --kind affected-scope --changed-path src/lib.rs --format json",
+        ],
+        &[
+            "Views are derived read models from committed code graph facts; narrative sections are not persisted as graph facts.",
+            "`affected-scope` requires one or more `--changed-path` values in deterministic v1.",
+        ],
+    )
+}
+
 pub(super) fn repo_status() -> CliCommandSpec {
     command!(
         &["repo", "status"],

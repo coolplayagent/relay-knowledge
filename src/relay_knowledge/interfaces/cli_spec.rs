@@ -159,7 +159,7 @@ pub(super) fn cli_spec() -> CliSpec {
                 Some("base-url"),
                 false,
                 false,
-                "Sends supported repository index, status, scope preview, and query commands to a resident service HTTP API instead of opening local runtime storage.",
+                "Sends supported repository index, status, scope preview, query, and view commands to a resident service HTTP API instead of opening local runtime storage.",
                 None,
                 &[],
             ),

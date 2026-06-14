@@ -81,6 +81,20 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             "changed_in_scope=1 results=1\n",
         ),
         (
+            "code.repo.view",
+            serde_json::json!({
+                "request": {"view_kind": "dependency_tour"},
+                "nodes": [{"id": "module:api"}],
+                "edges": [{"id": "depends_on:module:api->module:domain"}],
+                "sections": [{"id": "section:dependency_tour"}],
+                "evidence": [{"id": "evidence:1"}],
+                "metadata": {"stale": true},
+                "freshness": {"scope_stale": true},
+                "degraded_reason": null,
+            }),
+            "view=dependency_tour nodes=1 edges=1 sections=1 evidence=1 stale=true degraded=none\n",
+        ),
+        (
             "code.repo.feature_flags",
             serde_json::json!({
                 "flags": [{"feature_flag_id": "flag:1"}],
