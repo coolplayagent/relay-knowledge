@@ -11,7 +11,8 @@ use crate::{
     api::{ApiError, InterfaceKind, RequestContext},
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
-        CodeIndexRequest, CodeRepositorySelector, CodeRetrievalRequest, SoftwareGlobalRequest,
+        CodeIndexRequest, CodeRepositorySelector, CodeRetrievalRequest, CodebaseViewRequest,
+        SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::normalize_index_request,
 };
@@ -51,6 +52,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/software",
             post(code_repository_software),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/views",
+            post(codebase_view),
         )
         .route(
             "/api/v1/code/repositories/{alias}/status",
@@ -240,6 +245,28 @@ async fn code_repository_software(
     }
 }
 
+async fn codebase_view(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<CodebaseViewRequest>,
+) -> Response {
+    if let Some(error) = normalize_view_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .codebase_view(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
 async fn code_repository_status(
     State(state): State<WebState>,
     AxumPath(alias): AxumPath<String>,
@@ -376,6 +403,25 @@ fn normalize_software_request(request: &mut SoftwareGlobalRequest) -> Option<Api
         request.kind,
         request.freshness_policy,
         request.limit,
+    ) {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_view_request(request: &mut CodebaseViewRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match CodebaseViewRequest::new(
+        request.repository.clone(),
+        request.view_kind,
+        request.freshness_policy,
+        request.limit,
+        std::mem::take(&mut request.changed_paths),
     ) {
         Ok(validated) => {
             *request = validated;

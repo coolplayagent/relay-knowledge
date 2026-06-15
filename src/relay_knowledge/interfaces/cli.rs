@@ -18,6 +18,8 @@ mod ops_cli;
 mod remote_cli;
 #[path = "repo_cli.rs"]
 mod repo_cli;
+#[path = "repo_cli_view.rs"]
+pub(crate) mod repo_cli_view;
 #[path = "repo_set_cli.rs"]
 mod repo_set_cli;
 #[path = "service_cli.rs"]
@@ -199,6 +201,7 @@ fn option_consumes_value(option: &str) -> bool {
             | "--ref"
             | "--base"
             | "--head"
+            | "--changed-path"
             | "--query"
             | "--description"
             | "--id"

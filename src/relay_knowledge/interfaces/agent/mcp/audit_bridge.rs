@@ -69,7 +69,7 @@ pub(super) async fn record_mcp_tool_audit(
         freshness: audit_freshness(structured),
         limit: audit_limit(structured),
         result_count: audit_result_count(structured),
-        truncated: structured["truncated"].as_bool().unwrap_or(false),
+        truncated: audit_truncated(structured),
         elapsed_ms,
         error_kind,
     };
@@ -208,6 +208,25 @@ fn audit_limit(structured: &Value) -> Option<usize> {
         .and_then(|value| usize::try_from(value).ok())
 }
 
+fn audit_truncated(structured: &Value) -> bool {
+    structured["truncated"].as_bool().unwrap_or(false)
+        || structured["budget"]["snapshot_truncated"]
+            .as_bool()
+            .unwrap_or(false)
+        || structured["budget"]["nodes_truncated"]
+            .as_bool()
+            .unwrap_or(false)
+        || structured["budget"]["edges_truncated"]
+            .as_bool()
+            .unwrap_or(false)
+        || structured["budget"]["sections_truncated"]
+            .as_bool()
+            .unwrap_or(false)
+        || structured["budget"]["evidence_truncated"]
+            .as_bool()
+            .unwrap_or(false)
+}
+
 fn audit_result_count(structured: &Value) -> Option<usize> {
     if let Some(returned) = structured["budget_used"]["returned_count"].as_u64() {
         return usize::try_from(returned).ok();
@@ -217,6 +236,7 @@ fn audit_result_count(structured: &Value) -> Option<usize> {
         .as_array()
         .map(Vec::len)
         .or_else(|| structured["flags"].as_array().map(Vec::len))
+        .or_else(|| structured["sections"].as_array().map(Vec::len))
         .or_else(|| software_projection_result_count(structured))
 }
 
@@ -250,6 +270,7 @@ mod tests {
 
     use super::{
         audit_freshness, audit_graph_version, audit_limit, audit_result_count, audit_source_scope,
+        audit_truncated,
     };
 
     #[test]
@@ -306,5 +327,24 @@ mod tests {
             Some("wait-until-fresh")
         );
         assert_eq!(audit_limit(&structured), Some(13));
+    }
+
+    #[test]
+    fn audit_reads_codebase_view_budget_shape() {
+        let structured = json!({
+            "sections": [{"id": "section:one"}, {"id": "section:two"}],
+            "budget": {
+                "requested_limit": 2,
+                "snapshot_row_limit": 40,
+                "snapshot_truncated": false,
+                "nodes_truncated": true,
+                "edges_truncated": false,
+                "sections_truncated": false,
+                "evidence_truncated": false
+            }
+        });
+
+        assert_eq!(audit_result_count(&structured), Some(2));
+        assert!(audit_truncated(&structured));
     }
 }

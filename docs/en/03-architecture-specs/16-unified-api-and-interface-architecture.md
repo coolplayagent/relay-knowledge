@@ -27,7 +27,7 @@ Stable requests express at least operation, scope, freshness policy, budget, for
 
 Service deployment control-plane APIs cover runtime/status/health/doctor, service manager plan, operator pause/resume/status, worker task/lease/dead-letter/checkpoint, storage topology and shard-catalog diagnostics, repository register/index/status/report, repository-set refresh, audit, authorization identity, QoS admission, and overload decisions.
 
-New control-plane capabilities first define shared `api` request/response types and application service methods, then map to CLI, Web, MCP, or HTTP routes. Existing same-origin Web operations continue to use `/api/web/operations/execute`; external control-plane HTTP APIs use versioned `/api/v1/control/*` names. The current preview exposes only read-only `status`, `health`, `service/status`, and `storage/topology` routes while keeping CLI JSON, Web, and MCP tool semantics compatible.
+New control-plane capabilities first define shared `api` request/response types and application service methods, then map to CLI, Web, MCP, or HTTP routes. Existing same-origin Web operations continue to use `/api/web/operations/execute`; external control-plane HTTP APIs use versioned `/api/v1/control/*` names. Code repository read APIs use versioned `/api/v1/code/repositories/{alias}/*` routes, including `/views` for graph-derived codebase understanding views. The current preview exposes read-only `status`, `health`, `service/status`, `storage/topology`, and code repository routes while keeping CLI JSON, Web, and MCP tool semantics compatible.
 
 ## 5. Error Model
 

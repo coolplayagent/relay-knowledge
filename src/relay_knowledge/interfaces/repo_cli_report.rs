@@ -1,10 +1,24 @@
 use crate::api::CodeRepositoryReportResponse;
 
-use super::CliError;
+use super::{CliError, OutputFormat, render_response};
 
-pub(super) fn render_markdown_report(
+pub(crate) fn render_report_response(
     response: &CodeRepositoryReportResponse,
+    format: OutputFormat,
 ) -> Result<String, CliError> {
+    if format == OutputFormat::Markdown {
+        return render_markdown_report(response);
+    }
+
+    render_response(
+        "code.repo.report",
+        response.metadata.clone(),
+        response,
+        format,
+    )
+}
+
+fn render_markdown_report(response: &CodeRepositoryReportResponse) -> Result<String, CliError> {
     let report = &response.report;
     let mut output = String::new();
     output.push_str(&format!("# Code Repository Report: {}\n\n", report.alias));

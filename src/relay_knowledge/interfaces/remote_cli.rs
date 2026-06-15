@@ -6,8 +6,8 @@ use crate::{
         ApiError, CodeGraphContextResponse, CodeRepositoryFeatureFlagsResponse,
         CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse,
         CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
-        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, ErrorKind,
-        RequestContext, SoftwareGlobalResponse,
+        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, CodebaseViewResponse,
+        ErrorKind, RequestContext, SoftwareGlobalResponse,
     },
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
@@ -39,6 +39,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::Impact { .. }
                 | RepoCommand::Report { .. }
                 | RepoCommand::Software { .. }
+                | RepoCommand::View(_)
                 | RepoCommand::Status { .. }
         )
     )
@@ -330,6 +331,20 @@ pub(super) async fn run_remote(
 
             render_response(
                 "code.repo.software",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::View(command) => {
+            let request = super::repo_cli_view::request(command.clone(), format)?;
+            let response = client
+                .post_repository::<_, CodebaseViewResponse>(&command.alias, "views", &request)
+                .await?;
+
+            render_response(
+                "code.repo.view",
                 response.metadata.clone(),
                 &response,
                 format,
