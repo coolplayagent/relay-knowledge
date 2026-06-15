@@ -7,21 +7,22 @@ use crate::{
     },
     storage::{
         AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeSymbolSearchRequest, FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus,
-        FileIndexRootUpdate, FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest,
-        GraphCanvasStorageSnapshot, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
-        GraphStore, HealthStorageSnapshot, IndexCursor, IndexRefreshClaimRequest,
-        IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
-        IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
-        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
-        StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure,
-        WorkerTaskSeed,
+        CodeSymbolSearchRequest, FileContentSearchHit, FileContentSearchRequest,
+        FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus, FileIndexRootUpdate,
+        FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
+        GraphInspection, GraphSearchOutcome, GraphSearchRequest, GraphStore, HealthStorageSnapshot,
+        IndexCursor, IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
+        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
+        MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal, ProposalDecision,
+        ProposalListRequest, ServiceOperatorUpdate, StorageFuture, WorkerTaskClaimRequest,
+        WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
     },
 };
 
 use super::{
     SqliteGraphStore, canvas, code::code_report, code_graph, commit_batch, current_graph_version,
-    file_index, helpers::read_mutations_after, indexing, inspect_graph, operations, retrieval,
+    file_index, file_index_content, helpers::read_mutations_after, indexing, inspect_graph,
+    operations, retrieval,
 };
 
 impl GraphStore for SqliteGraphStore {
@@ -256,6 +257,21 @@ impl IndexStore for SqliteGraphStore {
             deadline,
             "file query timed out waiting for storage lock",
             move |connection| file_index::search(connection, request, deadline),
+        )
+    }
+
+    fn search_file_content(
+        &self,
+        request: FileContentSearchRequest,
+    ) -> StorageFuture<'_, Vec<FileContentSearchHit>> {
+        let started = Instant::now();
+        let deadline = started
+            .checked_add(std::time::Duration::from_millis(request.timeout_ms))
+            .unwrap_or(started);
+        self.run_read_until(
+            deadline,
+            "file content query timed out waiting for storage lock",
+            move |connection| file_index_content::search(connection, request, deadline),
         )
     }
 

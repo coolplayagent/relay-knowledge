@@ -21,6 +21,12 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             missing_file_count INTEGER NOT NULL DEFAULT 0,
             scan_error_count INTEGER NOT NULL DEFAULT 0,
             truncated INTEGER NOT NULL DEFAULT 0,
+            content_truncated INTEGER NOT NULL DEFAULT 0,
+            content_read_error_count INTEGER NOT NULL DEFAULT 0,
+            indexed_content_count INTEGER NOT NULL DEFAULT 0,
+            skipped_content_count INTEGER NOT NULL DEFAULT 0,
+            unchanged_content_count INTEGER NOT NULL DEFAULT 0,
+            stale_content_cursor_count INTEGER NOT NULL DEFAULT 0,
             last_indexed_at_ms INTEGER,
             last_error TEXT,
             PRIMARY KEY (scope_id, root_id)
@@ -56,7 +62,45 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             extension,
             parent_dir
         );
+
         ",
+    )?;
+    super::file_index_content::initialize_schema(connection)?;
+    super::schema_columns::ensure_column(
+        connection,
+        "file_index_roots",
+        "content_truncated",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::schema_columns::ensure_column(
+        connection,
+        "file_index_roots",
+        "content_read_error_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::schema_columns::ensure_column(
+        connection,
+        "file_index_roots",
+        "indexed_content_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::schema_columns::ensure_column(
+        connection,
+        "file_index_roots",
+        "skipped_content_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::schema_columns::ensure_column(
+        connection,
+        "file_index_roots",
+        "unchanged_content_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::schema_columns::ensure_column(
+        connection,
+        "file_index_roots",
+        "stale_content_cursor_count",
+        "INTEGER NOT NULL DEFAULT 0",
     )?;
 
     Ok(())
@@ -74,7 +118,11 @@ pub(super) fn replace_root(
         current.insert(entry_key(&entry.scope_id, &entry.root_id, &entry.path));
     }
 
-    if update.scan_error_count == 0 && !update.truncated {
+    let file_scan_completed = update.scan_error_count == 0 && !update.truncated;
+    let content_scan_completed =
+        file_scan_completed && !update.content_truncated && update.content_read_error_count == 0;
+
+    if file_scan_completed {
         for key in existing.difference(&current) {
             transaction.execute(
                 "UPDATE file_index_entries
@@ -94,9 +142,28 @@ pub(super) fn replace_root(
         }
     }
 
-    for entry in update.entries {
-        upsert_entry(&transaction, entry, update.now_ms)?;
+    for entry in &update.entries {
+        upsert_entry(&transaction, entry.clone(), update.now_ms)?;
     }
+    let processed_content_keys = update
+        .processed_content_paths
+        .iter()
+        .map(|path| entry_key(&update.root.scope_id, &update.root.root_id, path))
+        .collect::<BTreeSet<_>>();
+    let content_counts = super::file_index_content::replace_entries(
+        &transaction,
+        super::file_index_content::ContentReplacementRequest {
+            scope_id: &update.root.scope_id,
+            root_id: &update.root.root_id,
+            entries_len: update.entries.len(),
+            observed_file_keys: &current,
+            processed_content_keys: &processed_content_keys,
+            content_entries: &update.content_entries,
+            file_scan_completed,
+            content_scan_completed,
+            now_ms: update.now_ms,
+        },
+    )?;
 
     let indexed_file_count = count_entries(
         &transaction,
@@ -118,6 +185,12 @@ pub(super) fn replace_root(
             missing_file_count,
             scan_error_count: update.scan_error_count,
             truncated: update.truncated,
+            content_truncated: update.content_truncated,
+            content_read_error_count: update.content_read_error_count,
+            indexed_content_count: content_counts.indexed_content_count,
+            skipped_content_count: content_counts.skipped_content_count,
+            unchanged_content_count: content_counts.unchanged_content_count,
+            stale_content_cursor_count: content_counts.stale_content_cursor_count,
         },
         update.now_ms,
         update.last_error.as_deref(),
@@ -245,7 +318,9 @@ pub(super) fn diagnostics(connection: &Connection) -> Result<FileIndexDiagnostic
     let mut statement = connection.prepare(
         "
         SELECT scope_id, root_id, root_path, indexed_file_count, missing_file_count,
-               scan_error_count, truncated, last_indexed_at_ms, last_error
+               scan_error_count, truncated, content_truncated, content_read_error_count,
+               indexed_content_count, skipped_content_count, unchanged_content_count,
+               stale_content_cursor_count, last_indexed_at_ms, last_error
         FROM file_index_roots
         ORDER BY scope_id ASC, root_id ASC
         ",
@@ -259,8 +334,14 @@ pub(super) fn diagnostics(connection: &Connection) -> Result<FileIndexDiagnostic
             missing_file_count: row.get(4)?,
             scan_error_count: row.get(5)?,
             truncated: row.get(6)?,
-            last_indexed_at_ms: row.get(7)?,
-            last_error: row.get(8)?,
+            content_truncated: row.get(7)?,
+            content_read_error_count: row.get(8)?,
+            indexed_content_count: row.get(9)?,
+            skipped_content_count: row.get(10)?,
+            unchanged_content_count: row.get(11)?,
+            stale_content_cursor_count: row.get(12)?,
+            last_indexed_at_ms: row.get(13)?,
+            last_error: row.get(14)?,
         })
     })?;
     let roots = rows.collect::<Result<Vec<_>, _>>()?;
@@ -275,12 +356,33 @@ pub(super) fn diagnostics(connection: &Connection) -> Result<FileIndexDiagnostic
             .iter()
             .map(|root| root.missing_file_count)
             .sum::<usize>(),
+        indexed_content_count: roots
+            .iter()
+            .map(|root| root.indexed_content_count)
+            .sum::<usize>(),
+        skipped_content_count: roots
+            .iter()
+            .map(|root| root.skipped_content_count)
+            .sum::<usize>(),
+        unchanged_content_count: roots
+            .iter()
+            .map(|root| root.unchanged_content_count)
+            .sum::<usize>(),
+        stale_content_cursor_count: roots
+            .iter()
+            .map(|root| root.stale_content_cursor_count)
+            .sum::<usize>(),
+        content_read_error_count: roots
+            .iter()
+            .map(|root| root.content_read_error_count)
+            .sum::<usize>(),
         scan_error_count: roots
             .iter()
             .map(|root| root.scan_error_count)
             .sum::<usize>(),
         truncated_root_count: roots.iter().filter(|root| root.truncated).count(),
         roots,
+        content_cursors: Vec::new(),
     })
 }
 
@@ -371,6 +473,12 @@ struct RootStatusCounts {
     missing_file_count: usize,
     scan_error_count: usize,
     truncated: bool,
+    content_truncated: bool,
+    content_read_error_count: usize,
+    indexed_content_count: usize,
+    skipped_content_count: usize,
+    unchanged_content_count: usize,
+    stale_content_cursor_count: usize,
 }
 
 fn write_root_status(
@@ -384,15 +492,23 @@ fn write_root_status(
         "
         INSERT INTO file_index_roots (
             scope_id, root_id, root_path, indexed_file_count, missing_file_count,
-            scan_error_count, truncated, last_indexed_at_ms, last_error
+            scan_error_count, truncated, content_truncated, content_read_error_count,
+            indexed_content_count, skipped_content_count, unchanged_content_count,
+            stale_content_cursor_count, last_indexed_at_ms, last_error
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ON CONFLICT(scope_id, root_id) DO UPDATE SET
             root_path = excluded.root_path,
             indexed_file_count = excluded.indexed_file_count,
             missing_file_count = excluded.missing_file_count,
             scan_error_count = excluded.scan_error_count,
             truncated = excluded.truncated,
+            content_truncated = excluded.content_truncated,
+            content_read_error_count = excluded.content_read_error_count,
+            indexed_content_count = excluded.indexed_content_count,
+            skipped_content_count = excluded.skipped_content_count,
+            unchanged_content_count = excluded.unchanged_content_count,
+            stale_content_cursor_count = excluded.stale_content_cursor_count,
             last_indexed_at_ms = excluded.last_indexed_at_ms,
             last_error = excluded.last_error
         ",
@@ -404,6 +520,12 @@ fn write_root_status(
             counts.missing_file_count,
             counts.scan_error_count,
             counts.truncated,
+            counts.content_truncated,
+            counts.content_read_error_count,
+            counts.indexed_content_count,
+            counts.skipped_content_count,
+            counts.unchanged_content_count,
+            counts.stale_content_cursor_count,
             now_ms,
             last_error,
         ],
@@ -443,6 +565,7 @@ fn mark_root_unconfigured(
         ",
         params![scope_id, root_id],
     )?;
+    super::file_index_content::mark_root_unconfigured(connection, scope_id, root_id, now_ms)?;
     let Some(mut status) = root_status(connection, scope_id, root_id)? else {
         return Ok(());
     };
@@ -464,6 +587,12 @@ fn mark_root_unconfigured(
             missing_file_count: status.missing_file_count,
             scan_error_count: status.scan_error_count,
             truncated: status.truncated,
+            content_truncated: false,
+            content_read_error_count: 0,
+            indexed_content_count: 0,
+            skipped_content_count: 0,
+            unchanged_content_count: 0,
+            stale_content_cursor_count: 0,
         },
         now_ms,
         last_error.as_deref(),
@@ -481,7 +610,9 @@ fn root_status(
         .query_row(
             "
             SELECT scope_id, root_id, root_path, indexed_file_count, missing_file_count,
-                   scan_error_count, truncated, last_indexed_at_ms, last_error
+                   scan_error_count, truncated, content_truncated, content_read_error_count,
+                   indexed_content_count, skipped_content_count, unchanged_content_count,
+                   stale_content_cursor_count, last_indexed_at_ms, last_error
             FROM file_index_roots
             WHERE scope_id = ?1 AND root_id = ?2
             ",
@@ -495,8 +626,14 @@ fn root_status(
                     missing_file_count: row.get(4)?,
                     scan_error_count: row.get(5)?,
                     truncated: row.get(6)?,
-                    last_indexed_at_ms: row.get(7)?,
-                    last_error: row.get(8)?,
+                    content_truncated: row.get(7)?,
+                    content_read_error_count: row.get(8)?,
+                    indexed_content_count: row.get(9)?,
+                    skipped_content_count: row.get(10)?,
+                    unchanged_content_count: row.get(11)?,
+                    stale_content_cursor_count: row.get(12)?,
+                    last_indexed_at_ms: row.get(13)?,
+                    last_error: row.get(14)?,
                 })
             },
         )
@@ -569,298 +706,9 @@ fn u64_from_sql(value: i64) -> Result<u64, rusqlite::Error> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::storage::FileIndexRoot;
+#[path = "file_index_tests.rs"]
+mod tests;
 
-    #[test]
-    fn replace_search_and_diagnostics_round_trip() {
-        let mut connection = open_connection();
-        let first = update(
-            vec![
-                entry(
-                    "/workspace/docs/quarterly-design.pdf",
-                    "docs/quarterly-design.pdf",
-                    "pdf",
-                ),
-                entry(
-                    "/workspace/docs/quarterly-notes.md",
-                    "docs/quarterly-notes.md",
-                    "md",
-                ),
-            ],
-            10,
-        );
-        let status = replace_root(&mut connection, first).expect("root should be indexed");
-        assert_eq!(status.indexed_file_count, 2);
-        assert_eq!(status.missing_file_count, 0);
-        assert_eq!(status.last_indexed_at_ms, Some(10));
-
-        let hits = search(
-            &connection,
-            FileSearchRequest {
-                query: "quarterly design pdf".to_owned(),
-                source_scope: Some("local-files".to_owned()),
-                root_id: Some("root-a".to_owned()),
-                limit: 5,
-                timeout_ms: 750,
-            },
-            deadline(),
-        )
-        .expect("indexed files should be searchable");
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].rank, 1);
-        assert_eq!(hits[0].file_name, "quarterly-design.pdf");
-        assert_eq!(hits[0].extension.as_deref(), Some("pdf"));
-        assert_eq!(hits[0].status, INDEXED_STATUS);
-
-        let diagnostics = diagnostics(&connection).expect("diagnostics should load");
-        assert_eq!(diagnostics.root_count, 1);
-        assert_eq!(diagnostics.indexed_file_count, 2);
-        assert_eq!(diagnostics.missing_file_count, 0);
-
-        let second = update(
-            vec![entry(
-                "/workspace/docs/quarterly-design.pdf",
-                "docs/quarterly-design.pdf",
-                "pdf",
-            )],
-            20,
-        );
-        let status = replace_root(&mut connection, second).expect("root should update");
-        assert_eq!(status.indexed_file_count, 1);
-        assert_eq!(status.missing_file_count, 1);
-
-        let removed = search(
-            &connection,
-            FileSearchRequest {
-                query: "quarterly notes".to_owned(),
-                source_scope: Some("local-files".to_owned()),
-                root_id: Some("root-a".to_owned()),
-                limit: 5,
-                timeout_ms: 750,
-            },
-            deadline(),
-        )
-        .expect("query should run");
-        assert!(removed.is_empty());
-    }
-
-    #[test]
-    fn failed_scan_preserves_previous_indexed_entries() {
-        let mut connection = open_connection();
-        replace_root(
-            &mut connection,
-            update(
-                vec![
-                    entry("/workspace/docs/keep.pdf", "docs/keep.pdf", "pdf"),
-                    entry("/workspace/docs/older.txt", "docs/older.txt", "txt"),
-                ],
-                10,
-            ),
-        )
-        .expect("initial root should be indexed");
-
-        let status = replace_root(
-            &mut connection,
-            FileIndexRootUpdate {
-                root: root(),
-                entries: vec![entry("/workspace/docs/keep.pdf", "docs/keep.pdf", "pdf")],
-                scan_error_count: 1,
-                truncated: false,
-                last_error: Some("permission denied".to_owned()),
-                now_ms: 20,
-            },
-        )
-        .expect("failed scan should update diagnostics");
-        assert_eq!(status.indexed_file_count, 2);
-        assert_eq!(status.missing_file_count, 0);
-        assert_eq!(status.last_error.as_deref(), Some("permission denied"));
-
-        let hits = search(
-            &connection,
-            FileSearchRequest {
-                query: "keep pdf".to_owned(),
-                source_scope: Some("local-files".to_owned()),
-                root_id: Some("root-a".to_owned()),
-                limit: 5,
-                timeout_ms: 750,
-            },
-            deadline(),
-        )
-        .expect("previous entries should remain searchable");
-        assert_eq!(hits.len(), 1);
-
-        let older_hits = search(
-            &connection,
-            FileSearchRequest {
-                query: "older txt".to_owned(),
-                source_scope: Some("local-files".to_owned()),
-                root_id: Some("root-a".to_owned()),
-                limit: 5,
-                timeout_ms: 750,
-            },
-            deadline(),
-        )
-        .expect("unobserved entries should survive partial scan errors");
-        assert_eq!(older_hits.len(), 1);
-    }
-
-    #[test]
-    fn truncated_scan_preserves_unobserved_entries() {
-        let mut connection = open_connection();
-        replace_root(
-            &mut connection,
-            update(
-                vec![
-                    entry("/workspace/docs/first.pdf", "docs/first.pdf", "pdf"),
-                    entry("/workspace/docs/second.pdf", "docs/second.pdf", "pdf"),
-                ],
-                10,
-            ),
-        )
-        .expect("initial root should be indexed");
-
-        let status = replace_root(
-            &mut connection,
-            FileIndexRootUpdate {
-                root: root(),
-                entries: vec![entry("/workspace/docs/first.pdf", "docs/first.pdf", "pdf")],
-                scan_error_count: 0,
-                truncated: true,
-                last_error: None,
-                now_ms: 20,
-            },
-        )
-        .expect("truncated scan should update diagnostics");
-        assert_eq!(status.indexed_file_count, 2);
-        assert_eq!(status.missing_file_count, 0);
-        assert!(status.truncated);
-
-        let hits = search(
-            &connection,
-            FileSearchRequest {
-                query: "second pdf".to_owned(),
-                source_scope: Some("local-files".to_owned()),
-                root_id: Some("root-a".to_owned()),
-                limit: 5,
-                timeout_ms: 750,
-            },
-            deadline(),
-        )
-        .expect("unobserved entries should survive truncated scans");
-        assert_eq!(hits.len(), 1);
-    }
-
-    #[test]
-    fn unconfigured_roots_are_removed_from_search() {
-        let mut connection = open_connection();
-        replace_root(
-            &mut connection,
-            update(
-                vec![entry(
-                    "/workspace/docs/retired.pdf",
-                    "docs/retired.pdf",
-                    "pdf",
-                )],
-                10,
-            ),
-        )
-        .expect("initial root should be indexed");
-
-        let diagnostics = mark_unconfigured_roots(&mut connection, Vec::new(), 20)
-            .expect("unconfigured roots should be marked");
-        assert_eq!(diagnostics.indexed_file_count, 0);
-        assert_eq!(diagnostics.missing_file_count, 1);
-        assert_eq!(diagnostics.scan_error_count, 1);
-
-        let hits = search(
-            &connection,
-            FileSearchRequest {
-                query: "retired pdf".to_owned(),
-                source_scope: Some("local-files".to_owned()),
-                root_id: Some("root-a".to_owned()),
-                limit: 5,
-                timeout_ms: 750,
-            },
-            deadline(),
-        )
-        .expect("query should run");
-        assert!(hits.is_empty());
-    }
-
-    #[test]
-    fn search_validation_and_numeric_boundaries_are_explicit() {
-        let connection = open_connection();
-        let error = search(
-            &connection,
-            FileSearchRequest {
-                query: "!!!".to_owned(),
-                source_scope: None,
-                root_id: None,
-                limit: 10,
-                timeout_ms: 750,
-            },
-            deadline(),
-        )
-        .expect_err("query without terms should fail");
-        assert!(error.to_string().contains("searchable term"));
-        assert!(limit_i64(usize::MAX).is_err());
-        assert!(i64_from_u64(u64::MAX).is_err());
-        assert!(u64_from_sql(-1).is_err());
-        assert_eq!(
-            u64_from_sql(42).expect("positive integer should convert"),
-            42
-        );
-    }
-
-    fn open_connection() -> Connection {
-        let connection = Connection::open_in_memory().expect("connection should open");
-        initialize_schema(&connection).expect("schema should initialize");
-        connection
-    }
-
-    fn update(entries: Vec<FileIndexEntry>, now_ms: u64) -> FileIndexRootUpdate {
-        FileIndexRootUpdate {
-            root: root(),
-            entries,
-            scan_error_count: 0,
-            truncated: false,
-            last_error: None,
-            now_ms,
-        }
-    }
-
-    fn root() -> FileIndexRoot {
-        FileIndexRoot {
-            scope_id: "local-files".to_owned(),
-            root_id: "root-a".to_owned(),
-            root_path: "/workspace".to_owned(),
-        }
-    }
-
-    fn deadline() -> Instant {
-        Instant::now() + std::time::Duration::from_millis(750)
-    }
-
-    fn entry(path: &str, relative_path: &str, extension: &str) -> FileIndexEntry {
-        let file_name = path
-            .rsplit('/')
-            .next()
-            .expect("path should include a file name")
-            .to_owned();
-
-        FileIndexEntry {
-            scope_id: "local-files".to_owned(),
-            root_id: "root-a".to_owned(),
-            path: path.to_owned(),
-            relative_path: relative_path.to_owned(),
-            file_name,
-            extension: Some(extension.to_owned()),
-            parent_dir: "/workspace/docs".to_owned(),
-            size_bytes: 128,
-            modified_at_ms: 1,
-            fingerprint: "128:1".to_owned(),
-        }
-    }
-}
+#[cfg(test)]
+#[path = "file_index_retirement_tests.rs"]
+mod retirement_tests;

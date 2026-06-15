@@ -4,6 +4,8 @@
 mod web_code_api;
 #[path = "web_code_index_request.rs"]
 mod web_code_index_request;
+#[path = "web_files.rs"]
+mod web_files;
 #[path = "web_model_config.rs"]
 mod web_model_config;
 
@@ -26,11 +28,11 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::{
     api::{
-        ApiError, AuditQueryApiRequest, CodeRepositoryRegisterRequest, ErrorKind, FileIndexRequest,
-        FileQueryRequest, GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest,
-        GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
-        IngestRequest, InterfaceKind, ProposalDecisionApiRequest, ProposalListApiRequest,
-        RequestContext, WorkerRunRequest, WorkerStatusRequest,
+        ApiError, AuditQueryApiRequest, CodeRepositoryRegisterRequest, ErrorKind,
+        GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, GraphInspectionRequest,
+        HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence, IngestRequest, InterfaceKind,
+        ProposalDecisionApiRequest, ProposalListApiRequest, RequestContext, WorkerRunRequest,
+        WorkerStatusRequest,
     },
     application::RelayKnowledgeService,
     domain::{
@@ -237,17 +239,8 @@ async fn dispatch_operation(
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
-        "files.index" => {
-            let response = service
-                .index_files(file_index_request(payload)?, context)
-                .await?;
-            Ok((response.metadata.clone(), json!(response)))
-        }
-        "files.query" => {
-            let response = service
-                .query_files(file_query_request(payload)?, context)
-                .await?;
-            Ok((response.metadata.clone(), json!(response)))
+        "files.index" | "files.query" | "files.content" => {
+            web_files::dispatch_file_operation(service, operation, payload, context).await
         }
         "service.doctor" | "service.run.streamable_http" => {
             let response = service.service_status(context).await?;
@@ -600,26 +593,6 @@ fn code_register_alias(payload: &Value) -> Result<String, WebError> {
         Some(_) => Err(WebError::bad_request("alias must be a string".to_owned())),
         None => Ok(String::new()),
     }
-}
-
-fn file_index_request(payload: &Value) -> Result<FileIndexRequest, WebError> {
-    Ok(FileIndexRequest {
-        source_scope: optional_string_field(payload, "source_scope"),
-        roots: optional_string_array_field(payload, "roots")?,
-    })
-}
-
-fn file_query_request(payload: &Value) -> Result<FileQueryRequest, WebError> {
-    Ok(FileQueryRequest {
-        query: string_field(payload, "query")?.to_owned(),
-        source_scope: optional_string_field(payload, "source_scope"),
-        root_id: optional_string_field(payload, "root_id"),
-        limit: usize_field(payload, "limit")?,
-        freshness_policy: optional_string_field(payload, "freshness")
-            .map(|value| parse_freshness(&value))
-            .transpose()?
-            .unwrap_or(FreshnessPolicy::AllowStale),
-    })
 }
 
 fn code_query_request(payload: &Value) -> Result<CodeRetrievalRequest, WebError> {
@@ -989,6 +962,10 @@ mod control_tests;
 #[cfg(test)]
 #[path = "web_code_api_tests.rs"]
 mod code_api_tests;
+
+#[cfg(test)]
+#[path = "web_files_tests.rs"]
+mod files_tests;
 
 #[cfg(test)]
 #[path = "web_tests.rs"]

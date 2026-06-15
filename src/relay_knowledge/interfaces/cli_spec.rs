@@ -56,6 +56,8 @@ macro_rules! command {
 
 #[path = "cli_spec_data.rs"]
 mod cli_spec_data;
+#[path = "cli_spec_files.rs"]
+mod cli_spec_files;
 #[path = "cli_spec_repo.rs"]
 mod cli_spec_repo;
 #[path = "cli_spec_repo_set.rs"]
