@@ -46,6 +46,10 @@ Shared code-repository behavior is partitioned by explicit responsibility: `inde
 
 `model_provider` keeps profile normalization in `profile_config`, fallback policy in `fallback`, durable JSON writes in `persistence`, provider HTTP and response diagnostics in `connectivity`, and catalog fetch plus catalog data interpretation in `catalog`. Cross-module protocol tests live in `protocol_tests`; production behavior must not be recombined into a generic helper module.
 
+### 3.3 Dependency Parser Ownership
+
+Dependency parsing groups shared syntax by the format it interprets: `cargo_source` classifies Cargo lock sources, `npm_lock` interprets npm references and lock entries, `python_requirements` parses Python requirement syntax, `toml_inline_table` reads TOML dependency fields, and `gradle_notation` parses Gradle calls and coordinates. Ecosystem parsers depend on these narrow modules; a cross-ecosystem `support` module is prohibited.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

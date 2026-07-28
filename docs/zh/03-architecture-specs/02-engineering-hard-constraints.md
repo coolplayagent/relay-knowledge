@@ -46,6 +46,10 @@
 
 `model_provider` 必须把 profile 归一化放在 `profile_config`，fallback policy 放在 `fallback`，持久 JSON 写入放在 `persistence`，provider HTTP 与响应诊断放在 `connectivity`，catalog 获取和 catalog 数据解释放在 `catalog`。跨模块协议测试统一放在 `protocol_tests`；不得把生产行为重新合并进通用 helper 模块。
 
+### 3.3 依赖解析器职责
+
+依赖解析必须按所解释的格式划分共享语法：`cargo_source` 分类 Cargo lock source，`npm_lock` 解释 npm 引用和 lock entry，`python_requirements` 解析 Python requirement 语法，`toml_inline_table` 读取 TOML 依赖字段，`gradle_notation` 解析 Gradle 调用和坐标。各生态解析器依赖这些窄模块，不得重新建立跨生态的 `support` 模块。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

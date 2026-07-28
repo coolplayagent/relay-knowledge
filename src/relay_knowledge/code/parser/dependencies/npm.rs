@@ -1,8 +1,9 @@
 use serde_json::Value;
 
 use super::{
-    DependencySeed, SeedInput, line_containing_json_key, npm_group, push_seed,
-    support::{npm_requirement_is_local, package_lock_entry_is_local, package_lock_package_name},
+    DependencySeed, SeedInput, line_containing_json_key, npm_group,
+    npm_lock::{npm_requirement_is_local, package_lock_entry_is_local, package_lock_package_name},
+    push_seed,
 };
 
 pub(super) fn parse_package_json(content: &str, records: &mut Vec<DependencySeed>) {
