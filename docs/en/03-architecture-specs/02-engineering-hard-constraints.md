@@ -32,6 +32,10 @@ Advanced architecture is earned through clear boundaries, acyclic dependencies, 
 | `net::http` | HTTP over a mature async runtime/library | Blocking sockets, thread-per-connection, busy polling |
 | `net::qos` | Admission control, source/tenant limits, priority, budgets, overload metrics | Resource consumption before QoS |
 
+### 3.1 Code Repository Application Workflows
+
+`application::code_repository` partitions internal ownership by use case: `repository` owns registration, removal, status, and reports; `index_workflow` owns index execution, durable task leases, checkpoints, and scope previews; `query` owns versioned-scope retrieval, feature flags, and freshness diagnostics; and `impact` owns diff impact analysis. These modules expose stable APIs through the same `RelayKnowledgeService` and depend inward only on `domain`, `code`, and `storage` contracts; they must not duplicate workflows or depend back on CLI, Web, MCP, or other adapters.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

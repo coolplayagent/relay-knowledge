@@ -1,9 +1,13 @@
 mod context;
 mod fast_index;
 mod freshness;
+mod impact;
+mod index_workflow;
+mod query;
 mod queue;
 mod repository;
 mod repository_set;
+mod repository_staleness;
 #[cfg(test)]
 mod repository_test_support;
 #[cfg(test)]

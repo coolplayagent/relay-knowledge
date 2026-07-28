@@ -32,6 +32,10 @@
 | `net::http` | 基于成熟 async runtime/library 的 HTTP | blocking socket、thread-per-connection、busy polling |
 | `net::qos` | 准入控制、租户/来源限额、优先级、预算、overload metric | 绕过 QoS 消耗无界资源 |
 
+### 3.1 代码仓库应用工作流
+
+`application::code_repository` 按用例划分内部所有权：`repository` 负责注册、删除、状态和报告，`index_workflow` 负责索引执行、持久任务租约、checkpoint 和 scope preview，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
