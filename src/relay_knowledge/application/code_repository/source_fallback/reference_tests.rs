@@ -1,3 +1,5 @@
+//! Reference-query planning and ranking coverage for source fallback.
+
 use super::*;
 use crate::domain::{RepositoryCodeRange, code_snapshot_scope_id};
 

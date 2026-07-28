@@ -1,6 +1,8 @@
+//! Selects the immutable source revision used by worktree-aware fallback.
+
 use crate::{code::clean_worktree_overlay_hash, domain::CodeRepositoryStatus};
 
-use super::worktree_ref::worktree_overlay_base_commit;
+use super::super::worktree_ref::worktree_overlay_base_commit;
 
 pub(super) struct SourceFallbackCommit {
     pub(super) commit: String,

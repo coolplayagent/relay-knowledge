@@ -1,3 +1,5 @@
+//! End-to-end planning and result-merge coverage for source fallback.
+
 use super::*;
 use crate::code::clean_worktree_overlay_hash;
 use crate::domain::{RepositoryCodeRange, code_snapshot_scope_id};

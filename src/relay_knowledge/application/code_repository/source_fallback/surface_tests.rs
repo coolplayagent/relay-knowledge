@@ -1,3 +1,5 @@
+//! Structured-surface refresh coverage for source fallback.
+
 use super::*;
 use crate::{
     code::{SourceGrepKind, SourceGrepMatch, SourceGrepOutcome},

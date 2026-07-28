@@ -1,3 +1,5 @@
+//! Generated-source ranking coverage for source fallback results.
+
 use super::*;
 use crate::{
     code::{SourceDeclarationMatch, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome},

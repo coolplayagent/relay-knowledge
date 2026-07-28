@@ -1,3 +1,5 @@
+//! Detects incomplete structured source surfaces that need lexical refresh.
+
 use std::collections::BTreeSet;
 
 use crate::{
@@ -5,7 +7,7 @@ use crate::{
     domain::{CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest},
 };
 
-use super::source_surface::hit_has_complete_source_surface;
+use super::super::source_surface::hit_has_complete_source_surface;
 
 pub(super) fn hybrid_source_surface_fallback(
     request: &CodeRetrievalRequest,

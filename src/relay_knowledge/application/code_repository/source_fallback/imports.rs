@@ -1,6 +1,8 @@
+//! Extracts bounded import fallback queries and candidate source paths.
+
 use crate::domain::{CodeRetrievalHit, CodeRetrievalRequest};
 
-use super::source_fallback::{definition_identity, push_candidate_path};
+use super::identity::{definition_identity, push_candidate_path};
 
 const MAX_IMPORT_SOURCE_CANDIDATE_PATHS: usize = 32;
 

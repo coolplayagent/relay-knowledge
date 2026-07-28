@@ -1,3 +1,5 @@
+//! Query-field filtering coverage for source fallback results.
+
 use super::*;
 use crate::domain::{RepositoryCodeRange, code_snapshot_scope_id};
 

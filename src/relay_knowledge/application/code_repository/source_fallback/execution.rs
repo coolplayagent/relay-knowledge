@@ -1,3 +1,5 @@
+//! Executes bounded source fallback plans across committed and worktree sources.
+
 use std::collections::BTreeMap;
 
 use crate::{
@@ -11,14 +13,13 @@ use crate::{
     storage::{KnowledgeStore, StorageError},
 };
 
+use super::super::support::{registration_from_status, run_blocking_code};
 use super::{
-    source_fallback::{
-        append_code_grep_fallback, append_definition_source_fallback, plan_code_grep_fallback,
-    },
-    support::{registration_from_status, run_blocking_code},
+    plan::plan_code_grep_fallback,
+    results::{append_code_grep_fallback, append_definition_source_fallback},
 };
 
-pub(super) async fn apply_code_grep_fallback(
+pub(in crate::application::code_repository) async fn apply_code_grep_fallback(
     store: &std::sync::Arc<dyn KnowledgeStore>,
     base_status: &CodeRepositoryStatus,
     scoped_status: &CodeRepositoryStatus,

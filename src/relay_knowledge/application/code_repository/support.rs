@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-pub(super) use super::source_fallback_execution::apply_code_grep_fallback;
+pub(super) use super::source_fallback::apply_code_grep_fallback;
 
 pub(super) const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
 pub(super) const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
