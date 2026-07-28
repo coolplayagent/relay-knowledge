@@ -4,7 +4,7 @@ use crate::domain::{
     RepositoryCodeRange,
 };
 
-use super::derive_view;
+use super::service::derive_view;
 
 #[test]
 fn dependency_tour_reports_cycle_with_retained_edges() {

@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::domain::{CodeImportRecord, CodebaseViewDependency, CodebaseViewSnapshot};
 
 use super::{
-    views_builder::{SectionRefs, ViewBuilder},
-    views_rules::{module_key, topological_tour},
+    builder::{SectionRefs, ViewBuilder},
+    rules::{module_key, topological_tour},
 };
 
 pub(super) fn derive_dependency_tour(builder: &mut ViewBuilder, snapshot: &CodebaseViewSnapshot) {

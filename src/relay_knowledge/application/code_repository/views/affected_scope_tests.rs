@@ -3,7 +3,7 @@ use crate::domain::{
     CodebaseViewRequest, CodebaseViewSnapshot, FreshnessPolicy, RepositoryCodeRange,
 };
 
-use super::{derive_view, view_source_read_paths};
+use super::service::{derive_view, view_source_read_paths};
 
 #[test]
 fn affected_scope_reports_missing_changes_and_verification_candidates() {

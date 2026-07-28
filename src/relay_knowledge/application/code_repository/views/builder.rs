@@ -1,3 +1,5 @@
+//! Bounded construction and evidence-pruning primitives shared by codebase views.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{

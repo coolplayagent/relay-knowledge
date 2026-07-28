@@ -1,3 +1,5 @@
+//! Deterministic path classification and naming rules shared by codebase views.
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub(super) fn architecture_layer(path: &str) -> &'static str {

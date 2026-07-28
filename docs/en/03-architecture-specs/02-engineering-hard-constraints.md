@@ -36,6 +36,8 @@ Advanced architecture is earned through clear boundaries, acyclic dependencies, 
 
 `application::code_repository` partitions internal ownership by use case: `repository` owns registration, removal, status, and reports; `index_workflow` owns index execution, durable task leases, checkpoints, and scope previews; `query` owns versioned-scope retrieval, feature flags, and freshness diagnostics; and `impact` owns diff impact analysis. These modules expose stable APIs through the same `RelayKnowledgeService` and depend inward only on `domain`, `code`, and `storage` contracts; they must not duplicate workflows or depend back on CLI, Web, MCP, or other adapters.
 
+Codebase understanding views are grouped under `application::code_repository::views`: `service` only orchestrates scope selection, freshness, and responses; `architecture`, `business_domains`, `dependency_tour`, `process_flow`, and `affected_scope` each own one derivation algorithm; and `builder` plus `rules` provide bounded construction and deterministic classification. View tests are colocated with this directory instead of using ambiguous flat `views_*` filenames.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

@@ -4,7 +4,7 @@ use crate::domain::{
     CodebaseViewRequest, CodebaseViewSnapshot, FreshnessPolicy, RepositoryCodeRange,
 };
 
-use super::{derive_view, served_scope_is_stale};
+use super::service::{derive_view, served_scope_is_stale};
 
 #[test]
 fn architecture_layers_include_import_and_call_edges() {
