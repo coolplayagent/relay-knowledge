@@ -11,14 +11,16 @@ use super::{code::SearchDocumentInserter, evidence_identity::stable_id};
 
 #[path = "maven/model.rs"]
 mod model;
+#[path = "maven/pom_path.rs"]
+mod pom_path;
+#[path = "maven/property_interpolation.rs"]
+mod property_interpolation;
 #[cfg(test)]
 #[path = "maven/review_followup_tests.rs"]
 mod review_followup_tests;
 #[cfg(test)]
 #[path = "maven/review_tests.rs"]
 mod review_tests;
-#[path = "maven/support.rs"]
-mod support;
 #[cfg(test)]
 #[path = "maven/tests.rs"]
 mod tests;

@@ -54,6 +54,8 @@ Dependency parsing groups shared syntax by the format it interprets: `cargo_sour
 
 SQLite storage keeps evidence and stable ID generation in `evidence_identity`, mutation reads in `mutation_log`, commit-time validity normalization in `graph_version`, and diagnostic row counts in `table_stats`. Storage modules must import these explicit boundaries instead of accumulating unrelated persistence behavior in a generic helper module.
 
+Maven effective-model construction also separates syntax boundaries: `pom_path` owns repository-bounded relative POM resolution, while `property_interpolation` owns bounded recursive property expansion. These rules must not be combined in a generic Maven support module.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

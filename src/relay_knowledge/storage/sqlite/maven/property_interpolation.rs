@@ -1,34 +1,8 @@
-use std::{
-    collections::BTreeMap,
-    path::{Component, Path, PathBuf},
-};
+//! Expands bounded Maven property references in effective model values.
+
+use std::collections::BTreeMap;
 
 const MAX_INTERPOLATION_DEPTH: usize = 16;
-
-pub(super) fn relative_pom_path(path: &str, relative_path: &str) -> Option<String> {
-    let base = Path::new(path).parent().unwrap_or_else(|| Path::new(""));
-    let joined = normalize_path(base.join(relative_path))?;
-    Some(joined.to_string_lossy().replace('\\', "/"))
-}
-
-fn normalize_path(path: PathBuf) -> Option<PathBuf> {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    return None;
-                }
-            }
-            Component::Normal(_) => {
-                normalized.push(component.as_os_str());
-            }
-            Component::Prefix(_) | Component::RootDir => return None,
-        }
-    }
-    Some(normalized)
-}
 
 pub(super) fn interpolate(value: &str, properties: &BTreeMap<String, String>) -> String {
     interpolate_with_depth(value, properties, 0)

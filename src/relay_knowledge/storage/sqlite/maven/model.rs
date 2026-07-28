@@ -5,7 +5,7 @@ use std::{
 
 use crate::storage::StorageError;
 
-use super::support::{interpolate, relative_pom_path};
+use super::{pom_path::relative_pom_path, property_interpolation::interpolate};
 
 #[path = "model/effective.rs"]
 mod effective;
