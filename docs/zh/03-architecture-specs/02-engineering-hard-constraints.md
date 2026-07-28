@@ -56,6 +56,10 @@ SQLite 存储必须把 evidence 与稳定 ID 生成放在 `evidence_identity`，
 
 Maven effective model 构建也必须拆开语法边界：`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；不得把两类规则重新合并到通用 Maven support 模块。
 
+### 3.5 代码索引基础模块
+
+跨代码索引流程的基础原语必须使用能表达职责的顶层模块：`content_identity` 负责稳定 ID 和内容哈希，`language_metadata` 负责语言检测及语言级元数据，`generated_detection` 负责生成源码分类。不得把无关原语归入 `common` 目录；新增原语必须归属其所描述的行为。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

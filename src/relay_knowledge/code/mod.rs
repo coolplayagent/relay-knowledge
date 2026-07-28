@@ -1,11 +1,13 @@
 //! Code repository indexing, parsing, identity, and source discovery boundaries.
 
-mod common;
 mod config_files;
+mod content_identity;
 mod error;
 pub(crate) mod feature_flags;
+mod generated_detection;
 mod identity;
 mod index;
+mod language_metadata;
 mod parser;
 mod registration;
 mod search;
@@ -96,10 +98,11 @@ pub(crate) use source_declarations::{
     source_line_defines_identity,
 };
 
-use common::{generated_detection, ids, languages};
+use content_identity as ids;
 use ids::{stable_content_hash, stable_id};
 use index::snapshot;
 use index::snapshot::SnapshotBuild;
+use language_metadata as languages;
 #[cfg(test)]
 use parser::parse_indexed_file;
 

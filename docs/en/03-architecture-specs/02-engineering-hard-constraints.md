@@ -56,6 +56,10 @@ SQLite storage keeps evidence and stable ID generation in `evidence_identity`, m
 
 Maven effective-model construction also separates syntax boundaries: `pom_path` owns repository-bounded relative POM resolution, while `property_interpolation` owns bounded recursive property expansion. These rules must not be combined in a generic Maven support module.
 
+### 3.5 Code Index Foundations
+
+Cross-cutting code-index primitives use responsibility-bearing top-level modules: `content_identity` owns stable IDs and content hashes, `language_metadata` owns language detection and language-level metadata, and `generated_detection` owns generated-source classification. Do not group unrelated primitives under a `common` directory; new primitives belong with the behavior they describe.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.
