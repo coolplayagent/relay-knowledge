@@ -13,11 +13,12 @@ use crate::{
 };
 
 use super::super::{
-    support::{
-        active_index_matches_request, code_status_checkpoint, indexed_commit_for_selector,
-        indexed_source_scope, latest_compatible_code_scope_status,
-        missing_indexed_source_scope_error, required_code_repository, resolved_code_scope_status,
-        storage_api_error,
+    errors::storage_api_error,
+    repository_status::{code_status_checkpoint, required_code_repository},
+    scope::{
+        active_index_matches_request, indexed_commit_for_selector, indexed_source_scope,
+        latest_compatible_code_scope_status, missing_indexed_source_scope_error,
+        resolved_code_scope_status,
     },
     worktree_freshness::ensure_worktree_overlay_matches_current_worktree,
 };

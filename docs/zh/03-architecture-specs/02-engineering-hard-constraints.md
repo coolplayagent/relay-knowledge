@@ -40,6 +40,8 @@
 
 源码兜底检索统一收敛在 `application::code_repository::source_fallback` 目录：`execution` 是唯一 I/O 编排入口，`plan` 决定是否以及如何执行有界兜底，`identity`、`filters`、`scoring`、`results` 分别负责身份覆盖、请求约束、评分和结果归并，`imports`、`surface`、`worktree` 隔离特定证据边界。目录外不得直接依赖这些内部算法 helper。
 
+代码仓库共享行为必须按明确职责拆分：`index_task` 负责持久任务租约和 worker 恢复，`index_state` 负责已持久化索引状态检查及复用，`scope` 负责 scope 解析和 filter 兼容性，`repository_status` 负责注册状态查询和 checkpoint 选择；`blocking`、`errors`、`clock` 分别隔离 runtime、错误和持久化时间边界。调用方必须直接依赖职责模块，不得重新引入含义宽泛的 `support`、`helper` 或 utility 聚合层。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

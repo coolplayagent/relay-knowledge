@@ -7,11 +7,13 @@ use crate::{
     storage::KnowledgeStore,
 };
 
-use super::support::{
-    code_scope_matches_current_fact_version, registration_from_status, resolved_code_scope_status,
-    run_blocking_code, storage_api_error,
-};
 use super::worktree_ref::worktree_overlay_base_commit;
+use super::{
+    blocking::run_blocking_code,
+    errors::storage_api_error,
+    repository_status::registration_from_status,
+    scope::{code_scope_matches_current_fact_version, resolved_code_scope_status},
+};
 
 pub(super) async fn ensure_worktree_overlay_matches_current_worktree(
     store: &Arc<dyn KnowledgeStore>,

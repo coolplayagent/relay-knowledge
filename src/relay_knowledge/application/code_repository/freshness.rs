@@ -12,8 +12,10 @@ use crate::{
     storage::KnowledgeStore,
 };
 
-use super::support::{
-    active_index_matches_request, code_status_checkpoint, indexed_source_scope, storage_api_error,
+use super::{
+    errors::storage_api_error,
+    repository_status::code_status_checkpoint,
+    scope::{active_index_matches_request, indexed_source_scope},
 };
 
 pub(super) struct CodeQueryFreshnessContext<'a> {

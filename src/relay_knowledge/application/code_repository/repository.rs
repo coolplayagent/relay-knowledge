@@ -10,9 +10,12 @@ use crate::{
 
 use crate::application::service::RelayKnowledgeService;
 
-use super::support::{
-    code_status_checkpoint, now_millis, recover_code_index_task_leases, required_code_repository,
-    run_blocking_code, storage_api_error,
+use super::{
+    blocking::run_blocking_code,
+    clock::now_millis,
+    errors::storage_api_error,
+    index_task::recover_code_index_task_leases,
+    repository_status::{code_status_checkpoint, required_code_repository},
 };
 
 impl RelayKnowledgeService {

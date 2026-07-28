@@ -40,6 +40,8 @@ Codebase understanding views are grouped under `application::code_repository::vi
 
 Source fallback retrieval is grouped under `application::code_repository::source_fallback`: `execution` is the sole I/O orchestrator; `plan` decides whether and how bounded fallback runs; `identity`, `filters`, `scoring`, and `results` own coverage, request constraints, ranking, and result merging; and `imports`, `surface`, and `worktree` isolate evidence-specific boundaries. Modules outside this directory must not depend directly on these internal algorithm helpers.
 
+Shared code-repository behavior is partitioned by explicit responsibility: `index_task` owns durable task leases and worker recovery, `index_state` owns persisted index inspection and reuse, `scope` owns scope resolution and filter compatibility, and `repository_status` owns registered status lookup and checkpoint selection. `blocking`, `errors`, and `clock` isolate their respective runtime, error, and persisted-time boundaries. Callers must depend directly on the responsible module instead of reintroducing an ambiguous `support`, `helper`, or utility aggregation layer.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

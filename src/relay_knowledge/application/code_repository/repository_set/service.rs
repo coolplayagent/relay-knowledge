@@ -19,14 +19,15 @@ use crate::{
 use futures_util::{StreamExt, stream};
 use std::sync::Arc;
 
-use crate::application::{
-    code_repository::support::{apply_code_grep_fallback, resolve_code_ref_for_selector},
-    service::RelayKnowledgeService,
-};
+use crate::application::service::RelayKnowledgeService;
 
 #[cfg(test)]
 use crate::code::CodeIndexError;
 
+use super::super::{
+    clock::now_millis, scope::resolve_code_ref_for_selector,
+    source_fallback::apply_code_grep_fallback,
+};
 use super::{
     member_freshness::{fact_version_scope_mismatch_reason, refresh_fact_version_member_freshness},
     plan::{
@@ -896,14 +897,6 @@ fn code_status_for_repository_set_member(
         stale: member_status.stale,
         degraded_reason: member_status.degraded_reason.clone(),
     }
-}
-
-fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 #[cfg(test)]

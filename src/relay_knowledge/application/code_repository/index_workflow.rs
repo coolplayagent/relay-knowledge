@@ -16,17 +16,21 @@ use crate::{
 use crate::application::service::RelayKnowledgeService;
 
 use super::{
+    blocking::run_blocking_code,
+    clock::now_millis,
+    errors::storage_api_error,
     fast_index::fresh_full_index_response,
-    queue::queue_worktree_overlay_index_task,
-    support::{
-        CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
-        CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request,
-        code_index_worker_lease_owner, index_start_from_completed, now_millis,
-        previous_index_state_for_index, recover_code_index_task_leases,
-        recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
-        registration_from_status, requested_index_ref_for_response, required_code_repository,
-        run_blocking_code, storage_api_error,
+    index_state::{
+        RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request, index_start_from_completed,
+        previous_index_state_for_index, requested_index_ref_for_response,
     },
+    index_task::{
+        CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
+        CodeIndexTaskLeaseContext, code_index_worker_lease_owner, recover_code_index_task_leases,
+        recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
+    },
+    queue::queue_worktree_overlay_index_task,
+    repository_status::{registration_from_status, required_code_repository},
     worktree_ref::pending_worktree_overlay_base_commit,
 };
 

@@ -13,7 +13,7 @@ use crate::{
     storage::{KnowledgeStore, StorageError},
 };
 
-use super::super::support::{registration_from_status, run_blocking_code};
+use super::super::{blocking::run_blocking_code, repository_status::registration_from_status};
 use super::{
     plan::plan_code_grep_fallback,
     results::{append_code_grep_fallback, append_definition_source_fallback},

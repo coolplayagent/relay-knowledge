@@ -9,18 +9,19 @@ use crate::{
 use crate::application::service::RelayKnowledgeService;
 
 use super::{
+    errors::storage_api_error,
     freshness::{
         CodeFeatureFlagFreshnessContext, CodeQueryFreshnessContext,
         code_feature_flag_freshness_diagnostics, code_query_freshness_diagnostics,
     },
     repository_staleness::annotate_query_result_staleness,
-    support::{
-        active_index_matches_request, apply_code_grep_fallback,
-        feature_flag_request_at_indexed_ref, indexed_source_scope,
+    repository_status::required_code_repository,
+    scope::{
+        active_index_matches_request, feature_flag_request_at_indexed_ref, indexed_source_scope,
         latest_compatible_code_scope_status, missing_indexed_source_scope_error,
-        required_code_repository, resolved_code_scope_status, retrieval_request_at_indexed_ref,
-        storage_api_error,
+        resolved_code_scope_status, retrieval_request_at_indexed_ref,
     },
+    source_fallback::apply_code_grep_fallback,
     worktree_freshness::ensure_worktree_overlay_matches_current_worktree,
 };
 

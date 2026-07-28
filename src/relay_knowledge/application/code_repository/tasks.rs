@@ -6,9 +6,11 @@ use crate::{
     application::service::RelayKnowledgeService,
 };
 
-use super::support::{
-    code_status_checkpoint, now_millis, recover_orphaned_code_index_task_leases,
-    required_code_repository, storage_api_error,
+use super::{
+    clock::now_millis,
+    errors::storage_api_error,
+    index_task::recover_orphaned_code_index_task_leases,
+    repository_status::{code_status_checkpoint, required_code_repository},
 };
 
 impl RelayKnowledgeService {
