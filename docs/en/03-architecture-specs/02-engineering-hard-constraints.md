@@ -42,6 +42,10 @@ Source fallback retrieval is grouped under `application::code_repository::source
 
 Shared code-repository behavior is partitioned by explicit responsibility: `index_task` owns durable task leases and worker recovery, `index_state` owns persisted index inspection and reuse, `scope` owns scope resolution and filter compatibility, and `repository_status` owns registered status lookup and checkpoint selection. `blocking`, `errors`, and `clock` isolate their respective runtime, error, and persisted-time boundaries. Callers must depend directly on the responsible module instead of reintroducing an ambiguous `support`, `helper`, or utility aggregation layer.
 
+### 3.2 Model Provider Ownership
+
+`model_provider` keeps profile normalization in `profile_config`, fallback policy in `fallback`, durable JSON writes in `persistence`, provider HTTP and response diagnostics in `connectivity`, and catalog fetch plus catalog data interpretation in `catalog`. Cross-module protocol tests live in `protocol_tests`; production behavior must not be recombined into a generic helper module.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

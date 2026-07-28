@@ -42,6 +42,10 @@
 
 代码仓库共享行为必须按明确职责拆分：`index_task` 负责持久任务租约和 worker 恢复，`index_state` 负责已持久化索引状态检查及复用，`scope` 负责 scope 解析和 filter 兼容性，`repository_status` 负责注册状态查询和 checkpoint 选择；`blocking`、`errors`、`clock` 分别隔离 runtime、错误和持久化时间边界。调用方必须直接依赖职责模块，不得重新引入含义宽泛的 `support`、`helper` 或 utility 聚合层。
 
+### 3.2 模型提供方职责
+
+`model_provider` 必须把 profile 归一化放在 `profile_config`，fallback policy 放在 `fallback`，持久 JSON 写入放在 `persistence`，provider HTTP 与响应诊断放在 `connectivity`，catalog 获取和 catalog 数据解释放在 `catalog`。跨模块协议测试统一放在 `protocol_tests`；不得把生产行为重新合并进通用 helper 模块。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
