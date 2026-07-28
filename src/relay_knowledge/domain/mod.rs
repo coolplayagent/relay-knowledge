@@ -8,10 +8,8 @@ pub(crate) mod code_call_targets;
 mod code_context;
 #[path = "code/dependencies.rs"]
 mod code_dependency;
-#[path = "code/repository.rs"]
+#[path = "code/repository/mod.rs"]
 mod code_repository;
-#[path = "code/repository_helpers.rs"]
-mod code_repository_helpers;
 #[path = "code/repository_index.rs"]
 mod code_repository_index;
 #[path = "code/repository_set.rs"]
