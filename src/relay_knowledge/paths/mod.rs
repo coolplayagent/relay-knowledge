@@ -142,6 +142,15 @@ impl RuntimePaths {
     }
 }
 
+/// Resolves the Windows process-list executable from typed platform inputs.
+pub fn windows_tasklist_command(system_root: Option<&std::ffi::OsStr>) -> PathBuf {
+    system_root
+        .map(PathBuf::from)
+        .map(|root| root.join("System32").join("tasklist.exe"))
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| PathBuf::from("tasklist.exe"))
+}
+
 /// Returns conservative user document roots for local file indexing.
 pub fn default_user_document_roots(
     environment: &PlatformEnvironment,
@@ -580,6 +589,31 @@ mod tests {
         assert_eq!(
             paths.runtime_dir,
             PathBuf::from("/run/user/1000/relay-knowledge")
+        );
+    }
+
+    #[test]
+    fn windows_tasklist_command_uses_existing_system_root() {
+        let root = std::env::temp_dir().join(format!(
+            "relay-knowledge-system-root-{}",
+            std::process::id()
+        ));
+        let executable = root.join("System32").join("tasklist.exe");
+        std::fs::create_dir_all(executable.parent().expect("tasklist parent"))
+            .expect("system directory should be created");
+        std::fs::write(&executable, b"test tasklist").expect("tasklist fixture should be written");
+        assert_eq!(windows_tasklist_command(Some(root.as_os_str())), executable);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn windows_tasklist_command_falls_back_when_system_root_is_unavailable() {
+        assert_eq!(
+            windows_tasklist_command(Some(std::ffi::OsStr::new(
+                "/missing/relay-knowledge-system-root"
+            ))),
+            PathBuf::from("tasklist.exe")
         );
     }
 

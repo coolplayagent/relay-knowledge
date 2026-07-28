@@ -13,10 +13,11 @@ use crate::{
         RELAY_KNOWLEDGE_EMBEDDING_BASE_URL, RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
         RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, RELAY_KNOWLEDGE_RERANK_MODEL,
         RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, RetrievalEnvOverrides,
+        windows_system_root_from_process,
     },
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
     observability::{ObservabilityRuntime, TelemetryConfig},
-    paths::{PathError, RuntimePaths, default_user_document_roots},
+    paths::{PathError, RuntimePaths, default_user_document_roots, windows_tasklist_command},
     retrieval::{
         DEFAULT_EMBEDDING_BATCH_SIZE, DEFAULT_EMBEDDING_MAX_CONCURRENCY, DEFAULT_EMBEDDING_TIMEOUT,
         DEFAULT_RERANK_CANDIDATE_MULTIPLIER, DEFAULT_RERANK_MAX_CANDIDATES, DEFAULT_RERANK_TIMEOUT,
@@ -34,6 +35,7 @@ use super::update::{UpdateRuntimeConfig, UpdateRuntimeConfigError};
 #[derive(Debug, Clone)]
 pub struct RuntimeConfiguration {
     pub paths: RuntimePaths,
+    pub process: ProcessRuntimeConfig,
     pub network: NetworkRuntime,
     pub observability: ObservabilityRuntime,
     pub agent: AgentRuntimeConfig,
@@ -50,8 +52,11 @@ impl RuntimeConfiguration {
     pub async fn from_process_environment() -> Result<Self, RuntimeConfigurationError> {
         let environment =
             EnvironmentConfig::from_process().map_err(RuntimeConfigurationError::Environment)?;
+        let mut runtime = Self::from_environment(&environment).await?;
+        runtime.process =
+            ProcessRuntimeConfig::from_system_root(windows_system_root_from_process());
 
-        Self::from_environment(&environment).await
+        Ok(runtime)
     }
 
     /// Resolves runtime configuration from a typed environment snapshot.
@@ -80,6 +85,7 @@ impl RuntimeConfiguration {
         Ok(Self {
             paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
                 .map_err(RuntimeConfigurationError::Paths)?,
+            process: ProcessRuntimeConfig::default(),
             network: NetworkRuntime::from_config(network),
             observability,
             agent,
@@ -90,6 +96,26 @@ impl RuntimeConfiguration {
             storage,
             watcher,
         })
+    }
+}
+
+/// Resolved process integration paths captured during runtime bootstrap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessRuntimeConfig {
+    pub windows_tasklist_command: PathBuf,
+}
+
+impl Default for ProcessRuntimeConfig {
+    fn default() -> Self {
+        Self::from_system_root(None)
+    }
+}
+
+impl ProcessRuntimeConfig {
+    fn from_system_root(system_root: Option<std::ffi::OsString>) -> Self {
+        Self {
+            windows_tasklist_command: windows_tasklist_command(system_root.as_deref()),
+        }
     }
 }
 

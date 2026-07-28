@@ -32,6 +32,8 @@
 | `net::http` | 基于成熟 async runtime/library 的 HTTP | blocking socket、thread-per-connection、busy polling |
 | `net::qos` | 准入控制、租户/来源限额、优先级、预算、overload metric | 绕过 QoS 消耗无界资源 |
 
+具名的平台进程输入同样必须经过该边界。进程 bootstrap 期间由 `env::windows_system_root_from_process` 捕获 Windows `SystemRoot`，`paths::windows_tasklist_command` 解析可执行文件，`RuntimeConfiguration::process` 再把结果传给服务恢复；应用工作流在恢复 worker 或调用 service manager 时既不得直接调用 `std::env`，也不得自行拼接平台可执行文件路径。
+
 ### 3.1 代码仓库应用工作流
 
 `application::code_repository` 按用例划分内部所有权：`repository` 负责注册、删除、状态和报告，`index_workflow` 负责索引执行、持久任务租约、checkpoint 和 scope preview，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。

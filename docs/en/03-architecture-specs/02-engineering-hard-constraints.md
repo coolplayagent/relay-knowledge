@@ -32,6 +32,8 @@ Advanced architecture is earned through clear boundaries, acyclic dependencies, 
 | `net::http` | HTTP over a mature async runtime/library | Blocking sockets, thread-per-connection, busy polling |
 | `net::qos` | Admission control, source/tenant limits, priority, budgets, overload metrics | Resource consumption before QoS |
 
+Named platform process inputs follow the same boundary. During process bootstrap, `env::windows_system_root_from_process` captures Windows `SystemRoot`, `paths::windows_tasklist_command` resolves the executable, and `RuntimeConfiguration::process` passes that result into service recovery. Application workflows must neither call `std::env` nor construct platform executable paths while recovering workers or invoking service managers.
+
 ### 3.1 Code Repository Application Workflows
 
 `application::code_repository` partitions internal ownership by use case: `repository` owns registration, removal, status, and reports; `index_workflow` owns index execution, durable task leases, checkpoints, and scope previews; `query` owns versioned-scope retrieval, feature flags, and freshness diagnostics; and `impact` owns diff impact analysis. These modules expose stable APIs through the same `RelayKnowledgeService` and depend inward only on `domain`, `code`, and `storage` contracts; they must not duplicate workflows or depend back on CLI, Web, MCP, or other adapters.

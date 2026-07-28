@@ -116,6 +116,7 @@ pub const SSL_VERIFY: &str = "SSL_VERIFY";
 pub const SSL_VERIFY_LOWER: &str = "ssl_verify";
 
 const HOME: &str = "HOME";
+const WINDOWS_SYSTEM_ROOT: &str = "SystemRoot";
 const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
 const XDG_DATA_HOME: &str = "XDG_DATA_HOME";
 const XDG_STATE_HOME: &str = "XDG_STATE_HOME";
@@ -126,6 +127,10 @@ const LOCALAPPDATA: &str = "LOCALAPPDATA";
 const TMPDIR: &str = "TMPDIR";
 const TEMP: &str = "TEMP";
 const TMP: &str = "TMP";
+
+pub(crate) fn windows_system_root_from_process() -> Option<OsString> {
+    process_env::var_os(WINDOWS_SYSTEM_ROOT).filter(|value| !value.is_empty())
+}
 
 /// Operating-system family used by path resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -69,6 +69,7 @@ pub(super) async fn recover_code_index_task_leases(
 pub(super) async fn recover_orphaned_code_index_task_leases(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     now_ms: u64,
+    windows_tasklist_command: &std::path::Path,
 ) -> Result<usize, ApiError> {
     recover_code_index_task_leases(store, now_ms).await?;
     let running_leases = store
@@ -78,12 +79,13 @@ pub(super) async fn recover_orphaned_code_index_task_leases(
     if running_leases.is_empty() {
         return Ok(0);
     }
+    let windows_tasklist_command = windows_tasklist_command.to_path_buf();
     let orphaned_task_ids = tokio::task::spawn_blocking(move || {
         running_leases
             .into_iter()
             .filter_map(|lease| {
                 let pid = code_index_worker_pid(&lease.lease_owner)?;
-                (!process_is_running(pid)).then_some(lease.task_id)
+                (!process_is_running(pid, &windows_tasklist_command)).then_some(lease.task_id)
             })
             .collect::<Vec<_>>()
     })
@@ -133,18 +135,18 @@ fn code_index_worker_pid(lease_owner: &str) -> Option<u32> {
     suffix.parse::<u32>().ok()
 }
 
-fn process_is_running(pid: u32) -> bool {
+fn process_is_running(pid: u32, windows_tasklist_command: &std::path::Path) -> bool {
     if pid == std::process::id() {
         return true;
     }
 
-    process_is_running_by_platform(pid)
+    process_is_running_by_platform(pid, windows_tasklist_command)
 }
 
 #[cfg(windows)]
-fn process_is_running_by_platform(pid: u32) -> bool {
+fn process_is_running_by_platform(pid: u32, windows_tasklist_command: &std::path::Path) -> bool {
     let needle = format!(",\"{pid}\",");
-    std::process::Command::new(windows_tasklist_command())
+    std::process::Command::new(windows_tasklist_command)
         .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .output()
         .ok()
@@ -152,17 +154,8 @@ fn process_is_running_by_platform(pid: u32) -> bool {
         .unwrap_or(true)
 }
 
-#[cfg(windows)]
-fn windows_tasklist_command() -> std::path::PathBuf {
-    std::env::var_os("SystemRoot")
-        .map(std::path::PathBuf::from)
-        .map(|root| root.join("System32").join("tasklist.exe"))
-        .filter(|path| path.exists())
-        .unwrap_or_else(|| std::path::PathBuf::from("tasklist.exe"))
-}
-
 #[cfg(unix)]
-fn process_is_running_by_platform(pid: u32) -> bool {
+fn process_is_running_by_platform(pid: u32, _windows_tasklist_command: &std::path::Path) -> bool {
     std::process::Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "pid="])
         .output()
@@ -176,7 +169,7 @@ fn process_is_running_by_platform(pid: u32) -> bool {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn process_is_running_by_platform(_pid: u32) -> bool {
+fn process_is_running_by_platform(_pid: u32, _windows_tasklist_command: &std::path::Path) -> bool {
     true
 }
 
@@ -210,6 +203,9 @@ mod tests {
 
     #[test]
     fn current_process_is_treated_as_running() {
-        assert!(process_is_running(std::process::id()));
+        assert!(process_is_running(
+            std::process::id(),
+            std::path::Path::new("tasklist.exe")
+        ));
     }
 }

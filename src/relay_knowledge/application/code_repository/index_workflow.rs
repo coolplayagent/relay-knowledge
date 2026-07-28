@@ -419,7 +419,12 @@ impl RelayKnowledgeService {
         &self,
     ) -> Result<usize, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        recover_orphaned_code_index_task_leases(&store, now_millis()).await
+        recover_orphaned_code_index_task_leases(
+            &store,
+            now_millis(),
+            &self.runtime.process.windows_tasklist_command,
+        )
+        .await
     }
 
     /// Previews the effective code repository indexing scope without writing rows.
