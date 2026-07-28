@@ -7,7 +7,7 @@ use crate::{
     storage::StorageError,
 };
 
-use super::{code::SearchDocumentInserter, helpers::stable_id};
+use super::{code::SearchDocumentInserter, evidence_identity::stable_id};
 
 #[path = "maven/model.rs"]
 mod model;

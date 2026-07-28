@@ -11,7 +11,7 @@ use crate::{
     storage::StorageError,
 };
 
-use super::super::helpers::stable_id;
+use super::super::evidence_identity::stable_id;
 
 /// Batch of SQL parameter sets keyed by edge ID for batch insertion.
 type SqlParamBatch = Vec<(String, Vec<Box<dyn rusqlite::types::ToSql>>)>;

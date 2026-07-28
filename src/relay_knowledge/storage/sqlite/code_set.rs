@@ -15,7 +15,7 @@ use crate::{
     storage::{CodeRepositorySetMemberSeed, CodeRepositorySetSeed, StorageError},
 };
 
-use super::{super::helpers::stable_id, code_status::parse_json_list};
+use super::{super::evidence_identity::stable_id, code_status::parse_json_list};
 use manifest::{
     manifest_module_prefixes_for_members, module_keys_for_path_with_prefixes,
     module_keys_for_symbol_path_with_prefixes, normalize_module_key,
