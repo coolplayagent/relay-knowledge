@@ -19,7 +19,7 @@ use super::{
     code_query_call_direction::{
         call_direction_fts_filter_sql, fts_values_for_limited_with_language_and_call_direction,
     },
-    code_query_call_identity_support::{has_case_boundary, specific_call_identity_leaf},
+    code_query_call_identity::{has_case_boundary, specific_call_identity_leaf},
     code_query_call_site_scoring::exact_caller_named_receiver_member_call_bonus,
     code_query_call_target_ranking::high_confidence_inferred_target_bonus,
     code_query_caller_context_scoring::caller_context_density_bonus,
@@ -31,8 +31,8 @@ use super::{
         call_site_test_path_penalty, callee_member_context_bonus, caller_result_assignment_bonus,
         query_mentions_example_or_sample, query_mentions_test_or_benchmark,
     },
+    code_query_relevance::*,
     code_query_rows::CallRow,
-    code_query_support::*,
     filter_dedupe_sort_truncate, has_query_field_hit_filters, hit_from_parts,
     prepare_code_search_statement, query_field_filtered_hits_for_gate, required_scope,
     selected_row,

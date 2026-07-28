@@ -10,11 +10,11 @@ use crate::{
 use super::code_query_import_scoring::{
     import_usage_identifier_terms, named_import_binding_terms, named_import_binding_terms_for_query,
 };
-use super::code_query_rows::ImportRow;
-use super::code_query_support::{
+use super::code_query_relevance::{
     CandidateLayer, candidate_limit, language_filter_sql_for_columns, path_filter_sql_for_column,
     push_language_filter_values, push_path_filter_values, score_text, symbol_fts_match_query,
 };
+use super::code_query_rows::ImportRow;
 use super::{prepare_code_search_statement, required_scope};
 
 const SQLITE_BIND_BATCH_SIZE: usize = 500;

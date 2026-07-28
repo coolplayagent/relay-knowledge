@@ -2,7 +2,7 @@ use rusqlite::types::Value;
 
 use crate::domain::{CodeRepositoryStatus, CodeRetrievalRequest};
 
-use super::escape_sql_like;
+use super::tokens::escape_sql_like;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_path_and_language_filter_sql(
     status: &CodeRepositoryStatus,

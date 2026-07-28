@@ -26,8 +26,8 @@ use super::{
         search_imports_by_target_symbols, target_symbol_import_query,
     },
     code_query_path_ranking::{import_test_path_penalty, query_mentions_test_or_benchmark},
+    code_query_relevance::*,
     code_query_rows::ImportRow,
-    code_query_support::*,
     hit_from_parts, prepare_code_search_statement, required_scope, selected_row,
 };
 

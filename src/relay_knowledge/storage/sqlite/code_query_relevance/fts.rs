@@ -23,17 +23,17 @@ const FOCUSED_SYMBOL_MAX_TERMS: usize = 3;
 const FOCUSED_SYMBOL_MAX_WORKFLOW_TERMS: usize = 2;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str) -> String {
-    fts_match_query_with_operator(&super::fts_query_terms(query), " ", true)
+    fts_match_query_with_operator(&super::candidate_plan::fts_query_terms(query), " ", true)
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn symbol_fts_match_query(query: &str) -> String {
-    fts_match_query_with_operator(&super::fts_query_terms(query), " OR ", true)
+    fts_match_query_with_operator(&super::candidate_plan::fts_query_terms(query), " OR ", true)
 }
 
 pub(in crate::storage::sqlite::code::code_query) fn focused_symbol_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let terms = dedupe_terms(super::fts_query_terms(query));
+    let terms = dedupe_terms(super::candidate_plan::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return None;
     }
@@ -132,7 +132,7 @@ pub(in crate::storage::sqlite::code::code_query) fn direct_hybrid_chunk_fts_matc
 pub(in crate::storage::sqlite::code::code_query) fn focused_hybrid_chunk_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let terms = dedupe_terms(super::fts_query_terms(query));
+    let terms = dedupe_terms(super::candidate_plan::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return None;
     }
@@ -169,7 +169,7 @@ pub(in crate::storage::sqlite::code::code_query) fn lifecycle_hybrid_chunk_fts_m
     query: &str,
 ) -> Option<String> {
     let terms = dedupe_terms(
-        super::fts_query_terms(query)
+        super::candidate_plan::fts_query_terms(query)
             .into_iter()
             .map(|term| term.to_ascii_lowercase())
             .collect(),
@@ -236,13 +236,16 @@ fn lifecycle_recall_match_query(anchor: &str, finalization_terms: &[String]) -> 
 pub(in crate::storage::sqlite::code::code_query) fn structured_hybrid_chunk_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let query_terms = dedupe_terms(super::fts_query_terms(query));
+    let query_terms = dedupe_terms(super::candidate_plan::fts_query_terms(query));
     let mut terms = query_terms
         .into_iter()
         .filter(|term| identifier_term_has_recall_structure(term))
         .take(MAX_HYBRID_CHUNK_RECALL_ANCHORS)
         .collect::<Vec<_>>();
-    append_type_surface_companion_terms(&dedupe_terms(super::fts_query_terms(query)), &mut terms);
+    append_type_surface_companion_terms(
+        &dedupe_terms(super::candidate_plan::fts_query_terms(query)),
+        &mut terms,
+    );
 
     (!terms.is_empty()).then(|| fts_match_query_with_operator(&terms, " OR ", false))
 }
@@ -274,7 +277,7 @@ fn append_type_surface_companion_terms(query_terms: &[String], recall_terms: &mu
 pub(in crate::storage::sqlite::code::code_query) fn compound_hybrid_chunk_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let terms = dedupe_terms(super::fts_query_terms(query))
+    let terms = dedupe_terms(super::candidate_plan::fts_query_terms(query))
         .into_iter()
         .filter(|term| term.len() >= COMPOUND_HYBRID_CHUNK_MIN_TERM_LEN)
         .take(COMPOUND_HYBRID_CHUNK_MAX_TERMS)
@@ -311,7 +314,7 @@ fn hybrid_chunk_fts_match_query_with_compound(
     query: &str,
     include_compound_identifiers: bool,
 ) -> String {
-    let mut terms = dedupe_terms(super::fts_query_terms(query));
+    let mut terms = dedupe_terms(super::candidate_plan::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         let query_terms = terms.clone();
         append_type_surface_companion_terms(&query_terms, &mut terms);
@@ -325,7 +328,7 @@ fn hybrid_chunk_fts_match_query_with_compound(
 pub(in crate::storage::sqlite::code::code_query) fn strict_hybrid_chunk_fts_match_query(
     query: &str,
 ) -> Option<String> {
-    let terms = dedupe_terms(super::fts_query_terms(query));
+    let terms = dedupe_terms(super::candidate_plan::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return None;
     }
@@ -774,5 +777,5 @@ fn push_compound_identifier_alternative(
 }
 
 #[cfg(test)]
-#[path = "code_query_fts_tests.rs"]
+#[path = "fts_tests.rs"]
 mod tests;

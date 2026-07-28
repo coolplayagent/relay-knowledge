@@ -1,3 +1,5 @@
+//! Classifies specific call target identities for directional call queries.
+
 pub(super) fn specific_call_identity_leaf(leaf_name: &str) -> bool {
     leaf_name.len() >= 8 || leaf_name.contains('_') || has_case_boundary(leaf_name)
 }

@@ -1,6 +1,6 @@
 use rusqlite::types::Value;
 
-use super::code_query_support::{
+use super::code_query_relevance::{
     candidate_patterns, push_language_filter_values, push_path_filter_values,
     push_query_path_substring_filter_values,
 };

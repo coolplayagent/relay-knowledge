@@ -56,6 +56,8 @@ SQLite storage keeps evidence and stable ID generation in `evidence_identity`, m
 
 Maven effective-model construction also separates syntax boundaries: `pom_path` owns repository-bounded relative POM resolution, while `property_interpolation` owns bounded recursive property expansion. These rules must not be combined in a generic Maven support module.
 
+Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
+
 ### 3.5 Code Index Foundations
 
 Cross-cutting code-index primitives use responsibility-bearing top-level modules: `content_identity` owns stable IDs and content hashes, `language_metadata` owns language detection and language-level metadata, and `generated_detection` owns generated-source classification. Do not group unrelated primitives under a `common` directory; new primitives belong with the behavior they describe.

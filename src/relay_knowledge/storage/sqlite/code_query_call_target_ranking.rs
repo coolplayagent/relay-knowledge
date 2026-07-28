@@ -1,6 +1,6 @@
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
-use super::code_query_support::SymbolIdentityQuery;
+use super::code_query_relevance::SymbolIdentityQuery;
 
 const HIGH_CONFIDENCE_INFERRED_TARGET_BONUS: f64 = 1.15;
 const HIGH_CONFIDENCE_INFERRED_TARGET_MIN_BPS: u16 = 7_000;

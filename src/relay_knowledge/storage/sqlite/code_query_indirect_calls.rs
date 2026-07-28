@@ -1,12 +1,12 @@
 use rusqlite::{Connection, params_from_iter, types::Value};
 
 use super::super::{
-    code_query_rows::CallRow,
-    code_query_support::{
+    code_query_relevance::{
         fts_match_query, fts_path_and_language_filter_sql, language_filter_sql_for_columns,
         path_filter_sql_for_column, push_language_filter_values, push_path_filter_values,
         push_query_path_substring_filter_values,
     },
+    code_query_rows::CallRow,
     prepare_code_search_statement, required_scope,
 };
 use super::{

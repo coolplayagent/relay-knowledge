@@ -2,10 +2,10 @@ use super::super::{
     code_query_conversion_terms::conversion_action_term,
     code_query_identifiers::identifier_terms_equivalent,
 };
-use super::identifier_search_tokens;
+use super::tokens::identifier_search_tokens;
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
-pub(super) fn conversion_symbol_bonus(
+pub(in crate::storage::sqlite::code::code_query) fn conversion_symbol_bonus(
     query: &str,
     name: &str,
     signature: &str,

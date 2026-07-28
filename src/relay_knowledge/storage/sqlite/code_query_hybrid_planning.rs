@@ -3,7 +3,7 @@ use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 use super::{
     code_query_api_identities,
     code_query_conversion_terms::conversion_action_term,
-    code_query_support::{query_is_single_symbol_identity, query_terms},
+    code_query_relevance::{query_is_single_symbol_identity, query_terms},
 };
 
 const API_CHUNK_FIRST_MIN_TERMS: usize = 4;
