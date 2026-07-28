@@ -29,6 +29,8 @@ Installer 或安装脚本支持：版本选择、安装目录选择、dry run、
 
 服务化部署安装体验必须显式说明拓扑：`embedded_cli` 不安装常驻服务，`resident_single_process` 安装一个平台 service，`resident_partitioned_sqlite` 还要把 shard 目录纳入备份/迁移/卸载确认。`service plan install|upgrade|rollback|uninstall --format json` 必须在 `runtime_state_paths`、`lifecycle_steps`、`rollback_steps`、`permission_requirements` 和 `warnings` 中列出主库、配置/状态/日志/缓存路径、service definition 路径、service 名称、权限要求、失败回滚计划，以及 partitioned 模式下的 shard 目录覆盖要求。`service lifecycle <action> --dry-run` 是默认可审计输出；只有显式传入 `--execute` 才能写 service definition、checkpoint 或安装目录，并调用 systemd、launchd 或 Windows Service 命令。未来 `split_worker_preview` 必须分别生成控制服务和 worker 服务定义并说明每个进程的权限、环境变量、日志和 shutdown 行为。
 
+实现必须通过明确所有权保持该合同可审计：生命周期步骤策略留在 `application::service::lifecycle_plan`，服务定义渲染、平台权限以及 systemd/launchd/Windows Service 命令统一放在 `lifecycle_plan::platform_service`。修改任一边界都必须维持所有支持平台一致的 dry-run 计划与执行合同。
+
 精确代码源码兜底由产品内部实现，运行时不能依赖 `rg`。面向 agent 的 setup 说明可以提到使用有界 `rg` 或 `grep -RIn` 做人工检查工具，但安装器不能把递归 grep 作为 service 依赖，也不能把它当成已索引查询行为的替代品。
 
 ## 4. 运行时状态
