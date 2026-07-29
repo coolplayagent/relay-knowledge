@@ -7,6 +7,8 @@ use crate::storage::{
     FileSearchRequest, StorageError,
 };
 
+pub(super) mod content;
+
 const INDEXED_STATUS: &str = "indexed";
 const MISSING_STATUS: &str = "missing";
 
@@ -65,7 +67,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
 
         ",
     )?;
-    super::file_index_content::initialize_schema(connection)?;
+    content::initialize_schema(connection)?;
     super::schema_columns::ensure_column(
         connection,
         "file_index_roots",
@@ -150,9 +152,9 @@ pub(super) fn replace_root(
         .iter()
         .map(|path| entry_key(&update.root.scope_id, &update.root.root_id, path))
         .collect::<BTreeSet<_>>();
-    let content_counts = super::file_index_content::replace_entries(
+    let content_counts = content::replace_entries(
         &transaction,
-        super::file_index_content::ContentReplacementRequest {
+        content::ContentReplacementRequest {
             scope_id: &update.root.scope_id,
             root_id: &update.root.root_id,
             entries_len: update.entries.len(),
@@ -565,7 +567,7 @@ fn mark_root_unconfigured(
         ",
         params![scope_id, root_id],
     )?;
-    super::file_index_content::mark_root_unconfigured(connection, scope_id, root_id, now_ms)?;
+    content::mark_root_unconfigured(connection, scope_id, root_id, now_ms)?;
     let Some(mut status) = root_status(connection, scope_id, root_id)? else {
         return Ok(());
     };
@@ -706,9 +708,9 @@ fn u64_from_sql(value: i64) -> Result<u64, rusqlite::Error> {
 }
 
 #[cfg(test)]
-#[path = "file_index_tests.rs"]
+#[path = "tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "file_index_retirement_tests.rs"]
+#[path = "retirement_tests.rs"]
 mod retirement_tests;

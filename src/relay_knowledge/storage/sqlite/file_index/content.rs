@@ -215,7 +215,7 @@ pub(super) fn mark_root_unconfigured(
     Ok(())
 }
 
-pub(super) fn search(
+pub(in crate::storage::sqlite) fn search(
     connection: &Connection,
     request: FileContentSearchRequest,
     deadline: Instant,
@@ -224,7 +224,7 @@ pub(super) fn search(
         return Err(query_timeout());
     }
     connection.progress_handler(1000, Some(move || Instant::now() >= deadline));
-    let result = super::retry::retry_sqlite_transient(|| {
+    let result = super::super::retry::retry_sqlite_transient(|| {
         if Instant::now() >= deadline {
             return Err(query_timeout());
         }
@@ -951,5 +951,5 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(test)]
-#[path = "file_index_content_tests.rs"]
+#[path = "content_tests.rs"]
 mod tests;
