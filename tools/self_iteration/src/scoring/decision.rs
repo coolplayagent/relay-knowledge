@@ -1,4 +1,14 @@
-fn reject_reasons(
+use serde_json::Value;
+
+use super::{
+    EvaluationObservation, RATIO_EPSILON, ScoreBaselines, ScoreComponents,
+    capability::pareto_improved,
+    change_detection::{bug_fix_priority_improved, previous_number},
+};
+
+const SCORE_EPSILON: f64 = 0.0005;
+
+pub(super) fn reject_reasons(
     observation: &EvaluationObservation,
     current: ScoreComponents,
     baselines: ScoreBaselines<'_>,
@@ -90,98 +100,6 @@ fn profile_best_score_reject_reason(
     ))
 }
 
-fn changes(
-    observation: &EvaluationObservation,
-    current: ScoreComponents,
-    previous_run: Option<&Value>,
-    improved: bool,
-) -> Vec<Value> {
-    let Some(previous) = previous_run else {
-        return Vec::new();
-    };
-    let mut changes = Vec::new();
-    for (name, value) in [
-        ("score", current.score),
-        ("foundational_capability", current.foundational_capability),
-        ("competitive_capability", current.competitive_capability),
-        ("semantic_vector", current.semantic_vector),
-        ("performance", current.performance),
-        ("stability", current.stability),
-    ] {
-        push_score_change(
-            &mut changes,
-            name,
-            value,
-            previous_number(previous, name),
-            improved,
-        );
-    }
-    if let Some(value) = current.research_judge {
-        push_score_change(
-            &mut changes,
-            "research_judge",
-            value,
-            previous_number(previous, "research_judge"),
-            improved,
-        );
-    }
-    for gate in &observation.gates {
-        let Some(previous_passed) = previous_gate_passed(previous, &gate.name) else {
-            continue;
-        };
-        if gate.passed != previous_passed
-            && ((improved && gate.passed) || (!improved && !gate.passed))
-        {
-            changes.push(serde_json::json!({
-                "kind": "gate",
-                "name": gate.name,
-                "previous": previous_passed,
-                "current": gate.passed
-            }));
-        }
-    }
-    for case in &observation.cases {
-        let Some(previous_case) = previous_case(previous, &case.case_id) else {
-            continue;
-        };
-        if case.passed != previous_case.passed
-            && ((improved && case.passed) || (!improved && !case.passed))
-        {
-            changes.push(serde_json::json!({
-                "kind": "case",
-                "name": case.case_id,
-                "previous": previous_case.passed,
-                "current": case.passed
-            }));
-            continue;
-        }
-        push_case_quality_changes(&mut changes, case, previous_case, improved);
-    }
-    let previous_metrics = previous_metrics(previous);
-    for metric in &observation.metrics {
-        if let Some(previous_value) = previous_metrics.get(&metric.name).copied() {
-            let threshold =
-                (previous_value.abs() * METRIC_RELATIVE_EPSILON).max(METRIC_ABSOLUTE_EPSILON);
-            let delta = metric.value - previous_value;
-            let better = if metric.lower_is_better {
-                delta < -threshold
-            } else {
-                delta > threshold
-            };
-            let worse = if metric.lower_is_better {
-                delta > threshold
-            } else {
-                delta < -threshold
-            };
-            if (improved && better) || (!improved && worse) {
-                changes.push(serde_json::json!({
-                    "kind": "metric",
-                    "name": metric.name,
-                    "previous": previous_value,
-                    "current": metric.value
-                }));
-            }
-        }
-    }
-    changes
-}
+#[cfg(test)]
+#[path = "decision_tests.rs"]
+mod decision_tests;

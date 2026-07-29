@@ -106,21 +106,13 @@ pub fn score_evaluation(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ScoreComponents {
-    score: f64,
-    foundational_capability: f64,
-    competitive_capability: f64,
-    semantic_vector: f64,
-    research_judge: Option<f64>,
-    performance: f64,
-    stability: f64,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PreviousCase {
-    passed: bool,
-    rank: Option<usize>,
-    false_positive_count: usize,
-    score: f64,
-}
+#[cfg(test)]
+#[path = "evaluation_tests.rs"]
+mod evaluation_tests;
+use super::{
+    EvaluationObservation, ScoreBaselines, ScoreBreakdown, ScoreComponents,
+    capability::{capability_ceiling_bonus, performance_score, stability_score, weighted_score},
+    change_detection::{changes, metric_budget_failures, objective_scores},
+    decision::reject_reasons,
+    score_math::{average, clamp},
+};

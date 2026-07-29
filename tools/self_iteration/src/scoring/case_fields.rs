@@ -6,10 +6,15 @@ pub fn array_field<'a>(value: &'a Value, name: &str) -> &'a [Value] {
         .unwrap_or(&[])
 }
 
-fn usize_field(value: &Value, name: &str, default: usize) -> usize {
+pub(super) fn usize_field(value: &Value, name: &str, default: usize) -> usize {
     value
         .get(name)
         .and_then(Value::as_u64)
         .map(|value| value as usize)
         .unwrap_or(default)
 }
+
+#[cfg(test)]
+#[path = "case_fields_tests.rs"]
+mod case_fields_tests;
+use serde_json::Value;

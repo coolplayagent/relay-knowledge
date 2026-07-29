@@ -144,7 +144,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.10 Self-Iteration Scoring Ownership
 
-`tools/self_iteration::scoring` keeps observation types and the public score contract in `mod.rs`, ranked-evidence matching in `ranked`, total-score assembly in `evaluation`, rejection policy in `decision`, capability-ceiling/performance/stability components in `capability`, cross-run delta detection in `change_detection`, typed JSON case-field access in `case_fields`, and bounded averaging/clamping primitives in `score_math`. Focused unit tests stay in the same directory. Do not restore root-level `scoring_ranked` or `scoring_tests` files, introduce a generic `common` bucket, or recombine distinct scoring phases into one scoring file.
+`tools/self_iteration::scoring` must use real Rust modules. `mod.rs` owns observation, public score, and private stage contracts; `ranked` owns ranking-evidence matching, `evaluation` owns aggregate score assembly, `decision` owns rejection policy only, `capability` owns capability-ceiling/performance/stability components, `change_detection` owns all cross-run change extraction, `case_fields` owns typed JSON case access, and `score_math` owns bounded average/clamp primitives. Every behavior owner directly attaches its sibling `*_tests.rs` contract, while `mod_tests` only validates observation contracts; production code and tests must not use `include!` to merge stages or test scopes into an implicit namespace. Do not restore root-level `scoring_ranked` or `scoring_tests`, introduce a generic `common` bucket, move change extraction back into `decision`, or recombine distinct scoring stages into one score file.
 
 ### 3.11 Self-Iteration Configuration Ownership
 

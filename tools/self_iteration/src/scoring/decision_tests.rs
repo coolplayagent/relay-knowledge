@@ -1,208 +1,238 @@
-    #[test]
-    fn failed_gate_rejects() {
-        let observation = EvaluationObservation {
-            gates: vec![GateObservation {
-                name: "cargo_test".to_owned(),
-                passed: false,
-                duration_ms: 1,
-                message: "failed".to_owned(),
-            }],
-            cases: Vec::new(),
-            metrics: Vec::new(),
-            generated_diff: true,
-        };
+use serde_json::Value;
 
-        let score = score_evaluation(&observation, ScoreBaselines::default());
+use crate::scoring::{
+    CaseObservation, EvaluationObservation, GateObservation, MetricObservation, ScoreBaselines,
+    score_evaluation,
+};
 
-        assert!(!score.accepted);
-        assert!(score.reject_reasons[0].contains("quality gates failed"));
+#[test]
+fn failed_gate_rejects() {
+    let observation = EvaluationObservation {
+        gates: vec![GateObservation {
+            name: "cargo_test".to_owned(),
+            passed: false,
+            duration_ms: 1,
+            message: "failed".to_owned(),
+        }],
+        cases: Vec::new(),
+        metrics: Vec::new(),
+        generated_diff: true,
+    };
+
+    let score = score_evaluation(&observation, ScoreBaselines::default());
+
+    assert!(!score.accepted);
+    assert!(score.reject_reasons[0].contains("quality gates failed"));
+}
+
+fn case(case_id: &str, objective: &str, score_override: f64) -> CaseObservation {
+    CaseObservation {
+        case_id: case_id.to_owned(),
+        repository: "repo".to_owned(),
+        passed: true,
+        guardrail: false,
+        rank: Some(1),
+        max_rank: 1,
+        false_positive_count: 0,
+        message: "ok".to_owned(),
+        objective: objective.to_owned(),
+        score_override: Some(score_override),
     }
+}
 
-    #[test]
-    fn missing_diff_rejects_without_zeroing_gate_stability() {
-        let observation = EvaluationObservation {
-            gates: vec![GateObservation {
-                name: "cargo_test".to_owned(),
-                passed: true,
-                duration_ms: 1,
-                message: "ok".to_owned(),
-            }],
-            cases: vec![
-                case("foundation", "foundational_capability", 1.0),
-                case("competitive", "competitive_capability", 1.0),
-                case("semantic", "semantic_vector", 1.0),
-            ],
-            metrics: vec![MetricObservation {
-                name: "query_p95_ms".to_owned(),
-                value: 95.0,
-                budget: Some(100.0),
-                lower_is_better: true,
-                key: true,
-            }],
-            generated_diff: false,
-        };
+#[test]
+fn missing_diff_rejects_without_zeroing_gate_stability() {
+    let observation = EvaluationObservation {
+        gates: vec![GateObservation {
+            name: "cargo_test".to_owned(),
+            passed: true,
+            duration_ms: 1,
+            message: "ok".to_owned(),
+        }],
+        cases: vec![
+            case("foundation", "foundational_capability", 1.0),
+            case("competitive", "competitive_capability", 1.0),
+            case("semantic", "semantic_vector", 1.0),
+        ],
+        metrics: vec![MetricObservation {
+            name: "query_p95_ms".to_owned(),
+            value: 95.0,
+            budget: Some(100.0),
+            lower_is_better: true,
+            key: true,
+        }],
+        generated_diff: false,
+    };
 
-        let score = score_evaluation(&observation, ScoreBaselines::default());
+    let score = score_evaluation(&observation, ScoreBaselines::default());
 
-        assert_eq!(score.stability, 1.0);
-        assert!(score.score > 0.95);
-        assert!(!score.accepted);
-        assert!(score
+    assert_eq!(score.stability, 1.0);
+    assert!(score.score > 0.95);
+    assert!(!score.accepted);
+    assert!(
+        score
             .reject_reasons
             .iter()
-            .any(|reason| reason.contains("no candidate diff")));
-    }
+            .any(|reason| reason.contains("no candidate diff"))
+    );
+}
 
-    #[test]
-    fn fixed_gate_gets_bug_fix_priority() {
-        let previous = serde_json::json!({
-            "score": 0.9,
-            "foundational_capability": 0.0,
-            "competitive_capability": 0.0,
-            "semantic_vector": 0.0,
-            "performance": 1.0,
-            "stability": 1.0,
-            "gates": [{"name": "cargo_test", "passed": false}],
-            "cases": [],
-            "metrics": []
-        });
-        let observation = EvaluationObservation {
-            gates: vec![GateObservation {
-                name: "cargo_test".to_owned(),
-                passed: true,
-                duration_ms: 1,
-                message: "ok".to_owned(),
-            }],
-            cases: Vec::new(),
-            metrics: Vec::new(),
-            generated_diff: true,
-        };
+#[test]
+fn fixed_gate_gets_bug_fix_priority() {
+    let previous = serde_json::json!({
+        "score": 0.9,
+        "foundational_capability": 0.0,
+        "competitive_capability": 0.0,
+        "semantic_vector": 0.0,
+        "performance": 1.0,
+        "stability": 1.0,
+        "gates": [{"name": "cargo_test", "passed": false}],
+        "cases": [],
+        "metrics": []
+    });
+    let observation = EvaluationObservation {
+        gates: vec![GateObservation {
+            name: "cargo_test".to_owned(),
+            passed: true,
+            duration_ms: 1,
+            message: "ok".to_owned(),
+        }],
+        cases: Vec::new(),
+        metrics: Vec::new(),
+        generated_diff: true,
+    };
 
-        let score = score_evaluation(
-            &observation,
-            ScoreBaselines {
-                workload_previous: Some(&previous),
-                profile_best_accepted: None,
-            },
-        );
+    let score = score_evaluation(
+        &observation,
+        ScoreBaselines {
+            workload_previous: Some(&previous),
+            profile_best_accepted: None,
+        },
+    );
 
-        assert!(score.accepted);
-        assert!(score.improvements.iter().any(|item| {
-            item.get("kind").and_then(Value::as_str) == Some("gate")
-                && item.get("name").and_then(Value::as_str) == Some("cargo_test")
-        }));
-    }
+    assert!(score.accepted);
+    assert!(score.improvements.iter().any(|item| {
+        item.get("kind").and_then(Value::as_str) == Some("gate")
+            && item.get("name").and_then(Value::as_str) == Some("cargo_test")
+    }));
+}
 
-    #[test]
-    fn newly_added_passing_case_is_not_bug_fix_priority() {
-        let previous = serde_json::json!({
-            "score": 0.9,
-            "foundational_capability": 1.0,
-            "competitive_capability": 1.0,
-            "semantic_vector": 1.0,
-            "performance": 1.0,
-            "stability": 1.0,
-            "gates": [{"name": "cargo_test", "passed": true}],
-            "cases": [],
-            "metrics": []
-        });
-        let observation = EvaluationObservation {
-            gates: vec![GateObservation {
-                name: "cargo_test".to_owned(),
-                passed: true,
-                duration_ms: 1,
-                message: "ok".to_owned(),
-            }],
-            cases: vec![CaseObservation {
-                case_id: "new_case".to_owned(),
-                repository: "repo".to_owned(),
-                passed: true,
-                guardrail: false,
-                rank: Some(1),
-                max_rank: 1,
-                false_positive_count: 0,
-                message: "ok".to_owned(),
-                objective: "competitive_capability".to_owned(),
-                score_override: Some(1.0),
-            }],
-            metrics: Vec::new(),
-            generated_diff: true,
-        };
+#[test]
+fn newly_added_passing_case_is_not_bug_fix_priority() {
+    let previous = serde_json::json!({
+        "score": 0.9,
+        "foundational_capability": 1.0,
+        "competitive_capability": 1.0,
+        "semantic_vector": 1.0,
+        "performance": 1.0,
+        "stability": 1.0,
+        "gates": [{"name": "cargo_test", "passed": true}],
+        "cases": [],
+        "metrics": []
+    });
+    let observation = EvaluationObservation {
+        gates: vec![GateObservation {
+            name: "cargo_test".to_owned(),
+            passed: true,
+            duration_ms: 1,
+            message: "ok".to_owned(),
+        }],
+        cases: vec![CaseObservation {
+            case_id: "new_case".to_owned(),
+            repository: "repo".to_owned(),
+            passed: true,
+            guardrail: false,
+            rank: Some(1),
+            max_rank: 1,
+            false_positive_count: 0,
+            message: "ok".to_owned(),
+            objective: "competitive_capability".to_owned(),
+            score_override: Some(1.0),
+        }],
+        metrics: Vec::new(),
+        generated_diff: true,
+    };
 
-        let score = score_evaluation(
-            &observation,
-            ScoreBaselines {
-                workload_previous: Some(&previous),
-                profile_best_accepted: None,
-            },
-        );
+    let score = score_evaluation(
+        &observation,
+        ScoreBaselines {
+            workload_previous: Some(&previous),
+            profile_best_accepted: None,
+        },
+    );
 
-        assert!(!score.accepted);
-        assert!(!score
+    assert!(!score.accepted);
+    assert!(
+        !score
             .improvements
             .iter()
-            .any(|item| item.get("kind").and_then(Value::as_str) == Some("case")));
-    }
+            .any(|item| item.get("kind").and_then(Value::as_str) == Some("case"))
+    );
+}
 
-    #[test]
-    fn passing_case_rank_and_score_changes_are_recorded() {
-        let previous = serde_json::json!({
-            "score": 0.5,
-            "foundational_capability": 0.5,
-            "competitive_capability": 0.5,
-            "semantic_vector": 0.0,
-            "performance": 1.0,
-            "stability": 1.0,
-            "gates": [{"name": "cargo_test", "passed": true}],
-            "cases": [{
-                "case_id": "ranked_case",
-                "passed": true,
-                "rank": 4,
-                "false_positive_count": 1,
-                "score_override": 0.25
-            }],
-            "metrics": []
-        });
-        let observation = EvaluationObservation {
-            gates: vec![GateObservation {
-                name: "cargo_test".to_owned(),
-                passed: true,
-                duration_ms: 1,
-                message: "ok".to_owned(),
-            }],
-            cases: vec![CaseObservation {
-                case_id: "ranked_case".to_owned(),
-                repository: "repo".to_owned(),
-                passed: true,
-                guardrail: false,
-                rank: Some(1),
-                max_rank: 5,
-                false_positive_count: 0,
-                message: "better".to_owned(),
-                objective: "competitive_capability".to_owned(),
-                score_override: Some(1.0),
-            }],
-            metrics: Vec::new(),
-            generated_diff: true,
-        };
+#[test]
+fn passing_case_rank_and_score_changes_are_recorded() {
+    let previous = serde_json::json!({
+        "score": 0.5,
+        "foundational_capability": 0.5,
+        "competitive_capability": 0.5,
+        "semantic_vector": 0.0,
+        "performance": 1.0,
+        "stability": 1.0,
+        "gates": [{"name": "cargo_test", "passed": true}],
+        "cases": [{
+            "case_id": "ranked_case",
+            "passed": true,
+            "rank": 4,
+            "false_positive_count": 1,
+            "score_override": 0.25
+        }],
+        "metrics": []
+    });
+    let observation = EvaluationObservation {
+        gates: vec![GateObservation {
+            name: "cargo_test".to_owned(),
+            passed: true,
+            duration_ms: 1,
+            message: "ok".to_owned(),
+        }],
+        cases: vec![CaseObservation {
+            case_id: "ranked_case".to_owned(),
+            repository: "repo".to_owned(),
+            passed: true,
+            guardrail: false,
+            rank: Some(1),
+            max_rank: 5,
+            false_positive_count: 0,
+            message: "better".to_owned(),
+            objective: "competitive_capability".to_owned(),
+            score_override: Some(1.0),
+        }],
+        metrics: Vec::new(),
+        generated_diff: true,
+    };
 
-        let score = score_evaluation(
-            &observation,
-            ScoreBaselines {
-                workload_previous: Some(&previous),
-                profile_best_accepted: None,
-            },
-        );
+    let score = score_evaluation(
+        &observation,
+        ScoreBaselines {
+            workload_previous: Some(&previous),
+            profile_best_accepted: None,
+        },
+    );
 
-        assert!(score
+    assert!(
+        score
             .improvements
             .iter()
-            .any(|item| item.get("kind").and_then(Value::as_str) == Some("case_rank")));
-        assert!(score
+            .any(|item| item.get("kind").and_then(Value::as_str) == Some("case_rank"))
+    );
+    assert!(
+        score
             .improvements
             .iter()
-            .any(|item| item.get("kind").and_then(Value::as_str) == Some("case_score")));
-        assert!(score.improvements.iter().any(|item| {
-            item.get("kind").and_then(Value::as_str) == Some("case_false_positive_count")
-        }));
-    }
+            .any(|item| item.get("kind").and_then(Value::as_str) == Some("case_score"))
+    );
+    assert!(score.improvements.iter().any(|item| {
+        item.get("kind").and_then(Value::as_str) == Some("case_false_positive_count")
+    }));
+}

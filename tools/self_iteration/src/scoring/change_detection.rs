@@ -1,3 +1,112 @@
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+
+use super::{
+    CaseObservation, EvaluationObservation, MetricObservation, PreviousCase, RATIO_EPSILON,
+    ScoreComponents, score_math::clamp,
+};
+
+const CASE_SCORE_EPSILON: f64 = 0.005;
+const METRIC_RELATIVE_EPSILON: f64 = 0.03;
+const METRIC_ABSOLUTE_EPSILON: f64 = 25.0;
+
+pub(super) fn changes(
+    observation: &EvaluationObservation,
+    current: ScoreComponents,
+    previous_run: Option<&Value>,
+    improved: bool,
+) -> Vec<Value> {
+    let Some(previous) = previous_run else {
+        return Vec::new();
+    };
+    let mut changes = Vec::new();
+    for (name, value) in [
+        ("score", current.score),
+        ("foundational_capability", current.foundational_capability),
+        ("competitive_capability", current.competitive_capability),
+        ("semantic_vector", current.semantic_vector),
+        ("performance", current.performance),
+        ("stability", current.stability),
+    ] {
+        push_score_change(
+            &mut changes,
+            name,
+            value,
+            previous_number(previous, name),
+            improved,
+        );
+    }
+    if let Some(value) = current.research_judge {
+        push_score_change(
+            &mut changes,
+            "research_judge",
+            value,
+            previous_number(previous, "research_judge"),
+            improved,
+        );
+    }
+    for gate in &observation.gates {
+        let Some(previous_passed) = previous_gate_passed(previous, &gate.name) else {
+            continue;
+        };
+        if gate.passed != previous_passed
+            && ((improved && gate.passed) || (!improved && !gate.passed))
+        {
+            changes.push(serde_json::json!({
+                "kind": "gate",
+                "name": gate.name,
+                "previous": previous_passed,
+                "current": gate.passed
+            }));
+        }
+    }
+    for case in &observation.cases {
+        let Some(previous_case) = previous_case(previous, &case.case_id) else {
+            continue;
+        };
+        if case.passed != previous_case.passed
+            && ((improved && case.passed) || (!improved && !case.passed))
+        {
+            changes.push(serde_json::json!({
+                "kind": "case",
+                "name": case.case_id,
+                "previous": previous_case.passed,
+                "current": case.passed
+            }));
+            continue;
+        }
+        push_case_quality_changes(&mut changes, case, previous_case, improved);
+    }
+    let previous_metrics = previous_metrics(previous);
+    for metric in &observation.metrics {
+        if let Some(previous_value) = previous_metrics.get(&metric.name).copied() {
+            let threshold =
+                (previous_value.abs() * METRIC_RELATIVE_EPSILON).max(METRIC_ABSOLUTE_EPSILON);
+            let delta = metric.value - previous_value;
+            let better = if metric.lower_is_better {
+                delta < -threshold
+            } else {
+                delta > threshold
+            };
+            let worse = if metric.lower_is_better {
+                delta > threshold
+            } else {
+                delta < -threshold
+            };
+            if (improved && better) || (!improved && worse) {
+                changes.push(serde_json::json!({
+                    "kind": "metric",
+                    "name": metric.name,
+                    "previous": previous_value,
+                    "current": metric.value
+                }));
+            }
+        }
+    }
+    changes
+}
+
 fn push_score_change(
     changes: &mut Vec<Value>,
     name: &str,
@@ -16,7 +125,7 @@ fn push_score_change(
     }
 }
 
-fn metric_budget_failures(metrics: &[MetricObservation]) -> Vec<Value> {
+pub(super) fn metric_budget_failures(metrics: &[MetricObservation]) -> Vec<Value> {
     metrics
         .iter()
         .filter(|metric| metric.key && metric.budget.is_some() && metric.score() < 1.0)
@@ -30,7 +139,7 @@ fn metric_budget_failures(metrics: &[MetricObservation]) -> Vec<Value> {
         .collect()
 }
 
-fn bug_fix_priority_improved(improvements: &[Value]) -> bool {
+pub(super) fn bug_fix_priority_improved(improvements: &[Value]) -> bool {
     improvements.iter().any(|item| {
         matches!(
             item.get("kind").and_then(Value::as_str),
@@ -39,7 +148,11 @@ fn bug_fix_priority_improved(improvements: &[Value]) -> bool {
     })
 }
 
-fn objective_scores(cases: &[CaseObservation], objective: &str, aliases: &[&str]) -> Vec<f64> {
+pub(super) fn objective_scores(
+    cases: &[CaseObservation],
+    objective: &str,
+    aliases: &[&str],
+) -> Vec<f64> {
     cases
         .iter()
         .filter(|case| case.objective == objective || aliases.contains(&case.objective.as_str()))
@@ -47,7 +160,7 @@ fn objective_scores(cases: &[CaseObservation], objective: &str, aliases: &[&str]
         .collect()
 }
 
-fn previous_number(run: &Value, name: &str) -> f64 {
+pub(super) fn previous_number(run: &Value, name: &str) -> f64 {
     run.get(name).and_then(Value::as_f64).unwrap_or(0.0)
 }
 
@@ -158,7 +271,7 @@ fn previous_gate_passed(run: &Value, gate_name: &str) -> Option<bool> {
         .and_then(Value::as_bool)
 }
 
-fn previous_metrics(run: &Value) -> BTreeMap<String, f64> {
+pub(super) fn previous_metrics(run: &Value) -> BTreeMap<String, f64> {
     run.get("metrics")
         .and_then(Value::as_array)
         .map(|metrics| {
@@ -174,3 +287,7 @@ fn previous_metrics(run: &Value) -> BTreeMap<String, f64> {
         })
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+#[path = "change_detection_tests.rs"]
+mod change_detection_tests;

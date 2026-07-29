@@ -144,7 +144,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.10 自迭代评分职责
 
-`tools/self_iteration::scoring` 必须把 observation 和公开 score contract 保持在 `mod.rs`，排名证据匹配放在 `ranked`，总分装配放在 `evaluation`，拒绝决策放在 `decision`，能力上限、性能与稳定性分量放在 `capability`，跨运行变化检测放在 `change_detection`，类型化 JSON 用例字段读取放在 `case_fields`，有界均值与截断原语放在 `score_math`。定向 UT 与这些实现同目录；不得恢复根目录级 `scoring_ranked`、`scoring_tests`、引入笼统的 `common` 桶，或把不同评分阶段重新合并进单个评分文件。
+`tools/self_iteration::scoring` 必须使用真正的 Rust 模块。`mod.rs` 拥有 observation、公开 score 和私有阶段合同；`ranked` 负责排名证据匹配，`evaluation` 负责总分装配，`decision` 只负责拒绝策略，`capability` 负责能力上限、性能与稳定性分量，`change_detection` 负责全部跨运行变化提取，`case_fields` 负责类型化 JSON 用例字段读取，`score_math` 负责有界均值与截断原语。每个行为 owner 必须直接挂载同级 `*_tests.rs` contract，`mod_tests` 只验证 observation 合同；生产代码和测试不得使用 `include!` 把阶段或测试作用域合并进隐式命名空间。不得恢复根目录级 `scoring_ranked`、`scoring_tests`、引入笼统的 `common` 桶、把变化提取移回 `decision`，或把不同评分阶段重新合并进单个评分文件。
 
 ### 3.11 自迭代配置职责
 
