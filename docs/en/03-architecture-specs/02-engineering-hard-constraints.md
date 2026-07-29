@@ -70,6 +70,8 @@ Local-file persistence is grouped under `storage::sqlite::file_index`: `mod.rs` 
 
 Graph-canvas persistence is grouped under `storage::sqlite::canvas`: `mod.rs` owns budget validation, knowledge-graph projection, and the snapshot builder; `code` only projects code files, symbols, references, and source-path links; and `tests` covers both projections plus mixed canvases. Code-projection helpers stay private to the canvas directory. Do not restore a top-level `canvas_code` sibling whose ownership depends on a filename prefix.
 
+Code-graph fact persistence is grouped under `storage::sqlite::code_graph`: `mod.rs` owns the schema, version-bounded fact replacement and search, row decoding, and metadata validation, while `tests` verifies the same storage boundary. Do not separate its tests into the SQLite root or use a repeated `code_graph_tests` filename.
+
 Maven effective-model construction also separates syntax boundaries: `pom_path` owns repository-bounded relative POM resolution, while `property_interpolation` owns bounded recursive property expansion. These rules must not be combined in a generic Maven support module.
 
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
