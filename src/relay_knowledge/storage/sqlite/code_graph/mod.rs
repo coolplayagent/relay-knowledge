@@ -815,5 +815,4 @@ fn domain_error(error: DomainError) -> StorageError {
 }
 
 #[cfg(test)]
-#[path = "code_graph_tests.rs"]
-mod code_graph_tests;
+mod tests;
