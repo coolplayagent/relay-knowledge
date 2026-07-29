@@ -9,10 +9,11 @@ use crate::{
     history::{
         HistoryPaths, adopted, best_accepted_run_for_profile, best_accepted_run_for_workload,
         is_evaluate_run, load_runs,
-    },
-    history_synthesis::synthesize_history,
-    memory::{
-        historical_patch_memory_index, progressive_memory_index, rejection_recovery_memory_review,
+        memory::{
+            historical_patch_memory_index, progressive_memory_index,
+            rejection_recovery_memory_review,
+        },
+        synthesis::synthesize_history,
     },
 };
 

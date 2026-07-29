@@ -122,6 +122,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::config` keeps modes and strategies, category sets, the public configuration model, CLI parsing, category exclusions, job budgets, and scalar validation in `mode`, `categories`, `model`, `parse`, `category_exclusions`, `job_plan`, and `value_parser` respectively. `mod.rs` only maintains constants and the stable facade; parsing, category, unattended-mode, documentation-contract, and job-budget unit tests stay in the same directory. Do not restore a root `config.rs` that combines the model, parser, budgets, and inline tests.
 
+### 3.12 Self-Iteration History and Memory Ownership
+
+`tools/self_iteration::history` keeps run selection, persistence, CSV/SVG export, and adoption-state interpretation in `runs`, `persistence`, `export`, and `run_state`; `synthesis` builds bounded history summaries, while the `memory` subtree owns long-term memory queries, record construction, storage, summaries, and metadata. Callers express dependencies through `history::synthesis` or `history::memory`, and focused unit tests stay beside their boundary. Do not restore root-level `history_synthesis.rs` or `memory.rs`, or a monolithic `history.rs` with a large inline test module.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

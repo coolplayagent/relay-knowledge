@@ -5,8 +5,6 @@ mod config;
 mod evaluator;
 mod git_ops;
 mod history;
-mod history_synthesis;
-mod memory;
 mod research_plan;
 mod scoring;
 mod unattended;
@@ -495,7 +493,7 @@ pub(crate) fn persist_scored_run_with_score(
         }
     }
     if !history::is_evaluate_run(&record) {
-        memory::write_run_memory(input.paths, &record)?;
+        history::memory::write_run_memory(input.paths, &record)?;
     }
     history::append_run(input.paths, &record)?;
     history::export_history(input.paths)?;
@@ -526,12 +524,12 @@ fn optimization_plan(
     codex: Option<&codex::CodexResult>,
 ) -> serde_json::Value {
     let codex_notes = codex.map(|result| {
-        memory::compact_prompt_text(&format!("{}\n{}", result.stdout, result.stderr), 1200)
+        history::memory::compact_prompt_text(&format!("{}\n{}", result.stdout, result.stderr), 1200)
     });
     serde_json::json!({
         "changed_paths": git_ops::changed_paths_from_diff(&patch.diff),
-        "key_improvements": memory::compact_score_changes(&score.improvements, 8),
-        "known_degradations": memory::compact_score_changes(&score.degradations, 8),
+        "key_improvements": history::memory::compact_score_changes(&score.improvements, 8),
+        "known_degradations": history::memory::compact_score_changes(&score.degradations, 8),
         "reject_reasons": score.reject_reasons,
         "codex_notes": codex_notes,
     })
