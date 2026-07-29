@@ -110,6 +110,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 服务生命周期必须按边界划分职责：`application::service::lifecycle_plan` 负责请求校验、install/upgrade/rollback/uninstall 步骤计划和执行编排；只有 `lifecycle_plan::platform_service` 可以选择平台服务定义文件名、渲染 systemd/launchd/Windows Service 定义、声明平台权限并生成 service manager 命令；`lifecycle_plan::execution` 负责阻塞文件和进程执行。平台渲染与命令转义不得重新并入生命周期步骤 planner。
 
+### 3.9 自迭代评估器职责
+
+`tools/self_iteration::evaluator` 必须按评估阶段和证据类型分组：`runtime` 负责一次评估运行的顶层协调、并发限制和结果汇总，`quality` 分别拥有门禁定义和执行，`workloads` 按 repository、repository-set、agent、CLI、file 和 semantic-vector 工作负载划分，`fixtures` 只拥有生成式仓库 fixture 及其写入生命周期，`judge` 负责研究判断的配置、prompt、backend 和结果合同。评估器 UT 必须与被验证边界同目录并使用可定位的 `*_tests.rs` 名称；不得恢复 `evaluator_tail`、跨职责 `evaluator_tests` 或在 `tools/self_iteration/src` 根目录平铺同一领域的 `evaluator_*` 文件。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
