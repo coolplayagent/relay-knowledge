@@ -22,16 +22,11 @@ use super::{
     source_gitlink,
 };
 
-#[path = "worktree_overlay_dirs.rs"]
 mod dirs;
-#[path = "worktree_overlay_git.rs"]
 mod git_overlay;
-#[path = "worktree_overlay_plan.rs"]
 mod overlay_plan;
-#[path = "worktree_overlay_scope.rs"]
 mod overlay_scope;
-#[path = "worktree_overlay_untracked.rs"]
-mod worktree_overlay_untracked;
+mod untracked;
 
 use dirs::{worktree_directory_files, worktree_directory_is_expandable};
 use git_overlay::{

@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::domain::{CodeRepositoryRegistration, CodeRepositorySelector};
 
-use super::{
-    CodeIndexError, MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS, changes, scope,
-    worktree_overlay_untracked as untracked,
-};
+use super::{CodeIndexError, MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS, changes, scope, untracked};
 
 pub(super) struct WorktreeOverlayScope<'a> {
     registration: &'a CodeRepositoryRegistration,
