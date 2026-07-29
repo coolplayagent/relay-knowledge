@@ -953,8 +953,8 @@ mod storage_tests;
 mod operations_tests;
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
 
 #[cfg(test)]
 #[path = "trace_tests.rs"]

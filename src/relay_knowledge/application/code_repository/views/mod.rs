@@ -14,5 +14,5 @@ mod affected_scope_integration_tests;
 #[path = "dependency_tour_integration_tests.rs"]
 mod dependency_tour_integration_tests;
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
