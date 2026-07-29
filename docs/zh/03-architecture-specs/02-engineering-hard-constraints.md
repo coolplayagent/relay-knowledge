@@ -80,6 +80,8 @@ SQLite 存储必须把 evidence 与稳定 ID 生成放在 `evidence_identity`，
 
 SQLite adapter 根模块必须完整收敛在 `storage/sqlite/`：`mod.rs` 负责 `SqliteGraphStore`、有界 blocking-worker 入口、schema 编排、graph-fact 校验与根测试声明，具体持久化职责由命名明确的子模块维护。`storage/` 父目录不得重新出现 `sqlite.rs`；根测试模块必须与 `sqlite/mod.rs` 共置，不得使用带 `sqlite/` 前缀的路径重定向。
 
+根 graph-store 行为由同级 `graph_storage_tests.rs` 验证；retrieval schema migration 与 BM25 fallback integration 场景收敛在职责明确的 `graph_retrieval_tests` 目录，并由 graph-storage 测试 owner 声明。不得恢复含糊的 `graph_tests.rs` 加 `graph_tests/` 组合，也不得把这些 graph-store 场景混入 code-graph fact 测试。
+
 SQLite connection lifecycle 必须在逻辑与物理上统一收敛到 `storage::sqlite::connection_runtime`：`maintenance` 负责 connection pragma、WAL checkpoint 与 maintenance diagnostics，`read_pool` 负责有界读连接 lane 与锁等待 deadline，`retry` 负责有界 transient-SQLite retry policy。SQLite 持久化模块必须通过 `connection_runtime` 使用这些能力，不得将它们重新平铺到 SQLite 根模块。
 
 Partitioned SQLite adapter 必须完整收敛在 `storage/partitioned/`：`mod.rs` 维护公开 store 与 trait 实现，catalog、control delegate、diagnostics、retention、routing、status 和 totals 使用职责命名文件，`mod_tests.rs` 验证跨 shard contract。`storage/` 父目录不得重新出现 `partitioned.rs`、`partitioned_tests.rs` 或指向该子域的相对 `#[path]`。

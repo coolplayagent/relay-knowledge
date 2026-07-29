@@ -5,10 +5,10 @@ use crate::domain::{
     EventRecord, EvidenceRecord, FactStatus, GraphRelationRecord, RetrieverSource, SourceScope,
 };
 
-#[path = "graph_tests/retrieval_schema_tests.rs"]
+#[path = "graph_retrieval_tests/retrieval_schema_tests.rs"]
 mod retrieval_schema_tests;
 
-#[path = "graph_tests/bm25_fallback_integration_tests.rs"]
+#[path = "graph_retrieval_tests/bm25_fallback_integration_tests.rs"]
 mod bm25_fallback_integration_tests;
 
 #[tokio::test]

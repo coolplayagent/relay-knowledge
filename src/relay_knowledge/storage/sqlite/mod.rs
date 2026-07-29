@@ -981,7 +981,8 @@ fn replace_fact_evidence_links(
 mod metadata_tests;
 
 #[cfg(test)]
-mod graph_tests;
+#[path = "graph_storage_tests.rs"]
+mod graph_storage_tests;
 
 #[cfg(test)]
 mod graphrag_phase4_tests;
