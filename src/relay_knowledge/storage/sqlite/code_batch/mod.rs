@@ -15,11 +15,8 @@ use super::{
     code_report, code_status,
 };
 
-#[path = "code_batch/dependencies.rs"]
 pub(super) mod dependencies;
-#[path = "code_batch/finalize.rs"]
 mod finalize;
-#[path = "code_batch/progress.rs"]
 mod progress;
 
 pub(super) fn begin_session(
@@ -932,3 +929,12 @@ fn now_millis() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
+#[cfg(test)]
+mod search_materialization_tests;
+
+#[cfg(test)]
+mod session_finalize_tests;
+
+#[cfg(test)]
+mod typescript_finalize_tests;
