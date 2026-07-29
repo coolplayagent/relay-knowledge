@@ -990,6 +990,3 @@ mod index_refresh_tests;
 #[cfg(test)]
 #[path = "sqlite/health_tests.rs"]
 mod health_tests;
-
-#[cfg(test)]
-mod operations_tests;

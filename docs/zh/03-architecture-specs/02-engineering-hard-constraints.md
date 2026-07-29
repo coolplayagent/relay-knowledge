@@ -72,6 +72,8 @@ Graph canvas 持久化统一收敛在 `storage::sqlite::canvas` 目录：`mod.rs
 
 Code graph fact 持久化统一收敛在 `storage::sqlite::code_graph` 目录：`mod.rs` 负责 schema、受版本约束的 fact replacement/search、行解码和元数据校验，`tests` 验证同一个存储边界。不得把测试拆回 SQLite 根目录，也不得恢复重复前缀的 `code_graph_tests` 文件名。
 
+Durable operations 持久化统一收敛在 `storage::sqlite::operations` 目录：`mod.rs` 负责 worker task、proposal/conflict、audit event、service operator state、相应行解码和稳定 task ID，`tests` 通过存储接口验证这些工作流。SQLite 根模块不得持有 operations 专属测试模块。
+
 Maven effective model 构建也必须拆开语法边界：`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；不得把两类规则重新合并到通用 Maven support 模块。
 
 代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
