@@ -13,9 +13,14 @@ fn merge_appends_arrays_and_merges_maps() {
 
     merge_case_config(&mut target, included).expect("merge should succeed");
 
-    assert_eq!(array_field(&target, "query_cases").len(), 2);
+    assert_eq!(
+        target["query_cases"].as_array().map(Vec::len),
+        Some(2),
+        "query arrays should append"
+    );
     assert!(
-        object_field(&target, "repositories")
+        target["repositories"]
+            .as_object()
             .expect("repositories should exist")
             .contains_key("b")
     );

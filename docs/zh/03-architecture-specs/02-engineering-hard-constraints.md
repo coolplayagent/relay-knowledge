@@ -172,7 +172,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.17 自迭代用例配置职责
 
-`tools/self_iteration::cases` 必须把递归用例文件加载、确定性对象/数组合并、类型化 JSON 字段读取和按仓库分组分别放在 `loading`、`merge`、`fields` 和 `grouping`。合并 UT 必须与 `merge.rs` 同级共置并由 `merge.rs` 挂载，`mod.rs` 只作为 facade 与 include 装配层。`tools/self_iteration/cases.json` 只维护有界 workload manifest 和全局 suite，repository query target 必须放入具名 include 文件，其中 project-alias、relay-teams、Linux、LevelDB、Spring Framework 和 Kubernetes 各自独立。不得恢复同时组合配置 I/O、合并策略、访问辅助、分组和内联测试的根目录 `cases.rs`，也不得把 manifest 再扩成单体 query-case 文件。
+`tools/self_iteration::cases` 必须把递归用例文件加载、确定性对象/数组合并、类型化 JSON 字段读取和按仓库分组分别放在真正的 Rust 模块 `loading`、`merge`、`fields` 和 `grouping`。每个行为 owner 必须直接挂载同级 `*_tests.rs` UT contract，`mod.rs` 只声明模块并维持公开 facade。禁止生产代码使用 `include!` 装配，因为这种方式会抹去模块所有权，并让多个同级文件共享一个隐式命名空间。`tools/self_iteration/cases.json` 只维护有界 workload manifest 和全局 suite，repository query target 必须放入具名 JSON include 文件，其中 project-alias、relay-teams、Linux、LevelDB、Spring Framework 和 Kubernetes 各自独立。不得恢复同时组合配置 I/O、合并策略、访问辅助、分组和内联测试的根目录 `cases.rs`，也不得把 manifest 再扩成单体 query-case 文件。
 
 ### 3.18 自迭代研究计划职责
 

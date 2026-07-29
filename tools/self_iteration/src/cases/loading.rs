@@ -1,3 +1,9 @@
+use std::{fs, path::Path};
+
+use serde_json::Value;
+
+use super::merge::merge_case_config;
+
 pub fn load_cases(path: &Path) -> Result<Value, String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
@@ -18,3 +24,7 @@ pub fn load_cases(path: &Path) -> Result<Value, String> {
     }
     Ok(config)
 }
+
+#[cfg(test)]
+#[path = "loading_tests.rs"]
+mod loading_tests;
