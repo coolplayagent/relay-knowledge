@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn strict_hybrid_chunk_fts_uses_multiple_structured_api_anchors() {
+    let strict = strict_hybrid_chunk_fts_match_query(
+        "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+    )
+    .expect("multiple API anchors should enable strict chunk recall");
+
+    assert_eq!(
+        strict,
+        "\"RegisterWorkflow\" \"RegisterActivity\" \"InterruptCh\""
+    );
+    assert!(strict_hybrid_chunk_fts_match_query("RK_PIPELINE_NOTE").is_none());
+    let member_access_strict = strict_hybrid_chunk_fts_match_query(
+        "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+    )
+    .expect("member-access API leaves should complete a strict recall pair");
+    assert_eq!(
+        member_access_strict,
+        "\"MustLoadDefaultClientOptions\" \"Dial\""
+    );
+    let sparse_member_access_strict = strict_hybrid_chunk_fts_match_query(
+        "client.Dial MustLoadDefaultClientOptions setup call target api",
+    )
+    .expect("member-access leaves should allow strict recall with one structured API anchor");
+    assert_eq!(
+        sparse_member_access_strict,
+        "\"MustLoadDefaultClientOptions\" \"Dial\""
+    );
+    assert!(
+        strict_hybrid_chunk_fts_match_query("client.Dial workflow client path/to/client.go")
+            .is_none()
+    );
+}
+
+#[test]
 fn hybrid_chunk_fts_query_uses_bounded_identifier_anchors() {
     let query = "client.Open LoadDefaultOptions workflow client retry timeout";
     let fts_query = hybrid_chunk_fts_match_query(query);

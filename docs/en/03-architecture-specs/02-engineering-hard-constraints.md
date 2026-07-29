@@ -202,6 +202,8 @@ The model-provider facade pairs `mod.rs` with `mod_tests.rs` for profile, catalo
 
 SQLite canvas, code-graph, code-schema, code-view, file-index, Maven, operations, and retrieval owners pair their facades with `mod_tests.rs`. Focused schema, ranking, migration, and persistence suites keep descriptive filenames; generic `tests.rs` is forbidden in these storage domains.
 
+SQLite code-query hybrid chunk evidence admission lives in `hybrid::chunk_gate`, paired with `chunk_gate_tests`; direct-result admission, FTS query construction, candidate budgeting, and chunk-result merging keep their tests beside their own production owners. The code-query facade only orchestrates layers and must not regain hybrid evidence-density or language-scope policy.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.

@@ -30,6 +30,8 @@ mod code_query_designated_initializer_scoring;
 mod code_query_excerpts;
 #[path = "scoring/flow.rs"]
 mod code_query_flow_scoring;
+#[path = "hybrid/chunk_gate.rs"]
+mod code_query_hybrid_chunk_gate;
 #[path = "hybrid/direct_gate.rs"]
 mod code_query_hybrid_direct_gate;
 #[path = "hybrid/exact_path.rs"]
@@ -71,10 +73,12 @@ mod code_query_sbom;
 #[path = "symbols/mod.rs"]
 mod code_query_symbols;
 
+#[cfg(test)]
+use crate::domain::CodeRetrievalLayer;
 use crate::{
     domain::{
-        CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
-        CodeRetrievalRequest, RepositoryCodeRange,
+        CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
+        RepositoryCodeRange,
     },
     storage::StorageError,
 };
@@ -102,17 +106,16 @@ use code_query_flow_scoring::{
     compact_api_sequence_chunk_bonus, compact_high_coverage_chunk_bonus,
     execution_flow_chunk_bonus, inline_construct_chunk_bonus, source_definition_body_chunk_bonus,
 };
-use code_query_hybrid_direct_gate::hybrid_direct_results_can_answer_without_graph_expansion;
+use code_query_hybrid_chunk_gate::{
+    hybrid_hits_can_answer_without_graph_expansion, retain_query_language_scoped_workflow_hits,
+};
 use code_query_hybrid_exact_path::{
     hybrid_exact_path_query_can_defer_to_source_fallback, hybrid_query_can_skip_graph_expansion,
     hybrid_query_should_use_layered_chunk_search,
 };
 use code_query_hybrid_planning::{
-    hybrid_query_has_conversion_expansion_intent, hybrid_query_has_declaration_expansion_intent,
-    hybrid_query_has_inline_expansion_intent, hybrid_query_prefers_chunk_first,
-    hybrid_sequence_terms, query_language_scoped_workflow_surface_scopes,
+    hybrid_query_prefers_chunk_first, query_language_scoped_workflow_surface_scopes,
     strict_hybrid_chunk_candidate_limit, workflow_language_scope_language_ids,
-    workflow_language_scope_matches,
 };
 #[cfg(test)]
 use code_query_import_scoring::{
@@ -445,127 +448,6 @@ fn declaration_line_defines_identity(line: &str, leaf_name: &str) -> bool {
         .into_iter()
         .filter_map(|prefix| line.strip_prefix(prefix))
         .any(|remainder| line_starts_with_identifier(remainder, leaf_name))
-}
-
-fn hybrid_chunk_results_can_answer_without_graph_expansion(
-    request: &CodeRetrievalRequest,
-    hits: &[CodeRetrievalHit],
-) -> bool {
-    if request.code_query_kind != CodeQueryKind::Hybrid {
-        return false;
-    }
-    if hybrid_query_has_declaration_expansion_intent(&request.query) {
-        return false;
-    }
-    if hybrid_query_has_conversion_expansion_intent(&request.query) {
-        return false;
-    }
-    if hybrid_query_has_inline_expansion_intent(&request.query) {
-        return false;
-    }
-    let terms = hybrid_sequence_terms(&request.query);
-    if terms.len() < 3 {
-        return false;
-    }
-    let language_scopes = query_language_scoped_workflow_surface_scopes(request);
-    let required_matches = terms.len().clamp(3, 4);
-    let required_hits = request.limit.clamp(1, 3);
-    let dense_chunk_hits = hits
-        .iter()
-        .filter(|hit| {
-            hit.retrieval_layers.contains(&CodeRetrievalLayer::Lexical)
-                && !hit
-                    .retrieval_layers
-                    .contains(&CodeRetrievalLayer::TextFallback)
-                && workflow_language_scopes_allow_hit(&language_scopes, &hit.language_id)
-                && hybrid_sequence_match_count(&hit.excerpt, &terms) >= required_matches
-        })
-        .take(required_hits)
-        .count();
-    if dense_chunk_hits >= required_hits {
-        return true;
-    }
-
-    hybrid_chunk_results_have_collective_dense_coverage(
-        &terms,
-        hits,
-        required_hits,
-        &language_scopes,
-    )
-}
-
-fn hybrid_hits_can_answer_without_graph_expansion(
-    request: &CodeRetrievalRequest,
-    hits: &[CodeRetrievalHit],
-) -> bool {
-    hybrid_chunk_results_can_answer_without_graph_expansion(request, hits)
-        || hybrid_direct_results_can_answer_without_graph_expansion(request, hits)
-}
-
-fn hybrid_chunk_results_have_collective_dense_coverage(
-    terms: &[String],
-    hits: &[CodeRetrievalHit],
-    required_hits: usize,
-    language_scopes: &[&str],
-) -> bool {
-    let required_coverage = terms.len().saturating_mul(2).div_ceil(3).max(4);
-    let required_dense_matches = terms.len().clamp(3, 4);
-    let mut covered_terms = Vec::new();
-    let mut supporting_hits = 0usize;
-    let mut has_dense_hit = false;
-    for hit in hits {
-        if !hit.retrieval_layers.contains(&CodeRetrievalLayer::Lexical)
-            || hit
-                .retrieval_layers
-                .contains(&CodeRetrievalLayer::TextFallback)
-            || !workflow_language_scopes_allow_hit(language_scopes, &hit.language_id)
-        {
-            continue;
-        }
-        let excerpt = hit.excerpt.to_ascii_lowercase();
-        let mut matched_terms = 0usize;
-        for term in terms {
-            if excerpt.contains(term.as_str()) {
-                matched_terms += 1;
-                if !covered_terms.contains(term) {
-                    covered_terms.push(term.clone());
-                }
-            }
-        }
-        if matched_terms >= 2 {
-            supporting_hits += 1;
-        }
-        has_dense_hit |= matched_terms >= required_dense_matches;
-    }
-
-    supporting_hits >= required_hits && has_dense_hit && covered_terms.len() >= required_coverage
-}
-
-fn workflow_language_scopes_allow_hit(language_scopes: &[&str], language_id: &str) -> bool {
-    language_scopes.is_empty()
-        || language_scopes
-            .iter()
-            .any(|scope| workflow_language_scope_matches(language_id, scope))
-}
-
-fn retain_query_language_scoped_workflow_hits(
-    request: &CodeRetrievalRequest,
-    hits: &mut Vec<CodeRetrievalHit>,
-) {
-    let language_scopes = query_language_scoped_workflow_surface_scopes(request);
-    if language_scopes.is_empty() {
-        return;
-    }
-
-    hits.retain(|hit| workflow_language_scopes_allow_hit(&language_scopes, &hit.language_id));
-}
-
-fn hybrid_sequence_match_count(excerpt: &str, terms: &[String]) -> usize {
-    let excerpt = excerpt.to_ascii_lowercase();
-    terms
-        .iter()
-        .filter(|term| excerpt.contains(term.as_str()))
-        .count()
 }
 
 fn line_starts_with_identifier(line: &str, identifier: &str) -> bool {
@@ -990,6 +872,10 @@ fn chunk_fts_values_for_limited_with_language(
 
     values
 }
+
+#[cfg(test)]
+#[path = "chunk_search_tests.rs"]
+mod chunk_search_tests;
 
 #[cfg(test)]
 #[path = "tests/mod.rs"]
