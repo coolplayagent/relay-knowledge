@@ -1,13 +1,9 @@
 use rusqlite::{Connection, params_from_iter, types::Value};
 
-#[path = "code_views_affected.rs"]
-mod code_views_affected;
-#[path = "code_views_call_focus.rs"]
-mod code_views_call_focus;
-#[path = "code_views_dependencies.rs"]
-mod code_views_dependencies;
-#[path = "code_views_truncation.rs"]
-mod code_views_truncation;
+mod affected;
+mod call_focus;
+mod dependencies;
+mod truncation;
 use crate::{
     domain::{
         CodeCallRecord, CodeFeatureFlagRecord, CodeImportRecord, CodeRouteRecord, CodebaseViewCall,
@@ -39,21 +35,16 @@ pub(super) fn snapshot(
     let routes_truncated = truncate_to_limit(&mut routes, row_limit);
     let mut symbols = symbols(connection, source_scope, &routes, probe_limit)?;
     truncate_to_limit(&mut symbols, row_limit);
-    let call_focus = code_views_call_focus::call_focus_paths(
-        connection,
-        source_scope,
-        request,
-        &routes,
-        probe_limit,
-    )?;
+    let call_focus =
+        call_focus::call_focus_paths(connection, source_scope, request, &routes, probe_limit)?;
     let mut calls = calls(connection, source_scope, request, &call_focus, probe_limit)?;
     let calls_truncated = truncate_to_limit(&mut calls, row_limit);
     let mut dependencies =
-        code_views_dependencies::dependencies(connection, source_scope, request, probe_limit)?;
+        dependencies::dependencies(connection, source_scope, request, probe_limit)?;
     let dependencies_truncated = truncate_to_limit(&mut dependencies, row_limit);
     let mut feature_flags = feature_flags(connection, source_scope, request, probe_limit)?;
     let feature_flags_truncated = truncate_to_limit(&mut feature_flags, row_limit);
-    let truncated = code_views_truncation::snapshot_truncated(
+    let truncated = truncation::snapshot_truncated(
         request.view_kind,
         files_truncated,
         import_target_files_truncated,
@@ -109,7 +100,7 @@ fn files(
         source_scope,
         request,
         FilterColumns::new("path", Some("language_id")),
-        |sql, values| code_views_affected::append_file_focus(sql, values, request),
+        |sql, values| affected::append_file_focus(sql, values, request),
         "
         ORDER BY path ASC
         ",
@@ -236,7 +227,7 @@ fn calls(
     connection: &Connection,
     source_scope: &str,
     request: &CodebaseViewRequest,
-    focus: &code_views_call_focus::CallFocusPaths,
+    focus: &call_focus::CallFocusPaths,
     limit: usize,
 ) -> Result<Vec<CodebaseViewCall>, StorageError> {
     let (sql, values) = filtered_sql(
@@ -258,7 +249,7 @@ fn calls(
         source_scope,
         request,
         process_flow_call_filter_columns(request),
-        |sql, values| code_views_call_focus::append_call_focus_filters(sql, values, focus),
+        |sql, values| call_focus::append_call_focus_filters(sql, values, focus),
         "
         ORDER BY call.path ASC, call.line_start ASC, call.callee_name ASC
         ",
@@ -643,5 +634,4 @@ fn escape_like(value: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "code_views_tests.rs"]
 mod tests;

@@ -84,6 +84,8 @@ Checkpointed code-batch persistence is grouped under `storage::sqlite::code_batc
 
 Code-snapshot persistence is grouped under `storage::sqlite::code_snapshot`: `mod.rs` owns snapshot validation, transactional application, scope replacement, status publication, and legacy-database import coordination; `candidate_paths`, `fingerprints`, `snapshot_import`, and `import_compat` own their named read or compatibility boundaries. Candidate-path, progress-accounting, and import regressions stay in the same directory. Do not encode this ownership through repeated `code_snapshot_*` files in the SQLite root.
 
+Codebase-view persistence is grouped under `storage::sqlite::code_views`: `mod.rs` coordinates snapshot assembly, while `affected`, `call_focus`, `dependencies`, and `truncation` own their bounded derivations and `tests` verifies the combined projection. Keep these files together instead of scattering prefix-related siblings through the SQLite root.
+
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
 
 ### 3.7 Code Index Foundations

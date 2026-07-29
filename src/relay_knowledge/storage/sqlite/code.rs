@@ -22,7 +22,7 @@ mod code_symbols;
 #[path = "code_routes.rs"]
 mod code_routes;
 
-#[path = "code_views.rs"]
+#[path = "code_views/mod.rs"]
 mod code_views;
 
 #[path = "code_query_scope.rs"]
