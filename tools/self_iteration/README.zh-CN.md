@@ -67,6 +67,10 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 
 harness 会把实时进度写到 stderr，统一使用 `[self-iterate]` 前缀。每个子进程都会输出 `command start`、每 15 秒一次的 `command running` 心跳，以及带退出码和耗时的 `command done` 或 `command timeout`。评估阶段还会输出 profile、evaluation home、并发度、质量门禁 stage、仓库 workload 规模、repository-set workload 规模和最终 gate/case/command 计数。产品命令 stdout/stderr 仍捕获进 JSON 报告，长时间运行的 `fast` profile 不会处于无输出状态。
 
+### 源码所有权
+
+config、scoring、history 和 evaluator 的生产 facade 只维护合同与组合；其测试装配位于同级 `mod_tests.rs`。repository-set workload 的 provenance UT 位于同级 `repository_set_tests.rs`，避免在生产工作流文件中形成内联测试桶。
+
 ## 命令参考
 
 ### 语法和模式

@@ -67,6 +67,10 @@ Supported categories are `foundational`, `competitive`, `semantic_vector`, `file
 
 The harness writes live progress to stderr with the `[self-iterate]` prefix. Each subprocess reports `command start`, a 15-second `command running` heartbeat, and `command done` or `command timeout` with exit status and duration. Evaluation also reports the selected profile, evaluation home, resolved parallelism, quality-gate stage, repository workload size, repository-set workload size, and final gate/case/command counts. Product command stdout and stderr are still captured in the JSON report, so long `fast` runs remain observable.
 
+### Source Ownership
+
+The config, scoring, history, and evaluator production facades own contracts and composition only; sibling `mod_tests.rs` files own their test assembly. Repository-set workload provenance tests live in the sibling `repository_set_tests.rs` file instead of an inline test bucket in production workflow code.
+
 ## Command Reference
 
 ### Syntax and Modes

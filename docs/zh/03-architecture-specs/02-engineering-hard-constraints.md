@@ -162,6 +162,8 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 生产 Rust 文件不得内嵌 `#[cfg(test)] mod` 实现。每个单元测试模块必须放入命名明确的同级 `*_tests.rs` 文件，并由所属生产文件通过显式 test-only `#[path]` 挂载；模块声明仍由生产文件唯一维护，以保持 white-box 可见性和测试身份稳定。`api` contract 已对 `agent`、`code_repository`、`error` 和 `stream` 实施一一配对，application 层的 repository、indexing、repository-set、view、knowledge、service 和 update 单元也遵循同一规则。代码摄取与索引单元在 language metadata、generated detection、identity、index plan/snapshot、parser workspace/language 和 source discovery 中同样执行该规则。domain core、graph、code、repository、workspace、knowledge-map、runtime 和 software contract 也必须把 UT 放入显式同级文件，即使测试声明位于后续生产类型之前。bootstrap、evaluation、顶层 indexing、network/QoS、observability、paths、retrieval 和 watcher 基础模块同样一一配对，且不得削弱其所有权边界。存储 contract 测试必须逐一执行 `CodeRepositoryStore` 的全部可选默认能力，使不支持的租约、检查点、有界候选检索、repository set、view 与 software projection 显式报错，而不是静默成功。`PartitionedSqliteKnowledgeStore` 的同级 `partitioned_tests` contract 必须覆盖空控制库委派、已索引分片路由、任务租约、repository-set 控制状态和 staged 检查点收尾。interface 测试必须留在所属 CLI、Web、ACP、MCP、audit 或 policy adapter 目录；MCP HTTP/JSON-RPC 夹具边界必须命名为 `transport_harness`。SQLite code-store、code-query、scoring、import/call planning、view、retrieval、maintenance、retry、pool 和 schema 测试必须与精确的持久化 owner 共置；partitioned SQLite 集成数据构造集中于 `partitioned_sqlite_fixtures`。不得把这些测试重新合并进生产文件，也不得建立共享的笼统测试桶。
 
+自迭代的 config、scoring、history 和 evaluator facade 必须把测试装配留在同级 `mod_tests.rs`，repository-set workload 的 provenance UT 必须留在同级 `repository_set_tests.rs`，不得把测试体重新写回生产 facade 或 workload 文件。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
