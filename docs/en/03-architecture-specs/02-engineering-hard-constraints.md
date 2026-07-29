@@ -134,6 +134,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::codex` separates process execution, command construction, normal prompt construction, unattended prompt construction, history-derived prompt context, and command-result mapping into `execution`, `command`, `prompt`, `unattended_prompt`, `history_context`, and `result_mapping`. Command and prompt unit tests stay beside those implementation files. `mod.rs` owns the result contract and facade only; do not restore a root `codex.rs` that combines external-process policy, prompt policy, history formatting, and inline tests.
 
+### 3.15 Self-Iteration Workflow Ownership
+
+`tools/self_iteration::main` is only the binary composition root. Mode dispatch, loop control, manual evaluation, generation iterations, candidate evaluation, documentation gates, score persistence, report metadata, adopted-optimization documentation, terminal output, and run identity live under `tools/self_iteration::workflow` in files named for those responsibilities. Run-identity and documentation-gate unit tests stay beside their matching implementation files. Cross-workflow consumers use the crate facade; do not restore orchestration, persistence, documentation, and inline tests to `main.rs`.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

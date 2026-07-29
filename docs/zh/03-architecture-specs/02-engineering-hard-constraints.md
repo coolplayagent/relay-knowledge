@@ -134,6 +134,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::codex` 必须把进程执行、命令构建、普通提示词构建、无人值守提示词构建、历史派生提示上下文和命令结果映射分别放在 `execution`、`command`、`prompt`、`unattended_prompt`、`history_context` 和 `result_mapping`。命令和提示词 UT 必须与对应实现同级共置。`mod.rs` 只维护结果合同和 facade；不得恢复同时组合外部进程策略、提示词策略、历史格式化与内联测试的根目录 `codex.rs`。
 
+### 3.15 自迭代工作流职责
+
+`tools/self_iteration::main` 只能作为二进制组合入口。模式分派、循环控制、手工评估、生成迭代、候选评估、文档门禁、评分持久化、报告元数据、已采用优化文档、终端输出和运行标识必须放在 `tools/self_iteration::workflow` 下与职责同名的文件中。运行标识和文档门禁 UT 必须与对应实现同级共置。跨工作流调用方通过 crate facade 使用能力；不得把编排、持久化、文档逻辑和内联测试恢复到 `main.rs`。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
