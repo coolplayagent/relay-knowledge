@@ -1,7 +1,6 @@
 use super::*;
 
-#[path = "unit.rs"]
-mod tests;
+mod unit;
 
 #[path = "score.rs"]
 mod score_tests;

@@ -84,6 +84,8 @@ Software projection 持久化必须在物理与逻辑上完整收敛到 `storage
 
 Maven effective-model 解析必须完整收敛在 `storage/sqlite/maven/model/`：`mod.rs` 负责 document resolution 与 inheritance 编排，`parse.rs` 负责 POM 解码，`effective.rs` 负责 effective dependency、plugin、profile 和 property 构造。Maven 父目录不得重新出现 `model.rs` 或指向模型域的相对 `#[path]`。
 
+Code-query 核心 white-box 测试必须收敛在 `storage/sqlite/code_query/tests/unit/`：`mod.rs` 负责通用 query planning、fallback、ranking 与 outage 不变量，`case_intent_tests.rs` 负责 case-intent fixture 族。`tests` 父模块必须以 `unit` 声明该测试组，不得恢复笼统的 `test_modules::tests` 身份、同级 `unit.rs` 或指向 unit 测试组的相对路径重定向。
+
 本地文件持久化统一收敛在 `storage::sqlite::file_index` 目录：`mod.rs` 负责 root lifecycle、文件元数据、path search 和聚合诊断，`content` 负责正文 entry、chunk、FTS、freshness cursor 及正文 search。只有 `file_index::content::search` 对 SQLite store adapter 可见，其余内容索引原语保持目录私有；`tests`、`content_tests`、`retirement_tests` 分别验证元数据、正文和退役行为，不得恢复平铺的 `file_index_*` 兄弟模块。
 
 Graph canvas 持久化统一收敛在 `storage::sqlite::canvas` 目录：`mod.rs` 负责预算校验、knowledge graph 投影和 snapshot builder，`code` 只负责 code file/symbol/reference 与 source-path link 投影，`tests` 覆盖两种投影及 mixed canvas。代码投影 helper 保持 canvas 目录私有，不得恢复含义依赖文件名前缀的 `canvas_code` 顶层兄弟模块。
