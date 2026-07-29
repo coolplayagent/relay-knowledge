@@ -168,7 +168,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.16 自迭代进程边界职责
 
-`tools/self_iteration::command` 必须由 `mod.rs` 维护外部进程合同，`execution` 管理子进程生命周期与超时，`pipes` 管理管道读写 worker，`logging` 记录进度事件，`output` 选择有界输出，`failure` 构造失败结果。输出和执行 UT 必须与对应实现同级共置并由对应实现挂载，facade 不得代为维护其测试声明。不得恢复同时组合进程编排、worker 管道、可观测性、格式化与内联测试的根目录 `command.rs`。
+`tools/self_iteration::command` 必须由 `mod.rs` 维护外部进程合同，真正的 `execution` 模块管理子进程生命周期与超时，`pipes` 管理管道读写 worker，`logging` 记录进度事件，`output` 选择有界输出，`failure` 构造失败结果。每个行为 owner 必须直接挂载同级 `*_tests.rs` UT contract，`mod_tests` 只验证公开 command/result 合同。禁止生产代码使用 `include!` 装配。不得恢复同时组合进程编排、worker 管道、可观测性、格式化与内联测试的根目录 `command.rs`。
 
 ### 3.17 自迭代用例配置职责
 

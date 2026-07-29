@@ -168,7 +168,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.16 Self-Iteration Process Boundary Ownership
 
-`tools/self_iteration::command` owns external-process contracts in `mod.rs`, child lifecycle and timeout handling in `execution`, pipe reader/writer workers in `pipes`, progress events in `logging`, bounded output selection in `output`, and failed-result construction in `failure`. Output and execution unit tests stay beside and are attached by their matching implementation files; the facade must not own their test declarations. Do not restore a root `command.rs` that combines process orchestration, worker plumbing, observability, formatting, and inline tests.
+`tools/self_iteration::command` owns external-process contracts in `mod.rs`, child lifecycle and timeout handling in the real `execution` module, pipe reader/writer workers in `pipes`, progress events in `logging`, bounded output selection in `output`, and failed-result construction in `failure`. Every behavior owner attaches its sibling `*_tests.rs` unit contract directly, while `mod_tests` verifies only the public command/result contracts. Production `include!` assembly is forbidden. Do not restore a root `command.rs` that combines process orchestration, worker plumbing, observability, formatting, and inline tests.
 
 ### 3.17 Self-Iteration Case Configuration Ownership
 

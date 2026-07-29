@@ -1,4 +1,8 @@
-fn failed_result(
+use std::time::Instant;
+
+use super::{CommandResult, CommandSpec};
+
+pub(super) fn failed_result(
     spec: &CommandSpec,
     exit_code: i32,
     started: Instant,
@@ -13,3 +17,7 @@ fn failed_result(
         stderr: stderr.to_owned(),
     }
 }
+
+#[cfg(test)]
+#[path = "failure_tests.rs"]
+mod failure_tests;
