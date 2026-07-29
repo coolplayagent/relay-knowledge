@@ -2,7 +2,7 @@ struct UnattendedEvaluationInput<'a> {
     config: &'a Config,
     paths: &'a history::HistoryPaths,
     run_id: &'a str,
-    patch: &'a git_ops::PatchSnapshot,
+    patch: &'a candidate_git::PatchSnapshot,
     codex: Option<&'a codex::CodexResult>,
     metadata: serde_json::Value,
     commit: bool,
@@ -21,7 +21,7 @@ struct MetadataPersistInput<'a> {
     config: &'a Config,
     paths: &'a history::HistoryPaths,
     run_id: &'a str,
-    patch: &'a git_ops::PatchSnapshot,
+    patch: &'a candidate_git::PatchSnapshot,
     codex: Option<&'a codex::CodexResult>,
     evaluation: &'a evaluator::EvaluationRun,
     commit: Option<&'a str>,
@@ -57,7 +57,7 @@ fn evaluate_unattended_layer(
             &score,
             &evaluation,
         )?;
-        Some(git_ops::commit_candidate(
+        Some(candidate_git::commit_candidate(
             &input.config.workspace,
             input.config.commit_message.as_deref(),
             score.score,
@@ -86,7 +86,7 @@ fn persist_generation_failure(
     config: &Config,
     paths: &history::HistoryPaths,
     run_id: &str,
-    patch: &git_ops::PatchSnapshot,
+    patch: &candidate_git::PatchSnapshot,
     codex_result: &codex::CodexResult,
     metadata: &serde_json::Value,
 ) -> Result<(), String> {
@@ -123,7 +123,7 @@ fn persist_empty_candidate(
     config: &Config,
     paths: &history::HistoryPaths,
     run_id: &str,
-    patch: &git_ops::PatchSnapshot,
+    patch: &candidate_git::PatchSnapshot,
     codex: Option<&codex::CodexResult>,
     metadata: &serde_json::Value,
 ) -> Result<(), String> {

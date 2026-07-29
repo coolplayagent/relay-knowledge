@@ -6,7 +6,7 @@ fn run_loop(config: &Config, paths: &history::HistoryPaths) -> Result<i32, Strin
         return Ok(0);
     }
     if !config.use_current_candidate {
-        git_ops::ensure_clean_worktree(&config.workspace)?;
+        candidate_git::ensure_clean_worktree(&config.workspace)?;
     }
     let mut iteration = 0usize;
     let mut accepted_count = 0usize;
@@ -33,6 +33,6 @@ fn run_loop(config: &Config, paths: &history::HistoryPaths) -> Result<i32, Strin
                 }
             }
         }
-        git_ops::sleep_seconds(config.sleep_seconds);
+        sleep_seconds(config.sleep_seconds);
     }
 }

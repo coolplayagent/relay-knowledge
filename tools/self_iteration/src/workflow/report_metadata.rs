@@ -25,7 +25,7 @@ fn optimization_plan(
         history::memory::compact_prompt_text(&format!("{}\n{}", result.stdout, result.stderr), 1200)
     });
     serde_json::json!({
-        "changed_paths": git_ops::changed_paths_from_diff(&patch.diff),
+        "changed_paths": candidate_git::changed_paths_from_diff(&patch.diff),
         "key_improvements": history::memory::compact_score_changes(&score.improvements, 8),
         "known_degradations": history::memory::compact_score_changes(&score.degradations, 8),
         "reject_reasons": score.reject_reasons,

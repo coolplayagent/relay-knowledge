@@ -17,7 +17,7 @@ fn maybe_run_deep_check(
     state.last_deep_check_at = now;
     save_unattended_state(paths, state)?;
     let run_id = new_layer_run_id("deep-check");
-    let patch = git_ops::capture_patch(&config.workspace, paths, &run_id, "HEAD")?;
+    let patch = candidate_git::capture_patch(&config.workspace, paths, &run_id, "HEAD")?;
     let mut full_config = config.clone();
     full_config.profile = "full".to_owned();
     full_config.categories = None;

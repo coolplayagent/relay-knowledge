@@ -150,6 +150,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::research_plan::mod` owns the input contract, while `render` owns deterministic plan rendering and `render_tests` owns its unit contract. Keep these files together under the research-plan domain; do not restore rendering and inline tests to a root `research_plan.rs`.
 
+### 3.19 Self-Iteration Candidate Git Ownership
+
+`tools/self_iteration::candidate_git` owns the patch snapshot contract, bounded Git command execution, worktree inspection, patch capture/path extraction, and candidate rejection/commit lifecycle in `mod`, `command`, `dynamic_command`, `worktree`, `patch`, and `lifecycle`. Loop sleeping belongs to `workflow::pacing`, not the Git boundary. Use the explicit `candidate_git` name at call sites; do not restore an ambiguous root `git_ops.rs` or mix workflow pacing into repository mutation.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

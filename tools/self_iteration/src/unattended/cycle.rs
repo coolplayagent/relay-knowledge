@@ -50,8 +50,8 @@ fn run_current_candidate_cycle(
 ) -> Result<LayeredCycleOutcome, String> {
     let category = selected_or_default_category(config);
     let run_id = new_layer_run_id("current-candidate");
-    let base_ref = git_ops::current_head(&config.workspace)?;
-    let patch = git_ops::capture_patch(&config.workspace, paths, &run_id, &base_ref)?;
+    let base_ref = candidate_git::current_head(&config.workspace)?;
+    let patch = candidate_git::capture_patch(&config.workspace, paths, &run_id, &base_ref)?;
     if !patch.has_diff() {
         let current_config = unattended_config(config, "smoke", category, 1);
         let metadata = unattended_metadata(
@@ -91,7 +91,7 @@ fn run_current_candidate_cycle(
     })?;
     if !score_accepted(&screen_record) {
         update_unattended_rejection_counters(state, category);
-        git_ops::reject_candidate(&config.workspace, &patch, false)?;
+        candidate_git::reject_candidate(&config.workspace, &patch, false)?;
         return Ok(LayeredCycleOutcome::Rejected);
     }
     let validate_config = unattended_config(config, "fast", category, 1);
@@ -126,6 +126,6 @@ fn run_current_candidate_cycle(
         return Ok(LayeredCycleOutcome::Accepted);
     }
     update_unattended_rejection_counters(state, category);
-    git_ops::reject_candidate(&config.workspace, &patch, false)?;
+    candidate_git::reject_candidate(&config.workspace, &patch, false)?;
     Ok(LayeredCycleOutcome::Rejected)
 }

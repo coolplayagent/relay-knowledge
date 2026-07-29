@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    PersistInput, apply_candidate_documentation_gate, cases, codex, command,
+    PersistInput, apply_candidate_documentation_gate, candidate_git, cases, codex, command,
     config::{CategorySet, Config, EvaluationCategory, Strategy},
-    evaluate_candidate_for_patch, evaluator, git_ops, history, new_layer_run_id, number,
-    persist_scored_run_with_score, print_score, scoring, unix_timestamp,
+    evaluate_candidate_for_patch, evaluator, history, new_layer_run_id, number,
+    persist_scored_run_with_score, print_score, scoring, sleep_seconds, unix_timestamp,
     write_adopted_optimization_document,
 };
 

@@ -3,7 +3,7 @@ pub fn run_unattended_layered_loop(
     paths: &history::HistoryPaths,
 ) -> Result<i32, String> {
     if !config.use_current_candidate {
-        git_ops::ensure_clean_worktree(&config.workspace)?;
+        candidate_git::ensure_clean_worktree(&config.workspace)?;
     }
     let cases_config =
         cases::load_cases(&config.workspace.join("tools/self_iteration/cases.json"))?;
@@ -36,9 +36,9 @@ pub fn run_unattended_layered_loop(
         state.last_updated_at = unix_timestamp();
         save_unattended_state(paths, &state)?;
         maybe_run_deep_check(config, paths, &mut state)?;
-        let sleep_seconds = unattended_sleep_seconds(config, outcome);
-        if sleep_seconds > 0 && !config.dry_run_codex {
-            git_ops::sleep_seconds(sleep_seconds);
+        let cooldown_seconds = unattended_sleep_seconds(config, outcome);
+        if cooldown_seconds > 0 && !config.dry_run_codex {
+            sleep_seconds(cooldown_seconds);
         }
     }
 }

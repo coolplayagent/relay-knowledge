@@ -150,6 +150,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::research_plan::mod` 必须维护输入合同，`render` 负责确定性计划渲染，`render_tests` 维护其 UT 合同。这些文件必须共置于研究计划领域目录；不得把渲染和内联测试恢复到根目录 `research_plan.rs`。
 
+### 3.19 自迭代候选 Git 职责
+
+`tools/self_iteration::candidate_git` 必须由 `mod`、`command`、`dynamic_command`、`worktree`、`patch` 和 `lifecycle` 分别维护补丁快照合同、有界 Git 命令执行、工作树检查、补丁捕获/路径提取以及候选拒绝/提交生命周期。循环休眠属于 `workflow::pacing`，不得放入 Git 边界。调用点必须使用明确的 `candidate_git` 名称；不得恢复含糊的根目录 `git_ops.rs`，也不得把工作流节奏混入仓库变更。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

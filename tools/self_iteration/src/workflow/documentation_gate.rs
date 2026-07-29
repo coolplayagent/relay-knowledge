@@ -2,7 +2,7 @@ pub(crate) fn apply_candidate_documentation_gate(
     evaluation: &mut evaluator::EvaluationRun,
     patch: &PatchSnapshot,
 ) {
-    let changed_paths = git_ops::changed_paths_from_diff(&patch.diff);
+    let changed_paths = candidate_git::changed_paths_from_diff(&patch.diff);
     let requires_docs = changed_paths
         .iter()
         .any(|path| !path.starts_with("docs/") && !path.ends_with(".md"));

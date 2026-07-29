@@ -1,11 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
+    candidate_git::{self, PatchSnapshot},
     cases, codex, command,
     config::{Config, Mode, Strategy},
-    evaluator,
-    git_ops::{self, PatchSnapshot},
-    history, research_plan,
+    evaluator, history, research_plan,
     scoring::{self, EvaluationObservation, GateObservation},
     unattended,
 };
@@ -21,6 +20,7 @@ include!("report_metadata.rs");
 include!("adopted_documentation.rs");
 include!("output.rs");
 include!("run_identity.rs");
+include!("pacing.rs");
 
 #[cfg(test)]
 #[path = "run_identity_tests.rs"]

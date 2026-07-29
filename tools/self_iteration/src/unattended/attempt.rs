@@ -13,10 +13,10 @@ fn run_unattended_attempt(
     input: UnattendedAttemptInput<'_>,
 ) -> Result<LayeredCycleOutcome, String> {
     if !input.config.use_current_candidate {
-        git_ops::ensure_clean_worktree(&input.config.workspace)?;
+        candidate_git::ensure_clean_worktree(&input.config.workspace)?;
     }
     let parent_run_id = new_layer_run_id(input.kind.label());
-    let base_ref = git_ops::current_head(&input.config.workspace)?;
+    let base_ref = candidate_git::current_head(&input.config.workspace)?;
     let explore_config = unattended_config(
         input.config,
         "smoke",
@@ -41,7 +41,7 @@ fn run_unattended_attempt(
         codex_result.exit_code,
         codex_result.duration_ms
     );
-    let patch = git_ops::capture_patch(
+    let patch = candidate_git::capture_patch(
         &input.config.workspace,
         input.paths,
         &parent_run_id,
@@ -72,7 +72,7 @@ fn run_unattended_attempt(
             &codex_result,
             &metadata,
         )?;
-        git_ops::reject_candidate(&input.config.workspace, &patch, true)?;
+        candidate_git::reject_candidate(&input.config.workspace, &patch, true)?;
         if timed_out {
             return Ok(LayeredCycleOutcome::CodexTimeout);
         }
@@ -128,7 +128,7 @@ fn run_unattended_attempt(
     })?;
     if !score_accepted(&screen_record) {
         update_unattended_rejection_counters(input.state, input.category);
-        git_ops::reject_candidate(&input.config.workspace, &patch, true)?;
+        candidate_git::reject_candidate(&input.config.workspace, &patch, true)?;
         return Ok(LayeredCycleOutcome::Rejected);
     }
     let validate_config = unattended_config(input.config, "fast", input.category, 1);
@@ -173,6 +173,6 @@ fn run_unattended_attempt(
         return Ok(LayeredCycleOutcome::Accepted);
     }
     update_unattended_rejection_counters(input.state, input.category);
-    git_ops::reject_candidate(&input.config.workspace, &patch, true)?;
+    candidate_git::reject_candidate(&input.config.workspace, &patch, true)?;
     Ok(LayeredCycleOutcome::Rejected)
 }

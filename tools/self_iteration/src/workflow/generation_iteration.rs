@@ -4,9 +4,9 @@ fn run_generation_iteration(
 ) -> Result<bool, String> {
     let run_id = new_run_id();
     if !config.use_current_candidate {
-        git_ops::ensure_clean_worktree(&config.workspace)?;
+        candidate_git::ensure_clean_worktree(&config.workspace)?;
     }
-    let base_ref = git_ops::current_head(&config.workspace)?;
+    let base_ref = candidate_git::current_head(&config.workspace)?;
     let codex_result = if config.use_current_candidate {
         println!("[self-iterate] using current working tree as candidate");
         None
@@ -25,7 +25,7 @@ fn run_generation_iteration(
         );
         Some(result)
     };
-    let patch = git_ops::capture_patch(&config.workspace, paths, &run_id, &base_ref)?;
+    let patch = candidate_git::capture_patch(&config.workspace, paths, &run_id, &base_ref)?;
     if codex_result
         .as_ref()
         .is_some_and(|result| !result.succeeded())
@@ -60,7 +60,7 @@ fn run_generation_iteration(
             &evaluation,
             None,
         )?;
-        git_ops::reject_candidate(&config.workspace, &patch, !config.use_current_candidate)?;
+        candidate_git::reject_candidate(&config.workspace, &patch, !config.use_current_candidate)?;
         print_score(&record);
         return Ok(false);
     }
@@ -106,7 +106,7 @@ fn run_generation_iteration(
             &score,
             &evaluation,
         )?;
-        Some(git_ops::commit_candidate(
+        Some(candidate_git::commit_candidate(
             &config.workspace,
             config.commit_message.as_deref(),
             score.score,
@@ -135,7 +135,7 @@ fn run_generation_iteration(
         print_score(&record);
         Ok(true)
     } else {
-        git_ops::reject_candidate(&config.workspace, &patch, !config.use_current_candidate)?;
+        candidate_git::reject_candidate(&config.workspace, &patch, !config.use_current_candidate)?;
         println!("[self-iterate] rejected candidate and restored working tree");
         print_score(&record);
         Ok(false)

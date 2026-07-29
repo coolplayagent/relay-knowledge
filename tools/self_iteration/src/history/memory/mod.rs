@@ -7,7 +7,7 @@ use std::{
 
 use serde_json::Value;
 
-use crate::{git_ops::changed_paths_from_diff, history};
+use crate::{candidate_git::changed_paths_from_diff, history};
 
 include!("api.rs");
 include!("records.rs");

@@ -36,7 +36,7 @@ pub(crate) fn write_adopted_optimization_document(
             .unwrap_or_else(|| "n/a".to_owned()),
         score.performance,
         score.stability,
-        git_ops::changed_paths_from_diff(&patch.diff)
+        candidate_git::changed_paths_from_diff(&patch.diff)
             .into_iter()
             .map(|path| format!("`{path}`"))
             .collect::<Vec<_>>()
