@@ -379,7 +379,7 @@ where
 }
 
 #[cfg(test)]
-#[path = "cli_render_tests.rs"]
+#[path = "tests.rs"]
 mod cli_render_tests;
 
 fn render_streaming_project_status(response: &ProjectStatusResponse) -> Result<String, CliError> {

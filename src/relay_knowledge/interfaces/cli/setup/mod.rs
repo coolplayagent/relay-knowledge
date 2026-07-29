@@ -393,5 +393,5 @@ fn setup_profile(profile: SetupProfile, metadata: ApiMetadata) -> SetupProfileRe
 }
 
 #[cfg(test)]
-#[path = "setup_cli_tests.rs"]
+#[path = "tests.rs"]
 mod setup_cli_tests;

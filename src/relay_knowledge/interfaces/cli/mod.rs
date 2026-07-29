@@ -1,32 +1,32 @@
 //! CLI adapter for the shared application service.
 
-#[path = "cli_grammar.rs"]
+#[path = "grammar.rs"]
 mod cli_grammar;
-#[path = "cli_render.rs"]
+#[path = "render/mod.rs"]
 mod cli_render;
-#[path = "cli_spec.rs"]
+#[path = "spec/mod.rs"]
 mod cli_spec;
-#[path = "files_cli.rs"]
+#[path = "files.rs"]
 mod files_cli;
-#[path = "knowledge_cli.rs"]
+#[path = "knowledge.rs"]
 mod knowledge_cli;
-#[path = "map_cli.rs"]
+#[path = "map.rs"]
 pub(crate) mod map_cli;
-#[path = "ops_cli.rs"]
+#[path = "operations.rs"]
 mod ops_cli;
-#[path = "remote_cli.rs"]
+#[path = "remote.rs"]
 mod remote_cli;
-#[path = "repo_cli.rs"]
+#[path = "repo/mod.rs"]
 mod repo_cli;
-#[path = "repo_cli_view.rs"]
+#[path = "repo/view.rs"]
 pub(crate) mod repo_cli_view;
-#[path = "repo_set_cli.rs"]
+#[path = "repo_set/mod.rs"]
 mod repo_set_cli;
-#[path = "service_cli.rs"]
+#[path = "service.rs"]
 mod service_cli;
-#[path = "setup_cli.rs"]
+#[path = "setup/mod.rs"]
 mod setup_cli;
-#[path = "version_cli.rs"]
+#[path = "version.rs"]
 mod version_cli;
 
 use std::{error::Error, fmt};
@@ -961,29 +961,29 @@ pub(super) fn parse_freshness(value: &str) -> Result<FreshnessPolicy, CliError> 
 use service_cli::ensure_web_remote_bind_allowed;
 
 #[cfg(test)]
-#[path = "cli_naming_tests.rs"]
+#[path = "tests/naming.rs"]
 mod cli_naming_tests;
 
 #[cfg(test)]
-#[path = "cli_tests.rs"]
+#[path = "tests/general.rs"]
 mod cli_tests;
 
 #[cfg(test)]
-#[path = "cli_parse_tests.rs"]
+#[path = "tests/parse.rs"]
 mod cli_parse_tests;
 
 #[cfg(test)]
-#[path = "remote_cli_tests.rs"]
+#[path = "tests/remote.rs"]
 mod remote_cli_tests;
 
 #[cfg(test)]
-#[path = "cli_map_tests.rs"]
+#[path = "tests/map.rs"]
 mod cli_map_tests;
 
 #[cfg(test)]
-#[path = "cli_service_tests.rs"]
+#[path = "tests/service.rs"]
 mod cli_service_tests;
 
 #[cfg(test)]
-#[path = "cli_version_tests.rs"]
+#[path = "tests/version.rs"]
 mod cli_version_tests;
