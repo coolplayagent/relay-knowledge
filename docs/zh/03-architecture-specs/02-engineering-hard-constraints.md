@@ -70,6 +70,8 @@ CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解
 
 依赖解析器必须完整收敛在 `code/parser/dependencies/`：`mod.rs` 维护 manifest 分类、跨生态分派和稳定 fact 装配，生态解析器与共享格式原语使用职责命名文件，`mod_tests.rs` 验证该 facade。父级 parser 目录不得重新出现同名 `dependencies.rs`，也不得用父级相对 `#[path]` 隐藏物理所有权。
 
+C/C++ parse recovery 必须完整收敛在 `code/parser/recovery/`：`mod.rs` 负责有界 recovery 判定与 declaration-shape 校验，`scan.rs` 负责 literal-aware code scanning，`line_classification.rs` 负责 recoverable line 分类，`type_body.rs` 负责 decorated-type body 校验。parser 父目录不得重新出现 `recovery.rs`；language adapter 可以使用这个窄 recovery contract，但不得复制其中的规则。
+
 ### 3.6 SQLite 存储边界
 
 SQLite 存储必须把 evidence 与稳定 ID 生成放在 `evidence_identity`，mutation 读取放在 `mutation_log`，提交时有效期归一化放在 `graph_version`，诊断 row count 放在 `table_stats`。存储模块必须导入这些明确边界，不得把无关持久化行为累积到通用 helper 模块。

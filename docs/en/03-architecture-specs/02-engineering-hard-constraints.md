@@ -70,6 +70,8 @@ Dependency parsing groups shared syntax by the format it interprets: `cargo_sour
 
 Dependency parsing is physically contained in `code/parser/dependencies/`: `mod.rs` owns manifest classification, ecosystem dispatch, and stable fact assembly; ecosystem parsers and shared format primitives use responsibility-named files; and `mod_tests.rs` verifies the facade. The parent parser directory must not regain a same-named `dependencies.rs` file or parent-relative `#[path]` indirection that hides ownership.
 
+C/C++ parse recovery is physically contained in `code/parser/recovery/`: `mod.rs` owns the bounded recovery decision and declaration-shape validation, `scan.rs` owns literal-aware code scanning, `line_classification.rs` owns recoverable line classification, and `type_body.rs` owns decorated-type body validation. The parser parent must not regain `recovery.rs`; language adapters may consume this narrow recovery contract but must not duplicate its rules.
+
 ### 3.6 SQLite Storage Boundaries
 
 SQLite storage keeps evidence and stable ID generation in `evidence_identity`, mutation reads in `mutation_log`, commit-time validity normalization in `graph_version`, and diagnostic row counts in `table_stats`. Storage modules must import these explicit boundaries instead of accumulating unrelated persistence behavior in a generic helper module.
