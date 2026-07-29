@@ -6,10 +6,8 @@ use std::{
 
 mod advanced;
 
-#[path = "retrieval/bm25.rs"]
 mod bm25;
 
-#[path = "retrieval/bm25_fallback.rs"]
 mod bm25_fallback;
 
 use rusqlite::{Connection, params};
@@ -23,22 +21,16 @@ use crate::{
     storage::{GraphSearchOutcome, GraphSearchRequest, StorageError},
 };
 
-#[path = "retrieval/context.rs"]
 mod context;
 
-#[path = "retrieval/derived.rs"]
 mod derived;
 
-#[path = "retrieval/label_trigrams.rs"]
 mod label_trigrams;
 
-#[path = "retrieval_migration.rs"]
 mod migration;
 
-#[path = "retrieval_aliases.rs"]
 mod aliases;
 
-#[path = "retrieval/ranking.rs"]
 mod ranking;
 
 use bm25::{RawBm25Row, bm25_candidate_rows};
@@ -973,5 +965,4 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(test)]
-#[path = "retrieval/tests.rs"]
 mod tests;
