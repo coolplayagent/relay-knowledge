@@ -138,7 +138,8 @@ include!("evaluation.rs");
 include!("decision.rs");
 include!("capability.rs");
 include!("change_detection.rs");
-include!("common.rs");
+include!("case_fields.rs");
+include!("score_math.rs");
 
 #[cfg(test)]
 mod tests {

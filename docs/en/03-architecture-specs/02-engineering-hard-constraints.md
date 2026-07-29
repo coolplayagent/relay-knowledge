@@ -120,7 +120,7 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 ### 3.10 Self-Iteration Scoring Ownership
 
-`tools/self_iteration::scoring` keeps observation types and the public score contract in `mod.rs`, ranked-evidence matching in `ranked`, total-score assembly in `evaluation`, rejection policy in `decision`, capability-ceiling/performance/stability components in `capability`, cross-run delta detection in `change_detection`, and stateless numeric/JSON primitives in `common`. Focused unit tests stay in the same directory. Do not restore root-level `scoring_ranked` or `scoring_tests` files, or recombine distinct scoring phases into one scoring file.
+`tools/self_iteration::scoring` keeps observation types and the public score contract in `mod.rs`, ranked-evidence matching in `ranked`, total-score assembly in `evaluation`, rejection policy in `decision`, capability-ceiling/performance/stability components in `capability`, cross-run delta detection in `change_detection`, typed JSON case-field access in `case_fields`, and bounded averaging/clamping primitives in `score_math`. Focused unit tests stay in the same directory. Do not restore root-level `scoring_ranked` or `scoring_tests` files, introduce a generic `common` bucket, or recombine distinct scoring phases into one scoring file.
 
 ### 3.11 Self-Iteration Configuration Ownership
 
