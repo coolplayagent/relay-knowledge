@@ -218,6 +218,8 @@ The ACP adapter, prompt-context builder, and their paired tests live in the file
 
 ACP initialization, session, prompt, progress-update, result, and error wire contracts belong to `acp::protocol`, with `protocol_tests` covering JSON field names, omission rules, and state transitions. The adapter facade only re-exports these public types and orchestrates session requests; it must not embed serialization DTOs again.
 
+ACP session identity, active-request cancellation channels, and automatically cleaned-up leases belong to `acp::session_registry`. That owner normalizes untrusted client metadata, with paired tests covering session lookup, cancellation notification, explicit release, and drop cleanup; the adapter facade must not maintain shared maps or mutexes directly.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.

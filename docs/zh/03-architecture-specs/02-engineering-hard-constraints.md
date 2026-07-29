@@ -218,6 +218,8 @@ ACP adapter、prompt-context builder 及其配对测试统一位于纯文件型 
 
 ACP 初始化、会话、提示词、进度更新、结果与错误 wire contract 统一归 `acp::protocol` 所有，并由 `protocol_tests` 验证 JSON 字段名、省略规则与状态转换。adapter facade 只重导出这些公开类型并编排会话请求，不得重新内嵌序列化 DTO。
 
+ACP session identity、活动请求 cancellation channel 和自动清理 lease 统一归 `acp::session_registry` 所有。该 owner 必须规范化不可信客户端元数据，并由配对测试覆盖 session lookup、取消通知、显式 release 与 drop 清理；adapter facade 不得直接维护共享 map 或 mutex。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。

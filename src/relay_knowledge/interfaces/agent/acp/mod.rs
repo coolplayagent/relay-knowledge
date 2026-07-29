@@ -1,7 +1,5 @@
 use std::{
-    collections::HashMap,
     fmt,
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -11,12 +9,10 @@ use tokio::sync::watch;
 #[path = "prompt_context.rs"]
 mod acp_prompt_context;
 mod protocol;
+mod session_registry;
 
 use crate::{
-    api::{
-        AgentProtocolKind, ErrorKind, HybridRetrievalRequest, InterfaceKind, RequestContext,
-        RuntimeIdentity,
-    },
+    api::{AgentProtocolKind, ErrorKind, HybridRetrievalRequest, InterfaceKind, RequestContext},
     application::{AgentRuntimeConfig, RelayKnowledgeService},
     domain::{CodeGraphContextRequest, CodeRepositorySelector, FreshnessPolicy},
     net::{
@@ -37,6 +33,7 @@ pub use protocol::{
     AcpSession, AcpSessionRequest, AcpSessionUpdate, AcpSessionUpdateKind, AcpSessionUpdateStatus,
     AcpStopReason,
 };
+use session_registry::{AcpSessionRecord, AcpSessionRegistry};
 
 /// Local ACP session adapter for resident relay-knowledge processes.
 #[derive(Clone)]
@@ -96,11 +93,11 @@ impl LocalAcpSessionAdapter {
     pub fn new_session(&self, request: AcpSessionRequest) -> Result<AcpSession, AgentAdapterError> {
         let permit = self.admit_request()?;
         let session_id = generate_acp_id("acp-session")?;
-        let record = AcpSessionRecord {
-            client_name: normalized_optional(request.client_name),
-            client_version: normalized_optional(request.client_version),
-            actor_id: normalized_optional(request.actor_id),
-        };
+        let record = AcpSessionRecord::new(
+            request.client_name,
+            request.client_version,
+            request.actor_id,
+        );
         self.sessions
             .insert_session(session_id.clone(), record.clone());
         drop(permit);
@@ -425,117 +422,6 @@ struct AcpAuditInput<'a> {
     error_kind: Option<&'a str>,
 }
 
-#[derive(Clone, Default)]
-struct AcpSessionRegistry {
-    inner: Arc<Mutex<AcpSessionState>>,
-}
-
-#[derive(Default)]
-struct AcpSessionState {
-    sessions: HashMap<String, AcpSessionRecord>,
-    active_requests: HashMap<String, watch::Sender<bool>>,
-}
-
-#[derive(Debug, Clone)]
-struct AcpSessionRecord {
-    client_name: Option<String>,
-    client_version: Option<String>,
-    actor_id: Option<String>,
-}
-
-impl AcpSessionRecord {
-    fn identity(&self, session_id: &str, request_id: Option<String>) -> RuntimeIdentity {
-        RuntimeIdentity::acp(
-            self.client_name.clone(),
-            self.client_version.clone(),
-            self.actor_id.clone(),
-            session_id.to_owned(),
-            request_id,
-        )
-    }
-}
-
-struct ActiveAcpRequest {
-    registry: AcpSessionRegistry,
-    key: String,
-    released: bool,
-}
-
-impl ActiveAcpRequest {
-    fn release(mut self) {
-        self.registry.remove_request(&self.key);
-        self.released = true;
-    }
-}
-
-impl Drop for ActiveAcpRequest {
-    fn drop(&mut self) {
-        if !self.released {
-            self.registry.remove_request(&self.key);
-        }
-    }
-}
-
-impl AcpSessionRegistry {
-    fn insert_session(&self, session_id: String, record: AcpSessionRecord) {
-        self.inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .sessions
-            .insert(session_id, record);
-    }
-
-    fn session(&self, session_id: &str) -> Option<AcpSessionRecord> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .sessions
-            .get(session_id)
-            .cloned()
-    }
-
-    fn register_request(
-        &self,
-        session_id: &str,
-        request_id: String,
-    ) -> (watch::Receiver<bool>, ActiveAcpRequest) {
-        let (sender, receiver) = watch::channel(false);
-        let key = active_request_key(session_id, &request_id);
-        self.inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .active_requests
-            .insert(key.clone(), sender);
-
-        (
-            receiver,
-            ActiveAcpRequest {
-                registry: self.clone(),
-                key,
-                released: false,
-            },
-        )
-    }
-
-    fn cancel_request(&self, session_id: &str, request_id: &str) -> bool {
-        let key = active_request_key(session_id, request_id);
-        self.inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .active_requests
-            .get(&key)
-            .is_some_and(|sender| sender.send(true).is_ok())
-    }
-
-    fn remove_request(&self, key: &str) {
-        self.inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .active_requests
-            .remove(key);
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MappedPromptRequest {
     query: String,
@@ -727,17 +613,6 @@ fn api_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
         ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
         ErrorKind::Internal => AgentAdapterErrorKind::Internal,
     }
-}
-
-fn active_request_key(session_id: &str, request_id: &str) -> String {
-    format!("{session_id}|{request_id}")
-}
-
-fn normalized_optional(value: Option<String>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_owned())
-    })
 }
 
 fn generate_acp_id(prefix: &str) -> Result<String, AgentAdapterError> {
