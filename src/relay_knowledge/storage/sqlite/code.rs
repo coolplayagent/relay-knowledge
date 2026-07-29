@@ -63,10 +63,10 @@ mod code_search;
 #[path = "code_snapshot/mod.rs"]
 mod code_snapshot;
 
-#[path = "code_set.rs"]
+#[path = "code_set/mod.rs"]
 mod code_set;
 
-#[path = "code_set_tasks.rs"]
+#[path = "code_set/refresh_tasks.rs"]
 mod code_set_tasks;
 
 #[path = "software.rs"]
@@ -157,15 +157,15 @@ mod code_tasks_lease_tests;
 mod code_tasks_reset_tests;
 
 #[cfg(test)]
-#[path = "code_set_tasks_tests.rs"]
+#[path = "code_set/refresh_task_tests.rs"]
 mod code_set_tasks_tests;
 
 #[cfg(test)]
-#[path = "code_set_tests.rs"]
+#[path = "code_set/tests.rs"]
 mod code_set_tests;
 
 #[cfg(test)]
-#[path = "code_set_workspace_tests.rs"]
+#[path = "code_set/workspace_tests.rs"]
 mod code_set_workspace_tests;
 
 #[cfg(test)]

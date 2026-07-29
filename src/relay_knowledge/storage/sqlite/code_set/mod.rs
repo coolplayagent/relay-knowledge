@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde_json::json;
 
-#[path = "code_set/manifest.rs"]
 mod manifest;
 
 use crate::{
