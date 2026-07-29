@@ -42,7 +42,7 @@
 
 ### 3.2 代码仓库应用工作流
 
-`application::code_repository` 按用例划分内部所有权：`repository` 负责注册、删除、状态和报告，`index_workflow` 负责索引执行、持久任务租约、checkpoint 和 scope preview，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
+`application::code_repository` 按用例划分内部所有权：`repository` 目录负责注册、删除、状态、报告、staleness 标注和 worktree overlay 校验，`indexing` 负责索引执行、持久任务租约、checkpoint、scope preview 和 worker 管理，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
 
 Web adapter 统一收敛在 `interfaces::web`：`mod.rs` 负责 router composition 和共享 response/error 边界，`code_api`、`code_index_request`、`code_view_request`、`files`、`model_config` 负责各自命名的 HTTP contract，定向测试保持同目录。不得恢复根目录级 `web_*` 兄弟文件，也不得从该 adapter 打开 socket。
 
@@ -52,7 +52,7 @@ CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解
 
 源码兜底检索统一收敛在 `application::code_repository::source_fallback` 目录：`execution` 是唯一 I/O 编排入口，`plan` 决定是否以及如何执行有界兜底，`identity`、`filters`、`scoring`、`results` 分别负责身份覆盖、请求约束、评分和结果归并，`imports`、`surface`、`worktree` 隔离特定证据边界。目录外不得直接依赖这些内部算法 helper。
 
-代码仓库共享行为必须按明确职责拆分：`index_task` 负责持久任务租约和 worker 恢复，`index_state` 负责已持久化索引状态检查及复用，`scope` 负责 scope 解析和 filter 兼容性，`repository_status` 负责注册状态查询和 checkpoint 选择；`blocking`、`errors`、`clock` 分别隔离 runtime、错误和持久化时间边界。调用方必须直接依赖职责模块，不得重新引入含义宽泛的 `support`、`helper` 或 utility 聚合层。
+`indexing` 目录是严格的工作流边界：`mod.rs` 编排全量与增量执行，`state` 负责已持久化索引状态检查及复用，`task` 负责持久租约与 worker 恢复，`queue` 负责有界 overlay 任务提交，`fast_path` 负责经过校验的新鲜索引复用，`tasks` 负责任务管理。目录只向父模块暴露仓库注册所需的租约恢复操作，内部索引 helper 不得泄漏到查询或 adapter。`repository` 目录同样由 `mod.rs` 承载服务实现，`status` 负责注册状态和 checkpoint 选择，`staleness` 负责结果新鲜度标注，`worktree` 负责 overlay 校验，白盒 fixture 与所属行为保持共置。共享的 `scope` 继续负责 scope 解析和 filter 兼容性，`blocking`、`errors`、`clock`、`worktree_ref` 分别隔离 runtime、错误、持久化时间和 overlay 身份边界。不得恢复根级 `repository_*`、`worktree_freshness`、`index_*`、`fast_index`、`queue` 或 `tasks` 文件桶。
 
 ### 3.3 仓库领域模型职责
 
@@ -98,9 +98,13 @@ Monorepo workspace 持久化统一收敛在 `storage::sqlite::code_workspace`：
 
 Code index schema 所有权统一收敛在 `storage::sqlite::code_schema`：`mod.rs` 负责当前 table/index 和初始化顺序，`migrations` 负责有界兼容转换，`route_schema` 负责 route 专属 DDL，`tests` 验证 schema 与 migration 不变量。不得再通过 `code_schema_*` 前缀把这些文件拆散到 SQLite 根目录。
 
-Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协调有界检索层，`calls`、`imports`、`symbols`、`hybrid` 负责 edge 或 plan 专属行为，`scoring` 负责聚焦的 ranking signal，`accuracy` 负责端到端排名 fixture，`tests` 负责共享 query 回归。跨越这些聚焦子域的 row decoding、excerpt、identifier、line range、route、reference 和 SBOM retrieval 保留为具名根子模块；任何 query 目录都不得变成新的平铺前缀桶。
+Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协调有界检索层，`calls`、`imports`、`symbols`、`hybrid` 负责 edge 或 plan 专属行为，`scoring` 负责聚焦的 ranking signal，`accuracy` 负责端到端排名 fixture。共享 query 回归保留在 `tests`，并按 `calls`、`ranking`、`generated` 和 `hybrid` 分组；跨域的 unit、score、identity、excerpt、field-filter、line-context 和 SBOM case 保留为具名根子项。跨越聚焦子域的 row decoding、excerpt、identifier、line range、route、reference 和 SBOM retrieval 保留为具名生产根子模块；任何 query 或 test 目录都不得变成新的平铺前缀桶。
 
 代码查询相关性原语统一收敛在 `storage::sqlite::code_query::relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件或根目录级 `code_query_*` 兄弟文件。
+
+SQLite code-store facade 及其直接拥有的持久化行为必须在物理上收敛到 `storage::sqlite::code`：`mod.rs` 协调 store trait 并引用同级持久化领域，`feature_flags`、`generated`、`impact`、`routes`、`search` 和 `symbols` 分别维护与名称一致的 code-store 行为。Scope cleanup、removal、status 和 report 职责统一收敛到 `code::lifecycle`，每个配对 UT 文件必须与实现共置。Facade 回归、元数据/状态用例、共享夹具和测试支持必须使用描述性名称共置于该目录。不得再用 SQLite 根目录下一组扁平 `code_*` 文件模拟领域归属，也不得把 lifecycle 文件移回 facade 根目录。
+
+SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::connection_runtime`：`maintenance` 负责 writer pragma、WAL checkpoint 和 maintenance diagnostics，`read_pool` 负责有界读连接选择与 deadline，`retry` 负责有界 transient lock retry 分类；配对 UT 与 owner 共置。根 `sqlite.rs` 继续作为 store facade 并显式引用这些模块；不得把 runtime 文件恢复到拥挤的 SQLite 根目录。
 
 ### 3.7 代码索引基础模块
 
@@ -109,6 +113,54 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 ### 3.8 服务生命周期计划
 
 服务生命周期必须按边界划分职责：`application::service::lifecycle_plan` 负责请求校验、install/upgrade/rollback/uninstall 步骤计划和执行编排；只有 `lifecycle_plan::platform_service` 可以选择平台服务定义文件名、渲染 systemd/launchd/Windows Service 定义、声明平台权限并生成 service manager 命令；`lifecycle_plan::execution` 负责阻塞文件和进程执行。平台渲染与命令转义不得重新并入生命周期步骤 planner。
+
+### 3.9 自迭代评估器职责
+
+`tools/self_iteration::evaluator` 必须按评估阶段和证据类型分组：`runtime` 负责一次评估运行的顶层协调、并发限制和结果汇总，`quality` 分别拥有门禁定义和执行，`workloads` 按 repository、repository-set、agent、CLI、file 和 semantic-vector 工作负载划分，`fixtures` 只拥有生成式仓库 fixture 及其写入生命周期，`judge` 负责研究判断的配置、prompt、backend 和结果合同。评估器 UT 必须与被验证边界同目录并使用可定位的 `*_tests.rs` 名称；不得恢复 `evaluator_tail`、跨职责 `evaluator_tests` 或在 `tools/self_iteration/src` 根目录平铺同一领域的 `evaluator_*` 文件。
+
+### 3.10 自迭代评分职责
+
+`tools/self_iteration::scoring` 必须把 observation 和公开 score contract 保持在 `mod.rs`，排名证据匹配放在 `ranked`，总分装配放在 `evaluation`，拒绝决策放在 `decision`，能力上限、性能与稳定性分量放在 `capability`，跨运行变化检测放在 `change_detection`，类型化 JSON 用例字段读取放在 `case_fields`，有界均值与截断原语放在 `score_math`。定向 UT 与这些实现同目录；不得恢复根目录级 `scoring_ranked`、`scoring_tests`、引入笼统的 `common` 桶，或把不同评分阶段重新合并进单个评分文件。
+
+### 3.11 自迭代配置职责
+
+`tools/self_iteration::config` 必须把模式/策略、类别集合、公开配置模型、CLI 解析、类别排除、作业预算和标量校验分别放在 `mode`、`categories`、`model`、`parse`、`category_exclusions`、`job_plan` 和 `value_parser`。`mod.rs` 只维护常量和稳定 facade，解析、类别、无人值守模式、文档合同和作业预算 UT 与实现同目录。不得恢复同时包含模型、解析器、预算和内联测试的根目录 `config.rs`。
+
+### 3.12 自迭代历史与记忆职责
+
+`tools/self_iteration::history` 必须把运行记录选择、持久化、CSV/SVG 导出和采用状态分别放在 `runs`、`persistence`、`export` 和 `run_state`；`synthesis` 负责生成有界历史摘要，`memory` 子目录负责长期记忆查询、记录构建、存储、摘要和元数据。调用方必须通过 `history::synthesis` 或 `history::memory` 表达依赖，定向 UT 与对应边界共置。不得恢复根目录级 `history_synthesis.rs`、`memory.rs` 或带有内联大测试模块的单体 `history.rs`。
+
+### 3.13 自迭代无人值守工作流职责
+
+`tools/self_iteration::unattended` 必须把长运行生命周期、持久状态、循环选择、候选尝试、评估持久化、派生配置、元数据、类别轮换、宏触发、深度检查和结果策略分别放入与职责同名的文件。状态、类别轮换和触发策略 UT 必须与对应实现同级共置。`mod.rs` 只维护共享合同和模块 facade；不得恢复同时组合完整工作流与内联测试的根目录 `unattended.rs`。
+
+### 3.14 自迭代 Codex 生成职责
+
+`tools/self_iteration::codex` 必须把进程执行、命令构建、普通提示词构建、无人值守提示词构建、历史派生提示上下文和命令结果映射分别放在 `execution`、`command`、`prompt`、`unattended_prompt`、`history_context` 和 `result_mapping`。命令和提示词 UT 必须与对应实现同级共置。`mod.rs` 只维护结果合同和 facade；不得恢复同时组合外部进程策略、提示词策略、历史格式化与内联测试的根目录 `codex.rs`。
+
+### 3.15 自迭代工作流职责
+
+`tools/self_iteration::main` 只能作为二进制组合入口。模式分派、循环控制、手工评估、生成迭代、候选评估、文档门禁、评分持久化、报告元数据、已采用优化文档、终端输出和运行标识必须放在 `tools/self_iteration::workflow` 下与职责同名的文件中。运行标识和文档门禁 UT 必须与对应实现同级共置。跨工作流调用方通过 crate facade 使用能力；不得把编排、持久化、文档逻辑和内联测试恢复到 `main.rs`。
+
+### 3.16 自迭代进程边界职责
+
+`tools/self_iteration::command` 必须由 `mod.rs` 维护外部进程合同，`execution` 管理子进程生命周期与超时，`pipes` 管理管道读写 worker，`logging` 记录进度事件，`output` 选择有界输出，`failure` 构造失败结果。输出和执行 UT 必须与对应实现同级共置。不得恢复同时组合进程编排、worker 管道、可观测性、格式化与内联测试的根目录 `command.rs`。
+
+### 3.17 自迭代用例配置职责
+
+`tools/self_iteration::cases` 必须把递归用例文件加载、确定性对象/数组合并、类型化 JSON 字段读取和按仓库分组分别放在 `loading`、`merge`、`fields` 和 `grouping`。合并 UT 必须与 `merge.rs` 同级共置，`mod.rs` 只作为 facade。`tools/self_iteration/cases.json` 只维护有界 workload manifest 和全局 suite，repository query target 必须放入具名 include 文件，其中 project-alias、relay-teams、Linux、LevelDB、Spring Framework 和 Kubernetes 各自独立。不得恢复同时组合配置 I/O、合并策略、访问辅助、分组和内联测试的根目录 `cases.rs`，也不得把 manifest 再扩成单体 query-case 文件。
+
+### 3.18 自迭代研究计划职责
+
+`tools/self_iteration::research_plan::mod` 必须维护输入合同，`render` 负责确定性计划渲染，`render_tests` 维护其 UT 合同。这些文件必须共置于研究计划领域目录；不得把渲染和内联测试恢复到根目录 `research_plan.rs`。
+
+### 3.19 自迭代候选 Git 职责
+
+`tools/self_iteration::candidate_git` 必须由 `mod`、`command`、`dynamic_command`、`worktree`、`patch` 和 `lifecycle` 分别维护补丁快照合同、有界 Git 命令执行、工作树检查、补丁捕获/路径提取以及候选拒绝/提交生命周期。循环休眠属于 `workflow::pacing`，不得放入 Git 边界。调用点必须使用明确的 `candidate_git` 名称；不得恢复含糊的根目录 `git_ops.rs`，也不得把工作流节奏混入仓库变更。
+
+### 3.20 生产代码与单元测试文件职责
+
+生产 Rust 文件不得内嵌 `#[cfg(test)] mod` 实现。每个单元测试模块必须放入命名明确的同级 `*_tests.rs` 文件，并由所属生产文件通过显式 test-only `#[path]` 挂载；模块声明仍由生产文件唯一维护，以保持 white-box 可见性和测试身份稳定。`api` contract 已对 `agent`、`code_repository`、`error` 和 `stream` 实施一一配对，application 层的 repository、indexing、repository-set、view、knowledge、service 和 update 单元也遵循同一规则。代码摄取与索引单元在 language metadata、generated detection、identity、index plan/snapshot、parser workspace/language 和 source discovery 中同样执行该规则。domain core、graph、code、repository、workspace、knowledge-map、runtime 和 software contract 也必须把 UT 放入显式同级文件，即使测试声明位于后续生产类型之前。bootstrap、evaluation、顶层 indexing、network/QoS、observability、paths、retrieval 和 watcher 基础模块同样一一配对，且不得削弱其所有权边界。存储 contract 测试必须逐一执行 `CodeRepositoryStore` 的全部可选默认能力，使不支持的租约、检查点、有界候选检索、repository set、view 与 software projection 显式报错，而不是静默成功。`PartitionedSqliteKnowledgeStore` 的同级 `partitioned_tests` contract 必须覆盖空控制库委派、已索引分片路由、任务租约、repository-set 控制状态和 staged 检查点收尾。interface 测试必须留在所属 CLI、Web、ACP、MCP、audit 或 policy adapter 目录；MCP HTTP/JSON-RPC 夹具边界必须命名为 `transport_harness`。SQLite code-store、code-query、scoring、import/call planning、view、retrieval、maintenance、retry、pool 和 schema 测试必须与精确的持久化 owner 共置；partitioned SQLite 集成数据构造集中于 `partitioned_sqlite_fixtures`。不得把这些测试重新合并进生产文件，也不得建立共享的笼统测试桶。
 
 ## 4. HTTP 与 QoS
 

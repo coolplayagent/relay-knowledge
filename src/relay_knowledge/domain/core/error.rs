@@ -39,13 +39,5 @@ pub(crate) fn required_text(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn displays_field_and_message() {
-        let error = DomainError::invalid("field", "failed");
-
-        assert_eq!(error.to_string(), "field: failed");
-    }
-}
+#[path = "error_tests.rs"]
+mod tests;

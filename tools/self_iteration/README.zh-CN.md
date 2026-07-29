@@ -328,7 +328,7 @@ and (
 
 ## 评估数据
 
-`cases.json` 及其 `include_files` 定义自迭代目标 workload。它不是“当前已经全部实现”的能力清单；新增 case 可以代表下一轮候选需要补齐的竞争力目标。候选应改进通用 parser、图边、候选收缩、排序、service workflow 或可观测性，不能通过删除、放宽或枚举 case 获得分数。
+`cases.json` 及其 `include_files` 定义自迭代目标 workload。根文件只维护有界 manifest 和全局 suite；基础 repository query target 按 project-alias、relay-teams、Linux、LevelDB、Spring Framework 和 Kubernetes 拆入具名 include 文件。它不是“当前已经全部实现”的能力清单；新增 case 可以代表下一轮候选需要补齐的竞争力目标。候选应改进通用 parser、图边、候选收缩、排序、service workflow 或可观测性，不能通过删除、放宽或枚举 case 获得分数。
 
 ### 生成式和本地 fixture
 

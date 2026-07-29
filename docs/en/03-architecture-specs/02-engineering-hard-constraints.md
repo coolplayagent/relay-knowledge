@@ -42,7 +42,7 @@ The dependency direction is fixed as `error`/`variables` → `value_parser` → 
 
 ### 3.2 Code Repository Application Workflows
 
-`application::code_repository` partitions internal ownership by use case: `repository` owns registration, removal, status, and reports; `index_workflow` owns index execution, durable task leases, checkpoints, and scope previews; `query` owns versioned-scope retrieval, feature flags, and freshness diagnostics; and `impact` owns diff impact analysis. These modules expose stable APIs through the same `RelayKnowledgeService` and depend inward only on `domain`, `code`, and `storage` contracts; they must not duplicate workflows or depend back on CLI, Web, MCP, or other adapters.
+`application::code_repository` partitions internal ownership by use case: the `repository` directory owns registration, removal, status, reports, staleness annotation, and worktree-overlay validation; `indexing` owns index execution, durable task leases, checkpoints, scope previews, and worker administration; `query` owns versioned-scope retrieval, feature flags, and freshness diagnostics; and `impact` owns diff impact analysis. These modules expose stable APIs through the same `RelayKnowledgeService` and depend inward only on `domain`, `code`, and `storage` contracts; they must not duplicate workflows or depend back on CLI, Web, MCP, or other adapters.
 
 The Web adapter is grouped under `interfaces::web`: `mod.rs` owns router composition and shared response/error boundaries; `code_api`, `code_index_request`, `code_view_request`, `files`, and `model_config` own their named HTTP contracts; and focused tests stay in the same directory. Do not restore root-level `web_*` siblings or open sockets from this adapter.
 
@@ -52,7 +52,7 @@ Codebase understanding views are grouped under `application::code_repository::vi
 
 Source fallback retrieval is grouped under `application::code_repository::source_fallback`: `execution` is the sole I/O orchestrator; `plan` decides whether and how bounded fallback runs; `identity`, `filters`, `scoring`, and `results` own coverage, request constraints, ranking, and result merging; and `imports`, `surface`, and `worktree` isolate evidence-specific boundaries. Modules outside this directory must not depend directly on these internal algorithm helpers.
 
-Shared code-repository behavior is partitioned by explicit responsibility: `index_task` owns durable task leases and worker recovery, `index_state` owns persisted index inspection and reuse, `scope` owns scope resolution and filter compatibility, and `repository_status` owns registered status lookup and checkpoint selection. `blocking`, `errors`, and `clock` isolate their respective runtime, error, and persisted-time boundaries. Callers must depend directly on the responsible module instead of reintroducing an ambiguous `support`, `helper`, or utility aggregation layer.
+The `indexing` directory is a strict workflow boundary: `mod.rs` coordinates full and incremental execution, `state` owns persisted index inspection and reuse, `task` owns durable leases and worker recovery, `queue` owns bounded overlay task submission, `fast_path` owns validated fresh-index reuse, and `tasks` owns task administration. Only the lease-recovery operation needed during repository registration is exposed to its parent; internal indexing helpers must not leak into query or adapter code. The `repository` directory similarly keeps its service implementation in `mod.rs`, registered status and checkpoint selection in `status`, result freshness annotation in `staleness`, worktree-overlay validation in `worktree`, and white-box fixtures beside the owned behavior. Shared `scope` retains scope resolution and filter compatibility, while `blocking`, `errors`, `clock`, and `worktree_ref` isolate runtime, error, persisted-time, and overlay-identity boundaries. Do not restore root-level `repository_*`, `worktree_freshness`, `index_*`, `fast_index`, `queue`, or `tasks` buckets.
 
 ### 3.3 Repository Domain Ownership
 
@@ -98,9 +98,13 @@ Monorepo-workspace persistence is grouped under `storage::sqlite::code_workspace
 
 Code-index schema ownership is grouped under `storage::sqlite::code_schema`: `mod.rs` owns current tables, indexes, and initialization order; `migrations` owns bounded compatibility transformations; `route_schema` owns route-specific DDL; and `tests` verifies schema and migration invariants. Do not split these files across the SQLite root using `code_schema_*` prefixes.
 
-Code-query persistence is grouped under `storage::sqlite::code_query`: `mod.rs` coordinates bounded retrieval layers; `calls`, `imports`, `symbols`, and `hybrid` own edge- or plan-specific behavior; `scoring` owns focused ranking signals; `accuracy` owns end-to-end ranking fixtures; and `tests` owns shared query regressions. Generic row decoding, excerpts, identifiers, line ranges, routes, references, and SBOM retrieval remain named root children because they cross those focused subdomains. No query directory may become a new flat prefix bucket.
+Code-query persistence is grouped under `storage::sqlite::code_query`: `mod.rs` coordinates bounded retrieval layers; `calls`, `imports`, `symbols`, and `hybrid` own edge- or plan-specific behavior; `scoring` owns focused ranking signals; and `accuracy` owns end-to-end ranking fixtures. Shared query regressions remain under `tests`, partitioned into `calls`, `ranking`, `generated`, and `hybrid`; cross-cutting unit, score, identity, excerpt, field-filter, line-context, and SBOM cases stay as named root children. Generic row decoding, excerpts, identifiers, line ranges, routes, references, and SBOM retrieval remain named production root children because they cross focused subdomains. No query or test directory may become a new flat prefix bucket.
 
 Relevance primitives are grouped under `storage::sqlite::code_query::relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file or root-level `code_query_*` siblings.
+
+The SQLite code-store facade and its directly owned persistence behaviors are grouped physically under `storage::sqlite::code`: `mod.rs` coordinates store traits and references sibling persistence domains, while `feature_flags`, `generated`, `impact`, `routes`, `search`, and `symbols` own their named code-store behaviors. Scope cleanup, removal, status, and report ownership is grouped under `code::lifecycle`, with each paired unit-test file beside its implementation. Facade regressions, metadata/status cases, shared fixtures, and support code remain in the same directory with descriptive names. Do not simulate this ownership with a flat family of root-level `code_*` files or move lifecycle files back to the facade root.
+
+SQLite connection execution concerns are physically grouped under `storage::sqlite::connection_runtime`: `maintenance` owns writer pragmas, WAL checkpoints, and maintenance diagnostics; `read_pool` owns bounded read-connection selection and deadlines; and `retry` classifies bounded transient lock retries. Their paired unit tests stay beside the owner. The root `sqlite.rs` remains the store facade and references these modules explicitly; do not restore these runtime files to the crowded SQLite root.
 
 ### 3.7 Code Index Foundations
 
@@ -109,6 +113,54 @@ Cross-cutting code-index primitives use responsibility-bearing top-level modules
 ### 3.8 Service Lifecycle Planning
 
 Service lifecycle ownership is split by boundary: `application::service::lifecycle_plan` validates requests, builds install/upgrade/rollback/uninstall step plans, and coordinates execution; `lifecycle_plan::platform_service` alone selects platform service-definition names, renders systemd/launchd/Windows Service definitions, declares platform permissions, and builds service-manager commands; `lifecycle_plan::execution` owns blocking file and process execution. Platform rendering and command quoting must not return to the lifecycle step planner.
+
+### 3.9 Self-Iteration Evaluator Ownership
+
+`tools/self_iteration::evaluator` is grouped by evaluation stage and evidence type: `runtime` owns top-level orchestration, concurrency limits, and result assembly; `quality` owns gate policy and execution; `workloads` is partitioned into repository, repository-set, agent, CLI, file, and semantic-vector evaluation; `fixtures` owns only generated-repository fixtures and their write lifecycle; and `judge` owns research-judge settings, prompts, backends, and outcome contracts. Evaluator unit tests stay beside the boundary they verify and use traceable `*_tests.rs` names. Do not restore `evaluator_tail`, cross-responsibility `evaluator_tests`, or flat `evaluator_*` files in the `tools/self_iteration/src` root.
+
+### 3.10 Self-Iteration Scoring Ownership
+
+`tools/self_iteration::scoring` keeps observation types and the public score contract in `mod.rs`, ranked-evidence matching in `ranked`, total-score assembly in `evaluation`, rejection policy in `decision`, capability-ceiling/performance/stability components in `capability`, cross-run delta detection in `change_detection`, typed JSON case-field access in `case_fields`, and bounded averaging/clamping primitives in `score_math`. Focused unit tests stay in the same directory. Do not restore root-level `scoring_ranked` or `scoring_tests` files, introduce a generic `common` bucket, or recombine distinct scoring phases into one scoring file.
+
+### 3.11 Self-Iteration Configuration Ownership
+
+`tools/self_iteration::config` keeps modes and strategies, category sets, the public configuration model, CLI parsing, category exclusions, job budgets, and scalar validation in `mode`, `categories`, `model`, `parse`, `category_exclusions`, `job_plan`, and `value_parser` respectively. `mod.rs` only maintains constants and the stable facade; parsing, category, unattended-mode, documentation-contract, and job-budget unit tests stay in the same directory. Do not restore a root `config.rs` that combines the model, parser, budgets, and inline tests.
+
+### 3.12 Self-Iteration History and Memory Ownership
+
+`tools/self_iteration::history` keeps run selection, persistence, CSV/SVG export, and adoption-state interpretation in `runs`, `persistence`, `export`, and `run_state`; `synthesis` builds bounded history summaries, while the `memory` subtree owns long-term memory queries, record construction, storage, summaries, and metadata. Callers express dependencies through `history::synthesis` or `history::memory`, and focused unit tests stay beside their boundary. Do not restore root-level `history_synthesis.rs` or `memory.rs`, or a monolithic `history.rs` with a large inline test module.
+
+### 3.13 Self-Iteration Unattended Workflow Ownership
+
+`tools/self_iteration::unattended` keeps the long-running lifecycle, durable state, cycle selection, candidate attempts, evaluation persistence, derived configuration, metadata, category rotation, macro triggers, deep checks, and outcome policy in files named for those responsibilities. State, category-rotation, and trigger unit tests stay beside their matching implementation files. `mod.rs` owns only shared contracts and the module facade; do not restore a root `unattended.rs` that combines the entire workflow and its inline tests.
+
+### 3.14 Self-Iteration Codex Generation Ownership
+
+`tools/self_iteration::codex` separates process execution, command construction, normal prompt construction, unattended prompt construction, history-derived prompt context, and command-result mapping into `execution`, `command`, `prompt`, `unattended_prompt`, `history_context`, and `result_mapping`. Command and prompt unit tests stay beside those implementation files. `mod.rs` owns the result contract and facade only; do not restore a root `codex.rs` that combines external-process policy, prompt policy, history formatting, and inline tests.
+
+### 3.15 Self-Iteration Workflow Ownership
+
+`tools/self_iteration::main` is only the binary composition root. Mode dispatch, loop control, manual evaluation, generation iterations, candidate evaluation, documentation gates, score persistence, report metadata, adopted-optimization documentation, terminal output, and run identity live under `tools/self_iteration::workflow` in files named for those responsibilities. Run-identity and documentation-gate unit tests stay beside their matching implementation files. Cross-workflow consumers use the crate facade; do not restore orchestration, persistence, documentation, and inline tests to `main.rs`.
+
+### 3.16 Self-Iteration Process Boundary Ownership
+
+`tools/self_iteration::command` owns external-process contracts in `mod.rs`, child lifecycle and timeout handling in `execution`, pipe reader/writer workers in `pipes`, progress events in `logging`, bounded output selection in `output`, and failed-result construction in `failure`. Output and execution unit tests stay beside their matching implementation files. Do not restore a root `command.rs` that combines process orchestration, worker plumbing, observability, formatting, and inline tests.
+
+### 3.17 Self-Iteration Case Configuration Ownership
+
+`tools/self_iteration::cases` separates recursive case-file loading, deterministic object/array merging, typed JSON field access, and repository grouping into `loading`, `merge`, `fields`, and `grouping`. Merge unit tests stay beside `merge.rs`; `mod.rs` is only the facade. `tools/self_iteration/cases.json` is the bounded workload manifest and global-suite owner; repository query targets live in descriptive included files, including dedicated project-alias, relay-teams, Linux, LevelDB, Spring Framework, and Kubernetes files. Do not restore a root `cases.rs` that combines configuration I/O, merge policy, access helpers, grouping, and inline tests, or grow the manifest into another monolithic query-case file.
+
+### 3.18 Self-Iteration Research Plan Ownership
+
+`tools/self_iteration::research_plan::mod` owns the input contract, while `render` owns deterministic plan rendering and `render_tests` owns its unit contract. Keep these files together under the research-plan domain; do not restore rendering and inline tests to a root `research_plan.rs`.
+
+### 3.19 Self-Iteration Candidate Git Ownership
+
+`tools/self_iteration::candidate_git` owns the patch snapshot contract, bounded Git command execution, worktree inspection, patch capture/path extraction, and candidate rejection/commit lifecycle in `mod`, `command`, `dynamic_command`, `worktree`, `patch`, and `lifecycle`. Loop sleeping belongs to `workflow::pacing`, not the Git boundary. Use the explicit `candidate_git` name at call sites; do not restore an ambiguous root `git_ops.rs` or mix workflow pacing into repository mutation.
+
+### 3.20 Production and Unit-Test File Ownership
+
+Production Rust files must not embed a `#[cfg(test)] mod` implementation. Each unit-test module lives in a descriptive sibling `*_tests.rs` file and is attached from its production owner with an explicit test-only `#[path]`; the production file remains the only owner of the module declaration so white-box visibility and test identity stay stable. The `api` contracts apply this one-to-one pairing to `agent`, `code_repository`, `error`, and `stream`; application-layer repository, indexing, repository-set, view, knowledge, service, and update units follow the same rule. Code ingestion and indexing units apply it across language metadata, generated detection, identity, index planning/snapshots, parser workspaces/languages, and source discovery. Domain core, graph, code, repository, workspace, knowledge-map, runtime, and software contracts also keep their unit tests in explicit sibling files, even when the declaration occurs before later production types. Bootstrap, evaluation, top-level indexing, network/QoS, observability, paths, retrieval, and watcher foundations use the same pairing without weakening their ownership boundaries. Storage contract tests must exercise every optional `CodeRepositoryStore` default so unsupported leases, checkpoints, bounded candidate lookups, repository sets, views, and software projections remain explicit rather than silently succeeding. The sibling `partitioned_tests` contract covers empty-control delegation, indexed-shard routing, task leases, repository-set control state, and staged checkpoint finalization for `PartitionedSqliteKnowledgeStore`. Interface tests stay inside their owning CLI, Web, ACP, MCP, audit, and policy adapter directories; the MCP HTTP/JSON-RPC fixture boundary is named `transport_harness`. SQLite code-store, code-query, scoring, import/call planning, view, retrieval, maintenance, retry, pool, and schema tests remain beside their precise persistence owner; partitioned SQLite integration data builders live in `partitioned_sqlite_fixtures`. Do not merge these tests back into production files or create a shared catch-all test bucket.
 
 ## 4. HTTP and QoS
 

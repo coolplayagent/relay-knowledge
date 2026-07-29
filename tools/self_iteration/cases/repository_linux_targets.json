@@ -1,0 +1,260 @@
+{
+  "query_cases": [
+    {
+      "id": "linux_definition_start_kernel",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "start_kernel",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "init/main.c",
+          "line_start": 1017
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_container_of",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "container_of",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "include/linux/container_of.h",
+          "line_start": 19
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_export_symbol",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "EXPORT_SYMBOL",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "include/linux/export.h",
+          "line_start": 89
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_container_of_const",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "container_of_const",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "include/linux/container_of.h",
+          "line_start": 35
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_module_init_macro",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "module_init",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "include/linux/module.h"
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_syscall_read",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "read",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": [
+        "fs/read_write.c"
+      ],
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "fs/read_write.c",
+          "line_start": 724
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_do_sys_openat2",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "do_sys_openat2",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "fs/open.c",
+          "line_start": 1355
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_anon_inode_getfile",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "anon_inode_getfile",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "fs/anon_inodes.c",
+          "line_start": 200
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_debugfs_create_file_full",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "debugfs_create_file_full",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "fs/debugfs/inode.c",
+          "line_start": 455
+        }
+      ]
+    },
+    {
+      "id": "linux_callers_cma_debugfs_add_one",
+      "repository": "linux_sample",
+      "kind": "callers",
+      "query": "cma_debugfs_add_one",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "mm/cma_debug.c",
+          "excerpt_contains": "cma_debugfs_init"
+        }
+      ]
+    },
+    {
+      "id": "linux_callers_anon_inode_getfile",
+      "repository": "linux_sample",
+      "kind": "callers",
+      "query": "anon_inode_getfile",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "fs/eventpoll.c",
+          "excerpt_contains": "eventpoll"
+        }
+      ]
+    },
+    {
+      "id": "linux_callees_cma_debugfs_init",
+      "repository": "linux_sample",
+      "kind": "callees",
+      "query": "cma_debugfs_init",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "mm/cma_debug.c",
+          "excerpt_contains": "cma_debugfs_add_one"
+        }
+      ]
+    },
+    {
+      "id": "linux_callees_do_mmap",
+      "repository": "linux_sample",
+      "kind": "callees",
+      "query": "do_mmap",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": "mmap_region"
+        }
+      ]
+    },
+    {
+      "id": "linux_imports_debugfs",
+      "repository": "linux_sample",
+      "kind": "imports",
+      "query": "linux/debugfs.h",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "mm/cma_debug.c",
+          "edge_target_hint": "include/linux/debugfs.h"
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_copy_process_full_scope",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "copy_process",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "kernel/fork.c",
+          "line_start": 1969
+        }
+      ]
+    },
+    {
+      "id": "linux_hybrid_mmap_syscall_flow_full_scope",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "SYSCALL_DEFINE6 mmap_pgoff do_mmap mmap_region",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": "mmap_region"
+        }
+      ]
+    },
+    {
+      "id": "linux_hybrid_epoll_eventfd_full_scope",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "epoll eventfd anon_inode_getfile wakeup poll",
+      "limit": 10,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "fs/eventpoll.c"
+        }
+      ]
+    },
+    {
+      "id": "linux_definition_eventfd_ctx_fileget_full_scope",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "eventfd_ctx_fileget",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "fs/eventfd.c",
+          "line_start": 366
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,179 @@
+{
+  "query_cases": [
+    {
+      "id": "leveldb_definition_db_open",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "DB::Open",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "db/db_impl.cc",
+          "line_start": 1503
+        }
+      ]
+    },
+    {
+      "id": "leveldb_definition_dbimpl_get",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "DBImpl::Get",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "db/db_impl.cc",
+          "line_start": 1121
+        }
+      ]
+    },
+    {
+      "id": "leveldb_definition_new_lru_cache",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "NewLRUCache",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "util/cache.cc",
+          "line_start": 399
+        }
+      ]
+    },
+    {
+      "id": "leveldb_definition_write_batch_put",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "WriteBatch::Put",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "db/write_batch.cc",
+          "line_start": 98
+        }
+      ]
+    },
+    {
+      "id": "leveldb_callers_new_lru_cache",
+      "repository": "leveldb_cpp",
+      "kind": "callers",
+      "query": "NewLRUCache",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "db/db_impl.cc",
+          "excerpt_contains": "block_cache"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_hybrid_internal_key_comparator",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "InternalKeyComparator",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [
+        {
+          "path": "db/dbformat.h"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_filter_dbimpl_get_cpp",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "DBImpl::Get",
+      "limit": 10,
+      "path_filters": [
+        "db/db_impl.cc"
+      ],
+      "language_filters": [
+        "cpp"
+      ],
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "db/db_impl.cc",
+          "line_start": 1121
+        }
+      ]
+    },
+    {
+      "id": "leveldb_definition_table_cache_find_table_full_scope",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "TableCache::FindTable",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "db/table_cache.cc",
+          "line_start": 41
+        }
+      ]
+    },
+    {
+      "id": "leveldb_hybrid_recovery_manifest_full_scope",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "Recover descriptor save_manifest VersionEdit",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "db/db_impl.h",
+          "excerpt_contains": "Recover"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_definition_new_bloom_filter_policy",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "NewBloomFilterPolicy",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "util/bloom.cc",
+          "line_start": 88
+        }
+      ]
+    },
+    {
+      "id": "leveldb_fuzzy_class_cache_lru_interface",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "cache interface lookup insert total charge lru",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "include/leveldb/cache.h",
+          "excerpt_contains": "class LEVELDB_EXPORT Cache"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_fuzzy_constant_crc_mask_delta",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "crc masked representation rotate add constant",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "util/crc32c.h",
+          "excerpt_contains": "kMaskDelta"
+        }
+      ]
+    }
+  ]
+}

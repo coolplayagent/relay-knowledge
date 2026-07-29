@@ -1,0 +1,206 @@
+{
+  "query_cases": [
+    {
+      "id": "rt_definition_connector_service",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "ConnectorService",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "line_start": 137
+        }
+      ]
+    },
+    {
+      "id": "rt_definition_w3_save_request",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "W3ConnectorSaveRequest",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/w3_models.py",
+          "line_start": 53
+        }
+      ]
+    },
+    {
+      "id": "rt_callers_summary",
+      "repository": "relay_teams",
+      "kind": "callers",
+      "query": "_summary",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "line_start": 177
+        }
+      ]
+    },
+    {
+      "id": "rt_callees_summary",
+      "repository": "relay_teams",
+      "kind": "callees",
+      "query": "_summary",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "excerpt_contains": "ConnectorSummary"
+        }
+      ]
+    },
+    {
+      "id": "rt_imports_w3_save_request",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "W3ConnectorSaveRequest",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "edge_resolution_state": "resolved"
+        }
+      ]
+    },
+    {
+      "id": "rt_hybrid_connector_service",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "ConnectorService",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "line_start": 137
+        }
+      ]
+    },
+    {
+      "id": "rt_negative_missing_symbol",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "DefinitelyMissingRelayTeamsSymbol",
+      "limit": 10,
+      "expect_empty": true
+    },
+    {
+      "id": "rt_filter_connector_service_python",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "ConnectorService",
+      "limit": 10,
+      "path_filters": [
+        "src/relay_teams/connector/service.py"
+      ],
+      "language_filters": [
+        "python"
+      ],
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "line_start": 137
+        }
+      ]
+    },
+    {
+      "id": "rt_definition_w3_connector_service_full_scope",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "W3ConnectorService",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/w3_service.py",
+          "line_start": 107
+        }
+      ]
+    },
+    {
+      "id": "rt_hybrid_eval_checkpoint_store",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "EvalCheckpointStore signature mismatch append result",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [
+        {
+          "path": "src/relay_teams_evals/checkpoint.py",
+          "excerpt_contains": "EvalCheckpointStore"
+        }
+      ]
+    },
+    {
+      "id": "rt_imports_connector_reexport_full_scope",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "W3ConnectorService",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/__init__.py"
+        }
+      ]
+    },
+    {
+      "id": "rt_definition_eval_checkpoint_append_result",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "append_result",
+      "limit": 20,
+      "path_filters": [
+        "src/relay_teams_evals/checkpoint.py"
+      ],
+      "language_filters": [
+        "python"
+      ],
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "src/relay_teams_evals/checkpoint.py",
+          "line_start": 176
+        }
+      ]
+    },
+    {
+      "id": "rt_fuzzy_constant_checkpoint_version",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "checkpoint metadata version constant",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "src/relay_teams_evals/checkpoint.py",
+          "excerpt_contains": "_CHECKPOINT_VERSION"
+        }
+      ]
+    },
+    {
+      "id": "rt_fuzzy_function_archive_output_dir",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "archive old eval output directory timestamp suffix",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "src/relay_teams_evals/checkpoint.py",
+          "excerpt_contains": "archive_output_dir"
+        }
+      ]
+    }
+  ]
+}

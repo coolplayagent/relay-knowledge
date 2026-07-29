@@ -1,0 +1,211 @@
+{
+  "query_cases": [
+    {
+      "id": "kubernetes_definition_api_server_command",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewAPIServerCommand",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "cmd/kube-apiserver/app/server.go",
+          "line_start": 70
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_definition_kubelet_command",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewKubeletCommand",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "cmd/kubelet/app/server.go",
+          "line_start": 142
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_definition_run_kubelet",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "RunKubelet",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "cmd/kubelet/app/server.go",
+          "line_start": 1234
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_definition_pod_type",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "Pod",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": [
+        "pkg/apis/core/types.go"
+      ],
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/apis/core/types.go",
+          "line_start": 4695
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_definition_clientset_new_for_config",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewForConfig",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": [
+        "staging/src/k8s.io/client-go/kubernetes/clientset.go"
+      ],
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "staging/src/k8s.io/client-go/kubernetes/clientset.go",
+          "line_start": 476
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_callers_run_kubelet",
+      "repository": "kubernetes_go_sample",
+      "kind": "callers",
+      "query": "RunKubelet",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [
+        {
+          "path": "cmd/kubelet/app/server.go",
+          "excerpt_contains": "RunKubelet"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_hybrid_rest_client",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "RESTClient",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [
+        {
+          "path": "staging/src/k8s.io/client-go/rest/client.go",
+          "line_start": 86
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_definition_generic_client_full_scope",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewClientWithListAndApply",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "staging/src/k8s.io/client-go/gentype/type.go",
+          "line_start": 134
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_hybrid_authorizer_config_full_scope",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "AuthorizationConfiguration LoadAndValidateData webhook authorizer",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "pkg/kubeapiserver/authorizer/config.go",
+          "excerpt_contains": "LoadAndValidateData"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_imports_client_go_informer_full_scope",
+      "repository": "kubernetes_go_sample",
+      "kind": "imports",
+      "query": "SharedInformerFactory",
+      "limit": 10,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "pkg/kubeapiserver/authorizer/config.go"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_definition_authorizer_load_and_validate_data",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "LoadAndValidateData",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "pkg/kubeapiserver/authorizer/config.go",
+          "line_start": 185
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_fuzzy_variable_repeatable_authorizers",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "repeatable authorization modes webhook list variable",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "pkg/kubeapiserver/authorizer/config.go",
+          "excerpt_contains": "repeatableAuthorizerTypes"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_fuzzy_function_service_ip_ranges",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "service cluster ip ranges primary secondary helper",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "cmd/kube-apiserver/app/options/completion.go",
+          "excerpt_contains": "getServiceIPAndRanges"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_fuzzy_variable_no_backoff",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "rest request default no backoff manager variable",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "staging/src/k8s.io/client-go/rest/request.go",
+          "excerpt_contains": "noBackoff"
+        }
+      ]
+    }
+  ]
+}

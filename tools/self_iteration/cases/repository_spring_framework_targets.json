@@ -1,0 +1,156 @@
+{
+  "query_cases": [
+    {
+      "id": "spring_definition_application_context",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "ApplicationContext",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/ApplicationContext.java",
+          "line_start": 59
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_abstract_application_context_refresh",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "refresh",
+      "limit": 10,
+      "path_filters": [
+        "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java"
+      ],
+      "language_filters": [
+        "java"
+      ],
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java",
+          "line_start": 582
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_default_listable_bean_factory",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "DefaultListableBeanFactory",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/factory/support/DefaultListableBeanFactory.java",
+          "line_start": 132
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_annotation_config_application_context",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "AnnotationConfigApplicationContext",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/annotation/AnnotationConfigApplicationContext.java",
+          "line_start": 57
+        }
+      ]
+    },
+    {
+      "id": "spring_imports_default_listable_bean_factory",
+      "repository": "spring_framework_java",
+      "kind": "imports",
+      "query": "DefaultListableBeanFactory",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/support/GenericApplicationContext.java",
+          "line_start": 43
+        }
+      ]
+    },
+    {
+      "id": "spring_filter_bean_factory_get_bean",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "getBean",
+      "limit": 10,
+      "path_filters": [
+        "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java"
+      ],
+      "language_filters": [
+        "java"
+      ],
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java",
+          "line_start": 156
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_framework_servlet_full_scope",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "FrameworkServlet",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/FrameworkServlet.java",
+          "line_start": 142
+        }
+      ]
+    },
+    {
+      "id": "spring_hybrid_handler_mapping_full_scope",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "RequestMappingHandlerMapping HandlerMapping getHandler",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/HandlerMapping.java",
+          "excerpt_contains": "RequestMappingHandlerMapping"
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_dispatcher_servlet_full_scope",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "DispatcherServlet",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java",
+          "line_start": 157
+        }
+      ]
+    },
+    {
+      "id": "spring_fuzzy_class_dispatcher_servlet",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "front controller servlet dispatch web mvc framework servlet",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java",
+          "excerpt_contains": "class DispatcherServlet"
+        }
+      ]
+    }
+  ]
+}

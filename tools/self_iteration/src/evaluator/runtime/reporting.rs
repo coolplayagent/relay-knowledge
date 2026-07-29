@@ -1,0 +1,134 @@
+fn parse_json_output(stdout: &str) -> Value {
+    parse_json_output_value(stdout).unwrap_or(Value::Null)
+}
+
+fn parse_json_output_value(stdout: &str) -> Option<Value> {
+    stdout
+        .lines()
+        .rev()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .find_map(|line| serde_json::from_str(line).ok())
+}
+
+fn parse_json_case_output(
+    case: &Value,
+    repository: &str,
+    objective: &str,
+    result: &CommandResult,
+) -> Result<Value, Box<CaseObservation>> {
+    parse_json_output_value(&result.stdout).ok_or_else(|| Box::new(CaseObservation {
+        case_id: string_or(case, "id", "case").to_owned(),
+        repository: repository.to_owned(),
+        passed: false,
+        guardrail: is_guardrail_case(case),
+        rank: None,
+        max_rank: number_or(case, "max_rank", 1) as usize,
+        false_positive_count: 0,
+        message: "invalid JSON output from --format json command".to_owned(),
+        objective: objective.to_owned(),
+        score_override: Some(0.0),
+    }))
+}
+
+fn push_latency_metrics(
+    metrics: &mut Vec<MetricObservation>,
+    config: &Value,
+    prefix: &str,
+    durations: &[u64],
+) {
+    if durations.is_empty() {
+        return;
+    }
+    metrics.push(MetricObservation {
+        name: format!("{prefix}_p50_ms"),
+        value: percentile(durations, 50) as f64,
+        budget: budget(config, "query_p50_budget_ms"),
+        lower_is_better: true,
+        key: false,
+    });
+    metrics.push(MetricObservation {
+        name: format!("{prefix}_p95_ms"),
+        value: percentile(durations, 95) as f64,
+        budget: budget(config, "query_p95_budget_ms"),
+        lower_is_better: true,
+        key: true,
+    });
+    if let Some(max_budget) = budget(config, "query_max_budget_ms") {
+        metrics.push(MetricObservation {
+            name: format!("{prefix}_max_ms"),
+            value: durations.iter().copied().max().unwrap_or(0) as f64,
+            budget: Some(max_budget),
+            lower_is_better: true,
+            key: true,
+        });
+    }
+}
+
+fn percentile(values: &[u64], percentile_value: u64) -> u64 {
+    let mut ordered = values.to_vec();
+    ordered.sort_unstable();
+    let index = ((ordered.len() - 1) as u64 * percentile_value / 100) as usize;
+    ordered[index]
+}
+
+fn budget(value: &Value, name: &str) -> Option<f64> {
+    value
+        .get(name)
+        .and_then(Value::as_f64)
+        .filter(|value| *value > 0.0)
+}
+
+fn normalized_env(env: &BTreeMap<String, String>, name: &str, default: &str) -> String {
+    env.get(name)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default.to_owned())
+}
+
+fn repo_report(
+    repo_name: &str,
+    scope: String,
+    commands: Vec<CommandResult>,
+    cases: Vec<CaseObservation>,
+    metrics: Vec<MetricObservation>,
+    index_summary: Value,
+) -> RepoReport {
+    let passed_commands = commands.iter().filter(|command| command.passed()).count();
+    let passed_cases = cases.iter().filter(|case| case.passed).count();
+    let command_duration_ms = commands
+        .iter()
+        .map(|command| command.duration_ms)
+        .sum::<u64>();
+    eprintln!(
+        "[self-iterate] report done name={} commands={}/{} cases={}/{} metrics={} command_duration_ms={}",
+        repo_name,
+        passed_commands,
+        commands.len(),
+        passed_cases,
+        cases.len(),
+        metrics.len(),
+        command_duration_ms
+    );
+    RepoReport {
+        repository: repo_name.to_owned(),
+        scope,
+        commands,
+        gates: Vec::new(),
+        cases,
+        metrics,
+        index_summary,
+    }
+}
+
+fn serializable_repo_report(report: &RepoReport) -> Value {
+    serde_json::json!({
+        "repository": report.repository,
+        "scope": report.scope,
+        "commands": report.commands.iter().map(CommandResult::serializable).collect::<Vec<_>>(),
+        "gates": report.gates,
+        "cases": report.cases,
+        "metrics": report.metrics,
+        "index_summary": report.index_summary.get("summary").cloned().unwrap_or_else(|| report.index_summary.clone()),
+    })
+}

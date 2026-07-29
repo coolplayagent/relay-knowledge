@@ -7,10 +7,9 @@ use crate::{
     },
 };
 
-use super::worktree_freshness::ensure_worktree_overlay_matches_current_worktree;
 use super::{
     errors::storage_api_error,
-    repository_status::required_code_repository,
+    repository::{ensure_worktree_overlay_matches_current_worktree, required_code_repository},
     scope::{
         active_index_matches_request, indexed_commit_for_selector,
         latest_compatible_code_scope_status, resolved_code_scope_status,

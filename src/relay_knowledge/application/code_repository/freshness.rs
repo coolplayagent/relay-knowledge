@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     errors::storage_api_error,
-    repository_status::code_status_checkpoint,
+    repository::code_status_checkpoint,
     scope::{active_index_matches_request, indexed_source_scope},
 };
 

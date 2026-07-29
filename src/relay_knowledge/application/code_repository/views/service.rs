@@ -14,13 +14,15 @@ use crate::{
 
 use super::super::{
     errors::storage_api_error,
-    repository_status::{code_status_checkpoint, required_code_repository},
+    repository::{
+        code_status_checkpoint, ensure_worktree_overlay_matches_current_worktree,
+        required_code_repository,
+    },
     scope::{
         active_index_matches_request, indexed_commit_for_selector, indexed_source_scope,
         latest_compatible_code_scope_status, missing_indexed_source_scope_error,
         resolved_code_scope_status,
     },
-    worktree_freshness::ensure_worktree_overlay_matches_current_worktree,
 };
 use super::{
     affected_scope::derive_affected_scope,
