@@ -34,6 +34,8 @@
 
 具名的平台进程输入同样必须经过该边界。进程 bootstrap 期间由 `env::windows_system_root_from_process` 捕获 Windows `SystemRoot`，`paths::windows_tasklist_command` 解析可执行文件，`RuntimeConfiguration::process` 再把结果传给服务恢复；应用工作流在恢复 worker 或调用 service manager 时既不得直接调用 `std::env`，也不得自行拼接平台可执行文件路径。
 
+HTTP 基础边界必须完整收敛在 `net/http/`：`mod.rs` 维护配置、client/server runtime、timeout、cancellation 和 graceful shutdown，`qos_admission.rs` 与 `qos_client.rs` 分别隔离 inbound/outbound QoS，`mod_tests.rs` 验证该 facade。`net/` 父目录不得重新出现 `http.rs` 或 `http_tests.rs`。
+
 ### 3.1 环境变量边界
 
 `env` 内部按数据流保持单向依赖：`variables` 只拥有受支持的变量名，`error` 和 `overrides` 分别拥有稳定错误模型与 typed override 数据，`value_parser` 负责从已归一化 snapshot 提取并校验 path/string/bool/positive integer，`platform` 负责平台检测、大小写归一化、平台目录输入及 `SystemRoot` 进程读取，`config` 才能捕获完整进程环境并装配公开配置。`mod.rs` 仅维持原有 `env::*` facade，不得重新承载解析规则。对应 UT 必须分别放在 `config_tests`、`platform_tests` 和 `value_parser_tests`，使配置装配、平台规则和标量校验可以独立定位失败。

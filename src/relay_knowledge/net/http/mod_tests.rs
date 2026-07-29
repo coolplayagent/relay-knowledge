@@ -1,3 +1,5 @@
+//! Unit contract for HTTP configuration, QoS, cancellation, and graceful shutdown.
+
 use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
 use axum::{

@@ -34,6 +34,8 @@ Advanced architecture is earned through clear boundaries, acyclic dependencies, 
 
 Named platform process inputs follow the same boundary. During process bootstrap, `env::windows_system_root_from_process` captures Windows `SystemRoot`, `paths::windows_tasklist_command` resolves the executable, and `RuntimeConfiguration::process` passes that result into service recovery. Application workflows must neither call `std::env` nor construct platform executable paths while recovering workers or invoking service managers.
 
+The foundational HTTP boundary is physically contained in `net/http/`: `mod.rs` owns configuration, client/server runtime, timeouts, cancellation, and graceful shutdown; `qos_admission.rs` and `qos_client.rs` isolate inbound and outbound QoS; and `mod_tests.rs` verifies the facade. The `net/` parent must not regain `http.rs` or `http_tests.rs`.
+
 ### 3.1 Environment Variable Boundary
 
 The internals of `env` maintain a one-way data flow: `variables` only owns accepted variable names; `error` and `overrides` own the stable error model and typed override data; `value_parser` extracts and validates paths, strings, booleans, and positive integers from an already normalized snapshot; `platform` owns platform detection, key case normalization, platform directory inputs, and the process `SystemRoot` read; and only `config` may capture the complete process environment and assemble the public configuration. `mod.rs` preserves the existing `env::*` facade and must not accumulate parsing rules again. Corresponding unit tests live in `config_tests`, `platform_tests`, and `value_parser_tests` so configuration assembly, platform rules, and scalar validation fail independently.

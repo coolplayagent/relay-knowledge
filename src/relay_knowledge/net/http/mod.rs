@@ -848,5 +848,5 @@ fn is_loopback_host(host: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "http_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
