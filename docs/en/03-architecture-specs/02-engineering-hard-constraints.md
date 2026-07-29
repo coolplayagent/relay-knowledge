@@ -188,6 +188,8 @@ Production Rust files must not embed a `#[cfg(test)] mod` implementation. Each u
 
 The `code_workspace` owner attaches both its facade `mod_tests` suite and focused `lookup_tests`; the outer code-store facade must not attach workspace normalization tests.
 
+SQLite import-query target, generated filtering, ranking, and foundational ranking suites are attached by `code_query::imports`. Ambiguous-callee unit and generated-filter suites are attached by `ambiguous_callees`; the outer code-store facade must not attach either subdomain's tests.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.

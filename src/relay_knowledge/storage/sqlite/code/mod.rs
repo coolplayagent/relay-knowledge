@@ -89,14 +89,6 @@ mod code_cross_language_call_tests;
 mod code_query_accuracy_tests;
 
 #[cfg(test)]
-#[path = "../code_query/imports/target_tests.rs"]
-mod code_query_import_target_tests;
-
-#[cfg(test)]
-#[path = "../code_query/imports/generated_tests.rs"]
-mod code_query_import_generated_tests;
-
-#[cfg(test)]
 #[path = "../code_query/tests/generated/chunk_generated.rs"]
 mod code_query_chunk_generated_tests;
 
@@ -107,18 +99,6 @@ mod code_query_route_generated_tests;
 #[cfg(test)]
 #[path = "../code_query/symbols/generated_tests.rs"]
 mod code_query_symbol_generated_tests;
-
-#[cfg(test)]
-#[path = "../code_query/calls/ambiguous_generated_tests.rs"]
-mod code_query_ambiguous_callee_generated_tests;
-
-#[cfg(test)]
-#[path = "../code_query/imports/ranking_tests.rs"]
-mod code_query_import_ranking_tests;
-
-#[cfg(test)]
-#[path = "../code_query/imports/foundational_ranking_tests.rs"]
-mod code_query_import_foundational_ranking_tests;
 
 #[cfg(test)]
 #[path = "../code_query/tests/sbom.rs"]

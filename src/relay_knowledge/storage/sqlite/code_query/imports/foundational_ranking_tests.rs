@@ -1,4 +1,3 @@
-use super::*;
 use crate::{
     domain::{
         CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
@@ -6,7 +5,7 @@ use crate::{
         RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         RepositoryCodeSymbolRecord,
     },
-    storage::SqliteGraphStore,
+    storage::{SqliteGraphStore, code::CodeRepositoryStore},
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:import-foundational-ranking:commit:tree";

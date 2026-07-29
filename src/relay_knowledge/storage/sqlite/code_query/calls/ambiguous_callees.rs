@@ -683,4 +683,8 @@ fn push_unique_term(term: &str, terms: &mut Vec<String>) {
 
 #[cfg(test)]
 #[path = "ambiguous_callees_tests.rs"]
-mod tests;
+mod ambiguous_callees_tests;
+
+#[cfg(test)]
+#[path = "ambiguous_generated_tests.rs"]
+mod ambiguous_generated_tests;
