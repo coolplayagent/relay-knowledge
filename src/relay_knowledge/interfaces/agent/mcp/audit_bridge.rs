@@ -7,7 +7,7 @@ use crate::{
     interfaces::agent::{AgentAuditQosDecision, AgentAuditStatus},
 };
 
-use super::{AgentAuditEvent, McpServer, request_id_key};
+use super::{AgentAuditEvent, McpServer, json_rpc::request_id_key};
 
 pub(super) fn record_mcp_qos_rejection(
     server: &McpServer,

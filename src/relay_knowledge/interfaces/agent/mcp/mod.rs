@@ -8,6 +8,7 @@ use std::{
 mod audit_bridge;
 mod code_tools;
 mod http_contract;
+mod json_rpc;
 mod metrics;
 mod notifications;
 mod prompts;
@@ -20,7 +21,7 @@ use axum::{
     Router,
     body::Bytes,
     extract::State,
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -33,8 +34,14 @@ use http_contract::{
     ensure_remote_bind_allowed, validate_http_headers, validate_origin,
     validate_protocol_version_header,
 };
+use json_rpc::{
+    initialize_result, invalid_request_id_response, is_json_rpc_id, is_valid_json_rpc_response,
+    json_rpc_error, json_rpc_success, json_rpc_success_with_session, request_id_key,
+    response_message_session_response, session_create_error, session_lookup_error_response,
+    uninitialized_session_response, validate_initialize_params,
+};
 use scope_authorization::RuntimeScopeAuthorizer;
-use state::{CancellationRegistry, SessionCreateError, SessionLookupError, SessionRegistry};
+use state::{CancellationRegistry, SessionLookupError, SessionRegistry};
 
 use crate::{
     api::{
@@ -49,7 +56,6 @@ use crate::{
         qos::{QosPermit, QosRuntime, RejectReason},
     },
     observability::AgentProtocolMetrics,
-    project::PROJECT_NAME,
 };
 
 use super::{
@@ -524,74 +530,6 @@ async fn handle_mcp_delete(State(server): State<McpServer>, headers: HeaderMap) 
     }
 }
 
-fn is_valid_json_rpc_response(payload: &Value) -> bool {
-    let Some(object) = payload.as_object() else {
-        return false;
-    };
-    let has_result = object.contains_key("result");
-    let has_error = object.contains_key("error");
-    if has_result == has_error {
-        return false;
-    }
-
-    object.get("id").is_some_and(is_json_rpc_id)
-}
-
-fn validate_initialize_params(params: Value) -> Result<(), String> {
-    let params = serde_json::from_value::<InitializeParams>(params)
-        .map_err(|error| format!("invalid initialize params: {error}"))?;
-    if params.protocol_version != MCP_PROTOCOL_VERSION {
-        return Err(format!(
-            "unsupported MCP protocol version '{}'",
-            params.protocol_version
-        ));
-    }
-    if !params.capabilities.is_object() {
-        return Err("initialize capabilities must be an object".to_owned());
-    }
-    if params.client_info.name.trim().is_empty() || params.client_info.version.trim().is_empty() {
-        return Err("initialize clientInfo requires name and version".to_owned());
-    }
-
-    Ok(())
-}
-
-fn response_message_session_response(server: &McpServer, headers: &HeaderMap) -> Response {
-    match server.sessions.require_session(headers) {
-        Ok(session) if session.initialized => StatusCode::ACCEPTED.into_response(),
-        Ok(_) => StatusCode::BAD_REQUEST.into_response(),
-        Err(error) => session_lookup_error_response(error),
-    }
-}
-
-fn session_lookup_error_response(error: SessionLookupError) -> Response {
-    match error {
-        SessionLookupError::Missing | SessionLookupError::InvalidHeader => {
-            StatusCode::BAD_REQUEST.into_response()
-        }
-        SessionLookupError::Unknown => StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
-fn uninitialized_session_response(id: Option<Value>) -> Response {
-    let Some(id) = id else {
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-    if is_json_rpc_id(&id) {
-        json_rpc_error(id, -32002, "MCP session is not initialized")
-    } else {
-        invalid_request_id_response()
-    }
-}
-
-fn invalid_request_id_response() -> Response {
-    json_rpc_error(Value::Null, -32600, "request id must be a string or number")
-}
-
-fn session_create_error(id: Value, error: SessionCreateError) -> Response {
-    json_rpc_error(id, -32603, format!("failed to create MCP session: {error}"))
-}
-
 fn admit_mcp_request(server: &McpServer) -> Result<QosPermit, RejectReason> {
     let policy = server.network.current().qos;
     if crate::net::http::qos_request_context_active() {
@@ -814,22 +752,6 @@ async fn index_status_tool(server: &McpServer, request_id: String) -> Value {
     }
 }
 
-fn initialize_result() -> Value {
-    json!({
-        "protocolVersion": MCP_PROTOCOL_VERSION,
-        "capabilities": {
-            "tools": {},
-            "resources": {"listChanged": false},
-            "prompts": {"listChanged": false}
-        },
-        "serverInfo": {
-            "name": PROJECT_NAME,
-            "version": env!("CARGO_PKG_VERSION")
-        },
-        "instructions": "MCP tool schemas are static and storage is opened lazily on the first storage-backed tool call. For repository exploration, prefer relay_code_query or relay_code_repository_set_query and follow the explore_budget returned in structuredContent; budget tiers are 0-499 files: 1 call/15000 chars/5 files, 500-4999: 2/30000/10, 5000-14999: 3/45000/15, 15000+: 5/75000/25. Free-text queries are capped at 10000 characters and path filters at 4096 characters."
-    })
-}
-
 fn parse_freshness(value: Option<&str>) -> Result<FreshnessPolicy, AgentAdapterError> {
     match value.unwrap_or("allow-stale") {
         "allow-stale" => Ok(FreshnessPolicy::AllowStale),
@@ -892,45 +814,6 @@ fn domain_argument_error(error: impl fmt::Display) -> AgentAdapterError {
     AgentAdapterError::new(AgentAdapterErrorKind::InvalidArgument, error.to_string())
 }
 
-fn json_rpc_success(id: Value, result: Value) -> Response {
-    json_response(
-        StatusCode::OK,
-        json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-    )
-}
-
-fn json_rpc_success_with_session(id: Value, result: Value, session_id: &str) -> Response {
-    let mut response = json_rpc_success(id, result);
-    response.headers_mut().insert(
-        MCP_SESSION_ID_HEADER,
-        HeaderValue::from_str(session_id).expect("generated MCP session id is a valid header"),
-    );
-    response
-}
-
-fn json_rpc_error(id: Value, code: i64, message: impl Into<String>) -> Response {
-    json_response(
-        StatusCode::OK,
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": code,
-                "message": message.into()
-            }
-        }),
-    )
-}
-
-fn json_response(status: StatusCode, value: Value) -> Response {
-    (
-        status,
-        [(header::CONTENT_TYPE, "application/json")],
-        value.to_string(),
-    )
-        .into_response()
-}
-
 fn request_context(request_id: String) -> RequestContext {
     RequestContext::with_ids(
         InterfaceKind::Mcp,
@@ -944,24 +827,6 @@ fn endpoint_child(endpoint: &str, child: &str) -> String {
         format!("/{child}")
     } else {
         format!("{}/{child}", endpoint.trim_end_matches('/'))
-    }
-}
-
-fn request_id_key(namespace: &str, value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(format!("{namespace}|string:{value}")),
-        Value::Number(value) if value.is_i64() || value.is_u64() => {
-            Some(format!("{namespace}|number:{value}"))
-        }
-        _ => None,
-    }
-}
-
-fn is_json_rpc_id(value: &Value) -> bool {
-    match value {
-        Value::String(_) => true,
-        Value::Number(number) => number.is_i64() || number.is_u64(),
-        _ => false,
     }
 }
 
