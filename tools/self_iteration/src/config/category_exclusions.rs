@@ -1,4 +1,6 @@
-fn apply_category_exclusions(
+use super::{categories::CategorySet, model::Config};
+
+pub(super) fn apply_category_exclusions(
     config: &mut Config,
     excluded_categories: Option<CategorySet>,
 ) -> Result<(), String> {
@@ -13,3 +15,7 @@ fn apply_category_exclusions(
     config.categories = Some(selected);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "category_exclusions_tests.rs"]
+mod category_exclusions_tests;

@@ -1,3 +1,18 @@
+use std::path::PathBuf;
+
+use super::{
+    DEFAULT_CODEX_MODEL, DEFAULT_CODEX_REASONING_EFFORT,
+    categories::CategorySet,
+    category_exclusions::apply_category_exclusions,
+    jobs::Jobs,
+    mode::{Mode, Strategy},
+    model::Config,
+    value_parser::{
+        Parser, codex_reasoning_effort, default_workspace, non_empty_value, positive_u64,
+        positive_usize, profile, research_date, research_slug, suffix,
+    },
+};
+
 impl Config {
     pub fn selected_category_labels(&self) -> Vec<&'static str> {
         self.categories
@@ -226,3 +241,11 @@ impl Config {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+#[path = "parse_tests.rs"]
+mod parse_tests;
+
+#[cfg(test)]
+#[path = "unattended_tests.rs"]
+mod unattended_tests;

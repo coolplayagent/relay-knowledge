@@ -81,7 +81,7 @@ impl CategorySet {
         Ok(Self { categories })
     }
 
-    fn all() -> Self {
+    pub(super) fn all() -> Self {
         Self {
             categories: EvaluationCategory::ALL.into_iter().collect(),
         }
@@ -109,13 +109,18 @@ impl CategorySet {
         self.labels().join(",")
     }
 
-    fn remove_all(&mut self, excluded: &Self) {
+    pub(super) fn remove_all(&mut self, excluded: &Self) {
         for category in &excluded.categories {
             self.categories.remove(category);
         }
     }
 
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.categories.is_empty()
     }
 }
+
+#[cfg(test)]
+#[path = "categories_tests.rs"]
+mod categories_tests;
+use std::collections::BTreeSet;

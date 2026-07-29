@@ -148,7 +148,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.11 自迭代配置职责
 
-`tools/self_iteration::config` 必须把模式/策略、类别集合、公开配置模型、CLI 解析、类别排除、作业预算和标量校验分别放在 `mode`、`categories`、`model`、`parse`、`category_exclusions`、`job_plan` 和 `value_parser`。`mod.rs` 只维护常量和稳定 facade，解析、类别、无人值守模式、文档合同和作业预算 UT 与实现同目录。不得恢复同时包含模型、解析器、预算和内联测试的根目录 `config.rs`。
+`tools/self_iteration::config` 必须使用真正的 Rust 模块：`mode` 负责模式与策略，`jobs` 负责类型化并行输入，`categories` 负责类别集合，`model` 负责公开配置合同，`parse` 协调 CLI 解析，`category_exclusions` 应用排除策略，`job_plan` 解析资源预算，`value_parser` 校验标量参数。`mod.rs` 只维护常量和稳定 facade。每个行为 owner 必须直接挂载同级 `*_tests.rs` contract，`mod_tests` 只检查 facade 级文档合同；生产代码和测试不得使用 `include!` 把这些边界合并进隐式命名空间。不得恢复同时包含模型、解析器、预算和内联测试的根目录 `config.rs`。
 
 ### 3.12 自迭代历史与记忆职责
 

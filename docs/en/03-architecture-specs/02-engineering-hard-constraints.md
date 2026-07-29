@@ -148,7 +148,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.11 Self-Iteration Configuration Ownership
 
-`tools/self_iteration::config` keeps modes and strategies, category sets, the public configuration model, CLI parsing, category exclusions, job budgets, and scalar validation in `mode`, `categories`, `model`, `parse`, `category_exclusions`, `job_plan`, and `value_parser` respectively. `mod.rs` only maintains constants and the stable facade; parsing, category, unattended-mode, documentation-contract, and job-budget unit tests stay in the same directory. Do not restore a root `config.rs` that combines the model, parser, budgets, and inline tests.
+`tools/self_iteration::config` must use real Rust modules: `mode` owns modes and strategies, `jobs` owns typed parallelism inputs, `categories` owns category sets, `model` owns the public configuration contract, `parse` coordinates CLI parsing, `category_exclusions` applies exclusion policy, `job_plan` resolves resource budgets, and `value_parser` validates scalar arguments. `mod.rs` only maintains constants and the stable facade. Every behavior owner directly attaches its sibling `*_tests.rs` contract, while `mod_tests` only checks the facade-wide documentation contract; production code and tests must not use `include!` to merge these boundaries into an implicit namespace. Do not restore a root `config.rs` that combines the model, parser, budgets, and inline tests.
 
 ### 3.12 Self-Iteration History and Memory Ownership
 
