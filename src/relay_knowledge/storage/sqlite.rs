@@ -976,16 +976,7 @@ mod metadata_tests;
 mod graph_tests;
 
 #[cfg(test)]
-mod index_refresh_queue_tests;
-
-#[cfg(test)]
-mod index_schema_migration_tests;
-
-#[cfg(test)]
 mod graphrag_phase4_tests;
-
-#[cfg(test)]
-mod index_refresh_tests;
 
 #[cfg(test)]
 #[path = "sqlite/health_tests.rs"]

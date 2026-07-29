@@ -1,4 +1,4 @@
-use super::*;
+use super::super::*;
 use crate::storage::{IndexRefreshClaimRequest, IndexStore};
 
 #[tokio::test]

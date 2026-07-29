@@ -922,3 +922,12 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 
     hash
 }
+
+#[cfg(test)]
+mod queue_tests;
+
+#[cfg(test)]
+mod refresh_tests;
+
+#[cfg(test)]
+mod schema_migration_tests;

@@ -74,6 +74,8 @@ Code-graph fact persistence is grouped under `storage::sqlite::code_graph`: `mod
 
 Durable operational persistence is grouped under `storage::sqlite::operations`: `mod.rs` owns worker tasks, proposals and conflicts, audit events, service-operator state, their row decoding, and stable task IDs; `tests` verifies those workflows through the storage interface. The SQLite root must not own operation-specific test modules.
 
+Index lifecycle persistence is grouped under `storage::sqlite::indexing`: `mod.rs` owns cursor state, refresh orchestration, validation, and stable refresh-task identity; `cursor_metadata`, `schema`, and `task_queue` isolate those responsibilities; and `refresh_tests`, `queue_tests`, and `schema_migration_tests` remain beside the boundary they verify. Do not place index-lifecycle tests or prefixed `index_refresh_*` implementation files in the SQLite root.
+
 Maven effective-model construction also separates syntax boundaries: `pom_path` owns repository-bounded relative POM resolution, while `property_interpolation` owns bounded recursive property expansion. These rules must not be combined in a generic Maven support module.
 
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
