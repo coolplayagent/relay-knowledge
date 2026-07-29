@@ -1,15 +1,27 @@
-struct JudgePromptInput<'a> {
-    workspace: &'a Path,
-    suite: &'a Value,
-    generated_diff: bool,
-    candidate_diff: &'a str,
-    gates: &'a [GateObservation],
-    cases: &'a [CaseObservation],
-    metrics: &'a [MetricObservation],
-    repo_reports: &'a [RepoReport],
+use std::{collections::BTreeMap, fs, path::Path};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, number_or, string_vec},
+    scoring::{CaseObservation, GateObservation, MetricObservation},
+};
+
+use super::super::RepoReport;
+use super::outcome::required_judge_dimensions;
+
+pub(super) struct JudgePromptInput<'a> {
+    pub(super) workspace: &'a Path,
+    pub(super) suite: &'a Value,
+    pub(super) generated_diff: bool,
+    pub(super) candidate_diff: &'a str,
+    pub(super) gates: &'a [GateObservation],
+    pub(super) cases: &'a [CaseObservation],
+    pub(super) metrics: &'a [MetricObservation],
+    pub(super) repo_reports: &'a [RepoReport],
 }
 
-fn build_judge_prompt(input: JudgePromptInput<'_>) -> String {
+pub(super) fn build_judge_prompt(input: JudgePromptInput<'_>) -> String {
     let max_doc_chars = number_or(input.suite, "max_doc_chars", 3000) as usize;
     let max_diff_chars = number_or(input.suite, "max_diff_chars", 30000) as usize;
     let mut diff = input.candidate_diff.trim().to_owned();
@@ -111,3 +123,7 @@ fn document_excerpts(workspace: &Path, suite: &Value, max_doc_chars: usize) -> S
         .collect::<Vec<_>>()
         .join("\n\n")
 }
+
+#[cfg(test)]
+#[path = "prompt_tests.rs"]
+mod tests;

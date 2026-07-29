@@ -140,7 +140,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.9 自迭代评估器职责
 
-`tools/self_iteration::evaluator` 必须按评估阶段和证据类型分组：`runtime` 负责一次评估运行的顶层协调、并发限制和结果汇总，`quality` 分别拥有门禁定义和执行，`workloads` 按 repository、repository-set、agent、CLI、file 和 semantic-vector 工作负载划分，`fixtures` 只拥有生成式仓库 fixture 及其写入生命周期，`judge` 负责研究判断的配置、prompt、backend 和结果合同。`quality` 子树必须在领域根拥有门禁合同、分离策略与执行，并由两个 owner 直接挂载聚焦 UT；生产门禁装配不得使用 `include!`，quality-policy UT 不得混入 workload 选择断言。`fixtures` 子树必须使用真正的 Rust 模块分别拥有语言/源码族、agent-workflow 源码、仓库装配和共享文件 writer 边界；repository 与 writer UT 必须由对应 owner 直接挂载。生产 fixture 装配不得使用 `include!`，fixture 源码常量不得留在 workload 执行模块。评估器 UT 必须与被验证边界同目录并使用可定位的 `*_tests.rs` 名称；不得恢复 `evaluator_tail`、跨职责 `evaluator_tests` 或在 `tools/self_iteration/src` 根目录平铺同一领域的 `evaluator_*` 文件。
+`tools/self_iteration::evaluator` 必须按评估阶段和证据类型分组：`runtime` 负责一次评估运行的顶层协调、并发限制和结果汇总，`quality` 分别拥有门禁定义和执行，`workloads` 按 repository、repository-set、agent、CLI、file 和 semantic-vector 工作负载划分，`fixtures` 只拥有生成式仓库 fixture 及其写入生命周期，`judge` 负责研究判断的配置、prompt、backend 和结果合同。`quality` 子树必须在领域根拥有门禁合同、分离策略与执行，并由两个 owner 直接挂载聚焦 UT；生产门禁装配不得使用 `include!`，quality-policy UT 不得混入 workload 选择断言。`judge` 子树必须在领域根拥有共享 evaluation input，保持 evaluation 到 settings、prompt、backend 与 outcome owner 的单向组合，并为每个 owner 直接挂载同级测试文件。shell 命令解析归 judge settings 而不是 outcome 验证，生产 judge 装配不得使用 `include!` 或跨 owner 的 test-support 片段。`fixtures` 子树必须使用真正的 Rust 模块分别拥有语言/源码族、agent-workflow 源码、仓库装配和共享文件 writer 边界；repository 与 writer UT 必须由对应 owner 直接挂载。生产 fixture 装配不得使用 `include!`，fixture 源码常量不得留在 workload 执行模块。评估器 UT 必须与被验证边界同目录并使用可定位的 `*_tests.rs` 名称；不得恢复 `evaluator_tail`、跨职责 `evaluator_tests` 或在 `tools/self_iteration/src` 根目录平铺同一领域的 `evaluator_*` 文件。
 
 ### 3.10 自迭代评分职责
 

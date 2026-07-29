@@ -1,18 +1,21 @@
-struct JudgeEvalInput<'a> {
-    workspace: &'a Path,
-    run_home: &'a Path,
-    env: &'a BTreeMap<String, String>,
-    suite: &'a Value,
-    generated_diff: bool,
-    candidate_diff: &'a str,
-    gates: &'a [GateObservation],
-    cases: &'a [CaseObservation],
-    metrics: &'a [MetricObservation],
-    repo_reports: &'a [RepoReport],
-    limiter: &'a Limiter,
-}
+use std::fs;
 
-fn evaluate_research_judge_suite(input: JudgeEvalInput<'_>) -> Result<RepoReport, String> {
+use serde_json::Value;
+
+use crate::scoring::{CaseObservation, GateObservation};
+
+use super::super::{RepoReport, repo_report};
+use super::{
+    JudgeEvalInput,
+    backend::run_judge_backend,
+    outcome::judge_outcome,
+    prompt::{JudgePromptInput, build_judge_prompt},
+    settings::{judge_settings, settings_summary},
+};
+
+pub(in crate::evaluator) fn evaluate_research_judge_suite(
+    input: JudgeEvalInput<'_>,
+) -> Result<RepoReport, String> {
     let settings = judge_settings(input.env);
     let mut report = repo_report(
         "research_judge",
@@ -67,7 +70,10 @@ fn evaluate_research_judge_suite(input: JudgeEvalInput<'_>) -> Result<RepoReport
         .map_err(|error| format!("failed to write {}: {error}", prompt_file.display()))?;
     let result = run_judge_backend(&input, &settings, &prompt_file, &prompt)?;
     let outcome = if result.passed() {
-        judge_outcome(&format!("{}\n{}", result.stdout, result.stderr), input.suite)
+        judge_outcome(
+            &format!("{}\n{}", result.stdout, result.stderr),
+            input.suite,
+        )
     } else {
         (false, false, 0.0, result.gate_message(), Value::Null)
     };
@@ -93,3 +99,7 @@ fn evaluate_research_judge_suite(input: JudgeEvalInput<'_>) -> Result<RepoReport
     report.commands.push(result);
     Ok(report)
 }
+
+#[cfg(test)]
+#[path = "evaluation_tests.rs"]
+mod tests;

@@ -69,7 +69,7 @@ harness 会把实时进度写到 stderr，统一使用 `[self-iterate]` 前缀�
 
 ### 源码所有权
 
-evaluator 的生产 facade 只维护合同与组合；在 evaluator 分组迁移期间，其余测试装配仍位于同级 `mod_tests.rs`。evaluator 的 quality gate 合同现在归 `quality` 领域根，策略与执行也是真正的 owner 模块并分别直接挂载 UT。fixture 源码族、仓库装配和文件写入同样由真正的 owner 模块负责；生成式 agent-workflow 源码常量归 fixture，而不再属于 workload 执行。Config、scoring、workflow、内嵌 unattended 阶段、Case、进程适配器、history 和渐进记忆也都是真正的子模块，不再作为 `include!` 片段共享隐式命名空间。无人值守运行嵌套在 `workflow` 下，因此可消费 workflow 服务而不形成顶层模块依赖环。
+evaluator 的生产 facade 只维护合同与组合；在 evaluator 分组迁移期间，其余测试装配仍位于同级 `mod_tests.rs`。evaluator 的 quality gate 合同归 `quality` 领域根，策略与执行也是真正的 owner 模块并分别直接挂载 UT。research judge 同样是真正的模块树：共享输入合同位于 `judge` 领域根，evaluation 单向组合各自拥有直属测试的 settings、prompt、backend 与 outcome，不再共享 `include!` 命名空间。fixture 源码族、仓库装配和文件写入同样由真正的 owner 模块负责；生成式 agent-workflow 源码常量归 fixture，而不再属于 workload 执行。Config、scoring、workflow、内嵌 unattended 阶段、Case、进程适配器、history 和渐进记忆也都是真正的子模块，不再作为 `include!` 片段共享隐式命名空间。无人值守运行嵌套在 `workflow` 下，因此可消费 workflow 服务而不形成顶层模块依赖环。
 
 ## 命令参考
 

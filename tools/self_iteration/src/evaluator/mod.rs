@@ -24,9 +24,11 @@ use crate::{
 };
 
 mod fixtures;
+mod judge;
 mod quality;
 
 use fixtures::{prepare_repository_path, write_fixture_file};
+use judge::{JudgeEvalInput, evaluate_research_judge_suite};
 use quality::run_quality_gate_stages;
 
 #[derive(Debug, Clone)]
@@ -131,11 +133,6 @@ include!("workloads/cli_cases.rs");
 include!("workloads/repository_scoring.rs");
 include!("workloads/file_fixture.rs");
 include!("workloads/semantic_vector.rs");
-include!("judge/evaluation.rs");
-include!("judge/settings.rs");
-include!("judge/prompt.rs");
-include!("judge/backend.rs");
-include!("judge/outcome.rs");
 include!("runtime/reporting.rs");
 
 #[cfg(test)]

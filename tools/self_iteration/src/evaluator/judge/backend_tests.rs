@@ -1,85 +1,66 @@
-    #[test]
-    fn judge_uses_openai_compatible_http_when_configured() {
-        let env = BTreeMap::from([
-            (
-                "RELAY_KNOWLEDGE_JUDGE_BASE_URL".to_owned(),
-                "http://localhost:11434/v1".to_owned(),
-            ),
-            ("RELAY_KNOWLEDGE_JUDGE_API_KEY".to_owned(), "token".to_owned()),
-            (
-                "RELAY_KNOWLEDGE_JUDGE_MODEL".to_owned(),
-                "judge-model".to_owned(),
-            ),
-        ]);
-        let settings = judge_settings(&env);
-        assert_eq!(settings.backend, JudgeBackend::Http);
-        assert!(settings.missing.is_empty());
-        assert_eq!(
-            normalize_judge_chat_url(&settings.http_base_url),
-            "http://localhost:11434/v1/chat/completions"
-        );
-        let (command, body) = judge_http_command(&settings, "judge prompt").expect("http command");
-        assert!(!command.join(" ").contains("token"));
-        assert!(body.contains("judge-model"));
-        assert!(body.contains("judge prompt"));
+use super::{http_judge_content, judge_cli_command, judge_http_command, normalize_judge_chat_url};
+use crate::evaluator::judge::settings::{JudgeBackend, JudgeSettings};
+
+fn http_settings() -> JudgeSettings {
+    JudgeSettings {
+        enabled: true,
+        backend: JudgeBackend::Http,
+        missing: Vec::new(),
+        configuration_error: None,
+        command: String::new(),
+        http_base_url: "http://localhost:11434/v1".to_owned(),
+        http_api_key: "token".to_owned(),
+        http_model: "judge-model".to_owned(),
+        timeout_seconds: 30,
     }
+}
 
-    #[test]
-    fn judge_backend_http_env_selects_http_runner() {
-        let env = BTreeMap::from([
-            (
-                "RELAY_KNOWLEDGE_JUDGE_BACKEND".to_owned(),
-                "http".to_owned(),
-            ),
-            (
-                "RELAY_KNOWLEDGE_JUDGE_BASE_URL".to_owned(),
-                "http://localhost:11434".to_owned(),
-            ),
-            ("RELAY_KNOWLEDGE_JUDGE_API_KEY".to_owned(), "token".to_owned()),
-            (
-                "RELAY_KNOWLEDGE_JUDGE_MODEL".to_owned(),
-                "judge-model".to_owned(),
-            ),
-        ]);
-        let settings = judge_settings(&env);
-        assert_eq!(settings.backend, JudgeBackend::Http);
-        assert_eq!(settings_summary(&settings)["backend"], "http");
-    }
+#[test]
+fn cli_command_expands_paths_and_uses_stdin_without_a_prompt_placeholder() {
+    let workspace = std::path::Path::new("/workspace");
+    let prompt_file = workspace.join("judge-prompt.txt");
 
-    #[test]
-    fn judge_rejects_unsupported_backend() {
-        let env = BTreeMap::from([(
-            "RELAY_KNOWLEDGE_JUDGE_BACKEND".to_owned(),
-            "httpp".to_owned(),
-        )]);
+    let (command, stdin) = judge_cli_command(
+        "judge --workspace {workspace} --file {prompt_file}",
+        workspace,
+        &prompt_file,
+        "prompt",
+    )
+    .expect("CLI command should parse");
 
-        let settings = judge_settings(&env);
+    assert_eq!(
+        command,
+        vec![
+            "judge",
+            "--workspace",
+            "/workspace",
+            "--file",
+            "/workspace/judge-prompt.txt"
+        ]
+    );
+    assert_eq!(stdin, None);
 
-        assert!(settings.configuration_error.is_some());
-        assert!(!settings_summary(&settings)["configured"]
-            .as_bool()
-            .expect("configured should be boolean"));
-    }
+    let (_, stdin) =
+        judge_cli_command("judge", workspace, &prompt_file, "prompt").expect("command");
+    assert_eq!(stdin.as_deref(), Some("prompt"));
+}
 
-    #[test]
-    fn explicit_cli_judge_command_wins_over_stray_http_env() {
-        let env = BTreeMap::from([
-            (
-                "RELAY_KNOWLEDGE_JUDGE_BASE_URL".to_owned(),
-                "http://localhost:11434".to_owned(),
-            ),
-            (
-                "RELAY_KNOWLEDGE_JUDGE_COMMAND".to_owned(),
-                "custom-judge --file {prompt_file}".to_owned(),
-            ),
-        ]);
+#[test]
+fn http_command_keeps_secrets_in_environment_and_extracts_response_content() {
+    let settings = http_settings();
 
-        let settings = judge_settings(&env);
+    let (command, body) = judge_http_command(&settings, "judge prompt").expect("http command");
 
-        assert_eq!(settings.backend, JudgeBackend::Cli);
-        assert!(settings.missing.is_empty());
-        assert_eq!(
-            shell_split(&settings.command).expect("split").first(),
-            Some(&"custom-judge".to_owned())
-        );
-    }
+    assert!(!command.join(" ").contains("token"));
+    assert!(body.contains("judge-model"));
+    assert!(body.contains("judge prompt"));
+    assert_eq!(
+        normalize_judge_chat_url(&settings.http_base_url),
+        "http://localhost:11434/v1/chat/completions"
+    );
+    assert_eq!(
+        http_judge_content(r#"{"choices":[{"message":{"content":"{\"passed\":true}"}}]}"#)
+            .as_deref(),
+        Some(r#"{"passed":true}"#)
+    );
+}
