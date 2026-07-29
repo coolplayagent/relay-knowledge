@@ -1,5 +1,3 @@
-use super::shared::javascript_regex_literal_can_start;
-
 pub(in crate::code::parser) fn javascript_code_lines_without_comments(
     content: &str,
 ) -> Vec<String> {
@@ -79,6 +77,35 @@ fn javascript_code_line_without_comments(line: &str, state: &mut JavascriptLineS
     state.escaped = false;
     result
 }
+
+fn javascript_regex_literal_can_start(prefix: &str) -> bool {
+    let prefix = prefix.trim_end();
+    if prefix.is_empty() {
+        return true;
+    }
+    if prefix.chars().next_back().is_some_and(|character| {
+        matches!(
+            character,
+            '(' | '[' | '{' | '=' | ':' | ',' | ';' | '!' | '?' | '&' | '|' | '^' | '~'
+        )
+    }) {
+        return true;
+    }
+    let token = prefix
+        .rsplit(|character: char| {
+            !(character.is_ascii_alphanumeric() || character == '_' || character == '$')
+        })
+        .next()
+        .unwrap_or("");
+    matches!(
+        token,
+        "return" | "throw" | "case" | "typeof" | "delete" | "void" | "yield" | "await"
+    )
+}
+
+#[cfg(test)]
+#[path = "javascript_tests.rs"]
+mod tests;
 
 pub(in crate::code::parser) fn statement_ends_with_semicolon(segment: &str) -> bool {
     let mut quote = None;

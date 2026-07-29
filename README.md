@@ -492,6 +492,11 @@ language listed above, including JavaScript/JSX, Kotlin, Scala, C#, PHP, Rust,
 and Swift. Package-manager or SDK imports without authorized indexed source
 remain unresolved edge metadata rather than parser degradation.
 
+Web route detection separates Express argument/handler parsing, Python static
+route strings, and JavaScript comment/string/regex lexical state into named
+modules with direct unit tests. It does not use a generic shared parser bucket
+across those language boundaries.
+
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
 not full build-system or linker analysis.

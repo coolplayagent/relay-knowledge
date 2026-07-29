@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::RouteCandidate;
-use super::shared::extract_quoted_string_python;
+use super::python_strings::extract_quoted_string_python;
 
 #[cfg(test)]
 #[path = "flask_tests.rs"]
