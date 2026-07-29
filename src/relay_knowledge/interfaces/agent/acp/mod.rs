@@ -6,15 +6,14 @@ use std::{
 use serde_json::json;
 use tokio::sync::watch;
 
-#[path = "prompt_context.rs"]
-mod acp_prompt_context;
+mod prompt_context;
+mod prompt_mapping;
 mod protocol;
 mod session_registry;
 
 use crate::{
-    api::{AgentProtocolKind, ErrorKind, HybridRetrievalRequest, InterfaceKind, RequestContext},
+    api::{AgentProtocolKind, ErrorKind, InterfaceKind, RequestContext},
     application::{AgentRuntimeConfig, RelayKnowledgeService},
-    domain::{CodeGraphContextRequest, CodeRepositorySelector, FreshnessPolicy},
     net::{
         NetworkRuntime,
         qos::{QosPermit, QosRuntime, RejectReason},
@@ -24,9 +23,10 @@ use crate::{
 
 use super::{
     AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog,
-    AgentAuditQosDecision, AgentAuditSink, AgentAuditStatus, authorize_limit, authorize_scope,
+    AgentAuditQosDecision, AgentAuditSink, AgentAuditStatus,
 };
-use acp_prompt_context::{authorize_codegraph_limit, authorize_context_bytes, run_mapped_prompt};
+use prompt_context::run_mapped_prompt;
+use prompt_mapping::map_prompt_request;
 pub use protocol::{
     AcpContextArtifact, AcpErrorPayload, AcpInitializeMeta, AcpInitializeResponse, AcpPromptMeta,
     AcpPromptRequest, AcpPromptResponse, AcpRelayKnowledgeCapability, AcpRelayKnowledgePrompt,
@@ -420,133 +420,6 @@ struct AcpAuditInput<'a> {
     truncated: bool,
     elapsed_ms: u64,
     error_kind: Option<&'a str>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MappedPromptRequest {
-    query: String,
-    source_scope: Option<String>,
-    repository: Option<String>,
-    ref_selector: Option<String>,
-    path_filters: Vec<String>,
-    language_filters: Vec<String>,
-    limit: usize,
-    freshness: FreshnessPolicy,
-    max_context_bytes: usize,
-    include_code: bool,
-    exclude_generated: bool,
-}
-
-impl MappedPromptRequest {
-    fn audit_scope(&self) -> Option<String> {
-        self.repository
-            .clone()
-            .or_else(|| self.source_scope.clone())
-    }
-
-    fn into_retrieval_request(self) -> HybridRetrievalRequest {
-        HybridRetrievalRequest {
-            query: self.query,
-            source_scope: self.source_scope,
-            limit: self.limit,
-            freshness: self.freshness,
-        }
-    }
-
-    fn into_codegraph_request(self) -> Result<Option<CodeGraphContextRequest>, AgentAdapterError> {
-        let Some(repository) = self.repository else {
-            return Ok(None);
-        };
-        let selector = CodeRepositorySelector::new(
-            repository,
-            self.ref_selector.unwrap_or_else(|| "HEAD".to_owned()),
-            self.path_filters,
-            self.language_filters,
-        )
-        .map_err(|error| {
-            AgentAdapterError::new(AgentAdapterErrorKind::InvalidScope, error.to_string())
-        })?;
-
-        CodeGraphContextRequest::new(
-            selector,
-            self.query,
-            self.limit,
-            self.freshness,
-            self.max_context_bytes,
-            self.include_code,
-            self.exclude_generated,
-        )
-        .map(Some)
-        .map_err(|error| {
-            AgentAdapterError::new(AgentAdapterErrorKind::InvalidArgument, error.to_string())
-        })
-    }
-}
-
-fn map_prompt_request(
-    agent: &AgentRuntimeConfig,
-    request: AcpPromptRequest,
-) -> Result<MappedPromptRequest, AgentAdapterError> {
-    let relay = request
-        .meta
-        .and_then(|meta| meta.relay_knowledge)
-        .unwrap_or_default();
-    let query = relay.query.unwrap_or(request.prompt);
-    let requested_source_scope = relay.source_scope;
-    let requested_repository = relay.repository;
-    let repository = requested_repository
-        .map(|repository| authorize_scope(Some(repository), &agent.access_policy))
-        .transpose()?
-        .flatten();
-    let source_scope = if requested_source_scope.is_some() || repository.is_none() {
-        authorize_scope(requested_source_scope, &agent.access_policy)?
-    } else {
-        None
-    };
-    let limit = if repository.is_some() {
-        authorize_codegraph_limit(relay.limit, &agent.access_policy)?
-    } else {
-        authorize_limit(relay.limit, &agent.access_policy)?
-    };
-    let max_context_bytes = authorize_context_bytes(
-        relay.max_context_bytes,
-        agent.access_policy.max_context_bytes,
-        repository.is_some(),
-    )?;
-    let freshness = parse_freshness(relay.freshness.as_deref())?;
-
-    if query.trim().is_empty() {
-        return Err(AgentAdapterError::new(
-            AgentAdapterErrorKind::InvalidArgument,
-            "ACP prompt query must not be empty",
-        ));
-    }
-
-    Ok(MappedPromptRequest {
-        query,
-        source_scope,
-        repository,
-        ref_selector: relay.ref_selector,
-        path_filters: relay.path_filters,
-        language_filters: relay.language_filters,
-        limit,
-        freshness,
-        max_context_bytes,
-        include_code: relay.include_code.unwrap_or(true),
-        exclude_generated: relay.exclude_generated.unwrap_or(false),
-    })
-}
-
-fn parse_freshness(value: Option<&str>) -> Result<FreshnessPolicy, AgentAdapterError> {
-    match value.unwrap_or("allow-stale") {
-        "allow-stale" => Ok(FreshnessPolicy::AllowStale),
-        "wait-until-fresh" => Ok(FreshnessPolicy::WaitUntilFresh),
-        "graph-only" => Ok(FreshnessPolicy::GraphOnly),
-        other => Err(AgentAdapterError::new(
-            AgentAdapterErrorKind::InvalidArgument,
-            format!("invalid freshness '{other}'"),
-        )),
-    }
 }
 
 async fn wait_for_cancellation(cancellation: &mut watch::Receiver<bool>) {

@@ -239,35 +239,6 @@ async fn local_acp_prompt_can_be_cancelled_and_releases_qos() {
 }
 
 #[tokio::test]
-async fn local_acp_repository_prompt_can_omit_source_scope() {
-    let (adapter, _service) = adapter_and_service([
-        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
-        ("RELAY_KNOWLEDGE_MCP_MAX_LIMIT", "50"),
-    ])
-    .await;
-
-    let mapped = map_prompt_request(
-        &adapter.agent,
-        AcpPromptRequest {
-            prompt: "retry policy".to_owned(),
-            request_id: Some("turn-repo-only".to_owned()),
-            meta: Some(AcpPromptMeta {
-                relay_knowledge: Some(AcpRelayKnowledgePrompt {
-                    query: Some("retry policy".to_owned()),
-                    repository: Some("docs".to_owned()),
-                    ..AcpRelayKnowledgePrompt::default()
-                }),
-            }),
-        },
-    )
-    .expect("repository authorization should stand alone");
-
-    assert_eq!(mapped.repository.as_deref(), Some("docs"));
-    assert_eq!(mapped.source_scope, None);
-    assert_eq!(mapped.limit, crate::domain::CODEGRAPH_CONTEXT_DEFAULT_LIMIT);
-}
-
-#[tokio::test]
 async fn local_acp_repository_prompt_requires_repository_scope_authorization() {
     let (adapter, _service) =
         adapter_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
