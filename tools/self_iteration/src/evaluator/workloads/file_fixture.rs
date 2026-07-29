@@ -1,4 +1,28 @@
-fn create_file_fixture(root: &Path, fixture: &Value) -> Result<(), String> {
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::Path,
+    process::{Command, Stdio},
+    time::Instant,
+};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, number_or, object_field, string_or},
+    command::{CommandResult, CommandSpec, run_command},
+    scoring::{
+        CaseObservation, MetricObservation, array_field as score_array_field, assess_ranked_hits,
+    },
+};
+
+use super::super::{EvalRuntime, budget, parse_json_case_output, write_fixture_file};
+use super::{
+    case_scoring::{failed_case, payload_constraint_failures},
+    selection::is_guardrail_case,
+};
+
+pub(super) fn create_file_fixture(root: &Path, fixture: &Value) -> Result<(), String> {
     if root.exists() {
         fs::remove_dir_all(root)
             .map_err(|error| format!("failed to remove {}: {error}", root.display()))?;
@@ -22,7 +46,10 @@ fn create_file_fixture(root: &Path, fixture: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn file_fixture_env(env: &BTreeMap<String, String>, root: &Path) -> BTreeMap<String, String> {
+pub(super) fn file_fixture_env(
+    env: &BTreeMap<String, String>,
+    root: &Path,
+) -> BTreeMap<String, String> {
     let mut fixture_env = env.clone();
     let root_value = root.display().to_string();
     let mut roots: Vec<String> = fixture_env
@@ -68,7 +95,7 @@ fn background_file_env(
     fixture_env
 }
 
-fn file_query_command(binary: &Path, case: &Value) -> Vec<String> {
+pub(super) fn file_query_command(binary: &Path, case: &Value) -> Vec<String> {
     vec![
         binary.display().to_string(),
         "files".to_owned(),
@@ -83,7 +110,11 @@ fn file_query_command(binary: &Path, case: &Value) -> Vec<String> {
     ]
 }
 
-fn score_file_case(fixture_name: &str, case: &Value, result: &CommandResult) -> CaseObservation {
+pub(super) fn score_file_case(
+    fixture_name: &str,
+    case: &Value,
+    result: &CommandResult,
+) -> CaseObservation {
     let objective = string_or(case, "objective", "competitive_capability").to_owned();
     if !result.passed() {
         return failed_case(case, fixture_name, &objective, result);
@@ -128,57 +159,7 @@ fn score_file_case(fixture_name: &str, case: &Value, result: &CommandResult) -> 
     }
 }
 
-fn payload_constraint_failures(case: &Value, payload: &Value, results_len: usize) -> Vec<String> {
-    let mut failures = Vec::new();
-    if let Some(max_results) = case.get("max_results").and_then(Value::as_u64) {
-        if results_len > max_results as usize {
-            failures.push(format!("results={results_len} max_results={max_results}"));
-        }
-    }
-    if let Some(expected) = case.get("truncated").and_then(Value::as_bool) {
-        let actual = payload
-            .get("truncated")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        if actual != expected {
-            failures.push(format!("truncated={actual} expected={expected}"));
-        }
-    }
-    if case.get("degraded_reason").is_some() {
-        let actual = payload.get("degraded_reason").and_then(Value::as_str);
-        match case.get("degraded_reason").expect("checked above") {
-            Value::Null if actual.is_some() => {
-                failures.push(format!("degraded_reason={}", actual.unwrap_or_default()));
-            }
-            Value::Bool(false) if actual.is_some() => {
-                failures.push(format!("degraded_reason={}", actual.unwrap_or_default()));
-            }
-            Value::String(expected) if actual != Some(expected.as_str()) => {
-                failures.push(format!(
-                    "degraded_reason={} expected={expected}",
-                    actual.unwrap_or("missing")
-                ));
-            }
-            _ => {}
-        }
-    }
-    if let Some(expected) = case
-        .get("degraded_reason_contains")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-    {
-        let actual = payload
-            .get("degraded_reason")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if !actual.contains(expected) {
-            failures.push(format!("degraded_reason={actual} missing={expected}"));
-        }
-    }
-    failures
-}
-
-fn evaluate_background_file_case(
+pub(super) fn evaluate_background_file_case(
     runtime: &EvalRuntime,
     fixture_root: &Path,
     cases_config: &Value,
@@ -219,9 +200,11 @@ fn evaluate_background_file_case(
         apply_fixture_action(&root, action)?;
     }
     let deadline = Instant::now()
-        + std::time::Duration::from_secs(
-            runtime.timeout.min(number_or(case, "timeout_seconds", 8)),
-        );
+        + std::time::Duration::from_secs(runtime.timeout.min(number_or(
+            case,
+            "timeout_seconds",
+            8,
+        )));
     let mut final_query = None;
     while Instant::now() < deadline {
         if service
@@ -300,3 +283,7 @@ fn apply_fixture_action(root: &Path, action: &Value) -> Result<(), String> {
         other => Err(format!("unsupported fixture action: {other}")),
     }
 }
+
+#[cfg(test)]
+#[path = "file_fixture_tests.rs"]
+mod tests;

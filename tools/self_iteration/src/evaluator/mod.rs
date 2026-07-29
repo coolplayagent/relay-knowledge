@@ -1,8 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
+    path::PathBuf,
     sync::{Arc, Condvar, Mutex},
     time::Instant,
 };
@@ -10,26 +9,28 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    cases::{
-        array_field, number_or, object_field, objects_by_repository, string_field, string_or,
-        string_vec,
-    },
+    cases::{array_field, number_or, object_field, objects_by_repository, string_or},
     command::{CommandResult, CommandSpec, inherited_env, run_command},
-    config::{CategorySet, Config, EvaluationCategory, JobPlan},
+    config::{Config, JobPlan},
     history::HistoryPaths,
-    scoring::{
-        CaseObservation, EvaluationObservation, GateObservation, MetricObservation,
-        RankedAssessment, array_field as score_array_field, assess_ranked_hits, hit_matches_any,
-    },
+    scoring::{CaseObservation, EvaluationObservation, GateObservation, MetricObservation},
 };
 
 mod fixtures;
 mod judge;
 mod quality;
+mod workloads;
 
 use fixtures::{prepare_repository_path, write_fixture_file};
 use judge::{JudgeEvalInput, evaluate_research_judge_suite};
 use quality::run_quality_gate_stages;
+use workloads::{
+    WorkloadSelection, evaluate_agent_workflows, evaluate_cli_contract_cases,
+    evaluate_file_fixtures, evaluate_registration_cases, evaluate_repository,
+    evaluate_repository_sets, evaluate_semantic_vector_suite, evaluation_home, is_guardrail_case,
+    relay_knowledge_binary, repository_in_profile, select_repository_cases_for_profile,
+    selected_repository_set_member_names, semantic_vector_suite_for_selection,
+};
 
 #[derive(Debug, Clone)]
 pub struct EvaluationRun {
@@ -121,18 +122,8 @@ impl Drop for Permit {
 }
 
 include!("runtime/orchestration.rs");
-include!("workloads/repository.rs");
-include!("workloads/file_evaluation.rs");
-include!("workloads/semantic_vector_evaluation.rs");
 include!("runtime/finish.rs");
 include!("runtime/concurrency.rs");
-include!("workloads/repository_set.rs");
-include!("workloads/agent_workflow.rs");
-include!("workloads/selection.rs");
-include!("workloads/cli_cases.rs");
-include!("workloads/repository_scoring.rs");
-include!("workloads/file_fixture.rs");
-include!("workloads/semantic_vector.rs");
 include!("runtime/reporting.rs");
 
 #[cfg(test)]

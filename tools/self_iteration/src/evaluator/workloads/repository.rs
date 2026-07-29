@@ -1,4 +1,24 @@
-fn evaluate_repository(
+use std::path::Path;
+
+use serde_json::Value;
+
+use crate::{
+    cases::{string_or, string_vec},
+    command::{CommandResult, CommandSpec},
+    scoring::MetricObservation,
+};
+
+use super::super::{
+    EvalRuntime, RepoReport, budget, parallel_map, parse_json_output, prepare_repository_path,
+    push_latency_metrics, repo_report, run_limited, run_writer_limited,
+};
+use super::{
+    cli_cases::{query_command, register_command, software_query_command},
+    repository_scoring::{score_query_case, score_software_case},
+    selection::guardrail_gate_from_case,
+};
+
+pub(in crate::evaluator) fn evaluate_repository(
     runtime: &EvalRuntime,
     run_home: &Path,
     repo_name: &str,
@@ -253,3 +273,7 @@ fn evaluate_repository(
     report.gates = guardrail_gates;
     Ok(report)
 }
+
+#[cfg(test)]
+#[path = "repository_tests.rs"]
+mod tests;

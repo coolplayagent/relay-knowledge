@@ -1,4 +1,24 @@
-fn evaluate_registration_cases(
+use std::{collections::BTreeMap, fs, path::Path};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, number_or, string_field, string_or, string_vec},
+    command::{CommandResult, CommandSpec},
+    config::CategorySet,
+    scoring::CaseObservation,
+};
+
+use super::super::{
+    CliContractReport, EvalRuntime, RegistrationCaseReport, parse_json_output_value,
+    prepare_repository_path, run_writer_limited,
+};
+use super::{
+    repository_scoring::repository_case_objective,
+    selection::{focused_repository_case, guardrail_gate_from_case, is_guardrail_case},
+};
+
+pub(in crate::evaluator) fn evaluate_registration_cases(
     runtime: &EvalRuntime,
     run_home: &Path,
     repository_configs: &BTreeMap<String, Value>,
@@ -53,10 +73,7 @@ fn evaluate_registration_cases(
         commands.extend(setup_commands);
         if !setup_passed {
             let failed = CommandResult {
-                name: format!(
-                    "registration_case_{}_setup",
-                    string_or(&case, "id", "case")
-                ),
+                name: format!("registration_case_{}_setup", string_or(&case, "id", "case")),
                 command: vec!["prepare".to_owned(), repo_name.to_owned()],
                 exit_code: 1,
                 duration_ms: 0,
@@ -97,14 +114,16 @@ fn evaluate_registration_cases(
     })
 }
 
-fn select_registration_cases_for_profile(
+pub(super) fn select_registration_cases_for_profile(
     profile: &str,
     categories: Option<&CategorySet>,
     cases: Vec<Value>,
 ) -> Vec<Value> {
     cases
         .into_iter()
-        .filter(|case| string_field(case, "profile") != Some("exhaustive") || profile == "exhaustive")
+        .filter(|case| {
+            string_field(case, "profile") != Some("exhaustive") || profile == "exhaustive"
+        })
         .filter(|case| {
             categories
                 .map(|items| focused_repository_case(items, case))
@@ -113,7 +132,7 @@ fn select_registration_cases_for_profile(
         .collect()
 }
 
-fn evaluate_cli_contract_cases(
+pub(in crate::evaluator) fn evaluate_cli_contract_cases(
     runtime: &EvalRuntime,
     run_home: &Path,
     cases_config: &Value,
@@ -193,7 +212,9 @@ fn select_cli_contract_cases_for_profile(
 ) -> Vec<Value> {
     cases
         .into_iter()
-        .filter(|case| string_field(case, "profile") != Some("exhaustive") || profile == "exhaustive")
+        .filter(|case| {
+            string_field(case, "profile") != Some("exhaustive") || profile == "exhaustive"
+        })
         .filter(|case| {
             categories
                 .map(|items| focused_repository_case(items, case))
@@ -230,7 +251,10 @@ fn cli_contract_env(
     }
     fs::create_dir_all(&home)
         .map_err(|error| format!("failed to create {}: {error}", home.display()))?;
-    env.insert("RELAY_KNOWLEDGE_HOME".to_owned(), home.display().to_string());
+    env.insert(
+        "RELAY_KNOWLEDGE_HOME".to_owned(),
+        home.display().to_string(),
+    );
     Ok(env)
 }
 
@@ -248,13 +272,15 @@ fn safe_path_component(value: &str) -> String {
 }
 
 fn registration_case_alias(repo_config: &Value, case: &Value) -> String {
-    string_field(case, "alias").map(ToOwned::to_owned).unwrap_or_else(|| {
-        format!(
-            "{}-{}",
-            string_or(repo_config, "alias", "registration-case"),
-            string_or(case, "id", "case")
-        )
-    })
+    string_field(case, "alias")
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "{}-{}",
+                string_or(repo_config, "alias", "registration-case"),
+                string_or(case, "id", "case")
+            )
+        })
 }
 
 fn registration_case_command(binary: &Path, path: &Path, alias: &str, case: &Value) -> Vec<String> {
@@ -276,7 +302,7 @@ fn registration_case_command(binary: &Path, path: &Path, alias: &str, case: &Val
     command
 }
 
-fn register_command(binary: &Path, path: &Path, alias: Option<&str>) -> Vec<String> {
+pub(super) fn register_command(binary: &Path, path: &Path, alias: Option<&str>) -> Vec<String> {
     let mut command = vec![
         binary.display().to_string(),
         "repo".to_owned(),
@@ -290,7 +316,12 @@ fn register_command(binary: &Path, path: &Path, alias: Option<&str>) -> Vec<Stri
     command
 }
 
-fn query_command(binary: &Path, alias: &str, ref_selector: &str, case: &Value) -> Vec<String> {
+pub(super) fn query_command(
+    binary: &Path,
+    alias: &str,
+    ref_selector: &str,
+    case: &Value,
+) -> Vec<String> {
     let mut command = vec![
         binary.display().to_string(),
         "repo".to_owned(),
@@ -317,7 +348,7 @@ fn query_command(binary: &Path, alias: &str, ref_selector: &str, case: &Value) -
     command
 }
 
-fn software_query_command(
+pub(super) fn software_query_command(
     binary: &Path,
     alias: &str,
     ref_selector: &str,
@@ -352,8 +383,8 @@ fn score_registration_case(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let output = format!("{}\n{}", result.stdout, result.stderr);
-    let required_output = string_field(case, "output_contains")
-        .or_else(|| string_field(case, "stderr_contains"));
+    let required_output =
+        string_field(case, "output_contains").or_else(|| string_field(case, "stderr_contains"));
     let output_matches = required_output.is_none_or(|expected| output.contains(expected));
     let passed = if expect_failure {
         !result.passed() && output_matches
@@ -561,3 +592,7 @@ fn json_type(value: &Value) -> &'static str {
         Value::Object(_) => "object",
     }
 }
+
+#[cfg(test)]
+#[path = "cli_cases_tests.rs"]
+mod tests;

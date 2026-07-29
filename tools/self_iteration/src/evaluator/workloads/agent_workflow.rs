@@ -1,4 +1,30 @@
-fn evaluate_agent_workflows(
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, number_or, objects_by_repository, string_field, string_or, string_vec},
+    command::{CommandResult, CommandSpec},
+    config::{CategorySet, EvaluationCategory},
+    scoring::{
+        CaseObservation, MetricObservation, array_field as score_array_field, assess_ranked_hits,
+        hit_matches_any,
+    },
+};
+
+use super::super::{
+    EvalRuntime, RepoReport, budget, parse_json_output, parse_json_output_value,
+    prepare_repository_path, repo_report, run_limited, run_writer_limited,
+};
+use super::{
+    cli_cases::register_command,
+    selection::{guardrail_gate_from_case, is_guardrail_case},
+};
+
+pub(in crate::evaluator) fn evaluate_agent_workflows(
     runtime: &EvalRuntime,
     run_home: &Path,
     cases_config: &Value,
@@ -54,7 +80,10 @@ fn agent_workflow_case_in_profile(profile: &str, case: &Value) -> bool {
 fn agent_missing_repository_report(repo_name: String, workflow_cases: Vec<Value>) -> RepoReport {
     let failed = CommandResult {
         name: format!("{repo_name}_agent_repository_config"),
-        command: vec!["validate".to_owned(), "agent-workflow-repository".to_owned()],
+        command: vec![
+            "validate".to_owned(),
+            "agent-workflow-repository".to_owned(),
+        ],
         exit_code: 1,
         duration_ms: 0,
         stdout: String::new(),
@@ -64,7 +93,14 @@ fn agent_missing_repository_report(repo_name: String, workflow_cases: Vec<Value>
         .iter()
         .map(|case| failed_agent_workflow_case(case, &repo_name, &failed))
         .collect();
-    repo_report(&repo_name, "all".to_owned(), vec![failed], cases, Vec::new(), Value::Null)
+    repo_report(
+        &repo_name,
+        "all".to_owned(),
+        vec![failed],
+        cases,
+        Vec::new(),
+        Value::Null,
+    )
 }
 
 fn evaluate_agent_workflow_repository(
@@ -147,7 +183,12 @@ fn evaluate_agent_workflow_repository(
     commands.push(index.clone());
     if !index.passed() {
         return Ok(repo_report(
-            repo_name, "all".to_owned(), commands, cases, metrics, index_json,
+            repo_name,
+            "all".to_owned(),
+            commands,
+            cases,
+            metrics,
+            index_json,
         ));
     }
 
@@ -164,7 +205,14 @@ fn evaluate_agent_workflow_repository(
         cases.push(observation);
     }
 
-    let mut report = repo_report(repo_name, "all".to_owned(), commands, cases, metrics, index_json);
+    let mut report = repo_report(
+        repo_name,
+        "all".to_owned(),
+        commands,
+        cases,
+        metrics,
+        index_json,
+    );
     report.gates = gates;
     Ok(report)
 }
@@ -185,7 +233,13 @@ impl AgentWorkflowMetrics {
     fn into_metric_observations(self, case: &Value) -> Vec<MetricObservation> {
         let case_id = string_or(case, "id", "agent_workflow");
         vec![
-            lower_metric(case_id, "tool_calls", self.tool_calls as f64, case, "max_tool_calls"),
+            lower_metric(
+                case_id,
+                "tool_calls",
+                self.tool_calls as f64,
+                case,
+                "max_tool_calls",
+            ),
             lower_metric(
                 case_id,
                 "source_reads",
@@ -307,7 +361,10 @@ fn run_agent_workflow_case(
         metrics.output_chars += command.stdout.chars().count() + command.stderr.chars().count();
         metrics.total_duration_ms += command.duration_ms;
         if !command.passed() {
-            failures.push(format!("step[{index}] {step_id} command failed: {}", command.gate_message()));
+            failures.push(format!(
+                "step[{index}] {step_id} command failed: {}",
+                command.gate_message()
+            ));
             commands.push(command);
             continue;
         }
@@ -411,29 +468,47 @@ fn failed_agent_workflow_case(
 fn matched_expected_count(hits: &[Value], expected: &[Value]) -> usize {
     expected
         .iter()
-        .filter(|pattern| hits.iter().any(|hit| hit_matches_any(hit, std::slice::from_ref(pattern))))
+        .filter(|pattern| {
+            hits.iter()
+                .any(|hit| hit_matches_any(hit, std::slice::from_ref(pattern)))
+        })
         .count()
 }
 
 fn hit_context_chars(hit: &Value) -> usize {
-    ["path", "language_id", "excerpt", "degraded_reason", "edge_kind"]
-        .iter()
-        .filter_map(|field| hit.get(*field).and_then(Value::as_str))
-        .map(str::chars)
-        .map(Iterator::count)
-        .sum()
+    [
+        "path",
+        "language_id",
+        "excerpt",
+        "degraded_reason",
+        "edge_kind",
+    ]
+    .iter()
+    .filter_map(|field| hit.get(*field).and_then(Value::as_str))
+    .map(str::chars)
+    .map(Iterator::count)
+    .sum()
 }
 
 fn hit_has_retrieval_layer(hit: &Value, expected_layer: &str) -> bool {
     hit.get("retrieval_layers")
         .and_then(Value::as_array)
-        .map(|layers| layers.iter().any(|layer| layer.as_str() == Some(expected_layer)))
+        .map(|layers| {
+            layers
+                .iter()
+                .any(|layer| layer.as_str() == Some(expected_layer))
+        })
         .unwrap_or(false)
 }
 
 fn agent_budget_failures(case: &Value, metrics: &AgentWorkflowMetrics) -> Vec<String> {
     let mut failures = Vec::new();
-    push_max_budget_failure(&mut failures, case, "max_tool_calls", metrics.tool_calls as f64);
+    push_max_budget_failure(
+        &mut failures,
+        case,
+        "max_tool_calls",
+        metrics.tool_calls as f64,
+    );
     push_max_budget_failure(
         &mut failures,
         case,
@@ -467,7 +542,9 @@ fn agent_budget_failures(case: &Value, metrics: &AgentWorkflowMetrics) -> Vec<St
     if let Some(minimum) = budget(case, "min_evidence_hits") {
         let actual = metrics.evidence_hits as f64;
         if actual < minimum {
-            failures.push(format!("min_evidence_hits actual={actual:.3} budget={minimum:.3}"));
+            failures.push(format!(
+                "min_evidence_hits actual={actual:.3} budget={minimum:.3}"
+            ));
         }
     }
     failures
@@ -481,7 +558,12 @@ fn push_max_budget_failure(failures: &mut Vec<String>, case: &Value, field: &str
     }
 }
 
-fn agent_query_command(binary: &Path, alias: &str, ref_selector: &str, step: &Value) -> Vec<String> {
+fn agent_query_command(
+    binary: &Path,
+    alias: &str,
+    ref_selector: &str,
+    step: &Value,
+) -> Vec<String> {
     if string_or(step, "command", "query") == "context" {
         return agent_context_command(binary, alias, ref_selector, step);
     }
@@ -557,3 +639,7 @@ fn agent_context_command(
     command.extend(["--format".to_owned(), "json".to_owned()]);
     command
 }
+
+#[cfg(test)]
+#[path = "agent_workflow_tests.rs"]
+mod tests;

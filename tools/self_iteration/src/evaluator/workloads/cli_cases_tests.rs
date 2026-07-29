@@ -1,73 +1,81 @@
-    #[test]
-    fn registration_case_scores_expected_failure_message() {
-        let case = serde_json::json!({
-            "id": "reject_register_language",
-            "expect_failure": true,
-            "stderr_contains": "registration language filters are not supported",
-            "guardrail": true
-        });
-        let result = CommandResult {
-            name: "register".to_owned(),
-            command: vec!["relay-knowledge".to_owned()],
-            exit_code: 1,
-            duration_ms: 1,
-            stdout: String::new(),
-            stderr: "registration language filters are not supported; use query-time --language"
-                .to_owned(),
-        };
+use serde_json::Value;
 
-        let observation = score_registration_case("fixture", &case, &result);
+use super::{
+    register_command, score_cli_contract_case, score_registration_case,
+    select_cli_contract_cases_for_profile, select_registration_cases_for_profile,
+};
+use crate::{cases::string_or, command::CommandResult};
 
-        assert!(observation.passed);
-        assert!(observation.guardrail);
-        assert_eq!(observation.score_override, Some(1.0));
-    }
+#[test]
+fn registration_case_scores_expected_failure_message() {
+    let case = serde_json::json!({
+        "id": "reject_register_language",
+        "expect_failure": true,
+        "stderr_contains": "registration language filters are not supported",
+        "guardrail": true
+    });
+    let result = CommandResult {
+        name: "register".to_owned(),
+        command: vec!["relay-knowledge".to_owned()],
+        exit_code: 1,
+        duration_ms: 1,
+        stdout: String::new(),
+        stderr: "registration language filters are not supported; use query-time --language"
+            .to_owned(),
+    };
 
-    #[test]
-    fn cli_contract_case_scores_idle_index_worker_json() {
-        let case = serde_json::json!({
-            "id": "repo_index_worker_idle_json_reports_no_claim",
-            "guardrail": true,
-            "json_expect": {
-                "claimed": false,
-                "task": null
-            }
-        });
-        let result = CommandResult {
-            name: "index_worker".to_owned(),
-            command: vec!["relay-knowledge".to_owned()],
-            exit_code: 0,
-            duration_ms: 1,
-            stdout: "{\"claimed\":false,\"task\":null}\n".to_owned(),
-            stderr: String::new(),
-        };
+    let observation = score_registration_case("fixture", &case, &result);
 
-        let observation = score_cli_contract_case(&case, &result);
+    assert!(observation.passed);
+    assert!(observation.guardrail);
+    assert_eq!(observation.score_override, Some(1.0));
+}
 
-        assert!(observation.passed, "{}", observation.message);
-        assert!(observation.guardrail);
-        assert_eq!(observation.repository, "cli_contract");
-    }
+#[test]
+fn cli_contract_case_scores_idle_index_worker_json() {
+    let case = serde_json::json!({
+        "id": "repo_index_worker_idle_json_reports_no_claim",
+        "guardrail": true,
+        "json_expect": {
+            "claimed": false,
+            "task": null
+        }
+    });
+    let result = CommandResult {
+        name: "index_worker".to_owned(),
+        command: vec!["relay-knowledge".to_owned()],
+        exit_code: 0,
+        duration_ms: 1,
+        stdout: "{\"claimed\":false,\"task\":null}\n".to_owned(),
+        stderr: String::new(),
+    };
 
-    #[test]
-    fn cli_contract_case_scores_idle_index_worker_stream() {
-        let case = serde_json::json!({
-            "id": "repo_index_worker_idle_streaming_json_reports_events",
-            "guardrail": true,
-            "json_lines_expect": [
-                {"event": "started", "operation": "code.repo.index_worker"},
-                {
-                    "event": "item",
-                    "operation": "code.repo.index_worker",
-                    "payload": {
-                        "claimed": false,
-                        "task": null
-                    }
-                },
-                {"event": "completed", "operation": "code.repo.index_worker"}
-            ]
-        });
-        let result = CommandResult {
+    let observation = score_cli_contract_case(&case, &result);
+
+    assert!(observation.passed, "{}", observation.message);
+    assert!(observation.guardrail);
+    assert_eq!(observation.repository, "cli_contract");
+}
+
+#[test]
+fn cli_contract_case_scores_idle_index_worker_stream() {
+    let case = serde_json::json!({
+        "id": "repo_index_worker_idle_streaming_json_reports_events",
+        "guardrail": true,
+        "json_lines_expect": [
+            {"event": "started", "operation": "code.repo.index_worker"},
+            {
+                "event": "item",
+                "operation": "code.repo.index_worker",
+                "payload": {
+                    "claimed": false,
+                    "task": null
+                }
+            },
+            {"event": "completed", "operation": "code.repo.index_worker"}
+        ]
+    });
+    let result = CommandResult {
             name: "index_worker_stream".to_owned(),
             command: vec!["relay-knowledge".to_owned()],
             exit_code: 0,
@@ -81,110 +89,78 @@
             stderr: String::new(),
         };
 
-        let observation = score_cli_contract_case(&case, &result);
+    let observation = score_cli_contract_case(&case, &result);
 
-        assert!(observation.passed, "{}", observation.message);
-        assert!(observation.guardrail);
-    }
+    assert!(observation.passed, "{}", observation.message);
+    assert!(observation.guardrail);
+}
 
-    #[test]
-    fn cli_contract_cases_are_preserved_for_fast() {
-        let cases = vec![
-            serde_json::json!({"id": "regular"}),
-            serde_json::json!({
-                "id": "repo_index_worker_idle_json_reports_no_claim",
-                "guardrail": true
-            }),
-        ];
+#[test]
+fn cli_contract_cases_are_preserved_for_fast() {
+    let cases = vec![
+        serde_json::json!({"id": "regular"}),
+        serde_json::json!({
+            "id": "repo_index_worker_idle_json_reports_no_claim",
+            "guardrail": true
+        }),
+    ];
 
-        let selected = select_cli_contract_cases_for_profile("fast", None, cases);
+    let selected = select_cli_contract_cases_for_profile("fast", None, cases);
 
-        assert!(selected.iter().any(|case| {
-            string_or(case, "id", "") == "repo_index_worker_idle_json_reports_no_claim"
-                && case.get("guardrail").and_then(Value::as_bool) == Some(true)
-        }));
-    }
+    assert!(selected.iter().any(|case| {
+        string_or(case, "id", "") == "repo_index_worker_idle_json_reports_no_claim"
+            && case.get("guardrail").and_then(Value::as_bool) == Some(true)
+    }));
+}
 
-    #[test]
-    fn fast_preserves_grep_and_external_import_guardrail_cases() {
-        let cases = vec![
-            serde_json::json!({"id": "regular_a", "kind": "definition"}),
-            serde_json::json!({
-                "id": "typescript_syntax_external_react_import_grep_fallback",
-                "repository": "typescript_syntax_fixture",
-                "kind": "imports",
-                "query": "react",
-                "guardrail": true,
-                "expected": [{
-                    "path": "src/component.tsx",
-                    "retrieval_layer": "text_fallback"
-                }],
-                "degraded_reason": null
-            }),
-            serde_json::json!({
-                "id": "grep_budget_reference_late_comment_after_scope_budget",
-                "repository": "grep_budget_fixture",
-                "kind": "references",
-                "query": "RK_LATE_BUDGET_NOTE",
-                "guardrail": true,
-                "expected": [{
-                    "path": "zzz/late_target.c",
-                    "retrieval_layer": "text_fallback"
-                }],
-                "degraded_reason": false
-            }),
-            serde_json::json!({
-                "id": "c_syntax_definition_nginx_external_macro_handler",
-                "repository": "c_syntax_fixture",
-                "kind": "definition",
-                "query": "ngx_http_demo_access",
-                "guardrail": true,
-                "expected": [{
-                    "path": "src/nginx_external_module.c",
-                    "retrieval_layer": "definition"
-                }],
-                "degraded_reason": null
-            }),
-            serde_json::json!({
-                "id": "nonstandard_layout_external_deps_definition_without_path_filter",
-                "repository": "nonstandard_layout_fixture",
-                "kind": "definition",
-                "query": "ExternalTypeScriptSessionClient",
-                "guardrail": true,
-                "expected": [{
-                    "path": "external_deps/ts_sdk/sessionClient.ts"
-                }]
-            }),
-        ];
+#[test]
+fn register_command_can_omit_alias_for_default_project_name() {
+    let binary = std::path::Path::new("relay-knowledge");
+    let root = std::path::Path::new("/work/project");
 
-        let selected = select_repository_cases_for_profile("fast", None, cases);
-        let case = selected
-            .iter()
-            .find(|case| {
-                string_or(case, "id", "")
-                    == "typescript_syntax_external_react_import_grep_fallback"
-            })
-            .expect("fast should preserve the import grep fallback guardrail");
-        let expected = array_field(case, "expected");
+    assert_eq!(
+        register_command(binary, root, None),
+        vec![
+            "relay-knowledge",
+            "repo",
+            "register",
+            "/work/project",
+            "--format",
+            "json"
+        ]
+    );
+    assert_eq!(
+        register_command(binary, root, Some("stable")),
+        vec![
+            "relay-knowledge",
+            "repo",
+            "register",
+            "/work/project",
+            "--alias",
+            "stable",
+            "--format",
+            "json"
+        ]
+    );
+}
 
-        assert_eq!(string_or(case, "kind", ""), "imports");
-        assert_eq!(string_or(&expected[0], "retrieval_layer", ""), "text_fallback");
-        assert!(case.get("degraded_reason").is_some_and(Value::is_null));
-        assert!(case.get("guardrail").and_then(Value::as_bool).unwrap_or(false));
-        assert!(selected.iter().any(|case| {
-            string_or(case, "id", "") == "grep_budget_reference_late_comment_after_scope_budget"
-                && case
-                    .get("degraded_reason")
-                    .and_then(Value::as_bool)
-                    == Some(false)
-        }));
-        assert!(selected.iter().any(|case| {
-            string_or(case, "id", "") == "c_syntax_definition_nginx_external_macro_handler"
-                && case.get("degraded_reason").is_some_and(Value::is_null)
-        }));
-        assert!(selected.iter().any(|case| {
-            string_or(case, "id", "")
-                == "nonstandard_layout_external_deps_definition_without_path_filter"
-                && array_field(case, "path_filters").is_empty()
-        }));
-    }
+#[test]
+fn registration_guardrail_cases_are_preserved_for_fast() {
+    let cases = vec![
+        serde_json::json!({"id": "regular", "repository": "fixture"}),
+        serde_json::json!({
+            "id": "reject_register_language",
+            "repository": "fixture",
+            "expect_failure": true,
+            "language_filters": ["cpp"],
+            "guardrail": true
+        }),
+    ];
+
+    let selected = select_registration_cases_for_profile("fast", None, cases);
+
+    assert!(selected.iter().any(|case| {
+        string_or(case, "id", "") == "reject_register_language"
+            && case.get("guardrail").and_then(Value::as_bool) == Some(true)
+    }));
+}
