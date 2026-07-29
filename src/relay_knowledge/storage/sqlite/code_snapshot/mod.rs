@@ -21,13 +21,9 @@ use super::{
     code_status::{canonical_filter_values, canonical_path_filters, parse_json_list},
 };
 
-#[path = "code_snapshot_candidate_paths.rs"]
 mod candidate_paths;
-#[path = "code_snapshot_fingerprints.rs"]
 mod fingerprints;
-#[path = "code_snapshot_import_compat.rs"]
 mod import_compat;
-#[path = "code_snapshot_import.rs"]
 mod snapshot_import;
 
 use self::snapshot_import::copy_attached_code_table;
@@ -39,6 +35,15 @@ pub(super) use candidate_paths::{
 pub(super) use fingerprints::{
     file_fingerprints, file_fingerprints_for_paths, file_fingerprints_for_scope,
 };
+
+#[cfg(test)]
+mod candidate_paths_tests;
+
+#[cfg(test)]
+mod import_tests;
+
+#[cfg(test)]
+mod progress_tests;
 
 const IMPORT_SCHEMA: &str = "relay_import";
 
