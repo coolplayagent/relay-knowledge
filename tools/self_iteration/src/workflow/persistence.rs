@@ -1,4 +1,13 @@
-fn persist_scored_run(
+use crate::{candidate_git::PatchSnapshot, codex, config::Config, evaluator, history, scoring};
+
+use super::{
+    report_metadata::{
+        comparison_baseline, optimization_plan, patch_metadata, selected_categories_value,
+    },
+    run_identity::unix_timestamp_string,
+};
+
+pub(super) fn persist_scored_run(
     config: &Config,
     paths: &history::HistoryPaths,
     run_id: &str,

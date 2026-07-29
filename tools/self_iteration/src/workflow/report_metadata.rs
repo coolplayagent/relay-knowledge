@@ -1,4 +1,9 @@
-fn selected_categories_value(selected_categories: &[&str]) -> serde_json::Value {
+use crate::{
+    candidate_git::{self, PatchSnapshot},
+    codex, history, scoring,
+};
+
+pub(super) fn selected_categories_value(selected_categories: &[&str]) -> serde_json::Value {
     if selected_categories.is_empty() {
         serde_json::Value::Null
     } else {
@@ -6,7 +11,7 @@ fn selected_categories_value(selected_categories: &[&str]) -> serde_json::Value 
     }
 }
 
-fn patch_metadata(patch: &PatchSnapshot) -> serde_json::Value {
+pub(super) fn patch_metadata(patch: &PatchSnapshot) -> serde_json::Value {
     serde_json::json!({
         "path": patch.path.display().to_string(),
         "sha256": patch.sha256,
@@ -16,7 +21,7 @@ fn patch_metadata(patch: &PatchSnapshot) -> serde_json::Value {
     })
 }
 
-fn optimization_plan(
+pub(super) fn optimization_plan(
     patch: &PatchSnapshot,
     score: &scoring::ScoreBreakdown,
     codex: Option<&codex::CodexResult>,
@@ -33,7 +38,7 @@ fn optimization_plan(
     })
 }
 
-fn comparison_baseline(
+pub(super) fn comparison_baseline(
     paths: &history::HistoryPaths,
     profile: &str,
     category_focus: Option<&str>,

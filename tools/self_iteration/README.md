@@ -69,7 +69,7 @@ The harness writes live progress to stderr with the `[self-iterate]` prefix. Eac
 
 ### Source Ownership
 
-The evaluator production facade owns contracts and composition only; its sibling `mod_tests.rs` owns the remaining test assembly. Repository-set workload provenance tests live in the sibling `repository_set_tests.rs` file instead of an inline test bucket in production workflow code. Config parsing and budgets, scoring ranking/evaluation/decision/capability/change detection, case loading and merge behavior, research-plan rendering, candidate Git operations, external-command execution, Codex process/prompt mapping, history run selection/persistence/export/state, and progressive-memory boundaries are real submodules rather than `include!` fragments, and each behavior owner attaches its sibling unit-test file directly.
+The evaluator production facade owns contracts and composition only; its sibling `mod_tests.rs` owns the remaining test assembly. Repository-set workload provenance tests live in the sibling `repository_set_tests.rs` file instead of an inline test bucket in production workflow code. Config parsing and budgets, scoring stages, workflow dispatch/generation/evaluation/persistence/reporting, case loading and merge behavior, research-plan rendering, candidate Git operations, external-command execution, Codex process/prompt mapping, history lifecycle, and progressive-memory boundaries are real submodules rather than `include!` fragments, and each behavior owner attaches its sibling unit-test file directly.
 
 ## Command Reference
 

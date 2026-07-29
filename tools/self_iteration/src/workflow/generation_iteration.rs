@@ -1,4 +1,20 @@
-fn run_generation_iteration(
+use crate::{
+    candidate_git, codex, command,
+    config::Config,
+    evaluator, history,
+    scoring::{self, EvaluationObservation, GateObservation},
+};
+
+use super::{
+    adopted_documentation::write_adopted_optimization_document,
+    candidate_evaluation::evaluate_candidate_for_patch,
+    documentation_gate::apply_candidate_documentation_gate,
+    output::print_score,
+    persistence::{PersistInput, persist_scored_run, persist_scored_run_with_score},
+    run_identity::new_run_id,
+};
+
+pub(super) fn run_generation_iteration(
     config: &Config,
     paths: &history::HistoryPaths,
 ) -> Result<bool, String> {

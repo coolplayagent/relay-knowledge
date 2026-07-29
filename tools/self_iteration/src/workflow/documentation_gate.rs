@@ -1,3 +1,9 @@
+use crate::{
+    candidate_git::{self, PatchSnapshot},
+    evaluator,
+    scoring::GateObservation,
+};
+
 pub(crate) fn apply_candidate_documentation_gate(
     evaluation: &mut evaluator::EvaluationRun,
     patch: &PatchSnapshot,

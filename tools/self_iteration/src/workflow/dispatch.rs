@@ -1,3 +1,10 @@
+use crate::{
+    config::{Config, Mode},
+    history, research_plan,
+};
+
+use super::{loop_control::run_loop, manual_evaluation::run_evaluate};
+
 pub(crate) fn run(mut config: Config) -> Result<i32, String> {
     config.workspace = config
         .workspace
