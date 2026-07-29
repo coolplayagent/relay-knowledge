@@ -69,7 +69,7 @@ harness 会把实时进度写到 stderr，统一使用 `[self-iterate]` 前缀�
 
 ### 源码所有权
 
-config、scoring、history 和 evaluator 的生产 facade 只维护合同与组合；其测试装配位于同级 `mod_tests.rs`。repository-set workload 的 provenance UT 位于同级 `repository_set_tests.rs`，避免在生产工作流文件中形成内联测试桶。Case 文件加载、merge policy、typed field、repository 分组、research-plan 渲染、candidate Git 操作、外部命令执行、Codex 进程/提示词映射，以及渐进记忆的 API、记录、存储、摘要和元数据现在都是真正的子模块，不再作为 `include!` 片段共享隐式命名空间；每个行为 owner 直接挂载自己的同级 UT 文件。
+config、scoring 和 evaluator 的生产 facade 只维护合同与组合；其测试装配位于同级 `mod_tests.rs`。repository-set workload 的 provenance UT 位于同级 `repository_set_tests.rs`，避免在生产工作流文件中形成内联测试桶。Case 文件加载、merge policy、typed field、repository 分组、research-plan 渲染、candidate Git 操作、外部命令执行、Codex 进程/提示词映射、history 的运行选择/持久化/导出/状态，以及渐进记忆的 API、记录、存储、摘要和元数据现在都是真正的子模块，不再作为 `include!` 片段共享隐式命名空间；每个行为 owner 直接挂载自己的同级 UT 文件。
 
 ## 命令参考
 

@@ -9,49 +9,49 @@ use super::*;
 use crate::history::HistoryPaths;
 
 #[test]
-fn profile_best_accepted_ignores_category_focus() {
-    let workspace = temp_workspace("history-profile-best");
+fn automated_baseline_ignores_manual_evaluations() {
+    let workspace = temp_workspace("history-baseline");
     let paths = HistoryPaths::new(&workspace);
     paths.ensure().expect("history paths");
     let runs = [
         json!({
-            "run_id": "run-competitive",
+            "run_id": "run-1",
             "timestamp": "1",
             "profile": "fast",
-            "category_focus": "competitive",
             "accepted": true,
+            "score_accepted": true,
             "committed": true,
-            "commit": "competitive123",
-            "score": 0.84
+            "score": 0.8,
+            "commit": "abc1234"
         }),
         json!({
-            "run_id": "run-semantic",
+            "run_id": "manual-evaluate-2",
             "timestamp": "2",
             "profile": "fast",
-            "category_focus": "semantic_vector",
-            "accepted": true,
-            "committed": true,
-            "commit": "semantic123",
-            "score": 0.95
-        }),
-        json!({
-            "run_id": "run-performance",
-            "timestamp": "3",
-            "profile": "fast",
-            "category_focus": "performance",
             "accepted": false,
+            "score_accepted": true,
             "committed": false,
             "score": 0.99
         }),
         json!({
-            "run_id": "run-full",
-            "timestamp": "4",
-            "profile": "full",
-            "category_focus": "competitive",
-            "accepted": true,
-            "committed": true,
-            "commit": "full123",
+            "run_id": "run-no-diff-3",
+            "timestamp": "3",
+            "profile": "fast",
+            "accepted": false,
+            "score_accepted": false,
+            "committed": false,
+            "generated_diff": false,
             "score": 0.98
+        }),
+        json!({
+            "run_id": "run-legacy-no-diff-4",
+            "timestamp": "4",
+            "profile": "fast",
+            "accepted": false,
+            "score_accepted": false,
+            "committed": false,
+            "reject_reasons": ["codex produced no candidate diff"],
+            "score": 0.97
         }),
     ];
     fs::write(
@@ -63,13 +63,13 @@ fn profile_best_accepted_ignores_category_focus() {
     )
     .expect("runs");
 
-    let best = best_accepted_run_for_profile(&paths, "fast")
+    let previous = previous_scored_run_for_workload(&paths, "fast", None)
         .expect("history")
-        .expect("profile best");
+        .expect("previous run");
 
     assert_eq!(
-        best.get("run_id").and_then(Value::as_str),
-        Some("run-semantic")
+        previous.get("run_id").and_then(Value::as_str),
+        Some("run-1")
     );
     fs::remove_dir_all(workspace).expect("remove workspace");
 }
