@@ -15,15 +15,15 @@ mod evidence_identity;
 mod file_index;
 mod graph_version;
 mod indexing;
-#[path = "sqlite/connection_runtime/maintenance.rs"]
+#[path = "connection_runtime/maintenance.rs"]
 mod maintenance;
 mod maven;
 mod mutation_log;
 mod operations;
-#[path = "sqlite/connection_runtime/read_pool.rs"]
+#[path = "connection_runtime/read_pool.rs"]
 mod read_pool;
 mod retrieval;
-#[path = "sqlite/connection_runtime/retry.rs"]
+#[path = "connection_runtime/retry.rs"]
 mod retry;
 mod schema_columns;
 mod schema_marker;
@@ -984,5 +984,5 @@ mod graph_tests;
 mod graphrag_phase4_tests;
 
 #[cfg(test)]
-#[path = "sqlite/health_tests.rs"]
+#[path = "health_tests.rs"]
 mod health_tests;
