@@ -49,5 +49,9 @@ include!("unattended_prompt.rs");
 include!("history_context.rs");
 include!("result_mapping.rs");
 
-include!("command_tests.rs");
-include!("prompt_tests.rs");
+#[cfg(test)]
+#[path = "command_tests.rs"]
+mod command_tests;
+#[cfg(test)]
+#[path = "prompt_tests.rs"]
+mod prompt_tests;

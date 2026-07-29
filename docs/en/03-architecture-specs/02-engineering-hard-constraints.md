@@ -234,6 +234,8 @@ Every remaining sibling test attachment is explicit: runtime, service, repositor
 
 The self-iteration config, scoring, history, and evaluator facades keep their facade test assembly in sibling `mod_tests.rs` files, while the repository-set workload attaches its own sibling `repository_set_tests.rs` provenance contract; test bodies must not return to production facade or workload files.
 
+The self-iteration Codex adapter attaches `command_tests` and `prompt_tests` from `codex/mod.rs` through explicit test-only `#[path]` declarations, and each test file contains test items directly. Production-time `include!` expansion of test files and same-named nested test modules are forbidden.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

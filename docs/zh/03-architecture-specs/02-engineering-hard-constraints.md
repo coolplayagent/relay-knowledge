@@ -234,6 +234,8 @@ Worktree-overlay 的 Gitlink 输出聚合、子路径删除回放和 scope-aware
 
 自迭代的 config、scoring、history 和 evaluator facade 必须把各自 facade 测试装配留在同级 `mod_tests.rs`，repository-set workload 必须自行挂载同级 `repository_set_tests.rs` provenance UT 合同，不得把测试体重新写回生产 facade 或 workload 文件。
 
+自迭代 Codex adapter 的 `command_tests` 与 `prompt_tests` 必须由 `codex/mod.rs` 通过显式 test-only `#[path]` 挂载，测试文件本身直接包含测试项。禁止用生产期 `include!` 展开测试文件，也禁止在配对文件中再嵌套同名 test module。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
