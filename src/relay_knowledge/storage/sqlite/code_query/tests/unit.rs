@@ -12,7 +12,7 @@ use crate::{
 
 const CASE_INTENT_SOURCE_SCOPE: &str = "code:test:case-intent:commit:tree";
 
-#[path = "code_query_unit_tests/case_intent_tests.rs"]
+#[path = "unit/case_intent_tests.rs"]
 mod case_intent_tests;
 
 #[test]

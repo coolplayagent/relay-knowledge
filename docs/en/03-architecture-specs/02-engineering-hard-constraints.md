@@ -94,7 +94,9 @@ Monorepo-workspace persistence is grouped under `storage::sqlite::code_workspace
 
 Code-index schema ownership is grouped under `storage::sqlite::code_schema`: `mod.rs` owns current tables, indexes, and initialization order; `migrations` owns bounded compatibility transformations; `route_schema` owns route-specific DDL; and `tests` verifies schema and migration invariants. Do not split these files across the SQLite root using `code_schema_*` prefixes.
 
-Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
+Code-query persistence is grouped under `storage::sqlite::code_query`: `mod.rs` coordinates bounded retrieval layers; `calls`, `imports`, `symbols`, and `hybrid` own edge- or plan-specific behavior; `scoring` owns focused ranking signals; `accuracy` owns end-to-end ranking fixtures; and `tests` owns shared query regressions. Generic row decoding, excerpts, identifiers, line ranges, routes, references, and SBOM retrieval remain named root children because they cross those focused subdomains. No query directory may become a new flat prefix bucket.
+
+Relevance primitives are grouped under `storage::sqlite::code_query::relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file or root-level `code_query_*` siblings.
 
 ### 3.7 Code Index Foundations
 

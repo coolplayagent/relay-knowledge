@@ -29,7 +29,7 @@ use super::{
     selected_row,
 };
 
-#[path = "code_query_hybrid_symbol_direct.rs"]
+#[path = "hybrid_direct.rs"]
 mod hybrid_symbol_direct;
 
 struct SymbolIdentityRows {
@@ -988,5 +988,5 @@ fn hybrid_api_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize 
 }
 
 #[cfg(test)]
-#[path = "code_query_symbols_tests.rs"]
+#[path = "tests.rs"]
 mod tests;

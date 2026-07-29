@@ -10,23 +10,14 @@ use crate::{
 
 const TEST_SOURCE_SCOPE: &str = "code:test:fixture:commit:tree";
 
-#[path = "code_query_accuracy_tests/call_chunk_fixtures.rs"]
 mod call_chunk_fixtures;
-#[path = "code_query_accuracy_tests/call_chunk_tests.rs"]
 mod call_chunk_tests;
-#[path = "code_query_accuracy_tests/definition_fixtures.rs"]
 mod definition_fixtures;
-#[path = "code_query_accuracy_tests/definition_tests.rs"]
 mod definition_tests;
-#[path = "code_query_accuracy_tests/import_fixtures.rs"]
 mod import_fixtures;
-#[path = "code_query_accuracy_tests/import_tests.rs"]
 mod import_tests;
-#[path = "code_query_accuracy_tests/ranking_fixtures.rs"]
 mod ranking_fixtures;
-#[path = "code_query_accuracy_tests/scope_fixtures.rs"]
 mod scope_fixtures;
-#[path = "code_query_accuracy_tests/scope_tests.rs"]
 mod scope_tests;
 
 use call_chunk_fixtures::*;
