@@ -190,7 +190,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。
 
-自迭代的 config、scoring、history 和 evaluator facade 必须把测试装配留在同级 `mod_tests.rs`，repository-set workload 的 provenance UT 必须留在同级 `repository_set_tests.rs`，不得把测试体重新写回生产 facade 或 workload 文件。
+自迭代的 config、scoring、history 和 evaluator facade 必须把各自 facade 测试装配留在同级 `mod_tests.rs`，repository-set workload 必须自行挂载同级 `repository_set_tests.rs` provenance UT 合同，不得把测试体重新写回生产 facade 或 workload 文件。
 
 ## 4. HTTP 与 QoS
 

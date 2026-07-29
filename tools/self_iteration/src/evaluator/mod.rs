@@ -155,9 +155,5 @@ include!("judge/outcome.rs");
 include!("runtime/reporting.rs");
 
 #[cfg(test)]
-#[path = "workloads/repository_set_tests.rs"]
-mod repository_set_tests;
-
-#[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

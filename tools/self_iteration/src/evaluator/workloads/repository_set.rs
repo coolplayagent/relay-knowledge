@@ -461,3 +461,7 @@ fn flatten_repository_set_hits(payload: &Value) -> Vec<Value> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "repository_set_tests.rs"]
+mod repository_set_tests;
