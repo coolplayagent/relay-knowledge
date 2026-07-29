@@ -1,10 +1,10 @@
-const NONSTANDARD_PYTHON_SESSION_CLIENT: &str = r#"
+pub(super) const NONSTANDARD_PYTHON_SESSION_CLIENT: &str = r#"
 class ExternalPythonSessionClient:
     def open_external_session(self, payload):
         return f"python-session:{payload}"
 "#;
 
-const NONSTANDARD_TYPESCRIPT_SESSION_CLIENT: &str = r#"
+pub(super) const NONSTANDARD_TYPESCRIPT_SESSION_CLIENT: &str = r#"
 export class ExternalTypeScriptSessionClient {
   openExternalSession(payload: string): string {
     return `typescript-session:${payload}`;
@@ -12,7 +12,7 @@ export class ExternalTypeScriptSessionClient {
 }
 "#;
 
-const NONSTANDARD_GO_SESSION_CLIENT: &str = r#"
+pub(super) const NONSTANDARD_GO_SESSION_CLIENT: &str = r#"
 package session
 
 import "context"
@@ -22,7 +22,7 @@ type ExternalGoSessionClient interface {
 }
 "#;
 
-const NONSTANDARD_JAVA_SESSION_CLIENT: &str = r#"
+pub(super) const NONSTANDARD_JAVA_SESSION_CLIENT: &str = r#"
 package example;
 
 public class ExternalJavaSessionClient {
@@ -32,7 +32,7 @@ public class ExternalJavaSessionClient {
 }
 "#;
 
-const NONSTANDARD_CPP_SESSION_CLIENT_HPP: &str = r#"#pragma once
+pub(super) const NONSTANDARD_CPP_SESSION_CLIENT_HPP: &str = r#"#pragma once
 
 namespace nonstandard {
 
@@ -46,7 +46,7 @@ void external_session_client();
 }  // namespace nonstandard
 "#;
 
-const NONSTANDARD_CPP_SESSION_CLIENT_CPP: &str = r#"#include <external_session_client.hpp>
+pub(super) const NONSTANDARD_CPP_SESSION_CLIENT_CPP: &str = r#"#include <external_session_client.hpp>
 
 namespace nonstandard {
 
@@ -59,7 +59,7 @@ void external_session_client() {}
 }  // namespace nonstandard
 "#;
 
-const NONSTANDARD_SWIFT_SESSION_CLIENT: &str = r#"
+pub(super) const NONSTANDARD_SWIFT_SESSION_CLIENT: &str = r#"
 import Foundation
 
 final class ExternalSwiftSessionClient {
@@ -69,7 +69,7 @@ final class ExternalSwiftSessionClient {
 }
 "#;
 
-const NONSTANDARD_APPLICATION_TS: &str = r#"
+pub(super) const NONSTANDARD_APPLICATION_TS: &str = r#"
 import { ExternalTypeScriptSessionClient } from "ts_sdk/sessionClient";
 
 export function runExternalSessionWorkflow(payload: string): string {
@@ -78,7 +78,7 @@ export function runExternalSessionWorkflow(payload: string): string {
 }
 "#;
 
-const NONSTANDARD_CARGO_TOML: &str = r#"
+pub(super) const NONSTANDARD_CARGO_TOML: &str = r#"
 [package]
 name = "nonstandard-layout-fixture"
 version = "0.1.0"
@@ -87,7 +87,7 @@ version = "0.1.0"
 serde = "1.0"
 "#;
 
-const NONSTANDARD_CARGO_LOCK: &str = r#"
+pub(super) const NONSTANDARD_CARGO_LOCK: &str = r#"
 version = 3
 
 [[package]]
@@ -96,7 +96,7 @@ version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 "#;
 
-const NONSTANDARD_PACKAGE_JSON: &str = r#"
+pub(super) const NONSTANDARD_PACKAGE_JSON: &str = r#"
 {
   "name": "nonstandard-layout-fixture",
   "version": "0.1.0",
@@ -106,7 +106,7 @@ const NONSTANDARD_PACKAGE_JSON: &str = r#"
 }
 "#;
 
-const NONSTANDARD_PACKAGE_LOCK_JSON: &str = r#"
+pub(super) const NONSTANDARD_PACKAGE_LOCK_JSON: &str = r#"
 {
   "lockfileVersion": 3,
   "packages": {
@@ -117,7 +117,7 @@ const NONSTANDARD_PACKAGE_LOCK_JSON: &str = r#"
 }
 "#;
 
-const NONSTANDARD_GO_MOD: &str = r#"
+pub(super) const NONSTANDARD_GO_MOD: &str = r#"
 module example.com/nonstandard
 
 go 1.22
@@ -125,7 +125,7 @@ go 1.22
 require google.golang.org/grpc v1.62.0
 "#;
 
-const NONSTANDARD_PYPROJECT_TOML: &str = r#"
+pub(super) const NONSTANDARD_PYPROJECT_TOML: &str = r#"
 [project]
 name = "nonstandard-layout-fixture"
 dependencies = [
@@ -133,7 +133,7 @@ dependencies = [
 ]
 "#;
 
-const NONSTANDARD_POM_XML: &str = r#"
+pub(super) const NONSTANDARD_POM_XML: &str = r#"
 <project>
   <dependencyManagement>
     <dependencies>
@@ -149,7 +149,7 @@ const NONSTANDARD_POM_XML: &str = r#"
 </project>
 "#;
 
-const NONSTANDARD_BUILD_GRADLE_KTS: &str = r#"
+pub(super) const NONSTANDARD_BUILD_GRADLE_KTS: &str = r#"
 plugins {
     java
 }
@@ -159,12 +159,12 @@ dependencies {
 }
 "#;
 
-const NONSTANDARD_CONANFILE_TXT: &str = r#"
+pub(super) const NONSTANDARD_CONANFILE_TXT: &str = r#"
 [requires]
 zlib/1.2.13
 "#;
 
-const NONSTANDARD_CONANFILE_PY: &str = r#"
+pub(super) const NONSTANDARD_CONANFILE_PY: &str = r#"
 from conan import ConanFile
 
 class NonstandardConan(ConanFile):

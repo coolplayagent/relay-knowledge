@@ -6,7 +6,6 @@ include!("quality/gate_policy_tests.rs");
 include!("workloads/selection_tests.rs");
 include!("workloads/cli_cases_tests.rs");
 include!("workloads/semantic_vector_selection_tests.rs");
-include!("fixtures/repository_tests.rs");
 include!("judge/backend_tests.rs");
 include!("workloads/file_fixture_constraints_tests.rs");
 include!("workloads/repository_scoring_tests.rs");

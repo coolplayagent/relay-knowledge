@@ -23,6 +23,10 @@ use crate::{
     },
 };
 
+mod fixtures;
+
+use fixtures::{prepare_repository_path, write_fixture_file};
+
 #[derive(Debug, Clone)]
 pub struct EvaluationRun {
     pub observation: EvaluationObservation,
@@ -138,13 +142,6 @@ include!("quality/gate_policy.rs");
 include!("workloads/selection.rs");
 include!("workloads/cli_cases.rs");
 include!("workloads/repository_scoring.rs");
-include!("fixtures/repository.rs");
-include!("fixtures/c_and_cpp.rs");
-include!("fixtures/cross_language.rs");
-include!("fixtures/common_languages.rs");
-include!("fixtures/additional_languages.rs");
-include!("fixtures/nonstandard_layout.rs");
-include!("fixtures/software_global.rs");
 include!("workloads/file_fixture.rs");
 include!("workloads/semantic_vector.rs");
 include!("judge/evaluation.rs");

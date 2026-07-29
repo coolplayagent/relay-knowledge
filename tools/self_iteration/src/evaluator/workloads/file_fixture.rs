@@ -22,14 +22,6 @@ fn create_file_fixture(root: &Path, fixture: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn write_fixture_file(path: &Path, content: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    fs::write(path, content).map_err(|error| format!("failed to write {}: {error}", path.display()))
-}
-
 fn file_fixture_env(env: &BTreeMap<String, String>, root: &Path) -> BTreeMap<String, String> {
     let mut fixture_env = env.clone();
     let root_value = root.display().to_string();

@@ -1,4 +1,4 @@
-const C_DRIVER_OPS_H: &str = r#"#ifndef RK_DRIVER_OPS_H
+pub(super) const C_DRIVER_OPS_H: &str = r#"#ifndef RK_DRIVER_OPS_H
 #define RK_DRIVER_OPS_H
 
 #include <stddef.h>
@@ -27,7 +27,7 @@ int rk_dispatch_read(
 #endif
 "#;
 
-const C_MACROS_H: &str = r#"#ifndef RK_MACROS_H
+pub(super) const C_MACROS_H: &str = r#"#ifndef RK_MACROS_H
 #define RK_MACROS_H
 
 #define RK_STATUS_CLOSED 0
@@ -47,7 +47,7 @@ enum rk_stage {
 #endif
 "#;
 
-const C_DRIVER_OPS_C: &str = r#"#include "driver_ops.h"
+pub(super) const C_DRIVER_OPS_C: &str = r#"#include "driver_ops.h"
 #include "macros.h"
 
 struct rk_device {
@@ -80,7 +80,7 @@ const struct rk_driver_ops rk_default_ops = {
 };
 "#;
 
-const C_DISPATCH_C: &str = r#"#include "driver_ops.h"
+pub(super) const C_DISPATCH_C: &str = r#"#include "driver_ops.h"
 
 static int rk_validate_device(struct rk_device *dev)
 {
@@ -136,7 +136,7 @@ int rk_run_pipeline(struct rk_device *dev)
 // RK_PIPELINE_NOTE records dispatch ordering for exact source-text fallback.
 "#;
 
-const C_GENERATED_TABLE_C: &str = r#"#include "driver_ops.h"
+pub(super) const C_GENERATED_TABLE_C: &str = r#"#include "driver_ops.h"
 #include "macros.h"
 
 struct rk_table_row {
@@ -165,7 +165,7 @@ int rk_table_read(struct rk_device *dev, char *buffer, size_t length)
 }
 "#;
 
-const C_HTTP_MACRO_MODULE_C: &str = r#"#include "driver_ops.h"
+pub(super) const C_HTTP_MACRO_MODULE_C: &str = r#"#include "driver_ops.h"
 #include <openssl/ssl.h>
 
 #define RK_HTTP_HANDLER(name) int name(struct rk_device *dev)
@@ -186,7 +186,7 @@ static const struct rk_http_module_entry rk_http_modules[] = {
 };
 "#;
 
-const C_NGINX_EXTERNAL_MODULE_C: &str = r#"#include <ngx_config.h>
+pub(super) const C_NGINX_EXTERNAL_MODULE_C: &str = r#"#include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
 
@@ -231,7 +231,7 @@ ngx_module_t ngx_http_demo_module = {
 };
 "#;
 
-const C_GCC_EXTENSION_POLICY_C: &str = r#"#include "securec.h"
+pub(super) const C_GCC_EXTENSION_POLICY_C: &str = r#"#include "securec.h"
 
 #define WILD_MULTI_CHAR '*'
 
@@ -267,7 +267,7 @@ static PdpPolicyEntry pdp_policy_entries[] = {
 };
 "#;
 
-const C_FAKE_DRIVER_C: &str = r#"#include "driver_ops.h"
+pub(super) const C_FAKE_DRIVER_C: &str = r#"#include "driver_ops.h"
 
 int rk_driver_read_fake(struct rk_device *dev, char *buffer, size_t length)
 {
@@ -277,7 +277,7 @@ int rk_driver_read_fake(struct rk_device *dev, char *buffer, size_t length)
 }
 "#;
 
-const CPP_CACHE_HPP: &str = r#"#pragma once
+pub(super) const CPP_CACHE_HPP: &str = r#"#pragma once
 
 #include <memory>
 #include <string>
@@ -313,7 +313,7 @@ class RecordingWriter final : public Writer {
 }  // namespace rk::store
 "#;
 
-const CPP_EXPORTED_MODULE_HPP: &str = r#"#pragma once
+pub(super) const CPP_EXPORTED_MODULE_HPP: &str = r#"#pragma once
 
 #include <boost/asio.hpp>
 #include <string>
@@ -335,7 +335,7 @@ RK_STORE_API class HttpModule final : public BaseModule {
 }  // namespace rk::store
 "#;
 
-const CPP_PIPELINE_HPP: &str = r#"#pragma once
+pub(super) const CPP_PIPELINE_HPP: &str = r#"#pragma once
 
 #include "store/cache.hpp"
 
@@ -360,7 +360,7 @@ int RunPipeline(Cache<std::string>& cache, const std::vector<PipelineEvent>& eve
 }  // namespace rk::store
 "#;
 
-const CPP_CACHE_CPP: &str = r#"#include "store/cache.hpp"
+pub(super) const CPP_CACHE_CPP: &str = r#"#include "store/cache.hpp"
 
 #include <utility>
 
@@ -397,7 +397,7 @@ template class Cache<std::string>;
 }  // namespace rk::store
 "#;
 
-const CPP_PIPELINE_CPP: &str = r#"#include "store/pipeline.hpp"
+pub(super) const CPP_PIPELINE_CPP: &str = r#"#include "store/pipeline.hpp"
 
 #include <utility>
 
@@ -432,7 +432,7 @@ int RunPipeline(Cache<std::string>& cache, const std::vector<PipelineEvent>& eve
 }  // namespace rk::store
 "#;
 
-const CPP_FAKE_CACHE_CPP: &str = r#"#include "store/cache.hpp"
+pub(super) const CPP_FAKE_CACHE_CPP: &str = r#"#include "store/cache.hpp"
 
 namespace rk::store::test {
 
