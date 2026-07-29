@@ -194,6 +194,14 @@ Use the repository scripts by responsibility:
 ./check.sh
 ```
 
+The reusable domain model keeps its public `domain::*` facade while its physical
+ownership follows `domain/core`, `domain/graph`, `domain/code`,
+`domain/knowledge`, and `domain/operations`. These are real Rust modules with
+acyclic dependencies, not production path aliases. Validating domain owners
+attach their sibling unit-test files directly, so repository registration,
+scope identity, retrieval requests, repository status, and index summaries do
+not share a catch-all test module.
+
 ### Self-Iteration Harness
 
 For unattended code and semantic/vector retrieval optimization experiments,

@@ -137,3 +137,7 @@ pub struct CodeRepositoryReport {
     pub latency_samples: Vec<CodeRepositoryLatencySample>,
     pub freshness_state: String,
 }
+
+#[cfg(test)]
+#[path = "repository_status_tests.rs"]
+mod tests;

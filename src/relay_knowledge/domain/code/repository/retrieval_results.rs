@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::super::code_staleness::StalenessHint;
+use super::super::staleness::StalenessHint;
 use super::{CodeRetrievalLayer, RepositoryCodeRange};
 
 /// Diff paths split by the effective repository selector.

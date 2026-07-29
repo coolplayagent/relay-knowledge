@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DomainError,
-    code_repository::{CodeQueryKind, CodeRetrievalHit},
+    DomainError, FreshnessPolicy,
     error::required_text,
-    retrieval::FreshnessPolicy,
+    repository::{CodeQueryKind, CodeRetrievalHit},
 };
 
 /// Repository-set creation request shared by API adapters.

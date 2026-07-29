@@ -51,3 +51,19 @@ fn retrieval_request_carries_inline_filters_from_query_text() {
     assert_eq!(request.query_path_substrings, ["storage"]);
     assert_eq!(request.query_name_substrings, ["query"]);
 }
+
+#[test]
+fn retrieval_request_rejects_unbounded_limits() {
+    let selector = CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let error = CodeRetrievalRequest::new(
+        "symbol",
+        selector,
+        CodeQueryKind::Hybrid,
+        51,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect_err("large limit should fail");
+
+    assert_eq!(error.field, "limit");
+}

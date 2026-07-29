@@ -124,6 +124,12 @@ workflow 行为。
 ./check.sh
 ```
 
+可复用领域模型继续保留公开 `domain::*` facade，但物理职责分别归属
+`domain/core`、`domain/graph`、`domain/code`、`domain/knowledge` 与
+`domain/operations`。这些目录是真实且依赖无环的 Rust 模块，不使用生产路径别名模拟。
+带校验行为的领域 owner 直接挂载同级 UT，因此 repository registration、scope
+identity、retrieval request、repository status 与 index summary 不再共用笼统测试模块。
+
 ### 自迭代 Harness
 
 面向代码检索和 semantic/vector 检索优化实验，可以通过稳定启动脚本运行

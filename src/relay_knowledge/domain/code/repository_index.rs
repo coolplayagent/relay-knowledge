@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    code_dependency::CodeDependencyRecord,
-    code_repository::{
+    dependencies::CodeDependencyRecord,
+    error::DomainError,
+    repository::{
         CodeCallRecord, CodeFeatureFlagRecord, CodeFileDiagnostic, CodeImportRecord, CodeIndexMode,
         CodePathTombstone, CodeRouteRecord, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
         RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
-    code_workspace::CodeMonorepoWorkspace,
-    error::DomainError,
+    workspace::CodeMonorepoWorkspace,
 };
 
 /// Parsed index changes ready to commit into storage.
@@ -311,3 +311,7 @@ pub struct CodeIndexSummary {
     pub degraded_file_count: usize,
     pub progress: CodeIndexProgressSummary,
 }
+
+#[cfg(test)]
+#[path = "repository_index_tests.rs"]
+mod tests;
