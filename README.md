@@ -243,6 +243,10 @@ cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
+CI installs the current stable Rust toolchain. Update local `stable` before the
+final Clippy gate so newly stabilized lints cannot pass locally and fail only
+after the branch is pushed.
+
 The self-iteration harness runs its own product and harness quality checks in
 parallel dependency stages and defaults `--jobs auto` to the local CPU count.
 

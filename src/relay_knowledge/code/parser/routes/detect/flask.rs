@@ -3,6 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::RouteCandidate;
 use super::shared::extract_quoted_string_python;
 
+#[cfg(test)]
+#[path = "flask_tests.rs"]
+mod tests;
+
 const MAX_FLASK_ROUTE_DECORATOR_LINES: usize = 12;
 const MAX_PYTHON_ROUTER_PREFIX_LINES: usize = 12;
 const DYNAMIC_PYTHON_MOUNT_PREFIX: &str = "\0dynamic";
@@ -127,11 +131,8 @@ fn parse_flask_decorator(
     routers: &BTreeMap<String, PythonRouterInfo>,
 ) -> Option<FlaskRouteInfo> {
     let line = line.trim_start_matches('@');
-    let (func_part, args) = if let Some(paren_pos) = line.find('(') {
-        (&line[..paren_pos], &line[paren_pos + 1..])
-    } else {
-        return None;
-    };
+    let paren_pos = line.find('(')?;
+    let (func_part, args) = (&line[..paren_pos], &line[paren_pos + 1..]);
     let route_method = extract_flask_http_method(func_part);
     let is_route = func_line_matches_route(func_part);
     if !is_route {
@@ -184,7 +185,8 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
             mount_required: false,
             cross_file_mount_candidate: false,
         }
-    } else if let Some(args) = python_call_arguments(right, "Blueprint(") {
+    } else {
+        let args = python_call_arguments(right, "Blueprint(")?;
         let local_prefix = python_prefix_argument(args, "url_prefix");
         PythonRouterInfo {
             cross_file_mount_candidate: python_router_name_is_cross_file_candidate(
@@ -196,8 +198,6 @@ fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> 
             framework: "flask".to_owned(),
             mount_required: true,
         }
-    } else {
-        return None;
     };
 
     Some((router_name, router_info))
@@ -600,11 +600,8 @@ fn split_python_top_level_arguments(args: &str) -> Vec<&str> {
 
 fn parse_flask_methods_decorator(line: &str) -> Option<Vec<String>> {
     let line = line.trim_start_matches('@');
-    let (func_part, args) = if let Some(paren_pos) = line.find('(') {
-        (&line[..paren_pos], &line[paren_pos + 1..])
-    } else {
-        return None;
-    };
+    let paren_pos = line.find('(')?;
+    let (func_part, args) = (&line[..paren_pos], &line[paren_pos + 1..]);
     if func_part != ".methods" {
         let base = func_part.rsplit('.').next().unwrap_or("");
         if base != "methods" {
