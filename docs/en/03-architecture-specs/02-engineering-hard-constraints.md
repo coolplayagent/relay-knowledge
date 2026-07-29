@@ -138,6 +138,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::main` is only the binary composition root. Mode dispatch, loop control, manual evaluation, generation iterations, candidate evaluation, documentation gates, score persistence, report metadata, adopted-optimization documentation, terminal output, and run identity live under `tools/self_iteration::workflow` in files named for those responsibilities. Run-identity and documentation-gate unit tests stay beside their matching implementation files. Cross-workflow consumers use the crate facade; do not restore orchestration, persistence, documentation, and inline tests to `main.rs`.
 
+### 3.16 Self-Iteration Process Boundary Ownership
+
+`tools/self_iteration::command` owns external-process contracts in `mod.rs`, child lifecycle and timeout handling in `execution`, pipe reader/writer workers in `pipes`, progress events in `logging`, bounded output selection in `output`, and failed-result construction in `failure`. Output and execution unit tests stay beside their matching implementation files. Do not restore a root `command.rs` that combines process orchestration, worker plumbing, observability, formatting, and inline tests.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.
