@@ -88,6 +88,8 @@ Codebase-view persistence is grouped under `storage::sqlite::code_views`: `mod.r
 
 Durable code-index tasks are grouped physically under `storage::sqlite::code_tasks`: `mod.rs` owns queueing, attempt-scoped leases, bounded retry, completion/failure, reset, checkpoints, and scope retention; `worktree` protects active overlay base scopes; and focused queue, lease, reset, retention, and status tests stay beside that boundary. The logical test modules may remain code-facade siblings for white-box access, but their files must not return to the SQLite root.
 
+Repository-set persistence is grouped under `storage::sqlite::code_set`: `mod.rs` owns set membership, overlay refresh, cross-repository edge matching, and status; `manifest` owns bounded module-key derivation; `refresh_tasks` owns durable refresh-task leases and retry; and set, workspace, manifest, and refresh-task tests stay in the same directory. Facade-level test visibility must not be used as a reason to scatter `code_set_*` files through the SQLite root.
+
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
 
 ### 3.7 Code Index Foundations
