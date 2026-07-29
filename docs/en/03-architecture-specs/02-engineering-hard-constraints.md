@@ -126,6 +126,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::history` keeps run selection, persistence, CSV/SVG export, and adoption-state interpretation in `runs`, `persistence`, `export`, and `run_state`; `synthesis` builds bounded history summaries, while the `memory` subtree owns long-term memory queries, record construction, storage, summaries, and metadata. Callers express dependencies through `history::synthesis` or `history::memory`, and focused unit tests stay beside their boundary. Do not restore root-level `history_synthesis.rs` or `memory.rs`, or a monolithic `history.rs` with a large inline test module.
 
+### 3.13 Self-Iteration Unattended Workflow Ownership
+
+`tools/self_iteration::unattended` keeps the long-running lifecycle, durable state, cycle selection, candidate attempts, evaluation persistence, derived configuration, metadata, category rotation, macro triggers, deep checks, and outcome policy in files named for those responsibilities. State, category-rotation, and trigger unit tests stay beside their matching implementation files. `mod.rs` owns only shared contracts and the module facade; do not restore a root `unattended.rs` that combines the entire workflow and its inline tests.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

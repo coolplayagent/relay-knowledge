@@ -126,6 +126,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::history` 必须把运行记录选择、持久化、CSV/SVG 导出和采用状态分别放在 `runs`、`persistence`、`export` 和 `run_state`；`synthesis` 负责生成有界历史摘要，`memory` 子目录负责长期记忆查询、记录构建、存储、摘要和元数据。调用方必须通过 `history::synthesis` 或 `history::memory` 表达依赖，定向 UT 与对应边界共置。不得恢复根目录级 `history_synthesis.rs`、`memory.rs` 或带有内联大测试模块的单体 `history.rs`。
 
+### 3.13 自迭代无人值守工作流职责
+
+`tools/self_iteration::unattended` 必须把长运行生命周期、持久状态、循环选择、候选尝试、评估持久化、派生配置、元数据、类别轮换、宏触发、深度检查和结果策略分别放入与职责同名的文件。状态、类别轮换和触发策略 UT 必须与对应实现同级共置。`mod.rs` 只维护共享合同和模块 facade；不得恢复同时组合完整工作流与内联测试的根目录 `unattended.rs`。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
