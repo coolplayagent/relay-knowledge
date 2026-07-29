@@ -10,7 +10,6 @@ mod code;
 use rusqlite::{Connection, OptionalExtension, params};
 
 mod canvas;
-mod canvas_code;
 mod code_graph;
 mod evidence_identity;
 mod file_index;

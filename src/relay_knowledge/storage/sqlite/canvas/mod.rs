@@ -10,6 +10,8 @@ use crate::{
     },
 };
 
+mod code;
+
 const MAX_CANVAS_LIMIT: usize = 1000;
 
 pub(super) fn graph_canvas(
@@ -29,10 +31,10 @@ pub(super) fn graph_canvas(
         add_knowledge_nodes(connection, &mut builder, &filter)?;
     }
     if request.selection.includes_code() {
-        super::canvas_code::add_code_nodes(connection, &mut builder, &filter)?;
+        code::add_code_nodes(connection, &mut builder, &filter)?;
     }
     if request.selection == GraphCanvasSelection::Mixed {
-        super::canvas_code::add_source_path_links(connection, &mut builder, &filter)?;
+        code::add_source_path_links(connection, &mut builder, &filter)?;
     }
 
     Ok(builder.into_snapshot())
@@ -800,5 +802,5 @@ impl CanvasBuilder {
 }
 
 #[cfg(test)]
-#[path = "canvas_tests.rs"]
+#[path = "tests.rs"]
 mod tests;

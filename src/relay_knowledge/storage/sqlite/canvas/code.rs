@@ -7,7 +7,7 @@ use crate::{
     storage::{GraphCanvasStorageEdge, GraphCanvasStorageNode, StorageError},
 };
 
-use super::canvas::{
+use super::{
     CanvasBuilder, CanvasFilter, code_file_node_id, code_symbol_node_id, collect_rows, detail_map,
     evidence_node_id,
 };
@@ -399,7 +399,7 @@ fn insert_code_file_node(
     builder.insert_edge(GraphCanvasStorageEdge {
         id: format!("scope-file:{scope}:{path}"),
         kind: "contains".to_owned(),
-        source: super::canvas::scope_node_id(scope),
+        source: super::scope_node_id(scope),
         target: code_file_node_id(scope, path),
         label: "contains".to_owned(),
         graph_version,
