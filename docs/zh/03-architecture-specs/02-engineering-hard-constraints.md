@@ -224,6 +224,8 @@ ACP prompt 的 scope authorization、freshness parsing、资源 limit/context-by
 
 Worktree-overlay 索引实现统一位于 `code/index/worktree_overlay` 目录，物理文件名按 `dirs`、`git_overlay`、`overlay_plan`、`overlay_scope` 和 `untracked` 职责命名。不得在 `code/index` 根目录恢复 `worktree_overlay_*` 前缀文件，也不得改变 overlay 的有界变更、Gitlink 展开或 scope 过滤合同。
 
+Worktree-overlay 的 hash marker、删除集合、待解析文件集合和同内容跳过判定归 `worktree_overlay::recording` 所有，并由同级 UT 固定二进制 framing 与删除后重建语义。主 overlay 编排和 Gitlink 处理只能复用该记录边界，不得各自实现不同的 overlay hash 输入协议。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。

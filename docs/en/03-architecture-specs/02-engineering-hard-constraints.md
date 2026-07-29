@@ -224,6 +224,8 @@ ACP prompt scope authorization, freshness parsing, resource limit/context-byte v
 
 Worktree-overlay indexing lives in the `code/index/worktree_overlay` directory, with physical filenames that describe the `dirs`, `git_overlay`, `overlay_plan`, `overlay_scope`, and `untracked` responsibilities. Do not restore `worktree_overlay_*` prefixed files at the `code/index` root or weaken bounded-change, Gitlink-expansion, or scope-filtering contracts.
 
+Worktree-overlay hash markers, deletion sets, parse queues, and same-content skip decisions belong to `worktree_overlay::recording`, with sibling unit tests fixing the binary framing and delete-then-recreate semantics. The main overlay orchestration and Gitlink handling reuse this recording boundary and must not implement divergent overlay-hash input protocols.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.

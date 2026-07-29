@@ -26,6 +26,7 @@ mod dirs;
 mod git_overlay;
 mod overlay_plan;
 mod overlay_scope;
+mod recording;
 mod untracked;
 
 use dirs::{worktree_directory_files, worktree_directory_is_expandable};
@@ -35,6 +36,12 @@ use git_overlay::{
 };
 use overlay_plan::WorktreeOverlayPlan;
 use overlay_scope::{WorktreeOverlayScope, bounded_worktree_changes};
+use recording::{
+    WorktreeFileOutputs, record_deleted_path as record_worktree_deleted_path,
+    record_file_as as record_worktree_file_as,
+    record_status_marker as record_worktree_status_marker,
+    record_unparseable_path as record_unparseable_worktree_path,
+};
 
 pub(super) fn worktree_overlay_identity(
     registration: &CodeRepositoryRegistration,
@@ -312,15 +319,7 @@ fn record_worktree_path(
         return Ok(());
     }
     if context.overlay_scope.selected(path) {
-        record_worktree_file(
-            context.root,
-            path,
-            context.previous_hashes,
-            &mut *outputs.overlay_hash_input,
-            &mut *outputs.deleted_paths,
-            &mut *outputs.files_to_parse,
-            &mut *outputs.skipped_unchanged_count,
-        )?;
+        record_worktree_file_as(context.root, path, path, context.previous_hashes, outputs)?;
     }
 
     Ok(())
@@ -356,14 +355,12 @@ fn record_worktree_directory(
     }
     for nested_path in worktree_directory_files(context.root, path)? {
         if context.overlay_scope.untracked_selected(&nested_path) {
-            record_worktree_file(
+            record_worktree_file_as(
                 context.root,
                 &nested_path,
+                &nested_path,
                 context.previous_hashes,
-                &mut *outputs.overlay_hash_input,
-                &mut *outputs.deleted_paths,
-                &mut *outputs.files_to_parse,
-                &mut *outputs.skipped_unchanged_count,
+                outputs,
             )?;
         }
     }
@@ -389,32 +386,6 @@ fn workspace_overlay_entries(
         .into_iter()
         .map(|(path, byte_count)| changes::GitTreeEntry { path, byte_count })
         .collect()
-}
-
-fn record_worktree_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {
-    overlay_hash_input.extend_from_slice(b"S\0");
-    overlay_hash_input.extend_from_slice(path.as_bytes());
-    overlay_hash_input.push(0);
-}
-
-fn record_worktree_deleted_path(
-    path: &str,
-    overlay_hash_input: &mut Vec<u8>,
-    deleted_paths: &mut Vec<String>,
-) {
-    overlay_hash_input.extend_from_slice(b"D\0");
-    overlay_hash_input.extend_from_slice(path.as_bytes());
-    overlay_hash_input.push(0);
-    deleted_paths.push(path.to_owned());
-}
-
-fn record_unparseable_worktree_path(
-    path: &str,
-    overlay_hash_input: &mut Vec<u8>,
-    deleted_paths: &mut Vec<String>,
-) {
-    record_worktree_status_marker(path, overlay_hash_input);
-    record_worktree_deleted_path(path, overlay_hash_input, deleted_paths);
 }
 
 fn record_previous_gitlink_child_deletions(
@@ -443,68 +414,6 @@ fn record_previous_gitlink_child_deletions(
     }
 
     Ok(!paths.is_empty())
-}
-
-fn record_worktree_file(
-    root: &Path,
-    path: &str,
-    previous_hashes: &BTreeMap<String, String>,
-    overlay_hash_input: &mut Vec<u8>,
-    deleted_paths: &mut Vec<String>,
-    files_to_parse: &mut Vec<(String, Vec<u8>)>,
-    skipped_unchanged_count: &mut usize,
-) -> Result<(), CodeIndexError> {
-    let mut outputs = WorktreeFileOutputs {
-        overlay_hash_input,
-        deleted_paths,
-        files_to_parse,
-        skipped_unchanged_count,
-    };
-    record_worktree_file_as(root, path, path, previous_hashes, &mut outputs)
-}
-
-struct WorktreeFileOutputs<'a> {
-    overlay_hash_input: &'a mut Vec<u8>,
-    deleted_paths: &'a mut Vec<String>,
-    files_to_parse: &'a mut Vec<(String, Vec<u8>)>,
-    skipped_unchanged_count: &'a mut usize,
-}
-
-fn record_worktree_file_as(
-    root: &Path,
-    source_path: &str,
-    indexed_path: &str,
-    previous_hashes: &BTreeMap<String, String>,
-    outputs: &mut WorktreeFileOutputs<'_>,
-) -> Result<(), CodeIndexError> {
-    let bytes = fs::read(root.join(source_path))?;
-    let blob_hash = stable_content_hash(&bytes);
-    outputs.overlay_hash_input.extend_from_slice(b"F\0");
-    outputs
-        .overlay_hash_input
-        .extend_from_slice(indexed_path.as_bytes());
-    outputs.overlay_hash_input.push(0);
-    outputs
-        .overlay_hash_input
-        .extend_from_slice(blob_hash.as_bytes());
-    outputs.overlay_hash_input.push(0);
-    let was_deleted = outputs
-        .deleted_paths
-        .iter()
-        .any(|path| path == indexed_path);
-    outputs.deleted_paths.retain(|path| path != indexed_path);
-    if previous_hashes.get(indexed_path) == Some(&blob_hash) && !was_deleted {
-        *outputs.skipped_unchanged_count += 1;
-        return Ok(());
-    }
-    outputs
-        .files_to_parse
-        .retain(|(path, _)| path != indexed_path);
-    outputs
-        .files_to_parse
-        .push((indexed_path.to_owned(), bytes));
-
-    Ok(())
 }
 
 fn record_deleted_gitlink_overlay(
