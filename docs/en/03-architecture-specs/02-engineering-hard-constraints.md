@@ -158,7 +158,7 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 ### 3.20 Production and Unit-Test File Ownership
 
-Production Rust files must not embed a `#[cfg(test)] mod` implementation. Each unit-test module lives in a descriptive sibling `*_tests.rs` file and is attached from its production owner with an explicit test-only `#[path]`; the production file remains the only owner of the module declaration so white-box visibility and test identity stay stable. The `api` contracts apply this one-to-one pairing to `agent`, `code_repository`, `error`, and `stream`; application-layer repository, indexing, repository-set, view, knowledge, service, and update units follow the same rule. Do not merge these tests back into production files or create a shared catch-all test bucket.
+Production Rust files must not embed a `#[cfg(test)] mod` implementation. Each unit-test module lives in a descriptive sibling `*_tests.rs` file and is attached from its production owner with an explicit test-only `#[path]`; the production file remains the only owner of the module declaration so white-box visibility and test identity stay stable. The `api` contracts apply this one-to-one pairing to `agent`, `code_repository`, `error`, and `stream`; application-layer repository, indexing, repository-set, view, knowledge, service, and update units follow the same rule. Code ingestion and indexing units apply it across language metadata, generated detection, identity, index planning/snapshots, parser workspaces/languages, and source discovery. Do not merge these tests back into production files or create a shared catch-all test bucket.
 
 ## 4. HTTP and QoS
 

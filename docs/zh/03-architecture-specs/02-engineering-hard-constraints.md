@@ -158,7 +158,7 @@ SQLite code-store facade 及其直接拥有的持久化行为必须在物理上�
 
 ### 3.20 生产代码与单元测试文件职责
 
-生产 Rust 文件不得内嵌 `#[cfg(test)] mod` 实现。每个单元测试模块必须放入命名明确的同级 `*_tests.rs` 文件，并由所属生产文件通过显式 test-only `#[path]` 挂载；模块声明仍由生产文件唯一维护，以保持 white-box 可见性和测试身份稳定。`api` contract 已对 `agent`、`code_repository`、`error` 和 `stream` 实施一一配对，application 层的 repository、indexing、repository-set、view、knowledge、service 和 update 单元也遵循同一规则。不得把这些测试重新合并进生产文件，也不得建立共享的笼统测试桶。
+生产 Rust 文件不得内嵌 `#[cfg(test)] mod` 实现。每个单元测试模块必须放入命名明确的同级 `*_tests.rs` 文件，并由所属生产文件通过显式 test-only `#[path]` 挂载；模块声明仍由生产文件唯一维护，以保持 white-box 可见性和测试身份稳定。`api` contract 已对 `agent`、`code_repository`、`error` 和 `stream` 实施一一配对，application 层的 repository、indexing、repository-set、view、knowledge、service 和 update 单元也遵循同一规则。代码摄取与索引单元在 language metadata、generated detection、identity、index plan/snapshot、parser workspace/language 和 source discovery 中同样执行该规则。不得把这些测试重新合并进生产文件，也不得建立共享的笼统测试桶。
 
 ## 4. HTTP 与 QoS
 
