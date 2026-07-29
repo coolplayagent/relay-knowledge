@@ -892,5 +892,5 @@ fn software_projection_result_count(response: &crate::api::SoftwareGlobalRespons
 }
 
 #[cfg(test)]
-#[path = "code_tools_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
