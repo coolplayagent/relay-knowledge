@@ -14,7 +14,6 @@ use super::{
     filesystem_delta::build_filesystem_delta_snapshot,
     full_snapshot::build_full_snapshot_as_worktree_overlay,
     git::{git_bytes, resolve_ref},
-    ids::stable_content_hash,
     parser::parse_indexed_file,
     scope,
     snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
@@ -24,6 +23,7 @@ use super::{
 
 mod dirs;
 mod git_overlay;
+mod gitlink_recording;
 mod overlay_plan;
 mod overlay_scope;
 mod recording;
@@ -34,6 +34,7 @@ use git_overlay::{
     StagedPathKind, base_path_exists, contains_git_metadata, staged_path_kind,
     submodule_worktree_head, submodule_worktree_parent_path,
 };
+use gitlink_recording::{WorktreeOverlayRecorder, record_previous_gitlink_child_deletions};
 use overlay_plan::WorktreeOverlayPlan;
 use overlay_scope::{WorktreeOverlayScope, bounded_worktree_changes};
 use recording::{
@@ -388,34 +389,6 @@ fn workspace_overlay_entries(
         .collect()
 }
 
-fn record_previous_gitlink_child_deletions(
-    path: &str,
-    previous_hashes: &BTreeMap<String, String>,
-    scope: &WorktreeOverlayScope<'_>,
-    retained_paths: &BTreeSet<String>,
-    overlay_hash_input: &mut Vec<u8>,
-    deleted_paths: &mut Vec<String>,
-) -> Result<bool, CodeIndexError> {
-    let prefix = format!("{}/", path.trim_end_matches('/'));
-    let paths = previous_hashes
-        .keys()
-        .filter(|previous_path| previous_path.starts_with(&prefix))
-        .filter(|previous_path| !retained_paths.contains(*previous_path))
-        .filter(|previous_path| scope.selected(previous_path))
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    source_gitlink::ensure_gitlink_expansion_budget(
-        path,
-        paths.len(),
-        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
-    )?;
-    for path in &paths {
-        record_worktree_deleted_path(path, overlay_hash_input, deleted_paths);
-    }
-
-    Ok(!paths.is_empty())
-}
-
 fn record_deleted_gitlink_overlay(
     root: &Path,
     base_commit: &str,
@@ -456,68 +429,6 @@ fn record_deleted_gitlink_overlay(
     }
 
     Ok(true)
-}
-
-struct WorktreeOverlayRecorder<'a, 'scope> {
-    scope: &'a WorktreeOverlayScope<'scope>,
-    previous_hashes: &'a BTreeMap<String, String>,
-    overlay_hash_input: &'a mut Vec<u8>,
-    deleted_paths: &'a mut Vec<String>,
-    files_to_parse: &'a mut Vec<(String, Vec<u8>)>,
-    skipped_unchanged_count: &'a mut usize,
-}
-
-impl WorktreeOverlayRecorder<'_, '_> {
-    fn path_is_selected(&self, path: &str) -> bool {
-        self.scope.selected(path)
-    }
-
-    fn path_scope_overlaps(&self, path: &str) -> bool {
-        self.scope.overlaps(path)
-    }
-
-    fn untracked_path_is_selected(&self, path: &str) -> bool {
-        self.scope.untracked_selected(path)
-    }
-
-    fn record_deleted_path(&mut self, path: &str) {
-        record_worktree_deleted_path(path, self.overlay_hash_input, self.deleted_paths);
-    }
-
-    fn record_unparseable_path(&mut self, path: &str) {
-        record_unparseable_worktree_path(path, self.overlay_hash_input, self.deleted_paths);
-    }
-
-    fn record_gitlink_file(
-        &mut self,
-        root: &Path,
-        submodule_path: &str,
-        commit: &str,
-        entry: &source_gitlink::SubmodulePathEntry,
-    ) -> Result<(), CodeIndexError> {
-        let bytes =
-            source_gitlink::submodule_entry_bytes(root, submodule_path, commit, &entry.child_path)?;
-        let blob_hash = stable_content_hash(&bytes);
-        self.overlay_hash_input.extend_from_slice(b"F\0");
-        self.overlay_hash_input
-            .extend_from_slice(entry.parent_path.as_bytes());
-        self.overlay_hash_input.push(0);
-        self.overlay_hash_input
-            .extend_from_slice(blob_hash.as_bytes());
-        self.overlay_hash_input.push(0);
-        let was_deleted = self
-            .deleted_paths
-            .iter()
-            .any(|path| path == &entry.parent_path);
-        self.deleted_paths.retain(|path| path != &entry.parent_path);
-        if self.previous_hashes.get(&entry.parent_path) == Some(&blob_hash) && !was_deleted {
-            *self.skipped_unchanged_count += 1;
-            return Ok(());
-        }
-        self.files_to_parse.push((entry.parent_path.clone(), bytes));
-
-        Ok(())
-    }
 }
 
 fn record_staged_gitlink_overlay(

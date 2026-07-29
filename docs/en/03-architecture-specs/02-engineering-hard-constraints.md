@@ -226,6 +226,8 @@ Worktree-overlay indexing lives in the `code/index/worktree_overlay` directory, 
 
 Worktree-overlay hash markers, deletion sets, parse queues, and same-content skip decisions belong to `worktree_overlay::recording`, with sibling unit tests fixing the binary framing and delete-then-recreate semantics. The main overlay orchestration and Gitlink handling reuse this recording boundary and must not implement divergent overlay-hash input protocols.
 
+Worktree-overlay Gitlink output aggregation, child-path deletion replay, and the scope-aware recorder belong to `worktree_overlay::gitlink_recording`. That owner uses the shared `recording` protocol, with paired unit tests proving retained, out-of-scope, and deleted child paths stay distinct; the Gitlink state machine must not duplicate the recorder or invent new markers directly.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.

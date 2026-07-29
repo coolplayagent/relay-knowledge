@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
-use super::{CodeIndexError, stable_content_hash};
+use super::{super::ids::stable_content_hash, CodeIndexError};
 
 pub(super) struct WorktreeFileOutputs<'a> {
     pub(super) overlay_hash_input: &'a mut Vec<u8>,
