@@ -48,6 +48,8 @@ HTTP 基础边界必须完整收敛在 `net/http/`：`mod.rs` 维护配置、cli
 
 Web adapter 统一收敛在 `interfaces::web`：`mod.rs` 负责 router composition 和共享 response/error 边界，`code_api`、`code_index_request`、`code_view_request`、`files`、`model_config` 负责各自命名的 HTTP contract，定向测试保持同目录。不得恢复根目录级 `web_*` 兄弟文件，也不得从该 adapter 打开 socket。
 
+MCP adapter 在物理上统一收敛到 `interfaces::agent::mcp`：`mod.rs` 负责 server composition、streamable-HTTP/JSON-RPC dispatch、QoS admission、cancellation 和共享 tool-result mapping，具名子模块分别拥有 audit、protocol、resources、prompts、state、authorization、registry 与 code-tool 行为。根 adapter 测试以 `mod_tests`、`protocol_tests`、`tool_tests`、`software_tool_tests`、`feature_flag_tool_tests` 和 `runtime_guardrail_tests` 与 facade 共置，可复用的测试存储和 HTTP transport fixture 明确命名为 `test_support` 与 `transport_harness`。不得在该所有权边界外恢复根目录级 `mcp_*` 文件或 issue 编号测试模块名。
+
 CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解析、dispatch 和稳定公开 CLI surface，`spec` 负责 machine-readable command contract，`render` 负责输出序列化，`repo`、`repo_set`、`setup` 负责各自命令族，解析、命名、remote、service、map、version 定向测试放在 `tests`。需要 white-box 访问或兼容性时，命令模块可保留既有逻辑名称，但禁止恢复根目录级 `*_cli` 前缀桶。
 
 代码库理解视图统一收敛在 `application::code_repository::views` 目录：`service` 只编排 scope、新鲜度和响应，`architecture`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope` 分别拥有一种派生算法，`builder` 和 `rules` 提供有界构建及确定性分类规则。视图测试与所属目录共置，不再使用含义不清的 `views_*` 平铺文件名。

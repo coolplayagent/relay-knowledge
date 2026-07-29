@@ -8,8 +8,8 @@ use axum::{
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use super::mcp_test_support::SlowSearchStore;
-use super::mcp_tests::{
+use super::test_support::SlowSearchStore;
+use super::tests::{
     call_mcp, call_mcp_with_session, initialize_params, initialize_session, raw_custom_response,
     raw_mcp_request, raw_mcp_request_without_protocol, raw_mcp_response,
     server_and_service_with_store, server_with_env, tool_names,

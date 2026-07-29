@@ -978,23 +978,23 @@ fn qos_message(reason: RejectReason) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "mcp_feature_flag_tool_tests.rs"]
-mod mcp_feature_flag_tool_tests;
+#[path = "feature_flag_tool_tests.rs"]
+mod feature_flag_tool_tests;
 #[cfg(test)]
-#[path = "mcp_issue_283_tests.rs"]
-mod mcp_issue_283_tests;
+#[path = "protocol_tests.rs"]
+mod protocol_tests;
 #[cfg(test)]
-#[path = "mcp_protocol_tests.rs"]
-mod mcp_protocol_tests;
+#[path = "runtime_guardrail_tests.rs"]
+mod runtime_guardrail_tests;
 #[cfg(test)]
-#[path = "mcp_software_tool_tests.rs"]
-mod mcp_software_tool_tests;
+#[path = "software_tool_tests.rs"]
+mod software_tool_tests;
 #[cfg(test)]
-#[path = "mcp_test_support.rs"]
-mod mcp_test_support;
+#[path = "test_support.rs"]
+mod test_support;
 #[cfg(test)]
-#[path = "mcp_tests.rs"]
-mod mcp_tests;
+#[path = "mod_tests.rs"]
+mod tests;
 #[cfg(test)]
-#[path = "mcp_tool_tests.rs"]
-mod mcp_tool_tests;
+#[path = "tool_tests.rs"]
+mod tool_tests;

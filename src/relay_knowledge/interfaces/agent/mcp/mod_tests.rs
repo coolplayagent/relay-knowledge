@@ -16,9 +16,9 @@ use crate::{
     storage::SqliteGraphStore,
 };
 
-use super::mcp_test_support::SlowSearchStore;
+use super::test_support::SlowSearchStore;
 
-#[path = "mcp_tests/transport_harness.rs"]
+#[path = "transport_harness.rs"]
 mod transport_harness;
 pub(super) use transport_harness::{
     call_mcp, call_mcp_with_session, initialize_params, initialize_session, raw_custom_request,

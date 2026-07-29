@@ -7,7 +7,7 @@ use std::{
 
 use serde_json::json;
 
-use super::mcp_tests::{
+use super::tests::{
     call_mcp_with_session, initialize_session, server_and_service, tool_call, tool_names,
 };
 use super::*;
