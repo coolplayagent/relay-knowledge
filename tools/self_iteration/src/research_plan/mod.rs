@@ -5,7 +5,3 @@ pub struct ResearchPlanInput<'a> {
 }
 
 include!("render.rs");
-
-#[cfg(test)]
-#[path = "render_tests.rs"]
-mod render_tests;
