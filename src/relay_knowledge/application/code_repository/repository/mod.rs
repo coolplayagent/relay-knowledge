@@ -1,11 +1,14 @@
 mod staleness;
 mod status;
 #[cfg(test)]
+#[path = "test_support.rs"]
 mod test_support;
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;
 mod worktree;
 #[cfg(test)]
+#[path = "worktree_review_tests.rs"]
 mod worktree_review_tests;
 
 use crate::{

@@ -949,4 +949,5 @@ fn now_millis() -> u64 {
 }
 
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;

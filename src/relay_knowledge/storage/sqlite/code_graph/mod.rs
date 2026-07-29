@@ -815,4 +815,5 @@ fn domain_error(error: DomainError) -> StorageError {
 }
 
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;

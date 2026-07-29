@@ -26,12 +26,17 @@ use results::{append_code_grep_fallback, append_definition_source_fallback};
 use scoring::reference_source_grep_score_adjustment;
 
 #[cfg(test)]
+#[path = "filter_tests.rs"]
 mod filter_tests;
 #[cfg(test)]
+#[path = "generated_tests.rs"]
 mod generated_tests;
 #[cfg(test)]
+#[path = "pipeline_tests.rs"]
 mod pipeline_tests;
 #[cfg(test)]
+#[path = "reference_tests.rs"]
 mod reference_tests;
 #[cfg(test)]
+#[path = "surface_tests.rs"]
 mod surface_tests;

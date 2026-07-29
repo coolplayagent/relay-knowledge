@@ -965,4 +965,5 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;

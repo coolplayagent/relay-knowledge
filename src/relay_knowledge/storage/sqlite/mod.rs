@@ -978,6 +978,7 @@ fn replace_fact_evidence_links(
 }
 
 #[cfg(test)]
+#[path = "metadata_tests.rs"]
 mod metadata_tests;
 
 #[cfg(test)]
@@ -985,6 +986,7 @@ mod metadata_tests;
 mod graph_storage_tests;
 
 #[cfg(test)]
+#[path = "graphrag_phase4_tests.rs"]
 mod graphrag_phase4_tests;
 
 #[cfg(test)]

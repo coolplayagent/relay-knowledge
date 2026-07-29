@@ -981,4 +981,5 @@ fn backfill_edge_search_language_ids_once(connection: &Connection) -> Result<(),
     Ok(())
 }
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;

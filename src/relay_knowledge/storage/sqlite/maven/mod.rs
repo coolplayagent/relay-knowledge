@@ -13,10 +13,13 @@ mod model;
 mod pom_path;
 mod property_interpolation;
 #[cfg(test)]
+#[path = "review_followup_tests.rs"]
 mod review_followup_tests;
 #[cfg(test)]
+#[path = "review_tests.rs"]
 mod review_tests;
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;
 mod xml;
 

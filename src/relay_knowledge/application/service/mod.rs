@@ -929,25 +929,33 @@ mod storage_provider;
 mod watcher;
 
 #[cfg(test)]
+#[path = "id_tests.rs"]
 mod id_tests;
 
 #[cfg(test)]
+#[path = "graph_only_tests.rs"]
 mod graph_only_tests;
 
 #[cfg(test)]
+#[path = "recovery_tests.rs"]
 mod recovery_tests;
 
 #[cfg(test)]
+#[path = "refresh_tests.rs"]
 mod refresh_tests;
 
 #[cfg(test)]
+#[path = "storage_tests.rs"]
 mod storage_tests;
 
 #[cfg(test)]
+#[path = "operations_tests.rs"]
 mod operations_tests;
 
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;
 
 #[cfg(test)]
+#[path = "trace_tests.rs"]
 mod trace_tests;

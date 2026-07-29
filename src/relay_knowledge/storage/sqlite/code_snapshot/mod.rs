@@ -37,12 +37,15 @@ pub(super) use fingerprints::{
 };
 
 #[cfg(test)]
+#[path = "candidate_paths_tests.rs"]
 mod candidate_paths_tests;
 
 #[cfg(test)]
+#[path = "import_tests.rs"]
 mod import_tests;
 
 #[cfg(test)]
+#[path = "progress_tests.rs"]
 mod progress_tests;
 
 const IMPORT_SCHEMA: &str = "relay_import";

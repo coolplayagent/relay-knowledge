@@ -937,10 +937,13 @@ fn now_millis() -> u64 {
 }
 
 #[cfg(test)]
+#[path = "search_materialization_tests.rs"]
 mod search_materialization_tests;
 
 #[cfg(test)]
+#[path = "session_finalize_tests.rs"]
 mod session_finalize_tests;
 
 #[cfg(test)]
+#[path = "typescript_finalize_tests.rs"]
 mod typescript_finalize_tests;
