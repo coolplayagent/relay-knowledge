@@ -6,12 +6,12 @@ use crate::{
     application::service::RelayKnowledgeService,
 };
 
-use super::{
+use super::super::{
     clock::now_millis,
     errors::storage_api_error,
-    index_task::recover_orphaned_code_index_task_leases,
     repository_status::{code_status_checkpoint, required_code_repository},
 };
+use super::task::recover_orphaned_code_index_task_leases;
 
 impl RelayKnowledgeService {
     /// Resets unfinished full index tasks for a registered repository.

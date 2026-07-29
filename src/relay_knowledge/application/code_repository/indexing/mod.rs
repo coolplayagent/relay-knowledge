@@ -1,3 +1,9 @@
+mod fast_path;
+mod queue;
+mod state;
+mod task;
+mod tasks;
+
 use crate::{
     api::{
         ApiError, ApiMetadata, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse,
@@ -15,24 +21,28 @@ use crate::{
 
 use crate::application::service::RelayKnowledgeService;
 
+use self::{
+    fast_path::fresh_full_index_response,
+    queue::queue_worktree_overlay_index_task,
+    state::{
+        RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request, index_start_from_completed,
+        previous_index_state_for_index, requested_index_ref_for_response,
+    },
+    task::{
+        CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
+        CodeIndexTaskLeaseContext, code_index_worker_lease_owner,
+        recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
+    },
+};
 use super::{
     blocking::run_blocking_code,
     clock::now_millis,
     errors::storage_api_error,
-    fast_index::fresh_full_index_response,
-    index_state::{
-        RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request, index_start_from_completed,
-        previous_index_state_for_index, requested_index_ref_for_response,
-    },
-    index_task::{
-        CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
-        CodeIndexTaskLeaseContext, code_index_worker_lease_owner, recover_code_index_task_leases,
-        recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
-    },
-    queue::queue_worktree_overlay_index_task,
     repository_status::{registration_from_status, required_code_repository},
     worktree_ref::pending_worktree_overlay_base_commit,
 };
+
+pub(super) use task::recover_code_index_task_leases;
 
 impl RelayKnowledgeService {
     /// Builds or updates the tree-sitter code index for a registered repository.

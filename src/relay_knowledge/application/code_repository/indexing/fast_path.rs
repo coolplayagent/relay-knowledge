@@ -10,10 +10,8 @@ use crate::{
     storage::KnowledgeStore,
 };
 
-use super::{
-    errors::storage_api_error,
-    index_state::{degraded_file_count_for_fresh_index, fresh_full_index_probe},
-};
+use super::state::{degraded_file_count_for_fresh_index, fresh_full_index_probe};
+use crate::application::code_repository::errors::storage_api_error;
 
 pub(super) async fn fresh_full_index_response(
     store: &Arc<dyn KnowledgeStore>,

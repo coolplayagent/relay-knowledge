@@ -42,7 +42,7 @@
 
 ### 3.2 代码仓库应用工作流
 
-`application::code_repository` 按用例划分内部所有权：`repository` 负责注册、删除、状态和报告，`index_workflow` 负责索引执行、持久任务租约、checkpoint 和 scope preview，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
+`application::code_repository` 按用例划分内部所有权：`repository` 负责注册、删除、状态和报告，`indexing` 负责索引执行、持久任务租约、checkpoint、scope preview 和 worker 管理，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
 
 Web adapter 统一收敛在 `interfaces::web`：`mod.rs` 负责 router composition 和共享 response/error 边界，`code_api`、`code_index_request`、`code_view_request`、`files`、`model_config` 负责各自命名的 HTTP contract，定向测试保持同目录。不得恢复根目录级 `web_*` 兄弟文件，也不得从该 adapter 打开 socket。
 
@@ -52,7 +52,7 @@ CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解
 
 源码兜底检索统一收敛在 `application::code_repository::source_fallback` 目录：`execution` 是唯一 I/O 编排入口，`plan` 决定是否以及如何执行有界兜底，`identity`、`filters`、`scoring`、`results` 分别负责身份覆盖、请求约束、评分和结果归并，`imports`、`surface`、`worktree` 隔离特定证据边界。目录外不得直接依赖这些内部算法 helper。
 
-代码仓库共享行为必须按明确职责拆分：`index_task` 负责持久任务租约和 worker 恢复，`index_state` 负责已持久化索引状态检查及复用，`scope` 负责 scope 解析和 filter 兼容性，`repository_status` 负责注册状态查询和 checkpoint 选择；`blocking`、`errors`、`clock` 分别隔离 runtime、错误和持久化时间边界。调用方必须直接依赖职责模块，不得重新引入含义宽泛的 `support`、`helper` 或 utility 聚合层。
+`indexing` 目录是严格的工作流边界：`mod.rs` 编排全量与增量执行，`state` 负责已持久化索引状态检查及复用，`task` 负责持久租约与 worker 恢复，`queue` 负责有界 overlay 任务提交，`fast_path` 负责经过校验的新鲜索引复用，`tasks` 负责任务管理。目录只向父模块暴露仓库注册所需的租约恢复操作，内部索引 helper 不得泄漏到查询或 adapter。共享的 `scope` 和 `repository_status` 继续负责 scope 解析、filter 兼容性、注册状态查询和 checkpoint 选择，`blocking`、`errors`、`clock` 分别隔离 runtime、错误和持久化时间边界。不得恢复根级 `index_*`、`fast_index`、`queue` 或 `tasks` 文件桶。
 
 ### 3.3 仓库领域模型职责
 

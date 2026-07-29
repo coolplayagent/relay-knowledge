@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-use super::{
+use super::super::{
     blocking::run_blocking_code,
     errors::storage_api_error,
     repository_status::registration_from_status,

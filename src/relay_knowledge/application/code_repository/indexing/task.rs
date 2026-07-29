@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use super::{clock::now_millis, errors::storage_api_error};
+use super::super::{clock::now_millis, errors::storage_api_error};
 
 pub(super) const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
 pub(super) const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
@@ -48,7 +48,7 @@ pub(super) async fn refresh_code_index_task_lease(
     }
 }
 
-pub(super) async fn recover_code_index_task_leases(
+pub(in crate::application::code_repository) async fn recover_code_index_task_leases(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     now_ms: u64,
 ) -> Result<(), ApiError> {

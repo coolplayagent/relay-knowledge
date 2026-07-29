@@ -14,7 +14,7 @@ use super::{
     blocking::run_blocking_code,
     clock::now_millis,
     errors::storage_api_error,
-    index_task::recover_code_index_task_leases,
+    indexing::recover_code_index_task_leases,
     repository_status::{code_status_checkpoint, required_code_repository},
 };
 
