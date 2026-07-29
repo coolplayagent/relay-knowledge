@@ -11,20 +11,15 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 mod canvas;
 mod code_graph;
+mod connection_runtime;
 mod evidence_identity;
 mod file_index;
 mod graph_version;
 mod indexing;
-#[path = "connection_runtime/maintenance.rs"]
-mod maintenance;
 mod maven;
 mod mutation_log;
 mod operations;
-#[path = "connection_runtime/read_pool.rs"]
-mod read_pool;
 mod retrieval;
-#[path = "connection_runtime/retry.rs"]
-mod retry;
 mod schema_columns;
 mod schema_marker;
 mod schema_migration;
@@ -45,14 +40,18 @@ use crate::{
         CodeGraphStore, GraphSearchRequest, GraphStore, IndexStore, MutationLogStore, RetrievalHit,
     },
 };
+pub(in crate::storage) use connection_runtime::maintenance::{
+    configure_connection, read_only_database_diagnostics,
+};
+use connection_runtime::{
+    maintenance::{SqliteMaintenanceState, configure_writer_connection},
+    read_pool::{
+        ReadConnectionPool, lock_any_read_connection, lock_any_read_connection_until,
+        lock_connection_until, try_lock_any_read_connection,
+    },
+};
 use evidence_identity::{source_hash_for_evidence, stable_id};
 use graph_version::storage_version_range;
-use maintenance::{SqliteMaintenanceState, configure_writer_connection};
-pub(in crate::storage) use maintenance::{configure_connection, read_only_database_diagnostics};
-use read_pool::{
-    ReadConnectionPool, lock_any_read_connection, lock_any_read_connection_until,
-    lock_connection_until, try_lock_any_read_connection,
-};
 use table_stats::count_rows;
 
 /// SQLite implementation of graph facts, mutation log, and index metadata.
@@ -247,7 +246,7 @@ impl SqliteGraphStore {
 }
 
 fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
-    retry::retry_sqlite_transient(|| initialize_schema_once(connection))
+    connection_runtime::retry::retry_sqlite_transient(|| initialize_schema_once(connection))
 }
 
 fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
@@ -387,7 +386,7 @@ fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
     code_graph::initialize_schema(connection)?;
     operations::initialize_schema(connection)?;
     file_index::initialize_schema(connection)?;
-    maintenance::initialize_schema(connection)?;
+    connection_runtime::maintenance::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
     retrieval::initialize_schema(connection)?;
     schema_marker::initialize_schema_marker(connection)?;
@@ -820,7 +819,11 @@ fn inspect_graph(
         code_reference_count: count_rows(connection, "code_references")?,
         code_chunk_count: count_rows(connection, "code_chunks")?,
         code_parse_status_counts: code_graph::parse_status_counts(connection)?,
-        sqlite: maintenance::diagnostics(connection, database_path, maintenance_state)?,
+        sqlite: connection_runtime::maintenance::diagnostics(
+            connection,
+            database_path,
+            maintenance_state,
+        )?,
     })
 }
 

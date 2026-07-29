@@ -472,7 +472,10 @@ impl CodeRepositoryStore for SqliteGraphStore {
         let maintenance = self.maintenance.clone();
         self.run(move |connection| {
             let summary = code_snapshot::apply_snapshot(connection, snapshot)?;
-            super::maintenance::run_post_index_maintenance(connection, &maintenance);
+            super::connection_runtime::maintenance::run_post_index_maintenance(
+                connection,
+                &maintenance,
+            );
 
             Ok(summary)
         })
@@ -509,7 +512,10 @@ impl CodeRepositoryStore for SqliteGraphStore {
         let maintenance = self.maintenance.clone();
         self.run(move |connection| {
             let summary = code_batch::finalize_session(connection, session)?;
-            super::maintenance::run_post_index_maintenance(connection, &maintenance);
+            super::connection_runtime::maintenance::run_post_index_maintenance(
+                connection,
+                &maintenance,
+            );
 
             Ok(summary)
         })

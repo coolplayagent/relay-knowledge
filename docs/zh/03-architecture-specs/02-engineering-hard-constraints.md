@@ -76,6 +76,8 @@ SQLite 存储必须把 evidence 与稳定 ID 生成放在 `evidence_identity`，
 
 SQLite adapter 根模块必须完整收敛在 `storage/sqlite/`：`mod.rs` 负责 `SqliteGraphStore`、有界 blocking-worker 入口、schema 编排、graph-fact 校验与根测试声明，具体持久化职责由命名明确的子模块维护。`storage/` 父目录不得重新出现 `sqlite.rs`；根测试模块必须与 `sqlite/mod.rs` 共置，不得使用带 `sqlite/` 前缀的路径重定向。
 
+SQLite connection lifecycle 必须在逻辑与物理上统一收敛到 `storage::sqlite::connection_runtime`：`maintenance` 负责 connection pragma、WAL checkpoint 与 maintenance diagnostics，`read_pool` 负责有界读连接 lane 与锁等待 deadline，`retry` 负责有界 transient-SQLite retry policy。SQLite 持久化模块必须通过 `connection_runtime` 使用这些能力，不得将它们重新平铺到 SQLite 根模块。
+
 Partitioned SQLite adapter 必须完整收敛在 `storage/partitioned/`：`mod.rs` 维护公开 store 与 trait 实现，catalog、control delegate、diagnostics、retention、routing、status 和 totals 使用职责命名文件，`mod_tests.rs` 验证跨 shard contract。`storage/` 父目录不得重新出现 `partitioned.rs`、`partitioned_tests.rs` 或指向该子域的相对 `#[path]`。
 
 Software projection 持久化必须在物理与逻辑上完整收敛到 `storage::sqlite::software`：SQLite 根模块声明该域，code-store adapter 以兄弟模块导入它，不得再通过相对路径持有该域。`mod.rs` 负责 schema 与 projection 编排，`graph.rs` 负责从图派生的 file、topic 和 relationship 物化与查询，dependency usage、lifecycle 和 query scope 保持各自职责模块。SQLite 根级 `scope_filters.rs` 统一维护 code retrieval 与 software projection 共享的 indexed-scope 覆盖判定，两个域不得导入对方的私有 helper；对应 path、language 与 indexed-scope 不变量由同级 `scope_filters_tests.rs` 维护。`mod_tests.rs` 验证根 projection 生命周期，`projection_tests.rs` 验证带过滤条件的 projection 读取。`storage/sqlite/` 父目录不得重新出现 `software.rs`、`software_graph.rs` 或 software 根测试文件。

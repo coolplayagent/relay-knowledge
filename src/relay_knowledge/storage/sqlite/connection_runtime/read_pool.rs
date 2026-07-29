@@ -14,12 +14,12 @@ const READ_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(2);
 const READ_CONNECTIONS: usize = 4;
 
 #[derive(Debug)]
-pub(super) struct ReadConnectionPool {
+pub(in crate::storage::sqlite) struct ReadConnectionPool {
     connections: Vec<Arc<Mutex<Connection>>>,
 }
 
 impl ReadConnectionPool {
-    pub(super) fn open(path: &Path) -> Result<Self, StorageError> {
+    pub(in crate::storage::sqlite) fn open(path: &Path) -> Result<Self, StorageError> {
         let mut connections = Vec::with_capacity(READ_CONNECTIONS);
         for _ in 0..READ_CONNECTIONS {
             let connection = Connection::open_with_flags(
@@ -33,12 +33,12 @@ impl ReadConnectionPool {
         Ok(Self { connections })
     }
 
-    pub(super) fn connections(&self) -> Vec<Arc<Mutex<Connection>>> {
+    pub(in crate::storage::sqlite) fn connections(&self) -> Vec<Arc<Mutex<Connection>>> {
         self.connections.clone()
     }
 }
 
-pub(super) fn try_lock_any_read_connection(
+pub(in crate::storage::sqlite) fn try_lock_any_read_connection(
     connections: &[Arc<Mutex<Connection>>],
 ) -> Result<std::sync::MutexGuard<'_, Connection>, StorageError> {
     let mut saw_busy_connection = false;
@@ -65,7 +65,7 @@ pub(super) fn try_lock_any_read_connection(
     ))
 }
 
-pub(super) fn lock_any_read_connection(
+pub(in crate::storage::sqlite) fn lock_any_read_connection(
     connections: &[Arc<Mutex<Connection>>],
 ) -> Result<std::sync::MutexGuard<'_, Connection>, StorageError> {
     loop {
@@ -77,7 +77,7 @@ pub(super) fn lock_any_read_connection(
     }
 }
 
-pub(super) fn lock_any_read_connection_until<'a>(
+pub(in crate::storage::sqlite) fn lock_any_read_connection_until<'a>(
     connections: &'a [Arc<Mutex<Connection>>],
     deadline: Instant,
     timeout_message: &str,
@@ -91,7 +91,7 @@ pub(super) fn lock_any_read_connection_until<'a>(
     }
 }
 
-pub(super) fn lock_connection_until<'a>(
+pub(in crate::storage::sqlite) fn lock_connection_until<'a>(
     connection: &'a Arc<Mutex<Connection>>,
     deadline: Instant,
     timeout_message: &str,

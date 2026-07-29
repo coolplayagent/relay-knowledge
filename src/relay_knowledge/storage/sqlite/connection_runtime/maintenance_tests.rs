@@ -3,11 +3,9 @@ use crate::{
     domain::{
         CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot, CodeRepositoryRegistration,
     },
-    storage::{CodeRepositoryStore, GraphStore},
+    storage::{CodeRepositoryStore, GraphStore, SqliteGraphStore},
 };
 use rusqlite::OpenFlags;
-
-use super::super::SqliteGraphStore;
 
 #[test]
 fn maintenance_failure_is_recorded_without_returning_error() {

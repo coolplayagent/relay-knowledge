@@ -16,7 +16,7 @@ const SQLITE_MMAP_SIZE_BYTES: i64 = 268_435_456;
 const MAINTENANCE_DIAGNOSTICS_ID: i64 = 1;
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct SqliteMaintenanceState {
+pub(in crate::storage::sqlite) struct SqliteMaintenanceState {
     last_maintenance_at_ms: Option<u64>,
     last_maintenance_error: Option<String>,
 }
@@ -28,7 +28,9 @@ pub(in crate::storage) fn configure_connection(
     configure_common_pragmas(connection)
 }
 
-pub(super) fn configure_writer_connection(connection: &Connection) -> Result<(), StorageError> {
+pub(in crate::storage::sqlite) fn configure_writer_connection(
+    connection: &Connection,
+) -> Result<(), StorageError> {
     configure_connection(connection)?;
     let _journal_mode = connection.query_row("PRAGMA journal_mode = WAL", [], |row| {
         row.get::<_, String>(0)
@@ -45,7 +47,9 @@ pub(super) fn configure_read_connection(connection: &Connection) -> Result<(), S
     Ok(())
 }
 
-pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
+pub(in crate::storage::sqlite) fn initialize_schema(
+    connection: &Connection,
+) -> Result<(), StorageError> {
     connection.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS relay_sqlite_maintenance_diagnostics (
@@ -59,7 +63,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
     Ok(())
 }
 
-pub(super) fn run_post_index_maintenance(
+pub(in crate::storage::sqlite) fn run_post_index_maintenance(
     connection: &Connection,
     state: &Arc<Mutex<SqliteMaintenanceState>>,
 ) {
@@ -83,7 +87,7 @@ pub(super) fn run_post_index_maintenance(
     record_post_index_maintenance_result(state, attempted_at_ms, recorded_error);
 }
 
-pub(super) fn diagnostics(
+pub(in crate::storage::sqlite) fn diagnostics(
     connection: &Connection,
     database_path: Option<&Path>,
     state: &Arc<Mutex<SqliteMaintenanceState>>,

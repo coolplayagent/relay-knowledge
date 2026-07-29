@@ -29,7 +29,9 @@ pub(super) fn queue_task(
     connection: &mut Connection,
     task: CodeIndexTaskSeed,
 ) -> Result<CodeIndexTaskRecord, StorageError> {
-    super::super::retry::retry_sqlite_transient(|| queue_task_once(connection, &task))
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
+        queue_task_once(connection, &task)
+    })
 }
 
 fn queue_task_once(
@@ -103,7 +105,9 @@ pub(super) fn claim_task(
     connection: &mut Connection,
     request: CodeIndexTaskClaimRequest,
 ) -> Result<Option<CodeIndexTaskRecord>, StorageError> {
-    super::super::retry::retry_sqlite_transient(|| claim_task_once(connection, &request))
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
+        claim_task_once(connection, &request)
+    })
 }
 
 fn claim_task_once(
@@ -233,7 +237,7 @@ pub(super) fn renew_task_lease(
           AND lease_expires_at_ms > ?5
         ",
     );
-    let renewed = super::super::retry::retry_sqlite_transient(|| {
+    let renewed = super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         connection
             .query_row(
                 &sql,
@@ -274,7 +278,7 @@ pub(super) fn complete_task(
           AND lease_expires_at_ms > ?4
         ",
     );
-    let completed = super::super::retry::retry_sqlite_transient(|| {
+    let completed = super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         connection
             .query_row(
                 &sql,
@@ -325,7 +329,7 @@ pub(super) fn fail_task(
           AND lease_expires_at_ms > ?8
         ",
     );
-    let failed = super::super::retry::retry_sqlite_transient(|| {
+    let failed = super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         connection
             .query_row(
                 &sql,
@@ -463,7 +467,7 @@ pub(super) fn recover_expired_task_leases(
     now_ms: u64,
     max_attempts: u32,
 ) -> Result<(), StorageError> {
-    super::super::retry::retry_sqlite_transient(|| {
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         recover_expired_task_leases_once(connection, now_ms, max_attempts)
     })
 }
@@ -557,7 +561,7 @@ pub(super) fn reset_tasks(
     repository_id: &str,
     now_ms: u64,
 ) -> Result<Vec<CodeIndexTaskRecord>, StorageError> {
-    super::super::retry::retry_sqlite_transient(|| {
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         reset_tasks_once(connection, repository_id, now_ms)
     })
 }

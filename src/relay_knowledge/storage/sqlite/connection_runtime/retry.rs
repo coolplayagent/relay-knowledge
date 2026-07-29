@@ -6,7 +6,7 @@ use crate::storage::StorageError;
 
 const SQLITE_TRANSIENT_RETRY_DELAYS_MS: [u64; 6] = [10, 30, 90, 270, 810, 1620];
 
-pub(super) fn retry_sqlite_transient<T>(
+pub(in crate::storage::sqlite) fn retry_sqlite_transient<T>(
     mut operation: impl FnMut() -> Result<T, StorageError>,
 ) -> Result<T, StorageError> {
     for delay_ms in SQLITE_TRANSIENT_RETRY_DELAYS_MS {
