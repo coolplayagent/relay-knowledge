@@ -216,6 +216,8 @@ Dependency-usage 的 `matching` 独占不可变 component-key 索引、manifest 
 
 ACP adapter、prompt-context builder 及其配对测试统一位于纯文件型 `interfaces/agent/acp` 分组，同时保持公开 `interfaces::agent::acp` 路径不变。上层 agent 目录不得再把 ACP session 或 context 实现文件平铺在 MCP、audit 与 policy 领域旁。
 
+ACP 初始化、会话、提示词、进度更新、结果与错误 wire contract 统一归 `acp::protocol` 所有，并由 `protocol_tests` 验证 JSON 字段名、省略规则与状态转换。adapter facade 只重导出这些公开类型并编排会话请求，不得重新内嵌序列化 DTO。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。
