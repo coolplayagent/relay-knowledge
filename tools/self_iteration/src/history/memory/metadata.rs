@@ -1,4 +1,10 @@
-fn markdown_list(title: &str, values: &[String]) -> String {
+use std::{collections::BTreeSet, fs, path::PathBuf};
+
+use serde_json::Value;
+
+use crate::{candidate_git::changed_paths_from_diff, history};
+
+pub(super) fn markdown_list(title: &str, values: &[String]) -> String {
     let body = if values.is_empty() {
         "- none recorded".to_owned()
     } else {
@@ -11,7 +17,7 @@ fn markdown_list(title: &str, values: &[String]) -> String {
     format!("## {title}\n\n{body}")
 }
 
-fn changed_paths(record: &Value) -> Vec<String> {
+pub(super) fn changed_paths(record: &Value) -> Vec<String> {
     if let Some(paths) = record
         .get("optimization_plan")
         .and_then(|plan| plan.get("changed_paths"))
@@ -32,7 +38,7 @@ fn changed_paths(record: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn related_paths(record: &Value) -> Vec<String> {
+pub(super) fn related_paths(record: &Value) -> Vec<String> {
     [
         record
             .get("patch")
@@ -46,7 +52,7 @@ fn related_paths(record: &Value) -> Vec<String> {
     .collect()
 }
 
-fn score_impact(record: &Value) -> Value {
+pub(super) fn score_impact(record: &Value) -> Value {
     serde_json::json!({
         "accepted": history::adopted(record),
         "score_accepted": record.get("score_accepted").cloned().unwrap_or(Value::Null),
@@ -62,7 +68,7 @@ fn score_impact(record: &Value) -> Value {
     })
 }
 
-fn run_tags(record: &Value, kind: &str) -> Vec<String> {
+pub(super) fn run_tags(record: &Value, kind: &str) -> Vec<String> {
     let mut tags = BTreeSet::from([
         safe_tag(kind),
         if history::adopted(record) {
@@ -80,7 +86,7 @@ fn run_tags(record: &Value, kind: &str) -> Vec<String> {
     tags.into_iter().collect()
 }
 
-fn failed_gate_names(record: &Value) -> Vec<String> {
+pub(super) fn failed_gate_names(record: &Value) -> Vec<String> {
     value_array(record, "gates")
         .iter()
         .filter(|gate| !gate.get("passed").and_then(Value::as_bool).unwrap_or(false))
@@ -89,7 +95,7 @@ fn failed_gate_names(record: &Value) -> Vec<String> {
         .collect()
 }
 
-fn key_metric_lines(record: &Value) -> Vec<String> {
+pub(super) fn key_metric_lines(record: &Value) -> Vec<String> {
     value_array(record, "metrics")
         .iter()
         .take(8)
@@ -103,7 +109,7 @@ fn key_metric_lines(record: &Value) -> Vec<String> {
         .collect()
 }
 
-fn case_signal_lines(record: &Value) -> Vec<String> {
+pub(super) fn case_signal_lines(record: &Value) -> Vec<String> {
     value_array(record, "cases")
         .iter()
         .filter(|case| !case.get("passed").and_then(Value::as_bool).unwrap_or(false))
@@ -118,7 +124,7 @@ fn case_signal_lines(record: &Value) -> Vec<String> {
         .collect()
 }
 
-fn patch_changed_paths(path: &PathBuf, run: Option<&Value>) -> Vec<String> {
+pub(super) fn patch_changed_paths(path: &PathBuf, run: Option<&Value>) -> Vec<String> {
     if let Some(run) = run {
         let paths = changed_paths(run);
         if !paths.is_empty() {
@@ -130,7 +136,7 @@ fn patch_changed_paths(path: &PathBuf, run: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn value_array<'a>(record: &'a Value, name: &str) -> &'a [Value] {
+pub(super) fn value_array<'a>(record: &'a Value, name: &str) -> &'a [Value] {
     record
         .get(name)
         .and_then(Value::as_array)
@@ -138,7 +144,7 @@ fn value_array<'a>(record: &'a Value, name: &str) -> &'a [Value] {
         .unwrap_or(&[])
 }
 
-fn string_array(record: &Value, name: &str) -> Vec<String> {
+pub(super) fn string_array(record: &Value, name: &str) -> Vec<String> {
     value_array(record, name)
         .iter()
         .filter_map(Value::as_str)
@@ -146,11 +152,11 @@ fn string_array(record: &Value, name: &str) -> Vec<String> {
         .collect()
 }
 
-fn field_string(record: &Value, name: &str) -> String {
+pub(super) fn field_string(record: &Value, name: &str) -> String {
     record.get(name).map(Value::to_string).unwrap_or_default()
 }
 
-fn string_field(record: &Value, name: &str) -> String {
+pub(super) fn string_field(record: &Value, name: &str) -> String {
     record
         .get(name)
         .and_then(Value::as_str)
@@ -158,7 +164,7 @@ fn string_field(record: &Value, name: &str) -> String {
         .to_owned()
 }
 
-fn safe_id(value: &str) -> String {
+pub(super) fn safe_id(value: &str) -> String {
     let slug = value
         .chars()
         .map(|ch| {
@@ -196,3 +202,7 @@ fn safe_tag(value: &str) -> String {
         .take(80)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "metadata_tests.rs"]
+mod metadata_tests;

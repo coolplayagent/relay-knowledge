@@ -152,7 +152,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.12 Self-Iteration History and Memory Ownership
 
-`tools/self_iteration::history` keeps run selection, persistence, CSV/SVG export, and adoption-state interpretation in `runs`, `persistence`, `export`, and `run_state`; `synthesis` builds bounded history summaries, while the `memory` subtree owns long-term memory queries, record construction, storage, summaries, and metadata. Callers express dependencies through `history::synthesis` or `history::memory`, and focused unit tests stay beside their boundary. Do not restore root-level `history_synthesis.rs` or `memory.rs`, or a monolithic `history.rs` with a large inline test module.
+`tools/self_iteration::history` keeps run selection, persistence, CSV/SVG export, and adoption-state interpretation in `runs`, `persistence`, `export`, and `run_state`; `synthesis` builds bounded history summaries. The `memory` subtree must use real Rust modules: `api` coordinates public memory queries and writes, `records` constructs typed memory entries, `store` owns the atomic JSONL and Markdown boundary, `summaries` owns bounded prompt/report rendering, and `metadata` extracts normalized record evidence. Each memory behavior owner directly attaches its sibling `*_tests.rs` contract; production code must not use `include!` to merge these boundaries into an implicit namespace. Callers express dependencies through `history::synthesis` or `history::memory`. Do not restore root-level `history_synthesis.rs` or `memory.rs`, a cross-boundary `memory_tests.rs` bucket, or a monolithic `history.rs` with a large inline test module.
 
 ### 3.13 Self-Iteration Unattended Workflow Ownership
 

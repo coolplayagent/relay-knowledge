@@ -1,4 +1,12 @@
-fn memory_markdown(item: &Value, body_key: &str) -> String {
+use std::{fs, io::Write};
+
+use serde_json::Value;
+
+use crate::history;
+
+use super::metadata::string_field;
+
+pub(super) fn memory_markdown(item: &Value, body_key: &str) -> String {
     let tags = item
         .get("tags")
         .and_then(Value::as_array)
@@ -35,7 +43,7 @@ fn memory_markdown(item: &Value, body_key: &str) -> String {
     )
 }
 
-fn load_memory_index(paths: &history::HistoryPaths) -> Vec<Value> {
+pub(super) fn load_memory_index(paths: &history::HistoryPaths) -> Vec<Value> {
     let Ok(text) = fs::read_to_string(&paths.memory_index) else {
         return Vec::new();
     };
@@ -45,7 +53,10 @@ fn load_memory_index(paths: &history::HistoryPaths) -> Vec<Value> {
         .collect()
 }
 
-fn write_memory_index(paths: &history::HistoryPaths, items: &[Value]) -> Result<(), String> {
+pub(super) fn write_memory_index(
+    paths: &history::HistoryPaths,
+    items: &[Value],
+) -> Result<(), String> {
     let temp = paths.memory_index.with_extension("jsonl.tmp");
     let mut file = fs::File::create(&temp)
         .map_err(|error| format!("failed to write {}: {error}", temp.display()))?;
@@ -65,7 +76,7 @@ fn write_memory_index(paths: &history::HistoryPaths, items: &[Value]) -> Result<
     })
 }
 
-fn sorted_memory_items(paths: &history::HistoryPaths) -> Vec<Value> {
+pub(super) fn sorted_memory_items(paths: &history::HistoryPaths) -> Vec<Value> {
     let mut items = load_memory_index(paths);
     items.retain(|item| {
         !item
@@ -78,3 +89,7 @@ fn sorted_memory_items(paths: &history::HistoryPaths) -> Vec<Value> {
     });
     items
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod store_tests;

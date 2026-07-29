@@ -1,3 +1,18 @@
+use std::{fs, path::Path};
+
+use serde_json::Value;
+
+use crate::history;
+
+use super::{
+    metadata::{patch_changed_paths, string_field},
+    records::{
+        primary_memory, regression_memory, repeated_rejection_cluster_memory, write_memory_item,
+    },
+    store::{load_memory_index, sorted_memory_items, write_memory_index},
+    summaries::compact_prompt_text,
+};
+
 pub fn write_run_memory(paths: &history::HistoryPaths, record: &Value) -> Result<(), String> {
     paths.ensure()?;
     let mut items = vec![primary_memory(record)];
@@ -163,58 +178,6 @@ pub fn historical_patch_memory_index(paths: &history::HistoryPaths, limit: usize
     lines.join("\n")
 }
 
-pub fn compact_prompt_text(value: &str, limit: usize) -> String {
-    let compact = value
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if compact.len() <= limit {
-        return compact;
-    }
-    compact
-        .chars()
-        .rev()
-        .take(limit)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect()
-}
-
-pub fn compact_score_changes(changes: &[Value], limit: usize) -> Vec<String> {
-    changes
-        .iter()
-        .take(limit)
-        .filter_map(Value::as_object)
-        .map(|change| {
-            let name = change
-                .get("name")
-                .or_else(|| change.get("case_id"))
-                .or_else(|| change.get("kind"))
-                .map(Value::to_string)
-                .unwrap_or_default();
-            format!(
-                "{}:{} {}->{} {}",
-                change.get("kind").and_then(Value::as_str).unwrap_or(""),
-                name.trim_matches('"'),
-                change
-                    .get("previous")
-                    .map(Value::to_string)
-                    .unwrap_or_default(),
-                change
-                    .get("current")
-                    .map(Value::to_string)
-                    .unwrap_or_default(),
-                change
-                    .get("reason")
-                    .or_else(|| change.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-            )
-            .trim()
-            .to_owned()
-        })
-        .collect()
-}
+#[cfg(test)]
+#[path = "api_tests.rs"]
+mod api_tests;

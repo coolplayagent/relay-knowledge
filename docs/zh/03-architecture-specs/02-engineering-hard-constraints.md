@@ -152,7 +152,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.12 自迭代历史与记忆职责
 
-`tools/self_iteration::history` 必须把运行记录选择、持久化、CSV/SVG 导出和采用状态分别放在 `runs`、`persistence`、`export` 和 `run_state`；`synthesis` 负责生成有界历史摘要，`memory` 子目录负责长期记忆查询、记录构建、存储、摘要和元数据。调用方必须通过 `history::synthesis` 或 `history::memory` 表达依赖，定向 UT 与对应边界共置。不得恢复根目录级 `history_synthesis.rs`、`memory.rs` 或带有内联大测试模块的单体 `history.rs`。
+`tools/self_iteration::history` 必须把运行记录选择、持久化、CSV/SVG 导出和采用状态分别放在 `runs`、`persistence`、`export` 和 `run_state`；`synthesis` 负责生成有界历史摘要。`memory` 子树必须使用真正的 Rust 模块：`api` 协调公开记忆查询与写入，`records` 构造类型化记忆条目，`store` 负责原子 JSONL 与 Markdown 边界，`summaries` 负责有界 prompt/report 渲染，`metadata` 提取规范化运行证据。每个 memory 行为 owner 必须直接挂载同级 `*_tests.rs` contract；生产代码不得使用 `include!` 把这些边界合并进隐式命名空间。调用方必须通过 `history::synthesis` 或 `history::memory` 表达依赖。不得恢复根目录级 `history_synthesis.rs`、`memory.rs`、跨边界的 `memory_tests.rs` 测试桶，或带有内联大测试模块的单体 `history.rs`。
 
 ### 3.13 自迭代无人值守工作流职责
 

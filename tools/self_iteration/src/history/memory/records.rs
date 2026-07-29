@@ -1,5 +1,19 @@
+use std::fs;
 
-fn primary_memory(record: &Value) -> Value {
+use serde_json::Value;
+
+use crate::history;
+
+use super::{
+    metadata::{related_paths, run_tags, safe_id, score_impact, string_field},
+    store::memory_markdown,
+    summaries::{
+        compact_paths, compact_prompt_text, primary_kind, primary_reject_reason, primary_summary,
+        primary_title, run_detail, top_change_summary,
+    },
+};
+
+pub(super) fn primary_memory(record: &Value) -> Value {
     let kind = primary_kind(record);
     memory_payload(
         record,
@@ -10,7 +24,7 @@ fn primary_memory(record: &Value) -> Value {
     )
 }
 
-fn regression_memory(record: &Value) -> Option<Value> {
+pub(super) fn regression_memory(record: &Value) -> Option<Value> {
     let degradations = record.get("degradations")?.as_array()?;
     if degradations.is_empty() {
         return None;
@@ -53,7 +67,7 @@ fn regression_memory(record: &Value) -> Option<Value> {
     ))
 }
 
-fn repeated_rejection_cluster_memory(
+pub(super) fn repeated_rejection_cluster_memory(
     paths: &history::HistoryPaths,
     record: &Value,
 ) -> Option<Value> {
@@ -128,7 +142,10 @@ fn memory_payload(
     })
 }
 
-fn write_memory_item(paths: &history::HistoryPaths, item: &Value) -> Result<Value, String> {
+pub(super) fn write_memory_item(
+    paths: &history::HistoryPaths,
+    item: &Value,
+) -> Result<Value, String> {
     let item_id = string_field(item, "id");
     let summary_path = paths.memory_summaries.join(format!("{item_id}.md"));
     let detail_path = paths.memory_details.join(format!("{item_id}.md"));
@@ -149,3 +166,7 @@ fn write_memory_item(paths: &history::HistoryPaths, item: &Value) -> Result<Valu
         "detail_path": detail_path.display().to_string(),
     }))
 }
+
+#[cfg(test)]
+#[path = "records_tests.rs"]
+mod records_tests;
