@@ -101,11 +101,11 @@ mod code_query_import_target_tests;
 mod code_query_import_generated_tests;
 
 #[cfg(test)]
-#[path = "../code_query/tests/chunk_generated.rs"]
+#[path = "../code_query/tests/generated/chunk_generated.rs"]
 mod code_query_chunk_generated_tests;
 
 #[cfg(test)]
-#[path = "../code_query/tests/route_generated.rs"]
+#[path = "../code_query/tests/generated/route_generated.rs"]
 mod code_query_route_generated_tests;
 
 #[cfg(test)]

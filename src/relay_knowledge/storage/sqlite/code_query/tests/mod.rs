@@ -9,34 +9,34 @@ mod score_tests;
 #[path = "identity.rs"]
 mod identity_tests;
 
-#[path = "hybrid_symbol_planner.rs"]
+#[path = "hybrid/hybrid_symbol_planner.rs"]
 mod hybrid_symbol_planner_tests;
 
-#[path = "hybrid_chunk_gate.rs"]
+#[path = "hybrid/hybrid_chunk_gate.rs"]
 mod hybrid_chunk_gate_tests;
 
-#[path = "call_ranking.rs"]
+#[path = "calls/call_ranking.rs"]
 mod call_ranking_tests;
 
-#[path = "call_generated.rs"]
+#[path = "calls/call_generated.rs"]
 mod call_generated_tests;
 
-#[path = "indirect_call.rs"]
+#[path = "calls/indirect_call.rs"]
 mod indirect_call_tests;
 
-#[path = "chunk_ranking.rs"]
+#[path = "ranking/chunk_ranking.rs"]
 mod chunk_ranking_tests;
 
-#[path = "symbol_ranking.rs"]
+#[path = "ranking/symbol_ranking.rs"]
 mod symbol_ranking_tests;
 
-#[path = "definition_fallback.rs"]
+#[path = "ranking/definition_fallback.rs"]
 mod definition_fallback_tests;
 
-#[path = "reference_ranking.rs"]
+#[path = "ranking/reference_ranking.rs"]
 mod reference_ranking_tests;
 
-#[path = "reference_generated.rs"]
+#[path = "generated/reference_generated.rs"]
 mod reference_generated_tests;
 
 #[path = "excerpts.rs"]

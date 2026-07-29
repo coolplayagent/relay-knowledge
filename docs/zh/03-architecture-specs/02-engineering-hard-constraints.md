@@ -98,7 +98,7 @@ Monorepo workspace 持久化统一收敛在 `storage::sqlite::code_workspace`：
 
 Code index schema 所有权统一收敛在 `storage::sqlite::code_schema`：`mod.rs` 负责当前 table/index 和初始化顺序，`migrations` 负责有界兼容转换，`route_schema` 负责 route 专属 DDL，`tests` 验证 schema 与 migration 不变量。不得再通过 `code_schema_*` 前缀把这些文件拆散到 SQLite 根目录。
 
-Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协调有界检索层，`calls`、`imports`、`symbols`、`hybrid` 负责 edge 或 plan 专属行为，`scoring` 负责聚焦的 ranking signal，`accuracy` 负责端到端排名 fixture，`tests` 负责共享 query 回归。跨越这些聚焦子域的 row decoding、excerpt、identifier、line range、route、reference 和 SBOM retrieval 保留为具名根子模块；任何 query 目录都不得变成新的平铺前缀桶。
+Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协调有界检索层，`calls`、`imports`、`symbols`、`hybrid` 负责 edge 或 plan 专属行为，`scoring` 负责聚焦的 ranking signal，`accuracy` 负责端到端排名 fixture。共享 query 回归保留在 `tests`，并按 `calls`、`ranking`、`generated` 和 `hybrid` 分组；跨域的 unit、score、identity、excerpt、field-filter、line-context 和 SBOM case 保留为具名根子项。跨越聚焦子域的 row decoding、excerpt、identifier、line range、route、reference 和 SBOM retrieval 保留为具名生产根子模块；任何 query 或 test 目录都不得变成新的平铺前缀桶。
 
 代码查询相关性原语统一收敛在 `storage::sqlite::code_query::relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件或根目录级 `code_query_*` 兄弟文件。
 
