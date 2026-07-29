@@ -1,2 +1,2 @@
 mod partitioned_sqlite;
-mod support;
+mod partitioned_sqlite_fixtures;

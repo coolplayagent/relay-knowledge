@@ -18,9 +18,9 @@ use crate::{
 
 use super::mcp_test_support::SlowSearchStore;
 
-#[path = "mcp_tests/support.rs"]
-mod support;
-pub(super) use support::{
+#[path = "mcp_tests/transport_harness.rs"]
+mod transport_harness;
+pub(super) use transport_harness::{
     call_mcp, call_mcp_with_session, initialize_params, initialize_session, raw_custom_request,
     raw_custom_request_with_defaults, raw_custom_response, raw_mcp_request,
     raw_mcp_request_without_protocol, raw_mcp_response, server_and_service,

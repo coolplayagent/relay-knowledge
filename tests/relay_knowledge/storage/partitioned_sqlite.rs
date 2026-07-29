@@ -8,7 +8,7 @@ use relay_knowledge::{
     },
 };
 
-use super::support::*;
+use super::partitioned_sqlite_fixtures::*;
 
 #[tokio::test]
 async fn partitioned_sqlite_routes_repository_code_facts_to_shards() {
