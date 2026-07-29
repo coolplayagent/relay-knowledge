@@ -90,6 +90,8 @@ Durable code index task 在物理结构上统一收敛到 `storage::sqlite::code
 
 Repository set 持久化统一收敛在 `storage::sqlite::code_set`：`mod.rs` 负责 set membership、overlay refresh、跨仓 edge matching 和状态，`manifest` 负责有界 module-key 派生，`refresh_tasks` 负责持久 refresh-task lease 与 retry，set/workspace/manifest/refresh-task 测试保持同目录。不得以 facade 级测试可见性为由，再把 `code_set_*` 文件散落到 SQLite 根目录。
 
+Monorepo workspace 持久化统一收敛在 `storage::sqlite::code_workspace`：`mod.rs` 负责自动 workspace set、package mapping、跨成员 import resolution 和 workspace-format normalization，`tests` 覆盖 lifecycle/mapping 不变量，`lookup_tests` 覆盖语言级 import normalization。不得恢复根目录级 `code_workspace_*` 兄弟文件。
+
 代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
 
 ### 3.7 代码索引基础模块

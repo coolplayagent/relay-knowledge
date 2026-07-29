@@ -949,5 +949,4 @@ fn now_millis() -> u64 {
 }
 
 #[cfg(test)]
-#[path = "code_workspace_tests.rs"]
 mod tests;
