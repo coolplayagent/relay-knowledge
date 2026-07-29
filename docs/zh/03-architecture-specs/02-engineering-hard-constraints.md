@@ -34,7 +34,13 @@
 
 具名的平台进程输入同样必须经过该边界。进程 bootstrap 期间由 `env::windows_system_root_from_process` 捕获 Windows `SystemRoot`，`paths::windows_tasklist_command` 解析可执行文件，`RuntimeConfiguration::process` 再把结果传给服务恢复；应用工作流在恢复 worker 或调用 service manager 时既不得直接调用 `std::env`，也不得自行拼接平台可执行文件路径。
 
-### 3.1 代码仓库应用工作流
+### 3.1 环境变量边界
+
+`env` 内部按数据流保持单向依赖：`variables` 只拥有受支持的变量名，`error` 和 `overrides` 分别拥有稳定错误模型与 typed override 数据，`value_parser` 负责从已归一化 snapshot 提取并校验 path/string/bool/positive integer，`platform` 负责平台检测、大小写归一化、平台目录输入及 `SystemRoot` 进程读取，`config` 才能捕获完整进程环境并装配公开配置。`mod.rs` 仅维持原有 `env::*` facade，不得重新承载解析规则。对应 UT 必须分别放在 `config_tests`、`platform_tests` 和 `value_parser_tests`，使配置装配、平台规则和标量校验可以独立定位失败。
+
+依赖方向固定为 `error`/`variables` → `value_parser` → `platform`，`overrides` 只组合这些 typed platform 数据，`config` 作为最外层依赖其余模块；不得让 error、override 或 variable catalog 反向依赖配置装配，也不得把 `std::env` 读取扩散到 `env` 目录外。
+
+### 3.2 代码仓库应用工作流
 
 `application::code_repository` 按用例划分内部所有权：`repository` 负责注册、删除、状态和报告，`index_workflow` 负责索引执行、持久任务租约、checkpoint 和 scope preview，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
 
@@ -44,19 +50,19 @@
 
 代码仓库共享行为必须按明确职责拆分：`index_task` 负责持久任务租约和 worker 恢复，`index_state` 负责已持久化索引状态检查及复用，`scope` 负责 scope 解析和 filter 兼容性，`repository_status` 负责注册状态查询和 checkpoint 选择；`blocking`、`errors`、`clock` 分别隔离 runtime、错误和持久化时间边界。调用方必须直接依赖职责模块，不得重新引入含义宽泛的 `support`、`helper` 或 utility 聚合层。
 
-### 3.2 仓库领域模型职责
+### 3.3 仓库领域模型职责
 
 仓库领域类型统一按功能收敛在 `domain::code::repository`：`registration` 负责注册、selector、range 和索引请求，`retrieval_request` 负责查询类型、限定词、结果上限和检索层，`indexed_records` 负责持久化文件、符号、引用、关系、诊断及 tombstone 记录，`repository_status` 负责状态、scope preview、汇总和报告，`retrieval_results` 负责查询与特性开关结果，`scope_identity` 是版本化快照 scope 编码的唯一所有者；`validation` 仅作为目录私有校验边界。不得恢复混合职责的 `repository.rs` 或 `repository_helpers.rs`。
 
-### 3.3 模型提供方职责
+### 3.4 模型提供方职责
 
 `model_provider` 必须把 profile 归一化放在 `profile_config`，fallback policy 放在 `fallback`，持久 JSON 写入放在 `persistence`，provider HTTP 与响应诊断放在 `connectivity`，catalog 获取和 catalog 数据解释放在 `catalog`。跨模块协议测试统一放在 `protocol_tests`；不得把生产行为重新合并进通用 helper 模块。
 
-### 3.4 依赖解析器职责
+### 3.5 依赖解析器职责
 
 依赖解析必须按所解释的格式划分共享语法：`cargo_source` 分类 Cargo lock source，`npm_lock` 解释 npm 引用和 lock entry，`python_requirements` 解析 Python requirement 语法，`toml_inline_table` 读取 TOML 依赖字段，`gradle_notation` 解析 Gradle 调用和坐标。各生态解析器依赖这些窄模块，不得重新建立跨生态的 `support` 模块。
 
-### 3.5 SQLite 存储边界
+### 3.6 SQLite 存储边界
 
 SQLite 存储必须把 evidence 与稳定 ID 生成放在 `evidence_identity`，mutation 读取放在 `mutation_log`，提交时有效期归一化放在 `graph_version`，诊断 row count 放在 `table_stats`。存储模块必须导入这些明确边界，不得把无关持久化行为累积到通用 helper 模块。
 
@@ -64,11 +70,11 @@ Maven effective model 构建也必须拆开语法边界：`pom_path` 负责受�
 
 代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
 
-### 3.6 代码索引基础模块
+### 3.7 代码索引基础模块
 
 跨代码索引流程的基础原语必须使用能表达职责的顶层模块：`content_identity` 负责稳定 ID 和内容哈希，`language_metadata` 负责语言检测及语言级元数据，`generated_detection` 负责生成源码分类。不得把无关原语归入 `common` 目录；新增原语必须归属其所描述的行为。
 
-### 3.7 服务生命周期计划
+### 3.8 服务生命周期计划
 
 服务生命周期必须按边界划分职责：`application::service::lifecycle_plan` 负责请求校验、install/upgrade/rollback/uninstall 步骤计划和执行编排；只有 `lifecycle_plan::platform_service` 可以选择平台服务定义文件名、渲染 systemd/launchd/Windows Service 定义、声明平台权限并生成 service manager 命令；`lifecycle_plan::execution` 负责阻塞文件和进程执行。平台渲染与命令转义不得重新并入生命周期步骤 planner。
 

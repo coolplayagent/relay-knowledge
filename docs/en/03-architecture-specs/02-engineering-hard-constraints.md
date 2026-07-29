@@ -34,7 +34,13 @@ Advanced architecture is earned through clear boundaries, acyclic dependencies, 
 
 Named platform process inputs follow the same boundary. During process bootstrap, `env::windows_system_root_from_process` captures Windows `SystemRoot`, `paths::windows_tasklist_command` resolves the executable, and `RuntimeConfiguration::process` passes that result into service recovery. Application workflows must neither call `std::env` nor construct platform executable paths while recovering workers or invoking service managers.
 
-### 3.1 Code Repository Application Workflows
+### 3.1 Environment Variable Boundary
+
+The internals of `env` maintain a one-way data flow: `variables` only owns accepted variable names; `error` and `overrides` own the stable error model and typed override data; `value_parser` extracts and validates paths, strings, booleans, and positive integers from an already normalized snapshot; `platform` owns platform detection, key case normalization, platform directory inputs, and the process `SystemRoot` read; and only `config` may capture the complete process environment and assemble the public configuration. `mod.rs` preserves the existing `env::*` facade and must not accumulate parsing rules again. Corresponding unit tests live in `config_tests`, `platform_tests`, and `value_parser_tests` so configuration assembly, platform rules, and scalar validation fail independently.
+
+The dependency direction is fixed as `error`/`variables` → `value_parser` → `platform`; `overrides` only composes those typed platform values, and outermost `config` depends on the other modules. Error, override, and variable-catalog modules must not depend back on configuration assembly, and `std::env` reads must not spread outside the `env` directory.
+
+### 3.2 Code Repository Application Workflows
 
 `application::code_repository` partitions internal ownership by use case: `repository` owns registration, removal, status, and reports; `index_workflow` owns index execution, durable task leases, checkpoints, and scope previews; `query` owns versioned-scope retrieval, feature flags, and freshness diagnostics; and `impact` owns diff impact analysis. These modules expose stable APIs through the same `RelayKnowledgeService` and depend inward only on `domain`, `code`, and `storage` contracts; they must not duplicate workflows or depend back on CLI, Web, MCP, or other adapters.
 
@@ -44,19 +50,19 @@ Source fallback retrieval is grouped under `application::code_repository::source
 
 Shared code-repository behavior is partitioned by explicit responsibility: `index_task` owns durable task leases and worker recovery, `index_state` owns persisted index inspection and reuse, `scope` owns scope resolution and filter compatibility, and `repository_status` owns registered status lookup and checkpoint selection. `blocking`, `errors`, and `clock` isolate their respective runtime, error, and persisted-time boundaries. Callers must depend directly on the responsible module instead of reintroducing an ambiguous `support`, `helper`, or utility aggregation layer.
 
-### 3.2 Repository Domain Ownership
+### 3.3 Repository Domain Ownership
 
 Repository domain types are grouped under `domain::code::repository`: `registration` owns registration, selectors, ranges, and index requests; `retrieval_request` owns query kinds, qualifiers, limits, and retrieval layers; `indexed_records` owns persisted file, symbol, reference, relationship, diagnostic, and tombstone records; `repository_status` owns status, scope previews, totals, and reports; `retrieval_results` owns query and feature-flag results; and `scope_identity` is the only owner of versioned snapshot scope encoding. `validation` remains private to the directory. Do not restore the mixed `repository.rs` or `repository_helpers.rs` files.
 
-### 3.3 Model Provider Ownership
+### 3.4 Model Provider Ownership
 
 `model_provider` keeps profile normalization in `profile_config`, fallback policy in `fallback`, durable JSON writes in `persistence`, provider HTTP and response diagnostics in `connectivity`, and catalog fetch plus catalog data interpretation in `catalog`. Cross-module protocol tests live in `protocol_tests`; production behavior must not be recombined into a generic helper module.
 
-### 3.4 Dependency Parser Ownership
+### 3.5 Dependency Parser Ownership
 
 Dependency parsing groups shared syntax by the format it interprets: `cargo_source` classifies Cargo lock sources, `npm_lock` interprets npm references and lock entries, `python_requirements` parses Python requirement syntax, `toml_inline_table` reads TOML dependency fields, and `gradle_notation` parses Gradle calls and coordinates. Ecosystem parsers depend on these narrow modules; a cross-ecosystem `support` module is prohibited.
 
-### 3.5 SQLite Storage Boundaries
+### 3.6 SQLite Storage Boundaries
 
 SQLite storage keeps evidence and stable ID generation in `evidence_identity`, mutation reads in `mutation_log`, commit-time validity normalization in `graph_version`, and diagnostic row counts in `table_stats`. Storage modules must import these explicit boundaries instead of accumulating unrelated persistence behavior in a generic helper module.
 
@@ -64,11 +70,11 @@ Maven effective-model construction also separates syntax boundaries: `pom_path` 
 
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
 
-### 3.6 Code Index Foundations
+### 3.7 Code Index Foundations
 
 Cross-cutting code-index primitives use responsibility-bearing top-level modules: `content_identity` owns stable IDs and content hashes, `language_metadata` owns language detection and language-level metadata, and `generated_detection` owns generated-source classification. Do not group unrelated primitives under a `common` directory; new primitives belong with the behavior they describe.
 
-### 3.7 Service Lifecycle Planning
+### 3.8 Service Lifecycle Planning
 
 Service lifecycle ownership is split by boundary: `application::service::lifecycle_plan` validates requests, builds install/upgrade/rollback/uninstall step plans, and coordinates execution; `lifecycle_plan::platform_service` alone selects platform service-definition names, renders systemd/launchd/Windows Service definitions, declares platform permissions, and builds service-manager commands; `lifecycle_plan::execution` owns blocking file and process execution. Platform rendering and command quoting must not return to the lifecycle step planner.
 

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use super::platform::{HOME, TMPDIR};
 use super::*;
 
 #[test]
@@ -152,4 +153,82 @@ fn remote_cli_subset_validates_network_overrides() {
 
     assert_eq!(error.variable, RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS);
     assert_eq!(error.kind, EnvErrorKind::ZeroValue);
+}
+
+#[test]
+fn disabled_update_checks_ignore_invalid_interval_override() {
+    let config = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            (RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED, "false"),
+            (RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS, "0"),
+        ],
+    )
+    .expect("disabled update checks should ignore unused interval settings");
+
+    assert_eq!(config.updates.enabled, Some(false));
+    assert_eq!(config.updates.check_interval_ms, None);
+}
+
+#[test]
+fn invalid_telemetry_values_report_the_exact_variable() {
+    let zero_timeout =
+        EnvironmentConfig::from_pairs(PlatformKind::Unix, [(RELAY_OTEL_EXPORT_TIMEOUT_MS, "0")])
+            .expect_err("zero otel timeout should fail");
+    assert_eq!(zero_timeout.variable, RELAY_OTEL_EXPORT_TIMEOUT_MS);
+    assert_eq!(zero_timeout.kind, EnvErrorKind::ZeroValue);
+
+    let invalid_boolean =
+        EnvironmentConfig::from_pairs(PlatformKind::Unix, [(RELAY_OTEL_TRACES, "yes?")])
+            .expect_err("invalid otel boolean should fail");
+    assert_eq!(invalid_boolean.variable, RELAY_OTEL_TRACES);
+    assert_eq!(
+        invalid_boolean.kind,
+        EnvErrorKind::InvalidBoolean {
+            value: "yes?".to_owned()
+        }
+    );
+}
+
+#[test]
+fn https_proxy_takes_precedence_over_http_proxy() {
+    let config = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            (HTTP_PROXY, "http://http-proxy:8080"),
+            (HTTPS_PROXY, "http://https-proxy:8080"),
+            (NO_PROXY, "localhost"),
+        ],
+    )
+    .expect("environment should parse");
+
+    assert_eq!(
+        config.network.proxy,
+        Some("http://https-proxy:8080".to_owned())
+    );
+    assert_eq!(config.network.no_proxy, Some("localhost".to_owned()));
+}
+
+#[test]
+fn windows_environment_names_are_case_insensitive() {
+    let config = EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [
+            ("home", "/home/alice"),
+            ("appdata", "/roaming"),
+            ("localappdata", "/local"),
+            ("relay_knowledge_http_bind", "localhost:8791"),
+            ("ssl_verify", "off"),
+        ],
+    )
+    .expect("environment should parse");
+
+    assert_eq!(config.platform.home_dir, Some(PathBuf::from("/home/alice")));
+    assert_eq!(config.platform.app_data, Some(PathBuf::from("/roaming")));
+    assert_eq!(
+        config.platform.local_app_data,
+        Some(PathBuf::from("/local"))
+    );
+    assert_eq!(config.network.http_bind, Some("localhost:8791".to_owned()));
+    assert_eq!(config.network.ssl_verify, Some(false));
 }
