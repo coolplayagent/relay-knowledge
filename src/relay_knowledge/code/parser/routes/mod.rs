@@ -5,8 +5,8 @@ mod detect;
 pub(in crate::code::parser) use detect::{ANONYMOUS_ROUTE_HANDLER_NAME, detect_routes};
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
 
 #[cfg(test)]
 #[path = "review_tests.rs"]

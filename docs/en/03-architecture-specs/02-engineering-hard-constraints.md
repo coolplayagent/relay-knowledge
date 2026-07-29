@@ -194,6 +194,8 @@ Symbol query owns `mod_tests` and generated-filter suites directly. Typed functi
 
 Application repository, derived-view, runtime, and shared-service facade tests use the explicit `mod_tests` name. Do not restore ambiguous `tests.rs` files for these module owners.
 
+Code feature-flag extraction, route parsing, and source-search facade tests also use `mod_tests`; behavior-focused child suites keep their descriptive names.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.

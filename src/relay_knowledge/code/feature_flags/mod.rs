@@ -401,5 +401,5 @@ fn confidence_tier_for_edge(edge_kind: &str) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;

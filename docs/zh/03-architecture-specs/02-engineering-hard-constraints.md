@@ -194,6 +194,8 @@ Symbol query 直接拥有 `mod_tests` 与 generated-filter 测试套件。Typed 
 
 Application repository、derived-view、runtime 与 shared-service facade 测试统一使用明确的 `mod_tests` 名称；不得为这些模块 owner 恢复含糊的 `tests.rs`。
 
+代码 feature-flag extraction、route parsing 与 source-search facade 测试同样使用 `mod_tests`；行为聚焦的子测试套件继续保留描述性名称。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。
