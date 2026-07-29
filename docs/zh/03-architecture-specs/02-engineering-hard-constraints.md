@@ -86,6 +86,8 @@ Code snapshot 持久化统一收敛在 `storage::sqlite::code_snapshot`：`mod.r
 
 Codebase view 持久化统一收敛在 `storage::sqlite::code_views`：`mod.rs` 协调 snapshot assembly，`affected`、`call_focus`、`dependencies`、`truncation` 负责各自有界派生，`tests` 验证组合投影。必须把这些文件保持在一起，不得再把依赖前缀关联的兄弟文件散落在 SQLite 根目录。
 
+Durable code index task 在物理结构上统一收敛到 `storage::sqlite::code_tasks`：`mod.rs` 负责 queue、attempt-scoped lease、有界 retry、completion/failure、reset、checkpoint 和 scope retention，`worktree` 保护活跃 overlay base scope，queue/lease/reset/retention/status 定向测试与该边界放在一起。为保持 white-box 访问，测试的逻辑模块可继续作为 code facade 的兄弟，但文件不得回到 SQLite 根目录。
+
 代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
 
 ### 3.7 代码索引基础模块

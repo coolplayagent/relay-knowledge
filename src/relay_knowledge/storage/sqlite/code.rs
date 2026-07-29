@@ -52,9 +52,9 @@ mod code_cleanup;
 #[path = "code_workspace.rs"]
 mod code_workspace;
 
-#[path = "code_tasks.rs"]
+#[path = "code_tasks/mod.rs"]
 mod code_tasks;
-#[path = "code_tasks_worktree.rs"]
+#[path = "code_tasks/worktree.rs"]
 mod code_tasks_worktree;
 
 #[path = "code_search.rs"]
@@ -137,23 +137,23 @@ mod code_query_line_context_tests;
 mod code_metadata_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_tests.rs"]
+#[path = "code_tasks/tests.rs"]
 mod code_tasks_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_retention_tests.rs"]
+#[path = "code_tasks/retention_tests.rs"]
 mod code_tasks_retention_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_status_tests.rs"]
+#[path = "code_tasks/status_tests.rs"]
 mod code_tasks_status_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_lease_tests.rs"]
+#[path = "code_tasks/lease_tests.rs"]
 mod code_tasks_lease_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_reset_tests.rs"]
+#[path = "code_tasks/reset_tests.rs"]
 mod code_tasks_reset_tests;
 
 #[cfg(test)]
