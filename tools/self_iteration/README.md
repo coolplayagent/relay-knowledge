@@ -328,7 +328,7 @@ Regressions are recorded as degradation feedback for the next Codex prompt; posi
 
 ## Evaluation Data
 
-`cases.json` and its `include_files` define the self-improvement workload. They are not merely a list of capabilities that already work; new cases may represent competitive targets that future candidates must complete. Candidates should improve general parser, graph-edge, candidate-pruning, ranking, service workflow, or observability behavior instead of deleting, weakening, or enumerating cases.
+`cases.json` and its `include_files` define the self-improvement workload. The root file owns the bounded manifest and global suites; base repository query targets are split into descriptive project-alias, relay-teams, Linux, LevelDB, Spring Framework, and Kubernetes include files. They are not merely a list of capabilities that already work; new cases may represent competitive targets that future candidates must complete. Candidates should improve general parser, graph-edge, candidate-pruning, ranking, service workflow, or observability behavior instead of deleting, weakening, or enumerating cases.
 
 ### Generated and Local Fixtures
 

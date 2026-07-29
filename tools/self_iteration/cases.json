@@ -1,5 +1,11 @@
 {
   "include_files": [
+    "cases/repository_project_alias_targets.json",
+    "cases/repository_relay_teams_targets.json",
+    "cases/repository_linux_targets.json",
+    "cases/repository_leveldb_targets.json",
+    "cases/repository_spring_framework_targets.json",
+    "cases/repository_kubernetes_targets.json",
     "cases/file_background_targets.json",
     "cases/repository_grep_budget_targets.json",
     "cases/repository_config_document_syntax_fixture_targets.json",
@@ -51,7 +57,9 @@
       "generated_fixture": "project_alias_v1",
       "alias": "project_alias_fixture",
       "register_without_alias": true,
-      "additional_aliases": ["session-ephemeral-project-alias"],
+      "additional_aliases": [
+        "session-ephemeral-project-alias"
+      ],
       "ref": "HEAD",
       "scope": "all",
       "path_filters": [],
@@ -162,11 +170,26 @@
       "query_p50_budget_ms": 50,
       "query_p95_budget_ms": 150,
       "files": [
-        {"path": "Documents/design/quarterly-design.pdf", "content": "pdf placeholder"},
-        {"path": "Documents/design/quarterly-design-notes.md", "content": "notes placeholder"},
-        {"path": "Documents/budget/quarterly-budget.xlsx", "content": "budget placeholder"},
-        {"path": "opt/projects/relay/local-index-plan.md", "content": "linux opt style root"},
-        {"path": "D-drive/Work/contracts/vendor-contract.docx", "content": "windows d drive style root"}
+        {
+          "path": "Documents/design/quarterly-design.pdf",
+          "content": "pdf placeholder"
+        },
+        {
+          "path": "Documents/design/quarterly-design-notes.md",
+          "content": "notes placeholder"
+        },
+        {
+          "path": "Documents/budget/quarterly-budget.xlsx",
+          "content": "budget placeholder"
+        },
+        {
+          "path": "opt/projects/relay/local-index-plan.md",
+          "content": "linux opt style root"
+        },
+        {
+          "path": "D-drive/Work/contracts/vendor-contract.docx",
+          "content": "windows d drive style root"
+        }
       ]
     },
     "local_noise": {
@@ -176,8 +199,14 @@
       "query_p95_budget_ms": 200,
       "generate_noise_files": 1200,
       "files": [
-        {"path": "outputs/final/customer-renewal-2026.pdf", "content": "target placeholder"},
-        {"path": "deep/a/b/c/d/e/f/operations-runbook.md", "content": "deep placeholder"}
+        {
+          "path": "outputs/final/customer-renewal-2026.pdf",
+          "content": "target placeholder"
+        },
+        {
+          "path": "deep/a/b/c/d/e/f/operations-runbook.md",
+          "content": "deep placeholder"
+        }
       ]
     }
   },
@@ -188,7 +217,12 @@
       "query": "quarterly design pdf",
       "limit": 10,
       "max_rank": 1,
-      "expected": [{"relative_path": "Documents/design/quarterly-design.pdf", "extension": "pdf"}]
+      "expected": [
+        {
+          "relative_path": "Documents/design/quarterly-design.pdf",
+          "extension": "pdf"
+        }
+      ]
     },
     {
       "id": "files_linux_opt_style_path",
@@ -196,7 +230,11 @@
       "query": "opt relay local index plan",
       "limit": 10,
       "max_rank": 2,
-      "expected": [{"relative_path": "opt/projects/relay/local-index-plan.md"}]
+      "expected": [
+        {
+          "relative_path": "opt/projects/relay/local-index-plan.md"
+        }
+      ]
     },
     {
       "id": "files_windows_d_style_path",
@@ -204,7 +242,11 @@
       "query": "D drive vendor contract docx",
       "limit": 10,
       "max_rank": 2,
-      "expected": [{"relative_path": "D-drive/Work/contracts/vendor-contract.docx"}]
+      "expected": [
+        {
+          "relative_path": "D-drive/Work/contracts/vendor-contract.docx"
+        }
+      ]
     },
     {
       "id": "files_high_noise_target_rank",
@@ -212,7 +254,11 @@
       "query": "customer renewal 2026 pdf",
       "limit": 10,
       "max_rank": 1,
-      "expected": [{"relative_path": "outputs/final/customer-renewal-2026.pdf"}]
+      "expected": [
+        {
+          "relative_path": "outputs/final/customer-renewal-2026.pdf"
+        }
+      ]
     },
     {
       "id": "files_deep_path_budget",
@@ -220,7 +266,11 @@
       "query": "operations runbook",
       "limit": 10,
       "max_rank": 3,
-      "expected": [{"relative_path": "deep/a/b/c/d/e/f/operations-runbook.md"}]
+      "expected": [
+        {
+          "relative_path": "deep/a/b/c/d/e/f/operations-runbook.md"
+        }
+      ]
     },
     {
       "id": "files_negative_missing",
@@ -233,13 +283,27 @@
   "cli_contract_cases": [
     {
       "id": "repo_index_worker_help_is_agent_visible",
-      "command": ["help", "repo", "index-worker", "--format", "json"],
+      "command": [
+        "help",
+        "repo",
+        "index-worker",
+        "--format",
+        "json"
+      ],
       "guardrail": true,
-      "stdout_contains": ["index-worker", "streaming-json"]
+      "stdout_contains": [
+        "index-worker",
+        "streaming-json"
+      ]
     },
     {
       "id": "repo_index_worker_idle_json_reports_no_claim",
-      "command": ["repo", "index-worker", "--format", "json"],
+      "command": [
+        "repo",
+        "index-worker",
+        "--format",
+        "json"
+      ],
       "guardrail": true,
       "json_expect": {
         "claimed": false,
@@ -248,10 +312,18 @@
     },
     {
       "id": "repo_index_worker_idle_streaming_json_reports_events",
-      "command": ["repo", "index-worker", "--format", "streaming-json"],
+      "command": [
+        "repo",
+        "index-worker",
+        "--format",
+        "streaming-json"
+      ],
       "guardrail": true,
       "json_lines_expect": [
-        {"event": "started", "operation": "code.repo.index_worker"},
+        {
+          "event": "started",
+          "operation": "code.repo.index_worker"
+        },
         {
           "event": "item",
           "operation": "code.repo.index_worker",
@@ -260,7 +332,10 @@
             "task": null
           }
         },
-        {"event": "completed", "operation": "code.repo.index_worker"}
+        {
+          "event": "completed",
+          "operation": "code.repo.index_worker"
+        }
       ]
     }
   ],
@@ -274,15 +349,24 @@
     "evidence": [
       {
         "content": "Semantic vector recall anchors context packs with evidence sv-alpha-gradient, backend freshness, and retriever source attribution.",
-        "entities": ["SemanticVectorRecall", "ContextPack"]
+        "entities": [
+          "SemanticVectorRecall",
+          "ContextPack"
+        ]
       },
       {
         "content": "Hybrid GraphRAG fusion keeps bm25, semantic, vector, and graph evidence signals explainable through sv-beta-fusion notes.",
-        "entities": ["HybridGraphRag", "FusionDiagnostics"]
+        "entities": [
+          "HybridGraphRag",
+          "FusionDiagnostics"
+        ]
       },
       {
         "content": "External embedding metadata tracks model dimension, source hash, and cursor freshness for sv-gamma-provider diagnostics.",
-        "entities": ["EmbeddingProvider", "IndexCursor"]
+        "entities": [
+          "EmbeddingProvider",
+          "IndexCursor"
+        ]
       }
     ],
     "query_cases": [
@@ -292,36 +376,67 @@
         "guardrail": true,
         "limit": 10,
         "max_rank": 1,
-        "required_sources": ["semantic"],
+        "required_sources": [
+          "semantic"
+        ],
         "required_backend_states": {
-          "semantic": ["available"],
-          "vector": ["available"]
+          "semantic": [
+            "available"
+          ],
+          "vector": [
+            "available"
+          ]
         },
-        "expected": [{"content_contains": "sv-alpha-gradient"}]
+        "expected": [
+          {
+            "content_contains": "sv-alpha-gradient"
+          }
+        ]
       },
       {
         "id": "sv_vector_backend_freshness_source",
         "query": "backend freshness retriever source attribution vector",
         "limit": 10,
         "max_rank": 2,
-        "required_sources": ["vector"],
+        "required_sources": [
+          "vector"
+        ],
         "required_backend_states": {
-          "semantic": ["available"],
-          "vector": ["available"]
+          "semantic": [
+            "available"
+          ],
+          "vector": [
+            "available"
+          ]
         },
-        "expected": [{"content_contains": "sv-alpha-gradient"}]
+        "expected": [
+          {
+            "content_contains": "sv-alpha-gradient"
+          }
+        ]
       },
       {
         "id": "sv_external_embedding_metadata_recall",
         "query": "embedding metadata model dimension source hash cursor freshness",
         "limit": 10,
         "max_rank": 2,
-        "required_sources": ["semantic", "vector"],
+        "required_sources": [
+          "semantic",
+          "vector"
+        ],
         "required_backend_states": {
-          "semantic": ["available"],
-          "vector": ["available"]
+          "semantic": [
+            "available"
+          ],
+          "vector": [
+            "available"
+          ]
         },
-        "expected": [{"content_contains": "sv-gamma-provider"}]
+        "expected": [
+          {
+            "content_contains": "sv-gamma-provider"
+          }
+        ]
       }
     ]
   },
@@ -373,713 +488,5 @@
     "min_dimension_score": 0.65,
     "max_doc_chars": 3000,
     "max_diff_chars": 30000
-  },
-  "query_cases": [
-    {
-      "id": "project_alias_default_register_query",
-      "repository": "project_alias_fixture",
-      "kind": "definition",
-      "query": "stable_project_entry",
-      "guardrail": true,
-      "limit": 5,
-      "max_rank": 1,
-      "expected": [{"path": "src/lib.rs", "excerpt_contains": "stable_project_entry"}]
-    },
-    {
-      "id": "project_alias_session_alias_reuses_index",
-      "repository": "project_alias_fixture",
-      "repository_alias": "session-ephemeral-project-alias",
-      "kind": "definition",
-      "query": "stable_project_entry",
-      "guardrail": true,
-      "limit": 5,
-      "max_rank": 1,
-      "expected": [{"path": "src/lib.rs", "excerpt_contains": "stable_project_entry"}]
-    },
-    {
-      "id": "rt_definition_connector_service",
-      "repository": "relay_teams",
-      "kind": "definition",
-      "query": "ConnectorService",
-      "guardrail": true,
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
-    },
-    {
-      "id": "rt_definition_w3_save_request",
-      "repository": "relay_teams",
-      "kind": "definition",
-      "query": "W3ConnectorSaveRequest",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/w3_models.py", "line_start": 53}]
-    },
-    {
-      "id": "rt_callers_summary",
-      "repository": "relay_teams",
-      "kind": "callers",
-      "query": "_summary",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 177}]
-    },
-    {
-      "id": "rt_callees_summary",
-      "repository": "relay_teams",
-      "kind": "callees",
-      "query": "_summary",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/service.py", "excerpt_contains": "ConnectorSummary"}]
-    },
-    {
-      "id": "rt_imports_w3_save_request",
-      "repository": "relay_teams",
-      "kind": "imports",
-      "query": "W3ConnectorSaveRequest",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"edge_resolution_state": "resolved"}]
-    },
-    {
-      "id": "rt_hybrid_connector_service",
-      "repository": "relay_teams",
-      "kind": "hybrid",
-      "query": "ConnectorService",
-      "guardrail": true,
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
-    },
-    {
-      "id": "rt_negative_missing_symbol",
-      "repository": "relay_teams",
-      "kind": "definition",
-      "query": "DefinitelyMissingRelayTeamsSymbol",
-      "limit": 10,
-      "expect_empty": true
-    },
-    {
-      "id": "rt_filter_connector_service_python",
-      "repository": "relay_teams",
-      "kind": "definition",
-      "query": "ConnectorService",
-      "limit": 10,
-      "path_filters": ["src/relay_teams/connector/service.py"],
-      "language_filters": ["python"],
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
-    },
-    {
-      "id": "rt_definition_w3_connector_service_full_scope",
-      "repository": "relay_teams",
-      "kind": "definition",
-      "query": "W3ConnectorService",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/w3_service.py", "line_start": 107}]
-    },
-    {
-      "id": "rt_hybrid_eval_checkpoint_store",
-      "repository": "relay_teams",
-      "kind": "hybrid",
-      "query": "EvalCheckpointStore signature mismatch append result",
-      "limit": 10,
-      "max_rank": 3,
-      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "excerpt_contains": "EvalCheckpointStore"}]
-    },
-    {
-      "id": "rt_imports_connector_reexport_full_scope",
-      "repository": "relay_teams",
-      "kind": "imports",
-      "query": "W3ConnectorService",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "src/relay_teams/connector/__init__.py"}]
-    },
-    {
-      "id": "rt_definition_eval_checkpoint_append_result",
-      "repository": "relay_teams",
-      "kind": "definition",
-      "query": "append_result",
-      "limit": 20,
-      "path_filters": ["src/relay_teams_evals/checkpoint.py"],
-      "language_filters": ["python"],
-      "max_rank": 1,
-      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "line_start": 176}]
-    },
-    {
-      "id": "rt_fuzzy_constant_checkpoint_version",
-      "repository": "relay_teams",
-      "kind": "hybrid",
-      "query": "checkpoint metadata version constant",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "excerpt_contains": "_CHECKPOINT_VERSION"}]
-    },
-    {
-      "id": "rt_fuzzy_function_archive_output_dir",
-      "repository": "relay_teams",
-      "kind": "hybrid",
-      "query": "archive old eval output directory timestamp suffix",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "excerpt_contains": "archive_output_dir"}]
-    },
-    {
-      "id": "linux_definition_start_kernel",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "start_kernel",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "init/main.c", "line_start": 1017}]
-    },
-    {
-      "id": "linux_definition_container_of",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "container_of",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "include/linux/container_of.h", "line_start": 19}]
-    },
-    {
-      "id": "linux_definition_export_symbol",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "EXPORT_SYMBOL",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "include/linux/export.h", "line_start": 89}]
-    },
-    {
-      "id": "linux_definition_container_of_const",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "container_of_const",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "include/linux/container_of.h", "line_start": 35}]
-    },
-    {
-      "id": "linux_definition_module_init_macro",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "module_init",
-      "limit": 10,
-      "max_rank": 2,
-      "expected": [{"path": "include/linux/module.h"}]
-    },
-    {
-      "id": "linux_definition_syscall_read",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "read",
-      "limit": 10,
-      "max_rank": 5,
-      "path_filters": ["fs/read_write.c"],
-      "language_filters": ["c"],
-      "expected": [{"path": "fs/read_write.c", "line_start": 724}]
-    },
-    {
-      "id": "linux_definition_do_sys_openat2",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "do_sys_openat2",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "fs/open.c", "line_start": 1355}]
-    },
-    {
-      "id": "linux_definition_anon_inode_getfile",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "anon_inode_getfile",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "fs/anon_inodes.c", "line_start": 200}]
-    },
-    {
-      "id": "linux_definition_debugfs_create_file_full",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "debugfs_create_file_full",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "fs/debugfs/inode.c", "line_start": 455}]
-    },
-    {
-      "id": "linux_callers_cma_debugfs_add_one",
-      "repository": "linux_sample",
-      "kind": "callers",
-      "query": "cma_debugfs_add_one",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "mm/cma_debug.c", "excerpt_contains": "cma_debugfs_init"}]
-    },
-    {
-      "id": "linux_callers_anon_inode_getfile",
-      "repository": "linux_sample",
-      "kind": "callers",
-      "query": "anon_inode_getfile",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "fs/eventpoll.c", "excerpt_contains": "eventpoll"}]
-    },
-    {
-      "id": "linux_callees_cma_debugfs_init",
-      "repository": "linux_sample",
-      "kind": "callees",
-      "query": "cma_debugfs_init",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "mm/cma_debug.c", "excerpt_contains": "cma_debugfs_add_one"}]
-    },
-    {
-      "id": "linux_callees_do_mmap",
-      "repository": "linux_sample",
-      "kind": "callees",
-      "query": "do_mmap",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "mm/mmap.c", "excerpt_contains": "mmap_region"}]
-    },
-    {
-      "id": "linux_imports_debugfs",
-      "repository": "linux_sample",
-      "kind": "imports",
-      "query": "linux/debugfs.h",
-      "limit": 10,
-      "max_rank": 2,
-      "expected": [{"path": "mm/cma_debug.c", "edge_target_hint": "include/linux/debugfs.h"}]
-    },
-    {
-      "id": "linux_definition_copy_process_full_scope",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "copy_process",
-      "limit": 10,
-      "max_rank": 2,
-      "expected": [{"path": "kernel/fork.c", "line_start": 1969}]
-    },
-    {
-      "id": "linux_hybrid_mmap_syscall_flow_full_scope",
-      "repository": "linux_sample",
-      "kind": "hybrid",
-      "query": "SYSCALL_DEFINE6 mmap_pgoff do_mmap mmap_region",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "mm/mmap.c", "excerpt_contains": "mmap_region"}]
-    },
-    {
-      "id": "linux_hybrid_epoll_eventfd_full_scope",
-      "repository": "linux_sample",
-      "kind": "hybrid",
-      "query": "epoll eventfd anon_inode_getfile wakeup poll",
-      "limit": 10,
-      "max_rank": 8,
-      "expected": [{"path": "fs/eventpoll.c"}]
-    },
-    {
-      "id": "linux_definition_eventfd_ctx_fileget_full_scope",
-      "repository": "linux_sample",
-      "kind": "definition",
-      "query": "eventfd_ctx_fileget",
-      "limit": 20,
-      "max_rank": 2,
-      "expected": [{"path": "fs/eventfd.c", "line_start": 366}]
-    },
-    {
-      "id": "leveldb_definition_db_open",
-      "repository": "leveldb_cpp",
-      "kind": "definition",
-      "query": "DB::Open",
-      "guardrail": true,
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "db/db_impl.cc", "line_start": 1503}]
-    },
-    {
-      "id": "leveldb_definition_dbimpl_get",
-      "repository": "leveldb_cpp",
-      "kind": "definition",
-      "query": "DBImpl::Get",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "db/db_impl.cc", "line_start": 1121}]
-    },
-    {
-      "id": "leveldb_definition_new_lru_cache",
-      "repository": "leveldb_cpp",
-      "kind": "definition",
-      "query": "NewLRUCache",
-      "limit": 10,
-      "max_rank": 2,
-      "expected": [{"path": "util/cache.cc", "line_start": 399}]
-    },
-    {
-      "id": "leveldb_definition_write_batch_put",
-      "repository": "leveldb_cpp",
-      "kind": "definition",
-      "query": "WriteBatch::Put",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "db/write_batch.cc", "line_start": 98}]
-    },
-    {
-      "id": "leveldb_callers_new_lru_cache",
-      "repository": "leveldb_cpp",
-      "kind": "callers",
-      "query": "NewLRUCache",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "db/db_impl.cc", "excerpt_contains": "block_cache"}]
-    },
-    {
-      "id": "leveldb_hybrid_internal_key_comparator",
-      "repository": "leveldb_cpp",
-      "kind": "hybrid",
-      "query": "InternalKeyComparator",
-      "guardrail": true,
-      "limit": 10,
-      "max_rank": 3,
-      "expected": [{"path": "db/dbformat.h"}]
-    },
-    {
-      "id": "leveldb_filter_dbimpl_get_cpp",
-      "repository": "leveldb_cpp",
-      "kind": "definition",
-      "query": "DBImpl::Get",
-      "limit": 10,
-      "path_filters": ["db/db_impl.cc"],
-      "language_filters": ["cpp"],
-      "max_rank": 1,
-      "expected": [{"path": "db/db_impl.cc", "line_start": 1121}]
-    },
-    {
-      "id": "leveldb_definition_table_cache_find_table_full_scope",
-      "repository": "leveldb_cpp",
-      "kind": "definition",
-      "query": "TableCache::FindTable",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "db/table_cache.cc", "line_start": 41}]
-    },
-    {
-      "id": "leveldb_hybrid_recovery_manifest_full_scope",
-      "repository": "leveldb_cpp",
-      "kind": "hybrid",
-      "query": "Recover descriptor save_manifest VersionEdit",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "db/db_impl.h", "excerpt_contains": "Recover"}]
-    },
-    {
-      "id": "leveldb_definition_new_bloom_filter_policy",
-      "repository": "leveldb_cpp",
-      "kind": "definition",
-      "query": "NewBloomFilterPolicy",
-      "limit": 20,
-      "max_rank": 2,
-      "expected": [{"path": "util/bloom.cc", "line_start": 88}]
-    },
-    {
-      "id": "leveldb_fuzzy_class_cache_lru_interface",
-      "repository": "leveldb_cpp",
-      "kind": "hybrid",
-      "query": "cache interface lookup insert total charge lru",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [{"path": "include/leveldb/cache.h", "excerpt_contains": "class LEVELDB_EXPORT Cache"}]
-    },
-    {
-      "id": "leveldb_fuzzy_constant_crc_mask_delta",
-      "repository": "leveldb_cpp",
-      "kind": "hybrid",
-      "query": "crc masked representation rotate add constant",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [{"path": "util/crc32c.h", "excerpt_contains": "kMaskDelta"}]
-    },
-    {
-      "id": "spring_definition_application_context",
-      "repository": "spring_framework_java",
-      "kind": "definition",
-      "query": "ApplicationContext",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [
-        {
-          "path": "spring-context/src/main/java/org/springframework/context/ApplicationContext.java",
-          "line_start": 59
-        }
-      ]
-    },
-    {
-      "id": "spring_definition_abstract_application_context_refresh",
-      "repository": "spring_framework_java",
-      "kind": "definition",
-      "query": "refresh",
-      "limit": 10,
-      "path_filters": [
-        "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java"
-      ],
-      "language_filters": ["java"],
-      "max_rank": 1,
-      "expected": [
-        {
-          "path": "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java",
-          "line_start": 582
-        }
-      ]
-    },
-    {
-      "id": "spring_definition_default_listable_bean_factory",
-      "repository": "spring_framework_java",
-      "kind": "definition",
-      "query": "DefaultListableBeanFactory",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [
-        {
-          "path": "spring-beans/src/main/java/org/springframework/beans/factory/support/DefaultListableBeanFactory.java",
-          "line_start": 132
-        }
-      ]
-    },
-    {
-      "id": "spring_definition_annotation_config_application_context",
-      "repository": "spring_framework_java",
-      "kind": "definition",
-      "query": "AnnotationConfigApplicationContext",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [
-        {
-          "path": "spring-context/src/main/java/org/springframework/context/annotation/AnnotationConfigApplicationContext.java",
-          "line_start": 57
-        }
-      ]
-    },
-    {
-      "id": "spring_imports_default_listable_bean_factory",
-      "repository": "spring_framework_java",
-      "kind": "imports",
-      "query": "DefaultListableBeanFactory",
-      "limit": 10,
-      "max_rank": 2,
-      "expected": [
-        {
-          "path": "spring-context/src/main/java/org/springframework/context/support/GenericApplicationContext.java",
-          "line_start": 43
-        }
-      ]
-    },
-    {
-      "id": "spring_filter_bean_factory_get_bean",
-      "repository": "spring_framework_java",
-      "kind": "definition",
-      "query": "getBean",
-      "limit": 10,
-      "path_filters": [
-        "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java"
-      ],
-      "language_filters": ["java"],
-      "max_rank": 1,
-      "expected": [
-        {
-          "path": "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java",
-          "line_start": 156
-        }
-      ]
-    },
-    {
-      "id": "spring_definition_framework_servlet_full_scope",
-      "repository": "spring_framework_java",
-      "kind": "definition",
-      "query": "FrameworkServlet",
-      "limit": 10,
-      "max_rank": 2,
-      "expected": [
-        {
-          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/FrameworkServlet.java",
-          "line_start": 142
-        }
-      ]
-    },
-    {
-      "id": "spring_hybrid_handler_mapping_full_scope",
-      "repository": "spring_framework_java",
-      "kind": "hybrid",
-      "query": "RequestMappingHandlerMapping HandlerMapping getHandler",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [
-        {
-          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/HandlerMapping.java",
-          "excerpt_contains": "RequestMappingHandlerMapping"
-        }
-      ]
-    },
-    {
-      "id": "spring_definition_dispatcher_servlet_full_scope",
-      "repository": "spring_framework_java",
-      "kind": "definition",
-      "query": "DispatcherServlet",
-      "limit": 20,
-      "max_rank": 2,
-      "expected": [
-        {
-          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java",
-          "line_start": 157
-        }
-      ]
-    },
-    {
-      "id": "spring_fuzzy_class_dispatcher_servlet",
-      "repository": "spring_framework_java",
-      "kind": "hybrid",
-      "query": "front controller servlet dispatch web mvc framework servlet",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [
-        {
-          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java",
-          "excerpt_contains": "class DispatcherServlet"
-        }
-      ]
-    },
-    {
-      "id": "kubernetes_definition_api_server_command",
-      "repository": "kubernetes_go_sample",
-      "kind": "definition",
-      "query": "NewAPIServerCommand",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "cmd/kube-apiserver/app/server.go", "line_start": 70}]
-    },
-    {
-      "id": "kubernetes_definition_kubelet_command",
-      "repository": "kubernetes_go_sample",
-      "kind": "definition",
-      "query": "NewKubeletCommand",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "cmd/kubelet/app/server.go", "line_start": 142}]
-    },
-    {
-      "id": "kubernetes_definition_run_kubelet",
-      "repository": "kubernetes_go_sample",
-      "kind": "definition",
-      "query": "RunKubelet",
-      "limit": 10,
-      "max_rank": 1,
-      "expected": [{"path": "cmd/kubelet/app/server.go", "line_start": 1234}]
-    },
-    {
-      "id": "kubernetes_definition_pod_type",
-      "repository": "kubernetes_go_sample",
-      "kind": "definition",
-      "query": "Pod",
-      "limit": 10,
-      "max_rank": 3,
-      "path_filters": ["pkg/apis/core/types.go"],
-      "language_filters": ["go"],
-      "expected": [{"path": "pkg/apis/core/types.go", "line_start": 4695}]
-    },
-    {
-      "id": "kubernetes_definition_clientset_new_for_config",
-      "repository": "kubernetes_go_sample",
-      "kind": "definition",
-      "query": "NewForConfig",
-      "limit": 10,
-      "max_rank": 5,
-      "path_filters": ["staging/src/k8s.io/client-go/kubernetes/clientset.go"],
-      "language_filters": ["go"],
-      "expected": [{"path": "staging/src/k8s.io/client-go/kubernetes/clientset.go", "line_start": 476}]
-    },
-    {
-      "id": "kubernetes_callers_run_kubelet",
-      "repository": "kubernetes_go_sample",
-      "kind": "callers",
-      "query": "RunKubelet",
-      "limit": 10,
-      "max_rank": 3,
-      "expected": [{"path": "cmd/kubelet/app/server.go", "excerpt_contains": "RunKubelet"}]
-    },
-    {
-      "id": "kubernetes_hybrid_rest_client",
-      "repository": "kubernetes_go_sample",
-      "kind": "hybrid",
-      "query": "RESTClient",
-      "limit": 10,
-      "max_rank": 3,
-      "expected": [{"path": "staging/src/k8s.io/client-go/rest/client.go", "line_start": 86}]
-    },
-    {
-      "id": "kubernetes_definition_generic_client_full_scope",
-      "repository": "kubernetes_go_sample",
-      "kind": "definition",
-      "query": "NewClientWithListAndApply",
-      "limit": 10,
-      "max_rank": 2,
-      "expected": [{"path": "staging/src/k8s.io/client-go/gentype/type.go", "line_start": 134}]
-    },
-    {
-      "id": "kubernetes_hybrid_authorizer_config_full_scope",
-      "repository": "kubernetes_go_sample",
-      "kind": "hybrid",
-      "query": "AuthorizationConfiguration LoadAndValidateData webhook authorizer",
-      "limit": 10,
-      "max_rank": 5,
-      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go", "excerpt_contains": "LoadAndValidateData"}]
-    },
-    {
-      "id": "kubernetes_imports_client_go_informer_full_scope",
-      "repository": "kubernetes_go_sample",
-      "kind": "imports",
-      "query": "SharedInformerFactory",
-      "limit": 10,
-      "max_rank": 8,
-      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go"}]
-    },
-    {
-      "id": "kubernetes_definition_authorizer_load_and_validate_data",
-      "repository": "kubernetes_go_sample",
-      "kind": "definition",
-      "query": "LoadAndValidateData",
-      "limit": 20,
-      "max_rank": 2,
-      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go", "line_start": 185}]
-    },
-    {
-      "id": "kubernetes_fuzzy_variable_repeatable_authorizers",
-      "repository": "kubernetes_go_sample",
-      "kind": "hybrid",
-      "query": "repeatable authorization modes webhook list variable",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go", "excerpt_contains": "repeatableAuthorizerTypes"}]
-    },
-    {
-      "id": "kubernetes_fuzzy_function_service_ip_ranges",
-      "repository": "kubernetes_go_sample",
-      "kind": "hybrid",
-      "query": "service cluster ip ranges primary secondary helper",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [{"path": "cmd/kube-apiserver/app/options/completion.go", "excerpt_contains": "getServiceIPAndRanges"}]
-    },
-    {
-      "id": "kubernetes_fuzzy_variable_no_backoff",
-      "repository": "kubernetes_go_sample",
-      "kind": "hybrid",
-      "query": "rest request default no backoff manager variable",
-      "limit": 20,
-      "max_rank": 5,
-      "expected": [{"path": "staging/src/k8s.io/client-go/rest/request.go", "excerpt_contains": "noBackoff"}]
-    }
-  ]
+  }
 }
