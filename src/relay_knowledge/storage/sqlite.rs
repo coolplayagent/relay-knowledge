@@ -28,6 +28,8 @@ mod retry;
 mod schema_columns;
 mod schema_marker;
 mod schema_migration;
+mod scope_filters;
+mod software;
 mod store_impls;
 mod table_stats;
 

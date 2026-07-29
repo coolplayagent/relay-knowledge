@@ -16,16 +16,6 @@ const CASE_INTENT_SOURCE_SCOPE: &str = "code:test:case-intent:commit:tree";
 mod case_intent_tests;
 
 #[test]
-fn path_filters_accept_trailing_slashes() {
-    assert!(path_matches_filter("src/lib.rs", "src/"));
-    assert!(path_matches_filter("src/lib.rs", "src"));
-    assert!(path_matches_filter("src/lib.rs", "."));
-    assert!(path_matches_filter("src/lib.rs", "./"));
-    assert!(path_matches_filter("src/lib.rs", "./src"));
-    assert!(!path_matches_filter("src-other/lib.rs", "src/"));
-}
-
-#[test]
 fn candidate_condition_preserves_all_query_terms() {
     let (condition, values) = candidate_condition(&["lower(name)", "lower(path)"], "retry budget");
 

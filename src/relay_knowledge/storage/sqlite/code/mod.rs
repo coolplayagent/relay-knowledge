@@ -2,6 +2,8 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+use super::{scope_filters as code_query_scope, software};
+
 #[path = "../code_query/mod.rs"]
 mod code_query;
 
@@ -24,9 +26,6 @@ mod code_routes;
 
 #[path = "../code_views/mod.rs"]
 mod code_views;
-
-#[path = "../code_query/scope.rs"]
-mod code_query_scope;
 
 #[path = "impact.rs"]
 mod code_impact;
@@ -68,9 +67,6 @@ mod code_set;
 
 #[path = "../code_set/refresh_tasks.rs"]
 mod code_set_tasks;
-
-#[path = "../software.rs"]
-mod software;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

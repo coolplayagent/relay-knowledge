@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params, types::Value};
 
 use crate::{domain::SoftwareGlobalRequest, storage::StorageError};
 
-use super::super::code_query_scope;
+use super::super::scope_filters;
 
 pub(super) fn source_scope_for_request(
     connection: &mut Connection,
@@ -42,7 +42,7 @@ pub(super) fn source_scope_for_request(
         let (source_scope, path_filters_json, language_filters_json) = candidate?;
         let path_filters = parse_filter_json(&path_filters_json)?;
         let language_filters = parse_filter_json(&language_filters_json)?;
-        if code_query_scope::selector_filters_fit_indexed_scope(
+        if scope_filters::selector_filters_fit_indexed_scope(
             &path_filters,
             &language_filters,
             &request.repository.path_filters,

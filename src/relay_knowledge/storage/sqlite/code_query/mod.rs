@@ -93,8 +93,6 @@ use super::code_query_prepare::{
     code_search_read_model_unavailable_reason, prepare_code_search_statement,
     retry_code_search_operation,
 };
-#[cfg(test)]
-use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
 use code_query_api_sequence_scoring::compact_unique_api_sequence_chunk_bonus;
 use code_query_calls::search_calls;

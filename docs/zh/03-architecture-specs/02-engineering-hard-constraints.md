@@ -76,6 +76,8 @@ SQLite 存储必须把 evidence 与稳定 ID 生成放在 `evidence_identity`，
 
 Partitioned SQLite adapter 必须完整收敛在 `storage/partitioned/`：`mod.rs` 维护公开 store 与 trait 实现，catalog、control delegate、diagnostics、retention、routing、status 和 totals 使用职责命名文件，`mod_tests.rs` 验证跨 shard contract。`storage/` 父目录不得重新出现 `partitioned.rs`、`partitioned_tests.rs` 或指向该子域的相对 `#[path]`。
 
+Software projection 持久化必须在物理与逻辑上完整收敛到 `storage::sqlite::software`：SQLite 根模块声明该域，code-store adapter 以兄弟模块导入它，不得再通过相对路径持有该域。`mod.rs` 负责 schema 与 projection 编排，`graph.rs` 负责从图派生的 file、topic 和 relationship 物化与查询，dependency usage、lifecycle 和 query scope 保持各自职责模块。SQLite 根级 `scope_filters.rs` 统一维护 code retrieval 与 software projection 共享的 indexed-scope 覆盖判定，两个域不得导入对方的私有 helper；对应 path、language 与 indexed-scope 不变量由同级 `scope_filters_tests.rs` 维护。`mod_tests.rs` 验证根 projection 生命周期，`projection_tests.rs` 验证带过滤条件的 projection 读取。`storage/sqlite/` 父目录不得重新出现 `software.rs`、`software_graph.rs` 或 software 根测试文件。
+
 本地文件持久化统一收敛在 `storage::sqlite::file_index` 目录：`mod.rs` 负责 root lifecycle、文件元数据、path search 和聚合诊断，`content` 负责正文 entry、chunk、FTS、freshness cursor 及正文 search。只有 `file_index::content::search` 对 SQLite store adapter 可见，其余内容索引原语保持目录私有；`tests`、`content_tests`、`retirement_tests` 分别验证元数据、正文和退役行为，不得恢复平铺的 `file_index_*` 兄弟模块。
 
 Graph canvas 持久化统一收敛在 `storage::sqlite::canvas` 目录：`mod.rs` 负责预算校验、knowledge graph 投影和 snapshot builder，`code` 只负责 code file/symbol/reference 与 source-path link 投影，`tests` 覆盖两种投影及 mixed canvas。代码投影 helper 保持 canvas 目录私有，不得恢复含义依赖文件名前缀的 `canvas_code` 顶层兄弟模块。

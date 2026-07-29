@@ -11,7 +11,7 @@ use crate::{
     storage::StorageError,
 };
 
-use super::super::current_graph_version;
+use super::{current_graph_version, schema_columns};
 use query_scope::{
     language_filter_sql_for_column, path_filter_sql_for_column, push_language_filter_values,
     push_path_filter_values, repository_id_for_scope, source_scope_for_request,
@@ -19,14 +19,10 @@ use query_scope::{
 
 const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 = 3;
 
-#[path = "software/dependency_usage.rs"]
 mod dependency_usage;
-#[path = "software/lifecycle.rs"]
+mod graph;
 mod lifecycle;
-#[path = "software/query_scope.rs"]
 mod query_scope;
-#[path = "software_graph.rs"]
-mod software_graph;
 
 #[derive(Default)]
 struct ProjectionSlices {
@@ -155,25 +151,25 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         );
         ",
     )?;
-    super::super::schema_columns::ensure_column(
+    schema_columns::ensure_column(
         connection,
         "software_global_status",
         "file_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    super::super::schema_columns::ensure_column(
+    schema_columns::ensure_column(
         connection,
         "software_global_status",
         "topic_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    super::super::schema_columns::ensure_column(
+    schema_columns::ensure_column(
         connection,
         "software_global_status",
         "relationship_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    super::super::schema_columns::ensure_column(
+    schema_columns::ensure_column(
         connection,
         "software_global_status",
         "projection_schema_version",
@@ -181,19 +177,19 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
     )?;
     mark_legacy_projection_schema_stale(connection)?;
 
-    super::super::schema_columns::ensure_column(
+    schema_columns::ensure_column(
         connection,
         "software_global_status",
         "build_target_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    super::super::schema_columns::ensure_column(
+    schema_columns::ensure_column(
         connection,
         "software_global_status",
         "iac_resource_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    super::super::schema_columns::ensure_column(
+    schema_columns::ensure_column(
         connection,
         "software_global_status",
         "design_element_count",
@@ -254,13 +250,12 @@ pub(super) fn refresh_projection(
     let lifecycle_projection =
         lifecycle::refresh_projection(&transaction, source_scope, graph_version)?;
 
-    let file_count = software_graph::materialize_files(&transaction, source_scope, graph_version)?;
+    let file_count = graph::materialize_files(&transaction, source_scope, graph_version)?;
 
-    let topic_count =
-        software_graph::materialize_topics(&transaction, source_scope, graph_version)?;
+    let topic_count = graph::materialize_topics(&transaction, source_scope, graph_version)?;
 
     let relationship_count =
-        software_graph::materialize_relationships(&transaction, source_scope, graph_version)?;
+        graph::materialize_relationships(&transaction, source_scope, graph_version)?;
 
     let repository_id = repository_id_for_scope(&transaction, source_scope)?
         .unwrap_or_else(|| "unknown".to_owned());
@@ -367,25 +362,15 @@ fn projection_slices(
             ..ProjectionSlices::default()
         }),
         SoftwareGlobalKind::Files => Ok(ProjectionSlices {
-            files: software_graph::files_for_scope(
-                connection,
-                source_scope,
-                request,
-                request.limit,
-            )?,
+            files: graph::files_for_scope(connection, source_scope, request, request.limit)?,
             ..ProjectionSlices::default()
         }),
         SoftwareGlobalKind::Topics => Ok(ProjectionSlices {
-            topics: software_graph::topics_for_scope(
-                connection,
-                source_scope,
-                request,
-                request.limit,
-            )?,
+            topics: graph::topics_for_scope(connection, source_scope, request, request.limit)?,
             ..ProjectionSlices::default()
         }),
         SoftwareGlobalKind::Relationships => Ok(ProjectionSlices {
-            relationships: software_graph::relationships_for_scope(
+            relationships: graph::relationships_for_scope(
                 connection,
                 source_scope,
                 request,
@@ -436,24 +421,19 @@ fn projection_slices(
             let files = if remaining == 0 {
                 Vec::new()
             } else {
-                software_graph::files_for_scope(connection, source_scope, request, remaining)?
+                graph::files_for_scope(connection, source_scope, request, remaining)?
             };
             let remaining = remaining.saturating_sub(files.len());
             let topics = if remaining == 0 {
                 Vec::new()
             } else {
-                software_graph::topics_for_scope(connection, source_scope, request, remaining)?
+                graph::topics_for_scope(connection, source_scope, request, remaining)?
             };
             let remaining = remaining.saturating_sub(topics.len());
             let relationships = if remaining == 0 {
                 Vec::new()
             } else {
-                software_graph::relationships_for_scope(
-                    connection,
-                    source_scope,
-                    request,
-                    remaining,
-                )?
+                graph::relationships_for_scope(connection, source_scope, request, remaining)?
             };
             let remaining = remaining.saturating_sub(relationships.len());
             let build_targets = if remaining == 0 {
@@ -862,9 +842,9 @@ fn sdk_usage_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareSdkUs
 }
 
 #[cfg(test)]
-#[path = "software_projection_tests.rs"]
-mod software_projection_tests;
+#[path = "projection_tests.rs"]
+mod projection_tests;
 
 #[cfg(test)]
-#[path = "software_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
