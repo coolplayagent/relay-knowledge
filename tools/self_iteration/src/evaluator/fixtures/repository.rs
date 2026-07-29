@@ -11,7 +11,7 @@ use crate::{
     command::{CommandResult, CommandSpec},
 };
 
-use super::super::{EvalRuntime, run_limited};
+use super::super::runtime::{concurrency::run_limited, contracts::EvalRuntime};
 use super::{
     additional_languages::*, agent_workflow::*, c_and_cpp::*, common_languages::*,
     cross_language::*, nonstandard_layout::*, software_global::*, writer::write_fixture_file,

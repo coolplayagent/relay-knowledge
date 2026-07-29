@@ -6,8 +6,10 @@ use crate::{
     scoring::MetricObservation,
 };
 
-use super::super::{
-    EvalRuntime, RepoReport, budget, parallel_map, push_latency_metrics, repo_report, run_limited,
+use super::super::runtime::{
+    concurrency::{parallel_map, run_limited},
+    contracts::{EvalRuntime, RepoReport},
+    reporting::{budget, push_latency_metrics, repo_report},
 };
 use super::{
     selection::guardrail_gate_from_case,

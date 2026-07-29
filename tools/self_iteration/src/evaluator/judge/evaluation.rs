@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::scoring::{CaseObservation, GateObservation};
 
-use super::super::{RepoReport, repo_report};
+use super::super::runtime::{contracts::RepoReport, reporting::repo_report};
 use super::{
     JudgeEvalInput,
     backend::run_judge_backend,

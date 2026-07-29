@@ -6,7 +6,7 @@ use std::{
 };
 
 use super::evaluate_file_fixtures;
-use crate::evaluator::{EvalRuntime, Limiter};
+use crate::evaluator::runtime::contracts::{EvalRuntime, Limiter};
 
 #[test]
 fn empty_fixture_configuration_creates_bounded_workspace_without_commands() {

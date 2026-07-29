@@ -6,8 +6,6 @@ use crate::{
     scoring::CaseObservation,
 };
 
-use super::selection::is_guardrail_case;
-
 pub(super) fn payload_constraint_failures(
     case: &Value,
     payload: &Value,
@@ -62,6 +60,28 @@ pub(super) fn payload_constraint_failures(
     failures
 }
 
+pub(super) fn parse_json_case_output(
+    case: &Value,
+    repository: &str,
+    objective: &str,
+    result: &CommandResult,
+) -> Result<Value, Box<CaseObservation>> {
+    crate::evaluator::runtime::reporting::parse_json_output_value(&result.stdout).ok_or_else(|| {
+        Box::new(CaseObservation {
+            case_id: string_or(case, "id", "case").to_owned(),
+            repository: repository.to_owned(),
+            passed: false,
+            guardrail: is_guardrail_case(case),
+            rank: None,
+            max_rank: number_or(case, "max_rank", 1) as usize,
+            false_positive_count: 0,
+            message: "invalid JSON output from --format json command".to_owned(),
+            objective: objective.to_owned(),
+            score_override: Some(0.0),
+        })
+    })
+}
+
 pub(super) fn failed_case(
     case: &Value,
     repository: &str,
@@ -80,6 +100,12 @@ pub(super) fn failed_case(
         objective: objective.to_owned(),
         score_override: None,
     }
+}
+
+pub(super) fn is_guardrail_case(case: &Value) -> bool {
+    case.get("guardrail")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

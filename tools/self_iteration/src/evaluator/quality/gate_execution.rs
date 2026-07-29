@@ -5,7 +5,10 @@ use crate::{
     scoring::{GateObservation, MetricObservation},
 };
 
-use super::super::{Limiter, parallel_map, run_limited};
+use super::super::runtime::{
+    concurrency::{parallel_map, run_limited},
+    contracts::Limiter,
+};
 use super::{
     QualityGate, QualityGateStage,
     gate_policy::{quality_budget_ms, quality_gate_stages},

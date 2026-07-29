@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::scoring::{CaseObservation, GateObservation, MetricObservation};
 
-use super::{Limiter, RepoReport};
+use super::runtime::contracts::{Limiter, RepoReport};
 
 mod backend;
 mod evaluation;

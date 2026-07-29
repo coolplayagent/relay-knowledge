@@ -6,7 +6,7 @@ use std::{
 };
 
 use super::evaluate_repository;
-use crate::evaluator::{EvalRuntime, Limiter};
+use crate::evaluator::runtime::contracts::{EvalRuntime, Limiter};
 
 #[test]
 fn repository_workload_rejects_non_full_scope_before_running_product_commands() {

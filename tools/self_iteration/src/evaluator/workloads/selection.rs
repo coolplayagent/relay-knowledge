@@ -9,7 +9,7 @@ use crate::{
     scoring::{CaseObservation, GateObservation},
 };
 
-use super::repository_scoring::repository_case_objective;
+use super::{case_scoring::is_guardrail_case, repository_scoring::repository_case_objective};
 
 pub(in crate::evaluator) fn evaluation_home(
     config: &Config,
@@ -260,12 +260,6 @@ fn limit_preserving_guardrails(cases: Vec<Value>, limit: usize) -> Vec<Value> {
         }
     }
     selected
-}
-
-pub(in crate::evaluator) fn is_guardrail_case(case: &Value) -> bool {
-    case.get("guardrail")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
 }
 
 fn case_identity(case: &Value) -> String {

@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::command::{CommandResult, CommandSpec};
 
-use super::super::run_limited;
+use super::super::runtime::concurrency::run_limited;
 use super::{
     JudgeEvalInput,
     settings::{JudgeBackend, JudgeSettings, shell_split},

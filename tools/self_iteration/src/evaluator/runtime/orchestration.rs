@@ -1,3 +1,39 @@
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, object_field, objects_by_repository},
+    command::inherited_env,
+    config::{CategorySet, Config, JobPlan},
+    history::HistoryPaths,
+    scoring::GateObservation,
+};
+
+use super::super::{
+    judge::{JudgeEvalInput, evaluate_research_judge_suite},
+    quality::run_quality_gate_stages,
+    workloads::{
+        WorkloadSelection, evaluate_agent_workflows, evaluate_cli_contract_cases,
+        evaluate_file_fixtures, evaluate_registration_cases, evaluate_repository,
+        evaluate_repository_sets, evaluate_semantic_vector_suite, evaluation_home,
+        relay_knowledge_binary, repository_in_profile, select_repository_cases_for_profile,
+        selected_repository_set_member_names, semantic_vector_suite_for_selection,
+    },
+};
+use super::{
+    concurrency::parallel_map,
+    contracts::{EvalRuntime, EvaluationRun, Limiter},
+    finish::{FinishInput, finish},
+};
+
+type RepositoryWorkItem = (String, Value, Vec<Value>, Vec<Value>);
+
 pub fn evaluate_candidate(
     config: &Config,
     paths: &HistoryPaths,
@@ -137,48 +173,14 @@ pub fn evaluate_candidate(
         BTreeSet::new()
     };
     if selection.runs_repository_workload(&config.profile) {
-        let repositories = repository_configs
-            .iter()
-            .filter_map(|(name, repo_config)| {
-                let needed_for_repo_set = required_repo_set_members.contains(name.as_str());
-                if !needed_for_repo_set
-                    && !repository_in_profile(&config.profile, name, repo_config)
-                {
-                    return None;
-                }
-                let repo_cases = grouped_cases
-                    .get(name)
-                    .cloned()
-                    .map(|cases| {
-                        select_repository_cases_for_profile(
-                            &config.profile,
-                            config.categories.as_ref(),
-                            cases,
-                        )
-                    })
-                    .unwrap_or_default();
-                let software_cases = grouped_software_cases
-                    .get(name)
-                    .cloned()
-                    .map(|cases| {
-                        select_repository_cases_for_profile(
-                            &config.profile,
-                            config.categories.as_ref(),
-                            cases,
-                        )
-                    })
-                    .unwrap_or_default();
-                if repo_cases.is_empty() && software_cases.is_empty() && !needed_for_repo_set {
-                    return None;
-                }
-                Some((
-                    name.clone(),
-                    repo_config.clone(),
-                    repo_cases,
-                    software_cases,
-                ))
-            })
-            .collect::<Vec<_>>();
+        let repositories = select_repository_work_items(
+            &config.profile,
+            config.categories.as_ref(),
+            &repository_configs,
+            &grouped_cases,
+            &grouped_software_cases,
+            &required_repo_set_members,
+        );
         let repo_jobs = job_plan.repositories.min(job_plan.global).max(1);
         let repository_case_count = repositories
             .iter()
@@ -374,3 +376,45 @@ pub fn evaluate_candidate(
         started: evaluation_started,
     })
 }
+
+fn select_repository_work_items(
+    profile: &str,
+    categories: Option<&CategorySet>,
+    repository_configs: &BTreeMap<String, Value>,
+    grouped_cases: &BTreeMap<String, Vec<Value>>,
+    grouped_software_cases: &BTreeMap<String, Vec<Value>>,
+    required_repo_set_members: &BTreeSet<String>,
+) -> Vec<RepositoryWorkItem> {
+    repository_configs
+        .iter()
+        .filter_map(|(name, repo_config)| {
+            let needed_for_repo_set = required_repo_set_members.contains(name.as_str());
+            if !needed_for_repo_set && !repository_in_profile(profile, name, repo_config) {
+                return None;
+            }
+            let repo_cases = grouped_cases
+                .get(name)
+                .cloned()
+                .map(|cases| select_repository_cases_for_profile(profile, categories, cases))
+                .unwrap_or_default();
+            let software_cases = grouped_software_cases
+                .get(name)
+                .cloned()
+                .map(|cases| select_repository_cases_for_profile(profile, categories, cases))
+                .unwrap_or_default();
+            if repo_cases.is_empty() && software_cases.is_empty() && !needed_for_repo_set {
+                return None;
+            }
+            Some((
+                name.clone(),
+                repo_config.clone(),
+                repo_cases,
+                software_cases,
+            ))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "orchestration_tests.rs"]
+mod tests;

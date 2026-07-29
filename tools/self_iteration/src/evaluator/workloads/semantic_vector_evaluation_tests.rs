@@ -5,7 +5,7 @@ use std::{
 };
 
 use super::evaluate_semantic_vector_suite;
-use crate::evaluator::{EvalRuntime, Limiter};
+use crate::evaluator::runtime::contracts::{EvalRuntime, Limiter};
 
 #[test]
 fn external_backend_without_required_environment_stops_before_provider_process() {

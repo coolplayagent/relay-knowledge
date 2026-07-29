@@ -7,7 +7,7 @@ use crate::{
     scoring::{CaseObservation, GateObservation, MetricObservation},
 };
 
-use super::super::RepoReport;
+use super::super::runtime::contracts::RepoReport;
 use super::outcome::required_judge_dimensions;
 
 pub(super) struct JudgePromptInput<'a> {

@@ -10,12 +10,16 @@ use crate::{
 };
 
 use super::super::{
-    CliContractReport, EvalRuntime, RegistrationCaseReport, parse_json_output_value,
-    prepare_repository_path, run_writer_limited,
+    fixtures::prepare_repository_path,
+    runtime::{
+        concurrency::run_writer_limited, contracts::EvalRuntime, reporting::parse_json_output_value,
+    },
 };
 use super::{
+    CliContractReport, RegistrationCaseReport,
+    case_scoring::is_guardrail_case,
     repository_scoring::repository_case_objective,
-    selection::{focused_repository_case, guardrail_gate_from_case, is_guardrail_case},
+    selection::{focused_repository_case, guardrail_gate_from_case},
 };
 
 pub(in crate::evaluator) fn evaluate_registration_cases(

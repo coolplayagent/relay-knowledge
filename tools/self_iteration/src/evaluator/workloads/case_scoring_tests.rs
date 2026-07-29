@@ -1,4 +1,4 @@
-use super::{failed_case, payload_constraint_failures};
+use super::{failed_case, parse_json_case_output, payload_constraint_failures};
 use crate::command::CommandResult;
 
 #[test]
@@ -51,4 +51,23 @@ fn failed_case_preserves_guardrail_and_command_diagnostics() {
     assert!(observation.guardrail);
     assert_eq!(observation.max_rank, 3);
     assert!(observation.message.contains("query failed"));
+}
+
+#[test]
+fn malformed_json_maps_to_a_scored_case_failure() {
+    let case = serde_json::json!({"id": "malformed", "guardrail": true});
+    let result = CommandResult {
+        name: "query".to_owned(),
+        command: vec!["query".to_owned()],
+        exit_code: 0,
+        duration_ms: 1,
+        stdout: "{invalid".to_owned(),
+        stderr: String::new(),
+    };
+
+    let observation = parse_json_case_output(&case, "repo", "objective", &result)
+        .expect_err("malformed JSON should fail");
+
+    assert!(observation.guardrail);
+    assert_eq!(observation.score_override, Some(0.0));
 }

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::Path};
 
 use super::evaluate_research_judge_suite;
-use crate::evaluator::{JudgeEvalInput, Limiter};
+use crate::evaluator::{judge::JudgeEvalInput, runtime::contracts::Limiter};
 
 #[test]
 fn disabled_backend_records_an_observable_skip_without_running_a_command() {

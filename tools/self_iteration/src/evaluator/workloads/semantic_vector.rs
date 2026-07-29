@@ -8,8 +8,8 @@ use crate::{
     scoring::{CaseObservation, array_field as score_array_field, hit_matches_any},
 };
 
-use super::super::{normalized_env, parse_json_case_output, parse_json_output_value};
-use super::{case_scoring::failed_case, selection::is_guardrail_case};
+use super::super::runtime::reporting::{normalized_env, parse_json_output_value};
+use super::case_scoring::{failed_case, is_guardrail_case, parse_json_case_output};
 
 pub(super) fn semantic_vector_runtime_profile(env: &BTreeMap<String, String>) -> Value {
     let semantic_backend = normalized_env(env, "RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "local");

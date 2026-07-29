@@ -8,10 +8,8 @@ use crate::{
     },
 };
 
-use super::super::parse_json_case_output;
-use super::{
-    case_scoring::{failed_case, payload_constraint_failures},
-    selection::is_guardrail_case,
+use super::case_scoring::{
+    failed_case, is_guardrail_case, parse_json_case_output, payload_constraint_failures,
 };
 
 pub(super) fn score_query_case(

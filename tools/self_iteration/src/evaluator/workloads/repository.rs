@@ -9,8 +9,12 @@ use crate::{
 };
 
 use super::super::{
-    EvalRuntime, RepoReport, budget, parallel_map, parse_json_output, prepare_repository_path,
-    push_latency_metrics, repo_report, run_limited, run_writer_limited,
+    fixtures::prepare_repository_path,
+    runtime::{
+        concurrency::{parallel_map, run_limited, run_writer_limited},
+        contracts::{EvalRuntime, RepoReport},
+        reporting::{budget, parse_json_output, push_latency_metrics, repo_report},
+    },
 };
 use super::{
     cli_cases::{query_command, register_command, software_query_command},
