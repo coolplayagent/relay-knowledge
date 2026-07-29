@@ -54,13 +54,13 @@ macro_rules! command {
     };
 }
 
-#[path = "cli_spec_data.rs"]
+#[path = "data.rs"]
 mod cli_spec_data;
-#[path = "cli_spec_files.rs"]
+#[path = "files.rs"]
 mod cli_spec_files;
-#[path = "cli_spec_repo.rs"]
+#[path = "repo.rs"]
 mod cli_spec_repo;
-#[path = "cli_spec_repo_set.rs"]
+#[path = "repo_set.rs"]
 mod cli_spec_repo_set;
 
 const CLI_SPEC_SCHEMA_VERSION: u16 = 2;

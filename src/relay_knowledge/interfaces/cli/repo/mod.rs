@@ -13,11 +13,11 @@ use super::{
     CliError, OutputFormat, parse_freshness, render_response, serialize_line, value_after,
 };
 
-#[path = "repo_cli_index.rs"]
+#[path = "index.rs"]
 mod repo_cli_index;
-#[path = "repo_cli_query.rs"]
+#[path = "query.rs"]
 mod repo_cli_query;
-#[path = "repo_cli_report.rs"]
+#[path = "report.rs"]
 mod repo_cli_report;
 
 use repo_cli_index::{
@@ -864,11 +864,11 @@ pub(crate) fn selector(
 }
 
 #[cfg(test)]
-#[path = "repo_cli_test_support.rs"]
+#[path = "test_support.rs"]
 mod test_support;
 #[cfg(test)]
-#[path = "repo_cli_tests.rs"]
+#[path = "tests.rs"]
 mod tests;
 #[cfg(test)]
-#[path = "repo_cli_worktree_tests.rs"]
+#[path = "worktree_tests.rs"]
 mod worktree_tests;

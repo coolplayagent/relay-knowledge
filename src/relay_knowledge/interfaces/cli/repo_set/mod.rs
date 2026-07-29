@@ -454,5 +454,5 @@ fn parse_query_kind(value: &str) -> Result<CodeQueryKind, CliError> {
 }
 
 #[cfg(test)]
-#[path = "repo_set_cli_tests.rs"]
+#[path = "tests.rs"]
 mod tests;

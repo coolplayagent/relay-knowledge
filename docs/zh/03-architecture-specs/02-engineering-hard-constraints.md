@@ -46,6 +46,8 @@
 
 Web adapter 统一收敛在 `interfaces::web`：`mod.rs` 负责 router composition 和共享 response/error 边界，`code_api`、`code_index_request`、`code_view_request`、`files`、`model_config` 负责各自命名的 HTTP contract，定向测试保持同目录。不得恢复根目录级 `web_*` 兄弟文件，也不得从该 adapter 打开 socket。
 
+CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解析、dispatch 和稳定公开 CLI surface，`spec` 负责 machine-readable command contract，`render` 负责输出序列化，`repo`、`repo_set`、`setup` 负责各自命令族，解析、命名、remote、service、map、version 定向测试放在 `tests`。需要 white-box 访问或兼容性时，命令模块可保留既有逻辑名称，但禁止恢复根目录级 `*_cli` 前缀桶。
+
 代码库理解视图统一收敛在 `application::code_repository::views` 目录：`service` 只编排 scope、新鲜度和响应，`architecture`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope` 分别拥有一种派生算法，`builder` 和 `rules` 提供有界构建及确定性分类规则。视图测试与所属目录共置，不再使用含义不清的 `views_*` 平铺文件名。
 
 源码兜底检索统一收敛在 `application::code_repository::source_fallback` 目录：`execution` 是唯一 I/O 编排入口，`plan` 决定是否以及如何执行有界兜底，`identity`、`filters`、`scoring`、`results` 分别负责身份覆盖、请求约束、评分和结果归并，`imports`、`surface`、`worktree` 隔离特定证据边界。目录外不得直接依赖这些内部算法 helper。
