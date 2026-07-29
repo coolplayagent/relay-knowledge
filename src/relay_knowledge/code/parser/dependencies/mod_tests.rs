@@ -1,3 +1,5 @@
+//! Unit contract for manifest classification and dependency fact extraction.
+
 use super::*;
 use crate::domain::{CodeDependencyRecord, CodeRepositoryRegistration};
 

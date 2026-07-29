@@ -66,6 +66,8 @@ Repository domain types are grouped under `domain::code::repository`: `registrat
 
 Dependency parsing groups shared syntax by the format it interprets: `cargo_source` classifies Cargo lock sources, `npm_lock` interprets npm references and lock entries, `python_requirements` parses Python requirement syntax, `toml_inline_table` reads TOML dependency fields, and `gradle_notation` parses Gradle calls and coordinates. Ecosystem parsers depend on these narrow modules; a cross-ecosystem `support` module is prohibited.
 
+Dependency parsing is physically contained in `code/parser/dependencies/`: `mod.rs` owns manifest classification, ecosystem dispatch, and stable fact assembly; ecosystem parsers and shared format primitives use responsibility-named files; and `mod_tests.rs` verifies the facade. The parent parser directory must not regain a same-named `dependencies.rs` file or parent-relative `#[path]` indirection that hides ownership.
+
 ### 3.6 SQLite Storage Boundaries
 
 SQLite storage keeps evidence and stable ID generation in `evidence_identity`, mutation reads in `mutation_log`, commit-time validity normalization in `graph_version`, and diagnostic row counts in `table_stats`. Storage modules must import these explicit boundaries instead of accumulating unrelated persistence behavior in a generic helper module.

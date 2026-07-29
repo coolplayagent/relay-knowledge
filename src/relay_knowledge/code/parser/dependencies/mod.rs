@@ -534,5 +534,5 @@ pub(in crate::code::parser::dependencies) fn conan_reference(
 }
 
 #[cfg(test)]
-#[path = "dependencies/tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
