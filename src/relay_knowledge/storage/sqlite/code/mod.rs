@@ -133,18 +133,6 @@ mod code_query_line_context_tests;
 mod code_metadata_tests;
 
 #[cfg(test)]
-#[path = "../code_set/refresh_task_tests.rs"]
-mod code_set_tasks_tests;
-
-#[cfg(test)]
-#[path = "../code_set/tests.rs"]
-mod code_set_tests;
-
-#[cfg(test)]
-#[path = "../code_set/workspace_tests.rs"]
-mod code_set_workspace_tests;
-
-#[cfg(test)]
 #[path = "../code_workspace/lookup_tests.rs"]
 mod code_workspace_lookup_tests;
 

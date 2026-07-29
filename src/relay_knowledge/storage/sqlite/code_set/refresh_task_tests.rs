@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use super::*;
+use super as code_set_tasks;
 use crate::{
     domain::CodeRepositorySetRefreshTaskState,
     storage::{

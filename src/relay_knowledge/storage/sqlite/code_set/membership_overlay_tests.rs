@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use super::*;
+use super as code_set;
 use crate::{
     domain::CodeRepositorySetOverlayStatus,
     storage::{CodeRepositorySetMemberSeed, CodeRepositorySetSeed, SqliteGraphStore},

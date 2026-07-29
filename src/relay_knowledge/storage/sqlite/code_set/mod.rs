@@ -5,6 +5,14 @@ use serde_json::json;
 
 mod manifest;
 
+#[cfg(test)]
+#[path = "membership_overlay_tests.rs"]
+mod membership_overlay_tests;
+
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod workspace_tests;
+
 use crate::{
     domain::{
         CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetMember,
