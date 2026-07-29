@@ -88,3 +88,7 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "execution_tests.rs"]
+mod execution_tests;

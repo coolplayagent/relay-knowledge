@@ -85,11 +85,3 @@ include!("pipes.rs");
 include!("logging.rs");
 include!("output.rs");
 include!("failure.rs");
-
-#[cfg(test)]
-#[path = "output_tests.rs"]
-mod output_tests;
-
-#[cfg(test)]
-#[path = "execution_tests.rs"]
-mod execution_tests;

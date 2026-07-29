@@ -14,3 +14,7 @@ pub fn tail(value: &str, max_chars: usize) -> String {
     }
     value.chars().skip(count - max_chars).collect()
 }
+
+#[cfg(test)]
+#[path = "output_tests.rs"]
+mod output_tests;
