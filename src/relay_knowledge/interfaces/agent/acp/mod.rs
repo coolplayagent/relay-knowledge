@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
-#[path = "acp_prompt_context.rs"]
+#[path = "prompt_context.rs"]
 mod acp_prompt_context;
 
 use crate::{
@@ -989,5 +989,5 @@ impl fmt::Debug for LocalAcpSessionAdapter {
 }
 
 #[cfg(test)]
-#[path = "acp_tests.rs"]
-mod acp_tests;
+#[path = "mod_tests.rs"]
+mod tests;

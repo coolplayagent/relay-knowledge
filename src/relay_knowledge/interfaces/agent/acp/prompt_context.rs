@@ -134,5 +134,5 @@ pub(super) async fn run_mapped_prompt(
 }
 
 #[cfg(test)]
-#[path = "acp_prompt_context_tests.rs"]
+#[path = "prompt_context_tests.rs"]
 mod tests;

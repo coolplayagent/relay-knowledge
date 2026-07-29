@@ -214,6 +214,8 @@ Dependency-usage `persistence` owns scoped deletion, idempotent row writes, boun
 
 Dependency-usage `matching` owns the immutable component-key index, manifest-owner narrowing, Cargo alias evidence, and bounded cross-language import key normalization, together with the matching test suite. The `mod` workflow only coordinates evidence, matching, confidence intersection, deduplication, and deterministic ordering, and it must short-circuit before import reads when no component can match.
 
+The ACP adapter, prompt-context builder, and their paired tests live in the file-only `interfaces/agent/acp` group while preserving the public `interfaces::agent::acp` path. The parent agent directory must not flatten ACP session or context implementation files beside MCP, audit, and policy domains.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.
