@@ -1,74 +1,74 @@
 use rusqlite::{Connection, params_from_iter, types::Value};
 
-#[path = "code_query_ambiguous_callees.rs"]
+#[path = "calls/ambiguous_callees.rs"]
 mod code_query_ambiguous_callees;
-#[path = "code_query_api_identities.rs"]
+#[path = "api_identities.rs"]
 mod code_query_api_identities;
-#[path = "code_query_api_sequence_scoring.rs"]
+#[path = "scoring/api_sequence.rs"]
 mod code_query_api_sequence_scoring;
-#[path = "code_query_call_counts.rs"]
+#[path = "calls/counts.rs"]
 mod code_query_call_counts;
-#[path = "code_query_call_direction.rs"]
+#[path = "calls/direction.rs"]
 mod code_query_call_direction;
-#[path = "code_query_call_identity.rs"]
+#[path = "calls/identity.rs"]
 mod code_query_call_identity;
-#[path = "code_query_call_site_scoring.rs"]
+#[path = "calls/site_scoring.rs"]
 mod code_query_call_site_scoring;
-#[path = "code_query_call_target_ranking.rs"]
+#[path = "calls/target_ranking.rs"]
 mod code_query_call_target_ranking;
-#[path = "code_query_caller_context_scoring.rs"]
+#[path = "calls/caller_context_scoring.rs"]
 mod code_query_caller_context_scoring;
-#[path = "code_query_calls.rs"]
+#[path = "calls/mod.rs"]
 mod code_query_calls;
-#[path = "code_query_chunk_path_scoring.rs"]
+#[path = "scoring/chunk_path.rs"]
 mod code_query_chunk_path_scoring;
-#[path = "code_query_conversion_terms.rs"]
+#[path = "conversion_terms.rs"]
 mod code_query_conversion_terms;
-#[path = "code_query_designated_initializer_scoring.rs"]
+#[path = "scoring/designated_initializer.rs"]
 mod code_query_designated_initializer_scoring;
-#[path = "code_query_excerpts.rs"]
+#[path = "excerpts.rs"]
 mod code_query_excerpts;
-#[path = "code_query_flow_scoring.rs"]
+#[path = "scoring/flow.rs"]
 mod code_query_flow_scoring;
-#[path = "code_query_hybrid_direct_gate.rs"]
+#[path = "hybrid/direct_gate.rs"]
 mod code_query_hybrid_direct_gate;
-#[path = "code_query_hybrid_exact_path.rs"]
+#[path = "hybrid/exact_path.rs"]
 mod code_query_hybrid_exact_path;
-#[path = "code_query_hybrid_planning.rs"]
+#[path = "hybrid/planning.rs"]
 mod code_query_hybrid_planning;
-#[path = "code_query_identifiers.rs"]
+#[path = "identifiers.rs"]
 mod code_query_identifiers;
-#[path = "code_query_import_scoring.rs"]
+#[path = "imports/scoring.rs"]
 mod code_query_import_scoring;
-#[path = "code_query_import_targets.rs"]
+#[path = "imports/targets.rs"]
 mod code_query_import_targets;
-#[path = "code_query_imports.rs"]
+#[path = "imports/mod.rs"]
 mod code_query_imports;
-#[path = "code_query_inline_usage_scoring.rs"]
+#[path = "scoring/inline_usage.rs"]
 mod code_query_inline_usage_scoring;
-#[path = "code_query_interface_scoring.rs"]
+#[path = "scoring/interface.rs"]
 mod code_query_interface_scoring;
-#[path = "code_query_lifecycle_scoring.rs"]
+#[path = "scoring/lifecycle.rs"]
 mod code_query_lifecycle_scoring;
-#[path = "code_query_line_ranges.rs"]
+#[path = "line_ranges.rs"]
 mod code_query_line_ranges;
-#[path = "code_query_local_callable_scoring.rs"]
+#[path = "scoring/local_callable.rs"]
 mod code_query_local_callable_scoring;
-#[path = "code_query_path_ranking.rs"]
+#[path = "scoring/path_ranking.rs"]
 mod code_query_path_ranking;
-#[path = "code_query_proximity_scoring.rs"]
+#[path = "scoring/proximity.rs"]
 mod code_query_proximity_scoring;
-#[path = "code_query_references.rs"]
+#[path = "references.rs"]
 mod code_query_references;
-#[path = "code_query_relevance/mod.rs"]
+#[path = "relevance/mod.rs"]
 mod code_query_relevance;
-#[path = "code_query_routes.rs"]
+#[path = "routes.rs"]
 mod code_query_routes;
-#[path = "code_query_rows.rs"]
+#[path = "rows.rs"]
 mod code_query_rows;
-#[path = "code_query_sbom.rs"]
+#[path = "sbom.rs"]
 mod code_query_sbom;
-#[path = "code_query_symbols.rs"]
+#[path = "symbols/mod.rs"]
 mod code_query_symbols;
 
 use crate::{
@@ -994,5 +994,5 @@ fn chunk_fts_values_for_limited_with_language(
 }
 
 #[cfg(test)]
-#[path = "code_query_test_modules.rs"]
+#[path = "tests/mod.rs"]
 mod test_modules;

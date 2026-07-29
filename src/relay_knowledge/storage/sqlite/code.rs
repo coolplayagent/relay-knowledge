@@ -2,13 +2,13 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-#[path = "code_query.rs"]
+#[path = "code_query/mod.rs"]
 mod code_query;
 
-#[path = "code_query_prepare.rs"]
+#[path = "code_query/prepare.rs"]
 mod code_query_prepare;
 
-#[path = "code_query_hits.rs"]
+#[path = "code_query/hits.rs"]
 mod code_query_hits;
 
 #[path = "code_feature_flags.rs"]
@@ -25,7 +25,7 @@ mod code_routes;
 #[path = "code_views/mod.rs"]
 mod code_views;
 
-#[path = "code_query_scope.rs"]
+#[path = "code_query/scope.rs"]
 mod code_query_scope;
 
 #[path = "code_impact.rs"]
@@ -89,47 +89,47 @@ mod code_incremental_search_tests;
 mod code_cross_language_call_tests;
 
 #[cfg(test)]
-#[path = "code_query_accuracy_tests.rs"]
+#[path = "code_query/accuracy/mod.rs"]
 mod code_query_accuracy_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_target_tests.rs"]
+#[path = "code_query/imports/target_tests.rs"]
 mod code_query_import_target_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_generated_tests.rs"]
+#[path = "code_query/imports/generated_tests.rs"]
 mod code_query_import_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_chunk_generated_tests.rs"]
+#[path = "code_query/tests/chunk_generated.rs"]
 mod code_query_chunk_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_route_generated_tests.rs"]
+#[path = "code_query/tests/route_generated.rs"]
 mod code_query_route_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_symbol_generated_tests.rs"]
+#[path = "code_query/symbols/generated_tests.rs"]
 mod code_query_symbol_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_ambiguous_callee_generated_tests.rs"]
+#[path = "code_query/calls/ambiguous_generated_tests.rs"]
 mod code_query_ambiguous_callee_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_ranking_tests.rs"]
+#[path = "code_query/imports/ranking_tests.rs"]
 mod code_query_import_ranking_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_foundational_ranking_tests.rs"]
+#[path = "code_query/imports/foundational_ranking_tests.rs"]
 mod code_query_import_foundational_ranking_tests;
 
 #[cfg(test)]
-#[path = "code_query_sbom_tests.rs"]
+#[path = "code_query/tests/sbom.rs"]
 mod code_query_sbom_tests;
 
 #[cfg(test)]
-#[path = "code_query_line_context_tests.rs"]
+#[path = "code_query/tests/line_context.rs"]
 mod code_query_line_context_tests;
 
 #[cfg(test)]

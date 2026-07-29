@@ -810,7 +810,7 @@ async fn callers_rank_high_confidence_inferred_target_bindings() {
     assert!(hits[0].score > hits[1].score);
 }
 
-#[path = "code_query_call_scoring_tests.rs"]
+#[path = "call_scoring.rs"]
 mod scoring_tests;
 
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {

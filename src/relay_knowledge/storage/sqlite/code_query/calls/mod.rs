@@ -38,7 +38,7 @@ use super::{
     selected_row,
 };
 
-#[path = "code_query_indirect_calls.rs"]
+#[path = "indirect.rs"]
 mod code_query_indirect_calls;
 
 use code_query_indirect_calls::search_indirect_call_identity_rows;
@@ -782,5 +782,5 @@ fn call_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
 }
 
 #[cfg(test)]
-#[path = "code_query_call_core_tests.rs"]
+#[path = "core_tests.rs"]
 mod tests;
