@@ -21,11 +21,3 @@ include!("adopted_documentation.rs");
 include!("output.rs");
 include!("run_identity.rs");
 include!("pacing.rs");
-
-#[cfg(test)]
-#[path = "run_identity_tests.rs"]
-mod run_identity_tests;
-
-#[cfg(test)]
-#[path = "documentation_gate_tests.rs"]
-mod documentation_gate_tests;

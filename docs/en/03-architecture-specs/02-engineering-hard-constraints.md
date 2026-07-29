@@ -164,7 +164,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.15 Self-Iteration Workflow Ownership
 
-`tools/self_iteration::main` is only the binary composition root. Mode dispatch, loop control, manual evaluation, generation iterations, candidate evaluation, documentation gates, score persistence, report metadata, adopted-optimization documentation, terminal output, and run identity live under `tools/self_iteration::workflow` in files named for those responsibilities. Run-identity and documentation-gate unit tests stay beside their matching implementation files. Cross-workflow consumers use the crate facade; do not restore orchestration, persistence, documentation, and inline tests to `main.rs`.
+`tools/self_iteration::main` is only the binary composition root. Mode dispatch, loop control, manual evaluation, generation iterations, candidate evaluation, documentation gates, score persistence, report metadata, adopted-optimization documentation, terminal output, and run identity live under `tools/self_iteration::workflow` in files named for those responsibilities. Run-identity and documentation-gate unit tests stay beside and are attached by their matching implementation files, leaving the workflow facade free of their test declarations. Cross-workflow consumers use the crate facade; do not restore orchestration, persistence, documentation, and inline tests to `main.rs`.
 
 ### 3.16 Self-Iteration Process Boundary Ownership
 

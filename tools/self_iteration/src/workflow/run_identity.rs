@@ -31,3 +31,7 @@ fn unix_timestamp_string() -> String {
         .map(|duration| duration.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_owned())
 }
+
+#[cfg(test)]
+#[path = "run_identity_tests.rs"]
+mod run_identity_tests;

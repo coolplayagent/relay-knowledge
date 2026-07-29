@@ -85,3 +85,7 @@ fn self_iteration_evaluation_set_change_path(path: &str) -> bool {
         || path.starts_with("docs/")
         || path.ends_with(".md")
 }
+
+#[cfg(test)]
+#[path = "documentation_gate_tests.rs"]
+mod documentation_gate_tests;

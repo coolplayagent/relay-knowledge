@@ -164,7 +164,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.15 自迭代工作流职责
 
-`tools/self_iteration::main` 只能作为二进制组合入口。模式分派、循环控制、手工评估、生成迭代、候选评估、文档门禁、评分持久化、报告元数据、已采用优化文档、终端输出和运行标识必须放在 `tools/self_iteration::workflow` 下与职责同名的文件中。运行标识和文档门禁 UT 必须与对应实现同级共置。跨工作流调用方通过 crate facade 使用能力；不得把编排、持久化、文档逻辑和内联测试恢复到 `main.rs`。
+`tools/self_iteration::main` 只能作为二进制组合入口。模式分派、循环控制、手工评估、生成迭代、候选评估、文档门禁、评分持久化、报告元数据、已采用优化文档、终端输出和运行标识必须放在 `tools/self_iteration::workflow` 下与职责同名的文件中。运行标识和文档门禁 UT 必须与对应实现同级共置并由对应实现挂载，workflow facade 不得代管其测试声明。跨工作流调用方通过 crate facade 使用能力；不得把编排、持久化、文档逻辑和内联测试恢复到 `main.rs`。
 
 ### 3.16 自迭代进程边界职责
 
