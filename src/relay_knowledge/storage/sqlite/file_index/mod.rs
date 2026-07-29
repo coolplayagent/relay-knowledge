@@ -708,8 +708,8 @@ fn u64_from_sql(value: i64) -> Result<u64, rusqlite::Error> {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
 
 #[cfg(test)]
 #[path = "retirement_tests.rs"]

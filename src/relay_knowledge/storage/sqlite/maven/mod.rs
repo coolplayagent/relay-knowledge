@@ -9,6 +9,9 @@ use crate::{
 
 use super::{code::SearchDocumentInserter, evidence_identity::stable_id};
 
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod mod_tests;
 mod model;
 mod pom_path;
 mod property_interpolation;
@@ -18,9 +21,6 @@ mod review_followup_tests;
 #[cfg(test)]
 #[path = "review_tests.rs"]
 mod review_tests;
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
 mod xml;
 
 use model::{EffectivePom, JVM_LANGUAGES, PomDocument, resolve_effective_model_load};
