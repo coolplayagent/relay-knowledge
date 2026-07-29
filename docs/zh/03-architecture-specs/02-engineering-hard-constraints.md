@@ -82,6 +82,8 @@ Maven 持久化在物理结构上统一收敛到 `storage::sqlite::maven`：`mod
 
 Checkpointed code batch 持久化统一收敛在 `storage::sqlite::code_batch`：`mod.rs` 负责 session 启动、有界 batch apply、checkpoint 和 finalize 协调，`dependencies`、`progress` 与 `finalize` 子树负责更窄的写入阶段；session finalize、TypeScript finalize 与 search materialization 回归测试保持同目录。`storage::sqlite::code` 可以调用该边界，但不得持有 batch 专属测试模块。
 
+Code snapshot 持久化统一收敛在 `storage::sqlite::code_snapshot`：`mod.rs` 负责 snapshot 校验、事务 apply、scope replacement、状态发布和旧数据库导入协调，`candidate_paths`、`fingerprints`、`snapshot_import`、`import_compat` 负责各自命名的读取或兼容边界；candidate path、progress accounting 与 import 回归测试保持同目录。不得再通过 SQLite 根目录中重复的 `code_snapshot_*` 文件表达所有权。
+
 代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
 
 ### 3.7 代码索引基础模块

@@ -6,7 +6,7 @@ use std::{
 
 use rusqlite::Connection;
 
-use super::{code_snapshot, initialize_code_schema};
+use super::super::{code_snapshot, initialize_code_schema};
 
 #[test]
 fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {

@@ -82,6 +82,8 @@ Maven persistence is grouped physically under `storage::sqlite::maven`; `mod.rs`
 
 Checkpointed code-batch persistence is grouped under `storage::sqlite::code_batch`: `mod.rs` owns session start, bounded batch application, checkpoints, and finalization coordination; `dependencies`, `progress`, and the `finalize` subtree own their narrower write phases. Session-finalization, TypeScript-finalization, and search-materialization regressions stay in the same directory. `storage::sqlite::code` may call this boundary but must not own batch-specific test modules.
 
+Code-snapshot persistence is grouped under `storage::sqlite::code_snapshot`: `mod.rs` owns snapshot validation, transactional application, scope replacement, status publication, and legacy-database import coordination; `candidate_paths`, `fingerprints`, `snapshot_import`, and `import_compat` own their named read or compatibility boundaries. Candidate-path, progress-accounting, and import regressions stay in the same directory. Do not encode this ownership through repeated `code_snapshot_*` files in the SQLite root.
+
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
 
 ### 3.7 Code Index Foundations

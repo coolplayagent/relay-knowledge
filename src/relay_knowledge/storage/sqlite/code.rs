@@ -60,7 +60,7 @@ mod code_tasks_worktree;
 #[path = "code_search.rs"]
 mod code_search;
 
-#[path = "code_snapshot.rs"]
+#[path = "code_snapshot/mod.rs"]
 mod code_snapshot;
 
 #[path = "code_set.rs"]
@@ -81,24 +81,12 @@ mod code_tests;
 mod code_scope_status_tests;
 
 #[cfg(test)]
-#[path = "code_snapshot_candidate_paths_tests.rs"]
-mod code_snapshot_candidate_paths_tests;
-
-#[cfg(test)]
 #[path = "code_incremental_search_tests.rs"]
 mod code_incremental_search_tests;
 
 #[cfg(test)]
 #[path = "code_cross_language_call_tests.rs"]
 mod code_cross_language_call_tests;
-
-#[cfg(test)]
-#[path = "code_snapshot_progress_tests.rs"]
-mod code_snapshot_progress_tests;
-
-#[cfg(test)]
-#[path = "code_snapshot_import_tests.rs"]
-mod code_snapshot_import_tests;
 
 #[cfg(test)]
 #[path = "code_query_accuracy_tests.rs"]

@@ -1,4 +1,4 @@
-use super::*;
+use super::super::*;
 use crate::{
     domain::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
