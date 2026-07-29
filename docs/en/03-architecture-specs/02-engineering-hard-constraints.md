@@ -156,7 +156,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.13 Self-Iteration Unattended Workflow Ownership
 
-`tools/self_iteration::unattended` keeps the long-running lifecycle, durable state, cycle selection, candidate attempts, evaluation persistence, derived configuration, metadata, category rotation, macro triggers, deep checks, and outcome policy in files named for those responsibilities. State, category-rotation, and trigger unit tests stay beside their matching implementation files. `mod.rs` owns only shared contracts and the module facade; do not restore a root `unattended.rs` that combines the entire workflow and its inline tests.
+`tools/self_iteration::unattended` keeps the long-running lifecycle, durable state, cycle selection, candidate attempts, evaluation persistence, derived configuration, metadata, category rotation, macro triggers, deep checks, and outcome policy in files named for those responsibilities. State, category-rotation, and trigger unit tests stay beside and are attached by their matching implementation files. `mod.rs` owns only shared contracts and the module facade, without owning those test declarations; do not restore a root `unattended.rs` that combines the entire workflow and its inline tests.
 
 ### 3.14 Self-Iteration Codex Generation Ownership
 

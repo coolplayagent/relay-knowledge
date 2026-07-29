@@ -111,15 +111,3 @@ include!("category_rotation.rs");
 include!("triggers.rs");
 include!("deep_check.rs");
 include!("outcome.rs");
-
-#[cfg(test)]
-#[path = "state_tests.rs"]
-mod state_tests;
-
-#[cfg(test)]
-#[path = "category_rotation_tests.rs"]
-mod category_rotation_tests;
-
-#[cfg(test)]
-#[path = "triggers_tests.rs"]
-mod triggers_tests;

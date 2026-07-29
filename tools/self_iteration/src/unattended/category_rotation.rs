@@ -22,3 +22,7 @@ fn selected_or_default_category(config: &Config) -> EvaluationCategory {
     }
     EvaluationCategory::Competitive
 }
+
+#[cfg(test)]
+#[path = "category_rotation_tests.rs"]
+mod category_rotation_tests;

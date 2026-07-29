@@ -35,3 +35,7 @@ fn competitive_gap_trigger(paths: &history::HistoryPaths) -> Result<Option<Strin
         Ok(None)
     }
 }
+
+#[cfg(test)]
+#[path = "triggers_tests.rs"]
+mod triggers_tests;

@@ -57,3 +57,7 @@ fn unattended_stop_reason(config: &Config, state: &UnattendedState, now: u64) ->
     }
     None
 }
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod state_tests;
