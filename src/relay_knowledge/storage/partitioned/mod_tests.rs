@@ -5,6 +5,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+// Unit contract for partitioned SQLite routing, control state, and checkpoints.
+
 use super::*;
 use crate::{
     domain::{

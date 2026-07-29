@@ -1,18 +1,11 @@
 use std::{path::Path, sync::Arc};
 
-#[path = "partitioned/catalog.rs"]
 mod catalog;
-#[path = "partitioned/control_delegates.rs"]
 mod control_delegates;
-#[path = "partitioned/diagnostics.rs"]
 mod diagnostics;
-#[path = "partitioned/retention.rs"]
 mod retention;
-#[path = "partitioned/routing.rs"]
 mod routing;
-#[path = "partitioned/status.rs"]
 mod status;
-#[path = "partitioned/totals.rs"]
 mod totals;
 
 use crate::{
@@ -981,5 +974,5 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
 }
 
 #[cfg(test)]
-#[path = "partitioned_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
