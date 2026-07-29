@@ -4,4 +4,6 @@ pub struct ResearchPlanInput<'a> {
     pub date: &'a str,
 }
 
-include!("render.rs");
+mod render;
+
+pub use render::render;

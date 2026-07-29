@@ -176,7 +176,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.18 自迭代研究计划职责
 
-`tools/self_iteration::research_plan::mod` 必须维护输入合同，`render` 负责确定性计划渲染并显式挂载同级 `render_tests` UT 合同。这些文件必须共置于研究计划领域目录，facade 不得代管渲染测试；不得把渲染和内联测试恢复到根目录 `research_plan.rs`。
+`tools/self_iteration::research_plan::mod` 必须维护输入合同并把 `render` 声明为真正的 Rust 模块，`render` 负责确定性计划渲染并显式挂载同级 `render_tests` UT 合同。这些文件必须共置于研究计划领域目录；禁止生产代码使用 `include!` 装配，facade 不得代管渲染测试，也不得把渲染和内联测试恢复到根目录 `research_plan.rs`。
 
 ### 3.19 自迭代候选 Git 职责
 

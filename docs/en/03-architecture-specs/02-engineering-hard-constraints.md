@@ -176,7 +176,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.18 Self-Iteration Research Plan Ownership
 
-`tools/self_iteration::research_plan::mod` owns the input contract, while `render` owns deterministic plan rendering and explicitly attaches the sibling `render_tests` unit contract. Keep these files together under the research-plan domain; do not let the facade own rendering tests or restore rendering and inline tests to a root `research_plan.rs`.
+`tools/self_iteration::research_plan::mod` owns the input contract and declares `render` as a real Rust module, while `render` owns deterministic plan rendering and explicitly attaches the sibling `render_tests` unit contract. Keep these files together under the research-plan domain; production `include!` assembly is forbidden, the facade must not own rendering tests, and rendering plus inline tests must not return to a root `research_plan.rs`.
 
 ### 3.19 Self-Iteration Candidate Git Ownership
 

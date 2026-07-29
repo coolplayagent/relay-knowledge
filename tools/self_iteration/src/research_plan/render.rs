@@ -1,3 +1,5 @@
+use super::ResearchPlanInput;
+
 pub fn render(input: ResearchPlanInput<'_>) -> String {
     let topic = input.topic.trim();
     let slug = input.slug.trim();
