@@ -156,6 +156,10 @@ SQLite code-store facade 及其直接拥有的持久化行为必须在物理上�
 
 `tools/self_iteration::candidate_git` 必须由 `mod`、`command`、`dynamic_command`、`worktree`、`patch` 和 `lifecycle` 分别维护补丁快照合同、有界 Git 命令执行、工作树检查、补丁捕获/路径提取以及候选拒绝/提交生命周期。循环休眠属于 `workflow::pacing`，不得放入 Git 边界。调用点必须使用明确的 `candidate_git` 名称；不得恢复含糊的根目录 `git_ops.rs`，也不得把工作流节奏混入仓库变更。
 
+### 3.20 生产代码与单元测试文件职责
+
+生产 Rust 文件不得内嵌 `#[cfg(test)] mod` 实现。每个单元测试模块必须放入命名明确的同级 `*_tests.rs` 文件，并由所属生产文件通过显式 test-only `#[path]` 挂载；模块声明仍由生产文件唯一维护，以保持 white-box 可见性和测试身份稳定。`api` contract 已对 `agent`、`code_repository`、`error` 和 `stream` 实施一一配对。不得把这些测试重新合并进生产文件，也不得建立共享的笼统测试桶。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

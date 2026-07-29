@@ -156,6 +156,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::candidate_git` owns the patch snapshot contract, bounded Git command execution, worktree inspection, patch capture/path extraction, and candidate rejection/commit lifecycle in `mod`, `command`, `dynamic_command`, `worktree`, `patch`, and `lifecycle`. Loop sleeping belongs to `workflow::pacing`, not the Git boundary. Use the explicit `candidate_git` name at call sites; do not restore an ambiguous root `git_ops.rs` or mix workflow pacing into repository mutation.
 
+### 3.20 Production and Unit-Test File Ownership
+
+Production Rust files must not embed a `#[cfg(test)] mod` implementation. Each unit-test module lives in a descriptive sibling `*_tests.rs` file and is attached from its production owner with an explicit test-only `#[path]`; the production file remains the only owner of the module declaration so white-box visibility and test identity stay stable. The `api` contracts apply this one-to-one pairing to `agent`, `code_repository`, `error`, and `stream`. Do not merge these tests back into production files or create a shared catch-all test bucket.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.
