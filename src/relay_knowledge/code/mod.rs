@@ -38,6 +38,7 @@ mod source_submodule_tests;
 #[path = "tests/fixtures.rs"]
 mod test_fixtures;
 #[cfg(test)]
+#[path = "mod_tests.rs"]
 mod tests;
 #[cfg(test)]
 #[path = "tests/source/worktree_overlay_review.rs"]
