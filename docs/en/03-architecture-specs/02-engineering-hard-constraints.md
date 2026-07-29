@@ -86,6 +86,8 @@ Code-snapshot persistence is grouped under `storage::sqlite::code_snapshot`: `mo
 
 Codebase-view persistence is grouped under `storage::sqlite::code_views`: `mod.rs` coordinates snapshot assembly, while `affected`, `call_focus`, `dependencies`, and `truncation` own their bounded derivations and `tests` verifies the combined projection. Keep these files together instead of scattering prefix-related siblings through the SQLite root.
 
+Durable code-index tasks are grouped physically under `storage::sqlite::code_tasks`: `mod.rs` owns queueing, attempt-scoped leases, bounded retry, completion/failure, reset, checkpoints, and scope retention; `worktree` protects active overlay base scopes; and focused queue, lease, reset, retention, and status tests stay beside that boundary. The logical test modules may remain code-facade siblings for white-box access, but their files must not return to the SQLite root.
+
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
 
 ### 3.7 Code Index Foundations
