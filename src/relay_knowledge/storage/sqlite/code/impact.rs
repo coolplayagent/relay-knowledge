@@ -720,20 +720,5 @@ struct ImpactImportRow {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn module_import_matching_respects_boundaries() {
-        assert!(module_import_matches("crate::foo::bar", "foo::bar"));
-        assert!(module_import_matches("foo::bar::baz", "foo::bar"));
-        assert!(module_import_matches(
-            "use crate::foo::bar;",
-            "crate::foo::bar"
-        ));
-        assert!(module_import_matches("from foo.bar import baz", "foo.bar"));
-        assert!(!module_import_matches("foo::barista", "foo::bar"));
-        assert!(!module_import_matches("foo::bar_baz", "foo::bar"));
-        assert!(!module_import_matches("foo::bar-baz", "foo::bar"));
-    }
-}
+#[path = "impact_tests.rs"]
+mod tests;
