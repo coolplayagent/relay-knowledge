@@ -1,14 +1,14 @@
 //! Web HTTP adapter for same-origin diagnostics and static assets.
 
-#[path = "web_code_api.rs"]
+#[path = "code_api.rs"]
 mod web_code_api;
-#[path = "web_code_index_request.rs"]
+#[path = "code_index_request.rs"]
 mod web_code_index_request;
-#[path = "web_code_view_request.rs"]
+#[path = "code_view_request.rs"]
 mod web_code_view_request;
-#[path = "web_files.rs"]
+#[path = "files.rs"]
 mod web_files;
-#[path = "web_model_config.rs"]
+#[path = "model_config.rs"]
 mod web_model_config;
 
 use std::path::{Component, Path, PathBuf};
@@ -960,17 +960,17 @@ pub(super) struct WebState {
 }
 
 #[cfg(test)]
-#[path = "web_control_tests.rs"]
+#[path = "control_tests.rs"]
 mod control_tests;
 
 #[cfg(test)]
-#[path = "web_code_api_tests.rs"]
+#[path = "code_api_tests.rs"]
 mod code_api_tests;
 
 #[cfg(test)]
-#[path = "web_files_tests.rs"]
+#[path = "files_tests.rs"]
 mod files_tests;
 
 #[cfg(test)]
-#[path = "web_tests.rs"]
+#[path = "tests.rs"]
 mod tests;
