@@ -212,6 +212,8 @@ Within dependency usage, `schema` exclusively owns table creation and the one-ti
 
 Dependency-usage `persistence` owns scoped deletion, idempotent row writes, bounded filtered reads, import-evidence row mapping, and graph-version reconstruction. Its paired tests cover round-trip mapping, path/language filters, and scope deletion; the workflow owner must not embed SQL projection or row-decoding logic.
 
+Dependency-usage `matching` owns the immutable component-key index, manifest-owner narrowing, Cargo alias evidence, and bounded cross-language import key normalization, together with the matching test suite. The `mod` workflow only coordinates evidence, matching, confidence intersection, deduplication, and deterministic ordering, and it must short-circuit before import reads when no component can match.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.

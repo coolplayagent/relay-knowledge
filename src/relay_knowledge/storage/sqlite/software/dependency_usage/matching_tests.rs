@@ -1,6 +1,9 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::super::python;
+use crate::domain::{GraphVersion, RepositoryCodeRange};
+
 #[test]
 fn import_candidates_cover_common_package_roots() {
     let npm = import_match_candidates(

@@ -22,7 +22,7 @@ pub(super) fn local_modules(
         let path = row?;
         for candidate in source_module_candidates(&path) {
             if let Some(module) = module_from_file_path(&candidate) {
-                modules.insert(super::normalize_key(&module));
+                modules.insert(super::matching::normalize_key(&module));
             }
         }
     }
