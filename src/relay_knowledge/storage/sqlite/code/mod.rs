@@ -133,26 +133,6 @@ mod code_query_line_context_tests;
 mod code_metadata_tests;
 
 #[cfg(test)]
-#[path = "../code_tasks/tests.rs"]
-mod code_tasks_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/retention_tests.rs"]
-mod code_tasks_retention_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/status_tests.rs"]
-mod code_tasks_status_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/lease_tests.rs"]
-mod code_tasks_lease_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/reset_tests.rs"]
-mod code_tasks_reset_tests;
-
-#[cfg(test)]
 #[path = "../code_set/refresh_task_tests.rs"]
 mod code_set_tasks_tests;
 

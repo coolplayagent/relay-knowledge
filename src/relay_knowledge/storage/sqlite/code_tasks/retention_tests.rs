@@ -1,6 +1,7 @@
 use rusqlite::params;
 
-use super::*;
+use super as code_tasks;
+use super::super::code_workspace;
 use crate::{
     domain::CodeRepositoryRegistration,
     storage::{CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore},

@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use super::*;
+use super as code_tasks;
 use crate::{
     domain::{
         CodeIndexMode, CodeIndexResourceBudget, CodeIndexTaskState, CodeRepositoryRegistration,
