@@ -146,6 +146,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::cases` 必须把递归用例文件加载、确定性对象/数组合并、类型化 JSON 字段读取和按仓库分组分别放在 `loading`、`merge`、`fields` 和 `grouping`。合并 UT 必须与 `merge.rs` 同级共置，`mod.rs` 只作为 facade。不得恢复同时组合配置 I/O、合并策略、访问辅助、分组和内联测试的根目录 `cases.rs`。
 
+### 3.18 自迭代研究计划职责
+
+`tools/self_iteration::research_plan::mod` 必须维护输入合同，`render` 负责确定性计划渲染，`render_tests` 维护其 UT 合同。这些文件必须共置于研究计划领域目录；不得把渲染和内联测试恢复到根目录 `research_plan.rs`。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

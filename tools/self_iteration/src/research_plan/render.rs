@@ -1,9 +1,3 @@
-pub struct ResearchPlanInput<'a> {
-    pub topic: &'a str,
-    pub slug: &'a str,
-    pub date: &'a str,
-}
-
 pub fn render(input: ResearchPlanInput<'_>) -> String {
     let topic = input.topic.trim();
     let slug = input.slug.trim();
@@ -88,24 +82,4 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [ ] Remote `main` HEAD matches local HEAD after push.
 "#
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_reusable_research_method_sections() {
-        let plan = render(ResearchPlanInput {
-            topic: "graph database research",
-            slug: "graph-database-research",
-            date: "2026-06-05",
-        });
-
-        assert!(plan.contains("Research Self-Iteration Plan: graph database research"));
-        assert!(plan.contains("Source Ledger Checklist"));
-        assert!(plan.contains("Competitive Issue Extraction"));
-        assert!(plan.contains("Documentation and Archive Outputs"));
-        assert!(plan.contains("Remote `main` HEAD matches local HEAD"));
-    }
 }

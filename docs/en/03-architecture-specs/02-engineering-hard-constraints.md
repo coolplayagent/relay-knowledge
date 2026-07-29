@@ -146,6 +146,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::cases` separates recursive case-file loading, deterministic object/array merging, typed JSON field access, and repository grouping into `loading`, `merge`, `fields`, and `grouping`. Merge unit tests stay beside `merge.rs`; `mod.rs` is only the facade. Do not restore a root `cases.rs` that combines configuration I/O, merge policy, access helpers, grouping, and inline tests.
 
+### 3.18 Self-Iteration Research Plan Ownership
+
+`tools/self_iteration::research_plan::mod` owns the input contract, while `render` owns deterministic plan rendering and `render_tests` owns its unit contract. Keep these files together under the research-plan domain; do not restore rendering and inline tests to a root `research_plan.rs`.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.
