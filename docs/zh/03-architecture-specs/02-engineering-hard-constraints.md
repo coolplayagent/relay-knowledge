@@ -208,6 +208,8 @@ SQLite code-query 的 hybrid chunk 证据准入归 `hybrid::chunk_gate` 所有�
 
 SQLite software dependency-usage 的持久化、语言匹配辅助与 UT 合同统一位于纯文件型 `software/dependency_usage` 分组。上层 software projection facade 不得重新收纳 dependency-usage 实现或测试文件。
 
+在 dependency usage 内部，`schema` 独占建表与一次性 projection 失效判定，并覆盖“表已存在时不失效”的合同。匹配和持久化代码不得执行 schema DDL，也不得决定历史 projection 是否转为 stale。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。
