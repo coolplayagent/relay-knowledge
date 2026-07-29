@@ -31,22 +31,22 @@ mod code_query_scope;
 #[path = "impact.rs"]
 mod code_impact;
 
-#[path = "report.rs"]
+#[path = "lifecycle/report.rs"]
 pub(super) mod code_report;
 
 #[path = "../code_schema/mod.rs"]
 mod code_schema;
 
-#[path = "status.rs"]
+#[path = "lifecycle/status.rs"]
 mod code_status;
 
-#[path = "removal.rs"]
+#[path = "lifecycle/removal.rs"]
 mod code_remove;
 
 #[path = "../code_batch/mod.rs"]
 mod code_batch;
 
-#[path = "cleanup.rs"]
+#[path = "lifecycle/cleanup.rs"]
 mod code_cleanup;
 
 #[path = "../code_workspace/mod.rs"]
