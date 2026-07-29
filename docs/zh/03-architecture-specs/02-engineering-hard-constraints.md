@@ -52,7 +52,7 @@ MCP adapter 在物理上统一收敛到 `interfaces::agent::mcp`：`mod.rs` 负�
 
 CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解析、dispatch 和稳定公开 CLI surface，`spec` 负责 machine-readable command contract，`render` 负责输出序列化，`repo`、`repo_set`、`setup` 负责各自命令族，解析、命名、remote、service、map、version 定向测试放在 `tests`。需要 white-box 访问或兼容性时，命令模块可保留既有逻辑名称，但禁止恢复根目录级 `*_cli` 前缀桶。
 
-代码库理解视图统一收敛在 `application::code_repository::views` 目录：`service` 只编排 scope、新鲜度和响应，`architecture`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope` 分别拥有一种派生算法，`builder` 和 `rules` 提供有界构建及确定性分类规则。视图测试与所属目录共置，不再使用含义不清的 `views_*` 平铺文件名。
+代码库理解视图统一收敛在 `application::code_repository::views` 目录：`service` 只编排 scope、新鲜度和响应，`architecture`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope` 分别拥有一种派生算法，`builder` 和 `rules` 提供有界构建及确定性分类规则。聚焦 UT 与实现 owner 一一配对；`affected_scope_integration_tests` 和 `dependency_tour_integration_tests` 同时覆盖 service dispatch、builder、rules 与派生算法，因此由 facade 显式拥有。视图测试与所属目录共置，不再使用含义不清的 `views_*` 平铺文件名。
 
 源码兜底检索统一收敛在 `application::code_repository::source_fallback` 目录：`execution` 是唯一 I/O 编排入口，`plan` 决定是否以及如何执行有界兜底，`identity`、`filters`、`scoring`、`results` 分别负责身份覆盖、请求约束、评分和结果归并，`imports`、`surface`、`worktree` 隔离特定证据边界。`surface_integration_tests` 同时验证 `plan`、`results` 与 `surface` 的组合，因此由 facade 显式拥有；聚焦 UT 仍与精确实现 owner 一一配对。目录外不得直接依赖这些内部算法 helper。
 
