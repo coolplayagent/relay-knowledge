@@ -25,3 +25,7 @@ fn merge_objects(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "merge_tests.rs"]
+mod merge_tests;

@@ -172,7 +172,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.17 Self-Iteration Case Configuration Ownership
 
-`tools/self_iteration::cases` separates recursive case-file loading, deterministic object/array merging, typed JSON field access, and repository grouping into `loading`, `merge`, `fields`, and `grouping`. Merge unit tests stay beside `merge.rs`; `mod.rs` is only the facade. `tools/self_iteration/cases.json` is the bounded workload manifest and global-suite owner; repository query targets live in descriptive included files, including dedicated project-alias, relay-teams, Linux, LevelDB, Spring Framework, and Kubernetes files. Do not restore a root `cases.rs` that combines configuration I/O, merge policy, access helpers, grouping, and inline tests, or grow the manifest into another monolithic query-case file.
+`tools/self_iteration::cases` separates recursive case-file loading, deterministic object/array merging, typed JSON field access, and repository grouping into `loading`, `merge`, `fields`, and `grouping`. Merge unit tests stay beside `merge.rs` and are attached by `merge.rs`; `mod.rs` is only the facade and include assembly. `tools/self_iteration/cases.json` is the bounded workload manifest and global-suite owner; repository query targets live in descriptive included files, including dedicated project-alias, relay-teams, Linux, LevelDB, Spring Framework, and Kubernetes files. Do not restore a root `cases.rs` that combines configuration I/O, merge policy, access helpers, grouping, and inline tests, or grow the manifest into another monolithic query-case file.
 
 ### 3.18 Self-Iteration Research Plan Ownership
 
