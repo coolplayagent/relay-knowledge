@@ -66,6 +66,8 @@ Dependency parsing groups shared syntax by the format it interprets: `cargo_sour
 
 SQLite storage keeps evidence and stable ID generation in `evidence_identity`, mutation reads in `mutation_log`, commit-time validity normalization in `graph_version`, and diagnostic row counts in `table_stats`. Storage modules must import these explicit boundaries instead of accumulating unrelated persistence behavior in a generic helper module.
 
+Local-file persistence is grouped under `storage::sqlite::file_index`: `mod.rs` owns root lifecycle, file metadata, path search, and aggregate diagnostics, while `content` owns content entries, chunks, FTS, freshness cursors, and content search. Only `file_index::content::search` is visible to the SQLite store adapter; the remaining content-index primitives stay private to the directory. `tests`, `content_tests`, and `retirement_tests` verify metadata, content, and retirement behavior respectively. Do not restore flat `file_index_*` sibling modules.
+
 Maven effective-model construction also separates syntax boundaries: `pom_path` owns repository-bounded relative POM resolution, while `property_interpolation` owns bounded recursive property expansion. These rules must not be combined in a generic Maven support module.
 
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.

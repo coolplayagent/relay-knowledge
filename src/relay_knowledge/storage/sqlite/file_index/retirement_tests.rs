@@ -8,7 +8,7 @@ use crate::storage::{
 };
 
 use super::{
-    super::file_index_content::{cursors, search as search_content},
+    content::{cursors, search as search_content},
     diagnostics, initialize_schema, mark_unconfigured_roots, replace_root, search,
 };
 

@@ -21,8 +21,7 @@ use crate::{
 
 use super::{
     SqliteGraphStore, canvas, code::code_report, code_graph, commit_batch, current_graph_version,
-    file_index, file_index_content, indexing, inspect_graph, mutation_log::read_mutations_after,
-    operations, retrieval,
+    file_index, indexing, inspect_graph, mutation_log::read_mutations_after, operations, retrieval,
 };
 
 impl GraphStore for SqliteGraphStore {
@@ -271,7 +270,7 @@ impl IndexStore for SqliteGraphStore {
         self.run_read_until(
             deadline,
             "file content query timed out waiting for storage lock",
-            move |connection| file_index_content::search(connection, request, deadline),
+            move |connection| file_index::content::search(connection, request, deadline),
         )
     }
 

@@ -14,7 +14,6 @@ mod canvas_code;
 mod code_graph;
 mod evidence_identity;
 mod file_index;
-mod file_index_content;
 mod graph_version;
 mod indexing;
 mod maintenance;
