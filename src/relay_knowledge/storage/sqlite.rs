@@ -10,11 +10,9 @@ mod code;
 use rusqlite::{Connection, OptionalExtension, params};
 
 mod canvas;
-mod canvas_code;
 mod code_graph;
 mod evidence_identity;
 mod file_index;
-mod file_index_content;
 mod graph_version;
 mod indexing;
 mod maintenance;
@@ -978,20 +976,8 @@ mod metadata_tests;
 mod graph_tests;
 
 #[cfg(test)]
-mod index_refresh_queue_tests;
-
-#[cfg(test)]
-mod index_schema_migration_tests;
-
-#[cfg(test)]
 mod graphrag_phase4_tests;
-
-#[cfg(test)]
-mod index_refresh_tests;
 
 #[cfg(test)]
 #[path = "sqlite/health_tests.rs"]
 mod health_tests;
-
-#[cfg(test)]
-mod operations_tests;

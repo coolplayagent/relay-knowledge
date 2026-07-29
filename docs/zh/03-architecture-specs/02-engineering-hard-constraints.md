@@ -34,9 +34,19 @@
 
 具名的平台进程输入同样必须经过该边界。进程 bootstrap 期间由 `env::windows_system_root_from_process` 捕获 Windows `SystemRoot`，`paths::windows_tasklist_command` 解析可执行文件，`RuntimeConfiguration::process` 再把结果传给服务恢复；应用工作流在恢复 worker 或调用 service manager 时既不得直接调用 `std::env`，也不得自行拼接平台可执行文件路径。
 
-### 3.1 代码仓库应用工作流
+### 3.1 环境变量边界
+
+`env` 内部按数据流保持单向依赖：`variables` 只拥有受支持的变量名，`error` 和 `overrides` 分别拥有稳定错误模型与 typed override 数据，`value_parser` 负责从已归一化 snapshot 提取并校验 path/string/bool/positive integer，`platform` 负责平台检测、大小写归一化、平台目录输入及 `SystemRoot` 进程读取，`config` 才能捕获完整进程环境并装配公开配置。`mod.rs` 仅维持原有 `env::*` facade，不得重新承载解析规则。对应 UT 必须分别放在 `config_tests`、`platform_tests` 和 `value_parser_tests`，使配置装配、平台规则和标量校验可以独立定位失败。
+
+依赖方向固定为 `error`/`variables` → `value_parser` → `platform`，`overrides` 只组合这些 typed platform 数据，`config` 作为最外层依赖其余模块；不得让 error、override 或 variable catalog 反向依赖配置装配，也不得把 `std::env` 读取扩散到 `env` 目录外。
+
+### 3.2 代码仓库应用工作流
 
 `application::code_repository` 按用例划分内部所有权：`repository` 负责注册、删除、状态和报告，`index_workflow` 负责索引执行、持久任务租约、checkpoint 和 scope preview，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
+
+Web adapter 统一收敛在 `interfaces::web`：`mod.rs` 负责 router composition 和共享 response/error 边界，`code_api`、`code_index_request`、`code_view_request`、`files`、`model_config` 负责各自命名的 HTTP contract，定向测试保持同目录。不得恢复根目录级 `web_*` 兄弟文件，也不得从该 adapter 打开 socket。
+
+CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解析、dispatch 和稳定公开 CLI surface，`spec` 负责 machine-readable command contract，`render` 负责输出序列化，`repo`、`repo_set`、`setup` 负责各自命令族，解析、命名、remote、service、map、version 定向测试放在 `tests`。需要 white-box 访问或兼容性时，命令模块可保留既有逻辑名称，但禁止恢复根目录级 `*_cli` 前缀桶。
 
 代码库理解视图统一收敛在 `application::code_repository::views` 目录：`service` 只编排 scope、新鲜度和响应，`architecture`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope` 分别拥有一种派生算法，`builder` 和 `rules` 提供有界构建及确定性分类规则。视图测试与所属目录共置，不再使用含义不清的 `views_*` 平铺文件名。
 
@@ -44,31 +54,59 @@
 
 代码仓库共享行为必须按明确职责拆分：`index_task` 负责持久任务租约和 worker 恢复，`index_state` 负责已持久化索引状态检查及复用，`scope` 负责 scope 解析和 filter 兼容性，`repository_status` 负责注册状态查询和 checkpoint 选择；`blocking`、`errors`、`clock` 分别隔离 runtime、错误和持久化时间边界。调用方必须直接依赖职责模块，不得重新引入含义宽泛的 `support`、`helper` 或 utility 聚合层。
 
-### 3.2 仓库领域模型职责
+### 3.3 仓库领域模型职责
 
 仓库领域类型统一按功能收敛在 `domain::code::repository`：`registration` 负责注册、selector、range 和索引请求，`retrieval_request` 负责查询类型、限定词、结果上限和检索层，`indexed_records` 负责持久化文件、符号、引用、关系、诊断及 tombstone 记录，`repository_status` 负责状态、scope preview、汇总和报告，`retrieval_results` 负责查询与特性开关结果，`scope_identity` 是版本化快照 scope 编码的唯一所有者；`validation` 仅作为目录私有校验边界。不得恢复混合职责的 `repository.rs` 或 `repository_helpers.rs`。
 
-### 3.3 模型提供方职责
+### 3.4 模型提供方职责
 
 `model_provider` 必须把 profile 归一化放在 `profile_config`，fallback policy 放在 `fallback`，持久 JSON 写入放在 `persistence`，provider HTTP 与响应诊断放在 `connectivity`，catalog 获取和 catalog 数据解释放在 `catalog`。跨模块协议测试统一放在 `protocol_tests`；不得把生产行为重新合并进通用 helper 模块。
 
-### 3.4 依赖解析器职责
+### 3.5 依赖解析器职责
 
 依赖解析必须按所解释的格式划分共享语法：`cargo_source` 分类 Cargo lock source，`npm_lock` 解释 npm 引用和 lock entry，`python_requirements` 解析 Python requirement 语法，`toml_inline_table` 读取 TOML 依赖字段，`gradle_notation` 解析 Gradle 调用和坐标。各生态解析器依赖这些窄模块，不得重新建立跨生态的 `support` 模块。
 
-### 3.5 SQLite 存储边界
+### 3.6 SQLite 存储边界
 
 SQLite 存储必须把 evidence 与稳定 ID 生成放在 `evidence_identity`，mutation 读取放在 `mutation_log`，提交时有效期归一化放在 `graph_version`，诊断 row count 放在 `table_stats`。存储模块必须导入这些明确边界，不得把无关持久化行为累积到通用 helper 模块。
 
-Maven effective model 构建也必须拆开语法边界：`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；不得把两类规则重新合并到通用 Maven support 模块。
+本地文件持久化统一收敛在 `storage::sqlite::file_index` 目录：`mod.rs` 负责 root lifecycle、文件元数据、path search 和聚合诊断，`content` 负责正文 entry、chunk、FTS、freshness cursor 及正文 search。只有 `file_index::content::search` 对 SQLite store adapter 可见，其余内容索引原语保持目录私有；`tests`、`content_tests`、`retirement_tests` 分别验证元数据、正文和退役行为，不得恢复平铺的 `file_index_*` 兄弟模块。
 
-代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
+Graph canvas 持久化统一收敛在 `storage::sqlite::canvas` 目录：`mod.rs` 负责预算校验、knowledge graph 投影和 snapshot builder，`code` 只负责 code file/symbol/reference 与 source-path link 投影，`tests` 覆盖两种投影及 mixed canvas。代码投影 helper 保持 canvas 目录私有，不得恢复含义依赖文件名前缀的 `canvas_code` 顶层兄弟模块。
 
-### 3.6 代码索引基础模块
+Code graph fact 持久化统一收敛在 `storage::sqlite::code_graph` 目录：`mod.rs` 负责 schema、受版本约束的 fact replacement/search、行解码和元数据校验，`tests` 验证同一个存储边界。不得把测试拆回 SQLite 根目录，也不得恢复重复前缀的 `code_graph_tests` 文件名。
+
+Durable operations 持久化统一收敛在 `storage::sqlite::operations` 目录：`mod.rs` 负责 worker task、proposal/conflict、audit event、service operator state、相应行解码和稳定 task ID，`tests` 通过存储接口验证这些工作流。SQLite 根模块不得持有 operations 专属测试模块。
+
+Index lifecycle 持久化统一收敛在 `storage::sqlite::indexing` 目录：`mod.rs` 负责 cursor state、refresh orchestration、校验与稳定 refresh-task identity，`cursor_metadata`、`schema`、`task_queue` 隔离各自职责，`refresh_tests`、`queue_tests`、`schema_migration_tests` 与被验证边界放在一起。不得把 index lifecycle 测试或带 `index_refresh_*` 前缀的实现文件放回 SQLite 根目录。
+
+三层 graph retrieval 持久化统一收敛在 `storage::sqlite::retrieval` 目录：`mod.rs` 负责 schema 初始化、document materialization、检索协调和共享 scoring input，具名子模块分别负责 advanced graph path、BM25 与有界 fallback、context assembly、derived document、label trigram、schema migration、alias 和 ranking；定向测试与这些实现同目录。不得恢复父目录级 `retrieval_*` 文件，也不得用 path override 隐藏物理所有权边界。
+
+Maven 持久化在物理结构上统一收敛到 `storage::sqlite::maven`：`mod.rs` 协调 build/dependency 投影，`model` 负责 raw/effective POM model，`xml` 负责有界 XML 提取，`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；定向测试与 review regression 测试保持同目录。不得把这些规则重新合并到通用 Maven support 模块，也不得用父目录相对 path override 隐藏边界。
+
+Checkpointed code batch 持久化统一收敛在 `storage::sqlite::code_batch`：`mod.rs` 负责 session 启动、有界 batch apply、checkpoint 和 finalize 协调，`dependencies`、`progress` 与 `finalize` 子树负责更窄的写入阶段；session finalize、TypeScript finalize 与 search materialization 回归测试保持同目录。`storage::sqlite::code` 可以调用该边界，但不得持有 batch 专属测试模块。
+
+Code snapshot 持久化统一收敛在 `storage::sqlite::code_snapshot`：`mod.rs` 负责 snapshot 校验、事务 apply、scope replacement、状态发布和旧数据库导入协调，`candidate_paths`、`fingerprints`、`snapshot_import`、`import_compat` 负责各自命名的读取或兼容边界；candidate path、progress accounting 与 import 回归测试保持同目录。不得再通过 SQLite 根目录中重复的 `code_snapshot_*` 文件表达所有权。
+
+Codebase view 持久化统一收敛在 `storage::sqlite::code_views`：`mod.rs` 协调 snapshot assembly，`affected`、`call_focus`、`dependencies`、`truncation` 负责各自有界派生，`tests` 验证组合投影。必须把这些文件保持在一起，不得再把依赖前缀关联的兄弟文件散落在 SQLite 根目录。
+
+Durable code index task 在物理结构上统一收敛到 `storage::sqlite::code_tasks`：`mod.rs` 负责 queue、attempt-scoped lease、有界 retry、completion/failure、reset、checkpoint 和 scope retention，`worktree` 保护活跃 overlay base scope，queue/lease/reset/retention/status 定向测试与该边界放在一起。为保持 white-box 访问，测试的逻辑模块可继续作为 code facade 的兄弟，但文件不得回到 SQLite 根目录。
+
+Repository set 持久化统一收敛在 `storage::sqlite::code_set`：`mod.rs` 负责 set membership、overlay refresh、跨仓 edge matching 和状态，`manifest` 负责有界 module-key 派生，`refresh_tasks` 负责持久 refresh-task lease 与 retry，set/workspace/manifest/refresh-task 测试保持同目录。不得以 facade 级测试可见性为由，再把 `code_set_*` 文件散落到 SQLite 根目录。
+
+Monorepo workspace 持久化统一收敛在 `storage::sqlite::code_workspace`：`mod.rs` 负责自动 workspace set、package mapping、跨成员 import resolution 和 workspace-format normalization，`tests` 覆盖 lifecycle/mapping 不变量，`lookup_tests` 覆盖语言级 import normalization。不得恢复根目录级 `code_workspace_*` 兄弟文件。
+
+Code index schema 所有权统一收敛在 `storage::sqlite::code_schema`：`mod.rs` 负责当前 table/index 和初始化顺序，`migrations` 负责有界兼容转换，`route_schema` 负责 route 专属 DDL，`tests` 验证 schema 与 migration 不变量。不得再通过 `code_schema_*` 前缀把这些文件拆散到 SQLite 根目录。
+
+Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协调有界检索层，`calls`、`imports`、`symbols`、`hybrid` 负责 edge 或 plan 专属行为，`scoring` 负责聚焦的 ranking signal，`accuracy` 负责端到端排名 fixture，`tests` 负责共享 query 回归。跨越这些聚焦子域的 row decoding、excerpt、identifier、line range、route、reference 和 SBOM retrieval 保留为具名根子模块；任何 query 目录都不得变成新的平铺前缀桶。
+
+代码查询相关性原语统一收敛在 `storage::sqlite::code_query::relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件或根目录级 `code_query_*` 兄弟文件。
+
+### 3.7 代码索引基础模块
 
 跨代码索引流程的基础原语必须使用能表达职责的顶层模块：`content_identity` 负责稳定 ID 和内容哈希，`language_metadata` 负责语言检测及语言级元数据，`generated_detection` 负责生成源码分类。不得把无关原语归入 `common` 目录；新增原语必须归属其所描述的行为。
 
-### 3.7 服务生命周期计划
+### 3.8 服务生命周期计划
 
 服务生命周期必须按边界划分职责：`application::service::lifecycle_plan` 负责请求校验、install/upgrade/rollback/uninstall 步骤计划和执行编排；只有 `lifecycle_plan::platform_service` 可以选择平台服务定义文件名、渲染 systemd/launchd/Windows Service 定义、声明平台权限并生成 service manager 命令；`lifecycle_plan::execution` 负责阻塞文件和进程执行。平台渲染与命令转义不得重新并入生命周期步骤 planner。
 

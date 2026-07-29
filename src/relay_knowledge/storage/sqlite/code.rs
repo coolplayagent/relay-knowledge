@@ -2,13 +2,13 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-#[path = "code_query.rs"]
+#[path = "code_query/mod.rs"]
 mod code_query;
 
-#[path = "code_query_prepare.rs"]
+#[path = "code_query/prepare.rs"]
 mod code_query_prepare;
 
-#[path = "code_query_hits.rs"]
+#[path = "code_query/hits.rs"]
 mod code_query_hits;
 
 #[path = "code_feature_flags.rs"]
@@ -22,10 +22,10 @@ mod code_symbols;
 #[path = "code_routes.rs"]
 mod code_routes;
 
-#[path = "code_views.rs"]
+#[path = "code_views/mod.rs"]
 mod code_views;
 
-#[path = "code_query_scope.rs"]
+#[path = "code_query/scope.rs"]
 mod code_query_scope;
 
 #[path = "code_impact.rs"]
@@ -34,7 +34,7 @@ mod code_impact;
 #[path = "code_report.rs"]
 pub(super) mod code_report;
 
-#[path = "code_schema.rs"]
+#[path = "code_schema/mod.rs"]
 mod code_schema;
 
 #[path = "code_status.rs"]
@@ -43,30 +43,30 @@ mod code_status;
 #[path = "code_remove.rs"]
 mod code_remove;
 
-#[path = "code_batch.rs"]
+#[path = "code_batch/mod.rs"]
 mod code_batch;
 
 #[path = "code_cleanup.rs"]
 mod code_cleanup;
 
-#[path = "code_workspace.rs"]
+#[path = "code_workspace/mod.rs"]
 mod code_workspace;
 
-#[path = "code_tasks.rs"]
+#[path = "code_tasks/mod.rs"]
 mod code_tasks;
-#[path = "code_tasks_worktree.rs"]
+#[path = "code_tasks/worktree.rs"]
 mod code_tasks_worktree;
 
 #[path = "code_search.rs"]
 mod code_search;
 
-#[path = "code_snapshot.rs"]
+#[path = "code_snapshot/mod.rs"]
 mod code_snapshot;
 
-#[path = "code_set.rs"]
+#[path = "code_set/mod.rs"]
 mod code_set;
 
-#[path = "code_set_tasks.rs"]
+#[path = "code_set/refresh_tasks.rs"]
 mod code_set_tasks;
 
 #[path = "software.rs"]
@@ -81,79 +81,55 @@ mod code_tests;
 mod code_scope_status_tests;
 
 #[cfg(test)]
-#[path = "code_snapshot_candidate_paths_tests.rs"]
-mod code_snapshot_candidate_paths_tests;
-
-#[cfg(test)]
 #[path = "code_incremental_search_tests.rs"]
 mod code_incremental_search_tests;
-
-#[cfg(test)]
-#[path = "code_batch_finalize_tests.rs"]
-mod code_batch_finalize_tests;
-
-#[cfg(test)]
-#[path = "code_batch_finalize_typescript_tests.rs"]
-mod code_batch_finalize_typescript_tests;
 
 #[cfg(test)]
 #[path = "code_cross_language_call_tests.rs"]
 mod code_cross_language_call_tests;
 
 #[cfg(test)]
-#[path = "code_batch_search_tests.rs"]
-mod code_batch_search_tests;
-
-#[cfg(test)]
-#[path = "code_snapshot_progress_tests.rs"]
-mod code_snapshot_progress_tests;
-
-#[cfg(test)]
-#[path = "code_snapshot_import_tests.rs"]
-mod code_snapshot_import_tests;
-
-#[cfg(test)]
-#[path = "code_query_accuracy_tests.rs"]
+#[path = "code_query/accuracy/mod.rs"]
 mod code_query_accuracy_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_target_tests.rs"]
+#[path = "code_query/imports/target_tests.rs"]
 mod code_query_import_target_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_generated_tests.rs"]
+#[path = "code_query/imports/generated_tests.rs"]
 mod code_query_import_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_chunk_generated_tests.rs"]
+#[path = "code_query/tests/chunk_generated.rs"]
 mod code_query_chunk_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_route_generated_tests.rs"]
+#[path = "code_query/tests/route_generated.rs"]
 mod code_query_route_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_symbol_generated_tests.rs"]
+#[path = "code_query/symbols/generated_tests.rs"]
 mod code_query_symbol_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_ambiguous_callee_generated_tests.rs"]
+#[path = "code_query/calls/ambiguous_generated_tests.rs"]
 mod code_query_ambiguous_callee_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_ranking_tests.rs"]
+#[path = "code_query/imports/ranking_tests.rs"]
 mod code_query_import_ranking_tests;
 
 #[cfg(test)]
-#[path = "code_query_import_foundational_ranking_tests.rs"]
+#[path = "code_query/imports/foundational_ranking_tests.rs"]
 mod code_query_import_foundational_ranking_tests;
 
 #[cfg(test)]
-#[path = "code_query_sbom_tests.rs"]
+#[path = "code_query/tests/sbom.rs"]
 mod code_query_sbom_tests;
 
 #[cfg(test)]
-#[path = "code_query_line_context_tests.rs"]
+#[path = "code_query/tests/line_context.rs"]
 mod code_query_line_context_tests;
 
 #[cfg(test)]
@@ -161,39 +137,39 @@ mod code_query_line_context_tests;
 mod code_metadata_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_tests.rs"]
+#[path = "code_tasks/tests.rs"]
 mod code_tasks_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_retention_tests.rs"]
+#[path = "code_tasks/retention_tests.rs"]
 mod code_tasks_retention_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_status_tests.rs"]
+#[path = "code_tasks/status_tests.rs"]
 mod code_tasks_status_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_lease_tests.rs"]
+#[path = "code_tasks/lease_tests.rs"]
 mod code_tasks_lease_tests;
 
 #[cfg(test)]
-#[path = "code_tasks_reset_tests.rs"]
+#[path = "code_tasks/reset_tests.rs"]
 mod code_tasks_reset_tests;
 
 #[cfg(test)]
-#[path = "code_set_tasks_tests.rs"]
+#[path = "code_set/refresh_task_tests.rs"]
 mod code_set_tasks_tests;
 
 #[cfg(test)]
-#[path = "code_set_tests.rs"]
+#[path = "code_set/tests.rs"]
 mod code_set_tests;
 
 #[cfg(test)]
-#[path = "code_set_workspace_tests.rs"]
+#[path = "code_set/workspace_tests.rs"]
 mod code_set_workspace_tests;
 
 #[cfg(test)]
-#[path = "code_workspace_lookup_tests.rs"]
+#[path = "code_workspace/lookup_tests.rs"]
 mod code_workspace_lookup_tests;
 
 use crate::{

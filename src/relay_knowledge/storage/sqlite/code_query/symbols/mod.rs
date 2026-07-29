@@ -1,0 +1,992 @@
+use rusqlite::{Connection, params_from_iter};
+
+use crate::{
+    domain::{
+        CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
+        CodeRetrievalRequest, RepositoryCodeRange,
+    },
+    storage::StorageError,
+};
+
+use super::{
+    HitParts, canonical_symbol_leaf_matches,
+    code_query_api_identities::{
+        ApiSymbolIdentity, api_identity_symbol_bonus, hybrid_api_symbol_identities,
+    },
+    code_query_hybrid_exact_path::request_has_exact_file_filter,
+    code_query_hybrid_planning::hybrid_query_prefers_chunk_first,
+    code_query_line_ranges::{SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, symbol_result_line_range},
+    code_query_path_ranking::{
+        path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
+        symbol_declaration_surface_path_bonus, symbol_implementation_path_bonus,
+        symbol_test_path_penalty,
+    },
+    code_query_relevance::*,
+    code_query_rows::SymbolRow,
+    code_search_plannable_outage_reason, code_search_read_model_unavailable_reason,
+    filter_dedupe_sort_truncate, has_query_field_hit_filters, hit_from_parts, mark_hits_degraded,
+    prepare_code_search_statement, query_field_filtered_hits_for_gate, required_scope,
+    selected_row,
+};
+
+#[path = "hybrid_direct.rs"]
+mod hybrid_symbol_direct;
+
+struct SymbolIdentityRows {
+    rows: Vec<SymbolRow>,
+    saturated: bool,
+}
+
+struct ApiIdentityRows {
+    rows: Vec<SymbolRow>,
+    matched_identity_count: usize,
+    saturated: bool,
+}
+
+struct TypedFunctionValueSurface {
+    name_terms: Vec<String>,
+    declared_type_terms: Vec<String>,
+    signature_terms: Vec<String>,
+    exported: bool,
+}
+
+struct TypedFunctionValueQuery {
+    terms: Vec<String>,
+    mentions_surface_intent: bool,
+}
+
+const TYPED_FUNCTION_VALUE_MIN_QUERY_TERMS: usize = 4;
+const TYPED_FUNCTION_VALUE_MIN_MATCHED_TERMS: usize = 3;
+const TYPED_FUNCTION_VALUE_BASE_BONUS: f64 = 1.25;
+const TYPED_FUNCTION_VALUE_EXPORTED_BONUS: f64 = 0.35;
+const TYPED_FUNCTION_VALUE_MAX_BONUS: f64 = 2.35;
+
+pub(super) fn search_symbols(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    direct_symbol_recovery_reason: Option<&str>,
+) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    let identity = SymbolIdentityQuery::from_query(&request.query);
+    let api_identities = hybrid_api_symbol_identities(&request.query, request);
+    let mut identity_hits = Vec::new();
+    if let Some(identity) = &identity {
+        if identity_miss_can_answer_without_fts(request, false, identity)
+            && !symbol_identity_name_exists(connection, status, request, identity.leaf_name())?
+        {
+            return Ok(Vec::new());
+        }
+        let identity_rows = search_symbol_identity_rows(connection, status, request, identity)?;
+        let saturated = identity_rows.saturated;
+        let rows = identity_rows
+            .rows
+            .into_iter()
+            .filter(|row| {
+                identity.matches_symbol(
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    &row.canonical_symbol_id,
+                )
+            })
+            .collect::<Vec<_>>();
+        identity_hits = symbol_rows_to_hits(status, request, rows, &api_identities);
+        let filtered_identity_hits = has_query_field_hit_filters(request)
+            .then(|| query_field_filtered_hits_for_gate(&identity_hits, request));
+        let identity_gate_hit_count = filtered_identity_hits
+            .as_ref()
+            .map_or(identity_hits.len(), Vec::len);
+        if identity_hits_can_answer_without_fts(
+            request,
+            identity,
+            identity_gate_hit_count,
+            saturated,
+        ) {
+            if let Some(mut hits) = filtered_identity_hits {
+                hits.truncate(request.limit);
+                return Ok(hits);
+            }
+            filter_dedupe_sort_truncate(&mut identity_hits, request);
+            return Ok(identity_hits);
+        }
+        let field_filters_removed_identity_hits =
+            identity_gate_hit_count == 0 && !identity_hits.is_empty();
+        if identity_miss_can_answer_without_fts(request, saturated, identity)
+            && !field_filters_removed_identity_hits
+        {
+            return Ok(Vec::new());
+        }
+    }
+
+    let api_identity_rows =
+        search_hybrid_api_identity_rows(connection, status, request, &api_identities)?;
+    let api_identity_can_answer =
+        api_identity_rows_can_answer_without_fts(request, &api_identities, &api_identity_rows);
+    let api_identity_hits =
+        symbol_rows_to_hits(status, request, api_identity_rows.rows, &api_identities);
+    if api_identity_can_answer {
+        let filtered_api_hits = has_query_field_hit_filters(request)
+            .then(|| query_field_filtered_hits_for_gate(&api_identity_hits, request));
+        if let Some(mut hits) = filtered_api_hits {
+            if hits.is_empty() {
+                identity_hits.extend(api_identity_hits);
+            } else {
+                hits.truncate(request.limit);
+                return Ok(hits);
+            }
+        } else {
+            let mut hits = api_identity_hits;
+            filter_dedupe_sort_truncate(&mut hits, request);
+            return Ok(hits);
+        }
+    } else {
+        identity_hits.extend(api_identity_hits);
+    }
+    if let Some(reason) = direct_symbol_recovery_reason
+        && let Some(mut hits) = hybrid_symbol_direct::search_hybrid_direct_symbol_hits(
+            connection,
+            status,
+            request,
+            &api_identities,
+        )?
+    {
+        mark_hits_degraded(&mut hits, reason);
+        return Ok(hits);
+    }
+    let symbol_fts_rows = match search_symbol_fts_rows(connection, status, request) {
+        Ok(rows) => rows,
+        Err(error) => {
+            let Some(reason) = code_search_plannable_outage_reason(request, &error)
+                .or_else(|| hybrid_chunk_first_symbol_outage_reason(request, &error))
+            else {
+                return Err(error);
+            };
+            if let Some(mut hits) = hybrid_symbol_direct::search_hybrid_direct_symbol_hits(
+                connection,
+                status,
+                request,
+                &api_identities,
+            )? {
+                mark_hits_degraded(&mut hits, &reason);
+                return Ok(hits);
+            }
+            let mut hits = identity_hits;
+            if hits.is_empty() {
+                return Err(error);
+            }
+            mark_hits_degraded(&mut hits, &reason);
+            filter_dedupe_sort_truncate(&mut hits, request);
+            return Ok(hits);
+        }
+    };
+    let mut hits = symbol_rows_to_hits(status, request, symbol_fts_rows, &api_identities);
+    hits.extend(identity_hits);
+
+    Ok(hits)
+}
+
+fn hybrid_chunk_first_symbol_outage_reason(
+    request: &CodeRetrievalRequest,
+    error: &StorageError,
+) -> Option<String> {
+    (request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request))
+        .then(|| code_search_read_model_unavailable_reason(error))
+        .flatten()
+}
+
+pub(super) fn hybrid_symbol_query_can_answer_without_non_symbol_layers(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+) -> bool {
+    if request.code_query_kind != CodeQueryKind::Hybrid
+        || hits.is_empty()
+        || !query_is_single_symbol_identity(&request.query)
+    {
+        return false;
+    }
+    let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
+        return false;
+    };
+
+    let exact_symbol_hits = hits
+        .iter()
+        .filter(|hit| hybrid_symbol_hit_matches_identity(hit, &identity))
+        .count();
+    exact_symbol_hits > 0 && exact_symbol_hits <= request.limit.max(1)
+}
+
+fn hybrid_symbol_hit_matches_identity(
+    hit: &CodeRetrievalHit,
+    identity: &SymbolIdentityQuery,
+) -> bool {
+    if !hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
+        || hit.symbol_snapshot_id.is_none()
+    {
+        return false;
+    }
+    let Some(canonical_symbol_id) = hit.canonical_symbol_id.as_deref() else {
+        return false;
+    };
+
+    if identity.is_scoped() {
+        identity.matches_symbol(
+            identity.leaf_name(),
+            &hit.excerpt,
+            &hit.excerpt,
+            canonical_symbol_id,
+        )
+    } else {
+        canonical_symbol_leaf_matches(canonical_symbol_id, identity.leaf_name())
+    }
+}
+
+fn symbol_identity_name_exists(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    name: &str,
+) -> Result<bool, StorageError> {
+    let path_filter = path_filter_sql_for_column("path", status, request);
+    let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let kind_filter = kind_filter_sql_for_column("kind", request);
+    let sql = format!(
+        "
+        SELECT 1
+        FROM code_repository_symbols
+        WHERE source_scope = ?
+          AND name = ?
+          {path_filter}
+          {language_filter}
+          {kind_filter}
+        LIMIT 1
+        "
+    );
+    let mut values = vec![
+        rusqlite::types::Value::Text(required_scope(status)?.to_owned()),
+        rusqlite::types::Value::Text(name.to_owned()),
+    ];
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
+    push_kind_filter_values(&mut values, request);
+
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
+    let mut rows = statement.query(params_from_iter(values))?;
+
+    rows.next()
+        .map_err(StorageError::from)
+        .map(|row| row.is_some())
+}
+
+fn search_symbol_identity_rows(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    identity: &SymbolIdentityQuery,
+) -> Result<SymbolIdentityRows, StorageError> {
+    let scoped_pattern = identity.scoped_like_pattern();
+    search_symbol_identity_rows_by_name(
+        connection,
+        status,
+        request,
+        identity.leaf_name(),
+        symbol_identity_candidate_limit(request),
+        scoped_pattern.as_deref(),
+    )
+}
+
+fn search_symbol_identity_rows_by_name(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    name: &str,
+    direct_limit: usize,
+    scoped_pattern: Option<&str>,
+) -> Result<SymbolIdentityRows, StorageError> {
+    let path_filter = path_filter_sql_for_column("path", status, request);
+    let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let kind_filter = kind_filter_sql_for_column("kind", request);
+    let scoped_filter = if scoped_pattern.is_some() {
+        "AND (
+                   lower(qualified_name) LIKE ? ESCAPE '\\'
+                OR lower(signature) LIKE ? ESCAPE '\\'
+                OR lower(canonical_symbol_id) LIKE ? ESCAPE '\\'
+            )"
+    } else {
+        ""
+    };
+    let generated_filter = if request.exclude_generated {
+        "AND coalesce((
+                   SELECT file.is_generated
+                   FROM code_repository_files file
+                   WHERE file.source_scope = code_repository_symbols.source_scope
+                     AND file.path = code_repository_symbols.path
+                   LIMIT 1
+               ), 0) = 0"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "
+        SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
+               byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
+               coalesce((
+                   SELECT file.is_generated
+                   FROM code_repository_files file
+                   WHERE file.source_scope = code_repository_symbols.source_scope
+                     AND file.path = code_repository_symbols.path
+                   LIMIT 1
+               ), 0) AS is_generated,
+               CASE WHEN code_repository_symbols.kind = 'class' THEN (
+                   SELECT MIN(previous.line_start)
+                   FROM code_repository_symbols previous
+                   WHERE previous.source_scope = code_repository_symbols.source_scope
+                     AND previous.path = code_repository_symbols.path
+                     AND previous.line_end < code_repository_symbols.line_start
+                     AND code_repository_symbols.line_start - previous.line_end <= {SYMBOL_CONTEXT_PREAMBLE_MAX_LINES}
+               ) ELSE NULL END AS previous_symbol_context_start
+        FROM code_repository_symbols
+        WHERE source_scope = ?
+          AND name = ?
+          {scoped_filter}
+          {generated_filter}
+          {path_filter}
+          {language_filter}
+          {kind_filter}
+        ORDER BY is_generated ASC, path ASC, line_start ASC
+        LIMIT ?
+        "
+    );
+    let mut values = vec![
+        rusqlite::types::Value::Text(required_scope(status)?.to_owned()),
+        rusqlite::types::Value::Text(name.to_owned()),
+    ];
+    if let Some(pattern) = scoped_pattern {
+        values.extend([
+            rusqlite::types::Value::Text(pattern.to_owned()),
+            rusqlite::types::Value::Text(pattern.to_owned()),
+            rusqlite::types::Value::Text(pattern.to_owned()),
+        ]);
+    }
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
+    push_kind_filter_values(&mut values, request);
+    values.push(rusqlite::types::Value::Integer((direct_limit + 1) as i64));
+
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
+    let rows = statement.query_map(params_from_iter(values), row_to_symbol)?;
+    let mut rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    let saturated = rows.len() > direct_limit;
+    rows.truncate(direct_limit);
+
+    Ok(SymbolIdentityRows { rows, saturated })
+}
+
+fn search_hybrid_api_identity_rows(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    identities: &[ApiSymbolIdentity],
+) -> Result<ApiIdentityRows, StorageError> {
+    if identities.is_empty() {
+        return Ok(ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: 0,
+            saturated: false,
+        });
+    }
+
+    let mut rows = Vec::new();
+    let mut matched_identity_count = 0;
+    let mut saturated = false;
+    for identity in identities {
+        let identity_rows = search_symbol_identity_rows_by_name(
+            connection,
+            status,
+            request,
+            identity.leaf_name(),
+            hybrid_api_identity_candidate_limit(request),
+            None,
+        )?;
+        saturated |= identity_rows.saturated;
+        let matched_rows = identity_rows
+            .rows
+            .into_iter()
+            .filter(|row| {
+                identity.matches_symbol(
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    &row.canonical_symbol_id,
+                )
+            })
+            .collect::<Vec<_>>();
+        if !matched_rows.is_empty() {
+            matched_identity_count += 1;
+        }
+        rows.extend(matched_rows);
+    }
+
+    Ok(ApiIdentityRows {
+        rows,
+        matched_identity_count,
+        saturated,
+    })
+}
+
+fn api_identity_rows_can_answer_without_fts(
+    request: &CodeRetrievalRequest,
+    identities: &[ApiSymbolIdentity],
+    rows: &ApiIdentityRows,
+) -> bool {
+    if identities.len() < 2 || rows.saturated {
+        return false;
+    }
+
+    match request.code_query_kind {
+        CodeQueryKind::Symbol => {
+            rows.matched_identity_count == identities.len()
+                && api_identity_query_terms_are_closed(&request.query, identities)
+        }
+        CodeQueryKind::Hybrid => rows.matched_identity_count == identities.len(),
+        _ => false,
+    }
+}
+
+fn api_identity_query_terms_are_closed(query: &str, identities: &[ApiSymbolIdentity]) -> bool {
+    query
+        .split_whitespace()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .all(|token| {
+            identities
+                .iter()
+                .any(|identity| identity.matches_query_token(token))
+        })
+}
+
+fn search_symbol_fts_rows(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+) -> Result<Vec<SymbolRow>, StorageError> {
+    let fts_query = symbol_fts_match_query_for_request(request);
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let kind_filter = kind_filter_sql_for_column("code_repository_symbols.kind", request);
+    let inner_kind_filter = kind_filter_sql_for_column("search_symbol.kind", request);
+    let exclude_generated_flag = usize::from(request.exclude_generated);
+    let sql = format!(
+        "
+        SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
+               byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
+               coalesce((
+                   SELECT file.is_generated
+                   FROM code_repository_files file
+                   WHERE file.source_scope = code_repository_symbols.source_scope
+                     AND file.path = code_repository_symbols.path
+                   LIMIT 1
+               ), 0) AS is_generated,
+               CASE WHEN code_repository_symbols.kind = 'class' THEN (
+                   SELECT MIN(previous.line_start)
+                   FROM code_repository_symbols previous
+                   WHERE previous.source_scope = code_repository_symbols.source_scope
+                     AND previous.path = code_repository_symbols.path
+                     AND previous.line_end < code_repository_symbols.line_start
+                     AND code_repository_symbols.line_start - previous.line_end <= {SYMBOL_CONTEXT_PREAMBLE_MAX_LINES}
+               ) ELSE NULL END AS previous_symbol_context_start
+        FROM code_repository_symbols
+        WHERE source_scope = ?
+          AND symbol_snapshot_id IN (
+              SELECT record_id
+              FROM code_repository_search
+              WHERE code_repository_search MATCH ?
+                AND source_scope = ?
+                AND document_kind = 'symbol'
+                {fts_filter}
+                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
+                AND (
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM code_repository_symbols search_symbol
+                        WHERE search_symbol.source_scope = code_repository_search.source_scope
+                          AND search_symbol.symbol_snapshot_id = code_repository_search.record_id
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM code_repository_symbols search_symbol
+                        WHERE search_symbol.source_scope = code_repository_search.source_scope
+                          AND search_symbol.symbol_snapshot_id = code_repository_search.record_id
+                          {inner_kind_filter}
+                    )
+                )
+              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
+                  bm25(code_repository_search) ASC,
+                  record_id ASC
+              LIMIT ?
+          )
+          {kind_filter}
+        ORDER BY is_generated ASC, path ASC, line_start ASC
+        LIMIT ?
+        "
+    );
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
+    let mut values = fts_values_for_limited_with_language(
+        required_scope(status)?,
+        status,
+        request,
+        &fts_query,
+        candidate_limit(request, CandidateLayer::Symbol),
+        candidate_limit(request, CandidateLayer::Symbol),
+    );
+    let limit = values
+        .pop()
+        .expect("symbol fts values should include the outer limit");
+    let fts_limit = values
+        .pop()
+        .expect("symbol fts values should include the fts limit");
+    push_kind_filter_values(&mut values, request);
+    values.push(fts_limit);
+    push_kind_filter_values(&mut values, request);
+    values.push(limit);
+    let rows = statement.query_map(params_from_iter(values), row_to_symbol)?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn symbol_fts_match_query_for_request(request: &CodeRetrievalRequest) -> String {
+    if (request.code_query_kind == CodeQueryKind::Hybrid || request_has_exact_file_filter(request))
+        && let Some(query) = focused_symbol_fts_match_query(&request.query)
+    {
+        return query;
+    }
+
+    symbol_fts_match_query(&request.query)
+}
+
+fn row_to_symbol(row: &rusqlite::Row<'_>) -> rusqlite::Result<SymbolRow> {
+    Ok(SymbolRow {
+        symbol_snapshot_id: row.get(0)?,
+        canonical_symbol_id: row.get(1)?,
+        file_id: row.get(2)?,
+        path: row.get(3)?,
+        language_id: row.get(4)?,
+        signature: row.get(5)?,
+        doc_comment: row.get(6)?,
+        byte_range: RepositoryCodeRange {
+            start: row.get(7)?,
+            end: row.get(8)?,
+        },
+        line_range: RepositoryCodeRange {
+            start: row.get(9)?,
+            end: row.get(10)?,
+        },
+        name: row.get(11)?,
+        qualified_name: row.get(12)?,
+        kind: row.get(13)?,
+        is_generated: row.get::<_, i64>(14)? != 0,
+        previous_symbol_context_start: row.get(15)?,
+    })
+}
+
+fn symbol_rows_to_hits(
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    rows: Vec<SymbolRow>,
+    api_identities: &[ApiSymbolIdentity],
+) -> Vec<CodeRetrievalHit> {
+    let query = request.query.as_str();
+    let score_query = ScoreQuery::new(query);
+    let exact_identity = SymbolIdentityQuery::from_query(query);
+    let typed_function_value_query = TypedFunctionValueQuery::from_request(query, request);
+    let query_has_test_intent = query_mentions_test_or_benchmark(query);
+    let drop_test_symbols = should_drop_test_symbols(status, request, &rows, query_has_test_intent);
+
+    rows.into_iter()
+        .filter(|row| {
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            )
+        })
+        .filter(|row| !drop_test_symbols || !path_looks_like_test_or_benchmark(&row.path))
+        .filter_map(|row| {
+            let score = score_query.score([
+                row.name.as_str(),
+                row.qualified_name.as_str(),
+                row.kind.as_str(),
+                row.signature.as_str(),
+                row.doc_comment.as_deref().unwrap_or_default(),
+                row.path.as_str(),
+            ]) + score_exact_path(query, &row.path)
+                + symbol_query_bonus(
+                    query,
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    &row.canonical_symbol_id,
+                    request,
+                )
+                + api_identity_symbol_bonus(
+                    api_identities,
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    &row.canonical_symbol_id,
+                )
+                + scoped_member_identity_bonus(exact_identity.as_ref(), &row, request)
+                + type_symbol_identity_bonus(exact_identity.as_ref(), &row, request)
+                + typed_function_value_surface_bonus(
+                    &row,
+                    typed_function_value_query.as_ref(),
+                    query_has_test_intent,
+                );
+            (score > 0.0).then(|| {
+                let score = score
+                    + 2.0
+                    + symbol_kind_bonus(&row.kind, request)
+                    + symbol_declaration_surface_path_bonus(score, &row.kind, &row.path, request)
+                    + symbol_implementation_path_bonus(score, &row.signature, &row.path, request)
+                    + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
+                let line_range = symbol_result_line_range(&row);
+                let excerpt = symbol_excerpt(
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    row.doc_comment.as_deref(),
+                );
+                hit_from_parts(
+                    status,
+                    HitParts {
+                        path: row.path,
+                        language_id: row.language_id,
+                        byte_range: row.byte_range,
+                        line_range,
+                        symbol_snapshot_id: Some(row.symbol_snapshot_id),
+                        canonical_symbol_id: Some(row.canonical_symbol_id),
+                        file_id: Some(row.file_id),
+                        retrieval_layers: vec![
+                            CodeRetrievalLayer::Symbol,
+                            CodeRetrievalLayer::Definition,
+                        ],
+                        score,
+                        excerpt,
+                        is_generated: row.is_generated,
+                        degraded_reason: None,
+                        edge_kind: None,
+                        edge_resolution_state: None,
+                        edge_target_hint: None,
+                        edge_confidence_basis_points: None,
+                        edge_confidence_tier: None,
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+fn should_drop_test_symbols(
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    rows: &[SymbolRow],
+    query_has_test_intent: bool,
+) -> bool {
+    !query_has_test_intent
+        && matches!(
+            request.code_query_kind,
+            CodeQueryKind::Definition | CodeQueryKind::Symbol
+        )
+        && rows.iter().any(|row| {
+            selected_row(
+                &row.path,
+                &row.language_id,
+                row.is_generated,
+                status,
+                request,
+            ) && !path_looks_like_test_or_benchmark(&row.path)
+        })
+}
+
+fn type_symbol_identity_bonus(
+    identity: Option<&SymbolIdentityQuery>,
+    row: &SymbolRow,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Definition | CodeQueryKind::Symbol
+    ) || !type_symbol_kind(&row.kind)
+    {
+        return 0.0;
+    }
+    let Some(identity) = identity else {
+        return 0.0;
+    };
+    if identity.matches_symbol(
+        &row.name,
+        &row.qualified_name,
+        &row.signature,
+        &row.canonical_symbol_id,
+    ) {
+        0.55
+    } else {
+        0.0
+    }
+}
+
+fn scoped_member_identity_bonus(
+    identity: Option<&SymbolIdentityQuery>,
+    row: &SymbolRow,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Definition | CodeQueryKind::Symbol
+    ) || type_symbol_kind(&row.kind)
+    {
+        return 0.0;
+    }
+    let Some(identity) = identity.filter(|identity| identity.is_scoped()) else {
+        return 0.0;
+    };
+    if identity.matches_symbol(
+        &row.name,
+        &row.qualified_name,
+        &row.signature,
+        &row.canonical_symbol_id,
+    ) {
+        2.25
+    } else {
+        0.0
+    }
+}
+
+fn type_symbol_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class"
+            | "enum"
+            | "interface"
+            | "record"
+            | "struct"
+            | "trait"
+            | "type"
+            | "type_alias"
+            | "typedef"
+            | "union"
+    )
+}
+
+impl TypedFunctionValueQuery {
+    fn from_request(query: &str, request: &CodeRetrievalRequest) -> Option<Self> {
+        if request.code_query_kind != CodeQueryKind::Hybrid {
+            return None;
+        }
+        let terms = symbol_surface_terms(query);
+        if terms.len() < TYPED_FUNCTION_VALUE_MIN_QUERY_TERMS {
+            return None;
+        }
+
+        Some(Self {
+            mentions_surface_intent: query_mentions_typed_function_value(query, &terms),
+            terms,
+        })
+    }
+}
+
+fn typed_function_value_surface_bonus(
+    row: &SymbolRow,
+    query: Option<&TypedFunctionValueQuery>,
+    query_has_test_intent: bool,
+) -> f64 {
+    let Some(query) = query else {
+        return 0.0;
+    };
+    if !matches!(row.kind.as_str(), "constant" | "function" | "variable")
+        || (path_looks_like_test_or_benchmark(&row.path) && !query_has_test_intent)
+    {
+        return 0.0;
+    }
+    let Some(surface) = typed_function_value_surface(&row.signature) else {
+        return 0.0;
+    };
+    if !terms_overlap(&query.terms, &surface.name_terms)
+        || !terms_overlap(&query.terms, &surface.declared_type_terms)
+    {
+        return 0.0;
+    }
+    let matched_terms = query
+        .terms
+        .iter()
+        .filter(|query_term| {
+            surface
+                .signature_terms
+                .iter()
+                .any(|surface_term| related_surface_terms(surface_term, query_term))
+        })
+        .count();
+    if matched_terms < TYPED_FUNCTION_VALUE_MIN_MATCHED_TERMS
+        || (!query.mentions_surface_intent
+            && matched_terms < TYPED_FUNCTION_VALUE_MIN_MATCHED_TERMS + 1)
+    {
+        return 0.0;
+    }
+
+    let coverage = matched_terms as f64 / query.terms.len() as f64;
+    (TYPED_FUNCTION_VALUE_BASE_BONUS
+        + coverage
+        + if surface.exported {
+            TYPED_FUNCTION_VALUE_EXPORTED_BONUS
+        } else {
+            0.0
+        })
+    .min(TYPED_FUNCTION_VALUE_MAX_BONUS)
+}
+
+fn typed_function_value_surface(signature: &str) -> Option<TypedFunctionValueSurface> {
+    let signature = signature.trim();
+    if !(signature.contains("=>") && signature.contains('=')) {
+        return None;
+    }
+    let (left_side, _) = signature.split_once('=')?;
+    let (before_type, declared_type) = left_side.rsplit_once(':')?;
+    let name = before_type
+        .rsplit(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .find(|part| !part.is_empty())?;
+    let name_terms = symbol_surface_terms(name);
+    let declared_type_terms = symbol_surface_terms(declared_type);
+    if name_terms.is_empty() || declared_type_terms.is_empty() {
+        return None;
+    }
+
+    Some(TypedFunctionValueSurface {
+        name_terms,
+        declared_type_terms,
+        signature_terms: symbol_surface_terms(signature),
+        exported: signature.starts_with("export ") || signature.starts_with("pub "),
+    })
+}
+
+fn query_mentions_typed_function_value(query: &str, query_terms: &[String]) -> bool {
+    query.contains("=>")
+        || query_terms.iter().any(|term| {
+            matches!(
+                term.as_str(),
+                "arrow" | "callback" | "closure" | "function" | "inline" | "lambda" | "typed"
+            )
+        })
+}
+
+fn terms_overlap(left: &[String], right: &[String]) -> bool {
+    left.iter()
+        .any(|left| right.iter().any(|right| related_surface_terms(left, right)))
+}
+
+fn related_surface_terms(left: &str, right: &str) -> bool {
+    left == right
+        || (left.len() >= 4
+            && right.len() >= 4
+            && (left.starts_with(right) || right.starts_with(left)))
+}
+
+fn symbol_surface_terms(value: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for token in value
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty())
+    {
+        terms.push(token.to_ascii_lowercase());
+        terms.extend(
+            token
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .map(str::to_ascii_lowercase),
+        );
+        push_camel_surface_terms(token, &mut terms);
+    }
+    terms.sort();
+    terms.dedup();
+
+    terms
+}
+
+fn push_camel_surface_terms(token: &str, terms: &mut Vec<String>) {
+    let chars = token.char_indices().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return;
+    }
+
+    let mut start = 0usize;
+    for index in 1..chars.len() {
+        let previous = chars[index - 1].1;
+        let current = chars[index].1;
+        let next = chars.get(index + 1).map(|(_, character)| *character);
+        let starts_word = previous.is_ascii_lowercase() && current.is_ascii_uppercase();
+        let ends_acronym = previous.is_ascii_uppercase()
+            && current.is_ascii_uppercase()
+            && next.is_some_and(|character| character.is_ascii_lowercase());
+        let changes_kind = previous.is_ascii_alphabetic() != current.is_ascii_alphabetic();
+        if starts_word || ends_acronym || changes_kind {
+            terms.push(token[start..chars[index].0].to_ascii_lowercase());
+            start = chars[index].0;
+        }
+    }
+    terms.push(token[start..].to_ascii_lowercase());
+}
+
+fn identity_hits_can_answer_without_fts(
+    request: &CodeRetrievalRequest,
+    identity: &SymbolIdentityQuery,
+    hit_count: usize,
+    saturated: bool,
+) -> bool {
+    hit_count > 0
+        && !saturated
+        && query_is_single_symbol_identity(&request.query)
+        && (matches!(
+            request.code_query_kind,
+            CodeQueryKind::Definition | CodeQueryKind::Symbol
+        ) || request.code_query_kind == CodeQueryKind::Hybrid)
+        && (identity.is_scoped() || hit_count <= request.limit)
+}
+
+fn identity_miss_can_answer_without_fts(
+    request: &CodeRetrievalRequest,
+    saturated: bool,
+    identity: &SymbolIdentityQuery,
+) -> bool {
+    !saturated
+        && matches!(
+            request.code_query_kind,
+            CodeQueryKind::Definition | CodeQueryKind::Symbol
+        )
+        && query_is_single_symbol_identity(&request.query)
+        && identity_has_exact_case_intent(identity.leaf_name())
+}
+
+fn identity_has_exact_case_intent(name: &str) -> bool {
+    name.chars()
+        .any(|character| character.is_ascii_uppercase() || character == '_')
+}
+
+fn symbol_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    candidate_limit(request, CandidateLayer::Symbol).min(200)
+}
+
+fn hybrid_api_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    request.limit.clamp(10, 40)
+}
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
