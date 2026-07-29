@@ -1,3 +1,10 @@
+use crate::{
+    command::{CommandSpec, run_command},
+    config::Config,
+};
+
+use super::{CodexResult, command::build_codex_command, result_mapping::from_command};
+
 pub fn run_codex(config: &Config, prompt: &str) -> CodexResult {
     let command = build_codex_command(config);
     if config.dry_run_codex {
@@ -21,3 +28,7 @@ pub fn run_codex(config: &Config, prompt: &str) -> CodexResult {
     );
     from_command(result)
 }
+
+#[cfg(test)]
+#[path = "execution_tests.rs"]
+mod execution_tests;

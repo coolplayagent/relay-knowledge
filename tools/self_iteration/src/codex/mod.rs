@@ -1,21 +1,4 @@
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
-use crate::{
-    command::{CommandResult, CommandSpec, run_command},
-    config::{CategorySet, Config, DEFAULT_CODEX_MODEL, EvaluationCategory},
-    history::{
-        HistoryPaths, adopted, best_accepted_run_for_profile, best_accepted_run_for_workload,
-        is_evaluate_run, load_runs,
-        memory::{
-            historical_patch_memory_index, progressive_memory_index,
-            rejection_recovery_memory_review,
-        },
-        synthesis::synthesize_history,
-    },
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodexResult {
@@ -42,16 +25,17 @@ impl CodexResult {
     }
 }
 
-include!("execution.rs");
-include!("command.rs");
-include!("prompt.rs");
-include!("unattended_prompt.rs");
-include!("history_context.rs");
-include!("result_mapping.rs");
+mod command;
+mod execution;
+mod history_context;
+mod prompt;
+mod result_mapping;
+mod unattended_prompt;
+
+pub use execution::run_codex;
+pub use prompt::build_prompt;
+pub use unattended_prompt::build_unattended_prompt;
 
 #[cfg(test)]
-#[path = "command_tests.rs"]
-mod command_tests;
-#[cfg(test)]
-#[path = "prompt_tests.rs"]
-mod prompt_tests;
+#[path = "mod_tests.rs"]
+mod tests;

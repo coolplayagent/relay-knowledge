@@ -160,7 +160,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.14 自迭代 Codex 生成职责
 
-`tools/self_iteration::codex` 必须把进程执行、命令构建、普通提示词构建、无人值守提示词构建、历史派生提示上下文和命令结果映射分别放在 `execution`、`command`、`prompt`、`unattended_prompt`、`history_context` 和 `result_mapping`。命令和提示词 UT 必须与对应实现同级共置。`mod.rs` 只维护结果合同和 facade；不得恢复同时组合外部进程策略、提示词策略、历史格式化与内联测试的根目录 `codex.rs`。
+`tools/self_iteration::codex` 必须把进程执行、命令构建、普通提示词构建、无人值守提示词构建、历史派生提示上下文和命令结果映射分别放在真正的 Rust 模块 `execution`、`command`、`prompt`、`unattended_prompt`、`history_context` 和 `result_mapping`。每个行为 owner 必须直接挂载同级 `*_tests.rs` contract，`mod_tests` 只验证 `CodexResult`。`mod.rs` 只维护结果合同和 facade；禁止生产代码使用 `include!` 装配，也不得恢复同时组合外部进程策略、提示词策略、历史格式化与内联测试的根目录 `codex.rs`。
 
 ### 3.15 自迭代工作流职责
 
@@ -234,7 +234,7 @@ Worktree-overlay 的 Gitlink 输出聚合、子路径删除回放和 scope-aware
 
 自迭代的 config、scoring、history 和 evaluator facade 必须把各自 facade 测试装配留在同级 `mod_tests.rs`，repository-set workload 必须自行挂载同级 `repository_set_tests.rs` provenance UT 合同，不得把测试体重新写回生产 facade 或 workload 文件。
 
-自迭代 Codex adapter 的 `command_tests` 与 `prompt_tests` 必须由 `codex/mod.rs` 通过显式 test-only `#[path]` 挂载，测试文件本身直接包含测试项。禁止用生产期 `include!` 展开测试文件，也禁止在配对文件中再嵌套同名 test module。
+自迭代 Codex adapter 的 `command_tests`、`execution_tests`、`history_context_tests`、`prompt_tests`、`unattended_prompt_tests` 与 `result_mapping_tests` 必须由各自精确的生产 owner 通过显式 test-only `#[path]` 挂载，测试文件本身直接包含测试项。禁止生产期 `include!` 展开、facade 代管行为测试或在配对文件中再嵌套同名 test module。
 
 ## 4. HTTP 与 QoS
 

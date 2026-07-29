@@ -1,3 +1,19 @@
+use std::path::Path;
+
+use crate::{
+    config::CategorySet,
+    history::{
+        HistoryPaths, best_accepted_run_for_profile, best_accepted_run_for_workload,
+        memory::{
+            historical_patch_memory_index, progressive_memory_index,
+            rejection_recovery_memory_review,
+        },
+        synthesis::synthesize_history,
+    },
+};
+
+use super::history_context::{recent_rejections, run_brief};
+
 pub fn build_prompt(
     paths: &HistoryPaths,
     workspace: &Path,
@@ -74,3 +90,7 @@ Make one concrete candidate code change now. Before editing, use the historical 
         workspace = workspace.display(),
     )
 }
+
+#[cfg(test)]
+#[path = "prompt_tests.rs"]
+mod prompt_tests;

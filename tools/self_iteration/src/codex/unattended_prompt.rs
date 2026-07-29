@@ -1,3 +1,20 @@
+use std::path::Path;
+
+use serde_json::Value;
+
+use crate::{
+    config::{CategorySet, EvaluationCategory},
+    history::{
+        HistoryPaths, best_accepted_run_for_profile, best_accepted_run_for_workload,
+        memory::progressive_memory_index,
+    },
+};
+
+use super::history_context::{
+    capability_snapshot, competitive_feature_targets, implementation_guardrails, recent_rejections,
+    run_brief,
+};
+
 pub fn build_unattended_prompt(
     paths: &HistoryPaths,
     workspace: &Path,
@@ -112,3 +129,7 @@ Before editing, inspect only the files needed for this category. In your final n
         memory = progressive_memory_index(paths, if macro_explore { 5 } else { 3 }),
     )
 }
+
+#[cfg(test)]
+#[path = "unattended_prompt_tests.rs"]
+mod unattended_prompt_tests;

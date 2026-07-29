@@ -160,7 +160,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.14 Self-Iteration Codex Generation Ownership
 
-`tools/self_iteration::codex` separates process execution, command construction, normal prompt construction, unattended prompt construction, history-derived prompt context, and command-result mapping into `execution`, `command`, `prompt`, `unattended_prompt`, `history_context`, and `result_mapping`. Command and prompt unit tests stay beside those implementation files. `mod.rs` owns the result contract and facade only; do not restore a root `codex.rs` that combines external-process policy, prompt policy, history formatting, and inline tests.
+`tools/self_iteration::codex` separates process execution, command construction, normal prompt construction, unattended prompt construction, history-derived prompt context, and command-result mapping into the real Rust modules `execution`, `command`, `prompt`, `unattended_prompt`, `history_context`, and `result_mapping`. Every behavior owner attaches its sibling `*_tests.rs` contract directly, while `mod_tests` verifies only `CodexResult`. `mod.rs` owns the result contract and facade only; production `include!` assembly is forbidden, and a root `codex.rs` must not recombine external-process policy, prompt policy, history formatting, and inline tests.
 
 ### 3.15 Self-Iteration Workflow Ownership
 
@@ -234,7 +234,7 @@ Every remaining sibling test attachment is explicit: runtime, service, repositor
 
 The self-iteration config, scoring, history, and evaluator facades keep their facade test assembly in sibling `mod_tests.rs` files, while the repository-set workload attaches its own sibling `repository_set_tests.rs` provenance contract; test bodies must not return to production facade or workload files.
 
-The self-iteration Codex adapter attaches `command_tests` and `prompt_tests` from `codex/mod.rs` through explicit test-only `#[path]` declarations, and each test file contains test items directly. Production-time `include!` expansion of test files and same-named nested test modules are forbidden.
+The self-iteration Codex adapter attaches `command_tests`, `execution_tests`, `history_context_tests`, `prompt_tests`, `unattended_prompt_tests`, and `result_mapping_tests` from their exact production owners through explicit test-only `#[path]` declarations. Each test file contains test items directly; production-time `include!` expansion, facade-owned behavior tests, and same-named nested test modules are forbidden.
 
 ## 4. HTTP and QoS
 
