@@ -27,18 +27,12 @@ mod import_compat;
 mod snapshot_import;
 
 use self::snapshot_import::copy_attached_code_table;
-#[cfg(test)]
-pub(super) use candidate_paths::candidate_path_fts_query;
 pub(super) use candidate_paths::{
     file_candidate_paths_for_query_scope, file_candidate_paths_for_scope,
 };
 pub(super) use fingerprints::{
     file_fingerprints, file_fingerprints_for_paths, file_fingerprints_for_scope,
 };
-
-#[cfg(test)]
-#[path = "candidate_paths_tests.rs"]
-mod candidate_paths_tests;
 
 #[cfg(test)]
 #[path = "import_tests.rs"]
