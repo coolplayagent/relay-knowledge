@@ -78,7 +78,7 @@ Index lifecycle 持久化统一收敛在 `storage::sqlite::indexing` 目录：`m
 
 三层 graph retrieval 持久化统一收敛在 `storage::sqlite::retrieval` 目录：`mod.rs` 负责 schema 初始化、document materialization、检索协调和共享 scoring input，具名子模块分别负责 advanced graph path、BM25 与有界 fallback、context assembly、derived document、label trigram、schema migration、alias 和 ranking；定向测试与这些实现同目录。不得恢复父目录级 `retrieval_*` 文件，也不得用 path override 隐藏物理所有权边界。
 
-Maven effective model 构建也必须拆开语法边界：`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；不得把两类规则重新合并到通用 Maven support 模块。
+Maven 持久化在物理结构上统一收敛到 `storage::sqlite::maven`：`mod.rs` 协调 build/dependency 投影，`model` 负责 raw/effective POM model，`xml` 负责有界 XML 提取，`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；定向测试与 review regression 测试保持同目录。不得把这些规则重新合并到通用 Maven support 模块，也不得用父目录相对 path override 隐藏边界。
 
 代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
 
