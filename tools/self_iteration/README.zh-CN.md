@@ -69,7 +69,7 @@ harness 会把实时进度写到 stderr，统一使用 `[self-iterate]` 前缀�
 
 ### 源码所有权
 
-evaluator 的生产 facade 只维护合同与组合；其余测试装配位于同级 `mod_tests.rs`。repository-set workload 的 provenance UT 位于同级 `repository_set_tests.rs`，避免在生产工作流文件中形成内联测试桶。Config 解析与预算、scoring 阶段、workflow 的分派/生成/评估/持久化/报告、Case 加载与合并、research-plan 渲染、candidate Git 操作、外部命令执行、Codex 进程/提示词映射、history 生命周期，以及渐进记忆边界现在都是真正的子模块，不再作为 `include!` 片段共享隐式命名空间；每个行为 owner 直接挂载自己的同级 UT 文件。
+evaluator 的生产 facade 只维护合同与组合；其余测试装配位于同级 `mod_tests.rs`。repository-set workload 的 provenance UT 位于同级 `repository_set_tests.rs`，避免在生产工作流文件中形成内联测试桶。Config 解析与预算、scoring 阶段、workflow 的分派/生成/评估/持久化/报告、内嵌的 unattended 生命周期/状态/循环/尝试阶段、Case 加载与合并、进程适配器、history 生命周期，以及渐进记忆边界现在都是真正的子模块，不再作为 `include!` 片段共享隐式命名空间；每个行为 owner 直接挂载自己的同级 UT 文件。无人值守运行嵌套在 `workflow` 下，因此可消费 workflow 服务而不形成顶层模块依赖环。
 
 ## 命令参考
 

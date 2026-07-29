@@ -156,7 +156,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 ### 3.13 自迭代无人值守工作流职责
 
-`tools/self_iteration::unattended` 必须把长运行生命周期、持久状态、循环选择、候选尝试、评估持久化、派生配置、元数据、类别轮换、宏触发、深度检查和结果策略分别放入与职责同名的文件。状态、类别轮换和触发策略 UT 必须与对应实现同级共置并由对应实现挂载。`mod.rs` 只维护共享合同和模块 facade，不得代管这些测试声明；不得恢复同时组合完整工作流与内联测试的根目录 `unattended.rs`。
+无人值守运行必须属于 `tools/self_iteration::workflow::unattended` 子领域，不能作为与 `workflow` 互相依赖的顶层同级模块。它必须使用真正的 Rust 模块分别负责长运行生命周期、持久状态、循环选择、候选尝试、评估持久化、派生配置、元数据、类别轮换、宏触发、深度检查和结果策略。`mod.rs` 只维护共享阶段合同、策略常量和子领域 facade；每个实现必须显式导入依赖，生产代码不得使用 `include!` 把工作流合并进隐式命名空间。状态、类别轮换和触发策略 UT 必须与对应实现同级共置并由实现挂载。不得恢复顶层 `unattended` 模块、根目录 `unattended.rs` 或 workflow/unattended 依赖环。
 
 ### 3.14 自迭代 Codex 生成职责
 

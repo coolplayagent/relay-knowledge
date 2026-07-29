@@ -1,4 +1,6 @@
-use super::*;
+use crate::config::Config;
+
+use super::{UNATTENDED_ACCEPT_LIMIT, UnattendedState, unattended_stop_reason};
 
 #[test]
 fn stop_reason_uses_default_unattended_accept_limit() {

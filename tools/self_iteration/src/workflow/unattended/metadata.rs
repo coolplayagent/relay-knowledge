@@ -1,4 +1,9 @@
-fn unattended_metadata(
+use crate::config::{Config, EvaluationCategory};
+
+use super::super::unix_timestamp;
+use super::{MetadataLinks, UnattendedState};
+
+pub(super) fn unattended_metadata(
     config: &Config,
     state: &UnattendedState,
     layer: &str,

@@ -1,4 +1,14 @@
-fn load_unattended_state(paths: &history::HistoryPaths) -> Result<UnattendedState, String> {
+use crate::{
+    config::{Config, Strategy},
+    history,
+};
+
+use super::super::unix_timestamp;
+use super::{UNATTENDED_ACCEPT_LIMIT, UnattendedState};
+
+pub(super) fn load_unattended_state(
+    paths: &history::HistoryPaths,
+) -> Result<UnattendedState, String> {
     if !paths.unattended_state.exists() {
         return Ok(UnattendedState::new(unix_timestamp()));
     }
@@ -21,7 +31,7 @@ fn load_unattended_state(paths: &history::HistoryPaths) -> Result<UnattendedStat
     }
 }
 
-fn save_unattended_state(
+pub(super) fn save_unattended_state(
     paths: &history::HistoryPaths,
     state: &UnattendedState,
 ) -> Result<(), String> {
@@ -38,7 +48,11 @@ fn save_unattended_state(
     })
 }
 
-fn unattended_stop_reason(config: &Config, state: &UnattendedState, now: u64) -> Option<String> {
+pub(super) fn unattended_stop_reason(
+    config: &Config,
+    state: &UnattendedState,
+    now: u64,
+) -> Option<String> {
     if config
         .stop_after_accepted
         .unwrap_or(UNATTENDED_ACCEPT_LIMIT)

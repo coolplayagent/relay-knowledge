@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use super::*;
+use crate::{config::Config, history, workflow::unattended::UnattendedState};
+
+use super::macro_trigger;
 
 #[test]
 fn macro_trigger_uses_competitive_failure_threshold() {

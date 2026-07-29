@@ -1,4 +1,12 @@
-fn maybe_run_deep_check(
+use crate::{candidate_git, config::Config, history};
+
+use super::super::{evaluate_candidate_for_patch, new_layer_run_id, print_score, unix_timestamp};
+use super::{
+    MetadataPersistInput, UnattendedState, evaluation::persist_scored_run_with_metadata,
+    state::save_unattended_state,
+};
+
+pub(super) fn maybe_run_deep_check(
     config: &Config,
     paths: &history::HistoryPaths,
     state: &mut UnattendedState,

@@ -1,4 +1,8 @@
-fn unattended_sleep_seconds(config: &Config, outcome: LayeredCycleOutcome) -> u64 {
+use crate::config::Config;
+
+use super::LayeredCycleOutcome;
+
+pub(super) fn unattended_sleep_seconds(config: &Config, outcome: LayeredCycleOutcome) -> u64 {
     match outcome {
         LayeredCycleOutcome::Accepted => config.cooldown_after_accept_seconds,
         LayeredCycleOutcome::CodexTimeout => config.cooldown_after_timeout_seconds,
@@ -8,7 +12,7 @@ fn unattended_sleep_seconds(config: &Config, outcome: LayeredCycleOutcome) -> u6
     }
 }
 
-fn score_accepted(record: &serde_json::Value) -> bool {
+pub(super) fn score_accepted(record: &serde_json::Value) -> bool {
     record
         .get("score_accepted")
         .and_then(serde_json::Value::as_bool)

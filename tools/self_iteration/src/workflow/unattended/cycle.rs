@@ -1,4 +1,26 @@
-fn run_unattended_cycle(
+use crate::{
+    candidate_git,
+    config::{Config, EvaluationCategory},
+    history,
+};
+
+use super::super::new_layer_run_id;
+use super::{
+    LayerAttemptKind, LayeredCycleOutcome, MetadataLinks, UnattendedAttemptInput,
+    UnattendedEvaluationInput, UnattendedState,
+    attempt::run_unattended_attempt,
+    category_rotation::{
+        next_unattended_category, selected_or_default_category,
+        update_unattended_rejection_counters,
+    },
+    configuration::unattended_config,
+    evaluation::{evaluate_unattended_layer, persist_empty_candidate},
+    metadata::unattended_metadata,
+    outcome::score_accepted,
+    triggers::macro_trigger,
+};
+
+pub(super) fn run_unattended_cycle(
     config: &Config,
     paths: &history::HistoryPaths,
     cases_config: &serde_json::Value,

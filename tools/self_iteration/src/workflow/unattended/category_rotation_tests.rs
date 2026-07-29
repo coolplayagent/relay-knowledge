@@ -1,4 +1,7 @@
-use super::*;
+use crate::config::EvaluationCategory;
+
+use super::next_unattended_category;
+use crate::workflow::unattended::UnattendedState;
 
 #[test]
 fn category_rotation_starts_with_competitive() {

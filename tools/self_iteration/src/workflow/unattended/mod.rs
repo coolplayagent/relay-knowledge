@@ -1,12 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    PersistInput, apply_candidate_documentation_gate, candidate_git, cases, codex, command,
-    config::{CategorySet, Config, EvaluationCategory, Strategy},
-    evaluate_candidate_for_patch, evaluator, history, new_layer_run_id, number,
-    persist_scored_run_with_score, print_score, scoring, sleep_seconds, unix_timestamp,
-    write_adopted_optimization_document,
-};
+use crate::config::{Config, EvaluationCategory, Strategy};
 
 const UNATTENDED_ACCEPT_LIMIT: usize = 8;
 const COMPETITIVE_GAP_EPSILON: f64 = 0.02;
@@ -100,14 +94,57 @@ impl LayeredCycleOutcome {
     }
 }
 
-include!("lifecycle.rs");
-include!("state.rs");
-include!("cycle.rs");
-include!("attempt.rs");
-include!("evaluation.rs");
-include!("configuration.rs");
-include!("metadata.rs");
-include!("category_rotation.rs");
-include!("triggers.rs");
-include!("deep_check.rs");
-include!("outcome.rs");
+struct UnattendedAttemptInput<'a> {
+    config: &'a Config,
+    paths: &'a crate::history::HistoryPaths,
+    cases_config: &'a serde_json::Value,
+    state: &'a mut UnattendedState,
+    kind: LayerAttemptKind,
+    category: EvaluationCategory,
+    attempt_index: usize,
+    macro_trigger: Option<&'a str>,
+}
+
+struct UnattendedEvaluationInput<'a> {
+    config: &'a Config,
+    paths: &'a crate::history::HistoryPaths,
+    run_id: &'a str,
+    patch: &'a crate::candidate_git::PatchSnapshot,
+    codex: Option<&'a crate::codex::CodexResult>,
+    metadata: serde_json::Value,
+    commit: bool,
+    base_ref: &'a str,
+}
+
+#[derive(Default)]
+struct MetadataLinks<'a> {
+    parent_run_id: Option<&'a str>,
+    promoted_from_run_id: Option<&'a str>,
+    macro_trigger: Option<&'a str>,
+    promotion_decision: Option<&'a str>,
+}
+
+struct MetadataPersistInput<'a> {
+    config: &'a Config,
+    paths: &'a crate::history::HistoryPaths,
+    run_id: &'a str,
+    patch: &'a crate::candidate_git::PatchSnapshot,
+    codex: Option<&'a crate::codex::CodexResult>,
+    evaluation: &'a crate::evaluator::EvaluationRun,
+    commit: Option<&'a str>,
+    metadata: &'a serde_json::Value,
+}
+
+mod attempt;
+mod category_rotation;
+mod configuration;
+mod cycle;
+mod deep_check;
+mod evaluation;
+mod lifecycle;
+mod metadata;
+mod outcome;
+mod state;
+mod triggers;
+
+pub(super) use lifecycle::run_unattended_layered_loop;

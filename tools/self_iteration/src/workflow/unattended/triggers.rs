@@ -1,4 +1,9 @@
-fn macro_trigger(
+use crate::{config::Config, history};
+
+use super::super::number;
+use super::{COMPETITIVE_GAP_EPSILON, UnattendedState};
+
+pub(super) fn macro_trigger(
     config: &Config,
     paths: &history::HistoryPaths,
     state: &UnattendedState,

@@ -156,7 +156,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.13 Self-Iteration Unattended Workflow Ownership
 
-`tools/self_iteration::unattended` keeps the long-running lifecycle, durable state, cycle selection, candidate attempts, evaluation persistence, derived configuration, metadata, category rotation, macro triggers, deep checks, and outcome policy in files named for those responsibilities. State, category-rotation, and trigger unit tests stay beside and are attached by their matching implementation files. `mod.rs` owns only shared contracts and the module facade, without owning those test declarations; do not restore a root `unattended.rs` that combines the entire workflow and its inline tests.
+Unattended operation is the `tools/self_iteration::workflow::unattended` subdomain, not a top-level sibling that creates a circular dependency with `workflow`. It must use real Rust modules for the long-running lifecycle, durable state, cycle selection, candidate attempts, evaluation persistence, derived configuration, metadata, category rotation, macro triggers, deep checks, and outcome policy. `mod.rs` owns only shared stage contracts, policy constants, and the subdomain facade; every implementation imports its dependencies explicitly, and production code must not use `include!` to merge the workflow into an implicit namespace. State, category-rotation, and trigger unit tests stay beside and are attached by their matching implementation files. Do not restore a top-level `unattended` module, a root `unattended.rs`, or a workflow/unattended dependency cycle.
 
 ### 3.14 Self-Iteration Codex Generation Ownership
 

@@ -1,34 +1,12 @@
-struct UnattendedEvaluationInput<'a> {
-    config: &'a Config,
-    paths: &'a history::HistoryPaths,
-    run_id: &'a str,
-    patch: &'a candidate_git::PatchSnapshot,
-    codex: Option<&'a codex::CodexResult>,
-    metadata: serde_json::Value,
-    commit: bool,
-    base_ref: &'a str,
-}
+use crate::{candidate_git, codex, command, config::Config, evaluator, history, scoring};
 
-#[derive(Default)]
-struct MetadataLinks<'a> {
-    parent_run_id: Option<&'a str>,
-    promoted_from_run_id: Option<&'a str>,
-    macro_trigger: Option<&'a str>,
-    promotion_decision: Option<&'a str>,
-}
+use super::super::{
+    PersistInput, apply_candidate_documentation_gate, evaluate_candidate_for_patch,
+    persist_scored_run_with_score, print_score, write_adopted_optimization_document,
+};
+use super::{MetadataPersistInput, UnattendedEvaluationInput};
 
-struct MetadataPersistInput<'a> {
-    config: &'a Config,
-    paths: &'a history::HistoryPaths,
-    run_id: &'a str,
-    patch: &'a candidate_git::PatchSnapshot,
-    codex: Option<&'a codex::CodexResult>,
-    evaluation: &'a evaluator::EvaluationRun,
-    commit: Option<&'a str>,
-    metadata: &'a serde_json::Value,
-}
-
-fn evaluate_unattended_layer(
+pub(super) fn evaluate_unattended_layer(
     input: UnattendedEvaluationInput<'_>,
 ) -> Result<serde_json::Value, String> {
     let mut evaluation =
@@ -82,7 +60,7 @@ fn evaluate_unattended_layer(
     Ok(record)
 }
 
-fn persist_generation_failure(
+pub(super) fn persist_generation_failure(
     config: &Config,
     paths: &history::HistoryPaths,
     run_id: &str,
@@ -119,7 +97,7 @@ fn persist_generation_failure(
     Ok(())
 }
 
-fn persist_empty_candidate(
+pub(super) fn persist_empty_candidate(
     config: &Config,
     paths: &history::HistoryPaths,
     run_id: &str,
@@ -145,7 +123,7 @@ fn persist_empty_candidate(
     Ok(())
 }
 
-fn persist_scored_run_with_metadata(
+pub(super) fn persist_scored_run_with_metadata(
     input: MetadataPersistInput<'_>,
 ) -> Result<serde_json::Value, String> {
     let category_focus = input.config.category_focus_key();

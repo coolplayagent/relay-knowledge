@@ -1,4 +1,14 @@
-pub fn run_unattended_layered_loop(
+use crate::{candidate_git, cases, config::Config, history};
+
+use super::super::{sleep_seconds, unix_timestamp};
+use super::{
+    cycle::run_unattended_cycle,
+    deep_check::maybe_run_deep_check,
+    outcome::unattended_sleep_seconds,
+    state::{load_unattended_state, save_unattended_state, unattended_stop_reason},
+};
+
+pub(in crate::workflow) fn run_unattended_layered_loop(
     config: &Config,
     paths: &history::HistoryPaths,
 ) -> Result<i32, String> {

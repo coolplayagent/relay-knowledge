@@ -1,15 +1,16 @@
-struct UnattendedAttemptInput<'a> {
-    config: &'a Config,
-    paths: &'a history::HistoryPaths,
-    cases_config: &'a serde_json::Value,
-    state: &'a mut UnattendedState,
-    kind: LayerAttemptKind,
-    category: EvaluationCategory,
-    attempt_index: usize,
-    macro_trigger: Option<&'a str>,
-}
+use crate::{candidate_git, codex, config::EvaluationCategory};
 
-fn run_unattended_attempt(
+use super::super::new_layer_run_id;
+use super::{
+    LayeredCycleOutcome, MetadataLinks, UnattendedAttemptInput, UnattendedEvaluationInput,
+    category_rotation::update_unattended_rejection_counters,
+    configuration::unattended_config,
+    evaluation::{evaluate_unattended_layer, persist_empty_candidate, persist_generation_failure},
+    metadata::unattended_metadata,
+    outcome::score_accepted,
+};
+
+pub(super) fn run_unattended_attempt(
     input: UnattendedAttemptInput<'_>,
 ) -> Result<LayeredCycleOutcome, String> {
     if !input.config.use_current_candidate {

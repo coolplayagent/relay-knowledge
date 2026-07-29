@@ -1,4 +1,6 @@
-fn unattended_config(
+use crate::config::{CategorySet, Config, EvaluationCategory};
+
+pub(super) fn unattended_config(
     config: &Config,
     profile: &str,
     category: EvaluationCategory,

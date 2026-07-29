@@ -10,6 +10,7 @@ mod pacing;
 mod persistence;
 mod report_metadata;
 mod run_identity;
+mod unattended;
 
 pub(crate) use adopted_documentation::write_adopted_optimization_document;
 pub(crate) use candidate_evaluation::evaluate_candidate_for_patch;
