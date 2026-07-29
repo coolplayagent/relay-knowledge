@@ -92,6 +92,8 @@ Repository-set persistence is grouped under `storage::sqlite::code_set`: `mod.rs
 
 Monorepo-workspace persistence is grouped under `storage::sqlite::code_workspace`: `mod.rs` owns automatic workspace sets, package mappings, cross-member import resolution, and workspace-format normalization; `tests` covers lifecycle and mapping invariants, while `lookup_tests` covers language-specific import normalization. Do not restore root-level `code_workspace_*` siblings.
 
+Code-index schema ownership is grouped under `storage::sqlite::code_schema`: `mod.rs` owns current tables, indexes, and initialization order; `migrations` owns bounded compatibility transformations; `route_schema` owns route-specific DDL; and `tests` verifies schema and migration invariants. Do not split these files across the SQLite root using `code_schema_*` prefixes.
+
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
 
 ### 3.7 Code Index Foundations

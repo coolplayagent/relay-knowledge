@@ -2,9 +2,7 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
-#[path = "code_schema_migrations.rs"]
 mod migrations;
-#[path = "code_route_schema.rs"]
 mod route_schema;
 
 use self::migrations::{
@@ -983,5 +981,4 @@ fn backfill_edge_search_language_ids_once(connection: &Connection) -> Result<(),
     Ok(())
 }
 #[cfg(test)]
-#[path = "code_schema_tests.rs"]
 mod tests;
