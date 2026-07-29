@@ -142,6 +142,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::command` owns external-process contracts in `mod.rs`, child lifecycle and timeout handling in `execution`, pipe reader/writer workers in `pipes`, progress events in `logging`, bounded output selection in `output`, and failed-result construction in `failure`. Output and execution unit tests stay beside their matching implementation files. Do not restore a root `command.rs` that combines process orchestration, worker plumbing, observability, formatting, and inline tests.
 
+### 3.17 Self-Iteration Case Configuration Ownership
+
+`tools/self_iteration::cases` separates recursive case-file loading, deterministic object/array merging, typed JSON field access, and repository grouping into `loading`, `merge`, `fields`, and `grouping`. Merge unit tests stay beside `merge.rs`; `mod.rs` is only the facade. Do not restore a root `cases.rs` that combines configuration I/O, merge policy, access helpers, grouping, and inline tests.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

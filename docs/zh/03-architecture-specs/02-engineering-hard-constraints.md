@@ -142,6 +142,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::command` 必须由 `mod.rs` 维护外部进程合同，`execution` 管理子进程生命周期与超时，`pipes` 管理管道读写 worker，`logging` 记录进度事件，`output` 选择有界输出，`failure` 构造失败结果。输出和执行 UT 必须与对应实现同级共置。不得恢复同时组合进程编排、worker 管道、可观测性、格式化与内联测试的根目录 `command.rs`。
 
+### 3.17 自迭代用例配置职责
+
+`tools/self_iteration::cases` 必须把递归用例文件加载、确定性对象/数组合并、类型化 JSON 字段读取和按仓库分组分别放在 `loading`、`merge`、`fields` 和 `grouping`。合并 UT 必须与 `merge.rs` 同级共置，`mod.rs` 只作为 facade。不得恢复同时组合配置 I/O、合并策略、访问辅助、分组和内联测试的根目录 `cases.rs`。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
