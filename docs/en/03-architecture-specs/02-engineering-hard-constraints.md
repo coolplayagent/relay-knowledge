@@ -104,6 +104,8 @@ Relevance primitives are grouped under `storage::sqlite::code_query::relevance`:
 
 The SQLite code-store facade and its directly owned persistence behaviors are grouped physically under `storage::sqlite::code`: `mod.rs` coordinates store traits and references sibling persistence domains, while `feature_flags`, `generated`, `impact`, `routes`, `search`, and `symbols` own their named code-store behaviors. Scope cleanup, removal, status, and report ownership is grouped under `code::lifecycle`, with each paired unit-test file beside its implementation. Facade regressions, metadata/status cases, shared fixtures, and support code remain in the same directory with descriptive names. Do not simulate this ownership with a flat family of root-level `code_*` files or move lifecycle files back to the facade root.
 
+SQLite connection execution concerns are physically grouped under `storage::sqlite::connection_runtime`: `maintenance` owns writer pragmas, WAL checkpoints, and maintenance diagnostics; `read_pool` owns bounded read-connection selection and deadlines; and `retry` classifies bounded transient lock retries. Their paired unit tests stay beside the owner. The root `sqlite.rs` remains the store facade and references these modules explicitly; do not restore these runtime files to the crowded SQLite root.
+
 ### 3.7 Code Index Foundations
 
 Cross-cutting code-index primitives use responsibility-bearing top-level modules: `content_identity` owns stable IDs and content hashes, `language_metadata` owns language detection and language-level metadata, and `generated_detection` owns generated-source classification. Do not group unrelated primitives under a `common` directory; new primitives belong with the behavior they describe.

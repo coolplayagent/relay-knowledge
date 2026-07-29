@@ -104,6 +104,8 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 SQLite code-store facade 及其直接拥有的持久化行为必须在物理上收敛到 `storage::sqlite::code`：`mod.rs` 协调 store trait 并引用同级持久化领域，`feature_flags`、`generated`、`impact`、`routes`、`search` 和 `symbols` 分别维护与名称一致的 code-store 行为。Scope cleanup、removal、status 和 report 职责统一收敛到 `code::lifecycle`，每个配对 UT 文件必须与实现共置。Facade 回归、元数据/状态用例、共享夹具和测试支持必须使用描述性名称共置于该目录。不得再用 SQLite 根目录下一组扁平 `code_*` 文件模拟领域归属，也不得把 lifecycle 文件移回 facade 根目录。
 
+SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::connection_runtime`：`maintenance` 负责 writer pragma、WAL checkpoint 和 maintenance diagnostics，`read_pool` 负责有界读连接选择与 deadline，`retry` 负责有界 transient lock retry 分类；配对 UT 与 owner 共置。根 `sqlite.rs` 继续作为 store facade 并显式引用这些模块；不得把 runtime 文件恢复到拥挤的 SQLite 根目录。
+
 ### 3.7 代码索引基础模块
 
 跨代码索引流程的基础原语必须使用能表达职责的顶层模块：`content_identity` 负责稳定 ID 和内容哈希，`language_metadata` 负责语言检测及语言级元数据，`generated_detection` 负责生成源码分类。不得把无关原语归入 `common` 目录；新增原语必须归属其所描述的行为。
