@@ -130,6 +130,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::unattended` 必须把长运行生命周期、持久状态、循环选择、候选尝试、评估持久化、派生配置、元数据、类别轮换、宏触发、深度检查和结果策略分别放入与职责同名的文件。状态、类别轮换和触发策略 UT 必须与对应实现同级共置。`mod.rs` 只维护共享合同和模块 facade；不得恢复同时组合完整工作流与内联测试的根目录 `unattended.rs`。
 
+### 3.14 自迭代 Codex 生成职责
+
+`tools/self_iteration::codex` 必须把进程执行、命令构建、普通提示词构建、无人值守提示词构建、历史派生提示上下文和命令结果映射分别放在 `execution`、`command`、`prompt`、`unattended_prompt`、`history_context` 和 `result_mapping`。命令和提示词 UT 必须与对应实现同级共置。`mod.rs` 只维护结果合同和 facade；不得恢复同时组合外部进程策略、提示词策略、历史格式化与内联测试的根目录 `codex.rs`。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

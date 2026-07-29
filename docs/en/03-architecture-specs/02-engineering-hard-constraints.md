@@ -130,6 +130,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::unattended` keeps the long-running lifecycle, durable state, cycle selection, candidate attempts, evaluation persistence, derived configuration, metadata, category rotation, macro triggers, deep checks, and outcome policy in files named for those responsibilities. State, category-rotation, and trigger unit tests stay beside their matching implementation files. `mod.rs` owns only shared contracts and the module facade; do not restore a root `unattended.rs` that combines the entire workflow and its inline tests.
 
+### 3.14 Self-Iteration Codex Generation Ownership
+
+`tools/self_iteration::codex` separates process execution, command construction, normal prompt construction, unattended prompt construction, history-derived prompt context, and command-result mapping into `execution`, `command`, `prompt`, `unattended_prompt`, `history_context`, and `result_mapping`. Command and prompt unit tests stay beside those implementation files. `mod.rs` owns the result contract and facade only; do not restore a root `codex.rs` that combines external-process policy, prompt policy, history formatting, and inline tests.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.
