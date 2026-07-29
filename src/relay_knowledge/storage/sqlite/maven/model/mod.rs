@@ -7,9 +7,7 @@ use crate::storage::StorageError;
 
 use super::{pom_path::relative_pom_path, property_interpolation::interpolate};
 
-#[path = "model/effective.rs"]
 mod effective;
-#[path = "model/parse.rs"]
 mod parse;
 
 use effective::{
