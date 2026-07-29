@@ -379,8 +379,8 @@ where
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod cli_render_tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
 
 fn render_streaming_project_status(response: &ProjectStatusResponse) -> Result<String, CliError> {
     let events = [

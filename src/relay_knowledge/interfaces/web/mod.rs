@@ -972,5 +972,5 @@ mod code_api_integration_tests;
 mod files_integration_tests;
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
