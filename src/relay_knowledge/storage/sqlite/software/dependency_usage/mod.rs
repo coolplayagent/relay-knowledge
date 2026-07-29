@@ -14,7 +14,7 @@ const EXACT_MATCH_CONFIDENCE: u16 = 9500;
 const NORMALIZED_MATCH_CONFIDENCE: u16 = 8500;
 const HEURISTIC_MATCH_CONFIDENCE: u16 = 7000;
 
-#[path = "dependency_usage_python.rs"]
+#[path = "python.rs"]
 mod python;
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
@@ -989,5 +989,5 @@ fn package_root(spec: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "dependency_usage_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
