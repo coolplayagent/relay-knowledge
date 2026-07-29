@@ -24,8 +24,10 @@ use crate::{
 };
 
 mod fixtures;
+mod quality;
 
 use fixtures::{prepare_repository_path, write_fixture_file};
+use quality::run_quality_gate_stages;
 
 #[derive(Debug, Clone)]
 pub struct EvaluationRun {
@@ -77,19 +79,6 @@ struct EvalRuntime {
 }
 
 #[derive(Debug, Clone)]
-struct QualityGate {
-    name: &'static str,
-    command: Vec<String>,
-    timeout_seconds: u64,
-}
-
-#[derive(Debug, Clone)]
-enum QualityGateStage {
-    Parallel(Vec<QualityGate>),
-    Rails(Vec<Vec<QualityGate>>),
-}
-
-#[derive(Debug, Clone)]
 struct Limiter {
     inner: Arc<(Mutex<usize>, Condvar)>,
 }
@@ -134,11 +123,9 @@ include!("workloads/repository.rs");
 include!("workloads/file_evaluation.rs");
 include!("workloads/semantic_vector_evaluation.rs");
 include!("runtime/finish.rs");
-include!("quality/gate_execution.rs");
 include!("runtime/concurrency.rs");
 include!("workloads/repository_set.rs");
 include!("workloads/agent_workflow.rs");
-include!("quality/gate_policy.rs");
 include!("workloads/selection.rs");
 include!("workloads/cli_cases.rs");
 include!("workloads/repository_scoring.rs");

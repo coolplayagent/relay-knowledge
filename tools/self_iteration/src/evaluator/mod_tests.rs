@@ -2,7 +2,6 @@ use super::*;
 
 include!("judge/outcome_shell_tests.rs");
 include!("judge/settings_tests.rs");
-include!("quality/gate_policy_tests.rs");
 include!("workloads/selection_tests.rs");
 include!("workloads/cli_cases_tests.rs");
 include!("workloads/semantic_vector_selection_tests.rs");
