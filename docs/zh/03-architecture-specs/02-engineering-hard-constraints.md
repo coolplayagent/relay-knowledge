@@ -204,6 +204,8 @@ SQLite canvas、code-graph、code-schema、code-view、file-index、Maven、oper
 
 SQLite code-query 的 hybrid chunk 证据准入归 `hybrid::chunk_gate` 所有，并与 `chunk_gate_tests` 配对；direct-result 准入、FTS 查询构造、candidate 预算和 chunk 结果合并测试分别留在自己的生产 owner 旁。code-query facade 只负责编排检索层，不得重新承担 hybrid 证据密度或语言域策略。
 
+根 SQLite schema 兼容职责统一归入纯文件型 `sqlite/schema` 分组：`initialization` 负责核心 graph DDL 与 fact-evidence 回填，`columns` 负责旧列修复，`marker` 负责 schema 指纹，`migration` 负责安全的 obsolete-schema 准备。每个有状态 schema owner 都把聚焦测试留在该目录；SQLite store facade 不得再内嵌 DDL 或 migration 循环。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。

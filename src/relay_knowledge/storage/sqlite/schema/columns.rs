@@ -215,3 +215,7 @@ fn legacy_source_hashes(
         })
         .collect())
 }
+
+#[cfg(test)]
+#[path = "columns_tests.rs"]
+mod tests;

@@ -405,5 +405,5 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageErr
 }
 
 #[cfg(test)]
-#[path = "schema_marker_tests.rs"]
+#[path = "marker_tests.rs"]
 mod tests;

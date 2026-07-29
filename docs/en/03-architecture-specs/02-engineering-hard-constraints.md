@@ -204,6 +204,8 @@ SQLite canvas, code-graph, code-schema, code-view, file-index, Maven, operations
 
 SQLite code-query hybrid chunk evidence admission lives in `hybrid::chunk_gate`, paired with `chunk_gate_tests`; direct-result admission, FTS query construction, candidate budgeting, and chunk-result merging keep their tests beside their own production owners. The code-query facade only orchestrates layers and must not regain hybrid evidence-density or language-scope policy.
 
+Root SQLite schema compatibility belongs to the file-only `sqlite/schema` group: `initialization` owns core graph DDL and fact-evidence backfill, `columns` owns legacy column repair, `marker` owns schema fingerprints, and `migration` owns safe obsolete-schema preparation. Each stateful schema owner keeps its focused tests in that directory; the SQLite store facade must not embed DDL or migration loops.
+
 The top-level `code` facade pairs `mod.rs` with sibling `mod_tests.rs`; source discovery, layout, submodule, filesystem, and worktree-overlay scenario tests remain grouped under `code/tests/source`, with their reusable fixture owner in `code/tests/fixtures.rs`. Do not restore a sibling `tests.rs` alongside the scenario-test directory or move facade invariants into the source scenarios.
 
 Every remaining sibling test attachment is explicit: runtime, service, repository/source-fallback/view workflows, code feature/search boundaries, and SQLite Maven, view, schema, batch, graph, workspace, operation, indexing, retrieval, snapshot, and root adapters declare their concrete test filename with test-only `#[path]`. Implicit `#[cfg(test)] mod name;` file resolution is forbidden because renames or same-named directories would otherwise hide the physical owner.
