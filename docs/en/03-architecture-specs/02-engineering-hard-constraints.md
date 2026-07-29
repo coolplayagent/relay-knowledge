@@ -102,6 +102,8 @@ Code-query persistence is grouped under `storage::sqlite::code_query`: `mod.rs` 
 
 Relevance primitives are grouped under `storage::sqlite::code_query::relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file or root-level `code_query_*` siblings.
 
+The SQLite code-store facade and its directly owned persistence behaviors are grouped physically under `storage::sqlite::code`: `mod.rs` coordinates store traits and references sibling persistence domains, while `cleanup`, `feature_flags`, `generated`, `impact`, `removal`, `report`, `routes`, `search`, `status`, and `symbols` own their named code-store behaviors. Facade regressions, metadata/status cases, shared fixtures, and support code remain in the same directory with descriptive names. Do not simulate this ownership with a flat family of root-level `code_*` files.
+
 ### 3.7 Code Index Foundations
 
 Cross-cutting code-index primitives use responsibility-bearing top-level modules: `content_identity` owns stable IDs and content hashes, `language_metadata` owns language detection and language-level metadata, and `generated_detection` owns generated-source classification. Do not group unrelated primitives under a `common` directory; new primitives belong with the behavior they describe.

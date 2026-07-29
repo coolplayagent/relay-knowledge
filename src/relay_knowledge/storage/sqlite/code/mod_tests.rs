@@ -8,15 +8,15 @@ use crate::{
     storage::{SqliteGraphStore, StorageError},
 };
 
-#[path = "code_test_support.rs"]
+#[path = "test_support.rs"]
 mod code_test_support;
 
-#[path = "code_snapshot_fixtures.rs"]
+#[path = "snapshot_fixtures.rs"]
 mod code_snapshot_fixtures;
 
 pub(super) use code_snapshot_fixtures::*;
 
-#[path = "code_tests/impact_tests.rs"]
+#[path = "tests/impact.rs"]
 mod impact_tests;
 
 #[tokio::test]

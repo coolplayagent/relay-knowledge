@@ -2,174 +2,174 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-#[path = "code_query/mod.rs"]
+#[path = "../code_query/mod.rs"]
 mod code_query;
 
-#[path = "code_query/prepare.rs"]
+#[path = "../code_query/prepare.rs"]
 mod code_query_prepare;
 
-#[path = "code_query/hits.rs"]
+#[path = "../code_query/hits.rs"]
 mod code_query_hits;
 
-#[path = "code_feature_flags.rs"]
+#[path = "feature_flags.rs"]
 mod code_feature_flags;
 
-#[path = "code_generated.rs"]
+#[path = "generated.rs"]
 mod code_generated;
-#[path = "code_symbols.rs"]
+#[path = "symbols.rs"]
 mod code_symbols;
 
-#[path = "code_routes.rs"]
+#[path = "routes.rs"]
 mod code_routes;
 
-#[path = "code_views/mod.rs"]
+#[path = "../code_views/mod.rs"]
 mod code_views;
 
-#[path = "code_query/scope.rs"]
+#[path = "../code_query/scope.rs"]
 mod code_query_scope;
 
-#[path = "code_impact.rs"]
+#[path = "impact.rs"]
 mod code_impact;
 
-#[path = "code_report.rs"]
+#[path = "report.rs"]
 pub(super) mod code_report;
 
-#[path = "code_schema/mod.rs"]
+#[path = "../code_schema/mod.rs"]
 mod code_schema;
 
-#[path = "code_status.rs"]
+#[path = "status.rs"]
 mod code_status;
 
-#[path = "code_remove.rs"]
+#[path = "removal.rs"]
 mod code_remove;
 
-#[path = "code_batch/mod.rs"]
+#[path = "../code_batch/mod.rs"]
 mod code_batch;
 
-#[path = "code_cleanup.rs"]
+#[path = "cleanup.rs"]
 mod code_cleanup;
 
-#[path = "code_workspace/mod.rs"]
+#[path = "../code_workspace/mod.rs"]
 mod code_workspace;
 
-#[path = "code_tasks/mod.rs"]
+#[path = "../code_tasks/mod.rs"]
 mod code_tasks;
-#[path = "code_tasks/worktree.rs"]
+#[path = "../code_tasks/worktree.rs"]
 mod code_tasks_worktree;
 
-#[path = "code_search.rs"]
+#[path = "search.rs"]
 mod code_search;
 
-#[path = "code_snapshot/mod.rs"]
+#[path = "../code_snapshot/mod.rs"]
 mod code_snapshot;
 
-#[path = "code_set/mod.rs"]
+#[path = "../code_set/mod.rs"]
 mod code_set;
 
-#[path = "code_set/refresh_tasks.rs"]
+#[path = "../code_set/refresh_tasks.rs"]
 mod code_set_tasks;
 
-#[path = "software.rs"]
+#[path = "../software.rs"]
 mod software;
 
 #[cfg(test)]
-#[path = "code_tests.rs"]
+#[path = "mod_tests.rs"]
 mod code_tests;
 
 #[cfg(test)]
-#[path = "code_scope_status_tests.rs"]
+#[path = "scope_status_tests.rs"]
 mod code_scope_status_tests;
 
 #[cfg(test)]
-#[path = "code_incremental_search_tests.rs"]
+#[path = "incremental_search_tests.rs"]
 mod code_incremental_search_tests;
 
 #[cfg(test)]
-#[path = "code_cross_language_call_tests.rs"]
+#[path = "cross_language_call_tests.rs"]
 mod code_cross_language_call_tests;
 
 #[cfg(test)]
-#[path = "code_query/accuracy/mod.rs"]
+#[path = "../code_query/accuracy/mod.rs"]
 mod code_query_accuracy_tests;
 
 #[cfg(test)]
-#[path = "code_query/imports/target_tests.rs"]
+#[path = "../code_query/imports/target_tests.rs"]
 mod code_query_import_target_tests;
 
 #[cfg(test)]
-#[path = "code_query/imports/generated_tests.rs"]
+#[path = "../code_query/imports/generated_tests.rs"]
 mod code_query_import_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query/tests/chunk_generated.rs"]
+#[path = "../code_query/tests/chunk_generated.rs"]
 mod code_query_chunk_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query/tests/route_generated.rs"]
+#[path = "../code_query/tests/route_generated.rs"]
 mod code_query_route_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query/symbols/generated_tests.rs"]
+#[path = "../code_query/symbols/generated_tests.rs"]
 mod code_query_symbol_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query/calls/ambiguous_generated_tests.rs"]
+#[path = "../code_query/calls/ambiguous_generated_tests.rs"]
 mod code_query_ambiguous_callee_generated_tests;
 
 #[cfg(test)]
-#[path = "code_query/imports/ranking_tests.rs"]
+#[path = "../code_query/imports/ranking_tests.rs"]
 mod code_query_import_ranking_tests;
 
 #[cfg(test)]
-#[path = "code_query/imports/foundational_ranking_tests.rs"]
+#[path = "../code_query/imports/foundational_ranking_tests.rs"]
 mod code_query_import_foundational_ranking_tests;
 
 #[cfg(test)]
-#[path = "code_query/tests/sbom.rs"]
+#[path = "../code_query/tests/sbom.rs"]
 mod code_query_sbom_tests;
 
 #[cfg(test)]
-#[path = "code_query/tests/line_context.rs"]
+#[path = "../code_query/tests/line_context.rs"]
 mod code_query_line_context_tests;
 
 #[cfg(test)]
-#[path = "code_metadata_tests.rs"]
+#[path = "metadata_tests.rs"]
 mod code_metadata_tests;
 
 #[cfg(test)]
-#[path = "code_tasks/tests.rs"]
+#[path = "../code_tasks/tests.rs"]
 mod code_tasks_tests;
 
 #[cfg(test)]
-#[path = "code_tasks/retention_tests.rs"]
+#[path = "../code_tasks/retention_tests.rs"]
 mod code_tasks_retention_tests;
 
 #[cfg(test)]
-#[path = "code_tasks/status_tests.rs"]
+#[path = "../code_tasks/status_tests.rs"]
 mod code_tasks_status_tests;
 
 #[cfg(test)]
-#[path = "code_tasks/lease_tests.rs"]
+#[path = "../code_tasks/lease_tests.rs"]
 mod code_tasks_lease_tests;
 
 #[cfg(test)]
-#[path = "code_tasks/reset_tests.rs"]
+#[path = "../code_tasks/reset_tests.rs"]
 mod code_tasks_reset_tests;
 
 #[cfg(test)]
-#[path = "code_set/refresh_task_tests.rs"]
+#[path = "../code_set/refresh_task_tests.rs"]
 mod code_set_tasks_tests;
 
 #[cfg(test)]
-#[path = "code_set/tests.rs"]
+#[path = "../code_set/tests.rs"]
 mod code_set_tests;
 
 #[cfg(test)]
-#[path = "code_set/workspace_tests.rs"]
+#[path = "../code_set/workspace_tests.rs"]
 mod code_set_workspace_tests;
 
 #[cfg(test)]
-#[path = "code_workspace/lookup_tests.rs"]
+#[path = "../code_workspace/lookup_tests.rs"]
 mod code_workspace_lookup_tests;
 
 use crate::{

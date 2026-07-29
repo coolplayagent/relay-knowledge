@@ -102,6 +102,8 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 代码查询相关性原语统一收敛在 `storage::sqlite::code_query::relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件或根目录级 `code_query_*` 兄弟文件。
 
+SQLite code-store facade 及其直接拥有的持久化行为必须在物理上收敛到 `storage::sqlite::code`：`mod.rs` 协调 store trait 并引用同级持久化领域，`cleanup`、`feature_flags`、`generated`、`impact`、`removal`、`report`、`routes`、`search`、`status` 和 `symbols` 分别维护与名称一致的 code-store 行为。Facade 回归、元数据/状态用例、共享夹具和测试支持必须使用描述性名称共置于该目录。不得再用 SQLite 根目录下一组扁平 `code_*` 文件模拟领域归属。
+
 ### 3.7 代码索引基础模块
 
 跨代码索引流程的基础原语必须使用能表达职责的顶层模块：`content_identity` 负责稳定 ID 和内容哈希，`language_metadata` 负责语言检测及语言级元数据，`generated_detection` 负责生成源码分类。不得把无关原语归入 `common` 目录；新增原语必须归属其所描述的行为。
