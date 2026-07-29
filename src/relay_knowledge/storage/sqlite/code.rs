@@ -43,7 +43,7 @@ mod code_status;
 #[path = "code_remove.rs"]
 mod code_remove;
 
-#[path = "code_batch.rs"]
+#[path = "code_batch/mod.rs"]
 mod code_batch;
 
 #[path = "code_cleanup.rs"]
@@ -89,20 +89,8 @@ mod code_snapshot_candidate_paths_tests;
 mod code_incremental_search_tests;
 
 #[cfg(test)]
-#[path = "code_batch_finalize_tests.rs"]
-mod code_batch_finalize_tests;
-
-#[cfg(test)]
-#[path = "code_batch_finalize_typescript_tests.rs"]
-mod code_batch_finalize_typescript_tests;
-
-#[cfg(test)]
 #[path = "code_cross_language_call_tests.rs"]
 mod code_cross_language_call_tests;
-
-#[cfg(test)]
-#[path = "code_batch_search_tests.rs"]
-mod code_batch_search_tests;
 
 #[cfg(test)]
 #[path = "code_snapshot_progress_tests.rs"]

@@ -80,6 +80,8 @@ Three-layer graph retrieval persistence is grouped under `storage::sqlite::retri
 
 Maven persistence is grouped physically under `storage::sqlite::maven`; `mod.rs` coordinates build/dependency projection, `model` owns raw and effective POM models, `xml` owns bounded XML extraction, `pom_path` owns repository-bounded relative POM resolution, and `property_interpolation` owns bounded recursive property expansion. Focused and review-regression tests stay in the same directory. These rules must not be combined in a generic Maven support module or hidden behind parent-relative path overrides.
 
+Checkpointed code-batch persistence is grouped under `storage::sqlite::code_batch`: `mod.rs` owns session start, bounded batch application, checkpoints, and finalization coordination; `dependencies`, `progress`, and the `finalize` subtree own their narrower write phases. Session-finalization, TypeScript-finalization, and search-materialization regressions stay in the same directory. `storage::sqlite::code` may call this boundary but must not own batch-specific test modules.
+
 Code-query relevance is grouped under `storage::sqlite::code_query_relevance`: `tokens` normalizes terms, `text_scoring`, `symbol_scoring`, and `call_scoring` own their ranking domains, `symbol_identity` owns scoped identity matching, `candidate_plan` owns bounded candidate layers, and `filters` plus `fts` own SQL and FTS construction. `mod.rs` is only the internal relevance surface; do not restore a broad `code_query_support` file.
 
 ### 3.7 Code Index Foundations
