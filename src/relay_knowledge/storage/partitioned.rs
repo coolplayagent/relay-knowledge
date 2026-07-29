@@ -979,3 +979,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         self.control.fail_code_repository_set_refresh_task(request)
     }
 }
+
+#[cfg(test)]
+#[path = "partitioned_tests.rs"]
+mod tests;
