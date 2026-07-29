@@ -251,3 +251,7 @@ fn parse_watcher_overrides(values: &EnvironmentValues) -> Result<WatcherEnvOverr
         )?,
     })
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod config_tests;

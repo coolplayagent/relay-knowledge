@@ -144,3 +144,7 @@ fn reject_empty(value: &OsString, variable: &'static str) -> Result<(), EnvError
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "value_parser_tests.rs"]
+mod value_parser_tests;

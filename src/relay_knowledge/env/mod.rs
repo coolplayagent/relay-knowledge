@@ -23,15 +23,3 @@ pub use platform::{PlatformEnvironment, PlatformKind};
 pub use variables::*;
 
 pub(crate) use platform::windows_system_root_from_process;
-
-#[cfg(test)]
-#[path = "config_tests.rs"]
-mod config_tests;
-
-#[cfg(test)]
-#[path = "platform_tests.rs"]
-mod platform_tests;
-
-#[cfg(test)]
-#[path = "value_parser_tests.rs"]
-mod value_parser_tests;

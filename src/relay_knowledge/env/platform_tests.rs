@@ -1,9 +1,6 @@
 use std::{collections::HashMap, ffi::OsString, path::PathBuf};
 
-use super::{
-    PlatformKind,
-    platform::{TEMP, TMP, TMPDIR, normalize_key, platform_environment},
-};
+use super::{PlatformKind, TEMP, TMP, TMPDIR, normalize_key, platform_environment};
 
 #[test]
 fn windows_temp_prefers_temp_then_tmp_then_tmpdir() {

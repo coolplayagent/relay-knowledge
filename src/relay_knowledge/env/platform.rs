@@ -96,3 +96,7 @@ pub(super) fn normalize_key(platform: PlatformKind, key: OsString) -> OsString {
         key
     }
 }
+
+#[cfg(test)]
+#[path = "platform_tests.rs"]
+mod platform_tests;

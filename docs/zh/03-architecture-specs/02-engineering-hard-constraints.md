@@ -38,7 +38,7 @@ HTTP 基础边界必须完整收敛在 `net/http/`：`mod.rs` 维护配置、cli
 
 ### 3.1 环境变量边界
 
-`env` 内部按数据流保持单向依赖：`variables` 只拥有受支持的变量名，`error` 和 `overrides` 分别拥有稳定错误模型与 typed override 数据，`value_parser` 负责从已归一化 snapshot 提取并校验 path/string/bool/positive integer，`platform` 负责平台检测、大小写归一化、平台目录输入及 `SystemRoot` 进程读取，`config` 才能捕获完整进程环境并装配公开配置。`mod.rs` 仅维持原有 `env::*` facade，不得重新承载解析规则。对应 UT 必须分别放在 `config_tests`、`platform_tests` 和 `value_parser_tests`，使配置装配、平台规则和标量校验可以独立定位失败。
+`env` 内部按数据流保持单向依赖：`variables` 只拥有受支持的变量名，`error` 和 `overrides` 分别拥有稳定错误模型与 typed override 数据，`value_parser` 负责从已归一化 snapshot 提取并校验 path/string/bool/positive integer，`platform` 负责平台检测、大小写归一化、平台目录输入及 `SystemRoot` 进程读取，`config` 才能捕获完整进程环境并装配公开配置。`mod.rs` 仅维持原有 `env::*` facade，不得重新承载解析规则。对应 UT 必须分别放在同级 `config_tests`、`platform_tests` 和 `value_parser_tests` 文件，并由匹配的实现 owner 而非 facade 显式挂载，使配置装配、平台规则和标量校验可以独立定位失败。
 
 依赖方向固定为 `error`/`variables` → `value_parser` → `platform`，`overrides` 只组合这些 typed platform 数据，`config` 作为最外层依赖其余模块；不得让 error、override 或 variable catalog 反向依赖配置装配，也不得把 `std::env` 读取扩散到 `env` 目录外。
 
