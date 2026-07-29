@@ -38,5 +38,5 @@ mod pipeline_tests;
 #[path = "reference_tests.rs"]
 mod reference_tests;
 #[cfg(test)]
-#[path = "surface_tests.rs"]
-mod surface_tests;
+#[path = "surface_integration_tests.rs"]
+mod surface_integration_tests;

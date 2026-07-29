@@ -54,7 +54,7 @@ CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解
 
 代码库理解视图统一收敛在 `application::code_repository::views` 目录：`service` 只编排 scope、新鲜度和响应，`architecture`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope` 分别拥有一种派生算法，`builder` 和 `rules` 提供有界构建及确定性分类规则。视图测试与所属目录共置，不再使用含义不清的 `views_*` 平铺文件名。
 
-源码兜底检索统一收敛在 `application::code_repository::source_fallback` 目录：`execution` 是唯一 I/O 编排入口，`plan` 决定是否以及如何执行有界兜底，`identity`、`filters`、`scoring`、`results` 分别负责身份覆盖、请求约束、评分和结果归并，`imports`、`surface`、`worktree` 隔离特定证据边界。目录外不得直接依赖这些内部算法 helper。
+源码兜底检索统一收敛在 `application::code_repository::source_fallback` 目录：`execution` 是唯一 I/O 编排入口，`plan` 决定是否以及如何执行有界兜底，`identity`、`filters`、`scoring`、`results` 分别负责身份覆盖、请求约束、评分和结果归并，`imports`、`surface`、`worktree` 隔离特定证据边界。`surface_integration_tests` 同时验证 `plan`、`results` 与 `surface` 的组合，因此由 facade 显式拥有；聚焦 UT 仍与精确实现 owner 一一配对。目录外不得直接依赖这些内部算法 helper。
 
 `indexing` 目录是严格的工作流边界：`mod.rs` 编排全量与增量执行，`state` 负责已持久化索引状态检查及复用，`task` 负责持久租约与 worker 恢复，`queue` 负责有界 overlay 任务提交，`fast_path` 负责经过校验的新鲜索引复用，`tasks` 负责任务管理。目录只向父模块暴露仓库注册所需的租约恢复操作，内部索引 helper 不得泄漏到查询或 adapter。`repository` 目录同样由 `mod.rs` 承载服务实现，`status` 负责注册状态和 checkpoint 选择，`staleness` 负责结果新鲜度标注，`worktree` 负责 overlay 校验，白盒 fixture 与所属行为保持共置。共享的 `scope` 继续负责 scope 解析和 filter 兼容性，`blocking`、`errors`、`clock`、`worktree_ref` 分别隔离 runtime、错误、持久化时间和 overlay 身份边界。不得恢复根级 `repository_*`、`worktree_freshness`、`index_*`、`fast_index`、`queue` 或 `tasks` 文件桶。
 
