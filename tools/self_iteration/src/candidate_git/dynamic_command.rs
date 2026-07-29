@@ -1,4 +1,8 @@
-fn git_dynamic(
+use std::path::Path;
+
+use crate::command::{CommandResult, CommandSpec, run_command};
+
+pub(super) fn git_dynamic(
     workspace: &Path,
     args: &[String],
     timeout_seconds: u64,
@@ -19,3 +23,7 @@ fn git_dynamic(
         Ok(result)
     }
 }
+
+#[cfg(test)]
+#[path = "dynamic_command_tests.rs"]
+mod dynamic_command_tests;

@@ -1,4 +1,8 @@
-pub fn git(workspace: &Path, args: &[&str], timeout_seconds: u64) -> CommandResult {
+use std::path::Path;
+
+use crate::command::{CommandResult, CommandSpec, run_command};
+
+pub(super) fn git(workspace: &Path, args: &[&str], timeout_seconds: u64) -> CommandResult {
     let mut command = vec!["git".to_owned()];
     command.extend(args.iter().map(|arg| (*arg).to_owned()));
     run_command(&CommandSpec::new(
@@ -10,7 +14,7 @@ pub fn git(workspace: &Path, args: &[&str], timeout_seconds: u64) -> CommandResu
     ))
 }
 
-pub fn git_checked(
+pub(super) fn git_checked(
     workspace: &Path,
     args: &[&str],
     timeout_seconds: u64,
@@ -22,3 +26,7 @@ pub fn git_checked(
         Err(result.gate_message())
     }
 }
+
+#[cfg(test)]
+#[path = "command_tests.rs"]
+mod command_tests;

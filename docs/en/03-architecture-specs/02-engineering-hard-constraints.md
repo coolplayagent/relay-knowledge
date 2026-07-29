@@ -180,7 +180,7 @@ The lifecycle-plan domain is physically contained in `application/service/lifecy
 
 ### 3.19 Self-Iteration Candidate Git Ownership
 
-`tools/self_iteration::candidate_git` owns the patch snapshot contract, bounded Git command execution, worktree inspection, patch capture/path extraction, and candidate rejection/commit lifecycle in `mod`, `command`, `dynamic_command`, `worktree`, `patch`, and `lifecycle`. Loop sleeping belongs to `workflow::pacing`, not the Git boundary. Use the explicit `candidate_git` name at call sites; do not restore an ambiguous root `git_ops.rs` or mix workflow pacing into repository mutation.
+`tools/self_iteration::candidate_git` owns the patch snapshot contract, bounded Git command execution, worktree inspection, patch capture/path extraction, and candidate rejection/commit lifecycle in the real Rust modules `mod`, `command`, `dynamic_command`, `worktree`, `patch`, and `lifecycle`. Each behavior owner attaches its sibling `*_tests.rs` contract directly; the explicitly named `git_repository_fixture` is test-only infrastructure for isolated repositories. Production `include!` assembly is forbidden. Loop sleeping belongs to `workflow::pacing`, not the Git boundary. Use the explicit `candidate_git` name at call sites; do not restore an ambiguous root `git_ops.rs` or mix workflow pacing into repository mutation.
 
 ### 3.20 Production and Unit-Test File Ownership
 

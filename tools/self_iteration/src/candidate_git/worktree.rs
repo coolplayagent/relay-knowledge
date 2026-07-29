@@ -1,3 +1,7 @@
+use std::path::Path;
+
+use super::command::git_checked;
+
 pub fn ensure_clean_worktree(workspace: &Path) -> Result<(), String> {
     let result = git_checked(workspace, &["status", "--porcelain"], 60)?;
     if result.stdout.trim().is_empty() {
@@ -13,3 +17,7 @@ pub fn current_head(workspace: &Path) -> Result<String, String> {
         .trim()
         .to_owned())
 }
+
+#[cfg(test)]
+#[path = "worktree_tests.rs"]
+mod worktree_tests;
