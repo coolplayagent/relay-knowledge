@@ -118,6 +118,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::scoring` keeps observation types and the public score contract in `mod.rs`, ranked-evidence matching in `ranked`, total-score assembly in `evaluation`, rejection policy in `decision`, capability-ceiling/performance/stability components in `capability`, cross-run delta detection in `change_detection`, and stateless numeric/JSON primitives in `common`. Focused unit tests stay in the same directory. Do not restore root-level `scoring_ranked` or `scoring_tests` files, or recombine distinct scoring phases into one scoring file.
 
+### 3.11 Self-Iteration Configuration Ownership
+
+`tools/self_iteration::config` keeps modes and strategies, category sets, the public configuration model, CLI parsing, category exclusions, job budgets, and scalar validation in `mode`, `categories`, `model`, `parse`, `category_exclusions`, `job_plan`, and `value_parser` respectively. `mod.rs` only maintains constants and the stable facade; parsing, category, unattended-mode, documentation-contract, and job-budget unit tests stay in the same directory. Do not restore a root `config.rs` that combines the model, parser, budgets, and inline tests.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

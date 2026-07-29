@@ -118,6 +118,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::scoring` 必须把 observation 和公开 score contract 保持在 `mod.rs`，排名证据匹配放在 `ranked`，总分装配放在 `evaluation`，拒绝决策放在 `decision`，能力上限、性能与稳定性分量放在 `capability`，跨运行变化检测放在 `change_detection`，无状态数值/JSON 原语放在 `common`。定向 UT 与这些实现同目录；不得恢复根目录级 `scoring_ranked`、`scoring_tests` 或把不同评分阶段重新合并进单个评分文件。
 
+### 3.11 自迭代配置职责
+
+`tools/self_iteration::config` 必须把模式/策略、类别集合、公开配置模型、CLI 解析、类别排除、作业预算和标量校验分别放在 `mode`、`categories`、`model`、`parse`、`category_exclusions`、`job_plan` 和 `value_parser`。`mod.rs` 只维护常量和稳定 facade，解析、类别、无人值守模式、文档合同和作业预算 UT 与实现同目录。不得恢复同时包含模型、解析器、预算和内联测试的根目录 `config.rs`。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
