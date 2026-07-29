@@ -114,6 +114,10 @@ Service lifecycle ownership is split by boundary: `application::service::lifecyc
 
 `tools/self_iteration::evaluator` is grouped by evaluation stage and evidence type: `runtime` owns top-level orchestration, concurrency limits, and result assembly; `quality` owns gate policy and execution; `workloads` is partitioned into repository, repository-set, agent, CLI, file, and semantic-vector evaluation; `fixtures` owns only generated-repository fixtures and their write lifecycle; and `judge` owns research-judge settings, prompts, backends, and outcome contracts. Evaluator unit tests stay beside the boundary they verify and use traceable `*_tests.rs` names. Do not restore `evaluator_tail`, cross-responsibility `evaluator_tests`, or flat `evaluator_*` files in the `tools/self_iteration/src` root.
 
+### 3.10 Self-Iteration Scoring Ownership
+
+`tools/self_iteration::scoring` keeps observation types and the public score contract in `mod.rs`, ranked-evidence matching in `ranked`, total-score assembly in `evaluation`, rejection policy in `decision`, capability-ceiling/performance/stability components in `capability`, cross-run delta detection in `change_detection`, and stateless numeric/JSON primitives in `common`. Focused unit tests stay in the same directory. Do not restore root-level `scoring_ranked` or `scoring_tests` files, or recombine distinct scoring phases into one scoring file.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

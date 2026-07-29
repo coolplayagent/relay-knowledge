@@ -114,6 +114,10 @@ Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协
 
 `tools/self_iteration::evaluator` 必须按评估阶段和证据类型分组：`runtime` 负责一次评估运行的顶层协调、并发限制和结果汇总，`quality` 分别拥有门禁定义和执行，`workloads` 按 repository、repository-set、agent、CLI、file 和 semantic-vector 工作负载划分，`fixtures` 只拥有生成式仓库 fixture 及其写入生命周期，`judge` 负责研究判断的配置、prompt、backend 和结果合同。评估器 UT 必须与被验证边界同目录并使用可定位的 `*_tests.rs` 名称；不得恢复 `evaluator_tail`、跨职责 `evaluator_tests` 或在 `tools/self_iteration/src` 根目录平铺同一领域的 `evaluator_*` 文件。
 
+### 3.10 自迭代评分职责
+
+`tools/self_iteration::scoring` 必须把 observation 和公开 score contract 保持在 `mod.rs`，排名证据匹配放在 `ranked`，总分装配放在 `evaluation`，拒绝决策放在 `decision`，能力上限、性能与稳定性分量放在 `capability`，跨运行变化检测放在 `change_detection`，无状态数值/JSON 原语放在 `common`。定向 UT 与这些实现同目录；不得恢复根目录级 `scoring_ranked`、`scoring_tests` 或把不同评分阶段重新合并进单个评分文件。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。
