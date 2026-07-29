@@ -132,10 +132,6 @@ mod code_query_line_context_tests;
 #[path = "metadata_tests.rs"]
 mod code_metadata_tests;
 
-#[cfg(test)]
-#[path = "../code_workspace/lookup_tests.rs"]
-mod code_workspace_lookup_tests;
-
 use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
