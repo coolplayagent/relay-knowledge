@@ -182,12 +182,12 @@ const APPLICATION_MIGRATION_BASELINE: &[BaselineAllowance] = &[
         max_count: 1,
     },
     BaselineAllowance {
-        relative_path: "src/relay_knowledge/application/code_repository/repository_test_support.rs",
+        relative_path: "src/relay_knowledge/application/code_repository/repository/test_support.rs",
         token: "SqliteGraphStore",
         max_count: 3,
     },
     BaselineAllowance {
-        relative_path: "src/relay_knowledge/application/code_repository/repository_test_support.rs",
+        relative_path: "src/relay_knowledge/application/code_repository/repository/test_support.rs",
         token: "std::env",
         max_count: 3,
     },

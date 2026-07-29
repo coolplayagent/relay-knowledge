@@ -17,7 +17,7 @@ use crate::{
 use super::super::{
     blocking::run_blocking_code,
     errors::storage_api_error,
-    repository_status::registration_from_status,
+    repository::registration_from_status,
     scope::{
         code_scope_matches_current_fact_version, merged_filters, resolve_code_ref_for_selector,
     },

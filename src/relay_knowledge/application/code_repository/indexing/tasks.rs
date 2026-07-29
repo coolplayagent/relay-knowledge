@@ -9,7 +9,7 @@ use crate::{
 use super::super::{
     clock::now_millis,
     errors::storage_api_error,
-    repository_status::{code_status_checkpoint, required_code_repository},
+    repository::{code_status_checkpoint, required_code_repository},
 };
 use super::task::recover_orphaned_code_index_task_leases;
 

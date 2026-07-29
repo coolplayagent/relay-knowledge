@@ -38,7 +38,7 @@ use super::{
     blocking::run_blocking_code,
     clock::now_millis,
     errors::storage_api_error,
-    repository_status::{registration_from_status, required_code_repository},
+    repository::{registration_from_status, required_code_repository},
     worktree_ref::pending_worktree_overlay_base_commit,
 };
 

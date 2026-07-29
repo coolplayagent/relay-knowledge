@@ -15,7 +15,7 @@ use crate::application::service::RelayKnowledgeService;
 use super::{
     blocking::run_blocking_code,
     errors::storage_api_error,
-    repository_status::{registration_from_status, required_code_repository},
+    repository::{registration_from_status, required_code_repository},
     scope::{
         indexed_source_scope, missing_indexed_source_scope_error, resolve_code_ref_for_selector,
         resolved_code_scope_status,

@@ -15,7 +15,7 @@ use crate::{
     storage::{CodeRepositoryStore, SqliteGraphStore},
 };
 
-use super::repository_test_support::*;
+use super::test_support::*;
 
 static TRACKED_ENTRIES_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -787,7 +787,7 @@ fn active_pending_match_keeps_fresh_hit_when_source_read_is_not_required() {
     let mut hits = vec![test_hit()];
     let freshness = freshness_with_active_match(false);
 
-    super::repository_staleness::annotate_query_result_staleness(&mut hits, &freshness);
+    super::staleness::annotate_query_result_staleness(&mut hits, &freshness);
 
     assert!(!hits[0].stale);
     assert_eq!(hits[0].staleness_hint, Some(StalenessHint::Fresh));

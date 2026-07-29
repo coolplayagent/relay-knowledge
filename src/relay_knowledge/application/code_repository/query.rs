@@ -14,15 +14,16 @@ use super::{
         CodeFeatureFlagFreshnessContext, CodeQueryFreshnessContext,
         code_feature_flag_freshness_diagnostics, code_query_freshness_diagnostics,
     },
-    repository_staleness::annotate_query_result_staleness,
-    repository_status::required_code_repository,
+    repository::{
+        annotate_query_result_staleness, ensure_worktree_overlay_matches_current_worktree,
+        required_code_repository,
+    },
     scope::{
         active_index_matches_request, feature_flag_request_at_indexed_ref, indexed_source_scope,
         latest_compatible_code_scope_status, missing_indexed_source_scope_error,
         resolved_code_scope_status, retrieval_request_at_indexed_ref,
     },
     source_fallback::apply_code_grep_fallback,
-    worktree_freshness::ensure_worktree_overlay_matches_current_worktree,
 };
 
 impl RelayKnowledgeService {

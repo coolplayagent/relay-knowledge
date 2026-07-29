@@ -3,7 +3,7 @@ use crate::domain::{
     FreshnessPolicy,
 };
 
-use super::repository_test_support::*;
+use super::test_support::*;
 
 #[tokio::test]
 async fn filesystem_worktree_index_is_queryable_with_worktree_ref() {

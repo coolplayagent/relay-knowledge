@@ -7,9 +7,9 @@ use crate::{
     },
 };
 
-use super::errors::storage_api_error;
+use super::super::errors::storage_api_error;
 
-pub(super) async fn required_code_repository(
+pub(in crate::application::code_repository) async fn required_code_repository(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     repository: &str,
 ) -> Result<crate::domain::CodeRepositoryStatus, ApiError> {
@@ -22,7 +22,7 @@ pub(super) async fn required_code_repository(
         })
 }
 
-pub(super) async fn code_status_checkpoint(
+pub(in crate::application::code_repository) async fn code_status_checkpoint(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     status: &CodeRepositoryStatus,
     active_task: Option<&CodeIndexTaskRecord>,
@@ -53,7 +53,7 @@ pub(super) async fn code_status_checkpoint(
     Ok(None)
 }
 
-pub(super) fn registration_from_status(
+pub(in crate::application::code_repository) fn registration_from_status(
     status: &crate::domain::CodeRepositoryStatus,
 ) -> CodeRepositoryRegistration {
     CodeRepositoryRegistration {

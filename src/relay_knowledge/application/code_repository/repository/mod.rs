@@ -1,3 +1,13 @@
+mod staleness;
+mod status;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod tests;
+mod worktree;
+#[cfg(test)]
+mod worktree_review_tests;
+
 use crate::{
     api::{
         ApiError, ApiMetadata, CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
@@ -11,12 +21,15 @@ use crate::{
 use crate::application::service::RelayKnowledgeService;
 
 use super::{
-    blocking::run_blocking_code,
-    clock::now_millis,
-    errors::storage_api_error,
+    blocking::run_blocking_code, clock::now_millis, errors::storage_api_error,
     indexing::recover_code_index_task_leases,
-    repository_status::{code_status_checkpoint, required_code_repository},
 };
+
+pub(super) use staleness::annotate_query_result_staleness;
+pub(super) use status::{
+    code_status_checkpoint, registration_from_status, required_code_repository,
+};
+pub(super) use worktree::ensure_worktree_overlay_matches_current_worktree;
 
 impl RelayKnowledgeService {
     /// Registers a Git repository as a code source.
