@@ -21,13 +21,16 @@ use crate::{
 };
 
 use super::{
-    AgentAdapterError, AgentAdapterErrorKind, McpServer, api_error_result, authorize_limit,
-    domain_argument_error, invalid_arguments, parse_freshness, request_context, tool_error_result,
+    AgentAdapterError, AgentAdapterErrorKind, McpServer, authorize_limit,
+    tool_contract::{
+        api_error_result, domain_argument_error, invalid_arguments, parse_freshness,
+        request_context, tool_error_result, tool_success_result,
+    },
     tool_registry::{
         CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL,
         CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL, CODEBASE_VIEW_TOOL,
     },
-    tool_success_result, validate_query_text,
+    validate_query_text,
 };
 
 const CODE_QUERY_KIND_SCHEMA_VALUES: &[&str] = &[

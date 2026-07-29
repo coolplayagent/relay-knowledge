@@ -6,7 +6,8 @@ use serde_json::{Value, json};
 use super::{
     McpMethodError, McpServer,
     audit_bridge::{McpMethodAudit, record_mcp_method_audit},
-    elapsed_millis, request_context,
+    elapsed_millis,
+    tool_contract::request_context,
 };
 use crate::interfaces::agent::{AgentAdapterError, AgentAdapterErrorKind, AgentAuditStatus};
 

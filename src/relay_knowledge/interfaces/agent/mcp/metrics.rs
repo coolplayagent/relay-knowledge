@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::{
     McpMethodError, McpServer, admit_mcp_request, endpoint_child, http_contract::validate_origin,
-    request_context, state::SessionLookup,
+    state::SessionLookup, tool_contract::request_context,
 };
 
 pub(super) fn metrics_endpoint(endpoint: &str) -> String {

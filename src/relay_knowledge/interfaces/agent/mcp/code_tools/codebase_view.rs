@@ -7,9 +7,12 @@ use crate::{
 };
 
 use super::super::{
-    AgentAdapterError, AgentAdapterErrorKind, McpServer, api_error_result, authorize_limit,
-    domain_argument_error, invalid_arguments, parse_freshness, request_context, tool_error_result,
-    tool_registry::CODEBASE_VIEW_TOOL, tool_success_result,
+    AgentAdapterError, AgentAdapterErrorKind, McpServer, authorize_limit,
+    tool_contract::{
+        api_error_result, domain_argument_error, invalid_arguments, parse_freshness,
+        request_context, tool_error_result, tool_success_result,
+    },
+    tool_registry::CODEBASE_VIEW_TOOL,
 };
 
 #[derive(Debug, Deserialize)]

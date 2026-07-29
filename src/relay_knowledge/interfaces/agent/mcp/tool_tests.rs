@@ -16,7 +16,10 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::{
-    api::{AuditQueryApiRequest, CodeRepositoryRegisterRequest, IngestEvidence, IngestRequest},
+    api::{
+        AuditQueryApiRequest, CodeRepositoryRegisterRequest, IngestEvidence, IngestRequest,
+        InterfaceKind, RequestContext,
+    },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,

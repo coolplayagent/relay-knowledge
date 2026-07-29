@@ -9,7 +9,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::{
-    api::{AuditQueryApiRequest, IngestEvidence, IngestRequest},
+    api::{AuditQueryApiRequest, IngestEvidence, IngestRequest, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     env::{EnvironmentConfig, PlatformKind},
     interfaces::agent::AgentAuditStatus,

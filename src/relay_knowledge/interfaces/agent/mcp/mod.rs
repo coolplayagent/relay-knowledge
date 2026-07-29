@@ -15,6 +15,7 @@ mod prompts;
 mod resources;
 mod scope_authorization;
 mod state;
+mod tool_contract;
 mod tool_registry;
 
 use axum::{
@@ -42,14 +43,17 @@ use json_rpc::{
 };
 use scope_authorization::RuntimeScopeAuthorizer;
 use state::{CancellationRegistry, SessionLookupError, SessionRegistry};
+use tool_contract::{
+    api_error_result, invalid_arguments, parse_freshness, request_context, tool_error_result,
+    tool_success_result,
+};
 
 use crate::{
     api::{
         AgentRetrievalResult, ApiError, ErrorKind, GraphInspectionRequest, HybridRetrievalRequest,
-        InterfaceKind, RequestContext, RuntimeIdentity, freshness_label,
+        RuntimeIdentity, freshness_label,
     },
     application::{AgentRuntimeConfig, RelayKnowledgeService},
-    domain::FreshnessPolicy,
     net::{
         NetworkRuntime,
         http::HttpServeError,
@@ -750,76 +754,6 @@ async fn index_status_tool(server: &McpServer, request_id: String) -> Value {
         ),
         Err(error) => api_error_result(error),
     }
-}
-
-fn parse_freshness(value: Option<&str>) -> Result<FreshnessPolicy, AgentAdapterError> {
-    match value.unwrap_or("allow-stale") {
-        "allow-stale" => Ok(FreshnessPolicy::AllowStale),
-        "wait-until-fresh" => Ok(FreshnessPolicy::WaitUntilFresh),
-        "graph-only" => Ok(FreshnessPolicy::GraphOnly),
-        other => Err(AgentAdapterError::new(
-            AgentAdapterErrorKind::InvalidArgument,
-            format!("invalid freshness '{other}'"),
-        )),
-    }
-}
-
-fn tool_success_result(summary: impl Into<String>, structured_content: Value) -> Value {
-    json!({
-        "content": [{"type": "text", "text": summary.into()}],
-        "structuredContent": structured_content,
-        "isError": false
-    })
-}
-
-fn api_error_result(error: ApiError) -> Value {
-    tool_error_result(AgentAdapterError::new(
-        agent_error_kind(error.error_kind),
-        error.message,
-    ))
-}
-
-fn agent_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
-    match kind {
-        ErrorKind::InvalidArgument => AgentAdapterErrorKind::InvalidArgument,
-        ErrorKind::StorageUnavailable => AgentAdapterErrorKind::StorageUnavailable,
-        ErrorKind::QosRejected => AgentAdapterErrorKind::QosRejected,
-        ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
-        ErrorKind::Internal => AgentAdapterErrorKind::Internal,
-    }
-}
-
-fn tool_error_result(error: AgentAdapterError) -> Value {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": format!("{}: {}", error.kind.as_str(), error.message)
-        }],
-        "structuredContent": {
-            "error_kind": error.kind.as_str(),
-            "message": error.message,
-        },
-        "isError": true
-    })
-}
-
-fn invalid_arguments(error: serde_json::Error) -> AgentAdapterError {
-    AgentAdapterError::new(
-        AgentAdapterErrorKind::InvalidArgument,
-        format!("invalid tool arguments: {error}"),
-    )
-}
-
-fn domain_argument_error(error: impl fmt::Display) -> AgentAdapterError {
-    AgentAdapterError::new(AgentAdapterErrorKind::InvalidArgument, error.to_string())
-}
-
-fn request_context(request_id: String) -> RequestContext {
-    RequestContext::with_ids(
-        InterfaceKind::Mcp,
-        format!("mcp-{request_id}"),
-        format!("trace-mcp-{request_id}"),
-    )
 }
 
 fn endpoint_child(endpoint: &str, child: &str) -> String {
