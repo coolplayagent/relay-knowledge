@@ -1,4 +1,4 @@
-use super::*;
+use super::super::*;
 use crate::domain::{EvidenceRecord, GraphRelationRecord, IndexState, SourceScope};
 use crate::storage::{IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshQueueRequest};
 

@@ -74,6 +74,8 @@ Code graph fact 持久化统一收敛在 `storage::sqlite::code_graph` 目录：
 
 Durable operations 持久化统一收敛在 `storage::sqlite::operations` 目录：`mod.rs` 负责 worker task、proposal/conflict、audit event、service operator state、相应行解码和稳定 task ID，`tests` 通过存储接口验证这些工作流。SQLite 根模块不得持有 operations 专属测试模块。
 
+Index lifecycle 持久化统一收敛在 `storage::sqlite::indexing` 目录：`mod.rs` 负责 cursor state、refresh orchestration、校验与稳定 refresh-task identity，`cursor_metadata`、`schema`、`task_queue` 隔离各自职责，`refresh_tests`、`queue_tests`、`schema_migration_tests` 与被验证边界放在一起。不得把 index lifecycle 测试或带 `index_refresh_*` 前缀的实现文件放回 SQLite 根目录。
+
 Maven effective model 构建也必须拆开语法边界：`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；不得把两类规则重新合并到通用 Maven support 模块。
 
 代码查询相关性统一收敛在 `storage::sqlite::code_query_relevance`：`tokens` 归一化查询词，`text_scoring`、`symbol_scoring`、`call_scoring` 分别负责各自排名域，`symbol_identity` 负责 scoped identity 匹配，`candidate_plan` 负责有界候选层，`filters` 和 `fts` 负责 SQL/FTS 构造。`mod.rs` 只作为内部相关性接口，不得恢复宽泛的 `code_query_support` 文件。
