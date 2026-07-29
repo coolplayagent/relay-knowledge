@@ -49,7 +49,7 @@ mod code_batch;
 #[path = "code_cleanup.rs"]
 mod code_cleanup;
 
-#[path = "code_workspace.rs"]
+#[path = "code_workspace/mod.rs"]
 mod code_workspace;
 
 #[path = "code_tasks/mod.rs"]
@@ -169,7 +169,7 @@ mod code_set_tests;
 mod code_set_workspace_tests;
 
 #[cfg(test)]
-#[path = "code_workspace_lookup_tests.rs"]
+#[path = "code_workspace/lookup_tests.rs"]
 mod code_workspace_lookup_tests;
 
 use crate::{
