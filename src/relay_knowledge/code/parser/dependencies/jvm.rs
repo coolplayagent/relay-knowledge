@@ -1,6 +1,7 @@
 use super::{
-    DependencySeed, SeedInput, capture_xml_text, push_seed, strip_comment,
-    support::{gradle_coordinate_parts, gradle_dependency_call},
+    DependencySeed, SeedInput, capture_xml_text,
+    gradle_notation::{gradle_coordinate_parts, gradle_dependency_call},
+    push_seed, strip_comment,
 };
 
 pub(super) fn parse_pom(content: &str, records: &mut Vec<DependencySeed>) {

@@ -7,7 +7,7 @@ use std::{
 
 use crate::domain::{CodeRepositoryRegistration, RepositoryCodeRange};
 
-use super::common::generated_detection;
+use super::generated_detection;
 use super::{
     CodeIndexError,
     languages::language_id,

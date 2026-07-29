@@ -12,12 +12,14 @@ use rusqlite::{Connection, OptionalExtension, params};
 mod canvas;
 mod canvas_code;
 mod code_graph;
+mod evidence_identity;
 mod file_index;
 mod file_index_content;
-mod helpers;
+mod graph_version;
 mod indexing;
 mod maintenance;
 mod maven;
+mod mutation_log;
 mod operations;
 mod read_pool;
 mod retrieval;
@@ -26,6 +28,7 @@ mod schema_columns;
 mod schema_marker;
 mod schema_migration;
 mod store_impls;
+mod table_stats;
 
 use crate::{
     domain::{CommitReceipt, GraphMutationBatch, GraphVersion, SourceScope},
@@ -39,13 +42,15 @@ use crate::{
         CodeGraphStore, GraphSearchRequest, GraphStore, IndexStore, MutationLogStore, RetrievalHit,
     },
 };
-use helpers::{count_rows, source_hash_for_evidence, stable_id, storage_version_range};
+use evidence_identity::{source_hash_for_evidence, stable_id};
+use graph_version::storage_version_range;
 use maintenance::{SqliteMaintenanceState, configure_writer_connection};
 pub(in crate::storage) use maintenance::{configure_connection, read_only_database_diagnostics};
 use read_pool::{
     ReadConnectionPool, lock_any_read_connection, lock_any_read_connection_until,
     lock_connection_until, try_lock_any_read_connection,
 };
+use table_stats::count_rows;
 
 /// SQLite implementation of graph facts, mutation log, and index metadata.
 #[derive(Debug, Clone)]

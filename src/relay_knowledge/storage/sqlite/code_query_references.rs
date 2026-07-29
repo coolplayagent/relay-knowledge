@@ -14,8 +14,8 @@ use super::{
     code_query_path_ranking::{
         query_mentions_test_or_benchmark, reference_source_path_bonus, reference_test_path_penalty,
     },
+    code_query_relevance::*,
     code_query_rows::ReferenceRow,
-    code_query_support::*,
     code_search_plannable_outage_reason, filter_dedupe_sort_truncate, has_query_field_hit_filters,
     hit_from_parts, mark_hits_degraded, prepare_code_search_statement,
     query_field_filtered_hits_for_gate, required_scope, selected_row,

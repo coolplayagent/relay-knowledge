@@ -29,7 +29,7 @@ use super::{
     },
     source_roots::{NESTED_SOURCE_MARKERS, STRIPPABLE_SOURCE_ROOTS},
 };
-use crate::code::common::generated_detection;
+use crate::code::generated_detection;
 
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
 const PREVIEW_MAX_LARGEST_FILES: usize = 10;

@@ -21,7 +21,7 @@ use crate::{
 
 use super::{
     SqliteGraphStore, canvas, code::code_report, code_graph, commit_batch, current_graph_version,
-    file_index, file_index_content, helpers::read_mutations_after, indexing, inspect_graph,
+    file_index, file_index_content, indexing, inspect_graph, mutation_log::read_mutations_after,
     operations, retrieval,
 };
 

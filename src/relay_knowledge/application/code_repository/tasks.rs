@@ -6,9 +6,11 @@ use crate::{
     application::service::RelayKnowledgeService,
 };
 
-use super::support::{
-    code_status_checkpoint, now_millis, recover_orphaned_code_index_task_leases,
-    required_code_repository, storage_api_error,
+use super::{
+    clock::now_millis,
+    errors::storage_api_error,
+    index_task::recover_orphaned_code_index_task_leases,
+    repository_status::{code_status_checkpoint, required_code_repository},
 };
 
 impl RelayKnowledgeService {
@@ -52,16 +54,25 @@ impl RelayKnowledgeService {
     /// Reconciles expired or orphaned repository index leases before resident workers start.
     pub async fn reconcile_startup_code_index_tasks(&self) -> Result<(), ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        recover_orphaned_code_index_task_leases(&store, now_millis())
-            .await
-            .map(|_| ())
+        recover_orphaned_code_index_task_leases(
+            &store,
+            now_millis(),
+            &self.runtime.process.windows_tasklist_command,
+        )
+        .await
+        .map(|_| ())
     }
 
     pub(crate) async fn code_index_worker_status(
         &self,
         store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     ) -> Result<CodeIndexWorkerStatus, ApiError> {
-        recover_orphaned_code_index_task_leases(store, now_millis()).await?;
+        recover_orphaned_code_index_task_leases(
+            store,
+            now_millis(),
+            &self.runtime.process.windows_tasklist_command,
+        )
+        .await?;
         self.read_only_code_index_worker_status(store).await
     }
 

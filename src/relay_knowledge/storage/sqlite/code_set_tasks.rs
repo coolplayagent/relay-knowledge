@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use super::super::helpers::stable_id;
+use super::super::evidence_identity::stable_id;
 
 pub(super) fn queue_refresh_task(
     connection: &mut Connection,

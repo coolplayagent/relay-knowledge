@@ -43,7 +43,7 @@ fn queue_task_once(
         return Ok(existing);
     }
 
-    let task_id = super::super::helpers::stable_id(
+    let task_id = super::super::evidence_identity::stable_id(
         "code-index-task",
         &format!("{}:{}", task.repository_id, task.input_fingerprint),
     );

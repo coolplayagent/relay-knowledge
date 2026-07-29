@@ -8,8 +8,9 @@ use crate::{
     storage::{CodeIndexTaskSeed, KnowledgeStore},
 };
 
-use super::support::{
-    merged_filters, now_millis, previous_index_state_for_index, storage_api_error,
+use super::{
+    clock::now_millis, errors::storage_api_error, index_state::previous_index_state_for_index,
+    scope::merged_filters,
 };
 
 pub(super) async fn queue_worktree_overlay_index_task(

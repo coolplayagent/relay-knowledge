@@ -7,11 +7,15 @@ use crate::{
     },
 };
 
-use super::support::{
-    active_index_matches_request, indexed_commit_for_selector, latest_compatible_code_scope_status,
-    required_code_repository, resolved_code_scope_status, storage_api_error,
-};
 use super::worktree_freshness::ensure_worktree_overlay_matches_current_worktree;
+use super::{
+    errors::storage_api_error,
+    repository_status::required_code_repository,
+    scope::{
+        active_index_matches_request, indexed_commit_for_selector,
+        latest_compatible_code_scope_status, resolved_code_scope_status,
+    },
+};
 
 impl RelayKnowledgeService {
     /// Reads the repository-scoped software global dependency and SDK projection.

@@ -5,14 +5,23 @@
 //! network policy, and retrieval runtime metadata.
 
 mod catalog;
-mod helpers;
+mod connectivity;
+mod fallback;
+mod persistence;
+mod profile_config;
 
 use std::{collections::BTreeMap, error::Error, fmt, time::Instant};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use helpers::*;
+use connectivity::*;
+use fallback::*;
+use persistence::write_json;
+use profile_config::*;
+
+#[cfg(test)]
+use catalog::catalog_provider;
 
 use crate::{
     net::{
@@ -30,6 +39,10 @@ const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 const DEFAULT_CODEAGENT_BASE_URL: &str = "https://codeagentcli.rnd.huawei.com/codeAgentPro";
 const DEFAULT_MAAS_BASE_URL: &str =
     "http://snapengine.cida.cce.prod-szv-g.dragon.tools.huawei.com/api/v2/";
+
+#[cfg(test)]
+#[path = "protocol_tests.rs"]
+mod protocol_tests;
 
 /// Model provider family accepted by profile configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

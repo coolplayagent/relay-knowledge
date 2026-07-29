@@ -1,6 +1,6 @@
 use super::{
-    DependencySeed, SeedInput, parse_cargo_assignment_dependency, push_lock_seed, push_seed,
-    strip_comment, support::cargo_lock_source_is_external, unquote,
+    DependencySeed, SeedInput, cargo_source::cargo_lock_source_is_external,
+    parse_cargo_assignment_dependency, push_lock_seed, push_seed, strip_comment, unquote,
 };
 
 pub(super) fn parse_cargo_toml(content: &str, records: &mut Vec<DependencySeed>) {

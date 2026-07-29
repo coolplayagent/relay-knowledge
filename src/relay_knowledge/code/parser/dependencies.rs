@@ -4,18 +4,23 @@ use crate::domain::{CodeDependencyRecord, RepositoryCodeRange};
 
 use super::super::{CodeIndexError, SnapshotBuild, stable_id};
 
+mod cargo_source;
 mod cmake;
 mod conan;
 mod go;
+mod gradle_notation;
 mod jvm;
 mod npm;
+mod npm_lock;
 mod python;
+mod python_requirements;
 mod rust;
-mod support;
+mod toml_inline_table;
 mod yaml;
 
-pub(in crate::code::parser::dependencies) use support::{
-    inline_table_bool_field, inline_table_field, python_requirement,
+pub(in crate::code::parser::dependencies) use {
+    python_requirements::python_requirement,
+    toml_inline_table::{inline_table_bool_field, inline_table_field},
 };
 
 pub(super) fn collect_dependencies(

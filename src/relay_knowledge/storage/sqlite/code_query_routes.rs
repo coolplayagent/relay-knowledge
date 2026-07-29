@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
     HitParts,
-    code_query_support::{
+    code_query_relevance::{
         CandidateLayer, ScoreQuery, candidate_limit, escape_sql_like, fts_match_query,
         fts_path_and_language_filter_sql, fts_values_for_limited_with_language,
         language_filter_sql_for_columns, path_filter_sql_for_column, push_language_filter_values,

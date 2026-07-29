@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::support::interpolate;
+use super::super::property_interpolation::interpolate;
 use super::{
     EffectiveDependency, EffectiveGoal, EffectivePlugin, EffectivePluginExecution, EffectivePom,
     PomDocument, RawDependency, RawPlugin, RawPluginExecution, RawPom, TaggedValue,

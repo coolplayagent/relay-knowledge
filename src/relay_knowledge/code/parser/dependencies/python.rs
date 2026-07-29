@@ -1,7 +1,7 @@
 use super::{
     DependencySeed, SeedInput, parse_assignment_dependency, poetry_dependency_group,
-    push_lock_seed, push_python_requirement, push_seed, pyproject_group, quoted_values,
-    strip_comment, support::requirements_dependency_line, unquote,
+    push_lock_seed, push_python_requirement, push_seed, pyproject_group,
+    python_requirements::requirements_dependency_line, quoted_values, strip_comment, unquote,
 };
 
 pub(super) fn parse_pyproject(content: &str, records: &mut Vec<DependencySeed>) {

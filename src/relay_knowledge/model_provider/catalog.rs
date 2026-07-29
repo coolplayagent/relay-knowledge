@@ -2,8 +2,10 @@ use serde_json::Value;
 use tokio::fs;
 
 use super::{
-    ModelCatalogCache, ModelCatalogResult, ModelProviderConfigService, ModelProviderError,
-    helpers::*,
+    ModelCapabilities, ModelCatalogCache, ModelCatalogModel, ModelCatalogProvider,
+    ModelCatalogResult, ModelProviderConfigService, ModelProviderError, ModelProviderKind,
+    connectivity::{now_millis, status_error_code},
+    persistence::write_json,
 };
 use crate::net::{
     http::{HttpConfig, send_request_with_qos},
@@ -158,5 +160,179 @@ impl ModelProviderConfigService {
             error_code: None,
             error_message: None,
         })
+    }
+}
+pub(super) fn parse_catalog_payload(payload: &Value) -> Vec<ModelCatalogProvider> {
+    let providers = payload
+        .get("providers")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let parsed = providers
+        .iter()
+        .filter_map(parse_catalog_provider)
+        .collect::<Vec<_>>();
+    if parsed.is_empty() {
+        builtin_catalog_providers()
+    } else {
+        parsed
+    }
+}
+
+pub(super) fn parse_catalog_provider(value: &Value) -> Option<ModelCatalogProvider> {
+    let id = value.get("id").and_then(Value::as_str)?.to_owned();
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(&id)
+        .to_owned();
+    let runtime_provider = match value
+        .get("runtime_provider")
+        .or_else(|| value.get("provider"))
+        .and_then(Value::as_str)
+        .unwrap_or("openai_compatible")
+    {
+        "anthropic" => ModelProviderKind::Anthropic,
+        "bigmodel" => ModelProviderKind::Bigmodel,
+        "minimax" => ModelProviderKind::Minimax,
+        "maas" => ModelProviderKind::Maas,
+        "codeagent" => ModelProviderKind::Codeagent,
+        "echo" => ModelProviderKind::Echo,
+        _ => ModelProviderKind::OpenAiCompatible,
+    };
+    let models = value
+        .get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(parse_catalog_model)
+        .collect();
+    Some(ModelCatalogProvider {
+        id,
+        name,
+        runtime_provider,
+        api: value
+            .get("api")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        doc: value
+            .get("doc")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        env: value
+            .get("env")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect(),
+        models,
+    })
+}
+
+pub(super) fn parse_catalog_model(value: &Value) -> Option<ModelCatalogModel> {
+    let id = value
+        .get("id")
+        .or_else(|| value.get("model"))
+        .and_then(Value::as_str)?
+        .to_owned();
+    Some(ModelCatalogModel {
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(&id)
+            .to_owned(),
+        id,
+        family: value
+            .get("family")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        context_window: value
+            .get("context_window")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
+        output_limit: value
+            .get("output_limit")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
+        capabilities: ModelCapabilities::default(),
+    })
+}
+
+pub(super) fn builtin_catalog_result() -> ModelCatalogResult {
+    ModelCatalogResult {
+        ok: true,
+        source_url: "builtin".to_owned(),
+        fetched_at_ms: Some(now_millis()),
+        cache_age_seconds: Some(0),
+        stale: false,
+        providers: builtin_catalog_providers(),
+        error_code: None,
+        error_message: None,
+    }
+}
+
+pub(super) fn builtin_catalog_providers() -> Vec<ModelCatalogProvider> {
+    vec![
+        catalog_provider(
+            "openai",
+            "OpenAI-compatible",
+            ModelProviderKind::OpenAiCompatible,
+            &["gpt-4.1", "gpt-4.1-mini", "text-embedding-3-small"],
+        ),
+        catalog_provider(
+            "anthropic",
+            "Anthropic",
+            ModelProviderKind::Anthropic,
+            &["claude-sonnet-4-5", "claude-haiku-4-5"],
+        ),
+        catalog_provider("echo", "Echo", ModelProviderKind::Echo, &["echo"]),
+    ]
+}
+
+pub(super) fn catalog_provider(
+    id: &str,
+    name: &str,
+    runtime_provider: ModelProviderKind,
+    models: &[&str],
+) -> ModelCatalogProvider {
+    ModelCatalogProvider {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        runtime_provider,
+        api: None,
+        doc: None,
+        env: Vec::new(),
+        models: models
+            .iter()
+            .map(|model| ModelCatalogModel {
+                id: (*model).to_owned(),
+                name: (*model).to_owned(),
+                family: None,
+                context_window: None,
+                output_limit: None,
+                capabilities: ModelCapabilities::default(),
+            })
+            .collect(),
+    }
+}
+
+pub(super) fn catalog_result_from_cache(
+    cache: ModelCatalogCache,
+    ok: bool,
+    error_code: Option<String>,
+    error_message: Option<String>,
+) -> ModelCatalogResult {
+    let age = now_millis().saturating_sub(cache.fetched_at_ms) / 1000;
+    ModelCatalogResult {
+        ok,
+        source_url: cache.source_url,
+        fetched_at_ms: Some(cache.fetched_at_ms),
+        cache_age_seconds: Some(age),
+        stale: !ok,
+        providers: cache.providers,
+        error_code,
+        error_message,
     }
 }

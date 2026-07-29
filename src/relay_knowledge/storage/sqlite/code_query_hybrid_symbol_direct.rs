@@ -14,8 +14,8 @@ use crate::storage::sqlite::code::{
     code_query::code_query_hybrid_planning::{
         hybrid_query_prefers_chunk_first, hybrid_sequence_terms,
     },
+    code_query::code_query_relevance::*,
     code_query::code_query_rows::SymbolRow,
-    code_query::code_query_support::*,
     code_query::{filter_dedupe_sort_truncate, prepare_code_search_statement, required_scope},
 };
 

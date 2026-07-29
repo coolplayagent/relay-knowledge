@@ -10,8 +10,8 @@ mod code_query_api_sequence_scoring;
 mod code_query_call_counts;
 #[path = "code_query_call_direction.rs"]
 mod code_query_call_direction;
-#[path = "code_query_call_identity_support.rs"]
-mod code_query_call_identity_support;
+#[path = "code_query_call_identity.rs"]
+mod code_query_call_identity;
 #[path = "code_query_call_site_scoring.rs"]
 mod code_query_call_site_scoring;
 #[path = "code_query_call_target_ranking.rs"]
@@ -60,14 +60,14 @@ mod code_query_path_ranking;
 mod code_query_proximity_scoring;
 #[path = "code_query_references.rs"]
 mod code_query_references;
+#[path = "code_query_relevance/mod.rs"]
+mod code_query_relevance;
 #[path = "code_query_routes.rs"]
 mod code_query_routes;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
 #[path = "code_query_sbom.rs"]
 mod code_query_sbom;
-#[path = "code_query_support.rs"]
-mod code_query_support;
 #[path = "code_query_symbols.rs"]
 mod code_query_symbols;
 
@@ -130,10 +130,10 @@ use code_query_interface_scoring::public_interface_chunk_bonus;
 use code_query_path_ranking::declaration_surface_path_bonus;
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};
+use code_query_relevance::*;
 use code_query_routes::search_routes;
 use code_query_rows::ChunkRow;
 use code_query_sbom::search_sbom;
-use code_query_support::*;
 use code_query_symbols::{
     hybrid_symbol_query_can_answer_without_non_symbol_layers, search_symbols,
 };
