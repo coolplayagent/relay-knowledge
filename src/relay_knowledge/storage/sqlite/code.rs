@@ -34,7 +34,7 @@ mod code_impact;
 #[path = "code_report.rs"]
 pub(super) mod code_report;
 
-#[path = "code_schema.rs"]
+#[path = "code_schema/mod.rs"]
 mod code_schema;
 
 #[path = "code_status.rs"]
