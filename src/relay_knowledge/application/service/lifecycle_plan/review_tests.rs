@@ -1,3 +1,5 @@
+//! Cross-platform lifecycle rollback and service-definition regression contract.
+
 use super::*;
 use crate::env::{EnvironmentConfig, PathEnvOverrides, PlatformEnvironment, PlatformKind};
 use std::time::Duration;

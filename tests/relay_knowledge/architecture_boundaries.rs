@@ -212,7 +212,7 @@ const APPLICATION_MIGRATION_BASELINE: &[BaselineAllowance] = &[
         max_count: 1,
     },
     BaselineAllowance {
-        relative_path: "src/relay_knowledge/application/service/lifecycle_plan.rs",
+        relative_path: "src/relay_knowledge/application/service/lifecycle_plan/mod.rs",
         token: "std::env",
         max_count: 1,
     },

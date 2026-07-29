@@ -1,3 +1,5 @@
+//! Unit contract for lifecycle request validation, plans, and execution reports.
+
 use super::*;
 use crate::domain::ServiceLifecycleStepResult;
 use crate::env::{EnvironmentConfig, PlatformKind};

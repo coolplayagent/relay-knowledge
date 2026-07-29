@@ -114,6 +114,8 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 服务生命周期必须按边界划分职责：`application::service::lifecycle_plan` 负责请求校验、install/upgrade/rollback/uninstall 步骤计划和执行编排；只有 `lifecycle_plan::platform_service` 可以选择平台服务定义文件名、渲染 systemd/launchd/Windows Service 定义、声明平台权限并生成 service manager 命令；`lifecycle_plan::execution` 负责阻塞文件和进程执行。平台渲染与命令转义不得重新并入生命周期步骤 planner。
 
+生命周期计划必须完整收敛在 `application/service/lifecycle_plan/`：`mod.rs` 是 planner 与 execution coordinator，`execution.rs` 和 `platform_service.rs` 是具名子边界，`mod_tests.rs`、`review_tests.rs` 和 `review_followup_tests.rs` 与其共置。父级 `application/service/` 不得重新出现同名 `lifecycle_plan.rs` 或 `lifecycle_plan_*_tests.rs` 平铺文件。
+
 ### 3.9 自迭代评估器职责
 
 `tools/self_iteration::evaluator` 必须按评估阶段和证据类型分组：`runtime` 负责一次评估运行的顶层协调、并发限制和结果汇总，`quality` 分别拥有门禁定义和执行，`workloads` 按 repository、repository-set、agent、CLI、file 和 semantic-vector 工作负载划分，`fixtures` 只拥有生成式仓库 fixture 及其写入生命周期，`judge` 负责研究判断的配置、prompt、backend 和结果合同。评估器 UT 必须与被验证边界同目录并使用可定位的 `*_tests.rs` 名称；不得恢复 `evaluator_tail`、跨职责 `evaluator_tests` 或在 `tools/self_iteration/src` 根目录平铺同一领域的 `evaluator_*` 文件。

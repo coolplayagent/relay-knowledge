@@ -744,13 +744,13 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(test)]
-#[path = "lifecycle_plan_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "lifecycle_plan_review_tests.rs"]
+#[path = "review_tests.rs"]
 mod review_tests;
 
 #[cfg(test)]
-#[path = "lifecycle_plan_review_followup_tests.rs"]
+#[path = "review_followup_tests.rs"]
 mod review_followup_tests;

@@ -1,3 +1,5 @@
+//! Follow-up lifecycle recovery and bounded process-execution regression contract.
+
 use super::*;
 use crate::env::{EnvironmentConfig, PlatformKind};
 use std::{
