@@ -7,7 +7,11 @@ use crate::{
     },
 };
 
-use super::{CliError, OutputFormat, parse_freshness, render_response, value_after};
+use super::{
+    CliError, OutputFormat,
+    command::{parse_freshness, value_after},
+    render_response,
+};
 
 /// Parsed `repo-set` CLI command.
 #[derive(Debug, Clone, PartialEq, Eq)]

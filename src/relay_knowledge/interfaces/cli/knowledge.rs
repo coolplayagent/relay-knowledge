@@ -1,6 +1,9 @@
 use crate::domain::{FreshnessPolicy, IndexKind};
 
-use super::{CliAction, CliError, parse_freshness, value_after};
+use super::{
+    CliAction, CliError,
+    command::{parse_freshness, value_after},
+};
 
 pub(super) fn parse_ingest(tokens: &[String]) -> Result<CliAction, CliError> {
     let mut source_scope = None;

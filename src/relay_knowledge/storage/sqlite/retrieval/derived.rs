@@ -8,9 +8,13 @@ use crate::{
 };
 
 use super::{
-    ScoredHit, context::code_artifact_for_document, cosine_similarity, evidence_group_key,
-    hashed_vector, overlap_score, parse_f64_array, parse_string_array, semantic_overlap_score,
-    sort_scored_hits, split_labels, token_signature,
+    ScoredHit,
+    context::code_artifact_for_document,
+    evidence_group_key,
+    local_model::{
+        cosine_similarity, hashed_vector, overlap_score, semantic_overlap_score, token_signature,
+    },
+    parse_f64_array, parse_string_array, sort_scored_hits, split_labels,
 };
 
 const DERIVED_RESULT_MULTIPLIER: usize = 8;

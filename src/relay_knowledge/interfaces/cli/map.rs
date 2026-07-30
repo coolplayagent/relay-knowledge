@@ -4,7 +4,7 @@ use crate::{
     domain::{KnowledgeMapChange, KnowledgeMapSourceKind},
 };
 
-use super::{CliAction, CliError, OutputFormat, value_after};
+use super::{CliAction, CliError, OutputFormat, command::value_after};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MapCommand {

@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::RouteCandidate;
-use super::express::{
-    DYNAMIC_EXPRESS_MOUNT_PREFIX, ExpressRouteInfo, ExpressRouterMount, merge_url_parts,
-};
+use super::mounts::{DYNAMIC_EXPRESS_MOUNT_PREFIX, ExpressRouterMount};
+use super::registrations::ExpressRouteInfo;
+use super::syntax::merge_url_parts;
+use crate::code::parser::routes::detect::RouteCandidate;
 
 pub(super) fn materialize_express_routes(
     route_infos: Vec<ExpressRouteInfo>,
@@ -105,3 +105,7 @@ fn express_receiver_prefixes(
     }
     (!mounted_routers.contains(receiver_name)).then(|| BTreeSet::from([String::new()]))
 }
+
+#[cfg(test)]
+#[path = "materialize_tests.rs"]
+mod tests;

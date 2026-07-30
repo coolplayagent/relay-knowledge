@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/02-engineering-hard-constraints.md) | [English](../../en/03-architecture-specs/02-engineering-hard-constraints.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 文档版本: 2.1
+> 编制日期: 2026-07-30
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -46,11 +46,13 @@ HTTP 基础边界必须完整收敛在 `net/http/`：`mod.rs` 维护配置、cli
 
 `application::code_repository` 按用例划分内部所有权：`repository` 目录负责注册、删除、状态、报告、staleness 标注和 worktree overlay 校验，`indexing` 负责索引执行、持久任务租约、checkpoint、scope preview 和 worker 管理，`query` 负责版本化 scope 检索、特性开关和新鲜度诊断，`impact` 负责 diff 影响分析。这些模块通过同一个 `RelayKnowledgeService` 暴露稳定 API，并只向内依赖 `domain`、`code` 和 `storage` 合同；不得互相复制工作流或反向依赖 CLI、Web、MCP 等 adapter。
 
-Web adapter 统一收敛在 `interfaces::web`：`mod.rs` 负责 router composition 和共享 response/error 边界，`code_api`、`code_index_request`、`code_view_request`、`files`、`model_config` 负责各自命名的 HTTP contract，定向测试保持同目录。`code_api_integration_tests` 与 `files_integration_tests` 会运行装配后的 router 和共享 application service，因此由 facade 显式挂载；实现局部 UT 仍与精确 owner 一一配对。不得恢复根目录级 `web_*` 兄弟文件，也不得从该 adapter 打开 socket。
+共享应用服务按工作流收敛职责：`application::service::retrieval` 独占 source-scope validation、freshness/index reconciliation、backend degradation、bounded search/rerank、provenance budget 和 retrieval response assembly，并通过子模块 `impl RelayKnowledgeService` 保持公开 API 稳定；`mod.rs` 负责 service construction、共享状态和跨工作流组合。`retrieval_tests` 必须由 owner 直接挂载并覆盖 trace stale/truncation/budget 合同；不得把 retrieval 私有 helper 或这些断言恢复到 service facade。
+
+Web adapter 统一收敛在 `interfaces::web`：`mod.rs` 负责 router composition 和共享 response/error 边界，`operation_request` 独占 Web operation payload 的字段/类型/范围校验、枚举解析与 domain/API request 构造，`assets` 独占静态路径归一化/traversal 拒绝、异步文件读取、content type、SPA fallback 和缺失构建产物响应，`code_api`、`code_index_request`、`code_view_request`、`files`、`model_config` 负责各自命名的 HTTP contract。Payload validation 与 request mapping 断言必须由 `operation_request_tests` 直接维护；静态资源 primitive 与错误响应断言必须由 `assets_tests` 直接维护；两者不得回流到 facade `mod_tests`。`code_api_integration_tests` 与 `files_integration_tests` 会运行装配后的 router 和共享 application service，因此由 facade 显式挂载；静态资源与 API fallback 的 router 装配测试同样留在 facade。不得恢复根目录级 `web_*` 兄弟文件，也不得从该 adapter 打开 socket。
 
 MCP adapter 在物理上统一收敛到 `interfaces::agent::mcp`：`mod.rs` 负责 server composition、streamable-HTTP dispatch、QoS admission、cancellation 与 tool coordination；`json_rpc` 负责 protocol initialization validation、session/error envelope、response encoding 和 typed request-ID identity；`tool_contract` 负责 freshness parsing、argument/domain error mapping、MCP request context 和稳定 tool result envelope；其余具名子模块分别拥有 audit、HTTP contract、resources、prompts、state、authorization、registry 与 code-tool 行为。`json_rpc_tests` 和 `tool_contract_tests` 与各自 owner 一一配对，不得把 protocol 与 tool-mapping primitive 累积回根 facade 测试。`code_tools` 子树由 `mod.rs` 维护 tool dispatch 与 argument mapping，`agent_budget` 维护有界 agent output policy，`codebase_view` 维护派生 codebase-view 执行；facade 与预算测试分别以 `mod_tests` 和 `agent_budget_tests` 与 owner 共置。根 adapter 测试以 `mod_tests`、`protocol_tests`、`tool_tests`、`software_tool_tests`、`feature_flag_tool_tests` 和 `runtime_guardrail_tests` 与 facade 共置，可复用的测试存储和 HTTP transport fixture 明确命名为 `test_support` 与 `transport_harness`。不得在这些所有权边界外恢复根目录级 `mcp_*` 文件、同级 `code_tools.rs` 或 issue 编号测试模块名。
 
-CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解析、dispatch 和稳定公开 CLI surface，`spec` 负责 machine-readable command contract，`render` 负责输出序列化，`repo`、`repo_set`、`setup` 负责各自命令族，解析、命名、remote、service、map、version 定向测试放在 `tests`。需要 white-box 访问或兼容性时，命令模块可保留既有逻辑名称，但禁止恢复根目录级 `*_cli` 前缀桶。
+CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 只维护稳定公开类型、进程 facade、模块装配与重导出；`runtime::dispatch` 独占 process-free 快路径、remote/local 环境装配和共享 service action dispatch，`runtime::selection` 独占显式/环境 remote URL 优先级及远端能力判定，两者分别直接挂载 `dispatch_tests` 与 `selection_tests`，不得把环境选择或 service match 恢复到根 facade。`command::parse` 独占 global option/token 处理、help/version 短路及命令族解析分发，`command::values` 独占 flag 后值提取与 freshness policy 校验，两者分别直接挂载 `parse_tests` 与 `values_tests`，依赖必须保持 `command::parse -> 各命令族 -> command::values`。`command::diagnostics` 独占 `CliError`、结构化 grammar diagnostic、退出码及 stderr 编码，并直接挂载同级 `diagnostics_tests`；根 facade 只能重导出这些命令和 runtime 合同，不得重新实现解析、错误渲染或执行编排。`spec` 负责 machine-readable command contract，`render` 负责输出序列化，`repo`、`repo_set`、`setup` 负责各自命令族，兼容性级命名、remote transport、service、map、version 定向测试放在 `tests`。需要 white-box 访问或兼容性时，命令模块可保留既有逻辑名称，但禁止恢复根目录级 `*_cli` 前缀桶。
 
 代码库理解视图统一收敛在 `application::code_repository::views` 目录：`service` 只编排 scope、新鲜度和响应，`architecture`、`business_domains`、`dependency_tour`、`process_flow`、`affected_scope` 分别拥有一种派生算法，`builder` 和 `rules` 提供有界构建及确定性分类规则。聚焦 UT 与实现 owner 一一配对；`affected_scope_integration_tests` 和 `dependency_tour_integration_tests` 同时覆盖 service dispatch、builder、rules 与派生算法，因此由 facade 显式拥有。视图测试与所属目录共置，不再使用含义不清的 `views_*` 平铺文件名。
 
@@ -72,9 +74,11 @@ CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解
 
 依赖解析器必须完整收敛在 `code/parser/dependencies/`：`mod.rs` 维护 manifest 分类、跨生态分派和稳定 fact 装配，生态解析器与共享格式原语使用职责命名文件，`mod_tests.rs` 验证该 facade。父级 parser 目录不得重新出现同名 `dependencies.rs`，也不得用父级相对 `#[path]` 隐藏物理所有权。
 
-C/C++ parse recovery 必须完整收敛在 `code/parser/recovery/`：`mod.rs` 负责有界 recovery 判定与 declaration-shape 校验，`scan.rs` 负责 literal-aware code scanning，`line_classification.rs` 负责 recoverable line 分类，`type_body.rs` 负责 decorated-type body 校验。聚焦的语言与 recovery 单元保留配对 `mod_tests` 或实现具名测试；C/C++ `parser_integration_tests` 与 `gcc_recovery_integration_tests` 同时覆盖 language adapter、syntax parsing 和 recovery 的完整解析入口，因此由 parser facade 显式拥有。parser 父目录不得重新出现 `recovery.rs`；language adapter 可以使用这个窄 recovery contract，但不得复制其中的规则。
+C/C++ parse recovery 必须完整收敛在 `code/parser/recovery/`：`mod.rs` 只负责有界 syntax-error traversal、preprocessor/decorated error 协调与稳定 facade，`scan.rs` 负责 literal-aware code scanning，`line_classification.rs` 负责 recoverable line 分类，`type_body.rs` 负责 decorated-type body 校验，`declaration.rs` 负责 declaration head normalization、token/type/qualifier 识别与 aggregate initializer shape，`signature.rs` 只向下依赖 declaration/scan 并负责 function declarator、parameter boundary、operator、method suffix、postfix attribute 与 recovery decorator 判定。`declaration` 和 `signature` 必须各自直接挂载同级 UT，禁止 declaration 反向依赖 signature 形成环。C/C++ `parser_integration_tests` 与 `gcc_recovery_integration_tests` 同时覆盖 language adapter、syntax parsing 和 recovery 的完整解析入口，因此由 parser facade 显式拥有。parser 父目录不得重新出现 `recovery.rs`；language adapter 可以使用这个窄 recovery contract，但不得复制其中的规则。
 
-路由检测的语法辅助必须归解释该语法的 framework 或 lexical layer 所有。`detect::express_arguments` 负责 Express 引号路径、顶层参数切分、middleware 尾部选择、callback array 与具名 handler 校验；`detect::python_strings` 负责 Python 静态字符串前缀和 escape 处理；`detect::javascript` 负责 JavaScript 注释、字符串与正则词法状态。每个 owner 必须直接挂载聚焦同级测试。禁止恢复通用 `detect::shared` 模块，因为 JavaScript callback 与 Python string 不共享同一个语义合同。
+Python type-reference parsing 必须在 `code/parser/languages/python/` 保持两个物理 owner：`annotations.rs` 独占 literal-aware 函数签名扫描、跨行 parameter/return annotation、default-expression 边界和文件内 TypeVar/PEP 695 type-parameter 排除，`mod.rs` 只保留依赖 tree-sitter `Node` 的 type-context、forward-reference 和 local type-variable 判定，并通过稳定 re-export 暴露 annotation 入口。`annotations_tests.rs` 必须由 annotation owner 直接挂载；不得恢复笼统的 `mod_tests.rs`，也不得让 annotation owner 反向依赖 node facade。
+
+路由检测的语法辅助必须归解释该语法的 framework 或 lexical layer 所有。Express 子域完整收敛在 `detect/express/`：`mod.rs` 负责 detection 编排，`arguments` 负责引号路径、middleware 尾部选择、callback array 与具名 handler 校验，`bindings` 负责 ESM/CommonJS namespace、Router factory alias、application/router 赋值识别和 identifier 校验，`syntax` 负责 Express method/path、嵌套 call/array、receiver、顶层参数和 URL 合并原语，`statements` 负责有界多行 registration/mount 聚合与 literal-aware call closure，`mounts` 负责 `.use(...)` 发现、静态/动态前缀分类、router array 展开与 mount 记录，`registrations` 负责直接与链式 method 识别以及 route-info 和 handler 映射，`materialize` 负责 mount prefix 传播、动态前缀过滤与结果去重。八个 owner 都必须直接挂载聚焦同级测试，`detect/` 父目录不得恢复 `express.rs`、`express_arguments.rs` 或 `express_materialize.rs` 平铺文件。Spring 路由检测必须完整收敛在 `detect/spring/`：`mod.rs` 负责编排与 nested-type scope 状态，`java` 负责 comment/text-block 过滤、literal-aware brace depth 与 Java type/method declaration 识别，`attributes` 负责 positional/named path value、array、拼接拒绝、字符串解码与 request-method attribute，`statements` 负责 route annotation 定位、有界多行聚合与 leading annotation 剥离，`annotations` 负责 mapping kind、pending annotation fact、shorthand/RequestMapping 语义与相邻 route annotation 解析，`materialize` 负责 class-prefix 派生、HTTP method 合并、URL 拼接、route fact 生成与去重。六个 owner 都直接挂载同级测试，父目录不得恢复平铺 `spring.rs`。Flask/FastAPI 路由检测必须完整收敛在 `detect/flask/`：`mod.rs` 负责编排，`arguments` 负责顶层参数边界、keyword value、route path、HTTP method collection、handler/router identifier 与静态/动态 prefix 分类，`routers` 负责 FastAPI/Flask router declaration、跨文件 mount candidate、late declaration 合并、include/register mount 记录与 framework 解析，`registrations` 负责 route decorator/`add_url_rule` 语义、methods override、receiver/handler 识别与 pending route 到 Python function 的绑定，`materialize` 负责 receiver URL 展开、router/mount prefix 合并、动态 prefix 过滤、route fact 生成与去重，`python_lexical` 负责跨行 single/double triple-quoted-string 状态与 literal-aware comment 剥离，`statements` 负责有界 decorator、router declaration、include/register 与 add-url-rule 聚合。七个 owner 都直接挂载同级测试，父目录不得恢复平铺 `flask.rs` 或 `flask_tests.rs`。`detect::python_strings` 负责 Python 静态字符串前缀和 escape 处理；`detect::javascript` 负责 JavaScript 注释、字符串与正则词法状态。禁止恢复通用 `detect::shared` 模块，因为 JavaScript callback 与 Python string 不共享同一个语义合同。
 
 ### 3.6 SQLite 存储边界
 
@@ -88,7 +92,7 @@ SQLite connection lifecycle 必须在逻辑与物理上统一收敛到 `storage:
 
 Partitioned SQLite adapter 必须完整收敛在 `storage/partitioned/`：`mod.rs` 维护公开 store 与 trait 实现，catalog、control delegate、diagnostics、retention、routing、status 和 totals 使用职责命名文件，`mod_tests.rs` 验证跨 shard contract。`storage/` 父目录不得重新出现 `partitioned.rs`、`partitioned_tests.rs` 或指向该子域的相对 `#[path]`。
 
-Software projection 持久化必须在物理与逻辑上完整收敛到 `storage::sqlite::software`：SQLite 根模块声明该域，code-store adapter 以兄弟模块导入它，不得再通过相对路径持有该域。`mod.rs` 负责 schema 与 projection 编排，`graph.rs` 负责从图派生的 file、topic 和 relationship 物化与查询，dependency usage、lifecycle 和 query scope 保持各自职责模块。SQLite 根级 `scope_filters.rs` 统一维护 code retrieval 与 software projection 共享的 indexed-scope 覆盖判定，两个域不得导入对方的私有 helper；对应 path、language 与 indexed-scope 不变量由同级 `scope_filters_tests.rs` 维护。`mod_tests.rs` 验证根 projection 生命周期，`projection_tests.rs` 验证带过滤条件的 projection 读取。`storage/sqlite/` 父目录不得重新出现 `software.rs`、`software_graph.rs` 或 software 根测试文件。
+Software projection 持久化必须在物理与逻辑上完整收敛到 `storage::sqlite::software`：SQLite 根模块声明该域，code-store adapter 以兄弟模块导入它，不得再通过相对路径持有该域。`mod.rs` 负责 schema 与 projection 编排，`graph/mod.rs` 负责从图派生的 file、topic 和 relationship SQL 物化与查询，`graph/file_role` 独占 knowledge-map、documentation、dependency/build manifest、deployment、test、template、configuration 与 source 的确定性分类和优先级，dependency usage、lifecycle 和 query scope 保持各自职责模块。`file_role_tests` 必须直接覆盖纯分类 owner，SQLite projection 组合断言继续留在 `mod_tests`；不得把分类 helper 或纯规则断言恢复到 `graph/mod.rs`，也不得以 `#[path]` 把 graph 子模块伪装成 software 平铺 sibling。SQLite 根级 `scope_filters.rs` 统一维护 code retrieval 与 software projection 共享的 indexed-scope 覆盖判定，两个域不得导入对方的私有 helper；对应 path、language 与 indexed-scope 不变量由同级 `scope_filters_tests.rs` 维护。`mod_tests.rs` 验证根 projection 生命周期，`projection_tests.rs` 验证带过滤条件的 projection 读取。`storage/sqlite/` 父目录不得重新出现 `software.rs`、`software_graph.rs` 或 software 根测试文件。
 
 Maven effective-model 解析必须完整收敛在 `storage/sqlite/maven/model/`：`mod.rs` 负责 document resolution 与 inheritance 编排，`parse.rs` 负责 POM 解码，`effective.rs` 负责 effective dependency、plugin、profile 和 property 构造。Maven 父目录不得重新出现 `model.rs` 或指向模型域的相对 `#[path]`。
 
@@ -104,7 +108,7 @@ Durable operations 持久化统一收敛在 `storage::sqlite::operations` 目录
 
 Index lifecycle 持久化统一收敛在 `storage::sqlite::indexing` 目录：`mod.rs` 负责 cursor state、refresh orchestration、校验与稳定 refresh-task identity，`cursor_metadata`、`schema`、`task_queue` 隔离各自职责，`refresh_tests`、`queue_tests`、`schema_migration_tests` 与被验证边界放在一起。不得把 index lifecycle 测试或带 `index_refresh_*` 前缀的实现文件放回 SQLite 根目录。
 
-三层 graph retrieval 持久化统一收敛在 `storage::sqlite::retrieval` 目录：`mod.rs` 负责 schema 初始化、document materialization、检索协调和共享 scoring input，具名子模块分别负责 advanced graph path、BM25 与有界 fallback、context assembly、derived document、label trigram、schema migration、alias 和 ranking；定向测试与这些实现同目录。不得恢复父目录级 `retrieval_*` 文件，也不得用 path override 隐藏物理所有权边界。
+三层 graph retrieval 持久化统一收敛在 `storage::sqlite::retrieval` 目录：`mod.rs` 负责 schema 初始化、document materialization 和检索协调，`local_model` 独占确定性 token signature、本地 hashed vector、semantic/cosine/identifier overlap 及 stable hash 等纯 scoring primitive，具名子模块分别负责 advanced graph path、BM25 与有界 fallback、context assembly、derived document、label trigram、schema migration、alias 和 ranking。依赖方向必须保持 `advanced`/`context`/`derived`/facade → `local_model`，不得让纯算法层反向依赖 SQL、候选读取或检索编排；定向测试与这些实现同目录。不得恢复父目录级 `retrieval_*` 文件，也不得用 path override 隐藏物理所有权边界。
 
 Maven 持久化在物理结构上统一收敛到 `storage::sqlite::maven`：`mod.rs` 协调 build/dependency 投影，`model` 负责 raw/effective POM model，`xml` 负责有界 XML 提取，`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；定向测试与 review regression 测试保持同目录。不得把这些规则重新合并到通用 Maven support 模块，也不得用父目录相对 path override 隐藏边界。
 
@@ -118,9 +122,9 @@ Durable code index task 在物理结构上统一收敛到 `storage::sqlite::code
 
 Repository set 持久化统一收敛在 `storage::sqlite::code_set`：`mod.rs` 负责 set membership、overlay refresh、跨仓 edge matching 和状态，`manifest` 负责有界 module-key 派生，`refresh_tasks` 负责持久 refresh-task lease 与 retry，set/workspace/manifest/refresh-task 测试保持同目录。不得以 facade 级测试可见性为由，再把 `code_set_*` 文件散落到 SQLite 根目录。
 
-Monorepo workspace 持久化统一收敛在 `storage::sqlite::code_workspace`：`mod.rs` 负责自动 workspace set、package mapping、跨成员 import resolution 和 workspace-format normalization，`tests` 覆盖 lifecycle/mapping 不变量，`lookup_tests` 覆盖语言级 import normalization。不得恢复根目录级 `code_workspace_*` 兄弟文件。
+Monorepo workspace 持久化统一收敛在 `storage::sqlite::code_workspace`：`mod.rs` 只负责自动 workspace set、package mapping、跨成员 import resolution、状态清理与 overlay 刷新；`ecosystem` 独占 workspace format/ecosystem/language/manifest 映射、package-prefix candidate、import statement normalization 和 local/relative 分类等纯规则。Facade `mod_tests` 覆盖 SQLite lifecycle/mapping/cross-edge 不变量，`ecosystem_tests` 直接覆盖纯规则 owner；不得把规则实现或断言回流到 facade，也不得恢复根目录级 `code_workspace_*` 兄弟文件。
 
-Code index schema 所有权统一收敛在 `storage::sqlite::code_schema`：`mod.rs` 负责当前 table/index 和初始化顺序，`migrations` 负责有界兼容转换，`route_schema` 负责 route 专属 DDL，`tests` 验证 schema 与 migration 不变量。不得再通过 `code_schema_*` 前缀把这些文件拆散到 SQLite 根目录。
+Code index schema 所有权统一收敛在 `storage::sqlite::code_schema`：`mod.rs` 只负责初始化顺序、旧列兼容与 migration 编排；`repository_schema` 独占 repository/fact table DDL，`index_task_schema` 独占 checkpoint、durable task 与 claim index DDL，`repository_set_schema` 独占 set/overlay/refresh-task/workspace mapping DDL，`search_schema` 独占 FTS、search metadata 与 retrieval lookup index DDL。`migrations` 负责有界兼容原语，`route_schema` 负责 route extraction reindex migration，`search_backfill` 负责 symbol、reference、import、dependency、feature-flag、call、route 与 chunk 的一次性 FTS document 回填、search metadata 同步以及 call-signature 升级后的事务性 document 重建。每个 DDL owner 都直接挂载同级 schema-contract UT，`mod_tests` 验证 facade schema/migration 不变量，`search_backfill_tests` 直接验证回填 owner 的 legacy language 继承与 metadata 幂等合同。不得把领域 DDL 或 search materialization SQL 重新塞回 schema facade，也不得再通过 `code_schema_*` 前缀把这些文件拆散到 SQLite 根目录。
 
 Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协调有界检索层，`calls`、`imports`、`symbols`、`hybrid` 负责 edge 或 plan 专属行为，`scoring` 负责聚焦的 ranking signal，`accuracy` 负责端到端排名 fixture。共享 query 回归保留在 `tests`，并按 `calls`、`ranking`、`generated` 和 `hybrid` 分组；跨域的 unit、score、identity、excerpt、field-filter、line-context 和 SBOM case 保留为具名根子项。跨越聚焦子域的 row decoding、excerpt、identifier、line range、route、reference 和 SBOM retrieval 保留为具名生产根子模块；任何 query 或 test 目录都不得变成新的平铺前缀桶。
 
@@ -194,7 +198,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 生产 Rust 文件不得内嵌 `#[cfg(test)] mod` 实现。每个单元测试模块必须放入命名明确的同级 `*_tests.rs` 文件，并由所属生产文件通过显式 test-only `#[path]` 挂载；模块声明仍由生产文件唯一维护，以保持 white-box 可见性和测试身份稳定。`api` contract 已对 `agent`、`code_repository`、`error` 和 `stream` 实施一一配对，application 层的 repository、indexing、repository-set、view、knowledge、service 和 update 单元也遵循同一规则。代码摄取与索引单元在 language metadata、generated detection、identity、index plan/snapshot、parser workspace/language 和 source discovery 中同样执行该规则。domain core、graph、code、repository、workspace、knowledge-map、runtime 和 software contract 也必须把 UT 放入显式同级文件，即使测试声明位于后续生产类型之前。bootstrap、evaluation、顶层 indexing、network/QoS、observability、paths、retrieval 和 watcher 基础模块同样一一配对，且不得削弱其所有权边界。存储 contract 测试必须逐一执行 `CodeRepositoryStore` 的全部可选默认能力，使不支持的租约、检查点、有界候选检索、repository set、view 与 software projection 显式报错，而不是静默成功。partitioned storage 的 `mod_tests` contract 必须覆盖空控制库委派、已索引分片路由、任务租约、repository-set 控制状态和 staged 检查点收尾。interface 测试必须留在所属 CLI、Web、ACP、MCP、audit 或 policy adapter 目录；MCP HTTP/JSON-RPC 夹具边界必须命名为 `transport_harness`。SQLite code-store、code-query、scoring、import/call planning、view、retrieval、maintenance、retry、pool 和 schema 测试必须与精确的持久化 owner 共置；`code_tasks` 直接拥有 lifecycle、retention、status、lease 和 reset 测试套件，`record_mapping` 则隔离 task/checkpoint 行解码与 SQL projection 构造。repository-set membership、overlay 和 workspace 测试套件由 `code_set` 自己拥有，持久化 refresh-task 测试由 `refresh_tasks` 拥有，外层 code-store facade 不得代为挂载。candidate-path filtering、FTS planning、generated exclusion、legacy import 和 fallback 测试由 `candidate_paths` 直接挂载，不得再由更宽的 snapshot facade 代管。partitioned SQLite 集成数据构造集中于 `partitioned_sqlite_fixtures`。不得把这些测试重新合并进生产文件，也不得建立共享的笼统测试桶。
 
-`code_workspace` owner 直接挂载 facade `mod_tests` 与聚焦的 `lookup_tests`；外层 code-store facade 不得代管 workspace normalization 测试。
+`code_workspace` facade 直接挂载 SQLite 编排 `mod_tests`，`ecosystem` owner 直接挂载 `ecosystem_tests`；外层 code-store facade 不得代管 workspace normalization 测试。
 
 SQLite import-query 的 target、generated filtering、ranking 与 foundational ranking 测试套件由 `code_query::imports` 挂载；ambiguous-callee 单元与 generated-filter 测试套件由 `ambiguous_callees` 挂载，外层 code-store facade 不得代管这两个子域的测试。
 
@@ -208,7 +212,7 @@ CLI render、repository、repository-set 与 setup adapter 的 `mod.rs` owner �
 
 Model-provider facade 以 `mod.rs` 与 `mod_tests.rs` 配对，覆盖 profile、catalog、probe、discovery 与 fallback 行为。
 
-SQLite canvas、code-graph、code-schema、code-view、file-index、Maven、operations 与 retrieval owner 都以 `mod_tests.rs` 配对 facade。聚焦的 schema、ranking、migration 与 persistence 测试套件保留描述性文件名；这些存储子域禁止使用通用 `tests.rs`。
+SQLite canvas、code-graph、code-schema、code-view、file-index、Maven、operations 与 retrieval owner 都以 `mod_tests.rs` 配对 facade；retrieval 的纯 local scoring primitive 由 `local_model_tests` 直接覆盖，不得回流到 facade 或 `derived_tests`。聚焦的 schema、ranking、migration 与 persistence 测试套件保留描述性文件名；这些存储子域禁止使用通用 `tests.rs`。
 
 SQLite code-query 的 hybrid chunk 证据准入归 `hybrid::chunk_gate` 所有，并与 `chunk_gate_tests` 配对；direct-result 准入、FTS 查询构造、candidate 预算和 chunk 结果合并测试分别留在自己的生产 owner 旁。code-query facade 只负责编排检索层，不得重新承担 hybrid 证据密度或语言域策略。
 
@@ -236,6 +240,8 @@ Worktree-overlay 的 hash marker、删除集合、待解析文件集合和同内
 
 Worktree-overlay 的 Gitlink 输出聚合、子路径删除回放和 scope-aware recorder 归 `worktree_overlay::gitlink_recording` 所有。该 owner 必须使用共享 `recording` 协议，并由配对 UT 证明 retained、out-of-scope 与待删除子路径不会混淆；Gitlink 状态机不得复制 recorder 或直接发明新的 marker。
 
+源码 Gitlink/submodule 能力必须收敛在 `code/source/gitlink/`。`entries` 独占 tree gitlink commit 判定、child-filtered tracked entry 枚举、初始化/反初始化 submodule blob 读取与 worktree root 解析，并直接挂载 `entries_tests`；上层 incremental/worktree-overlay 只能调用该 owner，不得复制 worktree/git-dir fallback。`diff` 独占双侧 submodule change 分类、nested gitlink 有界递归、worktree/git-dir diff fallback、scope-aware entry expansion 与共享预算检查，并直接挂载 `diff_tests`。`impact` 独占 `GitlinkImpactExpander`、双侧路径展开与 fallback 合并、稳定去重及预算校验，并直接挂载 `impact_tests`；`gitlink::mod` 只能声明模块和重导出边界。依赖必须保持 `impact -> diff -> entries/commands/paths/selector` 的单向关系，禁止下层反向依赖 impact 或 facade。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。
@@ -253,6 +259,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 ## 5. 代码质量硬约束
 
 - tracked source、test、documentation、script 或 workflow 文件不得超过 1000 行。locked build 必需的生成式 release lockfile 例外，当前为 `Cargo.lock`，且必须保持机器生成。
+- 根 README 是简洁的入口与导航面；详细实现所有权和运维合同必须放入 README 所链接的职责型 architecture、capability 或 user-guide 文档中，README 增长同样不得绕过 1000 行上限。
 - 不添加 shallow function；函数必须负责校验、转换、外部边界、资源生命周期、错误映射、观测或真实编排。
 - 不保留 dead code、TODO stub、无调用公共 API、无测试 speculative extension point 或注释掉的实现。
 - 项目身份常量集中在 `project` 模块；模块局部运行默认值留在所属模块。

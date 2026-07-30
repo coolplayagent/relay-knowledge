@@ -1,30 +1,6 @@
 use super::*;
 
 #[test]
-fn token_signature_and_vector_are_deterministic() {
-    let labels = vec!["Rust".to_owned()];
-    let signature = token_signature("Async Rust graph", &labels, Some("src/lib.rs"));
-    let first = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), 8);
-    let second = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), 8);
-
-    assert!(signature.contains(&"rust".to_owned()));
-    assert_eq!(first, second);
-    assert!((cosine_similarity(&first, &second) - 1.0).abs() < 0.000_001);
-}
-
-#[test]
-fn token_signature_adds_identifier_parts_for_semantic_and_vector_recall() {
-    let labels = vec!["SemanticVectorRecall".to_owned()];
-    let signature = token_signature("GraphRAGContextPack", &labels, None);
-
-    for term in [
-        "semantic", "vector", "recall", "graph", "rag", "context", "pack",
-    ] {
-        assert!(signature.contains(&term.to_owned()), "missing term {term}");
-    }
-}
-
-#[test]
 fn semantic_document_stores_source_hash_without_retrieval_token_noise() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection

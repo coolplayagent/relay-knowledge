@@ -74,8 +74,8 @@ workflow 行为。
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。
 - 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态。
 - 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索、影响分析，以及不复制基础事实的多仓库 `repo-set` 薄覆盖查询。
-- 可选大仓工作区检测：支持 pnpm workspace、Go workspace（`go.work`）和 Cargo workspace 成员检测。当 `CodeIndexRequest` 显式启用 workspace detection 时，跨仓库导入解析会通过工作区包映射表将未解析的导入映射到兄弟包，提供 `target_hint` 元数据，而非静默丢弃跨仓库引用。CLI 索引保持默认关闭，因此单仓库索引路径完全不受影响。
-- 软件全域投影：按 repository scope 暴露文件整体节点、文档主题、配置/代码关系、依赖和 unresolved SDK/API 使用，`repo software` 读取投影表而不是查询时扫描仓库。
+- 可选大仓工作区检测：支持 pnpm workspace、Go workspace（`go.work`）和 Cargo workspace 成员检测。当 `CodeIndexRequest` 显式启用 workspace detection 时，跨仓库导入解析会通过工作区包映射表将未解析的导入映射到兄弟包，提供 `target_hint` 元数据，而非静默丢弃跨仓库引用。CLI 索引保持默认关闭，因此单仓库索引路径完全不受影响。生态、workspace format、manifest、package prefix 与 import statement 归一化规则统一归 storage `code_workspace::ecosystem` owner 及其同级 UT；SQLite set、mapping 和 cross-edge 编排仍归 workspace facade。
+- 软件全域投影：按 repository scope 暴露文件整体节点、文档主题、配置/代码关系、依赖和 unresolved SDK/API 使用，`repo software` 读取投影表而不是查询时扫描仓库。knowledge-map、文档、dependency/build manifest、部署、测试、模板、配置与源码的确定性分类统一归 SQLite software `file_role` owner 及其同级 UT。
 - 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots，并用 SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
 - 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
 - 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
@@ -182,6 +182,11 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 CI 安装当前最新的 Rust stable 工具链。最终执行 Clippy 门禁前应先更新本地
 `stable`，避免新稳定的 lint 在本地旧版本中未触发、直到推送后才失败。
 
+OpenTelemetry 依赖必须作为一个兼容族整体升级：`opentelemetry`、
+`opentelemetry_sdk` 与 `opentelemetry-otlp` 保持相同 minor 版本，
+`tracing-opentelemetry` 使用与其匹配的集成版本。只升级其中一部分会引入重复的
+telemetry trait 和不兼容的 provider 类型，因此不能进入发版候选。
+
 自迭代 harness 默认只执行轻量 fast 门禁。完整 profile 的产品与 harness
 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。
 
@@ -195,6 +200,7 @@ task claim 和混合语言注册安全性。
 
 二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。
 SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
+应用服务的 `retrieval` owner 负责 source-scope 校验、freshness reconciliation、backend degradation、有界 search/rerank、provenance budget 与响应装配；其同级 UT 直接保护 trace stale/truncation 合同，service facade 只保留构造和跨工作流组合。
 批量代码索引的 snapshot apply 或 checkpointed finalize 成功后，SQLite 存储会 best-effort 执行 `PRAGMA optimize` 和 `PRAGMA wal_checkpoint(PASSIVE)`；`health --format json` 与 graph inspection 会在 `graph.sqlite` 中暴露 journal mode、WAL 大小、最近维护时间和维护错误。最近维护时间和错误会持久化到 SQLite，因此服务重启或一次性 worker 退出后仍可诊断上一轮维护结果。`partitioned_sqlite` 拓扑下这些字段会通过只读 shard 诊断聚合 control 数据库和所有 active repository shard 数据库；任一 active shard 无法检查时，聚合结果会保留 shard 错误并把 WAL 大小标记为未知，避免把部分总量误报为完整状态。
 
 默认存储拓扑是 `single_sqlite`。设置
@@ -211,13 +217,48 @@ SQL 文件会贡献 table、view/materialized view、function/procedure、trigge
 
 同一 source scope 内的本地文件、模板和构建目标引用会在 finalize 阶段解析；外部或有歧义的配置关系保留为 unresolved metadata。
 
+Gitlink/submodule 源码访问统一收敛在 `code/source/gitlink/`。tree commit 判定、
+child-filtered entry 发现、初始化或反初始化 submodule blob 读取及 worktree root
+校验由 `entries` owner 负责并直接挂载 UT；incremental 与 worktree overlay 复用
+该边界。双侧 submodule change 分类、nested gitlink 有界递归、worktree/git-dir
+diff fallback、scope-aware entry expansion 与预算检查归独立 `diff` owner。影响
+编排、双侧 fallback 合并、稳定去重与最终预算校验归直接挂载 UT 的 `impact`
+owner；`gitlink::mod` 只保留模块声明和边界重导出。
+
 仓库注册会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
 C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头文件 typedef/module table 声明、GCC/Clang 风格声明属性与 inline 扩展（如 `__attribute__((always_inline))`、`attribute((always_inline))`、`__always_inline`）、预处理器或已识别 decorator 声明区域，decorator 类型体仍保持声明形态，并且仍能抽取可靠结构化事实，会被保守恢复为 parsed。
 
-Web 路由检测把 Express 参数/handler 解析、Python 静态路由字符串和 JavaScript
-注释/字符串/正则词法状态分别放入具名模块，并由各 owner 直接挂载 UT；不得用笼统
-shared parser 桶跨越这些语言边界。
+C/C++ recovery 把 declaration-head normalization 与 token/type/qualifier 识别放在 `declaration` owner，把 function signature、parameter boundary、operator、method suffix、postfix attribute 与 recovery decorator 判定放在 `signature` owner；依赖保持 `signature -> declaration/scan` 单向，两个 owner 都直接挂载 accepted/rejected shape UT。
+
+Python type-reference parsing 将 literal-aware 函数签名 annotation 扫描与
+tree-sitter node 分类分离。`languages/python/annotations` owner 负责跨行参数/
+返回值 annotation、default-expression 边界和文件内 type parameter，并直接挂载
+同级 UT；Python module facade 保留 node-context 与 local-type-reference 解析。
+
+Web 路由检测把 Express orchestration、import/factory 与 application/router alias
+发现、call/path syntax、参数/handler 解析、有界多行 statement aggregation、直接与
+链式 registration recording、mount discovery 和 prefix materialization 统一收敛在
+`detect/express/` 子域；各阶段分属明确 owner，
+并由每个 owner
+直接挂载 UT。Python 静态路由字符串与 JavaScript 注释/字符串/正则词法状态继续
+使用独立具名模块，不得用笼统 shared parser 桶跨越这些语言边界。Spring annotation
+与 Java type-scope 检测统一收敛在 `detect/spring/` 子域；Java comment/text-block
+过滤和 declaration 识别、annotation path/method attribute 解析分别使用独立
+owner；有界多行 annotation aggregation 与两者隔离，mapping kind 和
+RequestMapping 语义也由独立 owner 负责；每个 owner 都直接挂载 UT。
+class-prefix 派生、method 合并、URL 拼接与 route fact 去重收敛在 Spring
+materialization owner。
+Flask/FastAPI decorator、router mount 与 Python route materialization 统一收敛
+在 `detect/flask/`；Python triple-quoted-string 与 comment 词法状态使用独立
+owner，有界多行 statement aggregation 与 call-argument parsing 各自使用独立
+owner；argument owner 负责顶层边界、keyword value、route path、method
+collection、具名 handler、router identifier 与静态/动态 mount prefix 分类，
+router-state owner 负责 declaration、late merge、include/register mount 记录与
+framework 解析；materialization owner 负责 receiver URL 展开、mount-prefix
+合并、动态 prefix 过滤、route fact 生成与去重；registration owner 负责 route
+decorator、`add_url_rule`、methods override、receiver/handler 识别与 Python
+function 绑定，所有 owner 都直接挂载 UT。
 
 代码仓库 full index 会先发现 tracked source layout，再使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
 
@@ -260,6 +301,10 @@ worktree overlay 使用 Git status：被 `.gitignore` 忽略的 untracked 文件
 调用图检索也支持同仓静态跨语言边：C/C++ 互调、Go cgo `C.*` 和 Rust FFI/bindings 路径可解析为代码图证据，但这不等同于完整 build-system 或 linker 分析。
 
 代码仓库词法检索使用 SQLite FTS 候选表覆盖 symbol、reference、call、import、SBOM dependency 和 chunk。有效 path filter 会在 FTS 候选窗口内先过滤再进入有界评分；graph edge 候选在截断前按 BM25 排序；fuzzy symbol 召回可以命中任一查询词，而 typed graph edge 查询保持更窄语义；Rust 评分会识别 snake_case/CamelCase identifier 片段、多段符号名、调用方向上下文和声明形态 API chunk。
+
+Graph retrieval 的确定性 token signature、本地 hashed vector、semantic overlap、cosine similarity 与 identifier-aware lexical overlap 统一归 SQLite retrieval `local_model` owner 及其同级 UT。`advanced`、`context` 与 `derived` 只依赖这个纯低层，retrieval facade 继续负责 schema、document materialization 和 search orchestration。
+
+Code-index schema 初始化只把执行顺序、旧列兼容与 migration 编排保留在 `code_schema` facade；repository facts、durable index task、repository-set/workspace 状态和 FTS/retrieval index 分属四个 schema owner，并各自挂载同级 contract UT。`search_backfill` owner 独占 symbol、reference、import、dependency、feature flag、call、route 与 chunk 的一次性 FTS document 物化、search metadata 同步，以及 signature 升级后的事务性 call-document 重建；其同级定向测试保护 legacy call language 继承和 metadata 幂等同步合同。
 
 `repo query --kind sbom` 会返回索引期从 Cargo、npm、Go、Python、Maven effective `pom.xml`/BOM、Gradle 和 Conan manifest/lockfile 提取的依赖清单；它不会执行包管理器、访问 registry，也不提供漏洞或许可证分析。
 
@@ -308,6 +353,14 @@ BM25 读模型会为实体标签和代码符号索引生成词汇别名，但不
 ### CLI 契约
 
 当前 CLI 使用编译后的 `relay-knowledge` 二进制和 git 风格子命令：
+
+adapter 将 global option/token 解析与命令族分发收敛到直接配对 UT 的
+`interfaces::cli::command::parse` owner，共享 flag value 与 freshness 校验归
+`command::values`。CLI error、结构化 grammar diagnostic、退出码分类以及
+text/JSON stderr 编码归 `command::diagnostics`。CLI 根只重导出这些稳定合同，并
+保留 process facade。无需 runtime 的快路径、remote/local 环境装配与共享 service
+action dispatch 归直接配对 UT 的 `runtime::dispatch` owner；显式/环境 remote URL
+优先级与远端能力判定归 `runtime::selection`。
 
 ```bash
 relay-knowledge status --format json
@@ -488,13 +541,11 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-静态 Web 工作区会渲染项目健康状况、GraphRAG 准备度、图计数、用于 evidence/code/index/worker 拓扑的紧凑 SVG graph overview、交互式 Graph canvas、作用域索引新鲜度、刷新队列诊断、过期原因、运行时预算，以及检索、摄取、图检查、代码仓库图谱工作流、索引刷新、提供者探测、worker/提案/审计操作、服务运行时命令、agent 互操作性设置、检索默认值和模型 provider profile 管理的交互式工作区。
-
-同一个 Rust HTTP 服务会在本地端口提供静态 Web 资源，以及 `/api/project/status`、`/api/health`、`/api/service/status` 和 `/api/web/operations/execute`。
-
-execute 端点接收当前编排器快照，调用共享应用服务，并返回操作元数据和结果 JSON 供页面展示。Web `service run` 只返回服务运行时快照，不从浏览器启动常驻循环。
-
-Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
+静态工作区通过同一个有界 Rust HTTP 服务暴露 health、GraphRAG、Graph canvas、
+索引、worker 和 operation composer 诊断。用户工作流见
+[Web 工作区能力](docs/zh/02-capabilities/12-web-workspace-capabilities.md)，
+`operation_request`、`assets` 与同级测试所有权见
+[工程硬约束](docs/zh/03-architecture-specs/02-engineering-hard-constraints.md)。
 
 ### 可选 Hooks
 

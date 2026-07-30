@@ -10,7 +10,9 @@ use crate::{
 use super::{
     ScoredHit,
     context::{entities_for_evidence, parse_fact_status, version_range},
-    evidence_group_key, overlap_score, parse_string_array, sort_scored_hits, token_signature,
+    evidence_group_key,
+    local_model::{overlap_score, token_signature},
+    parse_string_array, sort_scored_hits,
 };
 
 pub(super) fn path_candidates(

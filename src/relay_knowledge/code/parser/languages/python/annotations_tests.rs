@@ -1,3 +1,5 @@
+//! Python annotation-reference scanning contracts.
+
 use super::manual_type_references;
 
 fn reference_names(content: &str) -> Vec<String> {

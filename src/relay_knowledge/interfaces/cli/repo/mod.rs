@@ -10,7 +10,9 @@ use crate::{
 };
 
 use super::{
-    CliError, OutputFormat, parse_freshness, render_response, serialize_line, value_after,
+    CliError, OutputFormat,
+    command::{parse_freshness, value_after},
+    render_response, serialize_line,
 };
 
 #[path = "index.rs"]

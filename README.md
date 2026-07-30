@@ -109,10 +109,17 @@ change CLI, service, Web, indexing, retrieval, or release workflow behavior.
   unresolved imports to sibling packages via a workspace package-mapping
   table, providing `target_hint` metadata instead of silently dropping
   cross-repo references. CLI indexing keeps the default disabled, so
-  single-repository indexing paths are completely unaffected.
+  single-repository indexing paths are completely unaffected. Ecosystem,
+  workspace-format, manifest, package-prefix, and import-statement
+  normalization rules are isolated in the storage `code_workspace::ecosystem`
+  owner with direct sibling tests; SQLite set, mapping, and cross-edge
+  orchestration remain in the workspace facade.
 - Software global projection for repository-scoped files, documentation topics,
   config/code relationships, dependencies, and unresolved SDK/API usage, exposed
-  through `repo software` without query-time repository scans.
+  through `repo software` without query-time repository scans. Deterministic
+  knowledge-map, documentation, dependency/build manifest, deployment, test,
+  template, configuration, and source classification is isolated in the
+  SQLite software `file_role` owner with direct sibling tests.
 - Local file-location indexing without Everything, Spotlight, Windows Search,
   locate, or other external search software: explicitly scan authorized roots
   and use SQLite/FTS5 to quickly find files by name, path, extension, and
@@ -255,6 +262,12 @@ CI installs the current stable Rust toolchain. Update local `stable` before the
 final Clippy gate so newly stabilized lints cannot pass locally and fail only
 after the branch is pushed.
 
+OpenTelemetry dependencies are upgraded as one compatibility family:
+`opentelemetry`, `opentelemetry_sdk`, and `opentelemetry-otlp` stay on the same
+minor release, while `tracing-opentelemetry` uses the matching integration
+release. A partial family update is not release-ready because it can introduce
+duplicate telemetry traits and incompatible provider types.
+
 The self-iteration harness runs its own product and harness quality checks in
 parallel dependency stages and defaults `--jobs auto` to the local CPU count.
 
@@ -273,6 +286,12 @@ The binary starts a Tokio runtime, and the shared application service exposes
 async entrypoints from the CLI boundary inward. SQLite storage is opened through
 the storage boundary, and blocking database work is isolated behind Tokio
 blocking workers.
+
+The application service `retrieval` owner coordinates source-scope validation,
+freshness reconciliation, backend degradation, bounded search/rerank,
+provenance budgeting, and response assembly. Its direct sibling tests protect
+trace staleness and truncation contracts; the service facade retains
+construction and cross-workflow composition.
 
 The default storage topology is `single_sqlite`. Set
 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` to keep global control
@@ -343,6 +362,12 @@ inline extensions such as `__attribute__((always_inline))`,
 directives, or recognized decorator-bearing declarations with
 declaration-shaped bodies. Recovery still requires reliable structured facts
 such as symbols, references, or imports.
+
+C/C++ recovery keeps declaration-head token/type/qualifier recognition separate
+from function-signature, parameter, operator, method-suffix, postfix-attribute,
+and recovery-decorator recognition. The signature owner depends one-way on the
+lower declaration and literal-aware scan owners, and both carry direct sibling
+tests for accepted and rejected shapes.
 
 Full Git repository indexing first discovers the tracked source layout. It then
 uses resource-bounded SQLite batches with durable checkpoints and a finalize
@@ -472,6 +497,17 @@ Worktree overlays use Git status for Git repositories. `.gitignore`-ignored
 untracked files are skipped, and untracked broad dependency/cache/build
 directories require explicit path opt-in before recursive expansion.
 
+Gitlink and submodule source access is grouped under `code/source/gitlink/`.
+Tree commit detection, child-filtered entry discovery, initialized or
+deinitialized submodule blob reads, and worktree-root validation share a
+dedicated `entries` owner with direct unit tests; incremental and worktree
+overlay paths reuse that boundary. Two-sided submodule change classification,
+bounded nested-gitlink recursion, worktree/git-dir diff fallback, scoped entry
+expansion, and budget enforcement live in a separate `diff` owner. Impact
+orchestration, two-sided fallback merging, stable deduplication, and final
+budget validation live in the paired-test `impact` owner; `gitlink::mod`
+remains a declaration and re-export facade.
+
 Registering the same repository root with an additional alias preserves prior
 aliases and resolves all aliases to the same repository id.
 `repo remove <alias>` deletes that repository's runtime registration, aliases,
@@ -492,10 +528,40 @@ language listed above, including JavaScript/JSX, Kotlin, Scala, C#, PHP, Rust,
 and Swift. Package-manager or SDK imports without authorized indexed source
 remain unresolved edge metadata rather than parser degradation.
 
-Web route detection separates Express argument/handler parsing, Python static
-route strings, and JavaScript comment/string/regex lexical state into named
-modules with direct unit tests. It does not use a generic shared parser bucket
-across those language boundaries.
+Python type-reference parsing separates literal-aware function-signature
+annotation scanning from tree-sitter node classification. The
+`languages/python/annotations` owner handles wrapped parameter and return
+annotations, default-expression boundaries, and file-local type parameters,
+with direct sibling tests; the Python module facade retains node-context and
+local-type-reference resolution.
+
+Web route detection groups Express orchestration, import/factory and
+application/router alias discovery, call/path syntax, argument/handler parsing,
+bounded multiline statement aggregation, direct and chained registration
+recording, mount discovery, and mount materialization under one
+`detect/express/` subdomain with direct unit tests for each owner. Python static
+route strings and JavaScript
+comment/string/regex lexical state remain separate named modules rather than a
+generic shared parser bucket across language boundaries. Spring annotation and
+Java type-scope detection is grouped under its own `detect/spring/` subdomain;
+Java comment/text-block filtering and declaration recognition have a dedicated
+owner, while annotation path/method attribute parsing has another dedicated
+owner. Bounded multiline annotation aggregation is isolated from both, and
+mapping-kind and RequestMapping semantics have their own owner; every owner
+carries direct unit tests. Class-prefix derivation, method combination, URL
+joining, and route-fact deduplication are isolated in Spring materialization.
+Flask/FastAPI decorators, router mounts, and Python route materialization are
+grouped under `detect/flask/`; Python triple-quoted-string and comment lexical
+state, bounded multiline statement aggregation, and call-argument parsing each
+have dedicated owners with direct unit tests. Argument parsing owns top-level
+boundaries, keyword values, route paths, method collections, named handlers,
+router identifiers, and static-versus-dynamic mount prefixes. Router declaration,
+late-merge, include/register mount recording, and framework resolution share a
+separate router-state owner. Receiver URL expansion, mount-prefix joining,
+dynamic-prefix filtering, route-fact creation, and deduplication live in a
+dedicated materialization owner. Route decorators, `add_url_rule`, methods
+overrides, receiver/handler recognition, and Python-function binding share a
+registration owner.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
@@ -509,6 +575,24 @@ symbol recall can match any query term while typed graph edge queries keep their
 narrower semantics, and Rust scoring recognizes snake_case/CamelCase identifier
 parts, multi-part symbol names, call-direction context, and declaration-shaped
 API chunks.
+
+Graph retrieval keeps deterministic token signatures, local hashed vectors,
+semantic overlap, cosine similarity, and identifier-aware lexical overlap in
+the SQLite retrieval `local_model` owner with direct sibling tests.
+`advanced`, `context`, and `derived` consume this pure lower layer, while the
+retrieval facade retains schema, document materialization, and search
+orchestration.
+
+Code-index schema initialization keeps only ordering, legacy-column
+compatibility, and migration orchestration in the `code_schema` facade.
+Repository facts, durable index tasks, repository-set/workspace state, and
+FTS/retrieval indexes have separate schema owners with direct sibling contract
+tests. The `search_backfill` owner isolates one-time FTS document
+materialization for symbols, references, imports, dependencies, feature flags,
+calls, routes, and chunks, plus search-metadata synchronization and
+transactional call-document rebuilding after signature upgrades. Its sibling
+tests protect legacy call-language inheritance and idempotent metadata
+synchronization.
 
 `repo query --kind sbom` returns dependency inventory facts extracted during
 indexing from Cargo, npm, Go, Python, Maven effective `pom.xml`/BOM, Gradle,
@@ -621,6 +705,16 @@ versions, and last error.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style
 subcommands:
+
+The adapter groups global option/token parsing and command-family dispatch in
+the paired-test `interfaces::cli::command::parse` owner, while shared flag-value
+and freshness validation live in `command::values`. CLI errors, structured
+grammar diagnostics, exit-code classification, and text/JSON stderr encoding
+live in `command::diagnostics`. The CLI root re-exports these stable contracts
+and retains the process facade. Process-free fast paths, remote/local
+environment composition, and shared-service action dispatch live in the
+paired-test `runtime::dispatch` owner; explicit versus environment remote URL
+selection and remote eligibility live in `runtime::selection`.
 
 ```bash
 relay-knowledge status --format json
@@ -880,22 +974,12 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-The static Web workspace renders project health, GraphRAG readiness, graph
-counts, a compact SVG graph overview for evidence/code/index/worker topology,
-the interactive Graph canvas, scoped index freshness, refresh queue diagnostics,
-stale reasons, runtime budgets, and interactive operation composers for
-retrieval, ingestion, graph inspection, code repository workflows, index refresh,
-provider probes, worker/proposal/audit operations, service runtime commands,
-agent interoperability settings, retrieval defaults, and model provider profile
-management. The same Rust HTTP service serves static Web assets plus
-`/api/project/status`, `/api/health`, `/api/service/status`, and
-`/api/web/operations/execute` on one local port. The execute endpoint accepts
-the current composer snapshot, calls the shared application service, and returns
-operation metadata plus result JSON for the page to display. Web `service run`
-returns a service runtime snapshot rather than starting a resident loop from the
-browser. Web execute requests are bounded by
-`RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback HTTP binds require the
-remote-client access policy to be enabled explicitly.
+The static workspace exposes health, GraphRAG, graph canvas, index, worker, and
+operation-composer diagnostics through the same bounded Rust HTTP service.
+See [Web Workspace Capabilities](docs/en/02-capabilities/12-web-workspace-capabilities.md)
+for user workflows and
+[Engineering Hard Constraints](docs/en/03-architecture-specs/02-engineering-hard-constraints.md)
+for the `operation_request` and `assets` ownership and sibling-test contracts.
 
 ### Optional Hooks
 

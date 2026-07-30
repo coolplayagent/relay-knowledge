@@ -1,5 +1,7 @@
 //! Web HTTP adapter for same-origin diagnostics and static assets.
 
+mod assets;
+mod operation_request;
 #[path = "code_api.rs"]
 mod web_code_api;
 #[path = "code_index_request.rs"]
@@ -11,12 +13,11 @@ mod web_files;
 #[path = "model_config.rs"]
 mod web_model_config;
 
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::{StatusCode, header};
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -26,20 +27,22 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::{
     api::{
-        ApiError, AuditQueryApiRequest, CodeRepositoryRegisterRequest, ErrorKind,
-        GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, GraphInspectionRequest,
-        HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence, IngestRequest, InterfaceKind,
-        ProposalDecisionApiRequest, ProposalListApiRequest, RequestContext, WorkerRunRequest,
-        WorkerStatusRequest,
+        ApiError, AuditQueryApiRequest, ErrorKind, GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind,
+        GraphCanvasRequest, InterfaceKind, ProposalListApiRequest, RequestContext,
+        WorkerRunRequest, WorkerStatusRequest,
     },
     application::RelayKnowledgeService,
-    domain::{
-        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
-        CodeQueryKind, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,
-        CodeRepositorySetCreateRequest, CodeRepositorySetQueryRequest,
-        CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest, FreshnessPolicy, IndexKind,
-        ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest, WorkerKind,
-    },
+    domain::{CodeIndexMode, ProposalState},
+};
+use assets::{asset_or_index, default_web_dist, index};
+use operation_request::{
+    code_context_request, code_feature_flag_request, code_impact_request, code_query_request,
+    code_register_request, code_repository_set_add_request, code_repository_set_create_request,
+    code_repository_set_query_request, code_repository_set_remove_request, code_selector,
+    code_software_request, graph_request, index_request, ingest_request, optional_bool_field,
+    optional_proposal_state, optional_string_array_field, optional_string_field,
+    optional_worker_kind, parse_freshness, proposal_decision_request, retrieve_request,
+    string_field, usize_field,
 };
 pub(super) use web_code_index_request::code_index_request;
 
@@ -452,46 +455,6 @@ async fn dispatch_operation(
     }
 }
 
-async fn index(State(state): State<WebState>) -> Response {
-    serve_file_or_status(index_path(&state.asset_root), StatusCode::NOT_FOUND).await
-}
-
-async fn asset_or_index(
-    State(state): State<WebState>,
-    AxumPath(path): AxumPath<String>,
-) -> Response {
-    if path.starts_with("api/") {
-        return (StatusCode::NOT_FOUND, Json(json!({"message": "not found"}))).into_response();
-    }
-
-    match sanitized_asset_path(&state.asset_root, &path) {
-        Some(asset_path)
-            if tokio::fs::metadata(&asset_path)
-                .await
-                .is_ok_and(|meta| meta.is_file()) =>
-        {
-            serve_file_or_status(asset_path, StatusCode::NOT_FOUND).await
-        }
-        _ => serve_file_or_status(index_path(&state.asset_root), StatusCode::NOT_FOUND).await,
-    }
-}
-
-async fn serve_file_or_status(path: PathBuf, missing_status: StatusCode) -> Response {
-    match tokio::fs::read(&path).await {
-        Ok(body) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type(&path))],
-            Body::from(body),
-        )
-            .into_response(),
-        Err(_) => (
-            missing_status,
-            Json(json!({"message": "web assets are not built; run ./build.sh"})),
-        )
-            .into_response(),
-    }
-}
-
 pub(super) fn api_error_response(error: ApiError) -> Response {
     let status = match error.error_kind {
         ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
@@ -502,382 +465,6 @@ pub(super) fn api_error_response(error: ApiError) -> Response {
     };
 
     (status, Json(error)).into_response()
-}
-
-fn sanitized_asset_path(root: &Path, requested: &str) -> Option<PathBuf> {
-    let mut path = root.to_path_buf();
-    for component in Path::new(requested).components() {
-        match component {
-            Component::Normal(segment) => path.push(segment),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-
-    Some(path)
-}
-
-fn index_path(root: &Path) -> PathBuf {
-    root.join("index.html")
-}
-
-fn default_web_dist() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("web")
-        .join("dist")
-}
-
-fn content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|extension| extension.to_str()) {
-        Some("css") => "text/css; charset=utf-8",
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("json") => "application/json",
-        Some("svg") => "image/svg+xml",
-        Some("wasm") => "application/wasm",
-        _ => "application/octet-stream",
-    }
-}
-
-fn retrieve_request(payload: &Value) -> Result<HybridRetrievalRequest, WebError> {
-    Ok(HybridRetrievalRequest {
-        query: string_field(payload, "query")?.to_owned(),
-        source_scope: optional_string_field(payload, "source_scope"),
-        freshness: parse_freshness(string_field(payload, "freshness")?)?,
-        limit: usize_field(payload, "limit")?,
-    })
-}
-
-fn ingest_request(payload: &Value) -> Result<IngestRequest, WebError> {
-    Ok(IngestRequest {
-        source_scope: string_field(payload, "source_scope")?.to_owned(),
-        evidence: vec![IngestEvidence {
-            id: None,
-            source_path: None,
-            span: None,
-            confidence: None,
-            status: None,
-            content: string_field(payload, "content")?.to_owned(),
-            entity_labels: string_array_field(payload, "entity_labels")?,
-            extraction: None,
-        }],
-        relations: Vec::new(),
-        claims: Vec::new(),
-        events: Vec::new(),
-    })
-}
-
-fn graph_request(payload: &Value) -> GraphInspectionRequest {
-    GraphInspectionRequest {
-        source_scope: optional_string_field(payload, "source_scope"),
-    }
-}
-
-fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebError> {
-    Ok(IndexRefreshRequest {
-        kinds: string_array_field(payload, "kinds")?
-            .into_iter()
-            .map(|kind| parse_index_kind(&kind))
-            .collect::<Result<Vec<_>, _>>()?,
-    })
-}
-
-fn code_register_request(payload: &Value) -> Result<CodeRepositoryRegisterRequest, WebError> {
-    Ok(CodeRepositoryRegisterRequest {
-        root_path: string_field(payload, "root_path")?.to_owned(),
-        alias: code_register_alias(payload)?,
-        path_filters: optional_string_array_field(payload, "path_filters")?,
-        language_filters: optional_string_array_field(payload, "language_filters")?,
-    })
-}
-
-fn code_register_alias(payload: &Value) -> Result<String, WebError> {
-    match payload.get("alias") {
-        Some(Value::String(alias)) => Ok(alias.trim().to_owned()),
-        Some(_) => Err(WebError::bad_request("alias must be a string".to_owned())),
-        None => Ok(String::new()),
-    }
-}
-
-fn code_query_request(payload: &Value) -> Result<CodeRetrievalRequest, WebError> {
-    let mut request = CodeRetrievalRequest::new(
-        string_field(payload, "query")?,
-        code_selector(payload)?,
-        parse_code_query_kind(string_field(payload, "kind")?)?,
-        usize_field(payload, "limit")?,
-        parse_freshness(string_field(payload, "freshness")?)?,
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))?;
-    request.exclude_generated = optional_bool_field(payload, "exclude_generated")?.unwrap_or(false);
-    Ok(request)
-}
-
-fn code_context_request(payload: &Value) -> Result<CodeGraphContextRequest, WebError> {
-    CodeGraphContextRequest::new(
-        code_selector(payload)?,
-        string_field(payload, "query")?,
-        usize_field(payload, "limit")?,
-        parse_freshness(string_field(payload, "freshness")?)?,
-        usize_field(payload, "max_context_bytes")?,
-        optional_bool_field(payload, "include_code")?.unwrap_or(true),
-        optional_bool_field(payload, "exclude_generated")?.unwrap_or(false),
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_feature_flag_request(payload: &Value) -> Result<CodeFeatureFlagRequest, WebError> {
-    CodeFeatureFlagRequest::new(
-        optional_string_field(payload, "query"),
-        code_selector(payload)?,
-        usize_field(payload, "limit")?,
-        parse_freshness(string_field(payload, "freshness")?)?,
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_impact_request(payload: &Value) -> Result<CodeImpactRequest, WebError> {
-    CodeImpactRequest::new(
-        code_selector(payload)?,
-        string_field(payload, "base_ref")?,
-        string_field(payload, "head_ref")?,
-        usize_field(payload, "limit")?,
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_software_request(payload: &Value) -> Result<SoftwareGlobalRequest, WebError> {
-    SoftwareGlobalRequest::new(
-        code_selector(payload)?,
-        parse_software_kind(string_field(payload, "kind")?)?,
-        parse_freshness(string_field(payload, "freshness")?)?,
-        usize_field(payload, "limit")?,
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_selector(payload: &Value) -> Result<CodeRepositorySelector, WebError> {
-    CodeRepositorySelector::new(
-        string_field(payload, "alias")?,
-        optional_string_field(payload, "ref").unwrap_or_else(|| "HEAD".to_owned()),
-        optional_string_array_field(payload, "path_filters")?,
-        optional_string_array_field(payload, "language_filters")?,
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_repository_set_create_request(
-    payload: &Value,
-) -> Result<CodeRepositorySetCreateRequest, WebError> {
-    CodeRepositorySetCreateRequest::new(
-        string_field(payload, "set_alias")?,
-        optional_string_field(payload, "description"),
-        optional_string_field(payload, "default_ref_policy_json"),
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_repository_set_add_request(
-    payload: &Value,
-) -> Result<CodeRepositorySetAddMemberRequest, WebError> {
-    CodeRepositorySetAddMemberRequest::new(
-        string_field(payload, "set_alias")?,
-        string_field(payload, "repository_alias")?,
-        string_field(payload, "ref")?,
-        optional_string_array_field(payload, "path_filters")?,
-        optional_string_array_field(payload, "language_filters")?,
-        optional_i32_field(payload, "priority")?.unwrap_or(0),
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_repository_set_remove_request(
-    payload: &Value,
-) -> Result<CodeRepositorySetRemoveMemberRequest, WebError> {
-    CodeRepositorySetRemoveMemberRequest::new(
-        string_field(payload, "set_alias")?,
-        string_field(payload, "repository_alias")?,
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))
-}
-
-fn code_repository_set_query_request(
-    payload: &Value,
-) -> Result<CodeRepositorySetQueryRequest, WebError> {
-    let mut request = CodeRepositorySetQueryRequest::new(
-        string_field(payload, "set_alias")?,
-        string_field(payload, "query")?,
-        parse_code_query_kind(string_field(payload, "kind")?)?,
-        usize_field(payload, "limit")?,
-        parse_freshness(string_field(payload, "freshness")?)?,
-        optional_string_array_field(payload, "path_filters")?,
-        optional_string_array_field(payload, "language_filters")?,
-    )
-    .map_err(|error| WebError::bad_request(error.to_string()))?;
-    request.exclude_generated = optional_bool_field(payload, "exclude_generated")?.unwrap_or(false);
-    Ok(request)
-}
-
-fn string_field<'a>(payload: &'a Value, field: &'static str) -> Result<&'a str, WebError> {
-    payload
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| WebError::bad_request(format!("{field} is required")))
-}
-
-fn optional_string_field(payload: &Value, field: &'static str) -> Option<String> {
-    payload
-        .get(field)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-}
-
-fn string_array_field(payload: &Value, field: &'static str) -> Result<Vec<String>, WebError> {
-    payload
-        .get(field)
-        .and_then(Value::as_array)
-        .ok_or_else(|| WebError::bad_request(format!("{field} must be an array")))?
-        .iter()
-        .map(|item| {
-            item.as_str()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| {
-                    WebError::bad_request(format!("{field} contains a non-string value"))
-                })
-        })
-        .collect()
-}
-
-fn optional_string_array_field(
-    payload: &Value,
-    field: &'static str,
-) -> Result<Vec<String>, WebError> {
-    if payload.get(field).is_none() {
-        return Ok(Vec::new());
-    }
-
-    string_array_field(payload, field)
-}
-
-fn usize_field(payload: &Value, field: &'static str) -> Result<usize, WebError> {
-    payload
-        .get(field)
-        .and_then(Value::as_u64)
-        .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| *value > 0)
-        .ok_or_else(|| WebError::bad_request(format!("{field} must be a positive integer")))
-}
-
-fn i32_field(payload: &Value, field: &'static str) -> Result<i32, WebError> {
-    payload
-        .get(field)
-        .and_then(Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
-        .ok_or_else(|| WebError::bad_request(format!("{field} must be an integer")))
-}
-
-fn optional_i32_field(payload: &Value, field: &'static str) -> Result<Option<i32>, WebError> {
-    if payload.get(field).is_none() {
-        return Ok(None);
-    }
-
-    i32_field(payload, field).map(Some)
-}
-
-fn optional_bool_field(payload: &Value, field: &'static str) -> Result<Option<bool>, WebError> {
-    if payload.get(field).is_none() {
-        return Ok(None);
-    }
-
-    payload
-        .get(field)
-        .and_then(Value::as_bool)
-        .map(Some)
-        .ok_or_else(|| WebError::bad_request(format!("{field} must be a boolean")))
-}
-
-fn parse_freshness(value: &str) -> Result<FreshnessPolicy, WebError> {
-    match value {
-        "allow-stale" => Ok(FreshnessPolicy::AllowStale),
-        "wait-until-fresh" => Ok(FreshnessPolicy::WaitUntilFresh),
-        "graph-only" => Ok(FreshnessPolicy::GraphOnly),
-        other => Err(WebError::bad_request(format!(
-            "unsupported freshness '{other}'"
-        ))),
-    }
-}
-
-fn parse_index_kind(value: &str) -> Result<IndexKind, WebError> {
-    match value {
-        "bm25" => Ok(IndexKind::Bm25),
-        "semantic" => Ok(IndexKind::Semantic),
-        "vector" => Ok(IndexKind::Vector),
-        other => Err(WebError::bad_request(format!(
-            "unsupported index kind '{other}'"
-        ))),
-    }
-}
-
-fn parse_code_query_kind(value: &str) -> Result<CodeQueryKind, WebError> {
-    match value {
-        "hybrid" => Ok(CodeQueryKind::Hybrid),
-        "symbol" => Ok(CodeQueryKind::Symbol),
-        "definition" => Ok(CodeQueryKind::Definition),
-        "references" => Ok(CodeQueryKind::References),
-        "callers" => Ok(CodeQueryKind::Callers),
-        "callees" => Ok(CodeQueryKind::Callees),
-        "imports" => Ok(CodeQueryKind::Imports),
-        "sbom" => Ok(CodeQueryKind::Sbom),
-        other => Err(WebError::bad_request(format!(
-            "unsupported code query kind '{other}'"
-        ))),
-    }
-}
-
-fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
-    match value {
-        "dependencies" => Ok(SoftwareGlobalKind::Dependencies),
-        "sdks" => Ok(SoftwareGlobalKind::Sdks),
-        "files" => Ok(SoftwareGlobalKind::Files),
-        "topics" => Ok(SoftwareGlobalKind::Topics),
-        "relationships" => Ok(SoftwareGlobalKind::Relationships),
-        "build" => Ok(SoftwareGlobalKind::Build),
-        "iac" => Ok(SoftwareGlobalKind::Iac),
-        "design" => Ok(SoftwareGlobalKind::Design),
-        "all" => Ok(SoftwareGlobalKind::All),
-        other => Err(WebError::bad_request(format!(
-            "unsupported software kind '{other}'"
-        ))),
-    }
-}
-
-fn optional_worker_kind(payload: &Value) -> Result<Option<WorkerKind>, WebError> {
-    optional_string_field(payload, "kind")
-        .map(|kind| {
-            WorkerKind::parse(&kind)
-                .map_err(|_| WebError::bad_request(format!("unsupported worker kind '{kind}'")))
-        })
-        .transpose()
-}
-
-fn optional_proposal_state(payload: &Value) -> Result<Option<ProposalState>, WebError> {
-    optional_string_field(payload, "state")
-        .map(|state| {
-            ProposalState::parse(&state)
-                .map_err(|_| WebError::bad_request(format!("unsupported proposal state '{state}'")))
-        })
-        .transpose()
-}
-
-fn proposal_decision_request(payload: &Value) -> Result<ProposalDecisionApiRequest, WebError> {
-    Ok(ProposalDecisionApiRequest {
-        actor: string_field(payload, "actor")?.to_owned(),
-        reason: optional_string_field(payload, "reason"),
-    })
 }
 
 #[derive(Debug, Deserialize)]
