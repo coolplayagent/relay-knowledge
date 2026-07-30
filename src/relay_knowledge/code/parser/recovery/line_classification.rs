@@ -1,8 +1,11 @@
 use super::{
-    c_family_decorator_payload_token, c_family_external_type_token, c_family_head_tokens,
-    c_family_known_decorator_token, c_family_top_level_parameter_start,
-    c_family_typedef_like_function_signature, c_identifier_name,
+    c_family_typedef_like_function_signature,
+    declaration::{
+        c_family_decorator_payload_token, c_family_external_type_token, c_family_head_tokens,
+        c_family_known_decorator_token, c_identifier_name,
+    },
     decorated_function_head_has_recovery_decorator,
+    signature::c_family_top_level_parameter_start,
 };
 
 pub(super) fn c_family_decorated_type_line(trimmed: &str) -> bool {

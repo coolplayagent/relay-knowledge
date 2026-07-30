@@ -344,6 +344,12 @@ directives, or recognized decorator-bearing declarations with
 declaration-shaped bodies. Recovery still requires reliable structured facts
 such as symbols, references, or imports.
 
+C/C++ recovery keeps declaration-head token/type/qualifier recognition separate
+from function-signature, parameter, operator, method-suffix, postfix-attribute,
+and recovery-decorator recognition. The signature owner depends one-way on the
+lower declaration and literal-aware scan owners, and both carry direct sibling
+tests for accepted and rejected shapes.
+
 Full Git repository indexing first discovers the tracked source layout. It then
 uses resource-bounded SQLite batches with durable checkpoints and a finalize
 phase for cross-batch references, includes, and call edges, so large scopes

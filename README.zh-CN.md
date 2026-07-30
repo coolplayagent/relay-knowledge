@@ -223,6 +223,8 @@ owner；`gitlink::mod` 只保留模块声明和边界重导出。
 
 C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头文件 typedef/module table 声明、GCC/Clang 风格声明属性与 inline 扩展（如 `__attribute__((always_inline))`、`attribute((always_inline))`、`__always_inline`）、预处理器或已识别 decorator 声明区域，decorator 类型体仍保持声明形态，并且仍能抽取可靠结构化事实，会被保守恢复为 parsed。
 
+C/C++ recovery 把 declaration-head normalization 与 token/type/qualifier 识别放在 `declaration` owner，把 function signature、parameter boundary、operator、method suffix、postfix attribute 与 recovery decorator 判定放在 `signature` owner；依赖保持 `signature -> declaration/scan` 单向，两个 owner 都直接挂载 accepted/rejected shape UT。
+
 Web 路由检测把 Express orchestration、import/factory 与 application/router alias
 发现、call/path syntax、参数/handler 解析、有界多行 statement aggregation、直接与
 链式 registration recording、mount discovery 和 prefix materialization 统一收敛在
