@@ -3,6 +3,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::*;
 use crate::{
+    api::{InterfaceKind, RequestContext},
     domain::{CodeQueryKind, SoftwareGlobalKind},
     env::NetworkEnvOverrides,
 };

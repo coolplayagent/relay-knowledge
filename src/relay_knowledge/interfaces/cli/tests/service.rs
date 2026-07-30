@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use super::*;
 use crate::{
-    application::RuntimeConfiguration,
+    api::{InterfaceKind, RequestContext},
+    application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
         CodeIndexMode, CodeIndexResourceBudget, CodeIndexSnapshot, CodeIndexTaskState,
         CodeParseStatus, CodeRepositoryRegistration, RepositoryCodeFileRecord,

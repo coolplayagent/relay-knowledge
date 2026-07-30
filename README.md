@@ -661,7 +661,10 @@ the paired-test `interfaces::cli::command::parse` owner, while shared flag-value
 and freshness validation live in `command::values`. CLI errors, structured
 grammar diagnostics, exit-code classification, and text/JSON stderr encoding
 live in `command::diagnostics`. The CLI root re-exports these stable contracts
-and retains execution dispatch.
+and retains the process facade. Process-free fast paths, remote/local
+environment composition, and shared-service action dispatch live in the
+paired-test `runtime::dispatch` owner; explicit versus environment remote URL
+selection and remote eligibility live in `runtime::selection`.
 
 ```bash
 relay-knowledge status --format json

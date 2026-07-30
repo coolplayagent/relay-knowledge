@@ -341,7 +341,9 @@ adapter 将 global option/token 解析与命令族分发收敛到直接配对 UT
 `interfaces::cli::command::parse` owner，共享 flag value 与 freshness 校验归
 `command::values`。CLI error、结构化 grammar diagnostic、退出码分类以及
 text/JSON stderr 编码归 `command::diagnostics`。CLI 根只重导出这些稳定合同，并
-继续负责执行 dispatch。
+保留 process facade。无需 runtime 的快路径、remote/local 环境装配与共享 service
+action dispatch 归直接配对 UT 的 `runtime::dispatch` owner；显式/环境 remote URL
+优先级与远端能力判定归 `runtime::selection`。
 
 ```bash
 relay-knowledge status --format json

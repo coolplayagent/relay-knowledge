@@ -4,7 +4,8 @@ use serde_json::Value;
 
 use super::*;
 use crate::{
-    application::RuntimeConfiguration,
+    api::{InterfaceKind, RequestContext},
+    application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::ServiceManagerAction,
     env::{EnvironmentConfig, PlatformKind},
     storage::SqliteGraphStore,
