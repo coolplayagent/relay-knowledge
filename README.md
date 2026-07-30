@@ -492,9 +492,9 @@ language listed above, including JavaScript/JSX, Kotlin, Scala, C#, PHP, Rust,
 and Swift. Package-manager or SDK imports without authorized indexed source
 remain unresolved edge metadata rather than parser degradation.
 
-Web route detection groups Express registration, import/factory and
+Web route detection groups Express orchestration, import/factory and
 application/router alias discovery, call/path syntax, argument/handler parsing,
-mount discovery, and mount materialization under one
+direct and chained registration recording, mount discovery, and mount materialization under one
 `detect/express/` subdomain with direct unit tests for each owner. Python static
 route strings and JavaScript
 comment/string/regex lexical state remain separate named modules rather than a

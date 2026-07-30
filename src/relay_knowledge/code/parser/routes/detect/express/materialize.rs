@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::ExpressRouteInfo;
 use super::mounts::{DYNAMIC_EXPRESS_MOUNT_PREFIX, ExpressRouterMount};
+use super::registrations::ExpressRouteInfo;
 use super::syntax::merge_url_parts;
 use crate::code::parser::routes::detect::RouteCandidate;
 

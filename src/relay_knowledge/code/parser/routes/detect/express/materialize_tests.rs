@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 use super::materialize_express_routes;
-use crate::code::parser::routes::detect::express::ExpressRouteInfo;
 use crate::code::parser::routes::detect::express::mounts::{
     DYNAMIC_EXPRESS_MOUNT_PREFIX, ExpressRouterMount,
 };
+use crate::code::parser::routes::detect::express::registrations::ExpressRouteInfo;
 
 fn route(receiver_name: &str, local_url: &str) -> ExpressRouteInfo {
     ExpressRouteInfo {
