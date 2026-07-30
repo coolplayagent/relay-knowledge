@@ -214,7 +214,8 @@ SQL 文件会贡献 table、view/materialized view、function/procedure、trigge
 Gitlink/submodule 源码访问统一收敛在 `code/source/gitlink/`。tree commit 判定、
 child-filtered entry 发现、初始化或反初始化 submodule blob 读取及 worktree root
 校验由 `entries` owner 负责并直接挂载 UT；incremental 与 worktree overlay 复用
-该边界。
+该边界。双侧 submodule change 分类、nested gitlink 有界递归、worktree/git-dir
+diff fallback、scope-aware entry expansion 与预算检查归独立 `diff` owner。
 
 仓库注册会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
