@@ -512,7 +512,9 @@ grouped under `detect/flask/`; Python triple-quoted-string and comment lexical
 state, bounded multiline statement aggregation, and call-argument parsing each
 have dedicated owners with direct unit tests. Argument parsing owns top-level
 boundaries, keyword values, route paths, method collections, named handlers,
-router identifiers, and static-versus-dynamic mount prefixes.
+router identifiers, and static-versus-dynamic mount prefixes. Router declaration,
+late-merge, include/register mount recording, and framework resolution share a
+separate router-state owner.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,

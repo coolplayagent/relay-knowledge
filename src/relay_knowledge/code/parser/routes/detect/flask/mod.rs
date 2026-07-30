@@ -4,15 +4,20 @@ use super::RouteCandidate;
 
 mod arguments;
 mod python_lexical;
+mod routers;
 mod statements;
 
 use arguments::{
     DYNAMIC_PYTHON_MOUNT_PREFIX, extract_methods_from_flask_args,
     extract_python_add_url_rule_positional_handler, extract_python_keyword_value,
-    extract_python_route_path, extract_python_router_argument, parse_flask_methods_decorator,
-    python_handler_name_from_value, python_prefix_argument, trim_one_trailing_paren,
+    extract_python_route_path, parse_flask_methods_decorator, python_handler_name_from_value,
+    trim_one_trailing_paren,
 };
 use python_lexical::python_code_lines_without_triple_quoted_strings;
+use routers::{
+    PythonRouterInfo, apply_python_include_router_prefix, apply_python_register_blueprint_prefix,
+    merge_python_router_declaration, parse_python_router_prefix, route_framework,
+};
 use statements::{
     flask_decorator_statement, python_add_url_rule_statement, python_include_router_statement,
     python_register_blueprint_statement, python_router_prefix_statement,
@@ -128,15 +133,6 @@ struct PythonRouteBinding {
     line: usize,
 }
 
-#[derive(Clone)]
-struct PythonRouterInfo {
-    local_prefix: String,
-    mount_prefixes: BTreeSet<String>,
-    framework: String,
-    mount_required: bool,
-    cross_file_mount_candidate: bool,
-}
-
 fn parse_flask_decorator(
     line: &str,
     routers: &BTreeMap<String, PythonRouterInfo>,
@@ -164,79 +160,6 @@ fn parse_flask_decorator(
         methods,
         framework,
     })
-}
-
-fn parse_python_router_prefix(line: &str) -> Option<(String, PythonRouterInfo)> {
-    let (left, right) = line.split_once('=')?;
-    let router_name = python_assignment_name(left)?;
-    if router_name.is_empty()
-        || !router_name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '_')
-    {
-        return None;
-    }
-    let router_info = if let Some(args) = python_call_arguments(right, "APIRouter(") {
-        let local_prefix = python_prefix_argument(args, "prefix");
-        PythonRouterInfo {
-            cross_file_mount_candidate: python_router_name_is_cross_file_candidate(
-                &router_name,
-                &local_prefix,
-            ),
-            local_prefix,
-            mount_prefixes: BTreeSet::new(),
-            framework: "fastapi".to_owned(),
-            mount_required: true,
-        }
-    } else if python_call_arguments(right, "FastAPI(").is_some() {
-        PythonRouterInfo {
-            local_prefix: String::new(),
-            mount_prefixes: BTreeSet::new(),
-            framework: "fastapi".to_owned(),
-            mount_required: false,
-            cross_file_mount_candidate: false,
-        }
-    } else {
-        let args = python_call_arguments(right, "Blueprint(")?;
-        let local_prefix = python_prefix_argument(args, "url_prefix");
-        PythonRouterInfo {
-            cross_file_mount_candidate: python_router_name_is_cross_file_candidate(
-                &router_name,
-                &local_prefix,
-            ),
-            local_prefix,
-            mount_prefixes: BTreeSet::new(),
-            framework: "flask".to_owned(),
-            mount_required: true,
-        }
-    };
-
-    Some((router_name, router_info))
-}
-
-fn python_call_arguments<'a>(source: &'a str, marker: &str) -> Option<&'a str> {
-    let start = source.find(marker)? + marker.len();
-    Some(trim_one_trailing_paren(&source[start..]))
-}
-
-fn merge_python_router_declaration(
-    routers: &mut BTreeMap<String, PythonRouterInfo>,
-    router_name: String,
-    mut router_info: PythonRouterInfo,
-) {
-    if let Some(existing) = routers.remove(&router_name) {
-        router_info.mount_prefixes = existing.mount_prefixes;
-    }
-    routers.insert(router_name, router_info);
-}
-
-fn python_router_name_is_cross_file_candidate(router_name: &str, local_prefix: &str) -> bool {
-    (router_name == "router" && !local_prefix.is_empty())
-        || (!matches!(router_name, "bp" | "blueprint")
-            && (router_name.ends_with("_router")
-                || router_name.ends_with("_blueprint")
-                || router_name.ends_with("Router")
-                || router_name.ends_with("Blueprint")))
 }
 
 fn parse_python_add_url_rule(
@@ -273,69 +196,6 @@ fn parse_python_add_url_rule(
             })
             .collect(),
     )
-}
-
-fn apply_python_include_router_prefix(
-    statement: &str,
-    routers: &mut BTreeMap<String, PythonRouterInfo>,
-) -> bool {
-    let Some(paren_pos) = statement.find(".include_router(") else {
-        return false;
-    };
-    let args = trim_one_trailing_paren(&statement[paren_pos + ".include_router(".len()..]);
-    let Some(router_name) = extract_python_router_argument(args, "router") else {
-        return false;
-    };
-    let prefix = python_prefix_argument(args, "prefix");
-    let router_info = routers
-        .entry(router_name)
-        .or_insert_with(|| PythonRouterInfo {
-            local_prefix: String::new(),
-            mount_prefixes: BTreeSet::new(),
-            framework: "fastapi".to_owned(),
-            mount_required: true,
-            cross_file_mount_candidate: false,
-        });
-    router_info.mount_prefixes.insert(prefix);
-    router_info.framework = "fastapi".to_owned();
-    true
-}
-
-fn apply_python_register_blueprint_prefix(
-    statement: &str,
-    routers: &mut BTreeMap<String, PythonRouterInfo>,
-) -> bool {
-    let Some(paren_pos) = statement.find(".register_blueprint(") else {
-        return false;
-    };
-    let args = trim_one_trailing_paren(&statement[paren_pos + ".register_blueprint(".len()..]);
-    let Some(blueprint_name) = extract_python_router_argument(args, "blueprint") else {
-        return false;
-    };
-    let prefix = python_prefix_argument(args, "url_prefix");
-    let router_info = routers
-        .entry(blueprint_name)
-        .or_insert_with(|| PythonRouterInfo {
-            local_prefix: String::new(),
-            mount_prefixes: BTreeSet::new(),
-            framework: "flask".to_owned(),
-            mount_required: true,
-            cross_file_mount_candidate: false,
-        });
-    router_info.mount_prefixes.insert(prefix);
-    router_info.framework = "flask".to_owned();
-    true
-}
-
-fn python_assignment_name(left: &str) -> Option<String> {
-    let name = left
-        .trim()
-        .split_once(':')
-        .map_or(left.trim(), |(name, _)| name.trim());
-    if name.is_empty() {
-        return None;
-    }
-    Some(name.to_owned())
 }
 
 fn materialize_python_routes(
@@ -412,22 +272,6 @@ fn python_router_prefixes(router_info: &PythonRouterInfo) -> BTreeSet<String> {
 fn python_decorator_receiver(func_part: &str) -> Option<String> {
     let (receiver, _) = func_part.rsplit_once('.')?;
     Some(receiver.rsplit('.').next().unwrap_or(receiver).to_owned())
-}
-
-fn route_framework(
-    func_part: &str,
-    receiver_name: Option<&str>,
-    routers: &BTreeMap<String, PythonRouterInfo>,
-) -> String {
-    if let Some(receiver_name) = receiver_name {
-        if let Some(router_info) = routers.get(receiver_name) {
-            return router_info.framework.clone();
-        }
-    }
-    if func_part.ends_with(".api_route") {
-        return "fastapi".to_owned();
-    }
-    "flask".to_owned()
 }
 
 fn extract_flask_http_method(func_part: &str) -> String {
