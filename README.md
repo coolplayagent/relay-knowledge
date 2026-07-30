@@ -262,6 +262,12 @@ CI installs the current stable Rust toolchain. Update local `stable` before the
 final Clippy gate so newly stabilized lints cannot pass locally and fail only
 after the branch is pushed.
 
+OpenTelemetry dependencies are upgraded as one compatibility family:
+`opentelemetry`, `opentelemetry_sdk`, and `opentelemetry-otlp` stay on the same
+minor release, while `tracing-opentelemetry` uses the matching integration
+release. A partial family update is not release-ready because it can introduce
+duplicate telemetry traits and incompatible provider types.
+
 The self-iteration harness runs its own product and harness quality checks in
 parallel dependency stages and defaults `--jobs auto` to the local CPU count.
 

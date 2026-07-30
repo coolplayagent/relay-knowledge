@@ -182,6 +182,11 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 CI 安装当前最新的 Rust stable 工具链。最终执行 Clippy 门禁前应先更新本地
 `stable`，避免新稳定的 lint 在本地旧版本中未触发、直到推送后才失败。
 
+OpenTelemetry 依赖必须作为一个兼容族整体升级：`opentelemetry`、
+`opentelemetry_sdk` 与 `opentelemetry-otlp` 保持相同 minor 版本，
+`tracing-opentelemetry` 使用与其匹配的集成版本。只升级其中一部分会引入重复的
+telemetry trait 和不兼容的 provider 类型，因此不能进入发版候选。
+
 自迭代 harness 默认只执行轻量 fast 门禁。完整 profile 的产品与 harness
 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。
 
