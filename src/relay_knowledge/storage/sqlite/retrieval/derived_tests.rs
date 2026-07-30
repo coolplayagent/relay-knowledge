@@ -139,18 +139,3 @@ fn vector_source_score_uses_lexical_coverage_as_bounded_tie_breaker() {
     assert_eq!(vector_source_score(-0.5, 4.0, 4), 0.0);
     assert_eq!(vector_source_score(0.5, 4.0, 0), 0.5);
 }
-
-#[test]
-fn overlap_score_matches_identifier_variants_after_fast_path_miss() {
-    let labels = vec!["RuntimeBudget".to_owned()];
-
-    assert_eq!(
-        overlap_score(
-            "retry_policy",
-            "Retry policy controls the runtime budget",
-            &labels,
-            Some("src/runtime/budget.rs"),
-        ),
-        2.0
-    );
-}

@@ -554,6 +554,13 @@ narrower semantics, and Rust scoring recognizes snake_case/CamelCase identifier
 parts, multi-part symbol names, call-direction context, and declaration-shaped
 API chunks.
 
+Graph retrieval keeps deterministic token signatures, local hashed vectors,
+semantic overlap, cosine similarity, and identifier-aware lexical overlap in
+the SQLite retrieval `local_model` owner with direct sibling tests.
+`advanced`, `context`, and `derived` consume this pure lower layer, while the
+retrieval facade retains schema, document materialization, and search
+orchestration.
+
 Code-index schema initialization keeps only ordering, legacy-column
 compatibility, and migration orchestration in the `code_schema` facade.
 Repository facts, durable index tasks, repository-set/workspace state, and

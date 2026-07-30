@@ -104,7 +104,7 @@ Durable operations 持久化统一收敛在 `storage::sqlite::operations` 目录
 
 Index lifecycle 持久化统一收敛在 `storage::sqlite::indexing` 目录：`mod.rs` 负责 cursor state、refresh orchestration、校验与稳定 refresh-task identity，`cursor_metadata`、`schema`、`task_queue` 隔离各自职责，`refresh_tests`、`queue_tests`、`schema_migration_tests` 与被验证边界放在一起。不得把 index lifecycle 测试或带 `index_refresh_*` 前缀的实现文件放回 SQLite 根目录。
 
-三层 graph retrieval 持久化统一收敛在 `storage::sqlite::retrieval` 目录：`mod.rs` 负责 schema 初始化、document materialization、检索协调和共享 scoring input，具名子模块分别负责 advanced graph path、BM25 与有界 fallback、context assembly、derived document、label trigram、schema migration、alias 和 ranking；定向测试与这些实现同目录。不得恢复父目录级 `retrieval_*` 文件，也不得用 path override 隐藏物理所有权边界。
+三层 graph retrieval 持久化统一收敛在 `storage::sqlite::retrieval` 目录：`mod.rs` 负责 schema 初始化、document materialization 和检索协调，`local_model` 独占确定性 token signature、本地 hashed vector、semantic/cosine/identifier overlap 及 stable hash 等纯 scoring primitive，具名子模块分别负责 advanced graph path、BM25 与有界 fallback、context assembly、derived document、label trigram、schema migration、alias 和 ranking。依赖方向必须保持 `advanced`/`context`/`derived`/facade → `local_model`，不得让纯算法层反向依赖 SQL、候选读取或检索编排；定向测试与这些实现同目录。不得恢复父目录级 `retrieval_*` 文件，也不得用 path override 隐藏物理所有权边界。
 
 Maven 持久化在物理结构上统一收敛到 `storage::sqlite::maven`：`mod.rs` 协调 build/dependency 投影，`model` 负责 raw/effective POM model，`xml` 负责有界 XML 提取，`pom_path` 负责受仓库范围约束的相对 POM 解析，`property_interpolation` 负责有界递归属性展开；定向测试与 review regression 测试保持同目录。不得把这些规则重新合并到通用 Maven support 模块，也不得用父目录相对 path override 隐藏边界。
 
@@ -208,7 +208,7 @@ CLI render、repository、repository-set 与 setup adapter 的 `mod.rs` owner �
 
 Model-provider facade 以 `mod.rs` 与 `mod_tests.rs` 配对，覆盖 profile、catalog、probe、discovery 与 fallback 行为。
 
-SQLite canvas、code-graph、code-schema、code-view、file-index、Maven、operations 与 retrieval owner 都以 `mod_tests.rs` 配对 facade。聚焦的 schema、ranking、migration 与 persistence 测试套件保留描述性文件名；这些存储子域禁止使用通用 `tests.rs`。
+SQLite canvas、code-graph、code-schema、code-view、file-index、Maven、operations 与 retrieval owner 都以 `mod_tests.rs` 配对 facade；retrieval 的纯 local scoring primitive 由 `local_model_tests` 直接覆盖，不得回流到 facade 或 `derived_tests`。聚焦的 schema、ranking、migration 与 persistence 测试套件保留描述性文件名；这些存储子域禁止使用通用 `tests.rs`。
 
 SQLite code-query 的 hybrid chunk 证据准入归 `hybrid::chunk_gate` 所有，并与 `chunk_gate_tests` 配对；direct-result 准入、FTS 查询构造、candidate 预算和 chunk 结果合并测试分别留在自己的生产 owner 旁。code-query facade 只负责编排检索层，不得重新承担 hybrid 证据密度或语言域策略。
 

@@ -11,7 +11,7 @@ use crate::{
     storage::{GraphSearchRequest, StorageError},
 };
 
-use super::{RawBm25Row, ScoredHit, evidence_group_key, overlap_score};
+use super::{RawBm25Row, ScoredHit, evidence_group_key, local_model::overlap_score};
 
 const FACT_LOOKUP_CHUNK_SIZE: usize = 250;
 
