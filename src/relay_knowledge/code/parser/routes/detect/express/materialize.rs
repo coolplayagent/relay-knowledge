@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{DYNAMIC_EXPRESS_MOUNT_PREFIX, ExpressRouteInfo, ExpressRouterMount, merge_url_parts};
+use super::syntax::merge_url_parts;
+use super::{DYNAMIC_EXPRESS_MOUNT_PREFIX, ExpressRouteInfo, ExpressRouterMount};
 use crate::code::parser::routes::detect::RouteCandidate;
 
 pub(super) fn materialize_express_routes(

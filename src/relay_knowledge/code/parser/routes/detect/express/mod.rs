@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 mod arguments;
 mod bindings;
 mod materialize;
+mod syntax;
 
 use super::javascript::{
     find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
@@ -15,6 +16,12 @@ use bindings::{
     parse_express_router_alias,
 };
 use materialize::materialize_express_routes;
+use syntax::{
+    express_http_method, express_method_position, express_receiver_name,
+    express_route_start_position, express_route_urls, express_router_name_is_router,
+    extract_quoted_strings, javascript_array_literal_inner, javascript_call_end,
+    javascript_top_level_arguments, route_url_literals,
+};
 
 pub(super) const DYNAMIC_EXPRESS_MOUNT_PREFIX: &str = "\0dynamic";
 const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
@@ -456,196 +463,6 @@ fn route_call_is_closed(
     false
 }
 
-fn express_method_position(line: &str) -> Option<usize> {
-    [
-        ".get(",
-        ".post(",
-        ".put(",
-        ".delete(",
-        ".patch(",
-        ".head(",
-        ".options(",
-        ".all(",
-    ]
-    .into_iter()
-    .filter_map(|method| find_javascript_pattern_outside_strings(line, method))
-    .min()
-}
-
-fn express_route_start_position(line: &str) -> Option<usize> {
-    [
-        express_method_position(line),
-        find_javascript_pattern_outside_strings(line, ".route("),
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-}
-
-fn express_http_method(raw_method: &str) -> Option<String> {
-    let method = raw_method.to_ascii_lowercase();
-    match method.as_str() {
-        "get" | "post" | "put" | "delete" | "patch" | "head" | "options" => Some(method),
-        "all" => Some("any".to_owned()),
-        _ => None,
-    }
-}
-
-fn express_route_urls(arguments: &str) -> Vec<String> {
-    let Some(first_argument) = first_top_level_argument(arguments) else {
-        return Vec::new();
-    };
-    if let Some(url) = extract_quoted_string(first_argument) {
-        return route_url_literals([url]);
-    }
-    let Some(array_inner) = javascript_array_literal_inner(first_argument) else {
-        return Vec::new();
-    };
-    route_url_literals(extract_quoted_strings(array_inner))
-}
-
-fn route_url_literals(urls: impl IntoIterator<Item = String>) -> Vec<String> {
-    urls.into_iter()
-        .filter(|url| url.starts_with('/') && !url.contains("${"))
-        .collect()
-}
-
-fn first_top_level_argument(arguments: &str) -> Option<&str> {
-    let arguments = arguments.trim_start();
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, character) in arguments.char_indices() {
-        if let Some(quote_char) = quote {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if character == quote_char {
-                quote = None;
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' | '`' => quote = Some(character),
-            '(' | '[' | '{' => depth += 1,
-            ')' | ',' if depth == 0 => {
-                let argument = arguments[..index].trim();
-                return (!argument.is_empty()).then_some(argument);
-            }
-            ')' | ']' | '}' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    let argument = arguments.trim();
-    (!argument.is_empty()).then_some(argument)
-}
-
-fn javascript_call_end(arguments: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, character) in arguments.char_indices() {
-        if let Some(quote_char) = quote {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if character == quote_char {
-                quote = None;
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' | '`' => quote = Some(character),
-            '(' | '[' | '{' => depth += 1,
-            ')' if depth == 0 => return Some(index + character.len_utf8()),
-            ')' | ']' | '}' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    None
-}
-
-fn javascript_array_literal_inner(value: &str) -> Option<&str> {
-    let value = value.trim();
-    if !value.starts_with('[') {
-        return None;
-    }
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, character) in value.char_indices() {
-        if let Some(quote_char) = quote {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if character == quote_char {
-                quote = None;
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' | '`' => quote = Some(character),
-            '[' => depth += 1,
-            ']' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(&value[1..index]);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn extract_quoted_strings(value: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut offset = 0usize;
-    while let Some(start_relative) = value[offset..].find(['\'', '"', '`']) {
-        let start = offset + start_relative;
-        if let Some(url) = extract_quoted_string(&value[start..]) {
-            offset = start + url.len() + 2;
-            values.push(url);
-        } else {
-            break;
-        }
-    }
-    values
-}
-
-fn express_receiver_name(receiver: &str) -> Option<String> {
-    receiver
-        .rsplit(|character: char| {
-            !(character.is_ascii_alphanumeric() || character == '_' || character == '$')
-        })
-        .find(|part| !part.is_empty())
-        .map(str::to_owned)
-}
-
-fn express_router_name_is_router(receiver_name: &str, router_names: &BTreeSet<String>) -> bool {
-    if router_names.contains(receiver_name) {
-        return true;
-    }
-    let receiver_name = receiver_name.to_ascii_lowercase();
-
-    receiver_name == "app" || receiver_name == "router"
-}
-
 fn express_router_mount_names(arguments: &[&str], router_names: &BTreeSet<String>) -> Vec<String> {
     let mut names = BTreeSet::new();
     for argument in arguments {
@@ -691,71 +508,6 @@ fn express_use_argument_looks_like_dynamic_path(argument: &str) -> bool {
     ["prefix", "path", "url", "route", "base", "mount"]
         .iter()
         .any(|marker| name.contains(marker))
-}
-
-fn javascript_top_level_arguments(rest: &str) -> Vec<&str> {
-    let mut arguments = Vec::new();
-    let mut argument_start = 0usize;
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, character) in rest.char_indices() {
-        if let Some(quote_char) = quote {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if character == quote_char {
-                quote = None;
-            }
-            continue;
-        }
-        match character {
-            '\'' | '"' | '`' => quote = Some(character),
-            '(' | '[' | '{' => depth += 1,
-            ')' if depth == 0 => {
-                let argument = rest[argument_start..index].trim();
-                if !argument.is_empty() {
-                    arguments.push(argument);
-                }
-                return arguments;
-            }
-            ')' | ']' | '}' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                let argument = rest[argument_start..index].trim();
-                if !argument.is_empty() {
-                    arguments.push(argument);
-                }
-                argument_start = index + character.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    let argument = rest[argument_start..].trim();
-    if !argument.is_empty() {
-        arguments.push(argument);
-    }
-    arguments
-}
-
-pub(super) fn merge_url_parts(prefix: &str, suffix: &str) -> String {
-    if prefix.is_empty() {
-        return if suffix.starts_with('/') {
-            suffix.to_owned()
-        } else {
-            format!("/{suffix}")
-        };
-    }
-    if suffix.is_empty() {
-        return prefix.to_owned();
-    }
-    let prefix = prefix.trim_end_matches('/');
-    let suffix = suffix.trim_start_matches('/');
-    format!("{prefix}/{suffix}")
 }
 
 #[cfg(test)]
