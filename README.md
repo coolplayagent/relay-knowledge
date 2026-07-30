@@ -514,7 +514,9 @@ have dedicated owners with direct unit tests. Argument parsing owns top-level
 boundaries, keyword values, route paths, method collections, named handlers,
 router identifiers, and static-versus-dynamic mount prefixes. Router declaration,
 late-merge, include/register mount recording, and framework resolution share a
-separate router-state owner.
+separate router-state owner. Receiver URL expansion, mount-prefix joining,
+dynamic-prefix filtering, route-fact creation, and deduplication live in a
+dedicated materialization owner.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
