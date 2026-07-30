@@ -86,6 +86,7 @@ fn parses_methods_decorators_and_default_route_methods() {
         extract_methods_from_flask_args(r#""/items", methods=METHODS"#),
         vec!["any".to_owned()]
     );
+    assert!(parse_flask_methods_decorator("@app.methods").is_none());
 }
 
 #[test]

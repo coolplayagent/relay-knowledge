@@ -235,7 +235,9 @@ owner；argument owner 负责顶层边界、keyword value、route path、method
 collection、具名 handler、router identifier 与静态/动态 mount prefix 分类，
 router-state owner 负责 declaration、late merge、include/register mount 记录与
 framework 解析；materialization owner 负责 receiver URL 展开、mount-prefix
-合并、动态 prefix 过滤、route fact 生成与去重，所有 owner 都直接挂载 UT。
+合并、动态 prefix 过滤、route fact 生成与去重；registration owner 负责 route
+decorator、`add_url_rule`、methods override、receiver/handler 识别与 Python
+function 绑定，所有 owner 都直接挂载 UT。
 
 代码仓库 full index 会先发现 tracked source layout，再使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
 

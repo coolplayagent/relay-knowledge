@@ -72,7 +72,10 @@ fn records_blueprint_mounts_and_resolves_frameworks() {
 }
 
 #[test]
-fn rejects_unknown_factories_and_invalid_assignment_names() {
+fn accepts_blueprints_and_rejects_unknown_factories_or_invalid_names() {
+    assert!(
+        parse_python_router_prefix("api = Blueprint('api', __name__, url_prefix='/v1')").is_some()
+    );
     assert!(parse_python_router_prefix("router = CustomRouter()").is_none());
     assert!(parse_python_router_prefix("items-router = APIRouter()").is_none());
 }

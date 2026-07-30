@@ -516,7 +516,9 @@ router identifiers, and static-versus-dynamic mount prefixes. Router declaration
 late-merge, include/register mount recording, and framework resolution share a
 separate router-state owner. Receiver URL expansion, mount-prefix joining,
 dynamic-prefix filtering, route-fact creation, and deduplication live in a
-dedicated materialization owner.
+dedicated materialization owner. Route decorators, `add_url_rule`, methods
+overrides, receiver/handler recognition, and Python-function binding share a
+registration owner.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
