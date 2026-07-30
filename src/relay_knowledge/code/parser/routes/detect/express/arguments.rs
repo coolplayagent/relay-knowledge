@@ -200,5 +200,5 @@ fn strip_javascript_keyword<'a>(argument: &'a str, keyword: &str) -> Option<&'a 
 }
 
 #[cfg(test)]
-#[path = "express_arguments_tests.rs"]
+#[path = "arguments_tests.rs"]
 mod tests;

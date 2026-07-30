@@ -1,14 +1,15 @@
 use std::collections::BTreeSet;
 
-use super::express_arguments::{
-    extract_handler_name, extract_handler_name_from_arguments, extract_quoted_string,
-};
-use super::express_materialize::materialize_express_routes;
+mod arguments;
+mod materialize;
+
 use super::javascript::{
     find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
     statement_ends_with_semicolon,
 };
 use super::{ANONYMOUS_ROUTE_HANDLER_NAME, RouteCandidate};
+use arguments::{extract_handler_name, extract_handler_name_from_arguments, extract_quoted_string};
+use materialize::materialize_express_routes;
 
 pub(super) const DYNAMIC_EXPRESS_MOUNT_PREFIX: &str = "\0dynamic";
 const MAX_EXPRESS_ROUTE_REGISTRATION_LINES: usize = 12;
@@ -937,3 +938,7 @@ pub(super) fn merge_url_parts(prefix: &str, suffix: &str) -> String {
     let suffix = suffix.trim_start_matches('/');
     format!("{prefix}/{suffix}")
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
