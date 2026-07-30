@@ -289,6 +289,8 @@ worktree overlay 使用 Git status：被 `.gitignore` 忽略的 untracked 文件
 
 代码仓库词法检索使用 SQLite FTS 候选表覆盖 symbol、reference、call、import、SBOM dependency 和 chunk。有效 path filter 会在 FTS 候选窗口内先过滤再进入有界评分；graph edge 候选在截断前按 BM25 排序；fuzzy symbol 召回可以命中任一查询词，而 typed graph edge 查询保持更窄语义；Rust 评分会识别 snake_case/CamelCase identifier 片段、多段符号名、调用方向上下文和声明形态 API chunk。
 
+Code-index schema 初始化把 table/index 顺序与 migration 编排保留在 `code_schema` facade；`search_backfill` owner 独占 symbol、reference、import、dependency、feature flag、call、route 与 chunk 的一次性 FTS document 物化、search metadata 同步，以及 signature 升级后的事务性 call-document 重建。同级定向测试保护 legacy call language 继承和 metadata 幂等同步合同。
+
 `repo query --kind sbom` 会返回索引期从 Cargo、npm、Go、Python、Maven effective `pom.xml`/BOM、Gradle 和 Conan manifest/lockfile 提取的依赖清单；它不会执行包管理器、访问 registry，也不提供漏洞或许可证分析。
 
 Maven effective POM 只基于已索引证据解析仓库内 parent POM、properties、dependency management、profiles、plugin management、modules 和 imported BOM 声明。

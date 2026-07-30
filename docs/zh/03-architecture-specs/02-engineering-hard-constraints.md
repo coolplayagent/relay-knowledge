@@ -120,7 +120,7 @@ Repository set 持久化统一收敛在 `storage::sqlite::code_set`：`mod.rs` �
 
 Monorepo workspace 持久化统一收敛在 `storage::sqlite::code_workspace`：`mod.rs` 负责自动 workspace set、package mapping、跨成员 import resolution 和 workspace-format normalization，`tests` 覆盖 lifecycle/mapping 不变量，`lookup_tests` 覆盖语言级 import normalization。不得恢复根目录级 `code_workspace_*` 兄弟文件。
 
-Code index schema 所有权统一收敛在 `storage::sqlite::code_schema`：`mod.rs` 负责当前 table/index 和初始化顺序，`migrations` 负责有界兼容转换，`route_schema` 负责 route 专属 DDL，`tests` 验证 schema 与 migration 不变量。不得再通过 `code_schema_*` 前缀把这些文件拆散到 SQLite 根目录。
+Code index schema 所有权统一收敛在 `storage::sqlite::code_schema`：`mod.rs` 负责当前 table/index、初始化顺序与 migration 编排，`migrations` 负责有界兼容转换，`route_schema` 负责 route 专属 DDL，`search_backfill` 负责 symbol、reference、import、dependency、feature-flag、call、route 与 chunk 的一次性 FTS document 回填、search metadata 同步以及 call-signature 升级后的事务性 document 重建。`mod_tests` 验证 facade schema/migration 不变量，`search_backfill_tests` 直接验证回填 owner 的 legacy language 继承与 metadata 幂等合同。不得把 search materialization SQL 重新塞回 schema facade，也不得再通过 `code_schema_*` 前缀把这些文件拆散到 SQLite 根目录。
 
 Code query 持久化统一收敛在 `storage::sqlite::code_query`：`mod.rs` 协调有界检索层，`calls`、`imports`、`symbols`、`hybrid` 负责 edge 或 plan 专属行为，`scoring` 负责聚焦的 ranking signal，`accuracy` 负责端到端排名 fixture。共享 query 回归保留在 `tests`，并按 `calls`、`ranking`、`generated` 和 `hybrid` 分组；跨域的 unit、score、identity、excerpt、field-filter、line-context 和 SBOM case 保留为具名根子项。跨越聚焦子域的 row decoding、excerpt、identifier、line range、route、reference 和 SBOM retrieval 保留为具名生产根子模块；任何 query 或 test 目录都不得变成新的平铺前缀桶。
 

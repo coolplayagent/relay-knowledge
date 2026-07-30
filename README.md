@@ -544,6 +544,14 @@ narrower semantics, and Rust scoring recognizes snake_case/CamelCase identifier
 parts, multi-part symbol names, call-direction context, and declaration-shaped
 API chunks.
 
+Code-index schema initialization keeps table/index ordering and migration
+orchestration in the `code_schema` facade. Its `search_backfill` owner isolates
+one-time FTS document materialization for symbols, references, imports,
+dependencies, feature flags, calls, routes, and chunks, plus search-metadata
+synchronization and transactional call-document rebuilding after signature
+upgrades. Direct sibling tests protect legacy call-language inheritance and
+idempotent metadata synchronization.
+
 `repo query --kind sbom` returns dependency inventory facts extracted during
 indexing from Cargo, npm, Go, Python, Maven effective `pom.xml`/BOM, Gradle,
 and Conan manifest or lock files. It does not execute package managers, contact
