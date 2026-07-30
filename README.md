@@ -974,34 +974,12 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-The static Web workspace renders project health, GraphRAG readiness, graph
-counts, a compact SVG graph overview for evidence/code/index/worker topology,
-the interactive Graph canvas, scoped index freshness, refresh queue diagnostics,
-stale reasons, runtime budgets, and interactive operation composers for
-retrieval, ingestion, graph inspection, code repository workflows, index refresh,
-provider probes, worker/proposal/audit operations, service runtime commands,
-agent interoperability settings, retrieval defaults, and model provider profile
-management. The same Rust HTTP service serves static Web assets plus
-`/api/project/status`, `/api/health`, `/api/service/status`, and
-`/api/web/operations/execute` on one local port. The execute endpoint accepts
-the current composer snapshot, calls the shared application service, and returns
-operation metadata plus result JSON for the page to display. Web `service run`
-returns a service runtime snapshot rather than starting a resident loop from the
-browser. Web execute requests are bounded by
-`RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback HTTP binds require the
-remote-client access policy to be enabled explicitly.
-
-Web operation payload validation and typed request construction are isolated in
-the `operation_request` owner. It validates required/optional scalar and array
-fields, parses supported enum values, and constructs API/domain requests with
-direct sibling tests, while the Web facade retains router and shared response
-composition.
-
-Static Web delivery is isolated in the `assets` owner. It normalizes requested
-paths, blocks traversal, serves files asynchronously with stable content types,
-falls back to the SPA index outside API routes, and reports missing build output
-through direct sibling tests. The Web facade only wires these handlers into the
-router.
+The static workspace exposes health, GraphRAG, graph canvas, index, worker, and
+operation-composer diagnostics through the same bounded Rust HTTP service.
+See [Web Workspace Capabilities](docs/en/02-capabilities/12-web-workspace-capabilities.md)
+for user workflows and
+[Engineering Hard Constraints](docs/en/03-architecture-specs/02-engineering-hard-constraints.md)
+for the `operation_request` and `assets` ownership and sibling-test contracts.
 
 ### Optional Hooks
 

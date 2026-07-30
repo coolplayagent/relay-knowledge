@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/02-engineering-hard-constraints.md) | [中文](../../zh/03-architecture-specs/02-engineering-hard-constraints.md)
 
-> Document version: 2.0
-> Date: 2026-05-17
+> Document version: 2.1
+> Date: 2026-07-30
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -253,6 +253,7 @@ Network entry points support connection budgets, request budgets, body limits, t
 ## 5. Code Quality Constraints
 
 - No tracked source, test, documentation, script, or workflow file may exceed 1000 lines. Generated release lockfiles required by locked builds, currently `Cargo.lock`, are exempt and must stay machine-generated.
+- Root README files are concise entry and navigation surfaces. Detailed implementation ownership and operational contracts belong in the responsibility-specific architecture, capability, or user-guide documents linked from those READMEs; README growth must not bypass the same 1000-line limit.
 - Do not add shallow functions; functions must validate, transform, isolate boundaries, manage resources, map errors, add observability, or coordinate real workflows.
 - Do not keep dead code, TODO stubs, unused public APIs, untested speculative extension points, or commented-out implementations.
 - Project identity constants live in the `project` module; module-local operational defaults stay with the owning module.

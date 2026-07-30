@@ -541,17 +541,11 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-静态 Web 工作区会渲染项目健康状况、GraphRAG 准备度、图计数、用于 evidence/code/index/worker 拓扑的紧凑 SVG graph overview、交互式 Graph canvas、作用域索引新鲜度、刷新队列诊断、过期原因、运行时预算，以及检索、摄取、图检查、代码仓库图谱工作流、索引刷新、提供者探测、worker/提案/审计操作、服务运行时命令、agent 互操作性设置、检索默认值和模型 provider profile 管理的交互式工作区。
-
-同一个 Rust HTTP 服务会在本地端口提供静态 Web 资源，以及 `/api/project/status`、`/api/health`、`/api/service/status` 和 `/api/web/operations/execute`。
-
-execute 端点接收当前编排器快照，调用共享应用服务，并返回操作元数据和结果 JSON 供页面展示。Web `service run` 只返回服务运行时快照，不从浏览器启动常驻循环。
-
-Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
-
-Web operation payload 的必填/可选 scalar 与 array 校验、枚举解析和 API/domain request 构造统一归 `operation_request` owner，并由同级 UT 直接覆盖；Web facade 只保留 router 与共享 response 编排。
-
-静态 Web 交付统一归 `assets` owner：它负责请求路径归一化与 traversal 拒绝、带稳定 content type 的异步文件读取、非 API 路径的 SPA index fallback，以及缺失构建产物提示，并由同级 UT 直接覆盖；Web facade 只把这些 handler 装配进 router。
+静态工作区通过同一个有界 Rust HTTP 服务暴露 health、GraphRAG、Graph canvas、
+索引、worker 和 operation composer 诊断。用户工作流见
+[Web 工作区能力](docs/zh/02-capabilities/12-web-workspace-capabilities.md)，
+`operation_request`、`assets` 与同级测试所有权见
+[工程硬约束](docs/zh/03-architecture-specs/02-engineering-hard-constraints.md)。
 
 ### 可选 Hooks
 

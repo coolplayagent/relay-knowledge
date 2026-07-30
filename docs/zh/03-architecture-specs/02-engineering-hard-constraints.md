@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/02-engineering-hard-constraints.md) | [English](../../en/03-architecture-specs/02-engineering-hard-constraints.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 文档版本: 2.1
+> 编制日期: 2026-07-30
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -259,6 +259,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 ## 5. 代码质量硬约束
 
 - tracked source、test、documentation、script 或 workflow 文件不得超过 1000 行。locked build 必需的生成式 release lockfile 例外，当前为 `Cargo.lock`，且必须保持机器生成。
+- 根 README 是简洁的入口与导航面；详细实现所有权和运维合同必须放入 README 所链接的职责型 architecture、capability 或 user-guide 文档中，README 增长同样不得绕过 1000 行上限。
 - 不添加 shallow function；函数必须负责校验、转换、外部边界、资源生命周期、错误映射、观测或真实编排。
 - 不保留 dead code、TODO stub、无调用公共 API、无测试 speculative extension point 或注释掉的实现。
 - 项目身份常量集中在 `project` 模块；模块局部运行默认值留在所属模块。
