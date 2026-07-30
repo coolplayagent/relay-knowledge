@@ -1,5 +1,9 @@
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum JudgeBackend {
+pub(super) enum JudgeBackend {
     Cli,
     Http,
 }
@@ -14,19 +18,19 @@ impl JudgeBackend {
 }
 
 #[derive(Debug, Clone)]
-struct JudgeSettings {
-    enabled: bool,
-    backend: JudgeBackend,
-    missing: Vec<String>,
-    configuration_error: Option<String>,
-    command: String,
-    http_base_url: String,
-    http_api_key: String,
-    http_model: String,
-    timeout_seconds: u64,
+pub(super) struct JudgeSettings {
+    pub(super) enabled: bool,
+    pub(super) backend: JudgeBackend,
+    pub(super) missing: Vec<String>,
+    pub(super) configuration_error: Option<String>,
+    pub(super) command: String,
+    pub(super) http_base_url: String,
+    pub(super) http_api_key: String,
+    pub(super) http_model: String,
+    pub(super) timeout_seconds: u64,
 }
 
-fn judge_settings(env: &BTreeMap<String, String>) -> JudgeSettings {
+pub(super) fn judge_settings(env: &BTreeMap<String, String>) -> JudgeSettings {
     let backend_value = env
         .get("RELAY_KNOWLEDGE_JUDGE_BACKEND")
         .map(|value| normalize_backend(value))
@@ -63,7 +67,11 @@ fn judge_settings(env: &BTreeMap<String, String>) -> JudgeSettings {
         "RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND",
     ]
     .iter()
-    .find_map(|name| env.get(*name).filter(|value| !value.trim().is_empty()).cloned());
+    .find_map(|name| {
+        env.get(*name)
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+    });
     let command = explicit_command.clone().unwrap_or_else(|| {
         "opencode run \"Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests.\" --file {prompt_file}".to_owned()
     });
@@ -109,7 +117,7 @@ fn judge_settings(env: &BTreeMap<String, String>) -> JudgeSettings {
     }
 }
 
-fn settings_summary(settings: &JudgeSettings) -> Value {
+pub(super) fn settings_summary(settings: &JudgeSettings) -> Value {
     serde_json::json!({
         "backend": settings.backend.as_str(),
         "enabled": settings.enabled,
@@ -136,3 +144,39 @@ fn env_string(env: &BTreeMap<String, String>, name: &str) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or_default()
 }
+
+pub(super) fn shell_split(value: &str) -> Result<Vec<String>, String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in value.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if quote == Some(ch) {
+            quote = None;
+        } else if quote.is_none() && (ch == '"' || ch == '\'') {
+            quote = Some(ch);
+        } else if quote.is_none() && ch.is_whitespace() {
+            if !current.is_empty() {
+                parts.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if quote.is_some() {
+        return Err("unterminated quote in command".to_owned());
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    Ok(parts)
+}
+
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod tests;

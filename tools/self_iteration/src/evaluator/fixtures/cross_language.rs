@@ -1,4 +1,4 @@
-const CROSS_LANGUAGE_BRIDGE_H: &str = r#"#pragma once
+pub(super) const CROSS_LANGUAGE_BRIDGE_H: &str = r#"#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,7 +13,7 @@ int rk_c_entry_process(const char *payload);
 #endif
 "#;
 
-const CROSS_LANGUAGE_C_ENTRY: &str = r#"#include "rk_bridge.h"
+pub(super) const CROSS_LANGUAGE_C_ENTRY: &str = r#"#include "rk_bridge.h"
 
 static int rk_c_weight(char value)
 {
@@ -36,7 +36,7 @@ int rk_c_entry_process(const char *payload)
 }
 "#;
 
-const CROSS_LANGUAGE_CPP_BRIDGE: &str = r#"#include "rk_bridge.h"
+pub(super) const CROSS_LANGUAGE_CPP_BRIDGE: &str = r#"#include "rk_bridge.h"
 
 #include <string_view>
 
@@ -60,7 +60,7 @@ extern "C" int rk_cpp_score(const char *payload)
 }
 "#;
 
-const CROSS_LANGUAGE_GO_BRIDGE: &str = r#"package bridge
+pub(super) const CROSS_LANGUAGE_GO_BRIDGE: &str = r#"package bridge
 
 /*
 #cgo CFLAGS: -I../include
@@ -78,7 +78,7 @@ func RunCgoBridge(payload string) int {
 }
 "#;
 
-const CROSS_LANGUAGE_RUST_BRIDGE: &str = r#"use std::ffi::CString;
+pub(super) const CROSS_LANGUAGE_RUST_BRIDGE: &str = r#"use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 
 unsafe extern "C" {
@@ -91,7 +91,7 @@ pub fn run_rust_bridge(payload: &str) -> i32 {
 }
 "#;
 
-const CROSS_LANGUAGE_FAKE_BRIDGE: &str = r#"#include "rk_bridge.h"
+pub(super) const CROSS_LANGUAGE_FAKE_BRIDGE: &str = r#"#include "rk_bridge.h"
 
 int rk_cpp_score_fake(const char *payload)
 {
@@ -100,7 +100,7 @@ int rk_cpp_score_fake(const char *payload)
 }
 "#;
 
-const PROJECT_ALIAS_LIB_RS: &str = r#"
+pub(super) const PROJECT_ALIAS_LIB_RS: &str = r#"
 pub fn stable_project_entry() -> &'static str {
     "project-name-default-alias"
 }

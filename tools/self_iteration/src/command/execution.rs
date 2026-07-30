@@ -1,3 +1,18 @@
+use std::{
+    process::{Command, Stdio},
+    time::{Duration, Instant},
+};
+
+use super::{
+    COMMAND_PROGRESS_INTERVAL, CommandResult, CommandSpec,
+    failure::failed_result,
+    logging::{
+        log_command_finished, log_command_invalid, log_command_running, log_command_started,
+        log_command_timeout,
+    },
+    pipes::{append_stdin_error, join_reader, read_pipe, write_pipe},
+};
+
 pub fn run_command(spec: &CommandSpec) -> CommandResult {
     let started = Instant::now();
     let Some(program) = spec.command.first() else {
@@ -88,3 +103,7 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "execution_tests.rs"]
+mod execution_tests;

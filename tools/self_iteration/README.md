@@ -67,6 +67,10 @@ Supported categories are `foundational`, `competitive`, `semantic_vector`, `file
 
 The harness writes live progress to stderr with the `[self-iterate]` prefix. Each subprocess reports `command start`, a 15-second `command running` heartbeat, and `command done` or `command timeout` with exit status and duration. Evaluation also reports the selected profile, evaluation home, resolved parallelism, quality-gate stage, repository workload size, repository-set workload size, and final gate/case/command counts. Product command stdout and stderr are still captured in the JSON report, so long `fast` runs remain observable.
 
+### Source Ownership
+
+The evaluator root is a declaration-only facade for `evaluate_candidate` and `EvaluationRun`; all behavior and tests live with their owners. Runtime separates contracts, bounded concurrency, reporting, finish serialization, and top-level orchestration. Workloads depend on the lower runtime services, while orchestration composes them without a reverse dependency through the evaluator facade. Evaluator quality-gate contracts live at the `quality` domain root, while policy and execution are explicit owner modules with direct tests. The research judge is likewise a real module tree: its shared input contract is rooted in `judge`, and evaluation composes independently tested settings, prompt, backend, and outcome owners. Workload execution is split into explicit agent, CLI, file, repository, repository-set, selection, and semantic-vector modules; shared case scoring has its own owner, and each behavioral source attaches its sibling tests directly. Fixture source families, repository assembly, and file writing are also real owner modules with direct tests; generated agent-workflow source constants live there rather than in workload execution. Config, scoring, evaluator, workflow, nested unattended stages, cases, process adapters, history, and progressive memory use real Rust modules with no production or test `include!` assembly. Unattended operation is nested under `workflow` so it consumes workflow services without a top-level module cycle.
+
 ## Command Reference
 
 ### Syntax and Modes

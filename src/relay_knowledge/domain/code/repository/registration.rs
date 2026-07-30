@@ -114,3 +114,7 @@ pub struct CodeIndexRequest {
     pub workspace_detection: CodeWorkspaceDetectionConfig,
     pub freshness_policy: FreshnessPolicy,
 }
+
+#[cfg(test)]
+#[path = "registration_tests.rs"]
+mod tests;

@@ -1,4 +1,34 @@
-fn evaluate_repository_sets(
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, number_or, object_field, string_field, string_or, string_vec},
+    command::{CommandResult, CommandSpec},
+    config::{CategorySet, EvaluationCategory},
+    scoring::{
+        CaseObservation, MetricObservation, array_field as score_array_field, assess_ranked_hits,
+    },
+};
+
+use super::super::runtime::{
+    concurrency::{parallel_map, run_limited, run_writer_limited},
+    contracts::{EvalRuntime, RepoReport},
+    reporting::{budget, parse_json_output, push_latency_metrics, repo_report},
+};
+use super::{
+    case_scoring::{
+        failed_case, is_guardrail_case, parse_json_case_output, payload_constraint_failures,
+    },
+    selection::{
+        guardrail_gate_from_case, limit_repository_set_cases_for_profile, repository_set_in_profile,
+    },
+};
+
+pub(in crate::evaluator) fn evaluate_repository_sets(
     runtime: &EvalRuntime,
     cases_config: &Value,
     repositories: &BTreeMap<String, Value>,
@@ -13,10 +43,8 @@ fn evaluate_repository_sets(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let cases_by_set = repository_set_cases_by_name(array_field(
-        cases_config,
-        "repository_set_query_cases",
-    ));
+    let cases_by_set =
+        repository_set_cases_by_name(array_field(cases_config, "repository_set_query_cases"));
     let mut reports = Vec::new();
     for (set_name, set_config) in set_configs {
         if !repository_set_config_in_profile(profile, &set_name, &set_config) {
@@ -41,7 +69,7 @@ fn evaluate_repository_sets(
     Ok(reports)
 }
 
-fn selected_repository_set_member_names(
+pub(in crate::evaluator) fn selected_repository_set_member_names(
     cases_config: &Value,
     profile: &str,
     categories: Option<&CategorySet>,
@@ -54,10 +82,8 @@ fn selected_repository_set_member_names(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let cases_by_set = repository_set_cases_by_name(array_field(
-        cases_config,
-        "repository_set_query_cases",
-    ));
+    let cases_by_set =
+        repository_set_cases_by_name(array_field(cases_config, "repository_set_query_cases"));
     let mut members = BTreeSet::new();
     for (set_name, set_config) in set_configs {
         if !repository_set_config_in_profile(profile, &set_name, &set_config) {
@@ -102,7 +128,7 @@ fn repository_set_cases_by_name(cases: &[Value]) -> BTreeMap<String, Vec<Value>>
     grouped
 }
 
-fn select_repository_set_cases_for_profile(
+pub(super) fn select_repository_set_cases_for_profile(
     profile: &str,
     categories: Option<&CategorySet>,
     cases: Vec<Value>,
@@ -435,10 +461,7 @@ fn flatten_repository_set_hits(payload: &Value) -> Vec<Value> {
     score_array_field(payload, "results")
         .iter()
         .map(|result| {
-            let mut flattened = result
-                .get("hit")
-                .cloned()
-                .unwrap_or_else(|| result.clone());
+            let mut flattened = result.get("hit").cloned().unwrap_or_else(|| result.clone());
             let Some(map) = flattened.as_object_mut() else {
                 return flattened;
             };
@@ -463,31 +486,5 @@ fn flatten_repository_set_hits(payload: &Value) -> Vec<Value> {
 }
 
 #[cfg(test)]
-mod repo_set_tests {
-    use super::*;
-
-    #[test]
-    fn flattens_repository_set_member_provenance() {
-        let payload = serde_json::json!({
-            "results": [{
-                "member": {
-                    "repository_alias": "sdk",
-                    "source_scope": "sdk::HEAD",
-                    "resolved_commit_sha": "abc"
-                },
-                "hit": {
-                    "path": "client/client.go",
-                    "excerpt": "func Dial"
-                },
-                "score": 0.7
-            }]
-        });
-
-        let hits = flatten_repository_set_hits(&payload);
-
-        assert_eq!(hits[0]["repository_alias"], "sdk");
-        assert_eq!(hits[0]["source_scope"], "sdk::HEAD");
-        assert_eq!(hits[0]["path"], "client/client.go");
-        assert_eq!(hits[0]["repository_set_score"], 0.7);
-    }
-}
+#[path = "repository_set_tests.rs"]
+mod repository_set_tests;

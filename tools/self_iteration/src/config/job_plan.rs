@@ -27,3 +27,8 @@ impl JobPlan {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "job_plan_tests.rs"]
+mod job_plan_tests;
+use super::model::Config;

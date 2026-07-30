@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::{CancelParams, McpServer, request_id_key};
+use super::{CancelParams, McpServer, json_rpc::request_id_key};
 
 pub(super) fn handle_notification(
     server: &McpServer,

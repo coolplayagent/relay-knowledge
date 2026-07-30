@@ -1,9 +1,9 @@
-use super::*;
 use crate::domain::{
     CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
     CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord,
     RepositoryCodeRange, RepositoryCodeSymbolRecord,
 };
+use crate::storage::{SqliteGraphStore, code::CodeRepositoryStore};
 use rusqlite::limits::Limit;
 
 const TEST_SOURCE_SCOPE: &str = "code:test:import-target:commit:tree";

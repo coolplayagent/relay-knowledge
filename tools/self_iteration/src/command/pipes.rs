@@ -1,4 +1,9 @@
-fn read_pipe<R>(mut reader: R) -> JoinHandle<String>
+use std::{
+    io::{Read, Write},
+    thread::JoinHandle,
+};
+
+pub(super) fn read_pipe<R>(mut reader: R) -> JoinHandle<String>
 where
     R: Read + Send + 'static,
 {
@@ -9,7 +14,7 @@ where
     })
 }
 
-fn write_pipe<W>(mut writer: W, input: String) -> JoinHandle<Result<(), String>>
+pub(super) fn write_pipe<W>(mut writer: W, input: String) -> JoinHandle<Result<(), String>>
 where
     W: Write + Send + 'static,
 {
@@ -20,13 +25,16 @@ where
     })
 }
 
-fn join_reader(reader: Option<JoinHandle<String>>) -> String {
+pub(super) fn join_reader(reader: Option<JoinHandle<String>>) -> String {
     reader
         .and_then(|handle| handle.join().ok())
         .unwrap_or_default()
 }
 
-fn append_stdin_error(stderr: &mut String, writer: Option<JoinHandle<Result<(), String>>>) {
+pub(super) fn append_stdin_error(
+    stderr: &mut String,
+    writer: Option<JoinHandle<Result<(), String>>>,
+) {
     let Some(writer) = writer else {
         return;
     };
@@ -41,3 +49,7 @@ fn append_stdin_error(stderr: &mut String, writer: Option<JoinHandle<Result<(), 
     stderr.push_str("stdin write failed: ");
     stderr.push_str(&error);
 }
+
+#[cfg(test)]
+#[path = "pipes_tests.rs"]
+mod pipes_tests;

@@ -1,3 +1,9 @@
+use crate::{
+    candidate_git::{self, PatchSnapshot},
+    evaluator,
+    scoring::GateObservation,
+};
+
 pub(crate) fn apply_candidate_documentation_gate(
     evaluation: &mut evaluator::EvaluationRun,
     patch: &PatchSnapshot,
@@ -85,3 +91,7 @@ fn self_iteration_evaluation_set_change_path(path: &str) -> bool {
         || path.starts_with("docs/")
         || path.ends_with(".md")
 }
+
+#[cfg(test)]
+#[path = "documentation_gate_tests.rs"]
+mod documentation_gate_tests;

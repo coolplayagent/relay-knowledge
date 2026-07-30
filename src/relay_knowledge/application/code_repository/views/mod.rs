@@ -8,8 +8,11 @@ mod rules;
 mod service;
 
 #[cfg(test)]
-mod affected_scope_tests;
+#[path = "affected_scope_integration_tests.rs"]
+mod affected_scope_integration_tests;
 #[cfg(test)]
-mod dependency_tour_tests;
+#[path = "dependency_tour_integration_tests.rs"]
+mod dependency_tour_integration_tests;
 #[cfg(test)]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;

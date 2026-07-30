@@ -722,4 +722,20 @@ fn import_path_like(value: &str) -> bool {
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
-mod tests;
+mod mod_tests;
+
+#[cfg(test)]
+#[path = "target_tests.rs"]
+mod target_tests;
+
+#[cfg(test)]
+#[path = "generated_tests.rs"]
+mod generated_tests;
+
+#[cfg(test)]
+#[path = "ranking_tests.rs"]
+mod ranking_tests;
+
+#[cfg(test)]
+#[path = "foundational_ranking_tests.rs"]
+mod foundational_ranking_tests;

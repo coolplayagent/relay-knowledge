@@ -1,3 +1,11 @@
+use std::path::Path;
+
+use sha2::{Digest, Sha256};
+
+use crate::history::HistoryPaths;
+
+use super::{PatchSnapshot, command::git_checked, dynamic_command::git_dynamic};
+
 pub fn capture_patch(
     workspace: &Path,
     paths: &HistoryPaths,
@@ -41,3 +49,7 @@ pub fn changed_paths_from_diff(diff: &str) -> Vec<String> {
         .map(ToOwned::to_owned)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "patch_tests.rs"]
+mod patch_tests;

@@ -1,4 +1,3 @@
-use super::super::*;
 use crate::{
     domain::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
@@ -201,7 +200,7 @@ async fn imports_legacy_file_table_without_generated_column_and_backfills_paths(
     let target_store = SqliteGraphStore::open_in_memory().expect("target store opens");
     target_store
         .run(move |connection| {
-            super::import_repository_from_database(
+            super::super::import_repository_from_database(
                 connection,
                 &source_path,
                 "repo",
@@ -446,7 +445,7 @@ async fn code_search_reports_import_search_read_model_unavailable() {
 #[test]
 fn candidate_path_query_keeps_discriminative_suffix_terms() {
     let fts_query =
-        code_snapshot::candidate_path_fts_query("a b c d e f g h pkg module VerySpecificHandler")
+        super::candidate_path_fts_query("a b c d e f g h pkg module VerySpecificHandler")
             .expect("query terms should produce FTS");
     let terms = fts_query.split(" OR ").collect::<Vec<_>>();
 

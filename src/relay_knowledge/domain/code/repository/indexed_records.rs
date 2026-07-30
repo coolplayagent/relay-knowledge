@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::super::{CodeParseStatus, code::SymbolRole};
+use super::super::{CodeParseStatus, SymbolRole};
 use super::RepositoryCodeRange;
 
 /// File-level code index row.

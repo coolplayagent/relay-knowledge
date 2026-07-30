@@ -2,6 +2,8 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+use super::{scope_filters as code_query_scope, software};
+
 #[path = "../code_query/mod.rs"]
 mod code_query;
 
@@ -24,9 +26,6 @@ mod code_routes;
 
 #[path = "../code_views/mod.rs"]
 mod code_views;
-
-#[path = "../code_query/scope.rs"]
-mod code_query_scope;
 
 #[path = "impact.rs"]
 mod code_impact;
@@ -69,9 +68,6 @@ mod code_set;
 #[path = "../code_set/refresh_tasks.rs"]
 mod code_set_tasks;
 
-#[path = "../software.rs"]
-mod software;
-
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod code_tests;
@@ -93,36 +89,12 @@ mod code_cross_language_call_tests;
 mod code_query_accuracy_tests;
 
 #[cfg(test)]
-#[path = "../code_query/imports/target_tests.rs"]
-mod code_query_import_target_tests;
-
-#[cfg(test)]
-#[path = "../code_query/imports/generated_tests.rs"]
-mod code_query_import_generated_tests;
-
-#[cfg(test)]
 #[path = "../code_query/tests/generated/chunk_generated.rs"]
 mod code_query_chunk_generated_tests;
 
 #[cfg(test)]
 #[path = "../code_query/tests/generated/route_generated.rs"]
 mod code_query_route_generated_tests;
-
-#[cfg(test)]
-#[path = "../code_query/symbols/generated_tests.rs"]
-mod code_query_symbol_generated_tests;
-
-#[cfg(test)]
-#[path = "../code_query/calls/ambiguous_generated_tests.rs"]
-mod code_query_ambiguous_callee_generated_tests;
-
-#[cfg(test)]
-#[path = "../code_query/imports/ranking_tests.rs"]
-mod code_query_import_ranking_tests;
-
-#[cfg(test)]
-#[path = "../code_query/imports/foundational_ranking_tests.rs"]
-mod code_query_import_foundational_ranking_tests;
 
 #[cfg(test)]
 #[path = "../code_query/tests/sbom.rs"]
@@ -135,42 +107,6 @@ mod code_query_line_context_tests;
 #[cfg(test)]
 #[path = "metadata_tests.rs"]
 mod code_metadata_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/tests.rs"]
-mod code_tasks_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/retention_tests.rs"]
-mod code_tasks_retention_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/status_tests.rs"]
-mod code_tasks_status_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/lease_tests.rs"]
-mod code_tasks_lease_tests;
-
-#[cfg(test)]
-#[path = "../code_tasks/reset_tests.rs"]
-mod code_tasks_reset_tests;
-
-#[cfg(test)]
-#[path = "../code_set/refresh_task_tests.rs"]
-mod code_set_tasks_tests;
-
-#[cfg(test)]
-#[path = "../code_set/tests.rs"]
-mod code_set_tests;
-
-#[cfg(test)]
-#[path = "../code_set/workspace_tests.rs"]
-mod code_set_workspace_tests;
-
-#[cfg(test)]
-#[path = "../code_workspace/lookup_tests.rs"]
-mod code_workspace_lookup_tests;
 
 use crate::{
     domain::{
@@ -476,7 +412,10 @@ impl CodeRepositoryStore for SqliteGraphStore {
         let maintenance = self.maintenance.clone();
         self.run(move |connection| {
             let summary = code_snapshot::apply_snapshot(connection, snapshot)?;
-            super::maintenance::run_post_index_maintenance(connection, &maintenance);
+            super::connection_runtime::maintenance::run_post_index_maintenance(
+                connection,
+                &maintenance,
+            );
 
             Ok(summary)
         })
@@ -513,7 +452,10 @@ impl CodeRepositoryStore for SqliteGraphStore {
         let maintenance = self.maintenance.clone();
         self.run(move |connection| {
             let summary = code_batch::finalize_session(connection, session)?;
-            super::maintenance::run_post_index_maintenance(connection, &maintenance);
+            super::connection_runtime::maintenance::run_post_index_maintenance(
+                connection,
+                &maintenance,
+            );
 
             Ok(summary)
         })

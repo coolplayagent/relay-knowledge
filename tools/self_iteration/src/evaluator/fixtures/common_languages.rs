@@ -1,12 +1,12 @@
-const PYTHON_OPERATIONS_MD: &str = r#"# Syntax service operations
+pub(super) const PYTHON_OPERATIONS_MD: &str = r#"# Syntax service operations
 
 The ServiceRunner class owns the async dispatch lifecycle for production workers.
 The dispatch_event function normalizes payload text before writing event records.
 "#;
 
-const PYTHON_INIT: &str = r#""#;
+pub(super) const PYTHON_INIT: &str = r#""#;
 
-const PYTHON_DECORATORS: &str = r#"
+pub(super) const PYTHON_DECORATORS: &str = r#"
 def traced_operation(name):
     def wrap(func):
         async def inner(*args, **kwargs):
@@ -16,7 +16,7 @@ def traced_operation(name):
     return wrap
 "#;
 
-const PYTHON_ERRORS: &str = r#"
+pub(super) const PYTHON_ERRORS: &str = r#"
 class ServiceError(RuntimeError):
     pass
 
@@ -25,7 +25,7 @@ class OverloadedServiceError(ServiceError):
     pass
 "#;
 
-const PYTHON_SERVICE: &str = r#"
+pub(super) const PYTHON_SERVICE: &str = r#"
 from .decorators import traced_operation
 from .errors import OverloadedServiceError, ServiceError
 
@@ -63,13 +63,13 @@ async def run_service(event):
     return await runner.dispatch_event(event)
 "#;
 
-const PYTHON_FAKE_SERVICE: &str = r#"
+pub(super) const PYTHON_FAKE_SERVICE: &str = r#"
 class ServiceRunner:
     def dispatch_event(self, event):
         return event
 "#;
 
-const JAVASCRIPT_RUNTIME: &str = r#"
+pub(super) const JAVASCRIPT_RUNTIME: &str = r#"
 import { createRegistry } from "./registry.js";
 
 export class RuntimeController {
@@ -89,7 +89,7 @@ export async function runRuntime(events) {
 }
 "#;
 
-const JAVASCRIPT_REGISTRY: &str = r#"
+pub(super) const JAVASCRIPT_REGISTRY: &str = r#"
 export function createRegistry() {
   const handlers = new Map();
   const payloadPipeline = (payload) => normalizePayload(payload);
@@ -110,12 +110,12 @@ function missingHandler(payload) {
 }
 "#;
 
-const JAVASCRIPT_INDEX: &str = r#"
+pub(super) const JAVASCRIPT_INDEX: &str = r#"
 export { RuntimeController, runRuntime } from "./runtime.js";
 export { createRegistry, normalizePayload } from "./registry.js";
 "#;
 
-const JAVASCRIPT_FAKE_RUNTIME: &str = r#"
+pub(super) const JAVASCRIPT_FAKE_RUNTIME: &str = r#"
 export class RuntimeController {
   dispatchEvent(event) {
     return event;
@@ -123,7 +123,7 @@ export class RuntimeController {
 }
 "#;
 
-const TYPESCRIPT_PROTOCOL: &str = r#"
+pub(super) const TYPESCRIPT_PROTOCOL: &str = r#"
 export interface StreamTransport<TEvent> {
   send(event: TEvent): Promise<void>;
 }
@@ -147,7 +147,7 @@ export async function sendEnvelope<TPayload>(
 }
 "#;
 
-const TYPESCRIPT_PROVIDER: &str = r#"
+pub(super) const TYPESCRIPT_PROVIDER: &str = r#"
 import type { StreamEnvelope, StreamTransport } from "./protocol";
 import { sendEnvelope } from "./protocol";
 import { trimPayload } from "./protocol";
@@ -169,7 +169,7 @@ export async function runProvider(payload: string): Promise<StreamEnvelope<strin
 }
 "#;
 
-const TYPESCRIPT_COMPONENT: &str = r#"
+pub(super) const TYPESCRIPT_COMPONENT: &str = r#"
 import React from "react";
 import { runProvider } from "./provider";
 
@@ -182,13 +182,13 @@ export function ProviderPanel({ value }: { value: string }) {
 }
 "#;
 
-const TYPESCRIPT_INDEX: &str = r#"
+pub(super) const TYPESCRIPT_INDEX: &str = r#"
 export type { StreamEnvelope, StreamTransport } from "./protocol";
 export { ProviderRuntime, runProvider } from "./provider";
 export { ProviderPanel } from "./component";
 "#;
 
-const TYPESCRIPT_FAKE_PROVIDER: &str = r#"
+pub(super) const TYPESCRIPT_FAKE_PROVIDER: &str = r#"
 export class ProviderRuntime {
   record(payload: string): string {
     return payload;
@@ -196,12 +196,12 @@ export class ProviderRuntime {
 }
 "#;
 
-const GO_MOD: &str = r#"module example.com/syntax
+pub(super) const GO_MOD: &str = r#"module example.com/syntax
 
 go 1.22
 "#;
 
-const GO_WORKER: &str = r#"
+pub(super) const GO_WORKER: &str = r#"
 package processor
 
 import (
@@ -237,7 +237,7 @@ func (w *Worker) Run(ctx ctxalias.Context, events []Event) error {
 }
 "#;
 
-const GO_PIPELINE: &str = r#"
+pub(super) const GO_PIPELINE: &str = r#"
 package processor
 
 import "context"
@@ -263,7 +263,7 @@ func RunPipeline(events []Event) error {
 }
 "#;
 
-const GO_FAKE_WORKER: &str = r#"
+pub(super) const GO_FAKE_WORKER: &str = r#"
 package tests
 
 type Worker struct{}
@@ -271,7 +271,7 @@ type Worker struct{}
 func (Worker) Run() {}
 "#;
 
-const JAVA_SERVICE_CONTRACT: &str = r#"
+pub(super) const JAVA_SERVICE_CONTRACT: &str = r#"
 package example;
 
 public interface ServiceContract<T> {
@@ -283,7 +283,7 @@ public interface ServiceContract<T> {
 }
 "#;
 
-const JAVA_ANNOTATED_SERVICE: &str = r#"
+pub(super) const JAVA_ANNOTATED_SERVICE: &str = r#"
 package example;
 
 @Deprecated
@@ -303,7 +303,7 @@ public class AnnotatedService implements ServiceContract<String> {
 }
 "#;
 
-const JAVA_SERVICE_FACTORY: &str = r#"
+pub(super) const JAVA_SERVICE_FACTORY: &str = r#"
 package example;
 
 import example.AnnotatedService.Builder;
@@ -322,7 +322,7 @@ public final class ServiceFactory {
 }
 "#;
 
-const JAVA_FAKE_SERVICE: &str = r#"
+pub(super) const JAVA_FAKE_SERVICE: &str = r#"
 package example;
 
 class FakeService {
@@ -332,21 +332,21 @@ class FakeService {
 }
 "#;
 
-const RUST_LIB: &str = r#"
+pub(super) const RUST_LIB: &str = r#"
 pub mod model;
 pub mod service;
 
 pub use service::{EventHandler, RuntimeService};
 "#;
 
-const RUST_MODEL: &str = r#"
+pub(super) const RUST_MODEL: &str = r#"
 pub enum RuntimeEvent {
     Start(String),
     Stop,
 }
 "#;
 
-const RUST_SERVICE: &str = r#"
+pub(super) const RUST_SERVICE: &str = r#"
 use crate::model::RuntimeEvent;
 
 macro_rules! trace_event {
@@ -382,7 +382,7 @@ impl EventHandler for RuntimeService {
 }
 "#;
 
-const RUST_FAKE_SERVICE: &str = r#"
+pub(super) const RUST_FAKE_SERVICE: &str = r#"
 struct RuntimeService;
 
 impl RuntimeService {
@@ -390,7 +390,7 @@ impl RuntimeService {
 }
 "#;
 
-const BASH_INSTALL: &str = r#"
+pub(super) const BASH_INSTALL: &str = r#"
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -410,7 +410,7 @@ rk_install_main() {
 rk_install_main "$@"
 "#;
 
-const BASH_RUNTIME: &str = r#"
+pub(super) const BASH_RUNTIME: &str = r#"
 rk_runtime_dispatch() {
   local mode="$1"
   rk_prepare_home "$mode"
@@ -431,13 +431,13 @@ rk_missing_command() {
 }
 "#;
 
-const BASH_FAKE_RUNTIME: &str = r#"
+pub(super) const BASH_FAKE_RUNTIME: &str = r#"
 rk_runtime_dispatch() {
   echo fake
 }
 "#;
 
-const CSHARP_BUFFER_POOL: &str = r#"
+pub(super) const CSHARP_BUFFER_POOL: &str = r#"
 using System;
 using System.Buffers;
 
@@ -462,7 +462,7 @@ public sealed class BufferPoolSink : IBufferSink<byte[]>
 }
 "#;
 
-const CSHARP_RUNTIME_SERVICE: &str = r#"
+pub(super) const CSHARP_RUNTIME_SERVICE: &str = r#"
 using System;
 using Syntax.Runtime;
 
@@ -481,7 +481,7 @@ public sealed class RuntimeService
 }
 "#;
 
-const CSHARP_FAKE_SERVICE: &str = r#"
+pub(super) const CSHARP_FAKE_SERVICE: &str = r#"
 namespace Syntax.Runtime.Tests;
 
 public sealed class RuntimeService

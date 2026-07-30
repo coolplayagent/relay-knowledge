@@ -1,4 +1,6 @@
-pub fn build_codex_command(config: &Config) -> Vec<String> {
+use crate::config::{Config, DEFAULT_CODEX_MODEL};
+
+pub(super) fn build_codex_command(config: &Config) -> Vec<String> {
     let codex = config
         .codex_path
         .clone()
@@ -34,3 +36,7 @@ pub fn build_codex_command(config: &Config) -> Vec<String> {
     command.push("-".to_owned());
     command
 }
+
+#[cfg(test)]
+#[path = "command_tests.rs"]
+mod command_tests;

@@ -8,6 +8,10 @@ use crate::{
     },
 };
 
+#[cfg(test)]
+#[path = "refresh_task_tests.rs"]
+mod refresh_task_tests;
+
 use super::super::evidence_identity::stable_id;
 
 pub(super) fn queue_refresh_task(

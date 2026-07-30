@@ -1,3 +1,11 @@
+use std::path::PathBuf;
+
+use super::{
+    categories::CategorySet,
+    jobs::Jobs,
+    mode::{Mode, Strategy},
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub mode: Mode,

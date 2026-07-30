@@ -1,3 +1,13 @@
+use std::path::Path;
+
+use crate::command::{CommandSpec, run_command};
+
+use super::{
+    PatchSnapshot,
+    command::{git, git_checked},
+    dynamic_command::git_dynamic,
+};
+
 pub fn reject_candidate(
     workspace: &Path,
     patch: &PatchSnapshot,
@@ -60,3 +70,7 @@ pub fn commit_candidate(
             .to_owned(),
     )
 }
+
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod lifecycle_tests;

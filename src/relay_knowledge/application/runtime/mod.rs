@@ -906,4 +906,5 @@ fn agent_runtime_budget_ms(request_timeout: Duration) -> u64 {
 }
 
 #[cfg(test)]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;

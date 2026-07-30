@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
 
+use super::express_arguments::{
+    extract_handler_name, extract_handler_name_from_arguments, extract_quoted_string,
+};
 use super::express_materialize::materialize_express_routes;
 use super::javascript::{
     find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
     statement_ends_with_semicolon,
-};
-use super::shared::{
-    extract_handler_name, extract_handler_name_from_arguments, extract_quoted_string,
 };
 use super::{ANONYMOUS_ROUTE_HANDLER_NAME, RouteCandidate};
 

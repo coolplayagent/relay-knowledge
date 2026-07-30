@@ -1,4 +1,6 @@
-fn new_run_id() -> String {
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub(super) fn new_run_id() -> String {
     format!("run-{}", unix_timestamp_string())
 }
 
@@ -10,7 +12,7 @@ pub(crate) fn new_layer_run_id(layer: &str) -> String {
     format!("run-{suffix}-{layer}")
 }
 
-fn new_manual_evaluate_run_id() -> String {
+pub(super) fn new_manual_evaluate_run_id() -> String {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos().to_string())
@@ -25,9 +27,13 @@ pub(crate) fn unix_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
-fn unix_timestamp_string() -> String {
+pub(super) fn unix_timestamp_string() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_owned())
 }
+
+#[cfg(test)]
+#[path = "run_identity_tests.rs"]
+mod run_identity_tests;

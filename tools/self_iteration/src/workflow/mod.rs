@@ -1,31 +1,22 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+mod adopted_documentation;
+mod candidate_evaluation;
+mod dispatch;
+mod documentation_gate;
+mod generation_iteration;
+mod loop_control;
+mod manual_evaluation;
+mod output;
+mod pacing;
+mod persistence;
+mod report_metadata;
+mod run_identity;
+mod unattended;
 
-use crate::{
-    candidate_git::{self, PatchSnapshot},
-    cases, codex, command,
-    config::{Config, Mode, Strategy},
-    evaluator, history, research_plan,
-    scoring::{self, EvaluationObservation, GateObservation},
-    unattended,
-};
-
-include!("dispatch.rs");
-include!("loop_control.rs");
-include!("manual_evaluation.rs");
-include!("generation_iteration.rs");
-include!("candidate_evaluation.rs");
-include!("documentation_gate.rs");
-include!("persistence.rs");
-include!("report_metadata.rs");
-include!("adopted_documentation.rs");
-include!("output.rs");
-include!("run_identity.rs");
-include!("pacing.rs");
-
-#[cfg(test)]
-#[path = "run_identity_tests.rs"]
-mod run_identity_tests;
-
-#[cfg(test)]
-#[path = "documentation_gate_tests.rs"]
-mod documentation_gate_tests;
+pub(crate) use adopted_documentation::write_adopted_optimization_document;
+pub(crate) use candidate_evaluation::evaluate_candidate_for_patch;
+pub(crate) use dispatch::run;
+pub(crate) use documentation_gate::apply_candidate_documentation_gate;
+pub(crate) use output::{number, print_score};
+pub(crate) use pacing::sleep_seconds;
+pub(crate) use persistence::{PersistInput, persist_scored_run_with_score};
+pub(crate) use run_identity::{new_layer_run_id, unix_timestamp};

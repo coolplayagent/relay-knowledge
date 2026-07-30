@@ -194,6 +194,14 @@ Use the repository scripts by responsibility:
 ./check.sh
 ```
 
+The reusable domain model keeps its public `domain::*` facade while its physical
+ownership follows `domain/core`, `domain/graph`, `domain/code`,
+`domain/knowledge`, and `domain/operations`. These are real Rust modules with
+acyclic dependencies, not production path aliases. Validating domain owners
+attach their sibling unit-test files directly, so repository registration,
+scope identity, retrieval requests, repository status, and index summaries do
+not share a catch-all test module.
+
 ### Self-Iteration Harness
 
 For unattended code and semantic/vector retrieval optimization experiments,
@@ -242,6 +250,10 @@ cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
 cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
+
+CI installs the current stable Rust toolchain. Update local `stable` before the
+final Clippy gate so newly stabilized lints cannot pass locally and fail only
+after the branch is pushed.
 
 The self-iteration harness runs its own product and harness quality checks in
 parallel dependency stages and defaults `--jobs auto` to the local CPU count.
@@ -479,6 +491,11 @@ Import resolution covers local same-repository imports for every tree-sitter
 language listed above, including JavaScript/JSX, Kotlin, Scala, C#, PHP, Rust,
 and Swift. Package-manager or SDK imports without authorized indexed source
 remain unresolved edge metadata rather than parser degradation.
+
+Web route detection separates Express argument/handler parsing, Python static
+route strings, and JavaScript comment/string/regex lexical state into named
+modules with direct unit tests. It does not use a generic shared parser bucket
+across those language boundaries.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,

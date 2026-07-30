@@ -1,3 +1,5 @@
+use crate::{candidate_git::PatchSnapshot, cases, config::Config, evaluator, history};
+
 pub(crate) fn evaluate_candidate_for_patch(
     config: &Config,
     paths: &history::HistoryPaths,

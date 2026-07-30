@@ -1,3 +1,5 @@
+use serde_json::{Map, Value};
+
 pub fn object_field<'a>(value: &'a Value, name: &str) -> Option<&'a Map<String, Value>> {
     value.get(name).and_then(Value::as_object)
 }
@@ -29,3 +31,7 @@ pub fn string_vec(value: &Value, name: &str) -> Vec<String> {
         .map(ToOwned::to_owned)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "fields_tests.rs"]
+mod fields_tests;

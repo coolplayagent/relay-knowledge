@@ -1,12 +1,7 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
 };
-
-use serde_json::Value;
-
-use crate::scoring::{EvaluationObservation, ScoreBreakdown};
 
 #[derive(Debug, Clone)]
 pub struct HistoryPaths {
@@ -68,25 +63,19 @@ impl HistoryPaths {
 pub(crate) mod memory;
 pub(crate) mod synthesis;
 
-include!("runs.rs");
-include!("persistence.rs");
-include!("export.rs");
-include!("run_state.rs");
+mod export;
+mod persistence;
+mod run_state;
+mod runs;
+
+pub use export::export_history;
+pub use persistence::{RunRecordInput, append_run, make_run_record, write_report};
+pub use run_state::{adopted, is_evaluate_run};
+pub use runs::{
+    best_accepted_run_for_profile, best_accepted_run_for_workload, load_runs, previous_scored_run,
+    previous_scored_run_for_workload,
+};
 
 #[cfg(test)]
-mod tests {
-    use std::{
-        fs,
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    use serde_json::json;
-
-    use super::*;
-
-    include!("export_tests.rs");
-    include!("run_state_tests.rs");
-    include!("workload_selection_tests.rs");
-    include!("profile_selection_tests.rs");
-    include!("test_support.rs");
-}
+#[path = "mod_tests.rs"]
+mod tests;

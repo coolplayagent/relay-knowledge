@@ -1,4 +1,22 @@
-fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> CaseObservation {
+use serde_json::Value;
+
+use crate::{
+    cases::{number_or, string_field, string_or},
+    command::CommandResult,
+    scoring::{
+        CaseObservation, RankedAssessment, array_field as score_array_field, assess_ranked_hits,
+    },
+};
+
+use super::case_scoring::{
+    failed_case, is_guardrail_case, parse_json_case_output, payload_constraint_failures,
+};
+
+pub(super) fn score_query_case(
+    repo_name: &str,
+    case: &Value,
+    result: &CommandResult,
+) -> CaseObservation {
     let objective = repository_case_objective(case);
     if !result.passed() {
         return failed_case(case, repo_name, &objective, result);
@@ -65,7 +83,11 @@ fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> Ca
     }
 }
 
-fn score_software_case(repo_name: &str, case: &Value, result: &CommandResult) -> CaseObservation {
+pub(super) fn score_software_case(
+    repo_name: &str,
+    case: &Value,
+    result: &CommandResult,
+) -> CaseObservation {
     let objective = repository_case_objective(case);
     if !result.passed() {
         return failed_case(case, repo_name, &objective, result);
@@ -168,16 +190,13 @@ fn append_software_hits(payload: &Value, field: &str, slice: &str, hits: &mut Ve
     for item in score_array_field(payload, field) {
         let mut hit = item.clone();
         if let Some(object) = hit.as_object_mut() {
-            object.insert(
-                "software_slice".to_owned(),
-                Value::String(slice.to_owned()),
-            );
+            object.insert("software_slice".to_owned(), Value::String(slice.to_owned()));
         }
         hits.push(hit);
     }
 }
 
-fn repository_case_objective(case: &Value) -> String {
+pub(super) fn repository_case_objective(case: &Value) -> String {
     if let Some(objective) = string_field(case, "objective").filter(|value| !value.is_empty()) {
         return objective.to_owned();
     }
@@ -201,22 +220,6 @@ fn repository_case_objective(case: &Value) -> String {
     }
 }
 
-fn failed_case(
-    case: &Value,
-    repository: &str,
-    objective: &str,
-    result: &CommandResult,
-) -> CaseObservation {
-    CaseObservation {
-        case_id: string_or(case, "id", "case").to_owned(),
-        repository: repository.to_owned(),
-        passed: false,
-        guardrail: is_guardrail_case(case),
-        rank: None,
-        max_rank: number_or(case, "max_rank", 1) as usize,
-        false_positive_count: 0,
-        message: result.gate_message(),
-        objective: objective.to_owned(),
-        score_override: None,
-    }
-}
+#[cfg(test)]
+#[path = "repository_scoring_tests.rs"]
+mod tests;

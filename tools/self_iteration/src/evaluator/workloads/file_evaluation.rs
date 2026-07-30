@@ -1,4 +1,27 @@
-fn evaluate_file_fixtures(
+use std::{fs, path::Path};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, number_or, object_field, string_field, string_or},
+    command::CommandSpec,
+    scoring::MetricObservation,
+};
+
+use super::super::runtime::{
+    concurrency::{parallel_map, run_limited},
+    contracts::EvalRuntime,
+    reporting::{budget, push_latency_metrics},
+};
+use super::{
+    FileReport,
+    file_fixture::{
+        create_file_fixture, evaluate_background_file_case, file_fixture_env, file_query_command,
+        score_file_case,
+    },
+};
+
+pub(in crate::evaluator) fn evaluate_file_fixtures(
     runtime: &EvalRuntime,
     run_home: &Path,
     cases_config: &Value,
@@ -118,3 +141,7 @@ fn evaluate_file_fixtures(
         metrics,
     })
 }
+
+#[cfg(test)]
+#[path = "file_evaluation_tests.rs"]
+mod tests;

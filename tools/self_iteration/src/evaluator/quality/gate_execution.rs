@@ -1,4 +1,20 @@
-fn run_quality_gate_stages(
+use std::{path::Path, time::Instant};
+
+use crate::{
+    command::{CommandResult, CommandSpec},
+    scoring::{GateObservation, MetricObservation},
+};
+
+use super::super::runtime::{
+    concurrency::{parallel_map, run_limited},
+    contracts::Limiter,
+};
+use super::{
+    QualityGate, QualityGateStage,
+    gate_policy::{quality_budget_ms, quality_gate_stages},
+};
+
+pub(in crate::evaluator) fn run_quality_gate_stages(
     profile: &str,
     workspace: &Path,
     limiter: &Limiter,
@@ -158,3 +174,7 @@ fn run_quality_gate_rails(
         .flat_map(|(_, results)| results)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "gate_execution_tests.rs"]
+mod tests;

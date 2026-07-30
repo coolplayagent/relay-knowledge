@@ -1,8 +1,8 @@
 use std::ffi::OsString;
 
-use super::{
+use super::{EnvironmentValues, bool_var, path_var, positive_usize_var};
+use crate::env::{
     EnvErrorKind, RELAY_KNOWLEDGE_HOME, RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS, SSL_VERIFY,
-    value_parser::{EnvironmentValues, bool_var, path_var, positive_usize_var},
 };
 
 #[test]

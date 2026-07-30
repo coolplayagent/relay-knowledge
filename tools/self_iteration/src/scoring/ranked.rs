@@ -371,3 +371,13 @@ fn ranked_forbidden_penalty(ranks: &[usize], weight: f64) -> f64 {
 fn matched_count(ranks: &[Option<usize>]) -> usize {
     ranks.iter().filter(|rank| rank.is_some()).count()
 }
+
+#[cfg(test)]
+#[path = "ranked_tests.rs"]
+mod ranked_tests;
+use serde_json::Value;
+
+use super::{
+    case_fields::{array_field, usize_field},
+    score_math::{average, clamp},
+};

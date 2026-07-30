@@ -1,3 +1,12 @@
+use std::fs;
+
+use serde_json::Value;
+
+use super::{
+    HistoryPaths,
+    run_state::{adopted, automated_baseline_run},
+};
+
 pub fn load_runs(paths: &HistoryPaths) -> Result<Vec<Value>, String> {
     if !paths.runs_jsonl.exists() {
         return Ok(Vec::new());
@@ -86,3 +95,15 @@ where
             .unwrap_or(std::cmp::Ordering::Equal)
     })
 }
+
+#[cfg(test)]
+#[path = "baseline_selection_tests.rs"]
+mod baseline_selection_tests;
+
+#[cfg(test)]
+#[path = "profile_selection_tests.rs"]
+mod profile_selection_tests;
+
+#[cfg(test)]
+#[path = "workload_selection_tests.rs"]
+mod workload_selection_tests;

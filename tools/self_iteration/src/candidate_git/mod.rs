@@ -1,12 +1,3 @@
-use std::path::Path;
-
-use sha2::{Digest, Sha256};
-
-use crate::{
-    command::{CommandResult, CommandSpec, run_command},
-    history::HistoryPaths,
-};
-
 #[derive(Debug, Clone)]
 pub struct PatchSnapshot {
     pub path: std::path::PathBuf,
@@ -21,8 +12,20 @@ impl PatchSnapshot {
     }
 }
 
-include!("command.rs");
-include!("dynamic_command.rs");
-include!("worktree.rs");
-include!("patch.rs");
-include!("lifecycle.rs");
+mod command;
+mod dynamic_command;
+mod lifecycle;
+mod patch;
+mod worktree;
+
+pub use lifecycle::{commit_candidate, reject_candidate};
+pub use patch::{capture_patch, changed_paths_from_diff};
+pub use worktree::{current_head, ensure_clean_worktree};
+
+#[cfg(test)]
+#[path = "git_repository_fixture.rs"]
+mod git_repository_fixture;
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

@@ -124,6 +124,12 @@ workflow 行为。
 ./check.sh
 ```
 
+可复用领域模型继续保留公开 `domain::*` facade，但物理职责分别归属
+`domain/core`、`domain/graph`、`domain/code`、`domain/knowledge` 与
+`domain/operations`。这些目录是真实且依赖无环的 Rust 模块，不使用生产路径别名模拟。
+带校验行为的领域 owner 直接挂载同级 UT，因此 repository registration、scope
+identity、retrieval request、repository status 与 index summary 不再共用笼统测试模块。
+
 ### 自迭代 Harness
 
 面向代码检索和 semantic/vector 检索优化实验，可以通过稳定启动脚本运行
@@ -173,6 +179,9 @@ cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
+CI 安装当前最新的 Rust stable 工具链。最终执行 Clippy 门禁前应先更新本地
+`stable`，避免新稳定的 lint 在本地旧版本中未触发、直到推送后才失败。
+
 自迭代 harness 默认只执行轻量 fast 门禁。完整 profile 的产品与 harness
 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。
 
@@ -205,6 +214,10 @@ SQL 文件会贡献 table、view/materialized view、function/procedure、trigge
 仓库注册会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
 C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头文件 typedef/module table 声明、GCC/Clang 风格声明属性与 inline 扩展（如 `__attribute__((always_inline))`、`attribute((always_inline))`、`__always_inline`）、预处理器或已识别 decorator 声明区域，decorator 类型体仍保持声明形态，并且仍能抽取可靠结构化事实，会被保守恢复为 parsed。
+
+Web 路由检测把 Express 参数/handler 解析、Python 静态路由字符串和 JavaScript
+注释/字符串/正则词法状态分别放入具名模块，并由各 owner 直接挂载 UT；不得用笼统
+shared parser 桶跨越这些语言边界。
 
 代码仓库 full index 会先发现 tracked source layout，再使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
 

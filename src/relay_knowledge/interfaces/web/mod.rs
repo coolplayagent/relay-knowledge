@@ -964,13 +964,13 @@ pub(super) struct WebState {
 mod control_tests;
 
 #[cfg(test)]
-#[path = "code_api_tests.rs"]
-mod code_api_tests;
+#[path = "code_api_integration_tests.rs"]
+mod code_api_integration_tests;
 
 #[cfg(test)]
-#[path = "files_tests.rs"]
-mod files_tests;
+#[path = "files_integration_tests.rs"]
+mod files_integration_tests;
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;

@@ -1,4 +1,13 @@
-fn primary_reject_reason(record: &Value) -> Option<String> {
+use serde_json::Value;
+
+use crate::history;
+
+use super::metadata::{
+    case_signal_lines, changed_paths, failed_gate_names, field_string, key_metric_lines,
+    markdown_list, string_array, string_field, value_array,
+};
+
+pub(super) fn primary_reject_reason(record: &Value) -> Option<String> {
     string_array(record, "reject_reasons")
         .into_iter()
         .find(|reason| !reason.trim().is_empty())
@@ -14,7 +23,7 @@ fn protected_floor_summary(record: &Value) -> String {
     )
 }
 
-fn compact_paths(record: &Value, limit: usize) -> String {
+pub(super) fn compact_paths(record: &Value, limit: usize) -> String {
     let paths = changed_paths(record);
     if paths.is_empty() {
         return "none recorded".to_owned();
@@ -27,7 +36,7 @@ fn compact_paths(record: &Value, limit: usize) -> String {
     selected.join(", ")
 }
 
-fn top_change_summary(record: &Value, field: &str, limit: usize) -> String {
+pub(super) fn top_change_summary(record: &Value, field: &str, limit: usize) -> String {
     let changes = compact_score_changes(value_array(record, field), limit);
     if changes.is_empty() {
         "none recorded".to_owned()
@@ -53,7 +62,7 @@ fn score_delta_summary(record: &Value) -> String {
         .unwrap_or_else(|| "within epsilon or unavailable".to_owned())
 }
 
-fn primary_kind(record: &Value) -> String {
+pub(super) fn primary_kind(record: &Value) -> String {
     if history::adopted(record) {
         "accepted_optimization".to_owned()
     } else if !failed_gate_names(record).is_empty() {
@@ -63,7 +72,7 @@ fn primary_kind(record: &Value) -> String {
     }
 }
 
-fn primary_title(kind: &str, record: &Value) -> String {
+pub(super) fn primary_title(kind: &str, record: &Value) -> String {
     let run_id = string_field(record, "run_id");
     if kind == "accepted_optimization" {
         format!("{run_id} accepted optimization")
@@ -77,7 +86,7 @@ fn primary_title(kind: &str, record: &Value) -> String {
     }
 }
 
-fn primary_summary(kind: &str, record: &Value) -> String {
+pub(super) fn primary_summary(kind: &str, record: &Value) -> String {
     let run_id = string_field(record, "run_id");
     if kind == "accepted_optimization" {
         format!(
@@ -118,7 +127,7 @@ fn primary_summary(kind: &str, record: &Value) -> String {
     }
 }
 
-fn run_detail(summary: &str, record: &Value) -> String {
+pub(super) fn run_detail(summary: &str, record: &Value) -> String {
     [
         summary.to_owned(),
         format!(
@@ -142,3 +151,63 @@ fn run_detail(summary: &str, record: &Value) -> String {
     ]
     .join("\n\n")
 }
+
+pub fn compact_prompt_text(value: &str, limit: usize) -> String {
+    let compact = value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if compact.len() <= limit {
+        return compact;
+    }
+    compact
+        .chars()
+        .rev()
+        .take(limit)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect()
+}
+
+pub fn compact_score_changes(changes: &[Value], limit: usize) -> Vec<String> {
+    changes
+        .iter()
+        .take(limit)
+        .filter_map(Value::as_object)
+        .map(|change| {
+            let name = change
+                .get("name")
+                .or_else(|| change.get("case_id"))
+                .or_else(|| change.get("kind"))
+                .map(Value::to_string)
+                .unwrap_or_default();
+            format!(
+                "{}:{} {}->{} {}",
+                change.get("kind").and_then(Value::as_str).unwrap_or(""),
+                name.trim_matches('"'),
+                change
+                    .get("previous")
+                    .map(Value::to_string)
+                    .unwrap_or_default(),
+                change
+                    .get("current")
+                    .map(Value::to_string)
+                    .unwrap_or_default(),
+                change
+                    .get("reason")
+                    .or_else(|| change.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+            )
+            .trim()
+            .to_owned()
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "summaries_tests.rs"]
+mod summaries_tests;

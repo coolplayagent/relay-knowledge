@@ -1,27 +1,35 @@
-fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
+use super::{QualityGate, QualityGateStage};
+
+pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
     if profile == "smoke" {
-        return vec![
-            QualityGateStage::Parallel(vec![
-                quality_gate("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120),
-                quality_gate(
-                    "self_iteration_cargo_fmt_check",
-                    [
-                        "cargo",
-                        "fmt",
-                        "--manifest-path",
-                        "tools/self_iteration/Cargo.toml",
-                        "--",
-                        "--check",
-                    ],
-                    120,
-                ),
-            ]),
-        ];
+        return vec![QualityGateStage::Parallel(vec![
+            quality_gate(
+                "cargo_fmt_check",
+                ["cargo", "fmt", "--all", "--", "--check"],
+                120,
+            ),
+            quality_gate(
+                "self_iteration_cargo_fmt_check",
+                [
+                    "cargo",
+                    "fmt",
+                    "--manifest-path",
+                    "tools/self_iteration/Cargo.toml",
+                    "--",
+                    "--check",
+                ],
+                120,
+            ),
+        ])];
     }
     if profile == "fast" {
         return vec![
             QualityGateStage::Parallel(vec![
-                quality_gate("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120),
+                quality_gate(
+                    "cargo_fmt_check",
+                    ["cargo", "fmt", "--all", "--", "--check"],
+                    120,
+                ),
                 quality_gate(
                     "self_iteration_cargo_fmt_check",
                     [
@@ -61,7 +69,12 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                 ),
                 quality_gate(
                     "code_index_sqlite_lock_cases",
-                    ["cargo", "test", "--all-targets", "code_index_sqlite_lock_cases"],
+                    [
+                        "cargo",
+                        "test",
+                        "--all-targets",
+                        "code_index_sqlite_lock_cases",
+                    ],
                     300,
                 ),
                 quality_gate(
@@ -82,7 +95,11 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
     }
     vec![
         QualityGateStage::Parallel(vec![
-            quality_gate("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120),
+            quality_gate(
+                "cargo_fmt_check",
+                ["cargo", "fmt", "--all", "--", "--check"],
+                120,
+            ),
             quality_gate(
                 "self_iteration_cargo_fmt_check",
                 [
@@ -203,7 +220,7 @@ fn quality_gate<const N: usize>(
     }
 }
 
-fn quality_budget_ms(name: &str) -> Option<f64> {
+pub(super) fn quality_budget_ms(name: &str) -> Option<f64> {
     match name {
         "cargo_build_debug" => Some(90_000.0),
         "code_index_recovery_cases" => Some(60_000.0),
@@ -222,3 +239,7 @@ fn quality_budget_ms(name: &str) -> Option<f64> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "gate_policy_tests.rs"]
+mod tests;

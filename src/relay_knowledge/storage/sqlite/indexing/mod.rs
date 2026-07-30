@@ -924,10 +924,13 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(test)]
+#[path = "queue_tests.rs"]
 mod queue_tests;
 
 #[cfg(test)]
+#[path = "refresh_tests.rs"]
 mod refresh_tests;
 
 #[cfg(test)]
+#[path = "schema_migration_tests.rs"]
 mod schema_migration_tests;

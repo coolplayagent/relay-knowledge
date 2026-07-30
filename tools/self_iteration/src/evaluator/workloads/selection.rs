@@ -1,4 +1,21 @@
-fn evaluation_home(config: &Config, paths: &HistoryPaths, run_id: &str) -> (PathBuf, bool) {
+use std::{collections::BTreeSet, path::PathBuf};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, string_or},
+    config::{CategorySet, Config, EvaluationCategory},
+    history::HistoryPaths,
+    scoring::{CaseObservation, GateObservation},
+};
+
+use super::{case_scoring::is_guardrail_case, repository_scoring::repository_case_objective};
+
+pub(in crate::evaluator) fn evaluation_home(
+    config: &Config,
+    paths: &HistoryPaths,
+    run_id: &str,
+) -> (PathBuf, bool) {
     if config.profile == "fast" {
         return (
             paths.root.join("cache-v2").join("fast-evaluation-home"),
@@ -8,7 +25,7 @@ fn evaluation_home(config: &Config, paths: &HistoryPaths, run_id: &str) -> (Path
     (paths.work.join(run_id).join("home"), false)
 }
 
-fn relay_knowledge_binary(config: &Config) -> PathBuf {
+pub(in crate::evaluator) fn relay_knowledge_binary(config: &Config) -> PathBuf {
     config
         .workspace
         .join("target")
@@ -21,12 +38,12 @@ fn relay_knowledge_binary(config: &Config) -> PathBuf {
 }
 
 #[derive(Debug, Clone)]
-struct WorkloadSelection {
+pub(in crate::evaluator) struct WorkloadSelection {
     categories: Option<CategorySet>,
 }
 
 impl WorkloadSelection {
-    fn new(config: &Config) -> Self {
+    pub(in crate::evaluator) fn new(config: &Config) -> Self {
         Self {
             categories: config.categories.clone(),
         }
@@ -42,7 +59,7 @@ impl WorkloadSelection {
             .is_some_and(|categories| categories.contains(category))
     }
 
-    fn selected_categories_report(&self) -> Value {
+    pub(in crate::evaluator) fn selected_categories_report(&self) -> Value {
         self.categories
             .as_ref()
             .map(|categories| {
@@ -57,41 +74,41 @@ impl WorkloadSelection {
             .unwrap_or(Value::Null)
     }
 
-    fn runs_repository_workload(&self, profile: &str) -> bool {
+    pub(in crate::evaluator) fn runs_repository_workload(&self, profile: &str) -> bool {
         profile != "smoke"
     }
 
-    fn runs_repository_sets(&self, profile: &str) -> bool {
+    pub(in crate::evaluator) fn runs_repository_sets(&self, profile: &str) -> bool {
         if profile == "smoke" {
             return false;
         }
         self.focused() || profile_runs_repository_sets(profile)
     }
 
-    fn runs_file_fixtures(&self, profile: &str) -> bool {
+    pub(in crate::evaluator) fn runs_file_fixtures(&self, profile: &str) -> bool {
         self.contains(EvaluationCategory::FileFixtures)
             || self.contains(EvaluationCategory::Performance)
             || (!self.focused() && profile_runs_slow_suites(profile))
     }
 
-    fn runs_semantic_vector(&self, profile: &str) -> bool {
+    pub(in crate::evaluator) fn runs_semantic_vector(&self, profile: &str) -> bool {
         if profile == "smoke" {
             return false;
         }
         self.focused() || profile == "fast" || profile_runs_slow_suites(profile)
     }
 
-    fn runs_agent_workflows(&self, profile: &str) -> bool {
+    pub(in crate::evaluator) fn runs_agent_workflows(&self, profile: &str) -> bool {
         self.contains(EvaluationCategory::AgentWorkflows)
             || (!self.focused() && profile_runs_slow_suites(profile))
     }
 
-    fn runs_research_judge(&self, profile: &str) -> bool {
+    pub(in crate::evaluator) fn runs_research_judge(&self, profile: &str) -> bool {
         self.contains(EvaluationCategory::ResearchJudge)
             || (!self.focused() && profile_runs_slow_suites(profile))
     }
 
-    fn skipped_suites(&self, profile: &str) -> Vec<&'static str> {
+    pub(in crate::evaluator) fn skipped_suites(&self, profile: &str) -> Vec<&'static str> {
         let mut skipped = Vec::new();
         if !self.runs_repository_workload(profile) {
             skipped.push("repository_evaluation");
@@ -115,7 +132,11 @@ impl WorkloadSelection {
     }
 }
 
-fn repository_in_profile(profile: &str, repo_name: &str, repo_config: &Value) -> bool {
+pub(in crate::evaluator) fn repository_in_profile(
+    profile: &str,
+    repo_name: &str,
+    repo_config: &Value,
+) -> bool {
     if repo_config.get("profile").and_then(Value::as_str) == Some("exhaustive")
         && profile != "exhaustive"
     {
@@ -124,7 +145,7 @@ fn repository_in_profile(profile: &str, repo_name: &str, repo_config: &Value) ->
     profile != "fast" || fast_repository_names().iter().any(|name| name == repo_name)
 }
 
-fn select_repository_cases_for_profile(
+pub(in crate::evaluator) fn select_repository_cases_for_profile(
     profile: &str,
     categories: Option<&CategorySet>,
     cases: Vec<Value>,
@@ -140,7 +161,7 @@ fn select_repository_cases_for_profile(
     limit_cases_for_profile(profile, filtered)
 }
 
-fn semantic_vector_suite_for_selection(
+pub(in crate::evaluator) fn semantic_vector_suite_for_selection(
     suite: &Value,
     profile: &str,
     categories: Option<&CategorySet>,
@@ -177,7 +198,10 @@ fn semantic_vector_guardrail_cases(cases: Vec<Value>) -> Vec<Value> {
     }
 }
 
-fn focused_repository_case(categories: &CategorySet, case: &Value) -> bool {
+pub(in crate::evaluator) fn focused_repository_case(
+    categories: &CategorySet,
+    case: &Value,
+) -> bool {
     is_guardrail_case(case)
         || categories.contains(EvaluationCategory::Performance)
         || (categories.contains(EvaluationCategory::Foundational)
@@ -201,11 +225,17 @@ fn profile_runs_repository_sets(profile: &str) -> bool {
     matches!(profile, "fast" | "full" | "exhaustive")
 }
 
-fn repository_set_in_profile(profile: &str, set_name: &str) -> bool {
-    profile != "fast" || fast_repository_set_names().iter().any(|name| name == set_name)
+pub(in crate::evaluator) fn repository_set_in_profile(profile: &str, set_name: &str) -> bool {
+    profile != "fast"
+        || fast_repository_set_names()
+            .iter()
+            .any(|name| name == set_name)
 }
 
-fn limit_repository_set_cases_for_profile(profile: &str, cases: Vec<Value>) -> Vec<Value> {
+pub(in crate::evaluator) fn limit_repository_set_cases_for_profile(
+    profile: &str,
+    cases: Vec<Value>,
+) -> Vec<Value> {
     if profile != "fast" {
         return cases;
     }
@@ -232,18 +262,11 @@ fn limit_preserving_guardrails(cases: Vec<Value>, limit: usize) -> Vec<Value> {
     selected
 }
 
-fn is_guardrail_case(case: &Value) -> bool {
-    case
-        .get("guardrail")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
 fn case_identity(case: &Value) -> String {
     string_or(case, "id", "case").to_owned()
 }
 
-fn guardrail_gate_from_case(
+pub(in crate::evaluator) fn guardrail_gate_from_case(
     observation: &CaseObservation,
     duration_ms: u64,
 ) -> Option<GateObservation> {
@@ -262,7 +285,7 @@ fn fast_case_limit(profile: &str) -> Option<usize> {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(8)
-        })
+    })
 }
 
 fn fast_repository_set_case_limit() -> usize {
@@ -318,3 +341,7 @@ fn fast_repository_set_names() -> Vec<String> {
         .filter(|items| !items.is_empty())
         .unwrap_or_else(|| vec!["temporal_go_workspace".to_owned()])
 }
+
+#[cfg(test)]
+#[path = "selection_tests.rs"]
+mod tests;

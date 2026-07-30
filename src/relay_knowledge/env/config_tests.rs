@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
-use super::platform::{HOME, TMPDIR};
 use super::*;
+use crate::env::{
+    EnvErrorKind,
+    platform::{HOME, TMPDIR},
+};
 
 #[test]
 fn parses_platform_and_relay_overrides() {

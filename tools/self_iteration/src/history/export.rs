@@ -1,3 +1,16 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+use serde_json::Value;
+
+use super::{
+    HistoryPaths,
+    run_state::{adopted, adoption_status_for_run, committed, run_mode, score_accepted},
+    runs::load_runs,
+};
+
 pub fn export_history(paths: &HistoryPaths) -> Result<(PathBuf, PathBuf), String> {
     let runs = load_runs(paths)?;
     paths.ensure()?;
@@ -192,3 +205,66 @@ fn empty_svg(width: u32, height: u32, message: &str) -> String {
 "##
     )
 }
+
+fn reject_reasons(run: &Value) -> String {
+    run.get("reject_reasons")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .unwrap_or_default()
+}
+
+fn patch_string(run: &Value, name: &str) -> String {
+    run.get("patch")
+        .and_then(|patch| patch.get(name))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn patch_number(run: &Value, name: &str) -> u64 {
+    run.get("patch")
+        .and_then(|patch| patch.get(name))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn csv(run: &Value, name: &str) -> String {
+    escape_csv(run.get(name).and_then(Value::as_str).unwrap_or(""))
+}
+
+fn number(run: &Value, name: &str) -> f64 {
+    run.get(name).and_then(Value::as_f64).unwrap_or(0.0)
+}
+
+fn optional_number(run: &Value, name: &str) -> String {
+    run.get(name)
+        .and_then(Value::as_f64)
+        .map(|value| value.to_string())
+        .unwrap_or_default()
+}
+
+fn escape_csv(value: &str) -> String {
+    if value.contains([',', '"', '\n']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+#[cfg(test)]
+#[path = "export_tests.rs"]
+mod export_tests;

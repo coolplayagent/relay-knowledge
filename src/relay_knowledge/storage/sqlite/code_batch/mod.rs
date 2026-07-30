@@ -23,7 +23,9 @@ pub(super) fn begin_session(
     connection: &mut Connection,
     session: CodeIndexSession,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
-    super::super::retry::retry_sqlite_transient(|| begin_session_once(connection, &session))
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
+        begin_session_once(connection, &session)
+    })
 }
 
 fn begin_session_once(
@@ -60,7 +62,9 @@ pub(super) fn apply_batch(
     connection: &mut Connection,
     batch: CodeIndexBatch,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
-    super::super::retry::retry_sqlite_transient(|| apply_batch_once(connection, &batch))
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
+        apply_batch_once(connection, &batch)
+    })
 }
 
 fn apply_batch_once(
@@ -119,7 +123,9 @@ pub(super) fn finalize_session(
     connection: &mut Connection,
     session: CodeIndexSession,
 ) -> Result<crate::domain::CodeIndexSummary, StorageError> {
-    super::super::retry::retry_sqlite_transient(|| finalize_session_once(connection, &session))
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
+        finalize_session_once(connection, &session)
+    })
 }
 
 fn finalize_session_once(
@@ -931,10 +937,13 @@ fn now_millis() -> u64 {
 }
 
 #[cfg(test)]
+#[path = "search_materialization_tests.rs"]
 mod search_materialization_tests;
 
 #[cfg(test)]
+#[path = "session_finalize_tests.rs"]
 mod session_finalize_tests;
 
 #[cfg(test)]
+#[path = "typescript_finalize_tests.rs"]
 mod typescript_finalize_tests;

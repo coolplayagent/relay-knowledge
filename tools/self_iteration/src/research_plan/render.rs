@@ -1,3 +1,5 @@
+use super::ResearchPlanInput;
+
 pub fn render(input: ResearchPlanInput<'_>) -> String {
     let topic = input.topic.trim();
     let slug = input.slug.trim();
@@ -83,3 +85,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 "#
     )
 }
+
+#[cfg(test)]
+#[path = "render_tests.rs"]
+mod render_tests;

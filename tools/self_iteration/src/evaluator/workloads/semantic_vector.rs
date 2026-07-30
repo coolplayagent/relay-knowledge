@@ -1,4 +1,17 @@
-fn semantic_vector_runtime_profile(env: &BTreeMap<String, String>) -> Value {
+use std::{collections::BTreeMap, path::Path};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{number_or, string_or, string_vec},
+    command::CommandResult,
+    scoring::{CaseObservation, array_field as score_array_field, hit_matches_any},
+};
+
+use super::super::runtime::reporting::{normalized_env, parse_json_output_value};
+use super::case_scoring::{failed_case, is_guardrail_case, parse_json_case_output};
+
+pub(super) fn semantic_vector_runtime_profile(env: &BTreeMap<String, String>) -> Value {
     let semantic_backend = normalized_env(env, "RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "local");
     let vector_backend = normalized_env(env, "RELAY_KNOWLEDGE_VECTOR_BACKEND", "local");
     let external_requested = semantic_backend == "external" || vector_backend == "external";
@@ -27,7 +40,7 @@ fn semantic_vector_runtime_profile(env: &BTreeMap<String, String>) -> Value {
     })
 }
 
-fn semantic_vector_env_check(profile: &Value) -> CommandResult {
+pub(super) fn semantic_vector_env_check(profile: &Value) -> CommandResult {
     let missing = profile
         .get("missing_external_env")
         .and_then(Value::as_array)
@@ -48,7 +61,7 @@ fn semantic_vector_env_check(profile: &Value) -> CommandResult {
     }
 }
 
-fn validate_provider_probe(result: &mut CommandResult) -> bool {
+pub(super) fn validate_provider_probe(result: &mut CommandResult) -> bool {
     if !result.passed() {
         return false;
     }
@@ -70,7 +83,11 @@ fn validate_provider_probe(result: &mut CommandResult) -> bool {
     false
 }
 
-fn semantic_vector_ingest_command(binary: &Path, scope: &str, evidence: &Value) -> Vec<String> {
+pub(super) fn semantic_vector_ingest_command(
+    binary: &Path,
+    scope: &str,
+    evidence: &Value,
+) -> Vec<String> {
     let mut command = vec![
         binary.display().to_string(),
         "ingest".to_owned(),
@@ -86,7 +103,11 @@ fn semantic_vector_ingest_command(binary: &Path, scope: &str, evidence: &Value) 
     command
 }
 
-fn semantic_vector_query_command(binary: &Path, scope: &str, case: &Value) -> Vec<String> {
+pub(super) fn semantic_vector_query_command(
+    binary: &Path,
+    scope: &str,
+    case: &Value,
+) -> Vec<String> {
     vec![
         binary.display().to_string(),
         "query".to_owned(),
@@ -102,12 +123,11 @@ fn semantic_vector_query_command(binary: &Path, scope: &str, case: &Value) -> Ve
     ]
 }
 
-fn score_semantic_vector_case(case: &Value, result: &CommandResult) -> CaseObservation {
+pub(super) fn score_semantic_vector_case(case: &Value, result: &CommandResult) -> CaseObservation {
     if !result.passed() {
         return failed_case(case, "semantic_vector", "semantic_vector", result);
     }
-    let payload = match parse_json_case_output(case, "semantic_vector", "semantic_vector", result)
-    {
+    let payload = match parse_json_case_output(case, "semantic_vector", "semantic_vector", result) {
         Ok(payload) => payload,
         Err(observation) => return *observation,
     };
@@ -223,3 +243,7 @@ fn missing_required_backends(case: &Value, payload: &Value) -> Vec<String> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "semantic_vector_tests.rs"]
+mod tests;

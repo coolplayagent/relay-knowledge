@@ -1,4 +1,8 @@
-fn run_brief(run: &Value) -> String {
+use serde_json::Value;
+
+use crate::history::{HistoryPaths, adopted, is_evaluate_run, load_runs};
+
+pub(super) fn run_brief(run: &Value) -> String {
     format!(
         "run_id={} score={} base_score={} ceiling_bonus={} competitive={} semantic_vector={} research_judge={} performance={} reasons={}",
         value(run, "run_id"),
@@ -22,7 +26,7 @@ fn run_brief(run: &Value) -> String {
     )
 }
 
-fn capability_snapshot(
+pub(super) fn capability_snapshot(
     latest: Option<&Value>,
     best: Option<&Value>,
     profile_best: Option<&Value>,
@@ -52,11 +56,11 @@ fn capability_snapshot(
     .join("\n")
 }
 
-fn competitive_feature_targets(cases_config: &Value, limit: usize) -> String {
+pub(super) fn competitive_feature_targets(cases_config: &Value, limit: usize) -> String {
     suite_strings(cases_config, "competitive_feature_targets", limit)
 }
 
-fn implementation_guardrails(cases_config: &Value, limit: usize) -> String {
+pub(super) fn implementation_guardrails(cases_config: &Value, limit: usize) -> String {
     suite_strings(cases_config, "implementation_guardrails", limit)
 }
 
@@ -81,7 +85,7 @@ fn suite_strings(cases_config: &Value, field: &str, limit: usize) -> String {
     }
 }
 
-fn recent_rejections(paths: &HistoryPaths) -> String {
+pub(super) fn recent_rejections(paths: &HistoryPaths) -> String {
     let Ok(runs) = load_runs(paths) else {
         return "No rejected v2 historical run with reasons yet.".to_owned();
     };
@@ -122,3 +126,7 @@ fn value(run: &serde_json::Value, name: &str) -> String {
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| value.to_string())
 }
+
+#[cfg(test)]
+#[path = "history_context_tests.rs"]
+mod history_context_tests;

@@ -1,6 +1,17 @@
-fn run_loop(config: &Config, paths: &history::HistoryPaths) -> Result<i32, String> {
+use crate::{
+    candidate_git,
+    config::{Config, Strategy},
+    history,
+};
+
+use super::{
+    generation_iteration::run_generation_iteration, pacing::sleep_seconds,
+    unattended::run_unattended_layered_loop,
+};
+
+pub(super) fn run_loop(config: &Config, paths: &history::HistoryPaths) -> Result<i32, String> {
     if config.strategy == Strategy::UnattendedLayered {
-        return unattended::run_unattended_layered_loop(config, paths);
+        return run_unattended_layered_loop(config, paths);
     }
     if config.max_iterations == Some(0) || config.stop_after_accepted == Some(0) {
         return Ok(0);

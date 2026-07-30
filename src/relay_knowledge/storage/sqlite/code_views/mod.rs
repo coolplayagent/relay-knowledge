@@ -634,4 +634,5 @@ fn escape_like(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;

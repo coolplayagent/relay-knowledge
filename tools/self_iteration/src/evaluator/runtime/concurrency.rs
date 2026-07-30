@@ -1,9 +1,53 @@
-fn run_limited(limiter: &Limiter, spec: CommandSpec) -> CommandResult {
+use std::sync::{Arc, Condvar, Mutex};
+
+use crate::command::{CommandResult, CommandSpec, run_command};
+
+use super::contracts::{EvalRuntime, Limiter};
+
+struct Permit {
+    inner: Arc<(Mutex<usize>, Condvar)>,
+}
+
+impl Limiter {
+    pub(in crate::evaluator) fn new(limit: usize) -> Self {
+        Self {
+            inner: Arc::new((Mutex::new(limit.max(1)), Condvar::new())),
+        }
+    }
+
+    fn acquire(&self) -> Permit {
+        let (lock, condvar) = &*self.inner;
+        let mut available = lock.lock().expect("limiter lock should not be poisoned");
+        while *available == 0 {
+            available = condvar
+                .wait(available)
+                .expect("limiter lock should not be poisoned");
+        }
+        *available -= 1;
+        Permit {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        let (lock, condvar) = &*self.inner;
+        let mut available = lock.lock().expect("limiter lock should not be poisoned");
+        *available += 1;
+        condvar.notify_one();
+    }
+}
+
+pub(in crate::evaluator) fn run_limited(limiter: &Limiter, spec: CommandSpec) -> CommandResult {
     let _permit = limiter.acquire();
     run_command(&spec)
 }
 
-fn run_writer_limited(runtime: &EvalRuntime, spec: CommandSpec) -> CommandResult {
+pub(in crate::evaluator) fn run_writer_limited(
+    runtime: &EvalRuntime,
+    spec: CommandSpec,
+) -> CommandResult {
     let _permit = runtime.limiter.acquire();
     let _writer = runtime
         .writer_lock
@@ -12,7 +56,7 @@ fn run_writer_limited(runtime: &EvalRuntime, spec: CommandSpec) -> CommandResult
     run_command(&spec)
 }
 
-fn parallel_map<T, R, F>(items: Vec<T>, jobs: usize, f: F) -> Vec<R>
+pub(in crate::evaluator) fn parallel_map<T, R, F>(items: Vec<T>, jobs: usize, f: F) -> Vec<R>
 where
     T: Send + 'static,
     R: Send + 'static,
@@ -49,3 +93,7 @@ where
         Err(_) => Vec::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "concurrency_tests.rs"]
+mod tests;

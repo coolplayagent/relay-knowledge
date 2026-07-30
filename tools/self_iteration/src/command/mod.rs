@@ -1,15 +1,12 @@
 use std::{
     collections::BTreeMap,
-    io::{Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
 
-const COMMAND_PROGRESS_INTERVAL: Duration = Duration::from_secs(15);
+pub(super) const COMMAND_PROGRESS_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandResult {
@@ -27,7 +24,7 @@ impl CommandResult {
     }
 
     pub fn gate_message(&self) -> String {
-        last_output_line(&self.stdout, &self.stderr)
+        output::last_output_line(&self.stdout, &self.stderr)
     }
 
     pub fn serializable(&self) -> serde_json::Value {
@@ -36,8 +33,8 @@ impl CommandResult {
             "command": self.command,
             "exit_code": self.exit_code,
             "duration_ms": self.duration_ms,
-            "stdout_tail": tail(&self.stdout, 4000),
-            "stderr_tail": tail(&self.stderr, 4000),
+            "stdout_tail": output::tail(&self.stdout, 4000),
+            "stderr_tail": output::tail(&self.stderr, 4000),
         })
     }
 }
@@ -80,16 +77,15 @@ pub fn inherited_env() -> BTreeMap<String, String> {
     std::env::vars().collect()
 }
 
-include!("execution.rs");
-include!("pipes.rs");
-include!("logging.rs");
-include!("output.rs");
-include!("failure.rs");
+mod execution;
+mod failure;
+mod logging;
+mod output;
+mod pipes;
+
+pub use execution::run_command;
+pub use output::{last_output_line, tail};
 
 #[cfg(test)]
-#[path = "output_tests.rs"]
-mod output_tests;
-
-#[cfg(test)]
-#[path = "execution_tests.rs"]
-mod execution_tests;
+#[path = "mod_tests.rs"]
+mod tests;

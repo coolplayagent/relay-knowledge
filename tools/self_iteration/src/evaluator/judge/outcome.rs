@@ -1,4 +1,8 @@
-fn judge_outcome(text: &str, suite: &Value) -> (bool, bool, f64, String, Value) {
+use serde_json::Value;
+
+use crate::cases::array_field;
+
+pub(super) fn judge_outcome(text: &str, suite: &Value) -> (bool, bool, f64, String, Value) {
     let payload = extract_json_object(text)
         .and_then(|json| serde_json::from_str::<Value>(&json).ok())
         .unwrap_or_else(|| serde_json::json!({"passed": false, "overall_score": 0.0, "summary": "invalid judge JSON"}));
@@ -102,7 +106,7 @@ fn required_judge_output_fields() -> [&'static str; 10] {
     ]
 }
 
-fn required_judge_dimensions(suite: &Value) -> Vec<String> {
+pub(super) fn required_judge_dimensions(suite: &Value) -> Vec<String> {
     let configured = array_field(suite, "rubric_dimensions")
         .iter()
         .filter_map(Value::as_str)
@@ -126,40 +130,12 @@ fn required_judge_dimensions(suite: &Value) -> Vec<String> {
     }
 }
 
-fn shell_split(value: &str) -> Result<Vec<String>, String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    let mut escaped = false;
-    for ch in value.chars() {
-        if escaped {
-            current.push(ch);
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if quote == Some(ch) {
-            quote = None;
-        } else if quote.is_none() && (ch == '"' || ch == '\'') {
-            quote = Some(ch);
-        } else if quote.is_none() && ch.is_whitespace() {
-            if !current.is_empty() {
-                parts.push(std::mem::take(&mut current));
-            }
-        } else {
-            current.push(ch);
-        }
-    }
-    if quote.is_some() {
-        return Err("unterminated quote in command".to_owned());
-    }
-    if !current.is_empty() {
-        parts.push(current);
-    }
-    Ok(parts)
-}
-
 fn extract_json_object(text: &str) -> Option<String> {
     let start = text.find('{')?;
     let end = text.rfind('}')?;
     (end >= start).then(|| text[start..=end].to_owned())
 }
+
+#[cfg(test)]
+#[path = "outcome_tests.rs"]
+mod tests;

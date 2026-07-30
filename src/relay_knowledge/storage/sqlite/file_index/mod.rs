@@ -238,7 +238,7 @@ pub(super) fn search(
         return Err(file_query_timeout());
     }
     connection.progress_handler(1000, Some(move || Instant::now() >= deadline));
-    let result = super::retry::retry_sqlite_transient(|| {
+    let result = super::connection_runtime::retry::retry_sqlite_transient(|| {
         if Instant::now() >= deadline {
             return Err(file_query_timeout());
         }
@@ -708,8 +708,8 @@ fn u64_from_sql(value: i64) -> Result<u64, rusqlite::Error> {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
 
 #[cfg(test)]
 #[path = "retirement_tests.rs"]

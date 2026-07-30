@@ -4,8 +4,6 @@ pub struct ResearchPlanInput<'a> {
     pub date: &'a str,
 }
 
-include!("render.rs");
+mod render;
 
-#[cfg(test)]
-#[path = "render_tests.rs"]
-mod render_tests;
+pub use render::render;

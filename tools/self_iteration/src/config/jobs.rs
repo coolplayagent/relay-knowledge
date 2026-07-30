@@ -5,7 +5,7 @@ pub enum Jobs {
 }
 
 impl Jobs {
-    fn parse(value: &str) -> Result<Self, String> {
+    pub(super) fn parse(value: &str) -> Result<Self, String> {
         if value == "auto" {
             return Ok(Self::Auto);
         }
@@ -18,7 +18,7 @@ impl Jobs {
         Ok(Self::Fixed(parsed))
     }
 
-    fn resolve(self, default: usize) -> usize {
+    pub(super) fn resolve(self, default: usize) -> usize {
         match self {
             Self::Auto => default.max(1),
             Self::Fixed(value) => value.max(1),
@@ -32,3 +32,7 @@ impl Jobs {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "jobs_tests.rs"]
+mod jobs_tests;

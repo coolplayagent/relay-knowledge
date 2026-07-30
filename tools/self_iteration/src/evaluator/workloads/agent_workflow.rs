@@ -1,4 +1,34 @@
-fn evaluate_agent_workflows(
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, number_or, objects_by_repository, string_field, string_or, string_vec},
+    command::{CommandResult, CommandSpec},
+    config::{CategorySet, EvaluationCategory},
+    scoring::{
+        CaseObservation, MetricObservation, array_field as score_array_field, assess_ranked_hits,
+        hit_matches_any,
+    },
+};
+
+use super::super::{
+    fixtures::prepare_repository_path,
+    runtime::{
+        concurrency::{run_limited, run_writer_limited},
+        contracts::{EvalRuntime, RepoReport},
+        reporting::{budget, parse_json_output, parse_json_output_value, repo_report},
+    },
+};
+use super::{
+    case_scoring::is_guardrail_case, cli_cases::register_command,
+    selection::guardrail_gate_from_case,
+};
+
+pub(in crate::evaluator) fn evaluate_agent_workflows(
     runtime: &EvalRuntime,
     run_home: &Path,
     cases_config: &Value,
@@ -54,7 +84,10 @@ fn agent_workflow_case_in_profile(profile: &str, case: &Value) -> bool {
 fn agent_missing_repository_report(repo_name: String, workflow_cases: Vec<Value>) -> RepoReport {
     let failed = CommandResult {
         name: format!("{repo_name}_agent_repository_config"),
-        command: vec!["validate".to_owned(), "agent-workflow-repository".to_owned()],
+        command: vec![
+            "validate".to_owned(),
+            "agent-workflow-repository".to_owned(),
+        ],
         exit_code: 1,
         duration_ms: 0,
         stdout: String::new(),
@@ -64,7 +97,14 @@ fn agent_missing_repository_report(repo_name: String, workflow_cases: Vec<Value>
         .iter()
         .map(|case| failed_agent_workflow_case(case, &repo_name, &failed))
         .collect();
-    repo_report(&repo_name, "all".to_owned(), vec![failed], cases, Vec::new(), Value::Null)
+    repo_report(
+        &repo_name,
+        "all".to_owned(),
+        vec![failed],
+        cases,
+        Vec::new(),
+        Value::Null,
+    )
 }
 
 fn evaluate_agent_workflow_repository(
@@ -147,7 +187,12 @@ fn evaluate_agent_workflow_repository(
     commands.push(index.clone());
     if !index.passed() {
         return Ok(repo_report(
-            repo_name, "all".to_owned(), commands, cases, metrics, index_json,
+            repo_name,
+            "all".to_owned(),
+            commands,
+            cases,
+            metrics,
+            index_json,
         ));
     }
 
@@ -164,7 +209,14 @@ fn evaluate_agent_workflow_repository(
         cases.push(observation);
     }
 
-    let mut report = repo_report(repo_name, "all".to_owned(), commands, cases, metrics, index_json);
+    let mut report = repo_report(
+        repo_name,
+        "all".to_owned(),
+        commands,
+        cases,
+        metrics,
+        index_json,
+    );
     report.gates = gates;
     Ok(report)
 }
@@ -185,7 +237,13 @@ impl AgentWorkflowMetrics {
     fn into_metric_observations(self, case: &Value) -> Vec<MetricObservation> {
         let case_id = string_or(case, "id", "agent_workflow");
         vec![
-            lower_metric(case_id, "tool_calls", self.tool_calls as f64, case, "max_tool_calls"),
+            lower_metric(
+                case_id,
+                "tool_calls",
+                self.tool_calls as f64,
+                case,
+                "max_tool_calls",
+            ),
             lower_metric(
                 case_id,
                 "source_reads",
@@ -307,7 +365,10 @@ fn run_agent_workflow_case(
         metrics.output_chars += command.stdout.chars().count() + command.stderr.chars().count();
         metrics.total_duration_ms += command.duration_ms;
         if !command.passed() {
-            failures.push(format!("step[{index}] {step_id} command failed: {}", command.gate_message()));
+            failures.push(format!(
+                "step[{index}] {step_id} command failed: {}",
+                command.gate_message()
+            ));
             commands.push(command);
             continue;
         }
@@ -411,29 +472,47 @@ fn failed_agent_workflow_case(
 fn matched_expected_count(hits: &[Value], expected: &[Value]) -> usize {
     expected
         .iter()
-        .filter(|pattern| hits.iter().any(|hit| hit_matches_any(hit, std::slice::from_ref(pattern))))
+        .filter(|pattern| {
+            hits.iter()
+                .any(|hit| hit_matches_any(hit, std::slice::from_ref(pattern)))
+        })
         .count()
 }
 
 fn hit_context_chars(hit: &Value) -> usize {
-    ["path", "language_id", "excerpt", "degraded_reason", "edge_kind"]
-        .iter()
-        .filter_map(|field| hit.get(*field).and_then(Value::as_str))
-        .map(str::chars)
-        .map(Iterator::count)
-        .sum()
+    [
+        "path",
+        "language_id",
+        "excerpt",
+        "degraded_reason",
+        "edge_kind",
+    ]
+    .iter()
+    .filter_map(|field| hit.get(*field).and_then(Value::as_str))
+    .map(str::chars)
+    .map(Iterator::count)
+    .sum()
 }
 
 fn hit_has_retrieval_layer(hit: &Value, expected_layer: &str) -> bool {
     hit.get("retrieval_layers")
         .and_then(Value::as_array)
-        .map(|layers| layers.iter().any(|layer| layer.as_str() == Some(expected_layer)))
+        .map(|layers| {
+            layers
+                .iter()
+                .any(|layer| layer.as_str() == Some(expected_layer))
+        })
         .unwrap_or(false)
 }
 
 fn agent_budget_failures(case: &Value, metrics: &AgentWorkflowMetrics) -> Vec<String> {
     let mut failures = Vec::new();
-    push_max_budget_failure(&mut failures, case, "max_tool_calls", metrics.tool_calls as f64);
+    push_max_budget_failure(
+        &mut failures,
+        case,
+        "max_tool_calls",
+        metrics.tool_calls as f64,
+    );
     push_max_budget_failure(
         &mut failures,
         case,
@@ -467,7 +546,9 @@ fn agent_budget_failures(case: &Value, metrics: &AgentWorkflowMetrics) -> Vec<St
     if let Some(minimum) = budget(case, "min_evidence_hits") {
         let actual = metrics.evidence_hits as f64;
         if actual < minimum {
-            failures.push(format!("min_evidence_hits actual={actual:.3} budget={minimum:.3}"));
+            failures.push(format!(
+                "min_evidence_hits actual={actual:.3} budget={minimum:.3}"
+            ));
         }
     }
     failures
@@ -481,7 +562,12 @@ fn push_max_budget_failure(failures: &mut Vec<String>, case: &Value, field: &str
     }
 }
 
-fn agent_query_command(binary: &Path, alias: &str, ref_selector: &str, step: &Value) -> Vec<String> {
+fn agent_query_command(
+    binary: &Path,
+    alias: &str,
+    ref_selector: &str,
+    step: &Value,
+) -> Vec<String> {
     if string_or(step, "command", "query") == "context" {
         return agent_context_command(binary, alias, ref_selector, step);
     }
@@ -558,120 +644,6 @@ fn agent_context_command(
     command
 }
 
-const AGENT_WORKFLOW_CARGO_TOML: &str = r#"[package]
-name = "agent-workflow-fixture"
-version = "0.1.0"
-edition = "2021"
-"#;
-
-const AGENT_WORKFLOW_CORE_CONTEXT_RS: &str = r#"pub struct AgentContextPackBuilder {
-    max_context_chars: usize,
-    evidence_floor: usize,
-}
-
-impl AgentContextPackBuilder {
-    pub fn new(max_context_chars: usize, evidence_floor: usize) -> Self {
-        Self {
-            max_context_chars,
-            evidence_floor,
-        }
-    }
-
-    pub fn build_context_packet(&self, request: &AgentWorkflowRequest) -> AgentContextPacket {
-        let summary = format!(
-            "{}:{}:{}",
-            request.repository_alias, self.max_context_chars, self.evidence_floor
-        );
-        AgentContextPacket {
-            summary,
-            freshness_mode: request.freshness_mode.clone(),
-        }
-    }
-}
-
-pub struct AgentWorkflowRequest {
-    pub repository_alias: String,
-    pub freshness_mode: String,
-}
-
-pub struct AgentContextPacket {
-    pub summary: String,
-    pub freshness_mode: String,
-}
-"#;
-
-const AGENT_WORKFLOW_CORE_ORCHESTRATOR_RS: &str = r#"use crate::context::{AgentContextPackBuilder, AgentWorkflowRequest};
-
-pub struct AgentWorkflowOrchestrator {
-    context_builder: AgentContextPackBuilder,
-}
-
-impl AgentWorkflowOrchestrator {
-    pub fn new(context_builder: AgentContextPackBuilder) -> Self {
-        Self { context_builder }
-    }
-
-    pub fn analyze_issue_entrypoint(&self, request: &AgentWorkflowRequest) -> String {
-        let packet = self.context_builder.build_context_packet(request);
-        format!("{}:{}", packet.summary, packet.freshness_mode)
-    }
-}
-"#;
-
-const AGENT_WORKFLOW_CORE_LIB_RS: &str = r#"pub mod context;
-pub mod orchestrator;
-"#;
-
-const AGENT_WORKFLOW_WEB_CONTEXT_TS: &str = r#"export type AgentEvidenceCard = {
-  path: string;
-  excerpt: string;
-  retrievalLayer: string;
-};
-
-export function buildContextPacket(cards: AgentEvidenceCard[], maxContextChars: number): string {
-  return cards
-    .slice(0, 4)
-    .map((card) => `${card.path}:${card.retrievalLayer}:${card.excerpt}`)
-    .join("\n")
-    .slice(0, maxContextChars);
-}
-"#;
-
-const AGENT_WORKFLOW_WEB_ENTRY_TS: &str = r#"import { buildContextPacket, AgentEvidenceCard } from "./contextPacket";
-
-export function renderAgentWorkflowAnswer(cards: AgentEvidenceCard[]): string {
-  return buildContextPacket(cards, 4096);
-}
-"#;
-
-const AGENT_WORKFLOW_OPS_POLICY_PY: &str = r#"AGENT_POLICY_BUDGET = {
-    "max_tool_calls": 6,
-    "max_source_reads": 8,
-    "max_context_chars": 9000,
-    "freshness": "wait-until-fresh",
-}
-
-
-def load_agent_policy(environment: str) -> dict[str, object]:
-    policy = dict(AGENT_POLICY_BUDGET)
-    policy["environment"] = environment
-    return policy
-"#;
-
-const AGENT_WORKFLOW_CONFIG_YAML: &str = r#"agent_workflow:
-  max_tool_calls: 6
-  max_source_reads: 8
-  max_output_chars: 64000
-  freshness_state: wait-until-fresh
-  fallback_policy: bounded-search
-"#;
-
-const AGENT_WORKFLOW_DOC_MD: &str = r#"# Agent Workflow Evaluation Fixture
-
-The coding-agent workflow combines definition lookup, cross-language context packet construction,
-configuration tracing, and freshness policy verification. The expected answer must cite structured
-evidence before bounded text fallback and keep the packed context under the configured budget.
-
-Freshness scenarios use wait-until-fresh for normal issue analysis and allow-stale only when a
-caller explicitly accepts stale graph evidence while diagnostics report the freshness state.
-"#;
+#[cfg(test)]
+#[path = "agent_workflow_tests.rs"]
+mod tests;

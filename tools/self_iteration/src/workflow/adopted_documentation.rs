@@ -1,3 +1,8 @@
+use crate::{
+    candidate_git::{self, PatchSnapshot},
+    evaluator, scoring,
+};
+
 pub(crate) fn write_adopted_optimization_document(
     workspace: &std::path::Path,
     run_id: &str,

@@ -70,8 +70,8 @@ mod identity_tests;
 mod go_tests;
 
 #[cfg(test)]
-#[path = "languages/c/tests.rs"]
-mod c_tests;
+#[path = "languages/c/parser_integration_tests.rs"]
+mod c_language_integration_tests;
 
 #[cfg(test)]
 #[path = "tests/enum_symbols.rs"]
@@ -86,12 +86,12 @@ mod review_tests;
 mod sql_tests;
 
 #[cfg(test)]
-#[path = "languages/c/gcc_recovery_tests.rs"]
-mod gcc_recovery_tests;
+#[path = "languages/c/gcc_recovery_integration_tests.rs"]
+mod gcc_recovery_integration_tests;
 
 #[cfg(test)]
-#[path = "languages/cpp/tests.rs"]
-mod cpp_tests;
+#[path = "languages/cpp/parser_integration_tests.rs"]
+mod cpp_language_integration_tests;
 
 #[cfg(test)]
 #[path = "tests/manual.rs"]

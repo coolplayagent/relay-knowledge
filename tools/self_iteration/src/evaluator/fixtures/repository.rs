@@ -1,11 +1,33 @@
-fn prepare_repository_path(
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
+
+use serde_json::Value;
+
+use crate::{
+    cases::{string_field, string_or},
+    command::{CommandResult, CommandSpec},
+};
+
+use super::super::runtime::{concurrency::run_limited, contracts::EvalRuntime};
+use super::{
+    additional_languages::*, agent_workflow::*, c_and_cpp::*, common_languages::*,
+    cross_language::*, nonstandard_layout::*, software_global::*, writer::write_fixture_file,
+};
+
+pub(in crate::evaluator) fn prepare_repository_path(
     runtime: &EvalRuntime,
     run_home: &Path,
     repo_name: &str,
     repo_config: &Value,
 ) -> Result<(PathBuf, Vec<CommandResult>), String> {
     let Some(fixture) = string_field(repo_config, "generated_fixture") else {
-        return Ok((PathBuf::from(string_or(repo_config, "path", "")), Vec::new()));
+        return Ok((
+            PathBuf::from(string_or(repo_config, "path", "")),
+            Vec::new(),
+        ));
     };
     let root = generated_repository_root(run_home, repo_name)?;
     create_generated_repository_files(&root, fixture)?;
@@ -112,9 +134,18 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("tests/fake_worker.go", GO_FAKE_WORKER),
         ]),
         "java_syntax_v2" => Ok(vec![
-            ("src/main/java/example/ServiceContract.java", JAVA_SERVICE_CONTRACT),
-            ("src/main/java/example/AnnotatedService.java", JAVA_ANNOTATED_SERVICE),
-            ("src/main/java/example/ServiceFactory.java", JAVA_SERVICE_FACTORY),
+            (
+                "src/main/java/example/ServiceContract.java",
+                JAVA_SERVICE_CONTRACT,
+            ),
+            (
+                "src/main/java/example/AnnotatedService.java",
+                JAVA_ANNOTATED_SERVICE,
+            ),
+            (
+                "src/main/java/example/ServiceFactory.java",
+                JAVA_SERVICE_FACTORY,
+            ),
             ("src/test/java/example/FakeService.java", JAVA_FAKE_SERVICE),
         ]),
         "rust_syntax_v2" => Ok(vec![
@@ -158,7 +189,10 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
         "swift_syntax_v2" => Ok(vec![
             ("Sources/App/SessionClient.swift", SWIFT_SESSION_CLIENT),
             ("Sources/App/RequestPipeline.swift", SWIFT_REQUEST_PIPELINE),
-            ("Tests/AppTests/FakeSessionClient.swift", SWIFT_FAKE_SESSION_CLIENT),
+            (
+                "Tests/AppTests/FakeSessionClient.swift",
+                SWIFT_FAKE_SESSION_CLIENT,
+            ),
         ]),
         "config_document_syntax_v1" => Ok(vec![
             ("README.md", CONFIG_DOCUMENT_README_MD),
@@ -207,9 +241,18 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("go.mod", NONSTANDARD_GO_MOD),
             ("pyproject.toml", NONSTANDARD_PYPROJECT_TOML),
             ("modules/java_sdk/pom.xml", NONSTANDARD_POM_XML),
-            ("modules/java_sdk/build.gradle.kts", NONSTANDARD_BUILD_GRADLE_KTS),
-            ("external_deps/cpp_sdk/conanfile.txt", NONSTANDARD_CONANFILE_TXT),
-            ("external_deps/cpp_sdk/conanfile.py", NONSTANDARD_CONANFILE_PY),
+            (
+                "modules/java_sdk/build.gradle.kts",
+                NONSTANDARD_BUILD_GRADLE_KTS,
+            ),
+            (
+                "external_deps/cpp_sdk/conanfile.txt",
+                NONSTANDARD_CONANFILE_TXT,
+            ),
+            (
+                "external_deps/cpp_sdk/conanfile.py",
+                NONSTANDARD_CONANFILE_PY,
+            ),
         ]),
         "software_global_v1" => Ok(vec![
             (".relay-knowledge-fixture-version", "software_global_v1\n"),
@@ -229,7 +272,10 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("infra/main.tf", SOFTWARE_GLOBAL_TERRAFORM),
             ("service/relay-global.service", SOFTWARE_GLOBAL_SYSTEMD),
             ("docs/architecture.md", SOFTWARE_GLOBAL_ARCHITECTURE_MD),
-            (".knowledge/knowledge-map.yaml", SOFTWARE_GLOBAL_KNOWLEDGE_MAP),
+            (
+                ".knowledge/knowledge-map.yaml",
+                SOFTWARE_GLOBAL_KNOWLEDGE_MAP,
+            ),
             ("config/flags.yaml", SOFTWARE_GLOBAL_FLAGS_YAML),
             ("tests/smoke.rs", SOFTWARE_GLOBAL_SMOKE_RS),
             ("templates/deployment.yaml.j2", SOFTWARE_GLOBAL_TEMPLATE),
@@ -275,9 +321,7 @@ fn write_index_performance_many_files_fixture(root: &Path) -> Result<(), String>
                 .join("src")
                 .join(format!("shard_{shard:03}"))
                 .join(format!("file_{index:04}.rs")),
-            &format!(
-                "pub fn rk_perf_target_{index:04}(input: u64) -> u64 {{ input + {index} }}\n"
-            ),
+            &format!("pub fn rk_perf_target_{index:04}(input: u64) -> u64 {{ input + {index} }}\n"),
         )?;
     }
 
@@ -367,8 +411,18 @@ fn commit_generated_repository(
     let env = generated_git_env(&runtime.env);
     let commands = [
         vec!["git", "init", "-q"],
-        vec!["git", "config", "user.email", "self-iteration@example.invalid"],
-        vec!["git", "config", "user.name", "relay-knowledge self-iteration"],
+        vec![
+            "git",
+            "config",
+            "user.email",
+            "self-iteration@example.invalid",
+        ],
+        vec![
+            "git",
+            "config",
+            "user.name",
+            "relay-knowledge self-iteration",
+        ],
         vec!["git", "add", "."],
         vec![
             "git",
@@ -409,3 +463,7 @@ fn generated_git_env(env: &BTreeMap<String, String>) -> BTreeMap<String, String>
     );
     scoped
 }
+
+#[cfg(test)]
+#[path = "repository_tests.rs"]
+mod repository_tests;

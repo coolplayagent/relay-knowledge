@@ -8,6 +8,10 @@ use super::super::code_query_prepare::retry_code_search_operation;
 
 const MAX_CANDIDATE_PATH_FTS_TERMS: usize = 8;
 
+#[cfg(test)]
+#[path = "candidate_paths_tests.rs"]
+mod candidate_paths_tests;
+
 pub(in crate::storage::sqlite) fn file_candidate_paths_for_scope(
     connection: &mut Connection,
     source_scope: &str,

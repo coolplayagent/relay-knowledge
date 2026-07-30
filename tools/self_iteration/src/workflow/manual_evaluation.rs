@@ -1,4 +1,11 @@
-fn run_evaluate(config: &Config, paths: &history::HistoryPaths) -> Result<i32, String> {
+use crate::{candidate_git, config::Config, history};
+
+use super::{
+    candidate_evaluation::evaluate_candidate_for_patch, output::print_score,
+    persistence::persist_scored_run, run_identity::new_manual_evaluate_run_id,
+};
+
+pub(super) fn run_evaluate(config: &Config, paths: &history::HistoryPaths) -> Result<i32, String> {
     let run_id = new_manual_evaluate_run_id();
     let patch = candidate_git::capture_patch(&config.workspace, paths, &run_id, "HEAD")?;
     let evaluation = evaluate_candidate_for_patch(config, paths, &run_id, &patch)?;

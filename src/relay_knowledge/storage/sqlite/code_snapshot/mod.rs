@@ -27,8 +27,6 @@ mod import_compat;
 mod snapshot_import;
 
 use self::snapshot_import::copy_attached_code_table;
-#[cfg(test)]
-pub(super) use candidate_paths::candidate_path_fts_query;
 pub(super) use candidate_paths::{
     file_candidate_paths_for_query_scope, file_candidate_paths_for_scope,
 };
@@ -37,12 +35,11 @@ pub(super) use fingerprints::{
 };
 
 #[cfg(test)]
-mod candidate_paths_tests;
-
-#[cfg(test)]
+#[path = "import_tests.rs"]
 mod import_tests;
 
 #[cfg(test)]
+#[path = "progress_tests.rs"]
 mod progress_tests;
 
 const IMPORT_SCHEMA: &str = "relay_import";

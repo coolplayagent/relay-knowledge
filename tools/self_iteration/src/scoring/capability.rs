@@ -1,4 +1,14 @@
-fn weighted_score(
+use serde_json::Value;
+
+use super::{
+    GateObservation, MetricObservation, RATIO_EPSILON, ScoreBaselines, ScoreComponents,
+    change_detection::{previous_metrics, previous_number},
+    score_math::{average, clamp},
+};
+
+const CAPABILITY_CEILING_MAX_BONUS: f64 = 0.06;
+
+pub(super) fn weighted_score(
     foundational: f64,
     competitive: f64,
     semantic: f64,
@@ -22,7 +32,7 @@ fn weighted_score(
     }
 }
 
-fn capability_ceiling_bonus(
+pub(super) fn capability_ceiling_bonus(
     current: ScoreComponents,
     baselines: ScoreBaselines<'_>,
     has_key_performance_metrics: bool,
@@ -99,7 +109,10 @@ fn normalized_ceiling_gain(current: f64, baseline: Option<f64>) -> Option<f64> {
     Some(((current - baseline) / remaining).clamp(0.0, 1.0))
 }
 
-fn performance_score(metrics: &[MetricObservation], previous_run: Option<&Value>) -> f64 {
+pub(super) fn performance_score(
+    metrics: &[MetricObservation],
+    previous_run: Option<&Value>,
+) -> f64 {
     let key_metrics = metrics
         .iter()
         .filter(|metric| metric.key)
@@ -126,14 +139,14 @@ fn performance_score(metrics: &[MetricObservation], previous_run: Option<&Value>
     average(&scores, 1.0)
 }
 
-fn stability_score(gates: &[GateObservation]) -> f64 {
+pub(super) fn stability_score(gates: &[GateObservation]) -> f64 {
     if gates.is_empty() {
         return 1.0;
     }
     gates.iter().filter(|gate| gate.passed).count() as f64 / gates.len() as f64
 }
 
-fn pareto_improved(current: ScoreComponents, previous: &Value) -> bool {
+pub(super) fn pareto_improved(current: ScoreComponents, previous: &Value) -> bool {
     let mut improved = false;
     for (name, value) in [
         ("foundational_capability", current.foundational_capability),
@@ -157,3 +170,7 @@ fn pareto_improved(current: ScoreComponents, previous: &Value) -> bool {
     }
     improved
 }
+
+#[cfg(test)]
+#[path = "capability_tests.rs"]
+mod capability_tests;

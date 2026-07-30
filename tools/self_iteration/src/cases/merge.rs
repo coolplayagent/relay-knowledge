@@ -1,4 +1,6 @@
-fn merge_case_config(target: &mut Value, included: Value) -> Result<(), String> {
+use serde_json::{Map, Value};
+
+pub(super) fn merge_case_config(target: &mut Value, included: Value) -> Result<(), String> {
     match (target, included) {
         (Value::Object(target), Value::Object(included)) => merge_objects(target, included),
         _ => Err("case config roots must be objects".to_owned()),
@@ -25,3 +27,7 @@ fn merge_objects(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "merge_tests.rs"]
+mod merge_tests;

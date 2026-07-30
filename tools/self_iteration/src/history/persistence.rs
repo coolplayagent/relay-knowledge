@@ -1,3 +1,15 @@
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+use serde_json::Value;
+
+use crate::scoring::{EvaluationObservation, ScoreBreakdown};
+
+use super::{HistoryPaths, run_state::adoption_status};
+
 pub fn write_report(paths: &HistoryPaths, run_id: &str, report: &Value) -> Result<PathBuf, String> {
     paths.ensure()?;
     let path = paths.reports.join(format!("{run_id}.json"));
@@ -76,3 +88,11 @@ pub fn make_run_record(input: RunRecordInput<'_>) -> Value {
         "metrics": input.observation.metrics,
     })
 }
+
+fn rounded(value: f64) -> f64 {
+    (value * 1_000_000.0).round() / 1_000_000.0
+}
+
+#[cfg(test)]
+#[path = "persistence_tests.rs"]
+mod persistence_tests;

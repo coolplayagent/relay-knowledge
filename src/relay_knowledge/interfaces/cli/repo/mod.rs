@@ -864,11 +864,11 @@ pub(crate) fn selector(
 }
 
 #[cfg(test)]
+#[path = "mod_tests.rs"]
+mod mod_tests;
+#[cfg(test)]
 #[path = "test_support.rs"]
 mod test_support;
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
 #[cfg(test)]
 #[path = "worktree_tests.rs"]
 mod worktree_tests;

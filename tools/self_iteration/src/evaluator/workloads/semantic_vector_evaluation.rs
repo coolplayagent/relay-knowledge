@@ -1,4 +1,25 @@
-fn evaluate_semantic_vector_suite(
+use serde_json::Value;
+
+use crate::{
+    cases::{array_field, string_or},
+    command::CommandSpec,
+    scoring::MetricObservation,
+};
+
+use super::super::runtime::{
+    concurrency::{parallel_map, run_limited},
+    contracts::{EvalRuntime, RepoReport},
+    reporting::{budget, push_latency_metrics, repo_report},
+};
+use super::{
+    selection::guardrail_gate_from_case,
+    semantic_vector::{
+        score_semantic_vector_case, semantic_vector_env_check, semantic_vector_ingest_command,
+        semantic_vector_query_command, semantic_vector_runtime_profile, validate_provider_probe,
+    },
+};
+
+pub(in crate::evaluator) fn evaluate_semantic_vector_suite(
     runtime: &EvalRuntime,
     suite: &Value,
 ) -> Result<RepoReport, String> {
@@ -177,3 +198,7 @@ fn evaluate_semantic_vector_suite(
     report.gates = guardrail_gates;
     Ok(report)
 }
+
+#[cfg(test)]
+#[path = "semantic_vector_evaluation_tests.rs"]
+mod tests;

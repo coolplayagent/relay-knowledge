@@ -76,7 +76,7 @@ pub(super) fn search(
     request: CodeFeatureFlagRequest,
 ) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
     let status = required_repository(connection, &request.repository)?;
-    super::super::retry::retry_sqlite_transient(|| {
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         search_with_status(connection, &status, &request)
     })
 }
@@ -93,7 +93,7 @@ pub(super) fn search_scope(
                     "code repository source scope '{source_scope}' is not indexed"
                 ))
             })?;
-    super::super::retry::retry_sqlite_transient(|| {
+    super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         search_with_status(connection, &status, &request)
     })
 }

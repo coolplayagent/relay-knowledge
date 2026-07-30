@@ -1,0 +1,409 @@
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::storage::StorageError;
+
+const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
+const SCHEMA_MARKER_VERSION: i64 = 3;
+const GRAPH_BM25_COLUMNS: &[&str] = &[
+    "document_id",
+    "document_kind",
+    "evidence_id",
+    "parent_evidence_id",
+    "modality",
+    "created_graph_version",
+    "source_scope",
+    "source_path",
+    "entity_labels",
+    "entity_aliases",
+    "content",
+];
+const GRAPH_SEMANTIC_COLUMNS: &[&str] = &[
+    "document_id",
+    "document_kind",
+    "evidence_id",
+    "parent_evidence_id",
+    "modality",
+    "created_graph_version",
+    "source_scope",
+    "source_path",
+    "entity_labels_json",
+    "content",
+    "token_signature_json",
+    "model",
+    "dimension",
+    "source_hash",
+    "tokenizer_version",
+];
+const GRAPH_VECTOR_COLUMNS: &[&str] = &[
+    "document_id",
+    "document_kind",
+    "evidence_id",
+    "parent_evidence_id",
+    "modality",
+    "created_graph_version",
+    "source_scope",
+    "source_path",
+    "entity_labels_json",
+    "content",
+    "vector_json",
+    "model",
+    "dimension",
+    "source_hash",
+    "tokenizer_version",
+];
+const GRAPH_BM25_LABEL_GRAM_COLUMNS: &[&str] = &[
+    "document_id",
+    "document_kind",
+    "source_scope",
+    "created_graph_version",
+    "label",
+    "label_lower",
+    "label_len",
+    "gram_size",
+    "gram",
+];
+const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
+    "set_id",
+    "package_name",
+    "ecosystem",
+    "repository_id",
+    "source_scope",
+    "workspace_format",
+    "created_at_ms",
+];
+const CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE: &[&str] = &["set_id", "package_name", "ecosystem"];
+const CODE_REPOSITORY_FILES_COLUMNS: &[&str] = &[
+    "repository_id",
+    "source_scope",
+    "file_id",
+    "path",
+    "language_id",
+    "blob_hash",
+    "byte_len",
+    "line_count",
+    "parse_status",
+    "is_generated",
+    "degraded_reason",
+];
+const FILE_INDEX_ROOT_COLUMNS: &[&str] = &[
+    "scope_id",
+    "root_id",
+    "root_path",
+    "indexed_file_count",
+    "missing_file_count",
+    "scan_error_count",
+    "truncated",
+    "content_truncated",
+    "content_read_error_count",
+    "indexed_content_count",
+    "skipped_content_count",
+    "unchanged_content_count",
+    "stale_content_cursor_count",
+    "last_indexed_at_ms",
+    "last_error",
+];
+const FILE_CONTENT_ENTRY_COLUMNS: &[&str] = &[
+    "entry_key",
+    "scope_id",
+    "root_id",
+    "path",
+    "relative_path",
+    "fingerprint",
+    "content_hash",
+    "indexed_at_ms",
+    "graph_version",
+    "status",
+    "skipped_reason",
+];
+const FILE_CONTENT_CHUNK_COLUMNS: &[&str] = &[
+    "chunk_id",
+    "entry_key",
+    "chunk_index",
+    "start_byte",
+    "end_byte",
+    "start_line",
+    "end_line",
+    "content",
+];
+const FILE_CONTENT_CURSOR_COLUMNS: &[&str] = &[
+    "cursor_key",
+    "kind",
+    "scope_id",
+    "root_id",
+    "path",
+    "content_hash",
+    "indexed_graph_version",
+    "state",
+    "stale_reason",
+    "updated_at_ms",
+];
+
+pub(super) fn schema_initialization_is_current(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
+    if !schema_marker_table_exists(connection)? {
+        return Ok(false);
+    }
+    let version = connection
+        .query_row(
+            "
+            SELECT version
+            FROM relay_storage_schema_state
+            WHERE key = ?1
+            ",
+            params![SCHEMA_MARKER_KEY],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+
+    if version != Some(SCHEMA_MARKER_VERSION) {
+        return Ok(false);
+    }
+    if !table_has_columns(connection, "graph_bm25", GRAPH_BM25_COLUMNS)?
+        || !table_has_columns(
+            connection,
+            "graph_semantic_documents",
+            GRAPH_SEMANTIC_COLUMNS,
+        )?
+        || !table_has_columns(connection, "graph_vector_documents", GRAPH_VECTOR_COLUMNS)?
+        || !table_has_columns(
+            connection,
+            "graph_bm25_label_grams",
+            GRAPH_BM25_LABEL_GRAM_COLUMNS,
+        )?
+        || !workspace_package_mappings_current(connection)?
+        || !table_has_columns(
+            connection,
+            "relay_sqlite_maintenance_diagnostics",
+            &["id", "last_maintenance_at_ms", "last_maintenance_error"],
+        )?
+        || !table_has_columns(
+            connection,
+            "code_repository_files",
+            CODE_REPOSITORY_FILES_COLUMNS,
+        )?
+        || !table_has_columns(connection, "file_index_roots", FILE_INDEX_ROOT_COLUMNS)?
+        || !table_has_columns(
+            connection,
+            "file_content_entries",
+            FILE_CONTENT_ENTRY_COLUMNS,
+        )?
+        || !table_has_columns(
+            connection,
+            "file_content_chunks",
+            FILE_CONTENT_CHUNK_COLUMNS,
+        )?
+        || !table_has_columns(
+            connection,
+            "file_content_cursors",
+            FILE_CONTENT_CURSOR_COLUMNS,
+        )?
+        || !table_has_columns(connection, "file_content_search", &["chunk_id", "content"])?
+    {
+        return Ok(false);
+    }
+    if !super::retrieval::derived_documents_current(connection)? {
+        return Ok(false);
+    }
+    if !fact_evidence_links_are_current(connection)? {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
+pub(super) fn initialize_schema_marker(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS relay_storage_schema_state (
+            key TEXT PRIMARY KEY,
+            version INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+        ",
+    )?;
+
+    Ok(())
+}
+
+pub(super) fn mark_schema_initialization_current(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    initialize_schema_marker(connection)?;
+    connection.execute(
+        "
+        INSERT INTO relay_storage_schema_state (key, version, updated_at_ms)
+        VALUES (?1, ?2, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+        ON CONFLICT(key) DO UPDATE SET
+            version = excluded.version,
+            updated_at_ms = excluded.updated_at_ms
+        ",
+        params![SCHEMA_MARKER_KEY, SCHEMA_MARKER_VERSION],
+    )?;
+
+    Ok(())
+}
+
+fn schema_marker_table_exists(connection: &Connection) -> Result<bool, StorageError> {
+    table_exists(connection, "relay_storage_schema_state")
+}
+
+fn table_has_columns(
+    connection: &Connection,
+    table: &str,
+    required_columns: &[&str],
+) -> Result<bool, StorageError> {
+    if !table_exists(connection, table)? {
+        return Ok(false);
+    }
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let columns = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+
+    Ok(required_columns
+        .iter()
+        .all(|required| columns.iter().any(|column| column == required)))
+}
+
+fn workspace_package_mappings_current(connection: &Connection) -> Result<bool, StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_workspace_package_mappings",
+        CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS,
+    )? {
+        return Ok(false);
+    }
+    table_has_unique_columns(
+        connection,
+        "code_workspace_package_mappings",
+        CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE,
+    )
+}
+
+fn table_has_unique_columns(
+    connection: &Connection,
+    table: &str,
+    expected_columns: &[&str],
+) -> Result<bool, StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA index_list({table})"))?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)? != 0))
+    })?;
+    let indexes = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+
+    for (index_name, unique) in indexes {
+        if !unique {
+            continue;
+        }
+        let mut statement = connection.prepare(&format!("PRAGMA index_info({index_name})"))?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
+        let columns = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)?;
+        if columns
+            .iter()
+            .map(String::as_str)
+            .eq(expected_columns.iter().copied())
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn fact_evidence_links_are_current(connection: &Connection) -> Result<bool, StorageError> {
+    if !table_exists(connection, "graph_fact_evidence")? {
+        return Ok(false);
+    }
+    for (fact_kind, table) in [
+        ("relation", "graph_relations"),
+        ("claim", "graph_claims"),
+        ("event", "graph_events"),
+    ] {
+        if !fact_evidence_links_are_current_for_kind(connection, fact_kind, table)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+fn fact_evidence_links_are_current_for_kind(
+    connection: &Connection,
+    fact_kind: &'static str,
+    table: &'static str,
+) -> Result<bool, StorageError> {
+    if !table_exists(connection, table)? {
+        return Ok(true);
+    }
+    let mut statement =
+        connection.prepare(&format!("SELECT id, evidence_ids_json FROM {table}"))?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let facts = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    drop(statement);
+
+    for (fact_id, evidence_json) in facts {
+        let evidence_ids: Vec<String> = serde_json::from_str(&evidence_json)
+            .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+        for evidence_id in evidence_ids {
+            if !fact_evidence_link_exists(connection, fact_kind, &fact_id, &evidence_id)? {
+                return Ok(false);
+            }
+        }
+    }
+
+    Ok(true)
+}
+
+fn fact_evidence_link_exists(
+    connection: &Connection,
+    fact_kind: &str,
+    fact_id: &str,
+    evidence_id: &str,
+) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT EXISTS (
+                SELECT 1
+                FROM graph_fact_evidence
+                WHERE fact_kind = ?1
+                  AND fact_id = ?2
+                  AND evidence_id = ?3
+            )
+            ",
+            params![fact_kind, fact_id, evidence_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StorageError::from)
+}
+
+fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT EXISTS (
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = ?1
+            )
+            ",
+            params![table],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StorageError::from)
+}
+
+#[cfg(test)]
+#[path = "marker_tests.rs"]
+mod tests;

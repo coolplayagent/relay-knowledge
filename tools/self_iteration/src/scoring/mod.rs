@@ -1,16 +1,9 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::command::CommandResult;
 
-const SCORE_EPSILON: f64 = 0.0005;
 const RATIO_EPSILON: f64 = 0.005;
-const CASE_SCORE_EPSILON: f64 = 0.005;
-const METRIC_RELATIVE_EPSILON: f64 = 0.03;
-const METRIC_ABSOLUTE_EPSILON: f64 = 25.0;
-const CAPABILITY_CEILING_MAX_BONUS: f64 = 0.06;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateObservation {
@@ -52,7 +45,7 @@ impl CaseObservation {
             return 0.0;
         }
         if let Some(score) = self.score_override {
-            return clamp(score);
+            return score_math::clamp(score);
         }
         let rank_score = match self.rank {
             Some(rank) if rank > 0 => 1.0 / rank as f64,
@@ -133,20 +126,37 @@ pub struct ScoreBaselines<'a> {
     pub profile_best_accepted: Option<&'a Value>,
 }
 
-include!("ranked.rs");
-include!("evaluation.rs");
-include!("decision.rs");
-include!("capability.rs");
-include!("change_detection.rs");
-include!("case_fields.rs");
-include!("score_math.rs");
+#[derive(Debug, Clone, Copy)]
+struct ScoreComponents {
+    score: f64,
+    foundational_capability: f64,
+    competitive_capability: f64,
+    semantic_vector: f64,
+    research_judge: Option<f64>,
+    performance: f64,
+    stability: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PreviousCase {
+    passed: bool,
+    rank: Option<usize>,
+    false_positive_count: usize,
+    score: f64,
+}
+
+mod capability;
+mod case_fields;
+mod change_detection;
+mod decision;
+mod evaluation;
+mod ranked;
+mod score_math;
+
+pub use case_fields::array_field;
+pub use evaluation::score_evaluation;
+pub use ranked::{RankedAssessment, assess_ranked_hits, hit_matches_any};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    include!("ranked_tests.rs");
-    include!("decision_tests.rs");
-    include!("capability_tests.rs");
-    include!("test_support.rs");
-}
+#[path = "mod_tests.rs"]
+mod tests;

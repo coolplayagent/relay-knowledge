@@ -1,4 +1,4 @@
-const KOTLIN_CLIENT: &str = r#"
+pub(super) const KOTLIN_CLIENT: &str = r#"
 package example
 
 import kotlin.time.Duration
@@ -22,7 +22,7 @@ class SyntaxClient(private val handler: RequestHandler = ClientRegistry.defaultH
 }
 "#;
 
-const KOTLIN_PIPELINE: &str = r#"
+pub(super) const KOTLIN_PIPELINE: &str = r#"
 package example
 
 fun runClientPipeline(values: List<String>): List<String> {
@@ -31,7 +31,7 @@ fun runClientPipeline(values: List<String>): List<String> {
 }
 "#;
 
-const KOTLIN_FAKE_CLIENT: &str = r#"
+pub(super) const KOTLIN_FAKE_CLIENT: &str = r#"
 package example
 
 class SyntaxClient {
@@ -39,7 +39,7 @@ class SyntaxClient {
 }
 "#;
 
-const PHP_KERNEL: &str = r#"<?php
+pub(super) const PHP_KERNEL: &str = r#"<?php
 namespace App;
 
 use App\Contracts\Bootable;
@@ -56,7 +56,7 @@ final class Kernel implements Bootable
 }
 "#;
 
-const PHP_BOOTABLE: &str = r#"<?php
+pub(super) const PHP_BOOTABLE: &str = r#"<?php
 namespace App\Contracts;
 
 interface Bootable
@@ -65,7 +65,7 @@ interface Bootable
 }
 "#;
 
-const PHP_CACHE_PROVIDER: &str = r#"<?php
+pub(super) const PHP_CACHE_PROVIDER: &str = r#"<?php
 namespace App\Providers;
 
 trait LogsBoot
@@ -88,7 +88,7 @@ final class CacheProvider
 }
 "#;
 
-const PHP_FAKE_KERNEL: &str = r#"<?php
+pub(super) const PHP_FAKE_KERNEL: &str = r#"<?php
 namespace Tests;
 
 final class Kernel
@@ -97,7 +97,7 @@ final class Kernel
 }
 "#;
 
-const RUBY_CONTROLLER: &str = r#"
+pub(super) const RUBY_CONTROLLER: &str = r#"
 require_relative "extensions"
 
 module App
@@ -119,7 +119,7 @@ module App
 end
 "#;
 
-const RUBY_EXTENSIONS: &str = r#"
+pub(super) const RUBY_EXTENSIONS: &str = r#"
 module App
   module Extensions
     def normalize_event(event)
@@ -129,7 +129,7 @@ module App
 end
 "#;
 
-const RUBY_RUNTIME: &str = r#"
+pub(super) const RUBY_RUNTIME: &str = r#"
 module App
   class Runtime
     def handle(event)
@@ -140,7 +140,7 @@ module App
 end
 "#;
 
-const RUBY_FAKE_CONTROLLER: &str = r#"
+pub(super) const RUBY_FAKE_CONTROLLER: &str = r#"
 class Controller
   def dispatch(event)
     event
@@ -148,7 +148,7 @@ class Controller
 end
 "#;
 
-const SCALA_PIPELINE: &str = r#"
+pub(super) const SCALA_PIPELINE: &str = r#"
 package example
 
 import example.Runtime.Event
@@ -165,7 +165,7 @@ object Pipeline:
     events.map(invoke)
 "#;
 
-const SCALA_RUNTIME: &str = r#"
+pub(super) const SCALA_RUNTIME: &str = r#"
 package example
 
 object Runtime:
@@ -176,14 +176,14 @@ class RuntimeService(stage: Stage):
     stage.run(event)
 "#;
 
-const SCALA_FAKE_PIPELINE: &str = r#"
+pub(super) const SCALA_FAKE_PIPELINE: &str = r#"
 package example
 
 object Pipeline:
   def execute(): Unit = ()
 "#;
 
-const SWIFT_SESSION_CLIENT: &str = r#"
+pub(super) const SWIFT_SESSION_CLIENT: &str = r#"
 import Foundation
 
 protocol SessionTransport {
@@ -204,7 +204,7 @@ final class SessionClient {
 }
 "#;
 
-const SWIFT_REQUEST_PIPELINE: &str = r#"
+pub(super) const SWIFT_REQUEST_PIPELINE: &str = r#"
 import Foundation
 
 struct RequestPipeline {
@@ -223,7 +223,7 @@ struct RequestPipeline {
 }
 "#;
 
-const SWIFT_FAKE_SESSION_CLIENT: &str = r#"
+pub(super) const SWIFT_FAKE_SESSION_CLIENT: &str = r#"
 import Foundation
 
 final class SessionClient {
@@ -231,7 +231,7 @@ final class SessionClient {
 }
 "#;
 
-const CONFIG_DOCUMENT_README_MD: &str = r#"# Runtime Guide
+pub(super) const CONFIG_DOCUMENT_README_MD: &str = r#"# Runtime Guide
 
 Install Notes
 =============
@@ -247,14 +247,14 @@ Install Notes
 ```
 "#;
 
-const CONFIG_DOCUMENT_REFERENCE_MD: &str = r#"# Reference
+pub(super) const CONFIG_DOCUMENT_REFERENCE_MD: &str = r#"# Reference
 
 ## Install
 
 The install reference backs local Markdown import extraction.
 "#;
 
-const CONFIG_DOCUMENT_SERVICE_CONF: &str = r#"[server]
+pub(super) const CONFIG_DOCUMENT_SERVICE_CONF: &str = r#"[server]
 enabled=true
 port=8080
 
@@ -262,7 +262,7 @@ port=8080
 cert=server.pem
 "#;
 
-const CONFIG_DOCUMENT_RUNTIME_JSON: &str = r#"{
+pub(super) const CONFIG_DOCUMENT_RUNTIME_JSON: &str = r#"{
   "server": {
     "port": 8080
   },

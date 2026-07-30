@@ -1,3 +1,15 @@
+use std::path::Path;
+
+use serde_json::Value;
+
+use crate::command::{CommandResult, CommandSpec};
+
+use super::super::runtime::concurrency::run_limited;
+use super::{
+    JudgeEvalInput,
+    settings::{JudgeBackend, JudgeSettings, shell_split},
+};
+
 fn judge_cli_command(
     template: &str,
     workspace: &Path,
@@ -25,7 +37,7 @@ fn judge_cli_command(
     Ok((command, (!used_prompt).then(|| prompt.to_owned())))
 }
 
-fn run_judge_backend(
+pub(super) fn run_judge_backend(
     input: &JudgeEvalInput<'_>,
     settings: &JudgeSettings,
     prompt_file: &Path,
@@ -122,3 +134,7 @@ fn http_judge_content(body: &str) -> Option<String> {
         .or_else(|| value.get("output_text").and_then(Value::as_str))
         .map(ToOwned::to_owned)
 }
+
+#[cfg(test)]
+#[path = "backend_tests.rs"]
+mod tests;

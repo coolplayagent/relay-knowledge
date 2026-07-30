@@ -1,19 +1,33 @@
-struct FinishInput<'a> {
-    config: &'a Config,
-    generated_diff: bool,
-    gates: Vec<GateObservation>,
-    cases: Vec<CaseObservation>,
-    metrics: Vec<MetricObservation>,
-    commands: Vec<CommandResult>,
-    repo_reports: Vec<RepoReport>,
-    run_home: PathBuf,
-    cached_home: bool,
-    job_plan: JobPlan,
-    selection: WorkloadSelection,
-    started: Instant,
+use std::{fs, path::PathBuf, time::Instant};
+
+use crate::{
+    command::CommandResult,
+    config::{Config, JobPlan},
+    scoring::{CaseObservation, EvaluationObservation, GateObservation, MetricObservation},
+};
+
+use super::super::workloads::WorkloadSelection;
+use super::{
+    contracts::{EvaluationRun, RepoReport},
+    reporting::serializable_repo_report,
+};
+
+pub(super) struct FinishInput<'a> {
+    pub(super) config: &'a Config,
+    pub(super) generated_diff: bool,
+    pub(super) gates: Vec<GateObservation>,
+    pub(super) cases: Vec<CaseObservation>,
+    pub(super) metrics: Vec<MetricObservation>,
+    pub(super) commands: Vec<CommandResult>,
+    pub(super) repo_reports: Vec<RepoReport>,
+    pub(super) run_home: PathBuf,
+    pub(super) cached_home: bool,
+    pub(super) job_plan: JobPlan,
+    pub(super) selection: WorkloadSelection,
+    pub(super) started: Instant,
 }
 
-fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
+pub(super) fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
     if input.run_home.exists() && !input.config.keep_workdirs && !input.cached_home {
         fs::remove_dir_all(&input.run_home)
             .map_err(|error| format!("failed to remove {}: {error}", input.run_home.display()))?;
@@ -63,3 +77,7 @@ fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
         report,
     })
 }
+
+#[cfg(test)]
+#[path = "finish_tests.rs"]
+mod tests;

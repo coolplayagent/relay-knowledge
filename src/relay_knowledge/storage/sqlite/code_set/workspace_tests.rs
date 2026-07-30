@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use super::*;
+use super as code_set;
 use crate::storage::{CodeRepositorySetMemberSeed, CodeRepositorySetSeed, SqliteGraphStore};
 
 #[tokio::test]

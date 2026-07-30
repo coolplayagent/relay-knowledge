@@ -239,6 +239,68 @@ fn hybrid_direct_gate_requires_scoped_api_identity_symbol_match() {
     ));
 }
 
+#[test]
+fn hybrid_direct_gate_accepts_dense_non_fallback_symbol_evidence() {
+    let request = request(
+        "Recover descriptor save_manifest VersionEdit",
+        CodeQueryKind::Hybrid,
+        10,
+    );
+
+    assert!(hybrid_direct_results_can_answer_without_graph_expansion(
+        &request,
+        &[symbol_hit(
+            "repo://repo/src::DBImpl::Recover",
+            "// Recover the descriptor from persistent storage.\nStatus Recover(VersionEdit* edit, bool* save_manifest);",
+        )]
+    ));
+
+    let fallback_hit = CodeRetrievalHit {
+        retrieval_layers: vec![
+            CodeRetrievalLayer::Lexical,
+            CodeRetrievalLayer::TextFallback,
+        ],
+        ..symbol_hit(
+            "repo://repo/src::DBImpl::Recover",
+            "Recover descriptor VersionEdit save_manifest",
+        )
+    };
+    let call_graph_hit = CodeRetrievalHit {
+        retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
+        edge_kind: Some("call".to_owned()),
+        ..symbol_hit(
+            "repo://repo/src::DBImpl::Recover",
+            "Recover descriptor VersionEdit save_manifest",
+        )
+    };
+
+    assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+        &request,
+        &[fallback_hit]
+    ));
+    assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+        &request,
+        &[call_graph_hit]
+    ));
+}
+
+#[test]
+fn hybrid_direct_gate_keeps_graph_expansion_for_graph_intent_terms() {
+    let request = request(
+        "Recover descriptor save_manifest VersionEdit callers",
+        CodeQueryKind::Hybrid,
+        10,
+    );
+
+    assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+        &request,
+        &[symbol_hit(
+            "repo://repo/src::DBImpl::Recover",
+            "// Recover the descriptor from persistent storage.\nStatus Recover(VersionEdit* edit, bool* save_manifest);",
+        )]
+    ));
+}
+
 fn request(query: &str, kind: CodeQueryKind, limit: usize) -> CodeRetrievalRequest {
     CodeRetrievalRequest::new(
         query,

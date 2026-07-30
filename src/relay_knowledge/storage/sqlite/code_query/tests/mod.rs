@@ -1,7 +1,6 @@
 use super::*;
 
-#[path = "unit.rs"]
-mod tests;
+mod unit;
 
 #[path = "score.rs"]
 mod score_tests;
@@ -11,9 +10,6 @@ mod identity_tests;
 
 #[path = "hybrid/hybrid_symbol_planner.rs"]
 mod hybrid_symbol_planner_tests;
-
-#[path = "hybrid/hybrid_chunk_gate.rs"]
-mod hybrid_chunk_gate_tests;
 
 #[path = "calls/call_ranking.rs"]
 mod call_ranking_tests;

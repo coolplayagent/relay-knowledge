@@ -67,6 +67,10 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 
 harness 会把实时进度写到 stderr，统一使用 `[self-iterate]` 前缀。每个子进程都会输出 `command start`、每 15 秒一次的 `command running` 心跳，以及带退出码和耗时的 `command done` 或 `command timeout`。评估阶段还会输出 profile、evaluation home、并发度、质量门禁 stage、仓库 workload 规模、repository-set workload 规模和最终 gate/case/command 计数。产品命令 stdout/stderr 仍捕获进 JSON 报告，长时间运行的 `fast` profile 不会处于无输出状态。
 
+### 源码所有权
+
+evaluator 根现在只声明模块并暴露 `evaluate_candidate` 与 `EvaluationRun`，所有行为和测试均归精确 owner。runtime 分离合同、有界并发、报告、finish 序列化和顶层 orchestration；workloads 依赖底层 runtime 服务，由 orchestration 向上组合，避免经 evaluator facade 形成反向依赖。evaluator 的 quality gate 合同归 `quality` 领域根，策略与执行也是真正的 owner 模块并分别直接挂载 UT。research judge 同样是真正的模块树：共享输入合同位于 `judge` 领域根，evaluation 单向组合各自拥有直属测试的 settings、prompt、backend 与 outcome。workload 执行已拆为显式的 agent、CLI、file、repository、repository-set、selection 与 semantic-vector 模块；共享 case scoring 拥有独立 owner，每个有行为的源码都直接挂载同级测试。fixture 源码族、仓库装配和文件写入同样由真正的 owner 模块负责；生成式 agent-workflow 源码常量归 fixture，而不再属于 workload 执行。Config、scoring、evaluator、workflow、内嵌 unattended 阶段、Case、进程适配器、history 和渐进记忆均使用真正的 Rust 模块，生产与测试代码都不再使用 `include!` 装配。无人值守运行嵌套在 `workflow` 下，因此可消费 workflow 服务而不形成顶层模块依赖环。
+
 ## 命令参考
 
 ### 语法和模式

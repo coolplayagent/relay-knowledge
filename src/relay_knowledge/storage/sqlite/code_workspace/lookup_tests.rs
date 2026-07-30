@@ -1,4 +1,4 @@
-use super::code_workspace::workspace_lookup_module;
+use super::workspace_lookup_module;
 
 #[test]
 fn workspace_lookup_module_normalizes_language_import_statements() {

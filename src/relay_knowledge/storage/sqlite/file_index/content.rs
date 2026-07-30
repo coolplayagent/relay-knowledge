@@ -224,7 +224,7 @@ pub(in crate::storage::sqlite) fn search(
         return Err(query_timeout());
     }
     connection.progress_handler(1000, Some(move || Instant::now() >= deadline));
-    let result = super::super::retry::retry_sqlite_transient(|| {
+    let result = super::super::connection_runtime::retry::retry_sqlite_transient(|| {
         if Instant::now() >= deadline {
             return Err(query_timeout());
         }

@@ -8,7 +8,7 @@ pub enum Mode {
 }
 
 impl Mode {
-    fn parse(value: &str) -> Option<Self> {
+    pub(super) fn parse(value: &str) -> Option<Self> {
         match value {
             "loop" => Some(Self::Loop),
             "once" => Some(Self::Once),
@@ -27,7 +27,7 @@ pub enum Strategy {
 }
 
 impl Strategy {
-    fn parse(value: &str) -> Result<Self, String> {
+    pub(super) fn parse(value: &str) -> Result<Self, String> {
         match value.trim().to_ascii_lowercase().as_str() {
             "single" => Ok(Self::Single),
             "unattended-layered" | "unattended_layered" | "layered" => Ok(Self::UnattendedLayered),
@@ -42,3 +42,7 @@ impl Strategy {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "mode_tests.rs"]
+mod mode_tests;

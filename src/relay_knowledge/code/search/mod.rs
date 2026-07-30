@@ -879,4 +879,5 @@ impl Drop for TempSourceTree {
 }
 
 #[cfg(test)]
-mod tests;
+#[path = "mod_tests.rs"]
+mod mod_tests;
