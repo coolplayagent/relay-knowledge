@@ -509,8 +509,10 @@ carries direct unit tests. Class-prefix derivation, method combination, URL
 joining, and route-fact deduplication are isolated in Spring materialization.
 Flask/FastAPI decorators, router mounts, and Python route materialization are
 grouped under `detect/flask/`; Python triple-quoted-string and comment lexical
-state and bounded multiline statement aggregation have dedicated owners with
-direct unit tests.
+state, bounded multiline statement aggregation, and call-argument parsing each
+have dedicated owners with direct unit tests. Argument parsing owns top-level
+boundaries, keyword values, route paths, method collections, named handlers,
+router identifiers, and static-versus-dynamic mount prefixes.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
