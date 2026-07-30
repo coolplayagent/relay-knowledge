@@ -494,7 +494,7 @@ remain unresolved edge metadata rather than parser degradation.
 
 Web route detection groups Express registration, import/factory and
 application/router alias discovery, call/path syntax, argument/handler parsing,
-and mount materialization under one
+mount discovery, and mount materialization under one
 `detect/express/` subdomain with direct unit tests for each owner. Python static
 route strings and JavaScript
 comment/string/regex lexical state remain separate named modules rather than a
