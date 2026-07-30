@@ -230,7 +230,7 @@ class-prefix 派生、method 合并、URL 拼接与 route fact 去重收敛在 S
 materialization owner。
 Flask/FastAPI decorator、router mount 与 Python route materialization 统一收敛
 在 `detect/flask/`；Python triple-quoted-string 与 comment 词法状态使用独立
-owner，并直接挂载 UT。
+owner，有界多行 statement aggregation 使用另一独立 owner；两者都直接挂载 UT。
 
 代码仓库 full index 会先发现 tracked source layout，再使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
 

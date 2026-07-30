@@ -4,15 +4,18 @@ use super::RouteCandidate;
 use super::python_strings::extract_quoted_string_python;
 
 mod python_lexical;
+mod statements;
 
 use python_lexical::python_code_lines_without_triple_quoted_strings;
+use statements::{
+    flask_decorator_statement, python_add_url_rule_statement, python_include_router_statement,
+    python_register_blueprint_statement, python_router_prefix_statement,
+};
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
 
-const MAX_FLASK_ROUTE_DECORATOR_LINES: usize = 12;
-const MAX_PYTHON_ROUTER_PREFIX_LINES: usize = 12;
 const DYNAMIC_PYTHON_MOUNT_PREFIX: &str = "\0dynamic";
 
 pub(in crate::code::parser) fn detect_flask_routes(content: &str) -> Vec<RouteCandidate> {
@@ -232,58 +235,6 @@ fn python_router_name_is_cross_file_candidate(router_name: &str, local_prefix: &
                 || router_name.ends_with("Blueprint")))
 }
 
-fn python_router_prefix_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
-    let first_line = lines[start].trim();
-    if !first_line.contains('=')
-        || (!first_line.contains("APIRouter(")
-            && !first_line.contains("FastAPI(")
-            && !first_line.contains("Blueprint("))
-    {
-        return None;
-    }
-    Some(python_parenthesized_statement(
-        lines,
-        start,
-        MAX_PYTHON_ROUTER_PREFIX_LINES,
-    ))
-}
-
-fn python_include_router_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
-    let first_line = lines[start].trim();
-    if !first_line.contains(".include_router(") {
-        return None;
-    }
-    Some(python_parenthesized_statement(
-        lines,
-        start,
-        MAX_PYTHON_ROUTER_PREFIX_LINES,
-    ))
-}
-
-fn python_register_blueprint_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
-    let first_line = lines[start].trim();
-    if !first_line.contains(".register_blueprint(") {
-        return None;
-    }
-    Some(python_parenthesized_statement(
-        lines,
-        start,
-        MAX_PYTHON_ROUTER_PREFIX_LINES,
-    ))
-}
-
-fn python_add_url_rule_statement(lines: &[String], start: usize) -> Option<(String, usize)> {
-    let first_line = lines[start].trim();
-    if !first_line.contains(".add_url_rule(") {
-        return None;
-    }
-    Some(python_parenthesized_statement(
-        lines,
-        start,
-        MAX_FLASK_ROUTE_DECORATOR_LINES,
-    ))
-}
-
 fn parse_python_add_url_rule(
     statement: &str,
     routers: &BTreeMap<String, PythonRouterInfo>,
@@ -381,65 +332,6 @@ fn python_assignment_name(left: &str) -> Option<String> {
         return None;
     }
     Some(name.to_owned())
-}
-
-fn flask_decorator_statement(lines: &[String], start: usize) -> (String, usize) {
-    python_parenthesized_statement(lines, start, MAX_FLASK_ROUTE_DECORATOR_LINES)
-}
-
-fn python_parenthesized_statement(
-    lines: &[String],
-    start: usize,
-    max_lines: usize,
-) -> (String, usize) {
-    let mut statement = String::new();
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    let mut saw_open = false;
-    let mut consumed = 0usize;
-    for line in lines.iter().skip(start).take(max_lines) {
-        let segment = line.trim();
-        if !statement.is_empty() {
-            statement.push(' ');
-        }
-        statement.push_str(segment);
-        consumed += 1;
-        for character in segment.chars() {
-            if let Some(quote_char) = quote {
-                if escaped {
-                    escaped = false;
-                    continue;
-                }
-                if character == '\\' {
-                    escaped = true;
-                    continue;
-                }
-                if character == quote_char {
-                    quote = None;
-                }
-                continue;
-            }
-            match character {
-                '\'' | '"' => quote = Some(character),
-                '(' => {
-                    depth += 1;
-                    saw_open = true;
-                }
-                ')' => {
-                    depth = depth.saturating_sub(1);
-                    if saw_open && depth == 0 {
-                        return (statement, consumed);
-                    }
-                }
-                _ => {}
-            }
-        }
-        if !saw_open {
-            return (statement, consumed);
-        }
-    }
-    (statement, consumed.max(1))
 }
 
 fn materialize_python_routes(
