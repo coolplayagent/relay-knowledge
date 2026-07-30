@@ -504,7 +504,8 @@ Java type-scope detection is grouped under its own `detect/spring/` subdomain;
 Java comment/text-block filtering and declaration recognition have a dedicated
 owner, while annotation path/method attribute parsing has another dedicated
 owner. Bounded multiline annotation aggregation is isolated from both, and
-every owner carries direct unit tests.
+mapping-kind and RequestMapping semantics have their own owner; every owner
+carries direct unit tests.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
