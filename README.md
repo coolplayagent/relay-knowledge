@@ -109,7 +109,11 @@ change CLI, service, Web, indexing, retrieval, or release workflow behavior.
   unresolved imports to sibling packages via a workspace package-mapping
   table, providing `target_hint` metadata instead of silently dropping
   cross-repo references. CLI indexing keeps the default disabled, so
-  single-repository indexing paths are completely unaffected.
+  single-repository indexing paths are completely unaffected. Ecosystem,
+  workspace-format, manifest, package-prefix, and import-statement
+  normalization rules are isolated in the storage `code_workspace::ecosystem`
+  owner with direct sibling tests; SQLite set, mapping, and cross-edge
+  orchestration remain in the workspace facade.
 - Software global projection for repository-scoped files, documentation topics,
   config/code relationships, dependencies, and unresolved SDK/API usage, exposed
   through `repo software` without query-time repository scans.

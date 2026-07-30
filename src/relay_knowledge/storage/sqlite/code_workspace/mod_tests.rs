@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::CodeWorkspaceMember;
+use crate::domain::{CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeWorkspaceMember};
 use rusqlite::{Connection, Transaction, params};
 
 fn workspace_schema_connection() -> Connection {
@@ -171,66 +171,6 @@ fn insert_source_file(
             params![source_scope, file_id, path, language_id],
         )
         .expect("insert source file");
-}
-
-#[test]
-fn ecosystem_mappings_are_correct() {
-    assert_eq!(
-        ecosystem_for_format(CodeMonorepoWorkspaceFormat::Pnpm),
-        "npm"
-    );
-    assert_eq!(
-        ecosystem_for_format(CodeMonorepoWorkspaceFormat::GoModules),
-        "go"
-    );
-    assert_eq!(
-        ecosystem_for_format(CodeMonorepoWorkspaceFormat::CargoWorkspace),
-        "rust"
-    );
-    assert_eq!(ecosystem_for_language("typescript"), Some("npm"));
-    assert_eq!(ecosystem_for_language("tsx"), Some("npm"));
-    assert_eq!(ecosystem_for_language("go"), Some("go"));
-    assert_eq!(ecosystem_for_language("rust"), Some("rust"));
-    assert_eq!(ecosystem_for_language("python"), None);
-}
-
-#[test]
-fn format_keys_are_correct() {
-    assert_eq!(
-        workspace_format_key(CodeMonorepoWorkspaceFormat::Pnpm),
-        "pnpm"
-    );
-    assert_eq!(
-        workspace_format_key(CodeMonorepoWorkspaceFormat::GoModules),
-        "go_modules"
-    );
-    assert_eq!(
-        workspace_format_key(CodeMonorepoWorkspaceFormat::CargoWorkspace),
-        "cargo_workspace"
-    );
-}
-
-#[test]
-fn package_candidates_preserve_path_and_namespace_prefixes() {
-    assert_eq!(
-        workspace_package_candidates("example.com/svc/api/client"),
-        vec![
-            "example.com/svc/api/client",
-            "example.com/svc/api",
-            "example.com/svc",
-            "example.com",
-            "example",
-        ]
-    );
-    assert_eq!(
-        workspace_package_candidates("@scope/core/utils"),
-        vec!["@scope/core/utils", "@scope/core", "@scope"]
-    );
-    assert_eq!(
-        workspace_package_candidates("serde::de::Deserialize"),
-        vec!["serde::de::Deserialize", "serde::de", "serde"]
-    );
-    assert!(workspace_package_candidates("  ").is_empty());
 }
 
 #[test]
@@ -960,20 +900,4 @@ fn upsert_workspace_package_mappings_prunes_removed_members() {
 
     assert_eq!(removed_count, 0);
     assert_eq!(remaining_count, 1);
-}
-
-#[test]
-fn is_local_or_relative_detects_correctly() {
-    assert!(is_local_or_relative_module("./foo"));
-    assert!(is_local_or_relative_module("../foo"));
-    assert!(is_local_or_relative_module("crate::foo"));
-    assert!(is_local_or_relative_module("self::foo"));
-    assert!(is_local_or_relative_module("super::foo"));
-    assert!(is_local_or_relative_module("crate"));
-    assert!(is_local_or_relative_module("self"));
-    assert!(is_local_or_relative_module("super"));
-    assert!(is_local_or_relative_module(""));
-    assert!(is_local_or_relative_module("  "));
-    assert!(!is_local_or_relative_module("example.com/api"));
-    assert!(!is_local_or_relative_module("@scope/pkg"));
 }
