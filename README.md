@@ -522,6 +522,13 @@ language listed above, including JavaScript/JSX, Kotlin, Scala, C#, PHP, Rust,
 and Swift. Package-manager or SDK imports without authorized indexed source
 remain unresolved edge metadata rather than parser degradation.
 
+Python type-reference parsing separates literal-aware function-signature
+annotation scanning from tree-sitter node classification. The
+`languages/python/annotations` owner handles wrapped parameter and return
+annotations, default-expression boundaries, and file-local type parameters,
+with direct sibling tests; the Python module facade retains node-context and
+local-type-reference resolution.
+
 Web route detection groups Express orchestration, import/factory and
 application/router alias discovery, call/path syntax, argument/handler parsing,
 bounded multiline statement aggregation, direct and chained registration

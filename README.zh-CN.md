@@ -226,6 +226,11 @@ C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头
 
 C/C++ recovery 把 declaration-head normalization 与 token/type/qualifier 识别放在 `declaration` owner，把 function signature、parameter boundary、operator、method suffix、postfix attribute 与 recovery decorator 判定放在 `signature` owner；依赖保持 `signature -> declaration/scan` 单向，两个 owner 都直接挂载 accepted/rejected shape UT。
 
+Python type-reference parsing 将 literal-aware 函数签名 annotation 扫描与
+tree-sitter node 分类分离。`languages/python/annotations` owner 负责跨行参数/
+返回值 annotation、default-expression 边界和文件内 type parameter，并直接挂载
+同级 UT；Python module facade 保留 node-context 与 local-type-reference 解析。
+
 Web 路由检测把 Express orchestration、import/factory 与 application/router alias
 发现、call/path syntax、参数/handler 解析、有界多行 statement aggregation、直接与
 链式 registration recording、mount discovery 和 prefix materialization 统一收敛在
