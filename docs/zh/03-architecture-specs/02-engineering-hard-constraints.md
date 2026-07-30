@@ -74,7 +74,7 @@ CLI adapter 统一收敛在 `interfaces::cli`：`mod.rs` 负责全局 option 解
 
 C/C++ parse recovery 必须完整收敛在 `code/parser/recovery/`：`mod.rs` 负责有界 recovery 判定与 declaration-shape 校验，`scan.rs` 负责 literal-aware code scanning，`line_classification.rs` 负责 recoverable line 分类，`type_body.rs` 负责 decorated-type body 校验。聚焦的语言与 recovery 单元保留配对 `mod_tests` 或实现具名测试；C/C++ `parser_integration_tests` 与 `gcc_recovery_integration_tests` 同时覆盖 language adapter、syntax parsing 和 recovery 的完整解析入口，因此由 parser facade 显式拥有。parser 父目录不得重新出现 `recovery.rs`；language adapter 可以使用这个窄 recovery contract，但不得复制其中的规则。
 
-路由检测的语法辅助必须归解释该语法的 framework 或 lexical layer 所有。Express 子域完整收敛在 `detect/express/`：`mod.rs` 负责 route registration 编排，`arguments` 负责引号路径、顶层参数切分、middleware 尾部选择、callback array 与具名 handler 校验，`materialize` 负责 mount prefix 传播、动态前缀过滤与结果去重。三个 owner 都必须直接挂载聚焦同级测试，`detect/` 父目录不得恢复 `express.rs`、`express_arguments.rs` 或 `express_materialize.rs` 平铺文件。`detect::python_strings` 负责 Python 静态字符串前缀和 escape 处理；`detect::javascript` 负责 JavaScript 注释、字符串与正则词法状态。禁止恢复通用 `detect::shared` 模块，因为 JavaScript callback 与 Python string 不共享同一个语义合同。
+路由检测的语法辅助必须归解释该语法的 framework 或 lexical layer 所有。Express 子域完整收敛在 `detect/express/`：`mod.rs` 负责 route registration 编排，`arguments` 负责引号路径、顶层参数切分、middleware 尾部选择、callback array 与具名 handler 校验，`bindings` 负责 ESM/CommonJS namespace、Router factory alias 和赋值 identifier 发现，`materialize` 负责 mount prefix 传播、动态前缀过滤与结果去重。四个 owner 都必须直接挂载聚焦同级测试，`detect/` 父目录不得恢复 `express.rs`、`express_arguments.rs` 或 `express_materialize.rs` 平铺文件。`detect::python_strings` 负责 Python 静态字符串前缀和 escape 处理；`detect::javascript` 负责 JavaScript 注释、字符串与正则词法状态。禁止恢复通用 `detect::shared` 模块，因为 JavaScript callback 与 Python string 不共享同一个语义合同。
 
 ### 3.6 SQLite 存储边界
 
