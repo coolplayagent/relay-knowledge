@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
     api::{
-        IndexRefreshRequest, IngestEvidence, IngestEvidenceExtraction, InterfaceKind,
-        MultimodalExtractionRequest,
+        HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IngestEvidence,
+        IngestEvidenceExtraction, InterfaceKind, MultimodalExtractionRequest,
     },
     domain::{
         EvidenceModality, ExtractionDiagnostic, ExtractionStatus, FreshnessPolicy, GraphVersion,

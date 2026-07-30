@@ -278,6 +278,12 @@ async entrypoints from the CLI boundary inward. SQLite storage is opened through
 the storage boundary, and blocking database work is isolated behind Tokio
 blocking workers.
 
+The application service `retrieval` owner coordinates source-scope validation,
+freshness reconciliation, backend degradation, bounded search/rerank,
+provenance budgeting, and response assembly. Its direct sibling tests protect
+trace staleness and truncation contracts; the service facade retains
+construction and cross-workflow composition.
+
 The default storage topology is `single_sqlite`. Set
 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` to keep global control
 state in the main runtime database while routing repository code facts,

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::{
-    api::{IngestEvidence, InterfaceKind},
+    api::{HybridRetrievalRequest, IngestEvidence, IngestRequest, InterfaceKind, RequestContext},
     application::RuntimeConfiguration,
     domain::{EvidenceRecord, FreshnessPolicy, GraphMutationBatch, SourceScope},
     env::{EnvironmentConfig, PlatformKind},
