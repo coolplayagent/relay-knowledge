@@ -116,7 +116,10 @@ change CLI, service, Web, indexing, retrieval, or release workflow behavior.
   orchestration remain in the workspace facade.
 - Software global projection for repository-scoped files, documentation topics,
   config/code relationships, dependencies, and unresolved SDK/API usage, exposed
-  through `repo software` without query-time repository scans.
+  through `repo software` without query-time repository scans. Deterministic
+  knowledge-map, documentation, dependency/build manifest, deployment, test,
+  template, configuration, and source classification is isolated in the
+  SQLite software `file_role` owner with direct sibling tests.
 - Local file-location indexing without Everything, Spotlight, Windows Search,
   locate, or other external search software: explicitly scan authorized roots
   and use SQLite/FTS5 to quickly find files by name, path, extension, and

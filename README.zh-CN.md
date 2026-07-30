@@ -75,7 +75,7 @@ workflow 行为。
 - 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态。
 - 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索、影响分析，以及不复制基础事实的多仓库 `repo-set` 薄覆盖查询。
 - 可选大仓工作区检测：支持 pnpm workspace、Go workspace（`go.work`）和 Cargo workspace 成员检测。当 `CodeIndexRequest` 显式启用 workspace detection 时，跨仓库导入解析会通过工作区包映射表将未解析的导入映射到兄弟包，提供 `target_hint` 元数据，而非静默丢弃跨仓库引用。CLI 索引保持默认关闭，因此单仓库索引路径完全不受影响。生态、workspace format、manifest、package prefix 与 import statement 归一化规则统一归 storage `code_workspace::ecosystem` owner 及其同级 UT；SQLite set、mapping 和 cross-edge 编排仍归 workspace facade。
-- 软件全域投影：按 repository scope 暴露文件整体节点、文档主题、配置/代码关系、依赖和 unresolved SDK/API 使用，`repo software` 读取投影表而不是查询时扫描仓库。
+- 软件全域投影：按 repository scope 暴露文件整体节点、文档主题、配置/代码关系、依赖和 unresolved SDK/API 使用，`repo software` 读取投影表而不是查询时扫描仓库。knowledge-map、文档、dependency/build manifest、部署、测试、模板、配置与源码的确定性分类统一归 SQLite software `file_role` owner 及其同级 UT。
 - 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots，并用 SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
 - 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
 - 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
