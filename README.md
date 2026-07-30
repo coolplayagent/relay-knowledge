@@ -478,7 +478,10 @@ deinitialized submodule blob reads, and worktree-root validation share a
 dedicated `entries` owner with direct unit tests; incremental and worktree
 overlay paths reuse that boundary. Two-sided submodule change classification,
 bounded nested-gitlink recursion, worktree/git-dir diff fallback, scoped entry
-expansion, and budget enforcement live in a separate `diff` owner.
+expansion, and budget enforcement live in a separate `diff` owner. Impact
+orchestration, two-sided fallback merging, stable deduplication, and final
+budget validation live in the paired-test `impact` owner; `gitlink::mod`
+remains a declaration and re-export facade.
 
 Registering the same repository root with an additional alias preserves prior
 aliases and resolves all aliases to the same repository id.

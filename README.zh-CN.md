@@ -215,7 +215,9 @@ Gitlink/submodule 源码访问统一收敛在 `code/source/gitlink/`。tree comm
 child-filtered entry 发现、初始化或反初始化 submodule blob 读取及 worktree root
 校验由 `entries` owner 负责并直接挂载 UT；incremental 与 worktree overlay 复用
 该边界。双侧 submodule change 分类、nested gitlink 有界递归、worktree/git-dir
-diff fallback、scope-aware entry expansion 与预算检查归独立 `diff` owner。
+diff fallback、scope-aware entry expansion 与预算检查归独立 `diff` owner。影响
+编排、双侧 fallback 合并、稳定去重与最终预算校验归直接挂载 UT 的 `impact`
+owner；`gitlink::mod` 只保留模块声明和边界重导出。
 
 仓库注册会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
