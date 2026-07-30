@@ -499,7 +499,9 @@ recording, mount discovery, and mount materialization under one
 `detect/express/` subdomain with direct unit tests for each owner. Python static
 route strings and JavaScript
 comment/string/regex lexical state remain separate named modules rather than a
-generic shared parser bucket across language boundaries.
+generic shared parser bucket across language boundaries. Spring annotation and
+Java type-scope detection is grouped under its own `detect/spring/` subdomain
+with a direct facade integration unit.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,

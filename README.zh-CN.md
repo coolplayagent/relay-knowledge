@@ -221,7 +221,9 @@ Web 路由检测把 Express orchestration、import/factory 与 application/route
 `detect/express/` 子域；各阶段分属明确 owner，
 并由每个 owner
 直接挂载 UT。Python 静态路由字符串与 JavaScript 注释/字符串/正则词法状态继续
-使用独立具名模块，不得用笼统 shared parser 桶跨越这些语言边界。
+使用独立具名模块，不得用笼统 shared parser 桶跨越这些语言边界。Spring annotation
+与 Java type-scope 检测统一收敛在 `detect/spring/` 子域，并由 facade 直接挂载
+integration unit。
 
 代码仓库 full index 会先发现 tracked source layout，再使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
 

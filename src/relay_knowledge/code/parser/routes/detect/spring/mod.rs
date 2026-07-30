@@ -920,3 +920,7 @@ fn merge_url_parts(prefix: &str, suffix: &str) -> String {
     let s = suffix.trim_start_matches('/');
     format!("{p}/{s}")
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
