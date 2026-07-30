@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 
-use super::{express_namespace_names, express_router_factory_names, js_assignment_variable_name};
+use super::{
+    express_namespace_names, express_router_factory_names, js_assignment_variable_name,
+    parse_express_application_alias, parse_express_router_alias,
+};
 
 #[test]
 fn discovers_esm_and_commonjs_router_factory_bindings() {
@@ -51,4 +54,31 @@ fn assignment_binding_accepts_exported_and_typed_identifiers() {
         Some("api$".to_owned())
     );
     assert_eq!(js_assignment_variable_name("const users-router"), None);
+}
+
+#[test]
+fn alias_parsing_requires_known_express_factories() {
+    let express_names = BTreeSet::from(["express".to_owned(), "web".to_owned()]);
+    let router_factories = BTreeSet::from(["ExpressRouter".to_owned()]);
+
+    assert_eq!(
+        parse_express_application_alias("const app = web()", &express_names),
+        Some("app".to_owned())
+    );
+    assert_eq!(
+        parse_express_router_alias(
+            "export const users = ExpressRouter()",
+            &router_factories,
+            &express_names,
+        ),
+        Some("users".to_owned())
+    );
+    assert_eq!(
+        parse_express_router_alias(
+            "const fake = OtherRouter()",
+            &router_factories,
+            &express_names,
+        ),
+        None
+    );
 }

@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
-use super::super::javascript::javascript_code_lines_without_comments;
+use super::super::javascript::{
+    find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
+};
 
 pub(super) fn js_assignment_variable_name(left: &str) -> Option<String> {
     let left = left.trim();
@@ -43,6 +45,44 @@ pub(super) fn express_namespace_names(content: &str) -> BTreeSet<String> {
         }
     }
     names
+}
+
+pub(super) fn parse_express_router_alias(
+    line: &str,
+    router_factory_names: &BTreeSet<String>,
+    express_names: &BTreeSet<String>,
+) -> Option<String> {
+    let (left, right) = line.split_once('=')?;
+    let right = right.trim_start();
+    let uses_express_factory = express_names.iter().any(|name| {
+        find_javascript_pattern_outside_strings(right, &format!("{name}.Router(")).is_some()
+    });
+    let uses_imported_factory = router_factory_names
+        .iter()
+        .any(|name| right.starts_with(&format!("{name}(")));
+    let uses_required_factory =
+        find_javascript_pattern_outside_strings(right, "require('express').Router(").is_some()
+            || find_javascript_pattern_outside_strings(right, "require(\"express\").Router(")
+                .is_some();
+    if !uses_express_factory && !uses_imported_factory && !uses_required_factory {
+        return None;
+    }
+    js_assignment_variable_name(left)
+}
+
+pub(super) fn parse_express_application_alias(
+    line: &str,
+    express_names: &BTreeSet<String>,
+) -> Option<String> {
+    let (left, right) = line.split_once('=')?;
+    let right = right.trim_start();
+    if !express_names
+        .iter()
+        .any(|name| right.starts_with(&format!("{name}(")))
+    {
+        return None;
+    }
+    js_assignment_variable_name(left)
 }
 
 fn collect_express_router_import_names(line: &str, names: &mut BTreeSet<String>) {

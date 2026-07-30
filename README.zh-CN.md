@@ -215,8 +215,8 @@ SQL 文件会贡献 table、view/materialized view、function/procedure、trigge
 
 C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头文件 typedef/module table 声明、GCC/Clang 风格声明属性与 inline 扩展（如 `__attribute__((always_inline))`、`attribute((always_inline))`、`__always_inline`）、预处理器或已识别 decorator 声明区域，decorator 类型体仍保持声明形态，并且仍能抽取可靠结构化事实，会被保守恢复为 parsed。
 
-Web 路由检测把 Express registration、import/factory binding 发现、参数/handler
-解析和 mount materialization 统一收敛在 `detect/express/` 子域，并由每个 owner
+Web 路由检测把 Express registration、import/factory 与 application/router alias
+发现、参数/handler 解析和 mount materialization 统一收敛在 `detect/express/` 子域，并由每个 owner
 直接挂载 UT。Python 静态路由字符串与 JavaScript 注释/字符串/正则词法状态继续
 使用独立具名模块，不得用笼统 shared parser 桶跨越这些语言边界。
 
