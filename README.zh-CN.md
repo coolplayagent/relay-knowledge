@@ -536,6 +536,8 @@ execute 端点接收当前编排器快照，调用共享应用服务，并返回
 
 Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
 
+Web operation payload 的必填/可选 scalar 与 array 校验、枚举解析和 API/domain request 构造统一归 `operation_request` owner，并由同级 UT 直接覆盖；Web facade 只保留 router 与共享 response 编排。
+
 ### 可选 Hooks
 
 可选本地 hooks：

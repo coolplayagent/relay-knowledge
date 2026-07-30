@@ -11,9 +11,9 @@ use std::{
 use tower::ServiceExt;
 
 use crate::{
-    api::{IngestEvidenceExtraction, IngestRequest},
+    api::{IngestEvidence, IngestEvidenceExtraction, IngestRequest},
     application::RelayKnowledgeService,
-    domain::{CodeIndexMode, CodeQueryKind, CodebaseViewKind, EvidenceModality, FreshnessPolicy},
+    domain::{CodeIndexMode, CodebaseViewKind, EvidenceModality, FreshnessPolicy},
     env::{EnvironmentConfig, PlatformKind},
 };
 
@@ -725,42 +725,14 @@ async fn web_operation_endpoint_enforces_configured_body_limit() {
 }
 
 #[test]
-fn request_builders_parse_web_payload_variants() {
+fn specialized_request_builders_parse_web_payload_variants() {
     let payload = json!({
-        "root_path": "/repo",
         "alias": "relay",
         "ref": "main",
         "path_filters": [" src/ ", "tests"],
         "language_filters": [" rust "],
-        "query": "handler",
-        "kind": "definition",
-        "freshness": "wait-until-fresh",
-        "limit": 7,
-        "base_ref": "main",
-        "head_ref": "feature"
+        "limit": 7
     });
-
-    let registration = code_register_request(&payload).expect("registration");
-    assert_eq!(registration.alias, "relay");
-    assert_eq!(registration.path_filters, ["src/", "tests"]);
-    assert_eq!(registration.language_filters, ["rust"]);
-
-    let default_alias_registration =
-        code_register_request(&json!({"root_path": "/repo"})).expect("default alias registration");
-    assert!(default_alias_registration.alias.is_empty());
-
-    let invalid_alias = code_register_request(&json!({"root_path": "/repo", "alias": 123}))
-        .expect_err("numeric alias should be rejected");
-    assert_eq!(invalid_alias.status, StatusCode::BAD_REQUEST);
-    assert_eq!(invalid_alias.message, "alias must be a string");
-
-    let selector = code_selector(&payload).expect("selector");
-    assert_eq!(selector.repository, "relay");
-    assert_eq!(selector.ref_selector, "main");
-
-    let query = code_query_request(&payload).expect("query");
-    assert_eq!(query.code_query_kind, CodeQueryKind::Definition);
-    assert_eq!(query.freshness_policy, FreshnessPolicy::WaitUntilFresh);
 
     let file_query = web_files::file_query_request(&json!({
         "query": "design",
@@ -781,23 +753,6 @@ fn request_builders_parse_web_payload_variants() {
         FreshnessPolicy::AllowStale
     );
 
-    let impact = code_impact_request(&payload).expect("impact");
-    assert_eq!(impact.base_ref, "main");
-    assert_eq!(impact.head_ref, "feature");
-
-    let software_payload = json!({
-        "alias": "relay",
-        "ref": "main",
-        "path_filters": [" src/ ", "tests"],
-        "language_filters": [" rust "],
-        "kind": "dependencies",
-        "freshness": "wait-until-fresh",
-        "limit": 7
-    });
-    let software = code_software_request(&software_payload).expect("software");
-    assert_eq!(software.kind, SoftwareGlobalKind::Dependencies);
-    assert_eq!(software.freshness_policy, FreshnessPolicy::WaitUntilFresh);
-
     let view_payload = json!({
         "alias": "relay",
         "ref": "main",
@@ -812,56 +767,6 @@ fn request_builders_parse_web_payload_variants() {
 
     let index = code_index_request(&payload, CodeIndexMode::Full).expect("index");
     assert!(matches!(index.mode, CodeIndexMode::Full));
-}
-
-#[test]
-fn payload_validation_reports_actionable_errors() {
-    let payload = json!({
-        "operation": "retrieve.context",
-        "query": " ",
-        "freshness": "now",
-        "limit": 0,
-        "kinds": ["bm25", 42]
-    });
-
-    assert_eq!(
-        string_field(&payload, "query")
-            .expect_err("blank string")
-            .message,
-        "query is required"
-    );
-    assert_eq!(
-        usize_field(&payload, "limit")
-            .expect_err("positive integer")
-            .message,
-        "limit must be a positive integer"
-    );
-    assert_eq!(
-        string_array_field(&payload, "missing")
-            .expect_err("array")
-            .message,
-        "missing must be an array"
-    );
-    assert_eq!(
-        string_array_field(&payload, "kinds")
-            .expect_err("string values")
-            .message,
-        "kinds contains a non-string value"
-    );
-    assert_eq!(
-        parse_freshness("now").expect_err("freshness").message,
-        "unsupported freshness 'now'"
-    );
-    assert_eq!(
-        parse_code_query_kind("sbom").expect("sbom query kind should parse"),
-        CodeQueryKind::Sbom
-    );
-    assert_eq!(
-        parse_code_query_kind("impact")
-            .expect_err("unsupported web query kind")
-            .message,
-        "unsupported code query kind 'impact'"
-    );
 }
 
 async fn test_router(label: &str) -> Router {

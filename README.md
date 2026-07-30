@@ -958,6 +958,12 @@ browser. Web execute requests are bounded by
 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback HTTP binds require the
 remote-client access policy to be enabled explicitly.
 
+Web operation payload validation and typed request construction are isolated in
+the `operation_request` owner. It validates required/optional scalar and array
+fields, parses supported enum values, and constructs API/domain requests with
+direct sibling tests, while the Web facade retains router and shared response
+composition.
+
 ### Optional Hooks
 
 Optional local hooks:
