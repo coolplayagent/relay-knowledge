@@ -1,13 +1,10 @@
 use super::*;
 use axum::{
-    body::to_bytes,
+    body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
 use serde_json::{Value, json};
-use std::{
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 
 use crate::{
@@ -16,38 +13,6 @@ use crate::{
     domain::{CodeIndexMode, CodebaseViewKind, EvidenceModality, FreshnessPolicy},
     env::{EnvironmentConfig, PlatformKind},
 };
-
-#[test]
-fn rejects_asset_path_traversal() {
-    let root = PathBuf::from("/srv/web");
-
-    assert!(sanitized_asset_path(&root, "assets/main.js").is_some());
-    assert_eq!(
-        sanitized_asset_path(&root, "assets/./main.js"),
-        Some(root.join("assets").join("main.js"))
-    );
-    assert!(sanitized_asset_path(&root, "../secret").is_none());
-    assert!(sanitized_asset_path(&root, "/etc/passwd").is_none());
-}
-
-#[test]
-fn reports_expected_content_types() {
-    assert_eq!(
-        content_type(Path::new("index.html")),
-        "text/html; charset=utf-8"
-    );
-    assert_eq!(
-        content_type(Path::new("assets/main.js")),
-        "text/javascript; charset=utf-8"
-    );
-    assert_eq!(content_type(Path::new("data.json")), "application/json");
-    assert_eq!(content_type(Path::new("icon.svg")), "image/svg+xml");
-    assert_eq!(content_type(Path::new("module.wasm")), "application/wasm");
-    assert_eq!(
-        content_type(Path::new("asset.bin")),
-        "application/octet-stream"
-    );
-}
 
 #[tokio::test]
 async fn default_router_can_be_constructed() {
@@ -219,28 +184,6 @@ async fn api_misses_do_not_fall_back_to_index() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(response_text(response).await, "{\"message\":\"not found\"}");
-}
-
-#[tokio::test]
-async fn missing_web_assets_report_build_guidance() {
-    let root = unique_temp_dir("missing-assets");
-    let service = test_service("missing-assets").await;
-    let response = router_with_assets(service, root, crate::net::http::DEFAULT_MAX_BODY_BYTES)
-        .oneshot(
-            Request::builder()
-                .uri("/")
-                .body(Body::empty())
-                .expect("request should build"),
-        )
-        .await
-        .expect("router should respond");
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert!(
-        response_text(response)
-            .await
-            .contains("web assets are not built")
-    );
 }
 
 #[tokio::test]

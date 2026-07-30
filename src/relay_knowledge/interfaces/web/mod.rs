@@ -1,5 +1,6 @@
 //! Web HTTP adapter for same-origin diagnostics and static assets.
 
+mod assets;
 mod operation_request;
 #[path = "code_api.rs"]
 mod web_code_api;
@@ -12,12 +13,11 @@ mod web_files;
 #[path = "model_config.rs"]
 mod web_model_config;
 
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::{StatusCode, header};
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -34,6 +34,7 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{CodeIndexMode, ProposalState},
 };
+use assets::{asset_or_index, default_web_dist, index};
 use operation_request::{
     code_context_request, code_feature_flag_request, code_impact_request, code_query_request,
     code_register_request, code_repository_set_add_request, code_repository_set_create_request,
@@ -454,46 +455,6 @@ async fn dispatch_operation(
     }
 }
 
-async fn index(State(state): State<WebState>) -> Response {
-    serve_file_or_status(index_path(&state.asset_root), StatusCode::NOT_FOUND).await
-}
-
-async fn asset_or_index(
-    State(state): State<WebState>,
-    AxumPath(path): AxumPath<String>,
-) -> Response {
-    if path.starts_with("api/") {
-        return (StatusCode::NOT_FOUND, Json(json!({"message": "not found"}))).into_response();
-    }
-
-    match sanitized_asset_path(&state.asset_root, &path) {
-        Some(asset_path)
-            if tokio::fs::metadata(&asset_path)
-                .await
-                .is_ok_and(|meta| meta.is_file()) =>
-        {
-            serve_file_or_status(asset_path, StatusCode::NOT_FOUND).await
-        }
-        _ => serve_file_or_status(index_path(&state.asset_root), StatusCode::NOT_FOUND).await,
-    }
-}
-
-async fn serve_file_or_status(path: PathBuf, missing_status: StatusCode) -> Response {
-    match tokio::fs::read(&path).await {
-        Ok(body) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type(&path))],
-            Body::from(body),
-        )
-            .into_response(),
-        Err(_) => (
-            missing_status,
-            Json(json!({"message": "web assets are not built; run ./build.sh"})),
-        )
-            .into_response(),
-    }
-}
-
 pub(super) fn api_error_response(error: ApiError) -> Response {
     let status = match error.error_kind {
         ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
@@ -504,41 +465,6 @@ pub(super) fn api_error_response(error: ApiError) -> Response {
     };
 
     (status, Json(error)).into_response()
-}
-
-fn sanitized_asset_path(root: &Path, requested: &str) -> Option<PathBuf> {
-    let mut path = root.to_path_buf();
-    for component in Path::new(requested).components() {
-        match component {
-            Component::Normal(segment) => path.push(segment),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-
-    Some(path)
-}
-
-fn index_path(root: &Path) -> PathBuf {
-    root.join("index.html")
-}
-
-fn default_web_dist() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("web")
-        .join("dist")
-}
-
-fn content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|extension| extension.to_str()) {
-        Some("css") => "text/css; charset=utf-8",
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("json") => "application/json",
-        Some("svg") => "image/svg+xml",
-        Some("wasm") => "application/wasm",
-        _ => "application/octet-stream",
-    }
 }
 
 #[derive(Debug, Deserialize)]

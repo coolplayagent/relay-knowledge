@@ -538,6 +538,8 @@ Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopbac
 
 Web operation payload 的必填/可选 scalar 与 array 校验、枚举解析和 API/domain request 构造统一归 `operation_request` owner，并由同级 UT 直接覆盖；Web facade 只保留 router 与共享 response 编排。
 
+静态 Web 交付统一归 `assets` owner：它负责请求路径归一化与 traversal 拒绝、带稳定 content type 的异步文件读取、非 API 路径的 SPA index fallback，以及缺失构建产物提示，并由同级 UT 直接覆盖；Web facade 只把这些 handler 装配进 router。
+
 ### 可选 Hooks
 
 可选本地 hooks：

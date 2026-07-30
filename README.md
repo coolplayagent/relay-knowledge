@@ -964,6 +964,12 @@ fields, parses supported enum values, and constructs API/domain requests with
 direct sibling tests, while the Web facade retains router and shared response
 composition.
 
+Static Web delivery is isolated in the `assets` owner. It normalizes requested
+paths, blocks traversal, serves files asynchronously with stable content types,
+falls back to the SPA index outside API routes, and reports missing build output
+through direct sibling tests. The Web facade only wires these handlers into the
+router.
+
 ### Optional Hooks
 
 Optional local hooks:
