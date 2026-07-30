@@ -4,7 +4,7 @@ use super::RouteCandidate;
 use super::python_strings::extract_quoted_string_python;
 
 #[cfg(test)]
-#[path = "flask_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
 
 const MAX_FLASK_ROUTE_DECORATOR_LINES: usize = 12;

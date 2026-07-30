@@ -507,6 +507,8 @@ owner. Bounded multiline annotation aggregation is isolated from both, and
 mapping-kind and RequestMapping semantics have their own owner; every owner
 carries direct unit tests. Class-prefix derivation, method combination, URL
 joining, and route-fact deduplication are isolated in Spring materialization.
+Flask/FastAPI decorators, router mounts, and Python route materialization are
+grouped under `detect/flask/` with a direct facade integration unit.
 
 Call graph retrieval resolves static same-repository cross-language edges for
 C/C++, Go cgo `C.*`, and Rust FFI/bindings paths. This is code-graph evidence,
