@@ -1,4 +1,5 @@
 pub(in crate::code) mod commands;
+mod entries;
 pub(in crate::code) mod paths;
 pub(in crate::code) mod selector;
 pub(in crate::code) mod target;
@@ -12,8 +13,7 @@ use super::{
     CodeIndexError,
     changes::{
         GitChange, TrackedEntryScope, diff_changes, git_dir_bytes, parse_name_status_z,
-        submodule_git_dir, submodule_git_dir_from_git_dir, submodule_worktree_root,
-        tracked_entries_from_git_dir_with_scope, tracked_entries_with_scope,
+        submodule_git_dir, submodule_git_dir_from_git_dir, tracked_entries_from_git_dir_with_scope,
     },
     git::git_bytes,
 };
@@ -22,15 +22,17 @@ use commands::{
     git_root_has_commit, git_tree_entry, git_tree_entry_from_git_dir,
     submodule_worktree_root_for_commit,
 };
+use entries::submodule_path_entries_with_scope;
+pub(in crate::code) use entries::{
+    gitlink_commit_at_tree, submodule_entry_bytes, submodule_path_entries_with_child_filters,
+    submodule_root,
+};
 pub(in crate::code) use paths::{
     GitlinkPathExpansion, SubmoduleChangedPathSets, SubmodulePathEntry,
     ensure_gitlink_expansion_budget, submodule_expansion_is_unavailable,
 };
 pub(in crate::code) use selector::GitlinkPathSelector;
-pub(in crate::code) use target::{
-    git_blob_bytes_with_submodules, git_dir_blob_bytes_with_submodules, submodule_blob_size,
-    submodule_bytes,
-};
+pub(in crate::code) use target::{submodule_blob_size, submodule_bytes};
 
 const MAX_NESTED_GITLINK_DIFF_DEPTH: usize = 8;
 
@@ -226,81 +228,6 @@ pub(in crate::code) fn changed_gitlink_path_expansion(
         base_paths,
         head_paths,
     }))
-}
-
-pub(in crate::code) fn gitlink_commit_at_tree(
-    root: &Path,
-    commit: &str,
-    path: &str,
-) -> Result<Option<String>, CodeIndexError> {
-    Ok(git_tree_entry(root, commit, path)?
-        .filter(|entry| entry.kind == "commit")
-        .map(|entry| entry.object))
-}
-
-pub(in crate::code) fn submodule_path_entries_with_child_filters(
-    root: &Path,
-    path: &str,
-    parent_commit: Option<&str>,
-    commit: &str,
-    child_filters: &[String],
-) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
-    submodule_path_entries_with_scope(
-        root,
-        path,
-        parent_commit,
-        commit,
-        &TrackedEntryScope::from_entry_path_filters(child_filters.iter()),
-    )
-}
-
-fn submodule_path_entries_with_scope(
-    root: &Path,
-    path: &str,
-    parent_commit: Option<&str>,
-    commit: &str,
-    scope: &TrackedEntryScope,
-) -> Result<Vec<SubmodulePathEntry>, CodeIndexError> {
-    let prefix = format!("{}/", path.trim_end_matches('/'));
-    let entries =
-        if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, commit) {
-            tracked_entries_with_scope(&submodule_root, commit, scope)?
-        } else {
-            tracked_entries_from_git_dir_with_scope(
-                &submodule_git_dir(root, path, parent_commit, Some(commit))?,
-                commit,
-                scope,
-            )?
-        };
-
-    Ok(entries
-        .into_iter()
-        .map(|entry| SubmodulePathEntry {
-            parent_path: format!("{prefix}{}", entry.path),
-            child_path: entry.path,
-        })
-        .collect())
-}
-
-pub(in crate::code) fn submodule_entry_bytes(
-    root: &Path,
-    path: &str,
-    commit: &str,
-    child_path: &str,
-) -> Result<Vec<u8>, CodeIndexError> {
-    if let Some(submodule_root) = submodule_worktree_root_for_commit(root, path, commit) {
-        git_blob_bytes_with_submodules(&submodule_root, commit, child_path)
-    } else {
-        git_dir_blob_bytes_with_submodules(
-            &submodule_git_dir(root, path, None, Some(commit))?,
-            commit,
-            child_path,
-        )
-    }
-}
-
-pub(in crate::code) fn submodule_root(root: &Path, path: &str) -> Result<PathBuf, CodeIndexError> {
-    submodule_worktree_root(root, path)
 }
 
 fn changed_submodule_paths_for_parent_commits(

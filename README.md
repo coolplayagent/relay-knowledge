@@ -472,6 +472,12 @@ Worktree overlays use Git status for Git repositories. `.gitignore`-ignored
 untracked files are skipped, and untracked broad dependency/cache/build
 directories require explicit path opt-in before recursive expansion.
 
+Gitlink and submodule source access is grouped under `code/source/gitlink/`.
+Tree commit detection, child-filtered entry discovery, initialized or
+deinitialized submodule blob reads, and worktree-root validation share a
+dedicated `entries` owner with direct unit tests; incremental and worktree
+overlay paths reuse that boundary.
+
 Registering the same repository root with an additional alias preserves prior
 aliases and resolves all aliases to the same repository id.
 `repo remove <alias>` deletes that repository's runtime registration, aliases,

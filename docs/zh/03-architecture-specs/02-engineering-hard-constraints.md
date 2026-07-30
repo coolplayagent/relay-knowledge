@@ -236,6 +236,8 @@ Worktree-overlay 的 hash marker、删除集合、待解析文件集合和同内
 
 Worktree-overlay 的 Gitlink 输出聚合、子路径删除回放和 scope-aware recorder 归 `worktree_overlay::gitlink_recording` 所有。该 owner 必须使用共享 `recording` 协议，并由配对 UT 证明 retained、out-of-scope 与待删除子路径不会混淆；Gitlink 状态机不得复制 recorder 或直接发明新的 marker。
 
+源码 Gitlink/submodule 能力必须收敛在 `code/source/gitlink/`。`entries` 独占 tree gitlink commit 判定、child-filtered tracked entry 枚举、初始化/反初始化 submodule blob 读取与 worktree root 解析，并直接挂载 `entries_tests`；上层 incremental/worktree-overlay 只能调用该 owner，不得复制 worktree/git-dir fallback。`gitlink::mod` 继续编排 bounded impact expansion，后续具名 owner 必须保持 `impact -> entries/commands/paths/selector` 的单向依赖。
+
 顶层 `code` facade 由 `mod.rs` 与同级 `mod_tests.rs` 一一配对；源码发现、布局、submodule、filesystem 和 worktree-overlay 场景测试继续收敛在 `code/tests/source`，可复用 fixture 由 `code/tests/fixtures.rs` 维护。不得在场景测试目录旁恢复同名 `tests.rs`，也不得把 facade 不变量混入源码场景测试。
 
 其余同级测试挂载必须全部显式：runtime、service、repository/source-fallback/view 工作流、code feature/search 边界，以及 SQLite Maven、view、schema、batch、graph、workspace、operation、indexing、retrieval、snapshot 和根 adapter 都必须通过 test-only `#[path]` 声明具体测试文件。禁止依赖隐式 `#[cfg(test)] mod name;` 文件解析，避免 rename 或同名目录掩盖物理 owner。

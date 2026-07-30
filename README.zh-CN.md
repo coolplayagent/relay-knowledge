@@ -211,6 +211,11 @@ SQL 文件会贡献 table、view/materialized view、function/procedure、trigge
 
 同一 source scope 内的本地文件、模板和构建目标引用会在 finalize 阶段解析；外部或有歧义的配置关系保留为 unresolved metadata。
 
+Gitlink/submodule 源码访问统一收敛在 `code/source/gitlink/`。tree commit 判定、
+child-filtered entry 发现、初始化或反初始化 submodule blob 读取及 worktree root
+校验由 `entries` owner 负责并直接挂载 UT；incremental 与 worktree overlay 复用
+该边界。
+
 仓库注册会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
 C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头文件 typedef/module table 声明、GCC/Clang 风格声明属性与 inline 扩展（如 `__attribute__((always_inline))`、`attribute((always_inline))`、`__always_inline`）、预处理器或已识别 decorator 声明区域，decorator 类型体仍保持声明形态，并且仍能抽取可靠结构化事实，会被保守恢复为 parsed。
