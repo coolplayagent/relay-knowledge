@@ -8,7 +8,9 @@ use crate::{
     domain::{ProposalState, ServiceManagerAction, ServiceOperatorState, WorkerKind},
 };
 
-use super::{CliAction, CliError, OutputFormat, ServiceMcpTransport, render_response, value_after};
+use super::{
+    CliAction, CliError, OutputFormat, ServiceMcpTransport, command::value_after, render_response,
+};
 
 pub(super) async fn run_operational_action(
     service: &RelayKnowledgeService,

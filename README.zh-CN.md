@@ -337,9 +337,11 @@ BM25 读模型会为实体标签和代码符号索引生成词汇别名，但不
 
 当前 CLI 使用编译后的 `relay-knowledge` 二进制和 git 风格子命令：
 
-adapter 将 CLI error、结构化 grammar diagnostic、退出码分类以及 text/JSON stderr
-编码收敛到直接配对 UT 的 `interfaces::cli::command::diagnostics` owner。CLI 根只重
-导出这项稳定合同，并继续负责顶层解析与 dispatch。
+adapter 将 global option/token 解析与命令族分发收敛到直接配对 UT 的
+`interfaces::cli::command::parse` owner，共享 flag value 与 freshness 校验归
+`command::values`。CLI error、结构化 grammar diagnostic、退出码分类以及
+text/JSON stderr 编码归 `command::diagnostics`。CLI 根只重导出这些稳定合同，并
+继续负责执行 dispatch。
 
 ```bash
 relay-knowledge status --format json

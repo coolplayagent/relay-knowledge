@@ -4,7 +4,9 @@ use crate::{
 };
 
 use super::{
-    CliAction, CliError, OutputFormat, cli_render::render_response, parse_freshness, value_after,
+    CliAction, CliError, OutputFormat,
+    cli_render::render_response,
+    command::{parse_freshness, value_after},
 };
 
 pub(super) fn parse_files(tokens: &[String]) -> Result<CliAction, CliError> {

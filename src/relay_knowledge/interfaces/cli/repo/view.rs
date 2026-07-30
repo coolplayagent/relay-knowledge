@@ -4,7 +4,11 @@ use crate::{
     domain::{CodebaseViewKind, CodebaseViewRequest, FreshnessPolicy},
 };
 
-use super::{CliError, OutputFormat, parse_freshness, render_response, value_after};
+use super::{
+    CliError, OutputFormat,
+    command::{parse_freshness, value_after},
+    render_response,
+};
 
 /// Parsed `repo view` command.
 #[derive(Debug, Clone, PartialEq, Eq)]

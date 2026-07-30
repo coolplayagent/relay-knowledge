@@ -656,10 +656,12 @@ versions, and last error.
 Current CLI commands use the compiled `relay-knowledge` binary with git-style
 subcommands:
 
-The adapter keeps CLI errors, structured grammar diagnostics, exit-code
-classification, and text/JSON stderr encoding in the paired-test
-`interfaces::cli::command::diagnostics` owner. The CLI root re-exports that
-stable contract while retaining top-level parsing and dispatch.
+The adapter groups global option/token parsing and command-family dispatch in
+the paired-test `interfaces::cli::command::parse` owner, while shared flag-value
+and freshness validation live in `command::values`. CLI errors, structured
+grammar diagnostics, exit-code classification, and text/JSON stderr encoding
+live in `command::diagnostics`. The CLI root re-exports these stable contracts
+and retains execution dispatch.
 
 ```bash
 relay-knowledge status --format json
