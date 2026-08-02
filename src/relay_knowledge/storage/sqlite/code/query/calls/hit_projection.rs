@@ -25,7 +25,7 @@ use super::{
     display::{call_display_name, inferred_caller_name_from_excerpt},
     execution_order::{callee_execution_order, callee_execution_order_bonus},
     site_scoring::exact_caller_named_receiver_member_call_bonus,
-    target_ranking::high_confidence_inferred_target_bonus,
+    target_ranking::{exact_local_binding_bonus, high_confidence_inferred_target_bonus},
 };
 
 pub(super) fn call_rows_to_hits(
@@ -169,6 +169,7 @@ pub(super) fn call_rows_to_hits(
                     row.confidence_basis_points,
                     request,
                 )
+                + exact_local_binding_bonus(base_score, &row.confidence_tier, request)
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
                 + caller_context_density_bonus(
                     base_score,

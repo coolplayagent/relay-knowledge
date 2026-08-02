@@ -1,5 +1,13 @@
 # 自迭代采纳优化记录
+
+## 候选优化说明：run-1785683424-graph-first-indirect-call-bindings
+
+- 算法/架构：caller 查询的间接调用绑定从“先对所有 chunk 做 FTS，再从文本识别字段赋值”改为 graph-first 两阶段计划：先通过 `code_repository_references(source_scope, name, ...)` 的精确索引定位目标引用，再只读取覆盖该引用行的最小已索引 chunk 并提取字段绑定；仅当结构化引用不能产生绑定时才执行原有有界 FTS。绑定匹配按同路径、已有 target 证据、上下文关联的证据强度排序，同文件字段赋值标记为 9500 basis points 的 `exact` tier，并在 caller 排序中获得有界的局部绑定加分。
+- 不变量/预期影响：不改变 parser facts、code fact version、schema、单仓 writer、task lease/checkpoint、freshness、repo-set overlay、semantic/vector 或 source fallback 语义；结构化候选仍受 81-row 探测/80-row 接纳、24 个间接字段、现有 path/language/generated filters 和最终 query limit 约束。预期避免已解析函数指针、回调表和同类字段绑定在查询时重复扫描完整 chunk FTS，降低 caller p95，并让同文件显式绑定稳定排在仅靠跨文件上下文推断的调用之前。默认 fast 手工评估 109/109 cases 通过、would-accept score/competitive/accuracy 均为 1.0，函数指针 caller 从历史 rank 2/score 0.5 提升到 rank 1/score 1.0；并发 workload 中该命令为 125 ms、C fixture query p95 为 181 ms（best accepted 为 189 ms），同一缓存图的隔离重跑为 60 ms，说明精确收益会受 CLI 并发启动噪声影响。
+- 风险/回归：风险是引用行可能落入过宽 chunk，或部分语言没有为绑定目标生成 reference fact；前者由字段赋值形状校验和同路径优先级限制，后者会回退原有 bounded FTS，不把缺少结构化绑定误报为 degraded。单测主动删除绑定 chunk 的 FTS 文档以证明 graph-first 路径独立可用，并保留 path filter、跨文件上下文、direct+indirect merge、generated exclusion 覆盖。本候选建立在已采纳的 bounded index lookahead/结构化图证据策略上，避免上一 rejected attempt 对通用 chunk search 的局部改写及其 recovery、SQLite-lock 和构建耗时噪声回退模式。
+
 ## 候选优化说明：run-1785677193-bounded-index-lookahead
+
 - 算法/架构：checkpointed full index 从串行“解析一批、写一批”改为一批有界 lookahead pipeline；当前批次仍由唯一 SQLite writer 提交时，下一批在既有 blocking worker 边界读取与解析，`tokio::join!` 在推进 checkpoint 前同时收敛两侧结果，最多同时保留当前与下一批两个受 512 files/16 MiB/150k rows 预算约束的 batch。
 - 不变量/预期影响/风险：不改变 parser facts、批次顺序、事务/FTS/edge finalize、单仓单 writer、task lease/checkpoint replay、重试、freshness、repo-set、semantic/vector、CLI/API、env/paths/net 或安装发布；预期让 Git/blob/CPU 与 SQLite DML 重叠，降低 OpenTelemetry 等多语言大仓 cold index 和后续 repo-set add 的 wall time。风险是峰值 batch 内存最多由一批升至两批，仍严格有界；任一侧失败时已提交 checkpoint 保持可重放，未提交的预解析批次直接丢弃。
 - 回归与策略关联：默认 fast 的 `index_performance_many_files_*` cold-index 完成证据、延迟 key metric、增量 blob/parse 上限及既有 recovery/SQLite-lock cases 共同保护吞吐和崩溃语义；相同 release 二进制环境与同一 OTel Contrib commit 的隔离 cold-index A/B 从基线 664.88 s 降至 357.46 s（-46.2%），13,098 files、703,968 symbols、1,381,087 references、715,126 chunks 计数不变，repo-set add 0.04 s 成功且双仓 overlay 43.48 s 刷新为 fresh。本候选建立在已采纳的 512-file Git batch read/prefetch 策略上，避免最近五轮 rejected parser/reference-finalize 局部改写及其 OpenTelemetry timeout、research/ranking 回退模式。
@@ -1006,6 +1014,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=4516ms; self_iteration_cargo_fmt_check_ms=504ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=243ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=464ms; code_index_recovery_cases_ms=1228ms; code_index_sqlite_lock_cases_ms=946ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1785683424
+
+- patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches-v2/run-1785683424.patch`
+- score: 1.000000 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.927754, stability=1.000000)
+- cases: 109/109 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code/query/calls/hit_projection.rs`, `src/relay_knowledge/storage/sqlite/code/query/calls/indirect.rs`, `src/relay_knowledge/storage/sqlite/code/query/calls/target_ranking.rs`, `src/relay_knowledge/storage/sqlite/code/query/tests/calls/indirect_call.rs`
+- key improvements: score_component:score 0.979012->1.0; score_component:competitive_capability 0.99359->1.0; score_component:performance 0.891236->0.927754486607225; case_score:c_syntax_callers_function_pointer_read 0.5->1.0; case_rank:c_syntax_callers_function_pointer_read 2->1; metric:cargo_build_debug_ms 16423.0->263.0; metric:code_index_recovery_cases_ms 29845.0->1228.0; metric:code_index_sqlite_lock_cases_ms 29519.0->1087.0
+- known degradations: metric:relay_teams_cold_index_ms 3738.0->4083.0; metric:relay_teams_cold_register_index_ms 3799.0->4144.0; metric:software_global_fixture_cold_index_ms 101.0->144.0; metric:temporal_samples_go_cold_index_ms 1127.0->1190.0; metric:temporal_samples_go_cold_register_index_ms 1188.0->1271.0; metric:project_alias_fixture_cold_index_ms 81.0->125.0; metric:project_alias_fixture_cold_register_index_ms 183.0->246.0
+- latency metrics: cargo_fmt_check_ms=4519ms; self_iteration_cargo_fmt_check_ms=503ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=243ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=283ms; code_index_recovery_cases_ms=1228ms; code_index_sqlite_lock_cases_ms=1087ms
 
 Adopted optimization notes:
 

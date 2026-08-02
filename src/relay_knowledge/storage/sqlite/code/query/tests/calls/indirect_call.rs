@@ -3,7 +3,7 @@ use crate::{
         CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
         RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeSymbolRecord,
+        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
     storage::CodeRepositoryStore,
     storage::SqliteGraphStore,
@@ -42,7 +42,13 @@ async fn callers_follow_designated_function_pointer_bindings() {
         tombstones: Vec::new(),
         files: vec![file("table-file", path, "c")],
         symbols: vec![caller_symbol],
-        references: Vec::new(),
+        references: vec![reference(
+            "table-binding-reference",
+            "table-file",
+            path,
+            "rk_driver_read",
+            range(12, 12),
+        )],
         imports: Vec::new(),
         calls: vec![read_call],
         dependencies: Vec::new(),
@@ -77,6 +83,18 @@ async fn callers_follow_designated_function_pointer_bindings() {
         diagnostics: Vec::new(),
     })
     .await;
+    {
+        let connection = store.connection.lock().expect("connection should lock");
+        connection
+            .execute(
+                "DELETE FROM code_repository_search
+                 WHERE source_scope = ?1
+                   AND document_kind = 'chunk'
+                   AND record_id = 'table-init-chunk'",
+                [TEST_SOURCE_SCOPE],
+            )
+            .expect("chunk FTS row should delete");
+    }
 
     let hits = store
         .search_code(request("rk_driver_read", CodeQueryKind::Callers))
@@ -85,6 +103,7 @@ async fn callers_follow_designated_function_pointer_bindings() {
 
     assert_eq!(hits[0].path, path);
     assert_eq!(hits[0].edge_target_hint.as_deref(), Some("rk_driver_read"));
+    assert_eq!(hits[0].edge_confidence_tier.as_deref(), Some("exact"));
     assert!(hits[0].excerpt.contains("rk_rows[RK_STAGE_READ].read"));
 }
 
@@ -595,6 +614,31 @@ fn call(call_id: &str, file_id: &str, path: &str) -> CodeCallRecord {
         confidence_basis_points: 2_500,
         confidence_tier: "ambiguous".to_owned(),
         line_range: range(1, 1),
+    }
+}
+
+fn reference(
+    reference_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+    line_range: RepositoryCodeRange,
+) -> RepositoryCodeReferenceRecord {
+    RepositoryCodeReferenceRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        reference_id: reference_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        name: name.to_owned(),
+        kind: "identifier".to_owned(),
+        target_symbol_snapshot_id: None,
+        target_hint: Some(name.to_owned()),
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 2_500,
+        confidence_tier: "ambiguous".to_owned(),
+        byte_range: range(0, 1),
+        line_range,
     }
 }
 
