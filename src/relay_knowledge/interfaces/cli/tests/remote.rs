@@ -125,6 +125,75 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
 }
 
 #[tokio::test]
+async fn remote_repo_list_reads_indexed_repositories_collection() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("listener addr should resolve");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("client should connect");
+        let mut buffer = vec![0; 4096];
+        let count = stream.read(&mut buffer).await.expect("request should read");
+        let request = String::from_utf8_lossy(&buffer[..count]);
+        assert!(request.starts_with("GET /api/v1/code/repositories HTTP/1.1"));
+        assert!(request.contains("x-relay-request-id: req-remote-list"));
+        let response = json!({
+            "metadata": {
+                "trace_id": "trace-remote-list",
+                "request_id": "req-remote-list",
+                "graph_version": 1,
+                "stale": false
+            },
+            "repositories": [{
+                "repository_id": "repo:fixture",
+                "alias": "fixture",
+                "root_path": "/tmp/fixture",
+                "path_filters": [],
+                "language_filters": [],
+                "last_indexed_scope_id": "git_snapshot:0000000000000001",
+                "last_indexed_commit": "abc",
+                "tree_hash": "tree",
+                "state": "fresh",
+                "indexed_file_count": 1,
+                "symbol_count": 2,
+                "reference_count": 3,
+                "chunk_count": 4,
+                "stale": false
+            }]
+        })
+        .to_string();
+        let response_head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            response.len()
+        );
+        stream
+            .write_all(response_head.as_bytes())
+            .await
+            .expect("response head should write");
+        stream
+            .write_all(response.as_bytes())
+            .await
+            .expect("response body should write");
+    });
+
+    let output = remote::run_remote(
+        &NetworkEnvOverrides::default(),
+        &format!("http://{addr}"),
+        &CliAction::Repo(repo::RepoCommand::List),
+        context("remote-list"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("remote repository list should run")
+    .expect("repo list should be supported");
+
+    let value: Value = serde_json::from_str(output.trim()).expect("remote output should be JSON");
+    assert_eq!(value["repositories"][0]["alias"], "fixture");
+    assert_eq!(value["repositories"][0]["state"], "fresh");
+    server.await.expect("server task should finish");
+}
+
+#[tokio::test]
 async fn remote_repo_index_worktree_ref_posts_overlay_request() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

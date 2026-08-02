@@ -28,9 +28,10 @@ pub use proposal::{
 pub use repository::{
     CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
     CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
-    CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest,
-    CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse, CodeRepositoryReportResponse,
-    CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, SoftwareGlobalResponse,
+    CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
+    CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse,
+    CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
+    SoftwareGlobalResponse,
 };
 pub use repository_set::{
     CodeRepositorySetAddResponse, CodeRepositorySetCreateResponse, CodeRepositorySetQueryResponse,

@@ -68,11 +68,12 @@ relay-knowledge repo index repo --ref <commit-sha> --format json
 
 当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；非交互式 agent 需要消费 queued 或 retrying 任务时，也可以显式调用 `repo index-worker --task-id <id> --format json`，不用维持一个前台 `service run` 进程。`relay-knowledge service run` 作为 resident master，会在启动时恢复过期 code-index lease，在 stderr 打印启动状态行，并用同一队列上的有界 code-index worker pool 消费任务，默认并发度为 2，可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 调整，最高按文档上限 clamp 到 8。不同 fingerprint 的任务独立排队、独立 lease、独立 checkpoint；完全相同的 full-index fingerprint 会复用当前任务，避免重复 full rebuild。`relay-knowledge service status --format json` 会在 `code_index_workers` 中报告 configured workers、active worker slots、queue depth、queued/running/retrying/dead-letter task counts、running leases 和 last error。跨 batch finalization 期间，`checkpoint.state` 会报告 `finalizing:resolve_references`、`finalizing:rebuild_reference_search`、`finalizing:rebuild_calls` 和 `finalizing:publish_scope` 等具体阶段；只有 checkpoint 到达 `completed` 后，查询才会把该 ref 当作 fresh。
 
-远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo index`、`repo scope preview`、`repo status`、`repo query`、`repo feature-flags`、`repo impact`、`repo report` 和 `repo software`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
+远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
   relay-knowledge repo index repo --ref HEAD --format json
+relay-knowledge --remote http://127.0.0.1:8791 repo list --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo query repo --query retry_policy --kind definition --freshness wait-until-fresh --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo software repo --kind relationships --ref HEAD --format json
 ```
@@ -248,9 +249,12 @@ relay-knowledge repo report repo --format markdown
 脚本使用 JSON:
 
 ```bash
+relay-knowledge repo list --format json
 relay-knowledge repo report repo --format json
 relay-knowledge repo status repo --format json
 ```
+
+`repo list` 只列出至少有一个已完成 indexed scope 的仓库，并返回当前 alias、root、indexed commit、state、stale 与文件/符号/reference/chunk 计数。仅注册但尚未完成首次索引的仓库不会出现在清单中。
 
 报告包含 repository id、root、indexed commit、tree hash、文件/符号/reference/chunk 总量、scope、代表性查询、延迟样本和 degradation summary。Markdown 报告适合贴进 PR 或发布说明；JSON 报告适合 CI 比较索引质量。
 

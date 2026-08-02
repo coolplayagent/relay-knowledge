@@ -9,21 +9,22 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         .map(|command| command.path.join(" "))
         .collect::<Vec<_>>();
 
-    assert_eq!(paths.len(), 54);
+    assert_eq!(paths.len(), 55);
     assert_eq!(
-        &paths[..6],
+        &paths[..7],
         [
             "status",
             "ingest",
             "query",
             "files index",
             "files query",
-            "files content"
+            "files content",
+            "repo list"
         ]
     );
-    assert_eq!(&paths[20..23], ["repo-set", "map init", "map show"]);
+    assert_eq!(&paths[21..24], ["repo-set", "map init", "map show"]);
     assert_eq!(
-        &paths[29..33],
+        &paths[30..34],
         [
             "graph inspect",
             "index refresh",
@@ -32,7 +33,7 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         ]
     );
     assert_eq!(
-        &paths[49..],
+        &paths[50..],
         [
             "setup doctor",
             "setup profile",

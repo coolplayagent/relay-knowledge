@@ -29,6 +29,7 @@ pub(super) use view_request::code_view_request;
 
 pub(super) fn routes() -> Router<WebState> {
     Router::new()
+        .route("/api/v1/code/repositories", get(code_repository_list))
         .route(
             "/api/v1/code/repositories/{alias}/index",
             post(code_repository_index),
@@ -69,6 +70,17 @@ pub(super) fn routes() -> Router<WebState> {
             "/api/v1/code/repositories/{alias}/status",
             get(code_repository_status),
         )
+}
+
+async fn code_repository_list(State(state): State<WebState>, headers: HeaderMap) -> Response {
+    match state
+        .service
+        .list_indexed_code_repositories(api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
 }
 
 async fn code_repository_index(

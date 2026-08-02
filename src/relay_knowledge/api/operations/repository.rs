@@ -33,6 +33,13 @@ pub struct CodeRepositoryRegisterResponse {
     pub status: CodeRepositoryStatus,
 }
 
+/// Indexed code repository list response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryListResponse {
+    pub metadata: ApiMetadata,
+    pub repositories: Vec<CodeRepositoryStatus>,
+}
+
 /// Code repository removal response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryRemoveResponse {

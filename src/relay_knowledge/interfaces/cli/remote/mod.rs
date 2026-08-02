@@ -6,7 +6,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::{
     api::{
         ApiError, CodeGraphContextResponse, CodeRepositoryFeatureFlagsResponse,
-        CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse,
+        CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse, CodeRepositoryListResponse,
         CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
         CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, CodebaseViewResponse,
         ErrorKind, RequestContext, SoftwareGlobalResponse,
@@ -33,7 +33,8 @@ pub(super) fn supports(action: &CliAction) -> bool {
     matches!(
         action,
         CliAction::Repo(
-            RepoCommand::Index { .. }
+            RepoCommand::List
+                | RepoCommand::Index { .. }
                 | RepoCommand::ScopePreview { .. }
                 | RepoCommand::Query { .. }
                 | RepoCommand::Context { .. }
@@ -67,6 +68,19 @@ pub(super) async fn run_remote(
     let client = RemoteCliClient::new(network, base_url, context, format)?;
 
     match command {
+        RepoCommand::List => {
+            let response = client
+                .get_repositories::<CodeRepositoryListResponse>()
+                .await?;
+
+            render_response(
+                "code.repo.list",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
         RepoCommand::Index {
             alias,
             ref_selector,
@@ -472,6 +486,25 @@ impl RemoteCliClient {
 
         decode_response(response, self.format).await
     }
+
+    async fn get_repositories<R>(&self) -> Result<R, CliError>
+    where
+        R: DeserializeOwned,
+    {
+        let url = repositories_url(&self.base_url, self.format)?;
+        let response = http::send_request_with_qos(
+            &self.qos,
+            &self.qos_policy,
+            self.client
+                .get(url)
+                .header("x-relay-request-id", &self.context.request_id)
+                .header("x-relay-trace-id", &self.context.trace_id),
+        )
+        .await
+        .map_err(|error| qos_transport_error(error, self.format))?;
+
+        decode_response(response, self.format).await
+    }
 }
 
 fn normalize_base_url(value: &str, format: OutputFormat) -> Result<String, CliError> {
@@ -524,6 +557,23 @@ fn repository_url(
             segments.push(segment);
         }
     }
+
+    Ok(url)
+}
+
+fn repositories_url(base_url: &str, format: OutputFormat) -> Result<reqwest::Url, CliError> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| invalid_remote_url(error.to_string(), format))?;
+    let mut segments = url.path_segments_mut().map_err(|_| {
+        invalid_remote_url(
+            "remote base URL cannot be a base for path segments".to_owned(),
+            format,
+        )
+    })?;
+    for segment in ["api", "v1", "code", "repositories"] {
+        segments.push(segment);
+    }
+    drop(segments);
 
     Ok(url)
 }

@@ -13,9 +13,9 @@ mod worktree_review_tests;
 
 use crate::{
     api::{
-        ApiError, ApiMetadata, CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
-        CodeRepositoryRemoveResponse, CodeRepositoryReportResponse, CodeRepositoryStatusResponse,
-        RequestContext,
+        ApiError, ApiMetadata, CodeRepositoryListResponse, CodeRepositoryRegisterRequest,
+        CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse, CodeRepositoryReportResponse,
+        CodeRepositoryStatusResponse, RequestContext,
     },
     code::{REGISTRATION_LANGUAGE_FILTER_ERROR, register_repository},
     domain::CodeRepositorySelector,
@@ -35,6 +35,30 @@ pub(super) use status::{
 pub(super) use worktree::ensure_worktree_overlay_matches_current_worktree;
 
 impl RelayKnowledgeService {
+    /// Lists repositories that have at least one completed indexed scope.
+    pub async fn list_indexed_code_repositories(
+        &self,
+        context: RequestContext,
+    ) -> Result<CodeRepositoryListResponse, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let repositories = store
+            .list_code_repositories()
+            .await
+            .map_err(storage_api_error)?
+            .into_iter()
+            .filter(|status| status.last_indexed_scope_id.is_some())
+            .collect();
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(CodeRepositoryListResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            repositories,
+        })
+    }
+
     /// Registers a Git repository as a code source.
     pub async fn register_code_repository(
         &self,

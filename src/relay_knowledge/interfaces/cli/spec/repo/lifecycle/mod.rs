@@ -2,6 +2,22 @@
 
 use super::super::{CliCommandSpec, CommandEffect, arg, command_syntax, opt};
 
+pub(in crate::interfaces::cli::spec) fn repo_list() -> CliCommandSpec {
+    command!(
+        &["repo", "list"],
+        "relay-knowledge repo list",
+        "List repositories with completed indexes.",
+        "code.repo.list",
+        CommandEffect::ReadOnly,
+        &[],
+        &[],
+        &["relay-knowledge repo list --format json"],
+        &[
+            "Only repositories with at least one completed indexed scope are returned; repositories that have only been registered are omitted."
+        ],
+    )
+}
+
 pub(in crate::interfaces::cli::spec) fn repo_register() -> CliCommandSpec {
     command!(
         &["repo", "register"],

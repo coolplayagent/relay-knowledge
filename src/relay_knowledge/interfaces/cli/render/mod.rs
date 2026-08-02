@@ -262,6 +262,7 @@ where
                 .unwrap_or(false),
             value["degraded_reason"].as_str().unwrap_or("none")
         ),
+        "code.repo.list" => render_code_repository_list(&value),
         "code.repo.status" => format!(
             "repo={} files={} symbols={} stale={} task={} checkpoint={}",
             value["status"]["alias"].as_str().unwrap_or(""),
@@ -335,6 +336,30 @@ where
     };
 
     Ok(format!("{line}\n"))
+}
+
+fn render_code_repository_list(value: &serde_json::Value) -> String {
+    let Some(repositories) = value["repositories"].as_array() else {
+        return "repositories=0".to_owned();
+    };
+    let mut lines = Vec::with_capacity(repositories.len() + 1);
+    lines.push(format!("repositories={}", repositories.len()));
+    lines.extend(repositories.iter().map(|repository| {
+        format!(
+            "repo={} state={} files={} symbols={} stale={} commit={} root={}",
+            repository["alias"].as_str().unwrap_or("unknown"),
+            repository["state"].as_str().unwrap_or("unknown"),
+            repository["indexed_file_count"].as_u64().unwrap_or(0),
+            repository["symbol_count"].as_u64().unwrap_or(0),
+            repository["stale"].as_bool().unwrap_or(true),
+            repository["last_indexed_commit"]
+                .as_str()
+                .unwrap_or("unknown"),
+            repository["root_path"].as_str().unwrap_or("unknown"),
+        )
+    }));
+
+    lines.join("\n")
 }
 
 fn render_streaming_response<T>(

@@ -269,7 +269,7 @@ function 绑定，所有 owner 都直接挂载 UT。
 
 冷启动 full `repo index` 通过 `storage::sqlite::code::tasks::queue` 落持久化 code-index task 并立即返回 `task` handle。CLI 会启动有界单次 worker；非交互式 agent 可调用 `repo index-worker --task-id <id> --format json` 显式 drain 一次；`application::runtime::worker` 独占 endpoint 校验与 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 并发上限，`service run` 依此运行有界 code-index worker pool，并继续运行单个 repository-set overlay refresh worker。
 
-本地 CLI 可以用 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问已部署常驻服务。远端 `repo index` 只向服务提交 durable task 并返回 task/status/checkpoint JSON；任务由远端 `service run --web` 的 worker pool 消费，而不是由本地 CLI 执行 `repo index-worker`。`repo index --reset` 和 `repo index-worker` 这类维护命令在远端配置下会被拒绝，必须在服务端机器执行；`storage::sqlite::code::tasks::reset` 独占本地原子 reset。远端分发只会预先校验远端 URL 与 outbound network 设置；无关本机 runtime 和 retrieval 设置只在命令回落到本机状态时校验。
+本地 CLI 可以用 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问已部署常驻服务。远端 `repo index` 只向服务提交 durable task 并返回 task/status/checkpoint JSON；任务由远端 `service run --web` 的 worker pool 消费，而不是由本地 CLI 执行 `repo index-worker`。远端只读命令包括 `repo list`、`repo query`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`；其中 `repo list` 只返回至少有一个已完成 indexed scope 的仓库，不包含尚未完成首次索引的注册项。`repo index --reset` 和 `repo index-worker` 这类维护命令在远端配置下会被拒绝，必须在服务端机器执行；`storage::sqlite::code::tasks::reset` 独占本地原子 reset。远端分发只会预先校验远端 URL 与 outbound network 设置；无关本机 runtime 和 retrieval 设置只在命令回落到本机状态时校验。
 
 不同 fingerprint 的 task 会独立排队和持有 lease；完全相同的 full-index fingerprint 会复用现有 task。
 
@@ -395,6 +395,7 @@ relay-knowledge repo-set add workspace relay-knowledge --ref HEAD --priority 10 
 relay-knowledge repo-set remove workspace relay-knowledge --format json
 relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
 relay-knowledge repo impact relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo list --format json
 relay-knowledge repo status relay-knowledge --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json

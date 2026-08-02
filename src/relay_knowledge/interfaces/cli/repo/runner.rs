@@ -23,6 +23,19 @@ pub async fn run_repo(
     format: OutputFormat,
 ) -> Result<String, CliError> {
     match command {
+        RepoCommand::List => {
+            let response = service
+                .list_indexed_code_repositories(context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "code.repo.list",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
         RepoCommand::Register {
             root_path,
             alias,

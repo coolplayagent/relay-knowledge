@@ -334,6 +334,10 @@ async fn dispatch_operation(
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
+        "code.repo.list" => {
+            let response = service.list_indexed_code_repositories(context).await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
         "code.repo.index" => {
             let response = service
                 .start_code_repository_index(

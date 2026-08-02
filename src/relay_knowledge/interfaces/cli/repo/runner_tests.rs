@@ -45,6 +45,21 @@ fn run_worker() {
     let value = json_value(&registered);
     assert_eq!(value["registration"]["alias"], "fixture");
 
+    let registered_only = run_repo(
+        &service,
+        RepoCommand::List,
+        context("list-before-index"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("repository list should run before indexing");
+    assert!(
+        json_value(&registered_only)["repositories"]
+            .as_array()
+            .expect("repositories should be an array")
+            .is_empty()
+    );
+
     let preview = run_repo(
         &service,
         RepoCommand::Index {
@@ -72,6 +87,17 @@ fn run_worker() {
     .await
     .expect("index should run");
     assert!(indexed.contains("code.repo.index"));
+
+    let listed = run_repo(
+        &service,
+        RepoCommand::List,
+        context("list-after-index"),
+        OutputFormat::Text,
+    )
+    .await
+    .expect("repository list should include completed indexes");
+    assert!(listed.contains("repositories=1"));
+    assert!(listed.contains("repo=fixture state=fresh"));
 
     let fresh_definitions = run_repo(
         &service,

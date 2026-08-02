@@ -121,6 +121,32 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             "feature_flags=1 degraded=none\n",
         ),
         (
+            "code.repo.list",
+            serde_json::json!({
+                "repositories": [
+                    {
+                        "alias": "core",
+                        "root_path": "/work/core",
+                        "last_indexed_commit": "abc123",
+                        "state": "fresh",
+                        "indexed_file_count": 2,
+                        "symbol_count": 3,
+                        "stale": false,
+                    },
+                    {
+                        "alias": "web",
+                        "root_path": "/work/web",
+                        "last_indexed_commit": "def456",
+                        "state": "indexing",
+                        "indexed_file_count": 5,
+                        "symbol_count": 8,
+                        "stale": true,
+                    },
+                ],
+            }),
+            "repositories=2\nrepo=core state=fresh files=2 symbols=3 stale=false commit=abc123 root=/work/core\nrepo=web state=indexing files=5 symbols=8 stale=true commit=def456 root=/work/web\n",
+        ),
+        (
             "code.repo.status",
             serde_json::json!({
                 "status": {
