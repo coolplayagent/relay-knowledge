@@ -29,6 +29,13 @@ pub struct CodeImpactChanges {
     pub deleted_symbol_names: Vec<String>,
 }
 
+/// Bounded repository-set overlay keys needed to decorate retrieval candidates.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodeRepositorySetEdgeSelector {
+    pub origin_files: Vec<(String, String)>,
+    pub target_records: Vec<(String, String, String)>,
+}
+
 /// New background code index task to persist or deduplicate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskSeed {
@@ -637,6 +644,14 @@ pub trait CodeRepositoryStore: Send + Sync {
         _set_id: String,
     ) -> StorageFuture<'_, Vec<CodeRepositoryCrossEdge>> {
         Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn code_repository_set_cross_edges_for_selector(
+        &self,
+        set_id: String,
+        _selector: CodeRepositorySetEdgeSelector,
+    ) -> StorageFuture<'_, Vec<CodeRepositoryCrossEdge>> {
+        self.code_repository_set_cross_edges(set_id)
     }
 
     fn queue_code_repository_set_refresh_task(

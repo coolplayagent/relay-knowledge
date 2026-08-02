@@ -117,17 +117,19 @@ fn helper_deferred_source_fallback_uses_set_level_sufficiency() {
             false,
         ),
     ];
-    let full_results = vec![set_query_hit(&app, 1, 12.0), set_query_hit(&sdk, 1, 11.0)];
-
     assert!(!repository_set_deferred_source_fallback_needed(
         &set_request,
-        &outcomes,
-        &full_results
+        &outcomes
     ));
+    let underfilled = vec![member_outcome(
+        app.clone(),
+        active_request.clone(),
+        vec![retrieval_hit(&app, 1, 12.0)],
+        false,
+    )];
     assert!(repository_set_deferred_source_fallback_needed(
         &set_request,
-        &outcomes,
-        &full_results[..1]
+        &underfilled
     ));
 
     let empty_member_outcomes = vec![
@@ -141,8 +143,7 @@ fn helper_deferred_source_fallback_uses_set_level_sufficiency() {
     ];
     assert!(repository_set_deferred_source_fallback_needed(
         &set_request,
-        &empty_member_outcomes,
-        &full_results
+        &empty_member_outcomes
     ));
 }
 #[tokio::test]
@@ -228,19 +229,6 @@ fn member_outcome(
         dependency_symbol_plan_satisfied,
         source_fallback_allowed: true,
         degraded_reason: None,
-    }
-}
-
-fn set_query_hit(
-    member: &CodeRepositorySetMemberStatus,
-    line: u32,
-    score: f64,
-) -> CodeRepositorySetQueryHit {
-    CodeRepositorySetQueryHit {
-        member: member.member.clone(),
-        hit: retrieval_hit(member, line, score),
-        overlay_evidence: Vec::new(),
-        score,
     }
 }
 

@@ -12,6 +12,7 @@ use crate::domain::{
     CodeRepositoryCrossEdge, CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit,
     CodeRetrievalHit,
 };
+use crate::storage::CodeRepositorySetEdgeSelector;
 use domain_affinity::priority_domain_affinity_bonus;
 use identity_coverage::select_identity_coverage_results;
 
@@ -353,14 +354,7 @@ pub(super) fn dedupe_sort_truncate(
     let mut best =
         BTreeMap::<(String, String, String, u32, u32, String), CodeRepositorySetQueryHit>::new();
     for result in results.drain(..) {
-        let key = (
-            result.hit.repository_id.clone(),
-            result.hit.scope_id.clone(),
-            result.hit.path.clone(),
-            result.hit.line_range.start,
-            result.hit.line_range.end,
-            result.hit.excerpt.clone(),
-        );
+        let key = repository_set_hit_key(&result.hit);
         match best.get(&key) {
             Some(existing) if existing.score >= result.score => {}
             _ => {
@@ -376,6 +370,19 @@ pub(super) fn dedupe_sort_truncate(
     }
     results.truncate(limit);
     truncated
+}
+
+pub(super) fn repository_set_hit_key(
+    hit: &CodeRetrievalHit,
+) -> (String, String, String, u32, u32, String) {
+    (
+        hit.repository_id.clone(),
+        hit.scope_id.clone(),
+        hit.path.clone(),
+        hit.line_range.start,
+        hit.line_range.end,
+        hit.excerpt.clone(),
+    )
 }
 
 fn sort_repository_set_results(results: &mut [CodeRepositorySetQueryHit]) {
@@ -556,6 +563,22 @@ fn hit_target_records(hit: &CodeRetrievalHit) -> Vec<(String, String, String)> {
     }
 
     records
+}
+
+pub(super) fn overlay_edge_selector<'a>(
+    hits: impl IntoIterator<Item = &'a CodeRetrievalHit>,
+) -> CodeRepositorySetEdgeSelector {
+    let mut origin_files = BTreeSet::new();
+    let mut target_records = BTreeSet::new();
+    for hit in hits {
+        origin_files.insert((hit.scope_id.clone(), hit.path.clone()));
+        target_records.extend(hit_target_records(hit));
+    }
+
+    CodeRepositorySetEdgeSelector {
+        origin_files: origin_files.into_iter().collect(),
+        target_records: target_records.into_iter().collect(),
+    }
 }
 
 fn hit_is_import_edge(hit: &CodeRetrievalHit) -> bool {

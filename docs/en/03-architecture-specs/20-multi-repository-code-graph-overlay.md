@@ -230,6 +230,8 @@ The first implementation should fan out at the application layer to existing `se
 
 Repository-set queries must search the member's stored `source_scope` directly. Query-time path and language filters are applied as additional narrowing predicates against that stored scope; they are not merged into the member selector as OR alternatives, and they must not cause the query to resolve against the repository's current registration defaults.
 
+After member retrieval and bounded source fallback converge, the query builds a deduplicated selector from candidate import-origin files and target symbol/file records, then projects matching persisted overlay edges in fixed-size batches. A query does not load the whole repository-set overlay. Projected edges restore the original edge order and keep the existing evidence attachment, bridge bonus, priority, dedupe, diversity, and top-k semantics; an empty selector returns no evidence, while compatible storage implementations may fall back to a full overlay read without changing results.
+
 ## 7. Ranking and Precision Constraints
 
 Single-repository queries must not use multi-repository ranking signals. Multi-repository queries may add:

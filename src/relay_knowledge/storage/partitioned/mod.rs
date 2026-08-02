@@ -563,6 +563,15 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         self.control.code_repository_set_cross_edges(set_id)
     }
 
+    fn code_repository_set_cross_edges_for_selector(
+        &self,
+        set_id: String,
+        selector: crate::storage::CodeRepositorySetEdgeSelector,
+    ) -> StorageFuture<'_, Vec<CodeRepositoryCrossEdge>> {
+        self.control
+            .code_repository_set_cross_edges_for_selector(set_id, selector)
+    }
+
     fn queue_code_repository_set_refresh_task(
         &self,
         task: CodeRepositorySetRefreshTaskSeed,

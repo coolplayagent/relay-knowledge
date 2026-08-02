@@ -18,13 +18,13 @@ use super::super::{
     status::required_set_status,
 };
 use super::{
-    OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
+    OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate, overlay_edge_selector,
     per_member_candidate_limit,
     plan::{
         dependency_symbol_plan_needs_hybrid_fallback, merge_dependency_symbol_fallback_hits,
         repository_set_member_query_plan,
     },
-    prune_returned_overlay_evidence, repository_set_score,
+    prune_returned_overlay_evidence, repository_set_hit_key, repository_set_score,
 };
 
 const REPOSITORY_SET_QUERY_MEMBER_CONCURRENCY: usize = 4;
@@ -55,12 +55,6 @@ impl RelayKnowledgeService {
         if let Some(error) = unfresh_set_error_for_wait_policy(&request, &status) {
             return Err(error);
         }
-        let edges = store
-            .code_repository_set_cross_edges(status.repository_set.set_id.clone())
-            .await
-            .map_err(storage_api_error)?;
-        let edge_index = OverlayEvidenceIndex::new(&edges);
-        let mut results = Vec::new();
         let candidate_limit = per_member_candidate_limit(request.limit, status.members.len());
         let highest_priority = status
             .members
@@ -85,27 +79,27 @@ impl RelayKnowledgeService {
         for outcome in member_outcomes {
             outcomes.push(outcome?);
         }
-        results.extend(repository_set_results_from_outcomes(
-            &request.query,
-            &outcomes,
-            &edge_index,
-        ));
-        apply_bridge_support_bonus(&mut results);
-        if repository_set_deferred_source_fallback_needed(&request, &outcomes, &results) {
+        if repository_set_deferred_source_fallback_needed(&request, &outcomes) {
             apply_repository_set_deferred_source_fallbacks(
                 Arc::clone(&store),
                 &request,
                 &mut outcomes,
             )
             .await?;
-            results.clear();
-            results.extend(repository_set_results_from_outcomes(
-                &request.query,
-                &outcomes,
-                &edge_index,
-            ));
-            apply_bridge_support_bonus(&mut results);
         }
+        let selector =
+            overlay_edge_selector(outcomes.iter().flat_map(|outcome| outcome.hits.iter()));
+        let edges = store
+            .code_repository_set_cross_edges_for_selector(
+                status.repository_set.set_id.clone(),
+                selector,
+            )
+            .await
+            .map_err(storage_api_error)?;
+        let edge_index = OverlayEvidenceIndex::new(&edges);
+        let mut results =
+            repository_set_results_from_outcomes(&request.query, &outcomes, &edge_index);
+        apply_bridge_support_bonus(&mut results);
         let truncated = dedupe_sort_truncate(&mut results, request.limit, &request.query);
         prune_returned_overlay_evidence(&mut results);
         let mut degraded_reasons = vec![
@@ -250,7 +244,6 @@ fn repository_set_results_from_outcomes(
 fn repository_set_deferred_source_fallback_needed(
     request: &CodeRepositorySetQueryRequest,
     outcomes: &[RepositorySetMemberQueryOutcome],
-    initial_results: &[CodeRepositorySetQueryHit],
 ) -> bool {
     if outcomes.iter().any(|outcome| {
         outcome.source_fallback_allowed
@@ -277,9 +270,13 @@ fn repository_set_deferred_source_fallback_needed(
         return true;
     }
 
-    let mut ranked = initial_results.to_vec();
-    dedupe_sort_truncate(&mut ranked, request.limit, &request.query);
-    ranked.len() < request.limit.max(1)
+    outcomes
+        .iter()
+        .flat_map(|outcome| outcome.hits.iter())
+        .map(repository_set_hit_key)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        < request.limit.max(1)
 }
 
 async fn apply_repository_set_deferred_source_fallbacks(

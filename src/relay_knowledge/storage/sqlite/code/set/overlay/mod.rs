@@ -22,6 +22,10 @@ use super::{
     membership::{member_statuses, set_by_alias},
 };
 
+mod projection;
+
+pub(in crate::storage::sqlite::code) use projection::cross_edges_for_selector;
+
 pub(in super::super) fn set_status(
     connection: &mut Connection,
     alias: &str,
@@ -422,7 +426,7 @@ fn member_versions_json(members: &[CodeRepositorySetMemberStatus]) -> Result<Str
     serde_json::to_string(&versions).map_err(|error| StorageError::InvalidInput(error.to_string()))
 }
 
-fn edge_from_row(row: &Row<'_>) -> rusqlite::Result<CodeRepositoryCrossEdge> {
+pub(super) fn edge_from_row(row: &Row<'_>) -> rusqlite::Result<CodeRepositoryCrossEdge> {
     Ok(CodeRepositoryCrossEdge {
         edge_id: row.get(0)?,
         set_id: row.get(1)?,

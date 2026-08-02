@@ -1,5 +1,11 @@
 # 自迭代采纳优化记录
 
+## 候选优化说明：run-1785705797-candidate-driven-overlay-projection
+
+- 算法/架构：Repository-set 查询先并发收集各 member 的有界结构化候选，并用与最终去重完全相同的 repository/scope/path/line/excerpt key 判断 set-level source fallback；fallback 收敛后，从最终候选生成去重的 import-origin file 与 target symbol/file selector。SQLite 不再为每次查询读取、分配、反序列化整张 `code_repository_cross_edges` overlay，而是用 `VALUES` CTE 按固定 128-key batch 只投影可能附着到候选的边，再沿用既有 `OverlayEvidenceIndex`、bridge bonus、priority、diversity 与 top-k。
+- 不变量/预期影响：不改变 parser facts、overlay refresh/materialization、edge identity/order、evidence 匹配、ranking 权重、candidate limit、path/language/freshness、单仓 query、source `text_fallback`、semantic/vector、schema、writer/lease/checkpoint 或 CLI/API；非 SQLite/custom store 的 storage 默认实现仍可回退完整 overlay 读取。Temporal fast cached set 有 4,436 条 overlay edge，隔离的同一 `client.Dial` query 五次 wall time 从候选前 0.55–0.71s（median 0.63s）降至 0.37–0.57s（median 0.38s），两条 fast repo-set expected-all 查询仍返回 usage 与 SDK definitions。
+- 风险/回归：风险是 selector 与 evidence attachment identity 漂移、SQLite 参数过多或 legacy malformed `evidence_json` 令查询失败；候选通过共享 hit dedupe key、origin/target key 去重、128-key SQL batch、`json_valid` guard、edge-id 去重和原排序恢复控制。单测覆盖 origin+target union、同边去重、无关边排除、malformed JSON、selector 去重、fallback set-level sufficiency 和既有 overlay ranking。本候选建立在已采纳的 graph-first indirect-call binding、bounded overlay evidence index 与 deferred fallback 策略上，避免近期 generic chunk search、SBOM 和 read-pool 局部改写造成 competitive floor、recovery/lock 或总分回退的 rejected pattern。
+
 ## 候选优化说明：run-1785683424-graph-first-indirect-call-bindings
 
 - 算法/架构：caller 查询的间接调用绑定从“先对所有 chunk 做 FTS，再从文本识别字段赋值”改为 graph-first 两阶段计划：先通过 `code_repository_references(source_scope, name, ...)` 的精确索引定位目标引用，再只读取覆盖该引用行的最小已索引 chunk 并提取字段绑定；仅当结构化引用不能产生绑定时才执行原有有界 FTS。绑定匹配按同路径、已有 target 证据、上下文关联的证据强度排序，同文件字段赋值标记为 9500 basis points 的 `exact` tier，并在 caller 排序中获得有界的局部绑定加分。
@@ -891,30 +897,6 @@
 - 方法：候选 diff 只要包含非文档文件，就追加 `self_iteration_algorithm_documentation` gate，要求同步更新本文档；prompt 明确要求写出算法、架构、不变量、预期 case/metric 影响和风险。该 gate 在候选评估完成后、评分前加入，作为硬质量门禁参与 `quality gates failed` 拒绝原因。
 - 长期记忆：prompt 新增 `.git/relay-knowledge-self-iteration/patches/` 索引，按最近 patch 列出路径、大小、采纳状态、分数、变更文件、拒绝原因和主要改善。Codex 先读索引，再用 `sed -n` 对相关 patch 小范围渐进读取，避免一次性塞入所有历史 patch 造成上下文膨胀。
 - 预期影响：后续自迭代能同时利用结构化 run history、人工可读设计说明和原始 patch 细节，减少重复尝试，提高对历史成功/失败算法的复用质量。
-## 候选优化说明：20260516T130000Z
-- 目标：继续修复 Linux、Kubernetes、Spring Framework full-scope index 在大文件数仓库中因 Git blob 读取批次过小而接近或超过 900 秒门禁的问题，同时避免把并行解析改成不受控的线程膨胀。
-- 方法：全量索引的 `git cat-file --batch` 读取组从固定 32 个路径提升到默认文件批次上限 128 个路径，并继续受 `max_files_per_batch` 与 `max_bytes_per_batch` 约束；解析阶段改为按 `available_parallelism()` 分块启动 scoped worker，每块完成后再推进下一块，保持输出顺序稳定。
-- 架构与不变量：Git blob 读取、解析、SQLite checkpoint/finalize 仍由既有 bounded batch plan 管理；source scope、路径筛选、语言筛选、行记录、符号 identity、CLI/API 响应语义不变；单个 batch 的内存上限仍由 16 MiB 默认字节预算和资源预算控制。
-- 预期影响：把大仓冷索引中的 Git 子进程数量最多再降低约 4 倍，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 的 index wall time；小仓 ranking 与 query accuracy 不应变化。
-- 已知风险：单次 `cat-file --batch` stdout 峰值可接近 batch 字节预算；低并发机器上解析仍按 CPU 并行度串行分块，因此收益主要来自减少 Git 进程启动与 IPC 开销。
-## 候选优化说明：20260516T132656Z
-- 目标：继续修复 Linux、Kubernetes、Spring Framework full-scope index 的 900 秒超时风险，针对批量持久化与 finalize 阶段中高频重复 SQL prepare 的固定开销。
-- 方法：checkpoint batch 写入在 files、symbols、references、imports、chunks、diagnostics 六类循环中复用各自的 prepared statement；FTS search document 插入通过同一个 prepared inserter 复用 SQL；finalize 的 import resolution 更新、call edge 重建插入和 search document 重建同样复用 prepared statement，避免每条记录重新解析相同 SQL 文本。
-- 架构与不变量：SQLite schema、事务边界、batch/checkpoint 语义、search document 内容、call edge ID、reference/import/call resolution 规则、CLI/API 返回 schema 均不变；仍由既有 bounded batch 与 finalize transaction 控制资源和崩溃恢复边界。
-- 预期影响：大仓索引中每批数百到数万行的写入与 call/import finalize 少做重复 SQL 编译，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index`、`relay_teams_index_ms` 和 `leveldb_cpp_index_ms`，对查询 accuracy/ranking 不应产生影响。
-- 已知风险：prepared statement 生命周期覆盖整个插入循环，若后续在同一循环中加入需要独占 schema 变更的操作，必须先释放 statement；当前循环只执行普通 DML 与 FTS insert，风险较低。
-## 候选优化说明：20260516T135345Z
-- 目标：继续修复 Linux、Kubernetes、Spring Framework 大仓 full-scope index 在 finalize 阶段重建 call graph 时的 SQLite/FTS 写入放大，同时避免上轮“移除 call FTS 文档”造成的 query p95 与 ranking 退化。
-- 方法：`code_repository_calls` 仍按 reference 逐条重建以保留 caller 归属和稳定 call ID；call edge 表重建完成后，用一次 `INSERT INTO code_repository_search ... SELECT ... FROM code_repository_calls` 集合语句批量重建 call FTS 文档，替代每条 call edge 一次 Rust inserter 调用；schema backfill 使用同一 caller、callee、target hint、path 内容字段，保持旧库补全和新 finalize 输出一致。
-- 架构与不变量：call edge schema、call search document 内容字段、source scope、caller/callee resolution、query API、FTS 查询路径、ranking 融合和 checkpoint/finalize 事务边界保持不变；新增测试断言 cross-batch call finalize 后仍生成 call FTS 文档并可被 callers 查询命中。
-- 预期影响：大仓调用引用数量很高时，finalize 少执行数十万次 Rust 到 SQLite 的 FTS insert 调用和参数绑定，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 超时风险；因为查询路径不变，`rt_hybrid_eval_checkpoint_store`、relay-teams p95 和 LevelDB definition cases 应避免 20260516T133442Z 的退化。
-- 已知风险：集合插入会在 call table 重建后一次性写入 call FTS rows，事务内峰值 SQLite 工作集中在该语句；若未来 call search document 内容新增字段，必须同步更新 backfill 与 finalize 的两处 `SELECT`。
-## 候选优化说明：20260516T135933Z
-- 目标：保护大仓 graph 查询准确率，避免 references、calls、imports 在 FTS 命中数超过 bounded candidate window 时，因为未排序的 SQLite FTS row 顺序先截断而丢掉最相关候选。
-- 方法：graph 查询的 reference、call、import FTS 子查询在 `LIMIT` 前统一按 `bm25(code_repository_search) ASC, record_id ASC` 排序，与 symbol/chunk 查询的候选剪枝策略一致；Rust 层仍只对 bounded candidate set 做既有语义评分、置信度加权、去重和截断。
-- 架构与不变量：SQLite schema、FTS 文档内容、API 返回字段、query kind 分派、scope/path/language 过滤、最终 Rust scoring 与排序规则不变；新增 caller 回归测试构造超过 500 个匹配 call 文档，断言更短且更相关的 FTS 候选在 bounded scoring 前不会被未排序窗口排除。
-- 预期影响：在 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 这类多仓/大仓中，callers/callees/imports/references 查询的候选召回更稳定，特别是大量同名调用、头文件 include、或引用噪声超过默认 500 候选时；性能可能因三个 graph 子查询多一次 FTS rank 排序有小幅成本，但候选窗口仍有上限。
-- 已知风险：SQLite FTS `bm25` 排序会在高频宽查询上增加查询 CPU；如果 p95 明显退化，应考虑把 rank-aware ordering 限定到命中数可能溢出窗口的 query kind，或引入更细的 path/language 预过滤候选表。
 ## 20260516T121321Z-20260516T132656Z 历史计分条目
 这些早期详细计分条目的完整 patch、score、case 和指标记录保留在 `.git/relay-knowledge-self-iteration/patches/` 与渐进式 memory 中；活跃文档保留上方候选优化说明以满足单文件 1000 行上限。
 ## 候选优化说明：accuracy/stability 优先与 case 扩展
@@ -968,56 +950,9 @@
 - summary: Python function type annotations now emit structured reference facts while preserving nested generic/default-expression/comment boundaries, Go type signatures keep the declaration keyword in symbol excerpts, import ranking separates package re-export surfaces from consuming source files and reuses robust test-path detection for path overlap bonuses, and reference ranking prefers return/type-use and external consumer contexts over same-name definition files. The compacted `run-1780219799` to `run-1780224921` records continue to cover atomic QoS, Go type-spec surface/deduping, Python/TypeScript type-reference recall, edge source-context ranking, and exported parameter reference ranking.
 - invariants: changes are query/parser scoring only; no durable task lease, queue bound, SQLite checkpoint, graph schema, service manager, env, paths, net, QoS, release, or installation behavior changed.
 
-## run-1780397808-to-run-1780398992 compacted
-- summary: accepted Rust workflow chunk-first (`run-1780397808`, score 0.978577, 108/108 cases) and import query shape scoring (`run-1780398992`, score 0.979356, 108/108 cases) preserved foundational=1.000000, semantic_vector=1.000000, and stability=1.000000 while improving TypeScript dynamic import rank from 4 to 1 and competitive capability to 0.996795. Full patches, changed paths, improvements, degradations, and latency metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
-- performance memory: `run-1780398992` improved competitive capability but recorded performance=0.889226 with software-global, LevelDB, index-performance, and project-alias latency regressions. Later candidates should prefer general read-path or planning work reduction over more local scorer-only import tweaks.
+## run-1780397808-to-run-1785677193 archived
 
-## run-1780401183 compacted
-- score: 0.980895 with 108/108 cases passed; Hybrid direct-evidence coverage gate improved performance from 0.875658 to 0.897779 while preserving foundational=1.000000, semantic_vector=1.000000, and stability=1.000000. Full patch, metrics, improvements, and latency degradations remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1780401183.patch`, its report, and progressive memory.
-
-## 2026-06-03 exact-symbol-miss, read-model outage, and fact-version scan
-- 算法/架构：Symbol/Definition 单标识符查询先执行精确 `name = ?` lookup；若未饱和且无直接命中，直接返回空结果，不再启动宽 FTS 证明负例。Hybrid chunk-first 在 FTS/read-model 暂时不可用时可用既有 graph/API identity rows 或 bounded symbol-table LIKE 候选继续返回有 `degraded_reason` 的结构化命中，source fallback 对无 indexed hit、无 path anchor 的精确定义 miss 直接退出，SQLite read pool busy timeout 降为固定短等待；`latest_repository_scope_status` 扫描候选时同步验证 `code_snapshot_expected_scope_id`，跳过 legacy fact-version scope 后继续寻找 current scope。自迭代 harness 评分同步升级为 `base_score + capability_ceiling_bonus` 的动态天花板策略，macro explore prompt 改为有边界 biological mutation，research judge 要求完整维度 JSON 和 `min_dimension_score`。
-- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 写入、candidate 上限、任务 lease/checkpoint、repo-set overlay、semantic/vector read model、env/paths/net、QoS 或安装发布；Hybrid 仍只在 bounded candidates 与 dense evidence gate 下提前返回，Symbol/Definition 精确 kind 与无锚点 source fallback 不再用宽文本召回补空。自迭代策略变更只影响独立 `tools/self_iteration` harness、cases 与文档，保留 failed gate、missing diff、受保护目标回退和 anti-fixture 约束；预期让高基线阶段的 competitive/research/performance 突破继续产生有界采纳信号，并让 LLM judge 输出可审计维度证据。风险是 judge 配置不完整时更早失败，受 self-iteration unit tests、README 参数覆盖测试和 judge dimension tests 控制。
-
-## run-1780646058817570176-validate
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1780645380018333834-explore.patch`
-- score: 1.000000 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.993317, stability=1.000000)
-- cases: 62/62 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/graph_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=4835ms; self_iteration_cargo_fmt_check_ms=463ms; linux_glibc_compatibility_policy_ms=161ms; skill_metadata_policy_cases_ms=322ms; cargo_build_debug_ms=31774ms; self_iteration_cargo_check_ms=685ms; code_index_recovery_cases_ms=8897ms; code_index_sqlite_lock_cases_ms=8771ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## 2026-06-05 research self-iteration planning mode
-
-- 算法/架构：`tools/self_iteration` 新增只读 `research-plan` 模式，把本次 arXiv、X.com、Reddit、开源项目与系统工程深度研究流程抽象为 Markdown 计划，覆盖来源台账、可信度分层、综合矩阵、竞品 issue 拆解、双语文档、归档验证和远端 main 发布证据。
-- 不变量/预期影响/风险：该模式不调用 Codex、不运行评估、不写 self-iteration 历史、不修改产品 CLI/API、索引、存储、网络或发布行为；后续 research 迭代可先生成计划底稿，再按来源真实、issue 独立可验收和文档归档完整性推进。风险主要是输出模板过于保守，由 harness 单元测试和双语 README 参数覆盖约束。
-
-## 2026-08-02 冷索引与增量索引分钟级性能评估
-
-- 目标与测量修复：Codex 候选生成默认升级为 `gpt-5.6-sol` + `xhigh`；性能 fixture 使用每仓隔离 runtime home，并验证 cold task/parsed-file 完成证据，禁止把缓存命中的 `changed_path_count=0` no-op 计作冷索引改善。
-- 算法：Git 冷索引先直接尝试有界 `cat-file --batch`，仅在缺失对象或 submodule 路径时回退 batch-check/逐路径读取；普通 Git 增量变更在 512 文件、16 MiB 默认预算内预取 blob，避免每个变更文件启动一次 `git show`。
-- 回归面：1024 文件 fast fixture 和 2048 文件 full fixture 都创建第二个含修改、新增、删除的提交，执行 `repo update`，记录 `*_cold_index_ms`、`*_cold_register_index_ms`、`*_incremental_index_ms`，并限制 delta blob read/parse 数量；PR benchmark workflow 会直接审计 JSON 完成证据和预算。
-- 架构不变量与风险：任务租约、单仓单 writer、checkpoint、重试、资源预算、FTS/边终结、freshness 和查询事实不变；额外内存严格受现有 batch 文件/字节上限约束。submodule 或 batch 读取失败仍走原有有界回退，风险由 Git/submodule 测试、增量 batch-read 测试和真实 CLI 性能 gate 覆盖。
-
-## run-1785677193
-
-- patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches-v2/run-1785677193.patch`
-- score: 0.986247 (foundational=1.000000, competitive=0.993590, accuracy=0.996795, semantic_vector=1.000000, research_judge=n/a, performance=0.931431, stability=1.000000)
-- cases: 109/109 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository/indexing/mod.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=4516ms; self_iteration_cargo_fmt_check_ms=504ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=243ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=464ms; code_index_recovery_cases_ms=1228ms; code_index_sqlite_lock_cases_ms=946ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+- summary: Rust workflow/import planning, Hybrid direct coverage, exact-symbol/read-model recovery, semantic/vector validation, research planning, bounded Git indexing, and `run-1785677193` details moved to `04-self-iteration-accepted-optimizations-archive-20260803.md` to keep this primary benchmark log below the tracked-file 1000-line hard cap. Raw patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/`.
 
 ## run-1785683424
 
@@ -1028,6 +963,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.979012->1.0; score_component:competitive_capability 0.99359->1.0; score_component:performance 0.891236->0.927754486607225; case_score:c_syntax_callers_function_pointer_read 0.5->1.0; case_rank:c_syntax_callers_function_pointer_read 2->1; metric:cargo_build_debug_ms 16423.0->263.0; metric:code_index_recovery_cases_ms 29845.0->1228.0; metric:code_index_sqlite_lock_cases_ms 29519.0->1087.0
 - known degradations: metric:relay_teams_cold_index_ms 3738.0->4083.0; metric:relay_teams_cold_register_index_ms 3799.0->4144.0; metric:software_global_fixture_cold_index_ms 101.0->144.0; metric:temporal_samples_go_cold_index_ms 1127.0->1190.0; metric:temporal_samples_go_cold_register_index_ms 1188.0->1271.0; metric:project_alias_fixture_cold_index_ms 81.0->125.0; metric:project_alias_fixture_cold_register_index_ms 183.0->246.0
 - latency metrics: cargo_fmt_check_ms=4519ms; self_iteration_cargo_fmt_check_ms=503ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=243ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=283ms; code_index_recovery_cases_ms=1228ms; code_index_sqlite_lock_cases_ms=1087ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1785705797
+
+- patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches-v2/run-1785705797.patch`
+- score: 0.982749 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.904158, stability=1.000000)
+- cases: 109/109 passed
+- changed paths: `docs/en/03-architecture-specs/20-multi-repository-code-graph-overlay.md`, `docs/zh/03-architecture-specs/20-multi-repository-code-graph-overlay.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260803.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository/repository_set/query/mod.rs`, `src/relay_knowledge/application/code_repository/repository_set/query/mod_tests.rs`, `src/relay_knowledge/application/code_repository/repository_set/query/workflow.rs`, `src/relay_knowledge/application/code_repository/repository_set/query/workflow_tests.rs`, `src/relay_knowledge/storage/contracts/code.rs`, `src/relay_knowledge/storage/contracts/mod.rs`, `src/relay_knowledge/storage/partitioned/mod.rs`, `src/relay_knowledge/storage/sqlite/code/mod.rs`, `src/relay_knowledge/storage/sqlite/code/set/mod.rs`, `src/relay_knowledge/storage/sqlite/code/set/overlay/mod.rs`, `src/relay_knowledge/storage/sqlite/code/set/overlay/projection.rs`, `src/relay_knowledge/storage/sqlite/code/set/overlay/projection_tests.rs`
+- key improvements: score_component:score 0.971867->0.9827485040194963; score_component:competitive_capability 0.987179->1.0; score_component:performance 0.859373->0.9041583556638684; case:typescript_syntax_hybrid_tsx_provider_flow false->true; metric:self_iteration_cargo_check_ms 364.0->262.0; metric:code_index_recovery_cases_ms 7884.0->1250.0; metric:code_index_sqlite_lock_cases_ms 7784.0->1107.0; metric:code_index_health_isolation_cases_ms 9586.0->2706.0
+- known degradations: metric:temporal_samples_go_cold_index_ms 967.0->1070.0; metric:temporal_samples_go_cold_register_index_ms 1028.0->1158.0; metric:leveldb_cpp_cold_index_ms 384.0->424.0; metric:typescript_syntax_fixture_cold_index_ms 101.0->142.0; metric:typescript_syntax_fixture_cold_register_index_ms 162.0->203.0
+- latency metrics: cargo_fmt_check_ms=4599ms; self_iteration_cargo_fmt_check_ms=484ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=222ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=262ms; code_index_recovery_cases_ms=1250ms; code_index_sqlite_lock_cases_ms=1107ms
 
 Adopted optimization notes:
 
