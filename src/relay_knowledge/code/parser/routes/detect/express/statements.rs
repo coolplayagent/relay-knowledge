@@ -1,4 +1,4 @@
-use super::super::javascript::{
+use super::super::lexical::javascript::{
     find_javascript_pattern_outside_strings, statement_ends_with_semicolon,
 };
 use super::syntax::express_route_start_position;

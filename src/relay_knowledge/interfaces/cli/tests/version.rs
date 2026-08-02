@@ -13,7 +13,7 @@ fn parses_version_check_command() {
 
 #[test]
 fn version_check_help_is_machine_readable() {
-    let help = cli_spec::render_help(
+    let help = spec::render_help(
         &["version".to_owned(), "check".to_owned()],
         OutputFormat::Json,
     )

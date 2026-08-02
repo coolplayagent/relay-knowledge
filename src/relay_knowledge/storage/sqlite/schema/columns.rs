@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 
 use crate::storage::StorageError;
 
-use super::indexing;
+use super::super::indexing;
 
 pub(super) fn ensure_core_schema_columns(connection: &Connection) -> Result<(), StorageError> {
     ensure_column(connection, "evidence", "source_path", "TEXT")?;
@@ -96,7 +96,7 @@ pub(super) fn ensure_core_schema_columns(connection: &Connection) -> Result<(), 
     Ok(())
 }
 
-pub(super) fn ensure_column(
+pub(in crate::storage::sqlite) fn ensure_column(
     connection: &Connection,
     table: &str,
     column: &str,

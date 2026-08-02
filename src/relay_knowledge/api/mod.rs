@@ -1,44 +1,17 @@
 //! Stable API contracts shared by CLI, Web, and future service adapters.
 
-mod agent;
-mod code_repository;
-mod codebase_views;
-mod context;
-mod error;
-mod file_index;
-mod metadata;
+mod contracts;
 mod operations;
-mod service_plan;
-mod status;
-mod stream;
-mod watcher_diagnostics;
 
-pub use agent::{
-    AgentAccessPolicy, AgentAccessPolicySummary, AgentBudgetUsed, AgentPolicyError,
-    AgentProtocolKind, AgentProtocolStatus, AgentRequestContext, AgentRetrievalResult,
-    RuntimeIdentity, freshness_label,
-};
-pub(crate) use code_repository::CodeRepositoryFreshnessInput;
-pub use code_repository::{
-    CodeGraphContextResponse, CodeRepositoryFreshnessCursor, CodeRepositoryFreshnessDiagnostics,
-    CodeRepositoryFreshnessState, CodeRepositoryIndexLag, CodeRepositoryPendingIndexWork,
-};
-pub use codebase_views::CodebaseViewResponse;
-pub use context::{InterfaceKind, RequestContext};
-pub use error::{ApiError, ErrorKind};
-pub use file_index::{
-    FileContentQueryRequest, FileContentQueryResponse, FileIndexFreshnessCursor,
-    FileIndexFreshnessDiagnostics, FileIndexFreshnessState, FileIndexLag, FileIndexRequest,
-    FileIndexResponse, FileQueryRequest, FileQueryResponse,
-};
-pub use metadata::ApiMetadata;
+pub(crate) use contracts::CodeRepositoryFreshnessInput;
+pub use contracts::*;
 pub use operations::{
     AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeIndexWorkerRunRequest,
     CodeIndexWorkerRunResponse, CodeIndexWorkerStatus, CodeRepositoryFeatureFlagsResponse,
     CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest,
     CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse, CodeRepositoryReportResponse,
-    CodeRepositoryScopeMetadata, CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,
+    CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,
     CodeRepositorySetCreateResponse, CodeRepositorySetQueryResponse,
     CodeRepositorySetRefreshResponse, CodeRepositorySetRemoveResponse,
     CodeRepositorySetStatusResponse, CodeRepositoryStatusResponse, EmbeddingProviderProbeResponse,
@@ -54,7 +27,3 @@ pub use operations::{
     StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest, WorkerRunResponse,
     WorkerStatusRequest, WorkerStatusResponse,
 };
-pub use service_plan::{ServicePlanRequest, ServicePlanResponse};
-pub use status::{ProjectStatusResponse, RuntimeStatus};
-pub use stream::{ApiStreamEvent, StreamEventKind};
-pub use watcher_diagnostics::WatcherDiagnostics;

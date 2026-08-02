@@ -23,18 +23,15 @@ fn parses_knowledge_map_source_commands() {
 
     assert!(matches!(
         add.action,
-        CliAction::Map(map_cli::MapCommand::SourceAdd { .. })
+        CliAction::Map(map::MapCommand::SourceAdd { .. })
     ));
     assert_eq!(
         route.action,
-        CliAction::Map(map_cli::MapCommand::Route {
+        CliAction::Map(map::MapCommand::Route {
             topic: "build".to_owned(),
         })
     );
-    assert_eq!(
-        validate.action,
-        CliAction::Map(map_cli::MapCommand::Validate)
-    );
+    assert_eq!(validate.action, CliAction::Map(map::MapCommand::Validate));
     assert!(
         CliCommand::parse([
             "map",

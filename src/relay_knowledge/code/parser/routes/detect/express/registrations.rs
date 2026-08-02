@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::super::ANONYMOUS_ROUTE_HANDLER_NAME;
-use super::super::javascript::find_javascript_pattern_outside_strings;
+use super::super::lexical::javascript::find_javascript_pattern_outside_strings;
 use super::arguments::{extract_handler_name, extract_handler_name_from_arguments};
 use super::syntax::{
     express_http_method, express_method_position, express_receiver_name, express_route_urls,

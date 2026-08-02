@@ -9,10 +9,9 @@ use crate::{
 
 use super::{
     super::{
-        CliAction, CliCommand, CliError,
-        cli_render::{render_project_status, render_response},
-        cli_spec, files_cli, map_cli, ops_cli, remote_cli, repo_cli, repo_set_cli, service_cli,
-        setup_cli, version_cli,
+        CliAction, CliCommand, CliError, files, map, operations, remote,
+        render::{render_project_status, render_response},
+        repo, repo_set, service, setup, spec, version,
     },
     selection::{remote_environment_needed, select_remote_base_url},
 };
@@ -23,17 +22,17 @@ mod tests;
 
 pub(crate) async fn run_command(command: CliCommand) -> Result<String, CliError> {
     if let CliAction::Help { path } = &command.action {
-        return cli_spec::render_help(path, command.format);
+        return spec::render_help(path, command.format);
     }
     if command.action == CliAction::Version {
-        return version_cli::render_version(command.format);
+        return version::render_version(command.format);
     }
     if let CliAction::ServiceRun { mcp, web } = command.action.clone() {
-        return service_cli::run_service(mcp, web).await;
+        return service::run_service(mcp, web).await;
     }
     if let CliAction::Map(map_command) = command.action.clone() {
         let context = RequestContext::for_interface(InterfaceKind::Cli);
-        return map_cli::run_map(map_command, None, context, command.format).await;
+        return map::run_map(map_command, None, context, command.format).await;
     }
 
     let context = RequestContext::for_interface(InterfaceKind::Cli);
@@ -43,7 +42,7 @@ pub(crate) async fn run_command(command: CliCommand) -> Result<String, CliError>
         if let Some(base_url) =
             select_remote_base_url(&command, remote_environment.remote_cli.base_url)
         {
-            let remote_output = remote_cli::run_remote(
+            let remote_output = remote::run_remote(
                 &remote_environment.network,
                 &base_url,
                 &command.action,
@@ -63,7 +62,7 @@ pub(crate) async fn run_command(command: CliCommand) -> Result<String, CliError>
     if let Some(base_url) =
         select_remote_base_url(&command, environment.remote_cli.base_url.clone())
     {
-        let remote_output = remote_cli::run_remote(
+        let remote_output = remote::run_remote(
             &environment.network,
             &base_url,
             &command.action,
@@ -99,17 +98,18 @@ pub async fn run_with_service(
 ) -> Result<String, CliError> {
     let format = command.format;
     if let Some(output) =
-        ops_cli::run_operational_action(service, &command.action, context.clone(), format).await?
+        operations::run_operational_action(service, &command.action, context.clone(), format)
+            .await?
     {
         return Ok(output);
     }
     if let Some(output) =
-        setup_cli::run_setup_action(service, &command.action, context.clone(), format)?
+        setup::run_setup_action(service, &command.action, context.clone(), format)?
     {
         return Ok(output);
     }
     if let Some(output) =
-        files_cli::run_files(service, &command.action, context.clone(), format).await?
+        files::run_files(service, &command.action, context.clone(), format).await?
     {
         return Ok(output);
     }
@@ -209,10 +209,10 @@ pub async fn run_with_service(
                 format,
             )
         }
-        CliAction::Map(command) => map_cli::run_map(command, None, context, format).await,
-        CliAction::Repo(command) => repo_cli::run_repo(service, command, context, format).await,
+        CliAction::Map(command) => map::run_map(command, None, context, format).await,
+        CliAction::Repo(command) => repo::run_repo(service, command, context, format).await,
         CliAction::RepoSet(command) => {
-            repo_set_cli::run_repo_set(service, command, context, format).await
+            repo_set::run_repo_set(service, command, context, format).await
         }
         CliAction::Health => {
             let response = service
@@ -240,11 +240,11 @@ pub async fn run_with_service(
                 format,
             )
         }
-        CliAction::VersionCheck => version_cli::run_version_check(service, format).await,
+        CliAction::VersionCheck => version::run_version_check(service, format).await,
         CliAction::ServiceRun { .. } => Err(CliError::ServiceRunFailed(
             "service run requires process runtime".to_owned(),
         )),
-        CliAction::Help { path } => cli_spec::render_help(&path, format),
+        CliAction::Help { path } => spec::render_help(&path, format),
         CliAction::WorkerStatus { .. }
         | CliAction::FilesIndex { .. }
         | CliAction::FilesQuery { .. }
@@ -267,6 +267,6 @@ pub async fn run_with_service(
         | CliAction::SetupProfile { .. } => Err(CliError::ApiFailed(
             "operational command was not handled by the service adapter".to_owned(),
         )),
-        CliAction::Version => version_cli::render_version(command.format),
+        CliAction::Version => version::render_version(command.format),
     }
 }

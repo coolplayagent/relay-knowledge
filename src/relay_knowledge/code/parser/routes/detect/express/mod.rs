@@ -9,7 +9,7 @@ mod statements;
 mod syntax;
 
 use super::RouteCandidate;
-use super::javascript::{
+use super::lexical::javascript::{
     find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
 };
 use bindings::{

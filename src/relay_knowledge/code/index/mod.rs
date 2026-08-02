@@ -7,7 +7,6 @@ use std::{
 
 mod deleted_symbols;
 pub(in crate::code) mod filesystem_delta;
-#[path = "full.rs"]
 mod full_snapshot;
 mod impact_paths;
 mod incremental;

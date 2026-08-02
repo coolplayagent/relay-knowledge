@@ -36,12 +36,9 @@ use super::{
         ingest::mutation_batch_from_request,
         multimodal::extraction_ingest_request,
     },
-    status::{agent_protocol_status, runtime_status, runtime_status_with_model_profiles},
+    runtime::{agent_protocol_status, runtime_status, runtime_status_with_model_profiles},
     update::{VersionCheckResponse, check_for_updates},
 };
-
-#[cfg(test)]
-use super::knowledge::ingest::generated_evidence_id;
 
 /// Shared application service used by CLI, Web, and future API adapters.
 #[derive(Clone)]
@@ -658,10 +655,6 @@ mod service_status;
 mod storage_diagnostics;
 mod storage_provider;
 mod watcher;
-
-#[cfg(test)]
-#[path = "id_tests.rs"]
-mod id_tests;
 
 #[cfg(test)]
 #[path = "graph_only_tests.rs"]

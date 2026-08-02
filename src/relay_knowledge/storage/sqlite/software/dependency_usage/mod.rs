@@ -11,7 +11,6 @@ use crate::{
 
 mod matching;
 mod persistence;
-#[path = "python.rs"]
 mod python;
 mod schema;
 

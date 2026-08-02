@@ -24,7 +24,7 @@ Provider 状态进入 `backend_statuses`，包含 configured backend、model、d
 
 ## Web 用户界面
 
-Web Settings 页面展示模型 provider profile、fallback policy、endpoint probe 和模型发现状态。Secret 只在保存时接收，回传给浏览器时只显示 configured boolean 或脱敏 header。
+Web Settings 页面展示模型 provider profile、fallback policy、endpoint probe 和模型发现状态。`model_provider::profiles` owner 负责 profile CRUD、runtime-profile fallback 与 secret 保留；`model_provider::profile` 负责公开及持久化 profile shape 与脱敏投影；`profile_config` 负责 normalization 和 validation。`model_provider::fallback` owner 负责 fallback contract、默认值、校验与 async persistence；`model_provider::catalog` owner 负责 catalog contract、cache-backed refresh degradation 与 payload parsing；`model_provider::connectivity` owner 负责 probe/discovery contract、QoS-governed HTTP 工作流、响应映射、脱敏与重试诊断；各自 UT 直接挂载对应工作流。Secret 只在保存时接收，回传给浏览器时只显示 configured boolean 或脱敏 header。
 
 ## 降级与诊断
 

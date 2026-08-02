@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::{
-    CanvasBuilder, CanvasFilter, code_file_node_id, code_symbol_node_id, collect_rows, detail_map,
-    evidence_node_id,
+    context::{CanvasBuilder, CanvasFilter, collect_rows},
+    nodes::{code_file_node_id, code_symbol_node_id, detail_map, evidence_node_id, scope_node_id},
 };
 
 pub(super) fn add_code_nodes(
@@ -399,7 +399,7 @@ fn insert_code_file_node(
     builder.insert_edge(GraphCanvasStorageEdge {
         id: format!("scope-file:{scope}:{path}"),
         kind: "contains".to_owned(),
-        source: super::scope_node_id(scope),
+        source: scope_node_id(scope),
         target: code_file_node_id(scope, path),
         label: "contains".to_owned(),
         graph_version,
@@ -408,3 +408,7 @@ fn insert_code_file_node(
         details: BTreeMap::new(),
     });
 }
+
+#[cfg(test)]
+#[path = "code_tests.rs"]
+mod tests;

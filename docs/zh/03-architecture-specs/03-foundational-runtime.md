@@ -21,6 +21,8 @@
 
 业务模块只能接收 typed config，不能调用 `std::env`。
 
+`application::runtime` 负责组合 typed snapshot，但不得在一个文件内承载所有领域 parser。其 `retrieval` owner 独占 semantic/vector backend mode、rerank policy、remote embedding provider metadata、model name、dimension、batch、concurrency 与 timeout 校验；`file_index` owner 独占 authorized root 解析、platform path normalization、稳定 root identity 生成与 scan/query budget 校验；`worker` owner 独占外部 worker endpoint 校验、通用与 code-index 并发上限，以及 worker kind 到 endpoint 的映射；`agent` owner 独占 MCP endpoint、逗号分隔的 origin 与 scope policy、request runtime budget 和 audit queue 设置校验；`storage` owner 独占 single-database 与 partitioned-SQLite topology 选择解析。UT 直接挂载这些 owner，runtime 根只在 bootstrap 组合时映射其稳定错误。
+
 ## 3. 路径边界
 
 `paths` 是唯一构造运行时路径的模块。默认目录必须使用平台约定：配置、数据、日志、缓存、临时文件、dead-letter 和 service definition 分开管理。

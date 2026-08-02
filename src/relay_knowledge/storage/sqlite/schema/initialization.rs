@@ -2,12 +2,14 @@ use rusqlite::{Connection, params};
 
 use crate::storage::StorageError;
 
-use super::{
+use super::super::{
     code, code_graph, connection_runtime, file_index, indexing, operations, retrieval,
-    schema_columns, schema_marker,
 };
+use super::{columns, marker};
 
-pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
+pub(in crate::storage::sqlite) fn initialize_schema(
+    connection: &Connection,
+) -> Result<(), StorageError> {
     connection_runtime::retry::retry_sqlite_transient(|| initialize_schema_once(connection))
 }
 
@@ -142,7 +144,7 @@ fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
             ON graph_fact_evidence(evidence_id, fact_kind);
         ",
     )?;
-    schema_columns::ensure_core_schema_columns(connection)?;
+    columns::ensure_core_schema_columns(connection)?;
     code::initialize_code_schema(connection)?;
     indexing::initialize_schema(connection)?;
     code_graph::initialize_schema(connection)?;
@@ -151,7 +153,7 @@ fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
     connection_runtime::maintenance::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
     retrieval::initialize_schema(connection)?;
-    schema_marker::initialize_schema_marker(connection)?;
+    marker::initialize_schema_marker(connection)?;
 
     Ok(())
 }

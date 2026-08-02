@@ -1,6 +1,6 @@
 use super::super::{
-    CliAction, CliCommand, CliError, OutputFormat, cli_grammar, files_cli, knowledge_cli, map_cli,
-    ops_cli, repo_cli, repo_set_cli, setup_cli,
+    CliAction, CliCommand, CliError, OutputFormat, files, grammar, knowledge, map, operations,
+    repo, repo_set, setup,
 };
 
 #[cfg(test)]
@@ -99,13 +99,13 @@ impl CliCommand {
         } else if version {
             if let Some(token) = action_tokens.first() {
                 let error = CliError::UnexpectedArgument(token.clone());
-                return Err(cli_grammar::diagnose(&action_tokens, error, format));
+                return Err(grammar::diagnose(&action_tokens, error, format));
             }
             CliAction::Version
         } else {
             match parse_action(action_tokens.clone()) {
                 Ok(action) => action,
-                Err(error) => return Err(cli_grammar::diagnose(&action_tokens, error, format)),
+                Err(error) => return Err(grammar::diagnose(&action_tokens, error, format)),
             }
         };
 
@@ -190,21 +190,21 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
                 .cloned()
                 .unwrap_or_else(|| "status".to_owned()),
         )),
-        "ingest" => knowledge_cli::parse_ingest(&tokens[1..]),
-        "query" => knowledge_cli::parse_query(&tokens[1..]),
-        "files" => files_cli::parse_files(&tokens[1..]),
-        "map" => map_cli::parse_map(&tokens[1..]),
-        "repo" => repo_cli::parse_repo(&tokens[1..]).map(CliAction::Repo),
-        "repo-set" => repo_set_cli::parse_repo_set(&tokens[1..]).map(CliAction::RepoSet),
-        "graph" => knowledge_cli::parse_graph(&tokens[1..]),
-        "index" => knowledge_cli::parse_index(&tokens[1..]),
-        "worker" => ops_cli::parse_worker(&tokens[1..]),
-        "proposal" => ops_cli::parse_proposal(&tokens[1..]),
-        "audit" => ops_cli::parse_audit(&tokens[1..]),
+        "ingest" => knowledge::parse_ingest(&tokens[1..]),
+        "query" => knowledge::parse_query(&tokens[1..]),
+        "files" => files::parse_files(&tokens[1..]),
+        "map" => map::parse_map(&tokens[1..]),
+        "repo" => repo::parse_repo(&tokens[1..]).map(CliAction::Repo),
+        "repo-set" => repo_set::parse_repo_set(&tokens[1..]).map(CliAction::RepoSet),
+        "graph" => knowledge::parse_graph(&tokens[1..]),
+        "index" => knowledge::parse_index(&tokens[1..]),
+        "worker" => operations::parse_worker(&tokens[1..]),
+        "proposal" => operations::parse_proposal(&tokens[1..]),
+        "audit" => operations::parse_audit(&tokens[1..]),
         "provider" => parse_provider(&tokens[1..]),
         "health" if tokens.len() == 1 => Ok(CliAction::Health),
-        "service" => ops_cli::parse_service(&tokens[1..]),
-        "setup" => setup_cli::parse_setup(&tokens[1..]),
+        "service" => operations::parse_service(&tokens[1..]),
+        "setup" => setup::parse_setup(&tokens[1..]),
         "version" if tokens.len() == 1 => Ok(CliAction::Version),
         "version" if tokens == ["version", "check"] => Ok(CliAction::VersionCheck),
         "help" => Ok(CliAction::Help {

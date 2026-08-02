@@ -3,11 +3,8 @@ use std::path::Path;
 use super::{
     super::{
         CodeIndexError,
-        changes::{
-            git_dir_bytes, submodule_git_dir, submodule_git_dir_from_git_dir,
-            submodule_worktree_root,
-        },
-        git::git_bytes,
+        changes::{submodule_git_dir, submodule_git_dir_from_git_dir, submodule_worktree_root},
+        git::{git_bytes, git_dir_bytes},
     },
     commands::{
         git_root_has_commit, git_tree_entry, git_tree_entry_from_git_dir, safe_relative_path,

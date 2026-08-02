@@ -1,9 +1,10 @@
 use std::{path::Path, sync::Arc};
 
 mod catalog;
-mod control_delegates;
+mod control_plane;
 mod diagnostics;
-mod retention;
+mod indexing;
+mod repository;
 mod routing;
 mod status;
 mod totals;
@@ -31,12 +32,7 @@ use crate::{
 };
 
 use catalog::{SqliteShardCatalog, initialize_catalog_schema};
-use retention::merge_scope_retention_summaries;
-use routing::{
-    current_control_scope, is_missing_code_scope_error, repository_store_for_selector,
-    source_scope_store,
-};
-use status::mirror_status;
+use routing::{is_missing_code_scope_error, repository_store_for_selector, source_scope_store};
 
 /// SQLite topology that keeps global control state in one DB and code facts in
 /// one DB per registered repository.
@@ -64,71 +60,18 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         &self,
         registration: CodeRepositoryRegistration,
     ) -> StorageFuture<'_, CodeRepositoryStatus> {
-        let this = self.clone();
-        Box::pin(async move {
-            let status = this
-                .control
-                .upsert_code_repository(registration.clone())
-                .await?;
-            let imported_scope = status.last_indexed_scope_id.clone();
-            let shard = this
-                .catalog
-                .staged_repository_store(status.repository_id.clone())
-                .await?;
-            this.catalog
-                .import_control_repository(
-                    Arc::clone(&shard),
-                    status.repository_id.clone(),
-                    imported_scope.clone(),
-                )
-                .await?;
-            let shard_status = shard.upsert_code_repository(registration).await?;
-            if let Some(source_scope) = imported_scope {
-                this.catalog
-                    .record_scope(status.repository_id.clone(), source_scope)
-                    .await?;
-            } else {
-                this.catalog
-                    .activate_repository(status.repository_id.clone())
-                    .await?;
-            }
-            Ok(CodeRepositoryStatus {
-                alias: status.alias,
-                ..shard_status
-            })
-        })
+        repository::upsert(self, registration)
     }
 
     fn code_repository_status(
         &self,
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
-        let this = self.clone();
-        Box::pin(async move {
-            let Some(control_status) = this.control.code_repository_status(repository).await?
-            else {
-                return Ok(None);
-            };
-            let Some(shard) = this
-                .catalog
-                .existing_repository_store(control_status.repository_id.clone())
-                .await?
-            else {
-                return Ok(Some(control_status));
-            };
-            let Some(mut shard_status) = shard
-                .code_repository_status(control_status.repository_id.clone())
-                .await?
-            else {
-                return Ok(Some(control_status));
-            };
-            shard_status.alias = control_status.alias;
-            Ok(Some(shard_status))
-        })
+        repository::status(self, repository)
     }
 
     fn list_code_repositories(&self) -> StorageFuture<'_, Vec<CodeRepositoryStatus>> {
-        control_delegates::list_code_repositories(self)
+        control_plane::list_code_repositories(self)
     }
 
     fn remove_code_repository(
@@ -136,33 +79,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         repository: String,
         now_ms: u64,
     ) -> StorageFuture<'_, Option<CodeRepositoryRemovalSummary>> {
-        let this = self.clone();
-        Box::pin(async move {
-            let Some(control_status) = this.control.code_repository_status(repository).await?
-            else {
-                return Ok(None);
-            };
-            let shard = this
-                .catalog
-                .existing_repository_store(control_status.repository_id.clone())
-                .await?;
-            let removed = this
-                .control
-                .remove_code_repository(control_status.repository_id.clone(), now_ms)
-                .await?;
-            let Some(summary) = removed else {
-                return Ok(None);
-            };
-            if let Some(shard) = shard {
-                shard
-                    .remove_code_repository(control_status.repository_id.clone(), now_ms)
-                    .await?;
-            }
-            this.catalog
-                .remove_repository(control_status.repository_id)
-                .await?;
-            Ok(Some(summary))
-        })
+        repository::remove(self, repository, now_ms)
     }
 
     fn code_repository_scope_status(
@@ -172,48 +89,13 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         path_filters: Vec<String>,
         language_filters: Vec<String>,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
-        let this = self.clone();
-        Box::pin(async move {
-            let Some(control_status) = this.control.code_repository_status(repository).await?
-            else {
-                return Ok(None);
-            };
-            let Some(shard) = this
-                .catalog
-                .existing_repository_store(control_status.repository_id.clone())
-                .await?
-            else {
-                return this
-                    .control
-                    .code_repository_scope_status(
-                        control_status.repository_id,
-                        resolved_commit_sha,
-                        path_filters,
-                        language_filters,
-                    )
-                    .await;
-            };
-            let status = shard
-                .code_repository_scope_status(
-                    control_status.repository_id.clone(),
-                    resolved_commit_sha.clone(),
-                    path_filters.clone(),
-                    language_filters.clone(),
-                )
-                .await?;
-            if let Some(mut status) = status {
-                status.alias = control_status.alias;
-                return Ok(Some(status));
-            }
-            this.control
-                .code_repository_scope_status(
-                    control_status.repository_id,
-                    resolved_commit_sha,
-                    path_filters,
-                    language_filters,
-                )
-                .await
-        })
+        repository::scope_status(
+            self,
+            repository,
+            resolved_commit_sha,
+            path_filters,
+            language_filters,
+        )
     }
 
     fn latest_code_repository_scope_status(
@@ -222,45 +104,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         path_filters: Vec<String>,
         language_filters: Vec<String>,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
-        let this = self.clone();
-        Box::pin(async move {
-            let Some(control_status) = this.control.code_repository_status(repository).await?
-            else {
-                return Ok(None);
-            };
-            let Some(shard) = this
-                .catalog
-                .existing_repository_store(control_status.repository_id.clone())
-                .await?
-            else {
-                return this
-                    .control
-                    .latest_code_repository_scope_status(
-                        control_status.repository_id,
-                        path_filters,
-                        language_filters,
-                    )
-                    .await;
-            };
-            let status = shard
-                .latest_code_repository_scope_status(
-                    control_status.repository_id.clone(),
-                    path_filters.clone(),
-                    language_filters.clone(),
-                )
-                .await?;
-            if let Some(mut status) = status {
-                status.alias = control_status.alias;
-                return Ok(Some(status));
-            }
-            this.control
-                .latest_code_repository_scope_status(
-                    control_status.repository_id,
-                    path_filters,
-                    language_filters,
-                )
-                .await
-        })
+        repository::latest_scope_status(self, repository, path_filters, language_filters)
     }
 
     fn queue_code_index_task(
@@ -350,120 +194,42 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         &self,
         source_scope: String,
     ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = this
-                .catalog
-                .checkpoint_scope_store(source_scope.clone())
-                .await?
-            {
-                if let Some(checkpoint) = shard.code_index_checkpoint(source_scope.clone()).await? {
-                    return Ok(Some(checkpoint));
-                }
-            }
-            this.control.code_index_checkpoint(source_scope).await
-        })
+        indexing::checkpoint::by_scope(self, source_scope)
     }
 
     fn latest_code_index_checkpoint(
         &self,
         repository_id: String,
     ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = this
-                .catalog
-                .checkpoint_repository_store(repository_id.clone())
-                .await?
-            {
-                return shard.latest_code_index_checkpoint(repository_id).await;
-            }
-            this.control
-                .latest_code_index_checkpoint(repository_id)
-                .await
-        })
+        indexing::checkpoint::latest(self, repository_id)
     }
 
     fn code_scope_retention(
         &self,
         repository_id: String,
     ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = this
-                .catalog
-                .existing_repository_store(repository_id.clone())
-                .await?
-            {
-                return shard.code_scope_retention(repository_id).await;
-            }
-            this.control.code_scope_retention(repository_id).await
-        })
+        indexing::retention::status(self, repository_id)
     }
 
     fn prune_code_repository_scopes(
         &self,
         request: CodeScopeRetentionRequest,
     ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = this
-                .catalog
-                .existing_repository_store(request.repository_id.clone())
-                .await?
-            {
-                let control_retention = this
-                    .control
-                    .prune_code_repository_scopes(request.clone())
-                    .await?;
-                let shard_retention = shard
-                    .prune_code_repository_scopes_with_retained(
-                        request.clone(),
-                        control_retention.retained_scopes.clone(),
-                    )
-                    .await;
-                return shard_retention.map(|summary| {
-                    merge_scope_retention_summaries(
-                        request.repository_id,
-                        control_retention,
-                        summary,
-                    )
-                });
-            }
-            this.control.prune_code_repository_scopes(request).await
-        })
+        indexing::retention::prune(self, request)
     }
 
     fn code_file_fingerprints(
         &self,
         repository_id: String,
     ) -> StorageFuture<'_, Vec<crate::domain::CodeFileFingerprint>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = this
-                .catalog
-                .existing_repository_store(repository_id.clone())
-                .await?
-            {
-                return shard.code_file_fingerprints(repository_id).await;
-            }
-            this.control.code_file_fingerprints(repository_id).await
-        })
+        indexing::file_index::fingerprints(self, repository_id)
     }
 
     fn code_file_fingerprints_for_scope(
         &self,
         source_scope: String,
     ) -> StorageFuture<'_, Vec<crate::domain::CodeFileFingerprint>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
-                return shard.code_file_fingerprints_for_scope(source_scope).await;
-            }
-            this.control
-                .code_file_fingerprints_for_scope(source_scope)
-                .await
-        })
+        indexing::file_index::fingerprints_for_scope(self, source_scope)
     }
 
     fn code_file_candidate_paths_for_scope(
@@ -474,29 +240,14 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         exclude_generated: bool,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
-                return shard
-                    .code_file_candidate_paths_for_scope(
-                        source_scope,
-                        path_filters,
-                        language_filters,
-                        exclude_generated,
-                        limit,
-                    )
-                    .await;
-            }
-            this.control
-                .code_file_candidate_paths_for_scope(
-                    source_scope,
-                    path_filters,
-                    language_filters,
-                    exclude_generated,
-                    limit,
-                )
-                .await
-        })
+        indexing::file_index::candidate_paths_for_scope(
+            self,
+            source_scope,
+            path_filters,
+            language_filters,
+            exclude_generated,
+            limit,
+        )
     }
 
     fn code_file_candidate_paths_for_query_scope(
@@ -508,80 +259,22 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         exclude_generated: bool,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
-                return shard
-                    .code_file_candidate_paths_for_query_scope(
-                        source_scope,
-                        query,
-                        path_filters,
-                        language_filters,
-                        exclude_generated,
-                        limit,
-                    )
-                    .await;
-            }
-            this.control
-                .code_file_candidate_paths_for_query_scope(
-                    source_scope,
-                    query,
-                    path_filters,
-                    language_filters,
-                    exclude_generated,
-                    limit,
-                )
-                .await
-        })
+        indexing::file_index::candidate_paths_for_query_scope(
+            self,
+            source_scope,
+            query,
+            path_filters,
+            language_filters,
+            exclude_generated,
+            limit,
+        )
     }
 
     fn apply_code_index_snapshot(
         &self,
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        let this = self.clone();
-        Box::pin(async move {
-            let base_scope = control_delegates::incremental_base_scope(&this, &snapshot).await?;
-            let shard = if snapshot.full_replace {
-                this.catalog
-                    .staged_repository_store(snapshot.repository_id.clone())
-                    .await?
-            } else {
-                match this
-                    .catalog
-                    .existing_repository_store(snapshot.repository_id.clone())
-                    .await?
-                {
-                    Some(shard) => shard,
-                    None => {
-                        this.catalog
-                            .staged_repository_store(snapshot.repository_id.clone())
-                            .await?
-                    }
-                }
-            };
-            this.catalog
-                .import_control_repository(
-                    Arc::clone(&shard),
-                    snapshot.repository_id.clone(),
-                    base_scope,
-                )
-                .await?;
-            let summary = shard.apply_code_index_snapshot(snapshot).await?;
-            let status = shard
-                .code_repository_status(summary.repository_id.clone())
-                .await?
-                .ok_or_else(|| {
-                    StorageError::InvalidInput(
-                        "sharded code repository status is missing after index".to_owned(),
-                    )
-                })?;
-            this.catalog
-                .record_scope(summary.repository_id.clone(), summary.source_scope.clone())
-                .await?;
-            mirror_status(&this.control, status).await?;
-            Ok(summary)
-        })
+        indexing::lifecycle::apply_snapshot(self, snapshot)
     }
 
     fn clear_code_workspace_state(
@@ -589,95 +282,27 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         repository_id: String,
         source_scope: String,
     ) -> StorageFuture<'_, ()> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) = this
-                .catalog
-                .existing_repository_store(repository_id.clone())
-                .await?
-            {
-                shard
-                    .clear_code_workspace_state(repository_id.clone(), source_scope.clone())
-                    .await?;
-            }
-            this.control
-                .clear_code_workspace_state(repository_id, source_scope)
-                .await
-        })
+        indexing::lifecycle::clear_workspace(self, repository_id, source_scope)
     }
     fn begin_code_index_session(
         &self,
         session: CodeIndexSession,
     ) -> StorageFuture<'_, CodeIndexCheckpoint> {
-        let this = self.clone();
-        Box::pin(async move {
-            let repository_id = session.repository_id.clone();
-            let source_scope = session.source_scope.clone();
-            let shard = this
-                .catalog
-                .staged_repository_store(repository_id.clone())
-                .await?;
-            let control_scope = current_control_scope(&this.control, repository_id.clone()).await?;
-            this.catalog
-                .import_control_repository(Arc::clone(&shard), repository_id.clone(), control_scope)
-                .await?;
-            let checkpoint = shard.begin_code_index_session(session).await?;
-            this.catalog
-                .stage_scope(repository_id, source_scope)
-                .await?;
-            Ok(checkpoint)
-        })
+        indexing::lifecycle::begin_session(self, session)
     }
 
     fn apply_code_index_batch(
         &self,
         batch: CodeIndexBatch,
     ) -> StorageFuture<'_, CodeIndexCheckpoint> {
-        let this = self.clone();
-        Box::pin(async move {
-            let repository_id = batch.repository_id.clone();
-            let source_scope = batch.source_scope.clone();
-            let shard = this
-                .catalog
-                .staged_repository_store(repository_id.clone())
-                .await?;
-            let control_scope = current_control_scope(&this.control, repository_id.clone()).await?;
-            this.catalog
-                .import_control_repository(Arc::clone(&shard), repository_id.clone(), control_scope)
-                .await?;
-            let checkpoint = shard.apply_code_index_batch(batch).await?;
-            this.catalog
-                .stage_scope(repository_id, source_scope)
-                .await?;
-            Ok(checkpoint)
-        })
+        indexing::lifecycle::apply_batch(self, batch)
     }
 
     fn finalize_code_index_session(
         &self,
         session: CodeIndexSession,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        let this = self.clone();
-        Box::pin(async move {
-            let shard = this
-                .catalog
-                .staged_repository_store(session.repository_id.clone())
-                .await?;
-            let summary = shard.finalize_code_index_session(session).await?;
-            let status = shard
-                .code_repository_status(summary.repository_id.clone())
-                .await?
-                .ok_or_else(|| {
-                    StorageError::InvalidInput(
-                        "sharded code repository status is missing after finalize".to_owned(),
-                    )
-                })?;
-            this.catalog
-                .record_scope(summary.repository_id.clone(), summary.source_scope.clone())
-                .await?;
-            mirror_status(&this.control, status).await?;
-            Ok(summary)
-        })
+        indexing::lifecycle::finalize_session(self, session)
     }
 
     fn search_code(

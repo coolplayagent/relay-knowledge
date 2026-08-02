@@ -138,7 +138,7 @@ const FILE_CONTENT_CURSOR_COLUMNS: &[&str] = &[
     "updated_at_ms",
 ];
 
-pub(super) fn schema_initialization_is_current(
+pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     connection: &Connection,
 ) -> Result<bool, StorageError> {
     if !schema_marker_table_exists(connection)? {
@@ -202,7 +202,7 @@ pub(super) fn schema_initialization_is_current(
     {
         return Ok(false);
     }
-    if !super::retrieval::derived_documents_current(connection)? {
+    if !super::super::retrieval::derived_documents_current(connection)? {
         return Ok(false);
     }
     if !fact_evidence_links_are_current(connection)? {
@@ -226,7 +226,7 @@ pub(super) fn initialize_schema_marker(connection: &Connection) -> Result<(), St
     Ok(())
 }
 
-pub(super) fn mark_schema_initialization_current(
+pub(in crate::storage::sqlite) fn mark_schema_initialization_current(
     connection: &Connection,
 ) -> Result<(), StorageError> {
     initialize_schema_marker(connection)?;

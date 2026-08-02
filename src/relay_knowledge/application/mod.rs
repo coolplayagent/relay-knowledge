@@ -5,7 +5,6 @@ mod knowledge;
 mod model_provider;
 mod runtime;
 mod service;
-mod status;
 mod update;
 mod worker;
 

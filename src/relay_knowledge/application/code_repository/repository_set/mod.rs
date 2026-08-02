@@ -1,7 +1,7 @@
-mod domain_affinity;
-mod identity_coverage;
+mod errors;
 mod lifecycle;
 mod member_freshness;
-mod plan;
+mod membership;
 mod query;
-mod service;
+mod refresh;
+mod status;

@@ -8,7 +8,7 @@ use crate::{
     storage::StorageError,
 };
 
-use super::code_status;
+use super::status;
 
 pub(in crate::storage::sqlite) fn repository_totals(
     connection: &mut Connection,
@@ -76,11 +76,11 @@ pub(in crate::storage::sqlite) fn repository_totals_excluding(
     })
 }
 
-pub(super) fn repository_report(
+pub(in crate::storage::sqlite::code) fn repository_report(
     connection: &mut Connection,
     repository: &str,
 ) -> Result<CodeRepositoryReport, StorageError> {
-    let status = code_status::repository_status(connection, repository)?.ok_or_else(|| {
+    let status = status::repository_status(connection, repository)?.ok_or_else(|| {
         StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
     })?;
     let scope = status.last_indexed_scope_id.as_deref().unwrap_or_default();

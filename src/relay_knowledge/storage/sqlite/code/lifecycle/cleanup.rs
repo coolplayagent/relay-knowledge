@@ -2,11 +2,11 @@ use rusqlite::{OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
 
-use super::code_search::{delete_search_documents_for_paths, delete_search_documents_for_scope};
+use super::super::search::{delete_search_documents_for_paths, delete_search_documents_for_scope};
 
 const MAX_PATH_DELETE_PATHS_PER_STATEMENT: usize = 500;
 
-pub(super) fn delete_scope_index(
+pub(in crate::storage::sqlite::code) fn delete_scope_index(
     transaction: &rusqlite::Transaction<'_>,
     source_scope: &str,
 ) -> Result<(), StorageError> {
@@ -40,7 +40,7 @@ pub(super) fn delete_scope_index(
     Ok(())
 }
 
-pub(super) fn delete_path_index(
+pub(in crate::storage::sqlite::code) fn delete_path_index(
     transaction: &rusqlite::Transaction<'_>,
     source_scope: &str,
     path: &str,
@@ -48,7 +48,7 @@ pub(super) fn delete_path_index(
     delete_path_indexes(transaction, source_scope, [path])
 }
 
-pub(super) fn path_indexes_exist<'path>(
+pub(in crate::storage::sqlite::code) fn path_indexes_exist<'path>(
     transaction: &rusqlite::Transaction<'_>,
     source_scope: &str,
     paths: impl IntoIterator<Item = &'path str>,
@@ -88,7 +88,7 @@ pub(super) fn path_indexes_exist<'path>(
     Ok(false)
 }
 
-pub(super) fn delete_path_indexes<'path>(
+pub(in crate::storage::sqlite::code) fn delete_path_indexes<'path>(
     transaction: &rusqlite::Transaction<'_>,
     source_scope: &str,
     paths: impl IntoIterator<Item = &'path str>,
@@ -134,7 +134,7 @@ pub(super) fn delete_path_indexes<'path>(
     Ok(())
 }
 
-pub(super) fn count_code_rows(
+pub(in crate::storage::sqlite::code) fn count_code_rows(
     transaction: &rusqlite::Transaction<'_>,
     table: &'static str,
     source_scope: &str,
