@@ -178,7 +178,9 @@ const CODE_GRAPH_SCHEMAS: &[DerivedTableSchema] = &[
     },
 ];
 
-pub(super) fn prepare_existing_database(connection: &Connection) -> Result<(), StorageError> {
+pub(in crate::storage::sqlite) fn prepare_existing_database(
+    connection: &Connection,
+) -> Result<(), StorageError> {
     for delay_ms in SCHEMA_COMPATIBILITY_RETRY_DELAYS_MS {
         match prepare_existing_database_once(connection) {
             Ok(()) => return Ok(()),

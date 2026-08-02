@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::super::javascript::find_javascript_pattern_outside_strings;
+use super::super::lexical::javascript::find_javascript_pattern_outside_strings;
 use super::arguments::extract_quoted_string;
 use super::syntax::{
     express_receiver_name, express_router_name_is_router, extract_quoted_strings,

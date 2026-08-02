@@ -1,7 +1,6 @@
 pub(in crate::code::parser) mod express;
 pub(in crate::code::parser) mod flask;
-pub(in crate::code::parser) mod javascript;
-mod python_strings;
+pub(in crate::code::parser) mod lexical;
 pub(in crate::code::parser) mod spring;
 
 pub(in crate::code::parser) struct RouteCandidate {

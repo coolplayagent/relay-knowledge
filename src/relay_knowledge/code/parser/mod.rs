@@ -70,7 +70,7 @@ mod identity_tests;
 mod go_tests;
 
 #[cfg(test)]
-#[path = "languages/c/parser_integration_tests.rs"]
+#[path = "languages/c/tests/parser.rs"]
 mod c_language_integration_tests;
 
 #[cfg(test)]
@@ -86,7 +86,7 @@ mod review_tests;
 mod sql_tests;
 
 #[cfg(test)]
-#[path = "languages/c/gcc_recovery_integration_tests.rs"]
+#[path = "languages/c/tests/gcc_recovery.rs"]
 mod gcc_recovery_integration_tests;
 
 #[cfg(test)]
@@ -104,10 +104,6 @@ mod source_surface_tests;
 #[cfg(test)]
 #[path = "tests/knowledge_map.rs"]
 mod knowledge_map_tests;
-
-#[cfg(test)]
-#[path = "tests/text_only_topics.rs"]
-mod text_only_topic_tests;
 
 #[cfg(test)]
 #[path = "tests/type_references.rs"]

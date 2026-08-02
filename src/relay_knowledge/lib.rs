@@ -1,5 +1,6 @@
 //! Core primitives and API boundaries for the relay-knowledge knowledge graph.
 
+pub mod adapters;
 pub mod api;
 pub mod application;
 pub mod bootstrap;
@@ -13,6 +14,7 @@ pub mod model_provider;
 pub mod net;
 pub mod observability;
 pub mod paths;
+pub mod ports;
 pub mod project;
 pub mod retrieval;
 pub mod storage;

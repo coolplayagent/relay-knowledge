@@ -267,3 +267,7 @@ fn xml_escape(value: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
 }
+
+#[cfg(test)]
+#[path = "platform_service_tests.rs"]
+mod tests;

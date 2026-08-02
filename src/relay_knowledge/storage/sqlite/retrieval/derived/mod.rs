@@ -1,0 +1,508 @@
+//! Semantic and vector candidates derived from the persisted retrieval read model.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use rusqlite::{Connection, params_from_iter, types::Value};
+
+use crate::{
+    domain::{RetrievalHit, RetrieverSource},
+    storage::{GraphSearchRequest, StorageError},
+};
+
+use super::{
+    ScoredHit,
+    context::code_artifact_for_document,
+    evidence_group_key,
+    local_model::{
+        cosine_similarity, hashed_vector, overlap_score, semantic_overlap_score, token_signature,
+    },
+    parse_f64_array, parse_string_array, sort_scored_hits, split_labels,
+};
+
+const DERIVED_RESULT_MULTIPLIER: usize = 8;
+const MAX_DERIVED_RESULT_LIMIT: usize = 512;
+const MAX_DERIVED_QUERY_TERMS: usize = 16;
+const VECTOR_LEXICAL_COVERAGE_WEIGHT: f64 = 0.05;
+const SEMANTIC_CANDIDATE_FIELDS: &[DerivedCandidateField] = &[DerivedCandidateField::json_token(
+    "lower(semantic.token_signature_json)",
+)];
+const VECTOR_CANDIDATE_FIELDS: &[DerivedCandidateField] = &[
+    DerivedCandidateField::contains("lower(vector.content)"),
+    DerivedCandidateField::contains("lower(coalesce(vector.source_path, ''))"),
+    DerivedCandidateField::contains("lower(vector.entity_labels_json)"),
+    DerivedCandidateField::json_token("lower(coalesce(semantic.token_signature_json, ''))"),
+];
+
+pub(super) fn semantic_candidates(
+    connection: &Connection,
+    request: &GraphSearchRequest,
+) -> Result<Vec<ScoredHit>, StorageError> {
+    let query_terms = token_signature(&request.query, &[], None)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if query_terms.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let result_limit = bounded_candidate_limit(request);
+    let (scope_version_condition, scope_version_values) =
+        derived_scope_version_filter(request, "semantic")?;
+    let (candidate_condition, ranking_expression, candidate_values) =
+        derived_candidate_filter(&query_terms, SEMANTIC_CANDIDATE_FIELDS);
+    let sql = format!(
+        "
+        SELECT semantic.document_id, semantic.document_kind, semantic.evidence_id,
+               semantic.parent_evidence_id, semantic.modality, semantic.source_scope,
+               semantic.source_path, semantic.entity_labels_json, semantic.content,
+               semantic.token_signature_json, semantic.model, semantic.dimension,
+               semantic.source_hash
+        FROM graph_semantic_documents AS semantic
+        WHERE {scope_version_condition}
+          AND ({candidate_condition})
+        ORDER BY {ranking_expression} DESC,
+                 semantic.created_graph_version DESC,
+                 semantic.document_id ASC
+        LIMIT ?
+        ",
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(derived_candidate_values(
+            scope_version_values,
+            candidate_values,
+            result_limit,
+        )?),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
+            ))
+        },
+    )?;
+
+    let mut hits = Vec::new();
+    for row in rows {
+        let (
+            document_id,
+            document_kind,
+            evidence_id,
+            parent_evidence_id,
+            modality,
+            source_scope,
+            source_path,
+            labels_json,
+            content,
+            signature_json,
+            model,
+            dimension,
+            source_hash,
+        ) = row.map_err(StorageError::from)?;
+        let document_terms = parse_string_array(&signature_json)?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let score = semantic_overlap_score(&query_terms, &document_terms);
+        if score <= 0.0 {
+            continue;
+        }
+
+        let group_id = parent_evidence_id
+            .as_deref()
+            .unwrap_or(evidence_id.as_str());
+        let key = if document_kind == "evidence" {
+            evidence_group_key(group_id)
+        } else {
+            document_id.clone()
+        };
+        let code_artifact =
+            code_artifact_for_document(&document_kind, &evidence_id, source_path.as_deref());
+        hits.push(ScoredHit {
+            key,
+            hit: RetrievalHit {
+                evidence_id: group_id.to_owned(),
+                source_scope,
+                source_path,
+                source_span: None,
+                entity_labels: split_labels(labels_json),
+                content,
+                entities: Vec::new(),
+                graph_facts: Vec::new(),
+                code_artifact,
+                retriever_sources: Vec::new(),
+                ranking: Vec::new(),
+                rerank: None,
+                score: 0.0,
+            },
+            source: RetrieverSource::Semantic,
+            source_score: score,
+            modality,
+            explanation: Some(format!(
+                "semantic read model {model} dimension={dimension} source_hash={source_hash} document={document_id}"
+            )),
+        });
+    }
+    sort_scored_hits(&mut hits);
+
+    Ok(hits)
+}
+
+pub(super) fn vector_candidates(
+    connection: &Connection,
+    request: &GraphSearchRequest,
+) -> Result<Vec<ScoredHit>, StorageError> {
+    let result_limit = bounded_candidate_limit(request);
+    let query_terms = token_signature(&request.query, &[], None)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if query_terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (scope_version_condition, scope_version_values) =
+        derived_scope_version_filter(request, "vector")?;
+    let (candidate_condition, ranking_expression, candidate_values) =
+        derived_candidate_filter(&query_terms, VECTOR_CANDIDATE_FIELDS);
+    let sql = format!(
+        "
+        SELECT vector.document_id, vector.document_kind, vector.evidence_id,
+               vector.parent_evidence_id, vector.modality, vector.source_scope,
+               vector.source_path, vector.entity_labels_json, vector.content,
+               vector.vector_json, vector.model, vector.dimension, vector.source_hash
+        FROM graph_vector_documents AS vector
+        LEFT JOIN graph_semantic_documents AS semantic
+          ON semantic.document_id = vector.document_id
+        WHERE {scope_version_condition}
+          AND ({candidate_condition})
+        ORDER BY {ranking_expression} DESC,
+                 vector.created_graph_version DESC,
+                 vector.document_id ASC
+        LIMIT ?
+        ",
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(derived_candidate_values(
+            scope_version_values,
+            candidate_values,
+            result_limit,
+        )?),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
+            ))
+        },
+    )?;
+
+    let mut hits = Vec::new();
+    let mut query_vectors = QueryVectorCache::new(&request.query);
+    for row in rows {
+        let (
+            document_id,
+            document_kind,
+            evidence_id,
+            parent_evidence_id,
+            modality,
+            source_scope,
+            source_path,
+            labels_json,
+            content,
+            vector_json,
+            model,
+            dimension,
+            source_hash,
+        ) = row.map_err(StorageError::from)?;
+        let labels = split_labels(labels_json);
+        let lexical_overlap =
+            overlap_score(&request.query, &content, &labels, source_path.as_deref());
+        if lexical_overlap <= 0.0 {
+            continue;
+        }
+        let dimension = usize::try_from(dimension).map_err(|_| {
+            StorageError::InvalidInput("vector dimension must be non-negative".to_owned())
+        })?;
+        if dimension == 0 {
+            continue;
+        }
+        let cosine = cosine_similarity(
+            query_vectors.vector(dimension),
+            &parse_f64_array(&vector_json)?,
+        );
+        if cosine <= 0.0 {
+            continue;
+        }
+        let score = vector_source_score(cosine, lexical_overlap, query_terms.len());
+
+        let group_id = parent_evidence_id
+            .as_deref()
+            .unwrap_or(evidence_id.as_str());
+        let key = if document_kind == "evidence" {
+            evidence_group_key(group_id)
+        } else {
+            document_id.clone()
+        };
+        let code_artifact =
+            code_artifact_for_document(&document_kind, &evidence_id, source_path.as_deref());
+        hits.push(ScoredHit {
+            key,
+            hit: RetrievalHit {
+                evidence_id: group_id.to_owned(),
+                source_scope,
+                source_path,
+                source_span: None,
+                entity_labels: labels,
+                content,
+                entities: Vec::new(),
+                graph_facts: Vec::new(),
+                code_artifact,
+                retriever_sources: Vec::new(),
+                ranking: Vec::new(),
+                rerank: None,
+                score: 0.0,
+            },
+            source: RetrieverSource::Vector,
+            source_score: score,
+            modality,
+            explanation: Some(format!(
+                "vector ANN read model {model} dimension={dimension} source_hash={source_hash} document={document_id}"
+            )),
+        });
+    }
+    sort_scored_hits(&mut hits);
+
+    Ok(hits)
+}
+
+struct QueryVectorCache<'a> {
+    query: &'a str,
+    vectors: BTreeMap<usize, Vec<f64>>,
+}
+
+impl<'a> QueryVectorCache<'a> {
+    fn new(query: &'a str) -> Self {
+        Self {
+            query,
+            vectors: BTreeMap::new(),
+        }
+    }
+
+    fn vector(&mut self, dimension: usize) -> &[f64] {
+        self.vectors
+            .entry(dimension)
+            .or_insert_with(|| hashed_vector(self.query, &[], None, dimension))
+    }
+}
+
+fn bounded_candidate_limit(request: &GraphSearchRequest) -> usize {
+    request
+        .limit
+        .saturating_mul(DERIVED_RESULT_MULTIPLIER)
+        .clamp(1, MAX_DERIVED_RESULT_LIMIT)
+}
+
+fn vector_source_score(cosine: f64, lexical_overlap: f64, query_term_count: usize) -> f64 {
+    if cosine <= 0.0 {
+        return 0.0;
+    }
+    if query_term_count == 0 {
+        return cosine;
+    }
+    let lexical_coverage = (lexical_overlap / query_term_count as f64).clamp(0.0, 1.0);
+
+    cosine + lexical_coverage * VECTOR_LEXICAL_COVERAGE_WEIGHT
+}
+
+#[derive(Clone, Copy)]
+struct DerivedCandidateField {
+    expression: &'static str,
+    pattern_kind: DerivedPatternKind,
+}
+
+impl DerivedCandidateField {
+    const fn contains(expression: &'static str) -> Self {
+        Self {
+            expression,
+            pattern_kind: DerivedPatternKind::Contains,
+        }
+    }
+
+    const fn json_token(expression: &'static str) -> Self {
+        Self {
+            expression,
+            pattern_kind: DerivedPatternKind::JsonToken,
+        }
+    }
+
+    fn pattern(self, term: &str) -> String {
+        match self.pattern_kind {
+            DerivedPatternKind::Contains => format!("%{}%", escape_like_pattern(term)),
+            DerivedPatternKind::JsonToken => {
+                format!("%\"{}\"%", escape_like_pattern(term))
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DerivedPatternKind {
+    Contains,
+    JsonToken,
+}
+
+fn derived_candidate_filter(
+    query_terms: &BTreeSet<String>,
+    fields: &[DerivedCandidateField],
+) -> (String, String, Vec<Value>) {
+    let terms = derived_candidate_terms(query_terms);
+    let mut values = Vec::new();
+
+    let candidate_groups = terms
+        .iter()
+        .map(|term| {
+            let clauses = fields
+                .iter()
+                .map(|field| {
+                    values.push(Value::Text(field.pattern(term)));
+                    format!("{} LIKE ? ESCAPE '\\'", field.expression)
+                })
+                .collect::<Vec<_>>();
+            format!("({})", clauses.join(" OR "))
+        })
+        .collect::<Vec<_>>();
+
+    let mut ranking_terms = Vec::new();
+    for term in &terms {
+        for field in fields {
+            values.push(Value::Text(field.pattern(term)));
+            ranking_terms.push(format!(
+                "CASE WHEN {} LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END",
+                field.expression
+            ));
+        }
+    }
+
+    (
+        candidate_groups.join(" OR "),
+        ranking_terms.join(" + "),
+        values,
+    )
+}
+
+fn derived_candidate_terms(query_terms: &BTreeSet<String>) -> Vec<&str> {
+    if query_terms.len() <= MAX_DERIVED_QUERY_TERMS {
+        return query_terms.iter().map(String::as_str).collect();
+    }
+
+    let mut ranked = query_terms
+        .iter()
+        .map(|term| (derived_query_term_priority(term), term.as_str()))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+
+    ranked
+        .into_iter()
+        .take(MAX_DERIVED_QUERY_TERMS)
+        .map(|(_, term)| term)
+        .collect()
+}
+
+fn derived_query_term_priority(term: &str) -> usize {
+    let length = term.chars().count();
+    let length_score = if length >= 16 {
+        8
+    } else if length >= 12 {
+        6
+    } else if length >= 8 {
+        4
+    } else if length >= 5 {
+        2
+    } else {
+        1
+    };
+    if term.contains('_') || term_has_alpha_digit_mix(term) {
+        length_score + 8
+    } else {
+        length_score
+    }
+}
+
+fn term_has_alpha_digit_mix(term: &str) -> bool {
+    let mut has_alpha = false;
+    let mut has_digit = false;
+    for character in term.chars() {
+        has_alpha |= character.is_alphabetic();
+        has_digit |= character.is_ascii_digit();
+    }
+
+    has_alpha && has_digit
+}
+
+fn escape_like_pattern(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+
+    escaped
+}
+
+fn derived_scope_version_filter(
+    request: &GraphSearchRequest,
+    table_alias: &str,
+) -> Result<(String, Vec<Value>), StorageError> {
+    let graph_version = i64::try_from(request.graph_version.get()).map_err(|_| {
+        StorageError::InvalidInput("graph version is too large for sqlite query".to_owned())
+    })?;
+    match &request.source_scope {
+        Some(scope) => Ok((
+            format!("{table_alias}.source_scope = ? AND {table_alias}.created_graph_version <= ?"),
+            vec![Value::Text(scope.clone()), Value::Integer(graph_version)],
+        )),
+        None => Ok((
+            format!("{table_alias}.created_graph_version <= ?"),
+            vec![Value::Integer(graph_version)],
+        )),
+    }
+}
+
+fn derived_candidate_values(
+    mut scope_version_values: Vec<Value>,
+    candidate_values: Vec<Value>,
+    result_limit: usize,
+) -> Result<Vec<Value>, StorageError> {
+    let result_limit = i64::try_from(result_limit).map_err(|_| {
+        StorageError::InvalidInput("candidate result limit is too large".to_owned())
+    })?;
+    scope_version_values.reserve(candidate_values.len() + 1);
+    scope_version_values.extend(candidate_values);
+    scope_version_values.push(Value::Integer(result_limit));
+
+    Ok(scope_version_values)
+}
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

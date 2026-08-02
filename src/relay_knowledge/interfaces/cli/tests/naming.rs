@@ -3,7 +3,7 @@ use crate::project::PROJECT_NAME;
 
 #[test]
 fn cli_spec_uses_canonical_binary_name_and_kebab_case_command_paths() {
-    let spec = cli_spec::cli_spec();
+    let spec = spec::cli_spec();
     let value = serde_json::to_value(spec).expect("CLI spec should serialize");
     let commands = value["commands"].as_array().expect("commands should exist");
 
@@ -32,10 +32,10 @@ fn cli_spec_uses_canonical_binary_name_and_kebab_case_command_paths() {
 
 #[test]
 fn text_help_uses_canonical_cli_name_for_root_namespaces_and_commands() {
-    let root = cli_spec::render_help(&[], OutputFormat::Text).expect("root help should render");
-    let repo = cli_spec::render_help(&["repo".to_owned()], OutputFormat::Text)
+    let root = spec::render_help(&[], OutputFormat::Text).expect("root help should render");
+    let repo = spec::render_help(&["repo".to_owned()], OutputFormat::Text)
         .expect("repo help should render");
-    let query = cli_spec::render_help(&["repo".to_owned(), "query".to_owned()], OutputFormat::Text)
+    let query = spec::render_help(&["repo".to_owned(), "query".to_owned()], OutputFormat::Text)
         .expect("repo query help should render");
 
     assert!(root.contains(&format!("Usage: {PROJECT_NAME} <command>")));
@@ -48,12 +48,12 @@ fn text_help_uses_canonical_cli_name_for_root_namespaces_and_commands() {
 
 #[test]
 fn repo_index_worker_help_is_public_and_machine_readable() {
-    let command = cli_spec::render_help(
+    let command = spec::render_help(
         &["repo".to_owned(), "index-worker".to_owned()],
         OutputFormat::Json,
     )
     .expect("repo index-worker help should render");
-    let namespace = cli_spec::render_help(&["repo".to_owned()], OutputFormat::Json)
+    let namespace = spec::render_help(&["repo".to_owned()], OutputFormat::Json)
         .expect("repo namespace help should render");
     let command_json: serde_json::Value =
         serde_json::from_str(command.trim()).expect("command help should be JSON");

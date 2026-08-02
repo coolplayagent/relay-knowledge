@@ -1,7 +1,7 @@
 //! Unit contract for lifecycle request validation, plans, and execution reports.
 
 use super::*;
-use crate::domain::ServiceLifecycleStepResult;
+use crate::domain::{ServiceLifecycleStep, ServiceLifecycleStepResult};
 use crate::env::{EnvironmentConfig, PlatformKind};
 use std::time::Duration;
 

@@ -19,11 +19,10 @@ use crate::code::{
     CodeIndexError,
     source::{
         changes::{
-            GitChange, TrackedEntryScope, diff_changes, git_dir_bytes, parse_name_status_z,
-            submodule_git_dir, submodule_git_dir_from_git_dir,
-            tracked_entries_from_git_dir_with_scope,
+            GitChange, TrackedEntryScope, diff_changes, parse_name_status_z, submodule_git_dir,
+            submodule_git_dir_from_git_dir, tracked_entries_from_git_dir_with_scope,
         },
-        git::git_bytes,
+        git::{git_bytes, git_dir_bytes},
     },
 };
 

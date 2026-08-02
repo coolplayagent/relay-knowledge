@@ -227,7 +227,7 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
     assert_eq!(
         setup_profile.action,
         CliAction::SetupProfile {
-            profile: setup_cli::SetupProfile::Local,
+            profile: setup::SetupProfile::Local,
         }
     );
 
@@ -374,29 +374,29 @@ fn parses_help_actions_without_runtime_configuration() {
 
 #[test]
 fn renders_machine_readable_help_for_skills() {
-    let root = cli_spec::render_help(&[], OutputFormat::Json).expect("root help should render");
+    let root = spec::render_help(&[], OutputFormat::Json).expect("root help should render");
     let root_json: serde_json::Value =
         serde_json::from_str(root.trim()).expect("root help should be JSON");
-    let query = cli_spec::render_help(&["repo".to_owned(), "query".to_owned()], OutputFormat::Json)
+    let query = spec::render_help(&["repo".to_owned(), "query".to_owned()], OutputFormat::Json)
         .expect("repo query help should render");
     let query_json: serde_json::Value =
         serde_json::from_str(query.trim()).expect("command help should be JSON");
-    let repo_namespace = cli_spec::render_help(&["repo".to_owned()], OutputFormat::Json)
+    let repo_namespace = spec::render_help(&["repo".to_owned()], OutputFormat::Json)
         .expect("repo namespace help should render");
     let repo_namespace_json: serde_json::Value =
         serde_json::from_str(repo_namespace.trim()).expect("namespace help should be JSON");
-    let version = cli_spec::render_help(&["version".to_owned()], OutputFormat::Json)
+    let version = spec::render_help(&["version".to_owned()], OutputFormat::Json)
         .expect("version help should render");
     let version_json: serde_json::Value =
         serde_json::from_str(version.trim()).expect("version help should be JSON");
-    let proposal_accept = cli_spec::render_help(
+    let proposal_accept = spec::render_help(
         &["proposal".to_owned(), "accept".to_owned()],
         OutputFormat::Json,
     )
     .expect("proposal accept help should render");
     let proposal_accept_json: serde_json::Value =
         serde_json::from_str(proposal_accept.trim()).expect("proposal accept help should be JSON");
-    let setup_profile = cli_spec::render_help(
+    let setup_profile = spec::render_help(
         &["setup".to_owned(), "profile".to_owned()],
         OutputFormat::Json,
     )
@@ -457,7 +457,7 @@ fn renders_machine_readable_help_for_skills() {
                     .any(|value| value == "definition"))
     );
 
-    let query_with_alias = cli_spec::render_help(
+    let query_with_alias = spec::render_help(
         &["repo".to_owned(), "query".to_owned(), "core".to_owned()],
         OutputFormat::Json,
     )

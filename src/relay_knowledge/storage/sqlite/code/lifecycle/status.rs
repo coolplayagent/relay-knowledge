@@ -8,7 +8,7 @@ use crate::{
     storage::StorageError,
 };
 
-pub(super) fn upsert_repository(
+pub(in crate::storage::sqlite::code) fn upsert_repository(
     connection: &mut Connection,
     registration: CodeRepositoryRegistration,
 ) -> Result<CodeRepositoryStatus, StorageError> {
@@ -88,7 +88,7 @@ fn reject_alias_collision(
     Ok(())
 }
 
-pub(super) fn repository_status(
+pub(in crate::storage::sqlite::code) fn repository_status(
     connection: &mut Connection,
     repository: &str,
 ) -> Result<Option<CodeRepositoryStatus>, StorageError> {
@@ -100,7 +100,7 @@ pub(super) fn repository_status(
     repository_status_by_column(connection, repository, RepositoryLookupColumn::Alias)
 }
 
-pub(super) fn repository_statuses(
+pub(in crate::storage::sqlite::code) fn repository_statuses(
     connection: &mut Connection,
 ) -> Result<Vec<CodeRepositoryStatus>, StorageError> {
     let statuses = {
@@ -146,7 +146,7 @@ pub(super) fn repository_statuses(
         .collect()
 }
 
-pub(super) fn repository_scope_status(
+pub(in crate::storage::sqlite::code) fn repository_scope_status(
     connection: &mut Connection,
     repository: &str,
     resolved_commit_sha: &str,
@@ -247,7 +247,7 @@ pub(super) fn repository_scope_status(
     Ok(current_compatible)
 }
 
-pub(super) fn latest_repository_scope_status(
+pub(in crate::storage::sqlite::code) fn latest_repository_scope_status(
     connection: &mut Connection,
     repository: &str,
     path_filters: &[String],
@@ -340,7 +340,7 @@ fn status_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
     .is_some_and(|expected| expected == source_scope)
 }
 
-pub(super) fn repository_scope_status_by_source_scope(
+pub(in crate::storage::sqlite::code) fn repository_scope_status_by_source_scope(
     connection: &mut Connection,
     source_scope: &str,
 ) -> Result<Option<CodeRepositoryStatus>, StorageError> {
@@ -475,7 +475,9 @@ impl RepositoryLookupColumn {
     }
 }
 
-pub(super) fn parse_json_list(value: String) -> rusqlite::Result<Vec<String>> {
+pub(in crate::storage::sqlite::code) fn parse_json_list(
+    value: String,
+) -> rusqlite::Result<Vec<String>> {
     serde_json::from_str(&value).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
     })
@@ -501,7 +503,7 @@ fn scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
     .is_some_and(|expected| expected == source_scope)
 }
 
-pub(super) fn canonical_path_filters(filters: &[String]) -> Vec<String> {
+pub(in crate::storage::sqlite::code) fn canonical_path_filters(filters: &[String]) -> Vec<String> {
     let mut normalized = Vec::new();
     for filter in filters {
         let value = normalize_path_filter(filter).to_owned();
@@ -513,7 +515,7 @@ pub(super) fn canonical_path_filters(filters: &[String]) -> Vec<String> {
     normalized
 }
 
-pub(super) fn canonical_filter_values(filters: &[String]) -> Vec<String> {
+pub(in crate::storage::sqlite::code) fn canonical_filter_values(filters: &[String]) -> Vec<String> {
     let mut normalized = Vec::new();
     for filter in filters {
         if !normalized.contains(filter) {

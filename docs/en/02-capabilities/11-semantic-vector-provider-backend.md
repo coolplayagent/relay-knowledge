@@ -24,7 +24,7 @@ Provider state enters `backend_statuses`, including configured backend, model, d
 
 ## Web User Interface
 
-The Web Settings page shows model provider profiles, fallback policy, endpoint probes, and model discovery state. Secrets are accepted only at save time; browser responses expose configured booleans or redacted headers only.
+The Web Settings page shows model provider profiles, fallback policy, endpoint probes, and model discovery state. The `model_provider::profiles` owner handles profile CRUD, runtime-profile fallback, and secret preservation; `model_provider::profile` owns the public and persisted profile shapes plus redacted projection; `profile_config` owns normalization and validation. The `model_provider::fallback` owner handles fallback contracts, defaults, validation, and async persistence. The `model_provider::catalog` owner handles catalog contracts, cache-backed refresh degradation, and payload parsing. The `model_provider::connectivity` owner handles probe/discovery contracts, QoS-governed HTTP workflows, response mapping, redaction, and retry diagnostics. Their unit tests attach directly to each workflow. Secrets are accepted only at save time; browser responses expose configured booleans or redacted headers only.
 
 ## Degradation and Diagnostics
 

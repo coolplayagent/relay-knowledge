@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use super::super::{
     CodeIndexError,
-    changes::{git_dir_bytes, submodule_worktree_root},
-    git::git_bytes,
+    changes::submodule_worktree_root,
+    git::{git_bytes, git_dir_bytes},
 };
 
 pub(in crate::code) fn git_root_has_commit(root: &Path, commit: &str) -> bool {

@@ -1,0 +1,284 @@
+//! Health snapshot assembly and bounded storage fallback policy.
+
+use std::{sync::Arc, time::Duration};
+
+use crate::{
+    api::{ApiError, ApiMetadata, HealthResponse, RequestContext, StorageTopologyDiagnostics},
+    domain::{CodeRepositoryTotals, GraphVersion},
+    storage::{
+        FileIndexDiagnostics, GraphInspection, HealthStorageSnapshot, IndexRefreshDiagnostics,
+        KnowledgeStore, StorageError,
+    },
+};
+
+use super::{
+    RelayKnowledgeService, current_time_millis, graph_with_repository_code_totals,
+    storage_api_error,
+};
+use crate::application::{
+    knowledge::index_refresh::{
+        IndexRefreshOutcome, filter_outcome_to_read_models, metadata_for_indexes,
+    },
+    runtime::runtime_status_with_model_profiles,
+};
+
+const HEALTH_STORAGE_BUDGET: Duration = Duration::from_millis(500);
+
+struct HealthStorageReport {
+    snapshot: HealthStorageSnapshot,
+    storage: StorageTopologyDiagnostics,
+    degraded_reason: Option<String>,
+}
+
+impl RelayKnowledgeService {
+    /// Returns liveness-safe service and data health diagnostics.
+    pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        match tokio::time::timeout(HEALTH_STORAGE_BUDGET, self.health_storage_report(&store)).await
+        {
+            Ok(Ok(report)) => {
+                let response = self.health_from_storage_report(context, report).await;
+                *self.health_cache.write().await = Some(response.clone());
+                Ok(response)
+            }
+            Ok(Err(StorageError::Busy(message))) => Ok(self
+                .degraded_cached_health(context, format!("storage_busy: {message}"))
+                .await),
+            Ok(Err(error)) => Err(storage_api_error(error)),
+            Err(_) => Ok(self
+                .degraded_cached_health(context, "storage_busy: health snapshot timed out")
+                .await),
+        }
+    }
+
+    /// Returns control-plane health without opening cold graph storage.
+    pub async fn read_only_health(
+        &self,
+        context: RequestContext,
+    ) -> Result<HealthResponse, ApiError> {
+        if self.storage.ready_store().is_some() {
+            return self.health(context).await;
+        }
+
+        match tokio::time::timeout(
+            HEALTH_STORAGE_BUDGET,
+            self.storage_free_health(context.clone()),
+        )
+        .await
+        {
+            Ok(response) => Ok(response),
+            Err(_) => Ok(self
+                .degraded_cached_health(context, "storage_busy: cold health snapshot timed out")
+                .await),
+        }
+    }
+
+    async fn storage_free_health(&self, context: RequestContext) -> HealthResponse {
+        let storage = self
+            .storage_topology_diagnostics_with_budget(HEALTH_STORAGE_BUDGET)
+            .await;
+        let degraded_reason = storage.degraded_reason.clone();
+
+        HealthResponse {
+            metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
+            healthy: degraded_reason.is_none(),
+            degraded_reason,
+            storage,
+            graph: GraphInspection::default(),
+            repository_code_totals: CodeRepositoryTotals::default(),
+            indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
+            file_index: FileIndexDiagnostics::default(),
+            runtime: runtime_status_with_model_profiles(
+                &self.runtime,
+                self.model_provider_config()
+                    .profile_summary(&self.runtime.retrieval)
+                    .await,
+            ),
+        }
+    }
+
+    async fn health_storage_report(
+        &self,
+        store: &Arc<dyn KnowledgeStore>,
+    ) -> Result<HealthStorageReport, StorageError> {
+        let snapshot = match self.storage_health_snapshot(store).await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let storage = self.storage_topology_diagnostics().await;
+                if storage.missing_shard_count == 0 {
+                    return Err(error);
+                }
+                return Ok(HealthStorageReport {
+                    snapshot: self
+                        .degraded_health_snapshot_without_repository_totals(store)
+                        .await?,
+                    degraded_reason: storage
+                        .degraded_reason
+                        .clone()
+                        .or_else(|| Some(error.to_string())),
+                    storage,
+                });
+            }
+        };
+        let storage = self.storage_topology_diagnostics().await;
+
+        Ok(HealthStorageReport {
+            snapshot,
+            storage,
+            degraded_reason: None,
+        })
+    }
+
+    async fn storage_health_snapshot(
+        &self,
+        store: &Arc<dyn KnowledgeStore>,
+    ) -> Result<HealthStorageSnapshot, StorageError> {
+        match store.health_snapshot(current_time_millis()).await {
+            Ok(snapshot) => Ok(snapshot),
+            Err(StorageError::InvalidInput(message))
+                if message == "health snapshot storage is unavailable" =>
+            {
+                self.legacy_health_snapshot(store).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn health_from_storage_report(
+        &self,
+        context: RequestContext,
+        report: HealthStorageReport,
+    ) -> HealthResponse {
+        let HealthStorageReport {
+            snapshot,
+            storage,
+            degraded_reason,
+        } = report;
+        let HealthStorageSnapshot {
+            graph,
+            repository_code_totals,
+            indexes,
+            index_cursors,
+            index_refresh,
+            file_index,
+        } = snapshot;
+        let graph = graph_with_repository_code_totals(graph, &repository_code_totals);
+        let degraded_reason = degraded_reason.or_else(|| storage.degraded_reason.clone());
+        let outcome = filter_outcome_to_read_models(
+            IndexRefreshOutcome {
+                indexes,
+                cursors: index_cursors,
+                diagnostics: index_refresh,
+            },
+            &self.runtime.retrieval,
+        );
+        let healthy = degraded_reason.is_none()
+            && outcome
+                .indexes
+                .iter()
+                .all(|status| !status.is_stale_for(graph.graph_version));
+
+        HealthResponse {
+            metadata: metadata_for_indexes(&context, graph.graph_version, &outcome.indexes),
+            healthy,
+            degraded_reason,
+            storage,
+            graph,
+            repository_code_totals,
+            indexes: outcome.indexes,
+            index_cursors: outcome.cursors,
+            index_refresh: outcome.diagnostics,
+            file_index,
+            runtime: runtime_status_with_model_profiles(
+                &self.runtime,
+                self.model_provider_config()
+                    .profile_summary(&self.runtime.retrieval)
+                    .await,
+            ),
+        }
+    }
+
+    async fn legacy_health_snapshot(
+        &self,
+        store: &Arc<dyn KnowledgeStore>,
+    ) -> Result<HealthStorageSnapshot, StorageError> {
+        Ok(HealthStorageSnapshot {
+            graph: store.inspect_graph().await?,
+            repository_code_totals: store.code_repository_totals().await?,
+            indexes: store.index_statuses().await?,
+            index_cursors: store.index_cursors().await?,
+            index_refresh: store
+                .index_refresh_diagnostics(current_time_millis())
+                .await?,
+            file_index: legacy_file_index_diagnostics_or_default(store).await?,
+        })
+    }
+
+    async fn degraded_health_snapshot_without_repository_totals(
+        &self,
+        store: &Arc<dyn KnowledgeStore>,
+    ) -> Result<HealthStorageSnapshot, StorageError> {
+        Ok(HealthStorageSnapshot {
+            graph: store.inspect_graph().await?,
+            repository_code_totals: CodeRepositoryTotals::default(),
+            indexes: store.index_statuses().await?,
+            index_cursors: store.index_cursors().await?,
+            index_refresh: store
+                .index_refresh_diagnostics(current_time_millis())
+                .await?,
+            file_index: legacy_file_index_diagnostics_or_default(store).await?,
+        })
+    }
+
+    async fn degraded_cached_health(
+        &self,
+        context: RequestContext,
+        degraded_reason: impl Into<String>,
+    ) -> HealthResponse {
+        let degraded_reason = degraded_reason.into();
+        if let Some(cached) = self.health_cache.read().await.clone() {
+            let mut response = cached;
+            response.metadata.trace_id = context.trace_id;
+            response.metadata.request_id = context.request_id;
+            response.metadata.stale = true;
+            response.healthy = false;
+            response.degraded_reason = Some(degraded_reason);
+            return response;
+        }
+
+        HealthResponse {
+            metadata: ApiMetadata::indexed(&context, GraphVersion::ZERO, None, None, true),
+            healthy: false,
+            degraded_reason: Some(degraded_reason),
+            storage: self.storage_diagnostics_from_snapshot(Default::default(), None),
+            graph: GraphInspection::default(),
+            repository_code_totals: CodeRepositoryTotals::default(),
+            indexes: Vec::new(),
+            index_cursors: Vec::new(),
+            index_refresh: IndexRefreshDiagnostics::default(),
+            file_index: FileIndexDiagnostics::default(),
+            runtime: runtime_status_with_model_profiles(
+                &self.runtime,
+                self.model_provider_config()
+                    .profile_summary(&self.runtime.retrieval)
+                    .await,
+            ),
+        }
+    }
+}
+
+async fn legacy_file_index_diagnostics_or_default(
+    store: &Arc<dyn KnowledgeStore>,
+) -> Result<FileIndexDiagnostics, StorageError> {
+    match store.file_index_diagnostics().await {
+        Ok(diagnostics) => Ok(diagnostics),
+        Err(StorageError::InvalidInput(message))
+            if message == "file index storage is unavailable" =>
+        {
+            Ok(FileIndexDiagnostics::default())
+        }
+        Err(error) => Err(error),
+    }
+}

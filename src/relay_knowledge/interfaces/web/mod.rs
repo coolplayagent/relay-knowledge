@@ -1,17 +1,10 @@
 //! Web HTTP adapter for same-origin diagnostics and static assets.
 
 mod assets;
+mod code;
+mod files;
+mod model_config;
 mod operation_request;
-#[path = "code_api.rs"]
-mod web_code_api;
-#[path = "code_index_request.rs"]
-mod web_code_index_request;
-#[path = "code_view_request.rs"]
-mod web_code_view_request;
-#[path = "files.rs"]
-mod web_files;
-#[path = "model_config.rs"]
-mod web_model_config;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,6 +28,7 @@ use crate::{
     domain::{CodeIndexMode, ProposalState},
 };
 use assets::{asset_or_index, default_web_dist, index};
+use code::{code_index_request, code_view_request};
 use operation_request::{
     code_context_request, code_feature_flag_request, code_impact_request, code_query_request,
     code_register_request, code_repository_set_add_request, code_repository_set_create_request,
@@ -44,7 +38,6 @@ use operation_request::{
     optional_worker_kind, parse_freshness, proposal_decision_request, retrieve_request,
     string_field, usize_field,
 };
-pub(super) use web_code_index_request::code_index_request;
 
 /// Builds the Web router without opening sockets.
 pub fn router(service: RelayKnowledgeService, max_request_body_bytes: u64) -> Router {
@@ -73,10 +66,10 @@ fn router_with_assets(
             get(read_only_service_status),
         )
         .route("/api/v1/control/storage/topology", get(storage_topology))
-        .merge(web_code_api::routes())
+        .merge(code::routes())
         .route("/api/web/graph/canvas", get(graph_canvas))
         .route("/api/web/operations/execute", post(execute_operation))
-        .merge(web_model_config::routes())
+        .merge(model_config::routes())
         .route("/", get(index))
         .route("/{*path}", get(asset_or_index))
         .with_state(state)
@@ -241,7 +234,7 @@ async fn dispatch_operation(
             Ok((response.metadata.clone(), json!(response)))
         }
         "files.index" | "files.query" | "files.content" => {
-            web_files::dispatch_file_operation(service, operation, payload, context).await
+            files::dispatch_file_operation(service, operation, payload, context).await
         }
         "service.doctor" | "service.run.streamable_http" => {
             let response = service.service_status(context).await?;
@@ -387,7 +380,7 @@ async fn dispatch_operation(
         }
         "code.repo.view" => {
             let response = service
-                .codebase_view(web_code_view_request::code_view_request(payload)?, context)
+                .codebase_view(code_view_request(payload)?, context)
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
@@ -551,12 +544,8 @@ pub(super) struct WebState {
 mod control_tests;
 
 #[cfg(test)]
-#[path = "code_api_integration_tests.rs"]
-mod code_api_integration_tests;
-
-#[cfg(test)]
-#[path = "files_integration_tests.rs"]
-mod files_integration_tests;
+#[path = "router_files_integration_tests.rs"]
+mod router_files_integration_tests;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

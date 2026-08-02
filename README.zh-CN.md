@@ -72,15 +72,15 @@ workflow 行为。
 ## 当前能力
 
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。
-- 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态。
-- 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索、影响分析，以及不复制基础事实的多仓库 `repo-set` 薄覆盖查询。
-- 可选大仓工作区检测：支持 pnpm workspace、Go workspace（`go.work`）和 Cargo workspace 成员检测。当 `CodeIndexRequest` 显式启用 workspace detection 时，跨仓库导入解析会通过工作区包映射表将未解析的导入映射到兄弟包，提供 `target_hint` 元数据，而非静默丢弃跨仓库引用。CLI 索引保持默认关闭，因此单仓库索引路径完全不受影响。生态、workspace format、manifest、package prefix 与 import statement 归一化规则统一归 storage `code_workspace::ecosystem` owner 及其同级 UT；SQLite set、mapping 和 cross-edge 编排仍归 workspace facade。
-- 软件全域投影：按 repository scope 暴露文件整体节点、文档主题、配置/代码关系、依赖和 unresolved SDK/API 使用，`repo software` 读取投影表而不是查询时扫描仓库。knowledge-map、文档、dependency/build manifest、部署、测试、模板、配置与源码的确定性分类统一归 SQLite software `file_role` owner 及其同级 UT。
-- 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots，并用 SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
-- 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
-- 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
+- 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态；`domain/graph/{multimodal,mutation,retrieval}/` 让每组 contract 与直接 UT 保持同域。
+- 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索、影响分析，以及不复制基础事实的多仓库 `repo-set` 薄覆盖查询；应用层把 query、context、freshness、scope、impact 与 software projection 收敛到具名物理子域，repo-set 的 membership、member freshness、refresh、status 与 query 也分别归物理 owner；`interfaces/code_index_mode/` 在 CLI/Web 间共享 worktree 语义，content/language/generated 原语、符号/引用身份与源码快照、校验式 blob 读取、安全文件系统访问和哈希分别归带直接 UT 的物理 owner。
+- 可选大仓工作区检测：支持 pnpm workspace、Go workspace（`go.work`）和 Cargo workspace 成员检测。当 `CodeIndexRequest` 显式启用 workspace detection 时，跨仓库导入解析会通过工作区包映射表将未解析的导入映射到兄弟包，提供 `target_hint` 元数据，而非静默丢弃跨仓库引用。CLI 索引保持默认关闭，因此单仓库索引路径完全不受影响。生态、workspace format、manifest、package prefix 与 import statement 归一化规则归 `code::workspace::ecosystem`；自动 set 生命周期/状态、package mapping、cross-edge resolution 与 target-file selection 分属带配对 UT 的 owner，workspace facade 只协调无环持久化工作流。
+- 软件全域投影：按 repository scope 暴露文件整体节点、文档主题、配置/代码关系、依赖和 unresolved SDK/API 使用，`repo software` 读取投影表而不是查询时扫描仓库。knowledge-map、文档、dependency/build manifest、部署、测试、模板、配置与源码的确定性分类统一归 SQLite software `file_role` owner 及其同级 UT；software 根仅作声明 facade，物理 `projection/`、`query_scope/` 与 `schema/` owner 分别收敛 refresh/read 编排、有界 scope/filter SQL 和投影 schema 生命周期及直属测试；`software::graph` 把 file、topic 与 relationship 的物化/查询/映射交给直接配对测试的 owner；`software::dependency_usage::python` 直接由匹配的物理 `python.rs` owner 声明，不使用生产路径重定向；`software/lifecycle/` 目录在小型编排 facade 后分离 build、IaC、design、indexed-document 与共享 syntax owner。
+- 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots；物理 `file_index/scanner/` owner 隔离有界文件系统工作并共置其 UT contract，SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
+- 有界索引刷新队列：SQLite `indexing/` 根只包含物理 `metadata/`、`cursor_metadata/`、`diagnostics/`、`schema/`、`status/`、`task_queue/` 与 facade；前三者分别独占持久 codec/identity、backend cursor/model metadata 和 lag/queue 诊断并直接挂载 UT，`task_queue/` 把规划、入队/upsert、租约恢复、完成、失败/死信、持久记录身份与解码交给独立 owner。
+- 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成；version check 以物理子域分离 config、cache、SemVer、release aggregation 与 notice workflow，并为每个 owner 共置直属 UT，再通过技术无关 release-metadata port 调用外层有界 QoS-aware HTTP adapter。
 - 服务化部署：文档化 `embedded_cli`、`resident_single_process`、`resident_partitioned_sqlite` 和未来 split worker 的控制面/数据面边界。
-- Agent 接入：通过共享应用服务暴露 MCP Streamable HTTP 和本地 ACP 适配器，并带有作用域策略、QoS 准入、取消、资源/提示、持久审计元数据和 OTLP 准备的 agent 指标。
+- Agent 接入：通过共享应用服务暴露 MCP Streamable HTTP 和本地 ACP 适配器，并带有作用域策略、QoS 准入、取消、资源/提示、持久审计元数据和 OTLP 准备的 agent 指标；HTTP 与 QoS 基础 owner 分别物理收敛在 `net/http/`、`net/qos/`，并在各自子域内共置 UT contract。
 - 可观测性：常驻服务模式支持真实 OTLP HTTP/protobuf 跟踪和指标导出；Collector 导出失败时提供本地诊断。
 - Web 工作区：Rust HTTP 服务可在同一端口提供静态 Web 诊断、分类后的 agent/model 设置、持久化模型 provider profile、操作组合器、`/api/*` 和可选 MCP 端点。
 - 设置诊断：提供 local、只读 agent、平台服务、外部嵌入等命名设置配置文件。
@@ -124,11 +124,11 @@ workflow 行为。
 ./check.sh
 ```
 
-可复用领域模型继续保留公开 `domain::*` facade，但物理职责分别归属
-`domain/core`、`domain/graph`、`domain/code`、`domain/knowledge` 与
-`domain/operations`。这些目录是真实且依赖无环的 Rust 模块，不使用生产路径别名模拟。
-带校验行为的领域 owner 直接挂载同级 UT，因此 repository registration、scope
-identity、retrieval request、repository status 与 index summary 不再共用笼统测试模块。
+可复用领域模型保留公开 `domain::*` facade，物理职责归属五个无环子域。
+`domain/operations/runtime/` 独占 worker、proposal、audit、service operator 与 lifecycle
+contract 并直接挂载 UT；`software/` 再按 request、dependency、graph、lifecycle、projection
+与 validation 分组，operations facade 只做稳定重导出。其他 repository、scope、retrieval、
+status 与 index-summary owner 进一步物理分组为 `domain/code` 下直接挂载 UT 的 call-target、context、dependency、graph-record、repository、index、repository-set、staleness、view 与 workspace owner，不再共用平铺源码或测试模块。
 
 ### 自迭代 Harness
 
@@ -198,38 +198,41 @@ task claim 和混合语言注册安全性。
 
 ### 运行时与存储边界
 
-二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。
-SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
-应用服务的 `retrieval` owner 负责 source-scope 校验、freshness reconciliation、backend degradation、有界 search/rerank、provenance budget 与响应装配；其同级 UT 直接保护 trace stale/truncation 合同，service facade 只保留构造和跨工作流组合。
+二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露；`application::runtime::status` 独占 runtime/API 诊断投影，并直接挂载同级 UT。
+SQLite 存储通过存储边界打开；物理 `storage/contracts/` 子域把异步错误、拓扑、graph、search、health、index、运维请求、code graph、canvas、repository code 与 file-index contract 分配给具名 owner，根 `storage/mod.rs` 只保留稳定 facade。SQLite adapter 内部由 `store/` 独占 schema-aware connection lifecycle 与有界 blocking worker，storage-port 映射归 `store/implementations.rs`；`evidence_identity/`、`mutation_log/`、`scope_filters/` 与 `table_stats/` 也是直接测试的物理 owner，跨 owner 持久化场景统一位于 `sqlite/tests/`。真实 `sqlite::graph/` 域把 graph-fact transaction/evidence invariant 交给 `mutation`，inspection/version read 交给 `mod.rs` facade，commit-time validity normalization 交给 `version`，每个行为 owner 都有直接配对测试。物理 `sqlite/schema/` 模块树独占 columns、initialization、compatibility marker 与 migration，不使用根 path redirect；`sqlite/mod.rs` 只组合具名 adapter owner。Graph canvas 将 request context/budget、稳定 node 格式、knowledge/evidence、structured facts 与 code facts 分别交给同名 owner 及其同级测试，根模块只保留预算校验和组合。`net::http::outbound` 独占 client 构造、有界 raw JSON transport 与响应校验，`qos_client` 保留 reqwest permit/body 计费；两者直接挂载同级 UT，HTTP facade 只保留配置、server runtime 与跨边界 integration contract。
+应用服务以物理子域分离 health、retrieval、service status、storage diagnostics/provider、watcher 与 lifecycle 工作流；`retrieval` owner 负责 source-scope 校验、freshness reconciliation、有界 search/rerank 和响应预算，service facade 只保留构造与跨 owner 组合。`lifecycle_plan` 再将 plan 装配、install/upgrade/uninstall 正向步骤、checkpoint 回滚步骤、step/rollback execution、attempt-scoped checkpoint 文件、timeout/有界输出 process runner、共享 step policy 和平台 service definition 分配给直接挂载配对 UT 的 owner，不保留含混的 review 测试桶。
+领域层 `graph::retrieval` facade 将 policy、backend status、diagnostics、evidence、hit、traversal provenance 与 context-pack contract 分别交给具名 owner；公开 `domain::*` API 保持不变，provenance、policy、backend 和 graph-path 行为由各自同级 UT 直接保护。
+共享 API 的 `operations` facade 按 graph canvas、ingestion、retrieval、graph maintenance、service runtime、worker、proposal、audit、code repository 与 repository set 划分物理 owner；稳定的请求、响应、状态与流合同集中在 `api/contracts/`，因此 API 根只保留两个具名子域。`api::*` 导出保持稳定，解析、转换、默认值和 filter 合并行为由 owner 同级 UT 保护。
 批量代码索引的 snapshot apply 或 checkpointed finalize 成功后，SQLite 存储会 best-effort 执行 `PRAGMA optimize` 和 `PRAGMA wal_checkpoint(PASSIVE)`；`health --format json` 与 graph inspection 会在 `graph.sqlite` 中暴露 journal mode、WAL 大小、最近维护时间和维护错误。最近维护时间和错误会持久化到 SQLite，因此服务重启或一次性 worker 退出后仍可诊断上一轮维护结果。`partitioned_sqlite` 拓扑下这些字段会通过只读 shard 诊断聚合 control 数据库和所有 active repository shard 数据库；任一 active shard 无法检查时，聚合结果会保留 shard 错误并把 WAL 大小标记为未知，避免把部分总量误报为完整状态。
 
-默认存储拓扑是 `single_sqlite`。设置
-`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` 后，全局控制状态仍写入主运行时数据库，代码仓库事实、checkpoint 和按 scope 的代码查询会路由到运行时数据目录下的每仓库 SQLite shard。多仓 `repo-set` overlay refresh 在跨 shard import/export 聚合实现前仍要求 `single_sqlite`。
-控制面继续拥有 task lease、audit、operator、topology catalog 和诊断；数据面 shard 只执行被共享应用服务授权和预算约束的读写。完整方案见 [服务化部署、控制面与数据面分离](docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md)。
+默认存储拓扑是 `single_sqlite`；`application::runtime::storage` 独占该选择的校验。设置
+`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` 后，全局控制状态仍写入主运行时数据库；物理 `repository/` 独占注册、别名状态、scope fallback 与删除一致性，`indexing/{checkpoint,file_index,lifecycle,retention}` 独占 checkpoint 路由、有界文件候选、durable 发布与 scope 清理，`catalog/`、`control_plane/`、`routing/`、`diagnostics/`、`status/` 和 `totals/` 协调运行时数据目录下的每仓库 SQLite shard。多仓 `repo-set` overlay refresh 在跨 shard import/export 聚合实现前仍要求 `single_sqlite`。
+控制面继续拥有 task lease、audit、operator、topology catalog 和诊断，数据面 shard 只执行被共享应用服务授权和预算约束的读写；每个 partitioned 行为 owner 直接挂载 UT，跨 shard contract 留在 facade 测试。完整方案见 [服务化部署、控制面与数据面分离](docs/zh/03-architecture-specs/22-service-deployment-control-data-plane.md)。
 
-存储契约包含 v1 代码图数据面。tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。
+存储契约包含 v1 代码图数据面。SQLite `code_graph` 根只保留 `mod.rs` 与物理 `batch/`、`schema/`、`query/`、`tests/` 目录：`schema` 独占 DDL，`batch` 独占事务性 fact replacement，`query/{symbols,references,chunks,status,common}` 独占有界读取、行解码、状态映射与输入校验；每个有行为 owner 直接挂载同级测试，跨 owner fixture 只放在 `tests/support.rs`。
 
 ### 代码索引
 
-当前代码仓库索引支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift、Bash、SQL、Markdown、XML、Bazel/Starlark、Make、CMake、Dockerfile/Containerfile、Java properties、TOML、INI、YAML、JSON、Go module、Ninja、Jinja2 和 Go template。不支持或降级的文件会回退为文本代码块。
+当前代码仓库索引支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift、Bash、SQL、Markdown、XML、Bazel/Starlark、Make、CMake、Dockerfile/Containerfile、Java properties、TOML、INI、YAML、JSON、Go module、Ninja、Jinja2 和 Go template。物理 `code::index` 子域分离 filesystem delta、full/incremental snapshot、plan、impact path 与 deleted symbol；worktree overlay 再分离 change recording、directories、scope、plan、snapshot 与 untracked policy，并直接共置 UT。不支持或降级的文件会回退为文本代码块。
 
 SQL 文件会贡献 table、view/materialized view、function/procedure、trigger、type 等 schema object 符号，以及 SQL 对象引用和函数/过程调用边。
 
 同一 source scope 内的本地文件、模板和构建目标引用会在 finalize 阶段解析；外部或有歧义的配置关系保留为 unresolved metadata。
 
-Gitlink/submodule 源码访问统一收敛在 `code/source/gitlink/`。tree commit 判定、
-child-filtered entry 发现、初始化或反初始化 submodule blob 读取及 worktree root
-校验由 `entries` owner 负责并直接挂载 UT；incremental 与 worktree overlay 复用
-该边界。双侧 submodule change 分类、nested gitlink 有界递归、worktree/git-dir
-diff fallback、scope-aware entry expansion 与预算检查归独立 `diff` owner。影响
-编排、双侧 fallback 合并、稳定去重与最终预算校验归直接挂载 UT 的 `impact`
-owner；`gitlink::mod` 只保留模块声明和边界重导出。
+Tracked-entry 路径准入、submodule 展开判定和 Git pathspec 投影归直接挂载 UT 的
+`code/source` 物理根把 change-status parsing、有界 declaration fallback、非 Git filesystem policy、filter 常量、Git 执行、ref/snapshot resolution 与 source-root candidate 分离到直接测试的 owner 目录；tracked-entry 准入归 `changes/scope`，有界递归 tree 枚举和 submodule 状态报告归配对 UT 的 `changes/tracked_entries`，经 ref 校验的 name-status 加载归配对 UT 的 `changes/diff`，`changes/submodule_repository` 独占安全 worktree/gitdir 解析。Gitlink/submodule 源码访问
+统一收敛在 `code/source/gitlink/`。tree commit 判定、child-filtered entry 发现、
+初始化或反初始化 submodule blob 读取及 worktree root 校验由 `entries` owner 负责
+并直接挂载 UT；incremental 与 worktree overlay 复用该边界。双侧 submodule change
+分类、nested gitlink 有界递归、worktree/git-dir diff fallback、scope-aware entry
+expansion 与预算检查归独立 `diff` owner；`impact` owner 独占影响编排、双侧 fallback
+合并、稳定去重与最终预算校验，`gitlink::mod` 只保留模块声明和边界重导出。
 
-仓库注册会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
+仓库注册会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。`code::parser` 根只保留 facade、跨域测试与具名物理子域；共享 chunk、manual extraction、node/range primitive、record materialization、syntax capture 和 text validation 分别由专属 owner 管理。其 `languages` 根把 C-family reference、configuration definition、enum member 与 Markdown import 分别收敛到具名且直接测试的共享子域，并与语言专属目录并列。结构化配置解析把 call aggregation、language detection、key/value fact、knowledge-map fact、normalized record 与 source-line primitive 分别收敛到 `code::config_files` 下具名且直接测试的物理 owner。文件级解析编排物理收敛在 `code::parser::file/`，共享 parse contracts、解析状态诊断、text-only topic、route 与 feature-flag 投影分别由直接挂载 UT 的具名 owner 独占；feature-flag comment shielding、boolean config 扫描与 extractor 同样位于具名且直接测试的子域。
 
 C/C++ 宏密集文件如果 error node 局限在宏、Nginx/Kong 这类外部头文件 typedef/module table 声明、GCC/Clang 风格声明属性与 inline 扩展（如 `__attribute__((always_inline))`、`attribute((always_inline))`、`__always_inline`）、预处理器或已识别 decorator 声明区域，decorator 类型体仍保持声明形态，并且仍能抽取可靠结构化事实，会被保守恢复为 parsed。
 
-C/C++ recovery 把 declaration-head normalization 与 token/type/qualifier 识别放在 `declaration` owner，把 function signature、parameter boundary、operator、method suffix、postfix attribute 与 recovery decorator 判定放在 `signature` owner；依赖保持 `signature -> declaration/scan` 单向，两个 owner 都直接挂载 accepted/rejected shape UT。
+C/C++ recovery 把 declaration-head normalization 与 token/type/qualifier 识别放在 `declaration` owner，把 function signature、parameter boundary、operator、method suffix、postfix attribute 与 recovery decorator 判定放在 `signature` owner；依赖保持 `signature -> declaration/scan` 单向，两个 owner 都直接挂载 accepted/rejected shape UT。C-language adapter 把 declaration symbol、GCC recovery、lexical predicate、macro function、node kind 与 preprocessor lifecycle 分别收敛到物理且直接测试的 owner 目录，parser-wide C/GCC 场景归 `languages/c/tests/`；C++ adapter 把确定性 tree-sitter 分类收敛到直接挂载 UT 的 `node_kinds/`，把共享 head rule、decorated type recovery 与 structured/GCC-decorated function recovery 收敛到直接挂载 UT 的 `manual::{lexical,type_definitions,function_definitions}` owner；手工 header recovery 把 byte-stable source text、top-level scan、class/member name recognition 与 nested member collection 分别独占在直接挂载 UT 的 `cpp_header_recovery::{source_text,top_level_scan,declarators,member_collection}` owner。这些 owner 都是真实目录模块并直接共置 contract，不再用 facade 文件和生产路径重定向模拟子树。
 
 Python type-reference parsing 将 literal-aware 函数签名 annotation 扫描与
 tree-sitter node 分类分离。`languages/python/annotations` owner 负责跨行参数/
@@ -239,10 +242,10 @@ tree-sitter node 分类分离。`languages/python/annotations` owner 负责跨�
 Web 路由检测把 Express orchestration、import/factory 与 application/router alias
 发现、call/path syntax、参数/handler 解析、有界多行 statement aggregation、直接与
 链式 registration recording、mount discovery 和 prefix materialization 统一收敛在
-`detect/express/` 子域；各阶段分属明确 owner，
-并由每个 owner
-直接挂载 UT。Python 静态路由字符串与 JavaScript 注释/字符串/正则词法状态继续
-使用独立具名模块，不得用笼统 shared parser 桶跨越这些语言边界。Spring annotation
+`detect/express/` 子域；各阶段分属明确 owner，并由每个 owner
+直接挂载 UT。物理 `detect/lexical/` 边界把 Python 静态路由字符串与 JavaScript
+注释/字符串/正则词法状态保留为独立语言 owner，不得用笼统 shared 实现跨越这些
+语言边界。Spring annotation
 与 Java type-scope 检测统一收敛在 `detect/spring/` 子域；Java comment/text-block
 过滤和 declaration 识别、annotation path/method attribute 解析分别使用独立
 owner；有界多行 annotation aggregation 与两者隔离，mapping kind 和
@@ -260,19 +263,19 @@ framework 解析；materialization owner 负责 receiver URL 展开、mount-pref
 decorator、`add_url_rule`、methods override、receiver/handler 识别与 Python
 function 绑定，所有 owner 都直接挂载 UT。
 
-代码仓库 full index 会先发现 tracked source layout，再使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
+代码仓库 full index 会先发现 tracked source layout；有界 source-root 推导和 effective filter 归 `source/layout/discovery` 所有，归一化 filter 交集与 submodule child 投影归 `source/layout/path_scope` 所有，Git/filesystem 准入原因归 `source/layout/selection` 所有，source 解析、已选 entry、effective filter、内容 hash 与 filesystem-ref 一致性归 `source/layout/scoped_snapshot` 所有，受界 exclusion/largest-file 样本和 preview 计数归 `source/layout/preview` 所有，稳定的 scope 内外变更分组归 `source/layout/impact_partition` 所有。SQLite snapshot 持久化把 repository attachment、metadata/scope import 及其直接 legacy regression 收敛到 `code/snapshot/repository_import`，`scope_tables` 独占与增量 scope clone 共享的 table-copy contract。随后使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
 
 增量 `repo update` 在新增文件出现在 `src/` 之外时复用同一套 source-layout 策略。
 
-冷启动 full `repo index` 会落持久化 code-index task 并立即返回 `task` handle。CLI 会启动有界单次 worker；非交互式 agent 可调用 `repo index-worker --task-id <id> --format json` 显式 drain 一次；`service run` 则用 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 控制的有界 code-index worker pool 消费同一队列，并继续运行单个 repository-set overlay refresh worker。
+冷启动 full `repo index` 通过 `storage::sqlite::code::tasks::queue` 落持久化 code-index task 并立即返回 `task` handle。CLI 会启动有界单次 worker；非交互式 agent 可调用 `repo index-worker --task-id <id> --format json` 显式 drain 一次；`application::runtime::worker` 独占 endpoint 校验与 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 并发上限，`service run` 依此运行有界 code-index worker pool，并继续运行单个 repository-set overlay refresh worker。
 
-本地 CLI 可以用 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问已部署常驻服务。远端 `repo index` 只向服务提交 durable task 并返回 task/status/checkpoint JSON；任务由远端 `service run --web` 的 worker pool 消费，而不是由本地 CLI 执行 `repo index-worker`。`repo index --reset` 和 `repo index-worker` 这类维护命令在远端配置下会被拒绝，必须在服务端机器执行。远端分发只会预先校验远端 URL 与 outbound network 设置；无关本机 runtime 和 retrieval 设置只在命令回落到本机状态时校验。
+本地 CLI 可以用 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问已部署常驻服务。远端 `repo index` 只向服务提交 durable task 并返回 task/status/checkpoint JSON；任务由远端 `service run --web` 的 worker pool 消费，而不是由本地 CLI 执行 `repo index-worker`。`repo index --reset` 和 `repo index-worker` 这类维护命令在远端配置下会被拒绝，必须在服务端机器执行；`storage::sqlite::code::tasks::reset` 独占本地原子 reset。远端分发只会预先校验远端 URL 与 outbound network 设置；无关本机 runtime 和 retrieval 设置只在命令回落到本机状态时校验。
 
 不同 fingerprint 的 task 会独立排队和持有 lease；完全相同的 full-index fingerprint 会复用现有 task。
 
-`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention。后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope。
+`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention；`storage::sqlite::code::tasks::status` 独占任务查询与有界 queue 投影，`checkpoint` 独占 scope 与 latest-progress 读取。后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope；`storage::sqlite::code::tasks::retention` 独占该计划与事务清理。
 
-Code-index task lease 绑定 attempt。过期 running lease 会在 claim/status 路径前恢复为 retry 或 dead-letter，旧 worker 不能完成或失败已经被新 worker 接管的 task，活跃 worker 会在昂贵 batch 解析前、每次提交 checkpoint batch 后、finalize 前后以及完成 task 前续租。
+Code-index task lease 绑定 attempt，`storage::sqlite::code::tasks::lease` 独占 claim、renew、listing 与有界 recovery。过期 running lease 会在 claim/status 路径前恢复为 retry 或 dead-letter；`storage::sqlite::code::tasks::completion` 独占 lease-checked success、retry 与 dead-letter 转换。旧 worker 不能完成或失败已经被新 worker 接管的 task，活跃 worker 会在昂贵 batch 解析前、每次提交 checkpoint batch 后、finalize 前后以及完成 task 前续租。
 
 未实现可选 lease recovery/renewal hook 的 store 会把这些 hook 当作 no-op，以保持 status 和 indexing 读路径兼容。JSON status 中的 checkpoint 会暴露 `updated_at_ms`，便于区分慢速推进和真正卡住。
 
@@ -290,7 +293,7 @@ clean Git snapshot 会把 registered/requested path scope 内的 tracked tree �
 
 Git 分支、标签和工作树选择器会解析为带作用域的提交/树快照。已索引作用域可按显式引用查询；rebase 或强制移动的 HEAD 需要重新索引；相同树的分支会复用同一作用域，同时保留请求引用的审计元数据。
 
-worktree overlay 使用 Git status：被 `.gitignore` 忽略的 untracked 文件会跳过，未跟踪的宽泛依赖、缓存或构建目录需要显式 path opt-in 后才会递归展开。
+worktree overlay 使用 Git status：窄 `worktree_overlay::mod` facade 把 identity/snapshot 装配交给 `snapshot`、普通路径分类与记录交给 `change_recording`、有界 submodule 状态转换交给物理 `gitlinks/` 子域；被 `.gitignore` 忽略的 untracked 文件会跳过，未跟踪的宽泛依赖、缓存或构建目录需要显式 path opt-in 后才会递归展开，每个行为 owner 都直接挂载同层 UT。
 
 `repo remove <alias>` 只删除该仓库在 relay-knowledge 中的注册记录、alias、索引 scope、task、repository-set 成员和 overlay，以及软件投影，不删除磁盘源码；删除后同一路径或 alias 可以重新注册。
 
@@ -298,21 +301,30 @@ worktree overlay 使用 Git status：被 `.gitignore` 忽略的 untracked 文件
 
 代码图 v1 响应区分稳定的 `canonical_symbol_id` 和快照绑定的 `symbol_snapshot_id`。引用、调用、导入和 SBOM 依赖命中会暴露 `target_hint`、`resolution_state`、置信度基点和置信度等级，避免将未解析、有歧义、声明型或锁定型边误报为确定调用。
 
-调用图检索也支持同仓静态跨语言边：C/C++ 互调、Go cgo `C.*` 和 Rust FFI/bindings 路径可解析为代码图证据，但这不等同于完整 build-system 或 linker 分析。
+调用图检索也支持同仓静态跨语言边：C/C++ 互调、Go cgo `C.*` 和 Rust FFI/bindings 路径可解析为代码图证据，但这不等同于完整 build-system 或 linker 分析。SQLite code-store 持久化使用唯一的物理 `storage::sqlite::code` 树：`batch`、`feature_flags`、`generated`、`impact`、`lifecycle`、`query`、`routes`、`schema`、`search`、`set`、`snapshot`、`symbols`、`tasks`、`tests`、`views` 与 `workspace` 都是具名目录；有行为的 owner 直接挂载直属测试，跨 owner fixture 与回归统一位于 `tests/`，facade 只保留组合与 port 实现。impact facade 只协调受界检索，`seed`、`evidence`、`path_selection` 分别独占图种子、SQLite 证据/命中映射与 changed-path/language 准入并挂载配对测试。`query::{hits,prepare}`、`tasks::worktree`、`set::refresh_tasks` 与 `lifecycle::{cleanup,removal,report,status}` 归真实父域所有，不使用生产 path redirect，也不重复加载文件。
 
-代码仓库词法检索使用 SQLite FTS 候选表覆盖 symbol、reference、call、import、SBOM dependency 和 chunk。有效 path filter 会在 FTS 候选窗口内先过滤再进入有界评分；graph edge 候选在截断前按 BM25 排序；fuzzy symbol 召回可以命中任一查询词，而 typed graph edge 查询保持更窄语义；Rust 评分会识别 snake_case/CamelCase identifier 片段、多段符号名、调用方向上下文和声明形态 API chunk。
+代码仓库词法检索使用 SQLite FTS 候选表覆盖 symbol、reference、call、import、SBOM dependency 和 chunk。有效 path filter 会在 FTS 候选窗口内先过滤再进入有界评分；graph edge 候选在截断前按 BM25 排序；相关性层的 `fts_plan` 只组装 focused/hybrid/lifecycle/structured match，`fts_recall` 独占高信号项与 member-access leaf 恢复并排除 source path，`fts_terms` 独占大小写去重、quote、type-surface companion 与 identifier 结构，`fts_compound` 独占 24 项预算内的 compact/snake alternative，四个 owner 直接挂载 UT。fuzzy symbol 召回仍可命中任一查询词，而 typed graph edge 查询保持更窄语义；Rust 评分会识别 snake_case/CamelCase identifier 片段、多段符号名、调用方向上下文和声明形态 API chunk。Call retrieval 使用真实 `code::query::calls` 模块树：`mod.rs` 只声明 owner 并重导出查询入口，`search` 协调受界 identity/FTS 路径，`row_store` 独占 SQL 与解码，`identity_query` 独占方向性 exact gate，`hit_projection` 独占评分和命中转换，`execution_order` 独占调用点顺序，`display` 独占 caller label。其余具名子模块继续拥有 ambiguous target、caller count、direction filter、indirect binding recovery、site/context scoring 与 target ranking，不在根层制造 path alias；聚焦 owner 直接挂载同级 UT。跨域 ranking 同样使用真实 `code::query::scoring` 树，直接声明 API-sequence、chunk-path、initializer、flow、inline-usage、interface、lifecycle、local-callable、path-ranking 与 proximity owner，并挂载各自同级 regression，不保留根级 alias。Hybrid planning 使用真实 `code::query::hybrid` 树：chunk/direct gate、exact-path decision 与受界 planning 都是直接 owner，共享 hybrid 回归通过物理 `tests::hybrid` 模块装配。Import retrieval 使用真实 `code::query::imports` 树：facade 只协调 layered fallback，`row_store` 独占受界 direct/identifier/FTS SQL 与解码，`hit_projection` 独占 enrichment/ranking/hit conversion，`scoring` 独占 ranking signal，`path_context` 独占 path/target classification，`binding_terms` 独占 named-binding 与 usage-term extraction，`targets` 独占 target-symbol 与 usage context；聚焦 owner 直接挂载 UT 且依赖单向进入 primitive。Reference retrieval 是 code-query 根直接声明的物理 `code::query::references` 子域，而不是根级 alias：`identifier_text` 独占 identifier scan，`identity_gate` 独占受界 exact 准入，`call_shape` 独占 call 识别，`same_name_path` 独占同名 source-file demotion，`type_context` 独占 parameter/type affinity；每个 owner 都直接挂载 regression。同级 `chunks` owner 独占 exact definition/reference fallback 准入、声明评分与 canonical-leaf 匹配，`chunks::search` 独占 layered FTS planning、SQL/value binding、row mapping 与 chunk scoring。Code-query facade 也直接声明 `symbols`，不再通过 `code_query_symbols` 挂载；symbol retrieval 的编排、exact/API identity 准入、FTS 规划、行解码、ranking、有界 direct recovery 与 typed function-value 解释继续由具名 owner 分担，并各自挂载测试。Code-query 根只能包含 `accuracy`、`api_identities`、`calls`、`chunks`、`conversion_terms`、`excerpts`、`hits`、`hybrid`、`identifiers`、`imports`、`line_ranges`、`prepare`、`references`、`relevance`、`routes`、`rows`、`sbom`、`scoring`、`symbols` 与 `tests` 目录及 facade；跨域 primitive 都是目录 owner，有行为的测试与 owner 同级，消费者使用真实模块身份，不得恢复平铺 sibling、`code_query_*` alias 或根级 `#[path]` redirect。
+共享 code-query 测试根同样只能包含 `calls`、`field_filters`、`generated`、`hybrid`、`identity`、`line_context`、`ranking`、`score` 与 `unit` 领域及声明 facade；测试 facade 直接声明每个领域，code-store facade 不得再通过跨层 path attribute 重挂单个 query regression。
+Graph retrieval 根只包含物理 `advanced/`、`aliases/`、`bm25/`、`bm25_fallback/`、`context/`、`derived/`、`label_trigrams/`、`local_model/`、`ranking/`、`read_model/` 与 facade；每个行为 owner 直接挂载同目录 UT，不得恢复平铺实现或测试 sibling。确定性 token signature、本地 hashed vector、semantic overlap、cosine similarity 与 identifier-aware lexical overlap 归 `local_model/`；共享 `retrieval::terms` owner 只暴露 rerank 生产调用的 normalized-term 操作。物理 `read_model/` 子域把 DDL/retry 交给 `schema`、重建交给 `migration`、文档写入交给 `documents`、共享候选/BM25 映射交给 `candidate`/`bm25_hit`、检索编排交给 `search`。同级 `advanced/` 子域进一步把 relation/claim/event path 组装交给 `path`、时间解析与过滤交给 `temporal`、scope 汇总交给 `community`、共享事件读取交给 `event`、证据归组交给 `support`。
 
-Graph retrieval 的确定性 token signature、本地 hashed vector、semantic overlap、cosine similarity 与 identifier-aware lexical overlap 统一归 SQLite retrieval `local_model` owner 及其同级 UT。`advanced`、`context` 与 `derived` 只依赖这个纯低层，retrieval facade 继续负责 schema、document materialization 和 search orchestration。
-
-Code-index schema 初始化只把执行顺序、旧列兼容与 migration 编排保留在 `code_schema` facade；repository facts、durable index task、repository-set/workspace 状态和 FTS/retrieval index 分属四个 schema owner，并各自挂载同级 contract UT。`search_backfill` owner 独占 symbol、reference、import、dependency、feature flag、call、route 与 chunk 的一次性 FTS document 物化、search metadata 同步，以及 signature 升级后的事务性 call-document 重建；其同级定向测试保护 legacy call language 继承和 metadata 幂等同步合同。
+Feature-flag extraction 将环境/配置/预处理来源键规则、SDK receiver/call tracking 和跳过字面量的共享 lexical primitive 分配给独立 owner；每个 owner 都挂载同级直接 UT，extractor facade 只保留稳定内部重导出。Repository-set 编排把 membership API 交给 `membership`、moving-ref 与 fact-version freshness 交给 `status`、set 专用存储错误交给 `errors`、同步与租约化 overlay rebuild 交给 `refresh`；物理 `query/` 域把纯 overlay ranking 交给 `mod.rs`、异步 member/fallback 协调交给 `workflow`、dependency API planning 交给 `plan`、ranking signal 交给 `domain_affinity` 与 `identity_coverage`，并为每个 owner 直接挂载配对 UT。SQLite repository-set 持久化同样把 member 生命周期/状态行映射交给 `code::set::membership`，把 overlay 状态、刷新、import/export 匹配与 cross-edge 读取交给 `code::set::overlay`；`code::set` facade 只重导出两者的窄入口。带配对 UT 的 `manifest/` 域进一步分离数据库编排、Go workspace、pnpm/package exports、module-key 展开与有界 path/glob 规则。
+物理 `code::set` 根只能包含 `manifest`、`membership`、`overlay`、`refresh_tasks` 与 `tests` 目录及 facade。三个行为 owner 直接挂载 `mod_tests.rs`；跨 owner workspace 场景与 fixture 隔离在 `tests/`，不得在 `manifest/` 旁恢复平铺实现或测试 sibling。
+Code-index schema 初始化只把执行顺序、旧列兼容与 migration 编排保留在 `code::schema` facade；repository facts、durable index task、repository-set/workspace 状态和 FTS/retrieval index 分属四个 schema owner，并各自挂载同级 contract UT。`search_backfill` owner 独占 symbol、reference、import、dependency、feature flag、call、route 与 chunk 的一次性 FTS document 物化、search metadata 同步，以及 signature 升级后的事务性 call-document 重建；其同级定向测试保护 legacy call language 继承和 metadata 幂等同步合同。
+Checkpointed code indexing 将 batch fact、checkpoint transition、dependency document 与 session scope 发布分别交给物理 `code::batch/{persistence,checkpoint,dependencies,session}/` owner，各自直接挂载 `mod_tests.rs`，batch 根只保留 `mod.rs` 与具名目录；`finalize/` 同样把 call target/edge、file metadata、imported/ordinary reference、phase、search document 与 symbol catalog 目录化并配对直属测试，跨 owner TypeScript 场景归 `finalize/tests`。其 `imports/{module_paths,specifier,symbol_targets}/` 把有界路径归一化、specifier 提取和符号匹配分别与直属 `mod_tests.rs` 配对，语言规则继续位于 `languages/`；共享 code-identity import resolution 只消费这些受界合同。
 
 `repo query --kind sbom` 会返回索引期从 Cargo、npm、Go、Python、Maven effective `pom.xml`/BOM、Gradle 和 Conan manifest/lockfile 提取的依赖清单；它不会执行包管理器、访问 registry，也不提供漏洞或许可证分析。
 
-Maven effective POM 只基于已索引证据解析仓库内 parent POM、properties、dependency management、profiles、plugin management、modules 和 imported BOM 声明。
+Maven effective POM 根以物理 `pom_path/`、`property_interpolation/`、`xml/` 分别独占不越过仓库根的相对路径、受界递归属性展开和带稳定行号的 XML tree，并直接挂载 UT；raw/effective model contracts 与 parent/profile property layering 归 `model/contracts` 和 `model/properties`，coordinate alias、dependency management/profile variant 与 plugin/execution inheritance 分别归 `model/{coordinates,dependencies,plugins}` 及其配对 UT，model facade 继续协调仓库内 parent、profiles、modules 和 imported BOM 的纯索引证据解析，跨 owner review regression 只放在 `tests/`。
 
 Call excerpt 通过 `source_scope + symbol_snapshot_id` chunk lookup 与调用行包含条件定位，避免高 fan-out caller/callee 查询把一条 call edge 放大成多个无关 chunk 候选。
 
 代码仓库查询还会使用可选 ripgrep 兜底恢复精确源码文本。AST 和已索引词法层先执行；当 definition/reference/hybrid 存在具体召回缺口，或 import 指向未作为代码图 target 索引的 unresolved external dependency 时，再用有界 `rg` 搜索已索引 commit 内容。
+
+`code::search::candidate_scope` 独占源码兜底的安全路径校验、去重、generated-path 排除、path/language filter 和 256 文件预算，物化与内容扫描只消费它输出的有界候选范围。
+
+`materialization` 独占 filesystem commit 前后校验、Git blob size/batch/per-path 读取策略、read/materialized byte 双预算、worktree-overlay 内容验证和临时源码树生命周期。
+
+同级 `scanner` 独占内部文件读取、binary 排除、handwritten/generated 分流、有界行 excerpt 和声明上下文拼接；门面只协调允许的 post-index 兜底。
 
 Definition 兜底会选择最后一个 identifier-like 查询目标，因此自然语言提示里的命令词不会被当成 symbol 搜索。
 
@@ -340,7 +352,7 @@ BM25 读模型会为实体标签和代码符号索引生成词汇别名，但不
 
 运维产品化能力会持久化 worker 任务、人工提案、审计事件和静默更新操作员状态。
 
-多模态摄取会排队 embedding/OCR/视觉/提取器工作；`worker run-once` 在配置 HTTP 端点时调用远端 worker，否则创建确定性回退提案；`proposal accept` 通过同一图变更路径提交；服务管理器命令仅生成平台服务定义，不执行特权安装。
+`storage::sqlite::operations::schema` 负责初始化并兼容升级 worker-task、proposal、audit 与 operator 表；`operations::worker_tasks`、`proposals`、`audit_events` 分别独占 worker 队列、提案/冲突生命周期与审计写入/查询，`service_operator` 独占静默更新操作员状态及 JSON 行映射。多模态摄取会排队 embedding/OCR/视觉/提取器工作；`worker run-once` 在配置 HTTP 端点时调用远端 worker，否则创建确定性回退提案；`proposal accept` 通过同一图变更路径提交；服务管理器命令仅生成平台服务定义，不执行特权安装。
 
 `evaluation` 模块提供纯 GraphRAG 测试框架和 CI 夹具门控，覆盖精确事实、多跳、时间、负面拒绝、过期索引、歧义实体和代码影响观察。
 
@@ -348,7 +360,7 @@ BM25 读模型会为实体标签和代码符号索引生成词汇别名，但不
 
 作用域索引游标跟踪种类/作用域/模态新鲜度、来源哈希、后端游标，以及语义/向量 worker 可选的模型名称/维度元数据。
 
-`ingest`、`query --freshness wait-until-fresh`、`index refresh`、`health` 和 `service doctor` 共享有界刷新队列、活动租约/尝试保护、重试/死信和过期诊断路径。
+`ingest`、`query --freshness wait-until-fresh`、`index refresh`、`health` 和 `service doctor` 共享有界刷新队列；物理 `task_queue/` owner 分离 planning、enqueue/upsert、lease recovery、completion、failure/dead-letter 与持久 record identity/decoding。
 
 ### CLI 契约
 
@@ -357,10 +369,12 @@ BM25 读模型会为实体标签和代码符号索引生成词汇别名，但不
 adapter 将 global option/token 解析与命令族分发收敛到直接配对 UT 的
 `interfaces::cli::command::parse` owner，共享 flag value 与 freshness 校验归
 `command::values`。CLI error、结构化 grammar diagnostic、退出码分类以及
-text/JSON stderr 编码归 `command::diagnostics`。CLI 根只重导出这些稳定合同，并
-保留 process facade。无需 runtime 的快路径、remote/local 环境装配与共享 service
-action dispatch 归直接配对 UT 的 `runtime::dispatch` owner；显式/环境 remote URL
-优先级与远端能力判定归 `runtime::selection`。
+text/JSON stderr 编码归 `command::diagnostics`；CLI 根只重导出这些稳定合同并保留
+process facade；`command`、`files`、`grammar`、`knowledge`、`map`、`operations`、`remote`、`render`、`repo`、`repo_set`、`runtime`、`service`、`setup`、`spec` 与 `version` 全部是物理 owner 目录，有行为的 owner 直接挂载 `mod_tests.rs`，CLI 根只保留这些具名域、`tests/` 与 `mod.rs`，不使用 `*_cli` alias 或生产路径重定向。仓储命令族由 `repo::mod` 只维护命令数据合同与模块装配，
+`repo::parser` 独占语法/校验并直接挂载 `parser_tests`，`repo::runner` 独占异步
+service workflow 与渲染并直接挂载 `runner_tests`，`repo::view` 保留嵌套 view 合同与 workflow 而不是提升为 CLI 根 sibling；machine-readable command metadata 使用物理 `spec::{data,files,repo,repo_set}` 模块树，`spec::repo::{lifecycle,indexing,retrieval}` 分别独占仓储生命周期、索引和读取 builder 及直属 UT，`data::{core,map,operations,service}` 独占聚合命令族。无需 runtime 的快路径与共享
+service action dispatch 归 `runtime::dispatch`，显式/环境 remote URL 优先级及
+远端能力判定归 `runtime::selection`。
 
 ```bash
 relay-knowledge status --format json
@@ -448,10 +462,17 @@ CLI 参数含义是公开契约的一部分。Skills 和其它 LLM 工具在发�
 
 本地文件索引 root 必须是绝对路径，并且必须出现在
 `RELAY_KNOWLEDGE_FILE_INDEX_ROOTS` 中；`RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS`
-用于设置每个 root 的扫描 timeout 预算。`files query --format json` 会返回顶层
+用于设置每个 root 的扫描 timeout 预算；`application::runtime::file_index` 独占 root normalization、稳定 root ID、authorization 与 scan/query budget。`files query --format json` 会返回顶层
 `freshness` 对象，包含 root cursor、index lag、stale/degraded reason、有界重扫状态和
 direct-source-read instructions。使用 `--freshness wait-until-fresh` 可以在 file index
 仍为 pending、degraded 或 overflow 时抑制答案，直到有界扫描完成。
+应用层 `application::knowledge/{ingest,multimodal,file_freshness,index_refresh,map}/` 分别收敛工作流与直属 UT，`file_index/` 子树把 async service API 与有界 blocking scanner 分开；
+其物理 `content/` 域把 read-byte 记账、抽取/chunking、capability-root 授权读取分别交给 `budget`、`extract`、`read`，并让每个 owner 直接挂载配对 UT。
+
+SQLite `file_index` 把 metadata schema、事务性 root update、retirement、path FTS search、diagnostics、content 与跨 owner tests 分别收敛到物理目录，facade 只重导稳定 store 边界。
+其 `content` 子域继续独占 schema、稳定 identity、replacement/cursor persistence、有界 FTS search
+与 fact-candidate extraction，并为每个 owner 共置 UT；store adapter 继续使用稳定的
+`file_index::content::search` 边界，根目录不再让生产/测试文件与子目录混排。
 
 ### 文件监听 (fs.watch)
 
@@ -464,11 +485,10 @@ RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS=1024
 RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY=4096
 ```
 
-监听通过 `notify` crate 实现跨平台文件系统事件
-（Linux inotify、macOS FSEvents、Windows ReadDirectoryChangesW）。
-事件经过去抖、内容哈希过滤和路径过滤后，生成 `WorktreeOverlay`
-增量索引任务。监听诊断（状态、事件计数、降级原因）在
-`service status --format json` 中暴露。
+Watcher 根把 `config/`、`event_filter/`、`hash_cache/`、`task_seed/` 保留为直接
+测试的 owner；`engine/` 分离 handle、`notify` event loop、repository registration、
+任务投影与 diagnostics。事件仍经 debounce、内容哈希与路径过滤后生成有租约的
+`WorktreeOverlay` 任务；状态、事件计数与降级原因继续由 `service status` 暴露。
 
 ### Semantic 与 Vector Backend
 
@@ -486,13 +506,13 @@ RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
 ```
 
 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 和 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 也接受
-`local` 与 `disabled`。禁用的 read-model backend 不参与 semantic/vector 检索执行和刷新调度；空 embedding model name 会在运行时配置阶段失败。
+`local` 与 `disabled`。`application::runtime::retrieval` 独占 typed backend、rerank 与 remote-embedding 校验；禁用的 read-model backend 不参与 semantic/vector 检索执行和刷新调度，空 embedding model name 会在运行时配置阶段失败。
 
 ### 设置与图事实
 
 Web Settings 页面按 agent 互操作性、检索默认值和模型 provider 分类展示。Agent/检索设置会读取同一套脱敏 runtime 与 service diagnostics，用于生成 MCP 暴露、origin allow-list、作用域策略、审计和外部模型相关环境变量。
 
-模型 provider 设置通过 `/api/configs/model/*` 管理命名 chat/completion profile、fallback policy、`models.dev` catalog 刷新、endpoint probe 和模型发现。Profile 与 fallback 文件位于解析后的配置目录，文件名为 `model-profiles.json` 和 `model-fallback.json`；公共 catalog cache 位于解析后的缓存目录，文件名为 `model-catalog-cache.json`。
+模型 provider 设置通过 `/api/configs/model/*` 管理命名 chat/completion profile、fallback policy、`models.dev` catalog 刷新、endpoint probe 和模型发现。`model_provider::profiles` 独占 profile CRUD、secret 保留与 runtime-profile resolution；`model_provider::profile` 独占公开 profile contract、持久形态与脱敏投影；`profile_config` 独占 normalization 和 validation；`model_provider::fallback` 独占 fallback 类型、默认值、校验与持久化；`model_provider::catalog` 独占 catalog contract、cache fallback、刷新与 payload parsing；`model_provider::connectivity` 独占 probe/discovery contract、QoS HTTP 工作流、脱敏与诊断。Profile 与 fallback 文件位于解析后的配置目录，文件名为 `model-profiles.json` 和 `model-fallback.json`；公共 catalog cache 位于解析后的缓存目录，文件名为 `model-catalog-cache.json`。
 
 Secret 只在保存时接收，回传给浏览器时只显示 configured boolean 或脱敏 header。更新 profile 时会保留已脱敏的 header secret，API 调用方可设置 `clear_api_key=true` 显式清除已保存的 API key，便于迁移到 header-only 认证。
 
@@ -502,15 +522,15 @@ CLI `ingest` 命令会写入 evidence 和 entity label。共享 API 还接受面
 
 ### Web、MCP 与 ACP
 
-`service run --web --mcp streamable-http` 会在同一端口启动 Web 诊断、`/api/*` 和常驻 MCP Streamable HTTP adapter。默认绑定为 `http://127.0.0.1:8791/` 和 `http://127.0.0.1:8791/mcp`。
+`service run --web --mcp streamable-http` 会在同一端口启动 Web 诊断、`/api/*` 和常驻 MCP Streamable HTTP adapter。默认绑定为 `http://127.0.0.1:8791/` 和 `http://127.0.0.1:8791/mcp`。物理 Web adapter 把 `assets/`、`files/`、`model_config/`、`operation_request/` 与 `code/` 保留为具名子域并直接挂载配对测试；`web/mod.rs` 只组合各子域 route 和共享 response/error 边界，装配后 router 的 file integration coverage 继续由 facade 持有。`code/` 域把版本化 repository route 交给 `mod.rs`，CLI-shaped index payload mapping 交给 `index_request`，code-view payload mapping 交给 `view_request`，不保留平铺 feature sibling 或生产 `#[path]` redirect。物理 MCP 根把 audit、HTTP、JSON-RPC、metrics、notification、prompt、resource、scope authorization、session state、tool contract 与 registry 分别收敛到直接测试的 owner 目录，装配型 protocol/tool 场景和 fixture 统一位于 `mcp/tests/`；`runtime/` 子树继续拥有共享 server state、HTTP transport 生命周期、JSON-RPC dispatch、可取消 tool runtime、内置只读工具和 method-error 映射，根 `mcp/mod.rs` 只保留模块声明、协议常量和稳定公开重导出。
 
-除非通过命令或 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true` 显式启用，MCP 默认关闭；graph tool 需要 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`，除非显式配置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。
+除非通过命令或 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true` 显式启用，MCP 默认关闭；graph tool 需要 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`，除非显式配置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。`application::runtime::agent` 独占 endpoint、origin、scope、request budget 与 audit queue 设置校验。
 
 Adapter 会校验 `initialize` 参数，然后签发不可预测的 `Mcp-Session-Id`。客户端必须发送 `notifications/initialized`，之后调用需要携带该 session header 和 `MCP-Protocol-Version`，确保 `ping`、工具请求和 `notifications/cancelled` 绑定到已签发的 session。
 
 缺少 session header 会返回 HTTP 400；未知或已驱逐的 session ID 会返回 HTTP 404。
 
-MCP 工具界面包含图检索、图检查、健康状况、服务状态、索引状态、授权代码图查询、授权软件全域模型查询、repository-set 代码图查询和授权代码影响分析。
+MCP 工具界面包含图检索、图检查、健康状况、服务状态、索引状态、授权代码图查询、授权软件全域模型查询、repository-set 代码图查询和授权代码影响分析；code-tool schema、请求校验、检索 workflow 及 software/feature-flag/impact 洞察由 `interfaces::agent::mcp::code_tools::{tool_definitions,request_contracts,retrieval_handlers,insight_handlers}` 分别拥有，contract primitive 保留直属 UT，装配后的 tool workflow 由 MCP integration test 覆盖。
 
 Agent-facing kind 选择复用现有产品 kind：`relay_code_query` 处理代码图谱 kind，`relay_software_query` 处理软件全域模型 kind，`relay_code_feature_flags` 处理配置驱动 feature flag。
 
@@ -522,7 +542,7 @@ MCP 服务器也会发布资源和提示：资源暴露服务状态、健康状�
 
 提示提供检索和代码影响规划模板。`/mcp/metrics` 暴露 Prometheus 文本指标；MCP 客户端只使用原生 Streamable HTTP `/mcp` 入口。
 
-Agent 请求会写入有界进程内审计事件，包含运行时身份、作用域、新鲜度、QoS 决策、预算、截断、结果数和状态。
+Agent 请求会写入有界进程内审计事件，包含运行时身份、作用域、新鲜度、QoS 决策、预算、截断、结果数和状态；物理 `interfaces/agent/audit/` owner 收敛日志、JSONL sink 与直属测试，`policy/` owner 收敛共享校验、授权策略与直属测试。
 
 设置 `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` 后，这些事件会镜像到由 `paths` 管理的 JSONL 文件 `logs/agent-audit.jsonl`；sink 使用由 `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` 控制的有界异步队列，最多允许 65536 条。
 

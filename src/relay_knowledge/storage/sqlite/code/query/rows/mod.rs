@@ -1,0 +1,110 @@
+//! Typed SQLite query rows shared by retrieval projections.
+
+use crate::domain::RepositoryCodeRange;
+
+pub(super) struct SymbolRow {
+    pub(super) symbol_snapshot_id: String,
+    pub(super) canonical_symbol_id: String,
+    pub(super) file_id: String,
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) signature: String,
+    pub(super) doc_comment: Option<String>,
+    pub(super) byte_range: RepositoryCodeRange,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) name: String,
+    pub(super) qualified_name: String,
+    pub(super) kind: String,
+    pub(super) is_generated: bool,
+    pub(super) previous_symbol_context_start: Option<u32>,
+}
+
+pub(super) struct ReferenceRow {
+    pub(super) file_id: String,
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) name: String,
+    pub(super) kind: String,
+    pub(super) target_symbol_snapshot_id: Option<String>,
+    pub(super) byte_range: RepositoryCodeRange,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) target_hint: Option<String>,
+    pub(super) resolution_state: String,
+    pub(super) confidence_basis_points: u16,
+    pub(super) confidence_tier: String,
+    pub(super) target_canonical_symbol_id: Option<String>,
+    pub(super) source_excerpt: Option<String>,
+    pub(super) source_excerpt_line_start: Option<u32>,
+    pub(super) is_generated: bool,
+}
+
+pub(super) struct CallRow {
+    pub(super) file_id: String,
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) caller_symbol_snapshot_id: Option<String>,
+    pub(super) caller_name: Option<String>,
+    pub(super) callee_symbol_snapshot_id: Option<String>,
+    pub(super) callee_name: String,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) caller_line_range: Option<RepositoryCodeRange>,
+    pub(super) target_hint: Option<String>,
+    pub(super) resolution_state: String,
+    pub(super) confidence_basis_points: u16,
+    pub(super) confidence_tier: String,
+    pub(super) caller_canonical_symbol_id: Option<String>,
+    pub(super) callee_canonical_symbol_id: Option<String>,
+    pub(super) caller_signature: Option<String>,
+    pub(super) callee_signature: Option<String>,
+    pub(super) caller_excerpt: Option<String>,
+    pub(super) callee_excerpt: Option<String>,
+    pub(super) is_generated: bool,
+}
+
+pub(super) struct ImportRow {
+    pub(super) file_id: String,
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) module: String,
+    pub(super) matched_symbol_name: Option<String>,
+    pub(super) target_symbol_names: Option<String>,
+    pub(super) same_file_query_usage_count: usize,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) target_hint: Option<String>,
+    pub(super) resolution_state: String,
+    pub(super) confidence_basis_points: u16,
+    pub(super) confidence_tier: String,
+    pub(super) is_generated: bool,
+}
+
+pub(super) struct DependencyRow {
+    pub(super) file_id: String,
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) ecosystem: String,
+    pub(super) package_name: String,
+    pub(super) requirement: Option<String>,
+    pub(super) resolved_version: Option<String>,
+    pub(super) dependency_group: String,
+    pub(super) source_kind: String,
+    pub(super) is_lockfile: bool,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) excerpt: String,
+    pub(super) is_generated: bool,
+}
+
+pub(super) struct ChunkRow {
+    pub(super) file_id: String,
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) content: String,
+    pub(super) byte_range: RepositoryCodeRange,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) symbol_snapshot_id: Option<String>,
+    pub(super) canonical_symbol_id: Option<String>,
+    pub(super) symbol_name: Option<String>,
+    pub(super) symbol_qualified_name: Option<String>,
+    pub(super) parse_status: String,
+    pub(super) degraded_reason: Option<String>,
+    pub(super) is_generated: bool,
+}

@@ -156,3 +156,7 @@ fn record_body_timeout<T>(
     }
     result
 }
+
+#[cfg(test)]
+#[path = "qos_client_tests.rs"]
+mod qos_client_tests;

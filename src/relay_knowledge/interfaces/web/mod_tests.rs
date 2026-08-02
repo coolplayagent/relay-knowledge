@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use crate::{
     api::{IngestEvidence, IngestEvidenceExtraction, IngestRequest},
     application::RelayKnowledgeService,
-    domain::{CodeIndexMode, CodebaseViewKind, EvidenceModality, FreshnessPolicy},
+    domain::EvidenceModality,
     env::{EnvironmentConfig, PlatformKind},
 };
 
@@ -665,51 +665,6 @@ async fn web_operation_endpoint_enforces_configured_body_limit() {
     let response = router.oneshot(request).await.expect("request should route");
 
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-}
-
-#[test]
-fn specialized_request_builders_parse_web_payload_variants() {
-    let payload = json!({
-        "alias": "relay",
-        "ref": "main",
-        "path_filters": [" src/ ", "tests"],
-        "language_filters": [" rust "],
-        "limit": 7
-    });
-
-    let file_query = web_files::file_query_request(&json!({
-        "query": "design",
-        "source_scope": "local-files",
-        "root_id": "root-1",
-        "freshness": "wait-until-fresh",
-        "limit": 7
-    }))
-    .expect("file query");
-    assert_eq!(file_query.source_scope.as_deref(), Some("local-files"));
-    assert_eq!(file_query.root_id.as_deref(), Some("root-1"));
-    assert_eq!(file_query.freshness_policy, FreshnessPolicy::WaitUntilFresh);
-
-    let default_file_query = web_files::file_query_request(&json!({"query": "design", "limit": 7}))
-        .expect("default file query");
-    assert_eq!(
-        default_file_query.freshness_policy,
-        FreshnessPolicy::AllowStale
-    );
-
-    let view_payload = json!({
-        "alias": "relay",
-        "ref": "main",
-        "kind": "dependency-tour",
-        "freshness": "wait-until-fresh",
-        "limit": 7,
-        "changed_paths": ["src/lib.rs"]
-    });
-    let view = web_code_view_request::code_view_request(&view_payload).expect("view");
-    assert_eq!(view.view_kind, CodebaseViewKind::DependencyTour);
-    assert_eq!(view.changed_paths, ["src/lib.rs"]);
-
-    let index = code_index_request(&payload, CodeIndexMode::Full).expect("index");
-    assert!(matches!(index.mode, CodeIndexMode::Full));
 }
 
 async fn test_router(label: &str) -> Router {
