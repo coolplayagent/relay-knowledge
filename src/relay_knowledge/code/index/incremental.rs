@@ -1,11 +1,12 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
 
 use crate::domain::{
-    CodeIndexSnapshot, CodePathTombstone, CodeRepositoryRegistration, CodeRepositorySelector,
-    CodeWorkspaceDetectionConfig,
+    CodeIndexResourceBudget, CodeIndexSnapshot, CodePathTombstone, CodeRepositoryRegistration,
+    CodeRepositorySelector, CodeWorkspaceDetectionConfig,
 };
 
 use super::{
@@ -27,8 +28,8 @@ use crate::code::{
     snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
     source::{
         RepositorySourceKind, git_tree_hash_with_submodules, gitlink as source_gitlink,
-        gitlink::paths as source_gitlink_paths, source_bytes_after_content_verification,
-        source_commit_is_filesystem, source_kind,
+        gitlink::paths as source_gitlink_paths, source_batch_bytes_after_content_verification,
+        source_bytes_after_content_verification, source_commit_is_filesystem, source_kind,
     },
 };
 
@@ -91,6 +92,16 @@ pub(super) fn build_incremental_snapshot(
     let effective_path_filters = path_filters.clone();
     let language_filters =
         snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let prefetched_bytes = prefetch_changed_path_bytes(ChangedPathPrefetchRequest {
+        registration,
+        selector,
+        root,
+        commit: &commit,
+        changes: &changes,
+        head_entries: &head_entries,
+        source_layout: &source_layout,
+        previous_source_layout: &previous_source_layout,
+    })?;
     let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
         commit,
@@ -121,6 +132,7 @@ pub(super) fn build_incremental_snapshot(
         source_layout: &source_layout,
         previous_source_layout: &previous_source_layout,
         effective_path_filters: &effective_path_filters,
+        prefetched_bytes: &prefetched_bytes,
     };
 
     for change in changes {
@@ -419,6 +431,72 @@ struct ChangedPathParseContext<'a> {
     source_layout: &'a scope::SourceLayoutDiscovery,
     previous_source_layout: &'a scope::SourceLayoutDiscovery,
     effective_path_filters: &'a [String],
+    prefetched_bytes: &'a BTreeMap<String, Vec<u8>>,
+}
+
+struct ChangedPathPrefetchRequest<'a> {
+    registration: &'a CodeRepositoryRegistration,
+    selector: &'a CodeRepositorySelector,
+    root: &'a Path,
+    commit: &'a str,
+    changes: &'a [GitChange],
+    head_entries: &'a [changes::GitTreeEntry],
+    source_layout: &'a scope::SourceLayoutDiscovery,
+    previous_source_layout: &'a scope::SourceLayoutDiscovery,
+}
+
+fn prefetch_changed_path_bytes(
+    request: ChangedPathPrefetchRequest<'_>,
+) -> Result<BTreeMap<String, Vec<u8>>, CodeIndexError> {
+    let entries = request
+        .head_entries
+        .iter()
+        .map(|entry| (entry.path.as_str(), entry.byte_count))
+        .collect::<BTreeMap<_, _>>();
+    let budget = CodeIndexResourceBudget::default();
+    let mut paths = Vec::new();
+    let mut total_bytes = 0usize;
+    for path in request.changes.iter().filter_map(changed_head_path) {
+        let Some(byte_count) = entries.get(path).copied() else {
+            continue;
+        };
+        if !path_is_selected_with_layout(
+            path,
+            request.registration,
+            request.selector,
+            request.source_layout,
+        ) && !path_is_selected_with_layout(
+            path,
+            request.registration,
+            request.selector,
+            request.previous_source_layout,
+        ) {
+            continue;
+        }
+        if paths.iter().any(|selected| selected == path) {
+            continue;
+        }
+        if !paths.is_empty()
+            && (paths.len() >= budget.max_files_per_batch
+                || total_bytes.saturating_add(byte_count) > budget.max_bytes_per_batch)
+        {
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(byte_count);
+        paths.push(path.to_owned());
+    }
+    let blobs =
+        source_batch_bytes_after_content_verification(request.root, request.commit, &paths, None)?;
+
+    Ok(paths.into_iter().zip(blobs).collect())
+}
+
+fn changed_head_path(change: &GitChange) -> Option<&str> {
+    match change {
+        GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => Some(path),
+        GitChange::Renamed { new_path, .. } | GitChange::Copied { new_path, .. } => Some(new_path),
+        GitChange::Deleted { .. } => None,
+    }
 }
 
 fn parse_changed_path(
@@ -439,7 +517,15 @@ fn parse_changed_path(
     ) {
         return Ok(());
     }
-    let bytes = source_bytes_after_content_verification(context.root, &build.commit, path, None)?;
+    let bytes = match context.prefetched_bytes.get(path) {
+        Some(bytes) => Cow::Borrowed(bytes.as_slice()),
+        None => Cow::Owned(source_bytes_after_content_verification(
+            context.root,
+            &build.commit,
+            path,
+            None,
+        )?),
+    };
     let blob_hash = stable_content_hash(&bytes);
     if context.previous_hashes.get(path) == Some(&blob_hash) {
         build.skipped_unchanged_count += 1;
