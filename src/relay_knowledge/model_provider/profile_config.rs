@@ -4,7 +4,136 @@ use std::collections::BTreeSet;
 
 use reqwest::header::{HeaderName, HeaderValue};
 
+use super::profile::{
+    DEFAULT_PROFILE_NAME, StoredModelProfile, StoredProfileFile, default_connect_timeout_seconds,
+    default_temperature, default_top_p,
+};
 use super::*;
+use crate::retrieval::{EmbeddingProviderKind, ReadModelBackendConfig};
+
+impl ModelRequestHeader {
+    pub(super) fn normalized(mut self) -> Result<Self, ModelProviderError> {
+        self.name = non_empty_string(self.name, "header name")?;
+        self.value = self
+            .value
+            .and_then(|value| non_empty_string(value, "header value").ok());
+        self.configured = self.configured || self.value.is_some();
+        Ok(self)
+    }
+}
+
+impl StoredModelProfile {
+    pub(super) fn from_save_request(
+        request: ModelProfileSaveRequest,
+        existing: Option<&Self>,
+    ) -> Result<Self, ModelProviderError> {
+        validate_sampling(
+            request.temperature,
+            request.top_p,
+            request.connect_timeout_seconds,
+        )?;
+        let provider = request.provider;
+        let model = non_empty_string(request.model, "model")?;
+        let base_url = normalized_base_url(provider, request.base_url)?;
+        let api_key = if request.clear_api_key {
+            None
+        } else {
+            match request.api_key {
+                Some(value) => non_empty_string(value, "api_key").ok(),
+                None => existing.and_then(|profile| profile.api_key.clone()),
+            }
+        };
+        let headers = if request.headers.is_empty() {
+            existing
+                .map(|profile| profile.headers.clone())
+                .unwrap_or_default()
+        } else {
+            validate_headers(
+                request.headers,
+                existing.map(|profile| profile.headers.as_slice()),
+            )?
+        };
+        if !provider_allows_missing_auth(provider)
+            && api_key.is_none()
+            && !headers.iter().any(|header| header.configured)
+        {
+            return Err(ModelProviderError::InvalidInput(
+                "model profile requires api_key or at least one configured header".to_owned(),
+            ));
+        }
+
+        Ok(Self {
+            provider,
+            model,
+            base_url,
+            api_key,
+            headers,
+            ssl_verify: request
+                .ssl_verify
+                .or_else(|| existing.and_then(|profile| profile.ssl_verify)),
+            context_window: request.context_window,
+            max_tokens: request.max_tokens,
+            temperature: request.temperature,
+            top_p: request.top_p,
+            connect_timeout_seconds: request.connect_timeout_seconds,
+            capabilities: request.capabilities.unwrap_or_else(|| {
+                existing
+                    .map(|profile| profile.capabilities.clone())
+                    .unwrap_or_default()
+            }),
+            fallback_policy_id: request.fallback_policy_id.and_then(normalize_optional),
+            fallback_priority: request.fallback_priority,
+            catalog_provider_id: request.catalog_provider_id.and_then(normalize_optional),
+            catalog_provider_name: request.catalog_provider_name.and_then(normalize_optional),
+            catalog_model_name: request.catalog_model_name.and_then(normalize_optional),
+            is_default: request.is_default,
+            source: "config".to_owned(),
+        })
+    }
+
+    pub(super) fn from_runtime(retrieval: &ReadModelBackendConfig) -> Option<Self> {
+        let remote = retrieval.remote_embedding.as_ref()?;
+        Some(Self {
+            provider: match remote.provider {
+                EmbeddingProviderKind::OpenAiCompatible => ModelProviderKind::OpenAiCompatible,
+                EmbeddingProviderKind::Echo => ModelProviderKind::Echo,
+            },
+            model: retrieval.vector_model.name.clone(),
+            base_url: remote.base_url.clone(),
+            api_key: Some(remote.api_key.clone()),
+            headers: Vec::new(),
+            ssl_verify: None,
+            context_window: None,
+            max_tokens: None,
+            temperature: default_temperature(),
+            top_p: default_top_p(),
+            connect_timeout_seconds: default_connect_timeout_seconds(),
+            capabilities: ModelCapabilities {
+                input: ModelModalityMatrix {
+                    text: Some(true),
+                    image: None,
+                    audio: None,
+                    video: None,
+                    pdf: None,
+                },
+                output: ModelModalityMatrix {
+                    text: Some(true),
+                    image: None,
+                    audio: None,
+                    video: None,
+                    pdf: None,
+                },
+            },
+            fallback_policy_id: None,
+            fallback_priority: 0,
+            catalog_provider_id: None,
+            catalog_provider_name: None,
+            catalog_model_name: None,
+            is_default: true,
+            source: "environment".to_owned(),
+        })
+    }
+}
 
 pub(super) fn profile_response(
     file: Option<StoredProfileFile>,
@@ -189,14 +318,6 @@ pub(super) fn normalize_optional(value: String) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-pub(super) fn default_temperature() -> f64 {
-    0.7
-}
-
-pub(super) fn default_top_p() -> f64 {
-    1.0
-}
-
-pub(super) fn default_connect_timeout_seconds() -> f64 {
-    DEFAULT_CONNECT_TIMEOUT_SECONDS
-}
+#[cfg(test)]
+#[path = "profile_config_tests.rs"]
+mod tests;

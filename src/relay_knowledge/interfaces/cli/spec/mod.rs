@@ -54,14 +54,10 @@ macro_rules! command {
     };
 }
 
-#[path = "data.rs"]
-mod cli_spec_data;
-#[path = "files.rs"]
-mod cli_spec_files;
-#[path = "repo.rs"]
-mod cli_spec_repo;
-#[path = "repo_set.rs"]
-mod cli_spec_repo_set;
+mod data;
+mod files;
+mod repo;
+mod repo_set;
 
 const CLI_SPEC_SCHEMA_VERSION: u16 = 2;
 
@@ -184,7 +180,7 @@ pub(super) fn cli_spec() -> CliSpec {
                 &[],
             ),
         ],
-        commands: cli_spec_data::command_specs(),
+        commands: data::command_specs(),
     }
 }
 

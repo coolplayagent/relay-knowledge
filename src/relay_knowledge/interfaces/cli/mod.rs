@@ -1,45 +1,28 @@
 //! CLI adapter for the shared application service.
 
-#[path = "grammar.rs"]
-mod cli_grammar;
-#[path = "render/mod.rs"]
-mod cli_render;
-#[path = "spec/mod.rs"]
-mod cli_spec;
-#[path = "command/mod.rs"]
 mod command;
-#[path = "files.rs"]
-mod files_cli;
-#[path = "knowledge.rs"]
-mod knowledge_cli;
-#[path = "map.rs"]
-pub(crate) mod map_cli;
-#[path = "operations.rs"]
-mod ops_cli;
-#[path = "remote.rs"]
-mod remote_cli;
-#[path = "repo/mod.rs"]
-mod repo_cli;
-#[path = "repo/view.rs"]
-pub(crate) mod repo_cli_view;
-#[path = "repo_set/mod.rs"]
-mod repo_set_cli;
-#[path = "runtime/mod.rs"]
+mod files;
+mod grammar;
+mod knowledge;
+pub(crate) mod map;
+mod operations;
+mod remote;
+mod render;
+mod repo;
+mod repo_set;
 mod runtime;
-#[path = "service.rs"]
-mod service_cli;
-#[path = "setup/mod.rs"]
-mod setup_cli;
-#[path = "version.rs"]
-mod version_cli;
+mod service;
+mod setup;
+mod spec;
+mod version;
 
 use crate::{
     api::ServicePlanRequest,
     domain::{FreshnessPolicy, IndexKind, ProposalState, WorkerKind},
 };
 
-use cli_render::{render_response, serialize_line};
 pub use command::{CliDiagnostic, CliError};
+use render::{render_response, serialize_line};
 pub(crate) use runtime::run_command;
 pub use runtime::run_with_service;
 
@@ -114,7 +97,7 @@ pub enum CliAction {
     IndexRefresh {
         kinds: Vec<IndexKind>,
     },
-    Map(map_cli::MapCommand),
+    Map(map::MapCommand),
     WorkerStatus {
         kind: Option<WorkerKind>,
     },
@@ -148,8 +131,8 @@ pub enum CliAction {
         limit: usize,
     },
     ProviderProbe,
-    Repo(repo_cli::RepoCommand),
-    RepoSet(repo_set_cli::RepoSetCommand),
+    Repo(repo::RepoCommand),
+    RepoSet(repo_set::RepoSetCommand),
     Health,
     ServiceStatus,
     ServicePlan(ServicePlanRequest),
@@ -166,7 +149,7 @@ pub enum CliAction {
     },
     SetupDoctor,
     SetupProfile {
-        profile: setup_cli::SetupProfile,
+        profile: setup::SetupProfile,
     },
     Version,
     VersionCheck,
@@ -218,11 +201,11 @@ where
     S: Into<String>,
 {
     let command = CliCommand::parse(args).ok()?;
-    version_cli::update_notice_for_process(&command, interactive_text_output).await
+    version::update_notice_for_process(&command, interactive_text_output).await
 }
 
 #[cfg(test)]
-use service_cli::ensure_web_remote_bind_allowed;
+use service::ensure_web_remote_bind_allowed;
 
 #[cfg(test)]
 #[path = "tests/naming.rs"]

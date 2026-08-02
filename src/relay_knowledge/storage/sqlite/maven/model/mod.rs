@@ -1,23 +1,40 @@
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::storage::StorageError;
 
 use super::{pom_path::relative_pom_path, property_interpolation::interpolate};
 
-mod effective;
+mod contracts;
+mod coordinates;
+mod dependencies;
 mod parse;
+mod plugins;
+mod properties;
 
-use effective::{
-    ProfileDependencyContext, ProfilePluginContext, dedupe_dependencies, dedupe_plugins,
-    dependency_management_keys, effective_dependency, effective_plugin, inherited_plugin_for_child,
-    insert_project_properties, parent_properties, project_coordinates, push_dependency_management,
-    push_imported_dependency_management, push_or_merge_plugin, push_or_replace_dependency,
-    push_profile_dependency_variant, push_profile_plugin_variant, raw_dependency_is_bom,
-    raw_plugin_execution_inherited, raw_plugin_inherited, raw_plugin_key,
+#[cfg(test)]
+mod coordinates_tests;
+#[cfg(test)]
+mod dependencies_tests;
+#[cfg(test)]
+mod plugins_tests;
+
+pub(super) use contracts::{
+    EffectiveDependency, EffectiveGoal, EffectivePlugin, EffectivePluginExecution, EffectivePom,
+    EffectiveProfile, ParentPom, PomDocument, RawDependency, RawPlugin, RawPluginExecution, RawPom,
+    RawProfile, ResolvedPomLoad, TaggedValue,
+};
+
+use coordinates::{insert_project_properties, parent_properties, project_coordinates};
+use dependencies::{
+    ProfileDependencyContext, dedupe_dependencies, dependency_management_keys,
+    effective_dependency, push_dependency_management, push_imported_dependency_management,
+    push_or_replace_dependency, push_profile_dependency_variant, raw_dependency_is_bom,
     resolved_management_dependency,
+};
+use plugins::{
+    ProfilePluginContext, dedupe_plugins, effective_plugin, inherited_plugin_for_child,
+    push_or_merge_plugin, push_profile_plugin_variant, raw_plugin_execution_inherited,
+    raw_plugin_inherited, raw_plugin_key,
 };
 
 pub(super) const JVM_LANGUAGES: [&str; 3] = ["java", "kotlin", "scala"];
@@ -58,359 +75,9 @@ pub(super) fn resolve_effective_model_load(
     })
 }
 
-pub(super) struct ResolvedPomLoad {
-    pub(super) models: Vec<EffectivePom>,
-    pub(super) preserve_existing_facts: bool,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct PomDocument {
-    pub(super) repository_id: String,
-    pub(super) source_scope: String,
-    pub(super) file_id: String,
-    pub(super) path: String,
-    pub(super) content: String,
-    pub(super) byte_start: u64,
-    pub(super) byte_end: u64,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct EffectivePom {
-    pub(super) document: PomDocument,
-    pub(super) group_id: String,
-    pub(super) artifact_id: String,
-    pub(super) version: Option<String>,
-    pub(super) coordinate: String,
-    pub(super) packaging: Option<String>,
-    pub(super) modules: Vec<TaggedValue>,
-    pub(super) profiles: Vec<EffectiveProfile>,
-    pub(super) plugins: Vec<EffectivePlugin>,
-    pub(super) dependencies: Vec<EffectiveDependency>,
-    pub(super) languages: Vec<&'static str>,
-    pub(super) line: u32,
-    dependency_management: BTreeMap<String, RawDependency>,
-    plugin_management: BTreeMap<String, RawPlugin>,
-    properties: BTreeMap<String, String>,
-}
-
-impl EffectivePom {
-    pub(super) fn packaging_phase(&self) -> &str {
-        match self.packaging.as_deref() {
-            Some("pom") => "validate",
-            _ => "package",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct EffectiveProfile {
-    pub(super) id: String,
-    pub(super) line: u32,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct EffectivePlugin {
-    pub(super) artifact_id: String,
-    pub(super) version: Option<String>,
-    pub(super) executions: Vec<EffectivePluginExecution>,
-    pub(super) line: u32,
-    pub(super) source_path: String,
-    pub(super) coordinate: String,
-    pub(super) profile: Option<String>,
-    inherited: bool,
-}
-
-impl EffectivePlugin {
-    pub(super) fn prefix(&self) -> String {
-        let artifact = self.artifact_id.as_str();
-        if let Some(core) = artifact
-            .strip_prefix("maven-")
-            .and_then(|value| value.strip_suffix("-plugin"))
-        {
-            return core.to_owned();
-        }
-        if let Some(third_party) = artifact.strip_suffix("-maven-plugin") {
-            return third_party.to_owned();
-        }
-        artifact
-            .strip_suffix("-plugin")
-            .unwrap_or(artifact)
-            .to_owned()
-    }
-
-    pub(super) fn scoped_name(&self, name: &str) -> String {
-        self.profile
-            .as_ref()
-            .map(|profile| format!("profile:{profile}:{name}"))
-            .unwrap_or_else(|| name.to_owned())
-    }
-
-    pub(super) fn command(&self, target: &str) -> String {
-        self.profile
-            .as_ref()
-            .map(|profile| format!("mvn -P{profile} {target}"))
-            .unwrap_or_else(|| format!("mvn {target}"))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct EffectivePluginExecution {
-    pub(super) id: Option<String>,
-    pub(super) phase: Option<String>,
-    pub(super) goals: Vec<EffectiveGoal>,
-    pub(super) line: u32,
-    pub(super) source_path: String,
-    inherited: bool,
-}
-
-impl EffectivePluginExecution {
-    pub(super) fn name(&self) -> Cow<'_, str> {
-        self.id.as_deref().map(Cow::Borrowed).unwrap_or_else(|| {
-            Cow::Owned(self.phase.clone().unwrap_or_else(|| "default".to_owned()))
-        })
-    }
-
-    pub(super) fn command(&self, plugin: &EffectivePlugin) -> Option<String> {
-        self.phase
-            .as_ref()
-            .map(|phase| plugin.command(phase))
-            .or_else(|| {
-                self.goals.first().map(|goal| {
-                    let target = format!("{}:{}", plugin.prefix(), goal.value);
-                    plugin.command(&target)
-                })
-            })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct EffectiveGoal {
-    pub(super) value: String,
-    pub(super) line: u32,
-    pub(super) source_path: String,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct EffectiveDependency {
-    pub(super) group_id: String,
-    pub(super) artifact_id: String,
-    pub(super) version: Option<String>,
-    scope: Option<String>,
-    dep_type: Option<String>,
-    classifier: Option<String>,
-    optional: Option<String>,
-    profile: Option<String>,
-    pub(super) line: u32,
-    pub(super) source_file_id: String,
-    pub(super) source_path: String,
-}
-
-impl EffectiveDependency {
-    pub(super) fn coordinate(&self) -> String {
-        format!("{}:{}", self.group_id, self.artifact_id)
-    }
-
-    pub(super) fn dependency_group(&self) -> String {
-        let base =
-            if self.dep_type.as_deref() == Some("pom") && self.scope.as_deref() == Some("import") {
-                "bom"
-            } else {
-                self.scope.as_deref().unwrap_or("compile")
-            };
-        match &self.profile {
-            Some(profile) => format!("profile:{profile}:{base}"),
-            None => base.to_owned(),
-        }
-    }
-
-    pub(super) fn excerpt(&self, package_name: &str) -> String {
-        let version = self.version.as_deref().unwrap_or("unversioned");
-        let optional = self
-            .optional
-            .as_deref()
-            .filter(|value| *value == "true")
-            .map(|_| " optional")
-            .unwrap_or_default();
-        format!(
-            "{package_name} {version}{} group={}",
-            optional,
-            self.dependency_group()
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RawPom {
-    document: PomDocument,
-    group_id: Option<TaggedValue>,
-    artifact_id: Option<TaggedValue>,
-    version: Option<TaggedValue>,
-    packaging: Option<TaggedValue>,
-    parent: Option<ParentPom>,
-    properties: BTreeMap<String, TaggedValue>,
-    modules: Vec<TaggedValue>,
-    dependencies: Vec<RawDependency>,
-    dependency_management: Vec<RawDependency>,
-    plugins: Vec<RawPlugin>,
-    plugin_management: Vec<RawPlugin>,
-    profiles: Vec<RawProfile>,
-}
-
-impl RawPom {
-    fn coordinate_hint(&self) -> Option<String> {
-        let mut properties = self.local_properties();
-        for profile in self
-            .profiles
-            .iter()
-            .filter(|profile| profile.active_by_default)
-        {
-            merge_profile_properties(&mut properties, profile);
-        }
-        let group_id = self.group_id.as_ref().or(self
-            .parent
-            .as_ref()
-            .and_then(|parent| parent.group_id.as_ref()))?;
-        let artifact_id = self.artifact_id.as_ref()?;
-        let version = self.version.as_ref().or(self
-            .parent
-            .as_ref()
-            .and_then(|parent| parent.version.as_ref()))?;
-        Some(format!(
-            "{}:{}:{}",
-            interpolate(&group_id.value, &properties),
-            interpolate(&artifact_id.value, &properties),
-            interpolate(&version.value, &properties)
-        ))
-    }
-
-    fn local_properties(&self) -> BTreeMap<String, String> {
-        self.properties
-            .iter()
-            .map(|(key, value)| (key.clone(), value.value.clone()))
-            .collect()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ParentPom {
-    group_id: Option<TaggedValue>,
-    artifact_id: Option<TaggedValue>,
-    version: Option<TaggedValue>,
-    relative_path: Option<TaggedValue>,
-    line: u32,
-}
-
-impl ParentPom {
-    fn coordinate(&self, properties: &BTreeMap<String, String>) -> Option<String> {
-        Some(format!(
-            "{}:{}:{}",
-            interpolate(&self.group_id.as_ref()?.value, properties),
-            interpolate(&self.artifact_id.as_ref()?.value, properties),
-            interpolate(&self.version.as_ref()?.value, properties)
-        ))
-    }
-}
-
-fn insert_declared_parent_properties(
-    properties: &mut BTreeMap<String, String>,
-    declared_parent: Option<&ParentPom>,
-    resolved_parent: Option<&EffectivePom>,
-) {
-    let group_id = declared_parent
-        .and_then(|parent| parent.group_id.as_ref())
-        .map(|value| interpolate(&value.value, properties))
-        .or_else(|| resolved_parent.map(|parent| parent.group_id.clone()));
-    let artifact_id = declared_parent
-        .and_then(|parent| parent.artifact_id.as_ref())
-        .map(|value| interpolate(&value.value, properties))
-        .or_else(|| resolved_parent.map(|parent| parent.artifact_id.clone()));
-    let version = declared_parent
-        .and_then(|parent| parent.version.as_ref())
-        .map(|value| interpolate(&value.value, properties))
-        .or_else(|| resolved_parent.and_then(|parent| parent.version.clone()));
-    insert_parent_property(properties, "groupId", group_id);
-    insert_parent_property(properties, "artifactId", artifact_id);
-    insert_parent_property(properties, "version", version);
-}
-
-fn insert_parent_property(
-    properties: &mut BTreeMap<String, String>,
-    name: &str,
-    value: Option<String>,
-) {
-    if let Some(value) = value {
-        properties.insert(format!("project.parent.{name}"), value.clone());
-        properties.insert(format!("pom.parent.{name}"), value);
-    }
-}
-
-fn resolved_profile_properties(
-    base: &BTreeMap<String, String>,
-    profile: &RawProfile,
-) -> BTreeMap<String, String> {
-    let mut profile_properties = base.clone();
-    merge_profile_properties(&mut profile_properties, profile);
-    profile_properties
-}
-
-fn merge_profile_properties(properties: &mut BTreeMap<String, String>, profile: &RawProfile) {
-    let mut merged = properties.clone();
-    for (key, value) in &profile.properties {
-        merged.insert(key.clone(), value.value.clone());
-    }
-    for (key, value) in &profile.properties {
-        properties.insert(key.clone(), interpolate(&value.value, &merged));
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RawProfile {
-    id: TaggedValue,
-    active_by_default: bool,
-    properties: BTreeMap<String, TaggedValue>,
-    dependencies: Vec<RawDependency>,
-    dependency_management: Vec<RawDependency>,
-    plugins: Vec<RawPlugin>,
-    plugin_management: Vec<RawPlugin>,
-}
-
-#[derive(Debug, Clone)]
-struct RawPlugin {
-    group_id: Option<TaggedValue>,
-    artifact_id: Option<TaggedValue>,
-    version: Option<TaggedValue>,
-    inherited: Option<TaggedValue>,
-    executions: Vec<RawPluginExecution>,
-    line: u32,
-    source_path: String,
-}
-
-#[derive(Debug, Clone)]
-struct RawPluginExecution {
-    id: Option<TaggedValue>,
-    phase: Option<TaggedValue>,
-    inherited: Option<TaggedValue>,
-    goals: Vec<TaggedValue>,
-    line: u32,
-}
-
-#[derive(Debug, Clone)]
-struct RawDependency {
-    group_id: Option<TaggedValue>,
-    artifact_id: Option<TaggedValue>,
-    version: Option<TaggedValue>,
-    scope: Option<TaggedValue>,
-    dep_type: Option<TaggedValue>,
-    classifier: Option<TaggedValue>,
-    optional: Option<TaggedValue>,
-    line: u32,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct TaggedValue {
-    pub(super) value: String,
-    pub(super) line: u32,
-}
+use properties::{
+    insert_declared_parent_properties, merge_profile_properties, resolved_profile_properties,
+};
 
 struct EffectiveResolver {
     raw_models: BTreeMap<String, RawPom>,

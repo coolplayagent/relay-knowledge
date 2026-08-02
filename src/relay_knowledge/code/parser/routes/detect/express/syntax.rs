@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::super::javascript::find_javascript_pattern_outside_strings;
+use super::super::lexical::javascript::find_javascript_pattern_outside_strings;
 use super::arguments::extract_quoted_string;
 
 pub(super) fn express_method_position(line: &str) -> Option<usize> {

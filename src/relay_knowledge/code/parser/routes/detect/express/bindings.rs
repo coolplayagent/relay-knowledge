@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::super::javascript::{
+use super::super::lexical::javascript::{
     find_javascript_pattern_outside_strings, javascript_code_lines_without_comments,
 };
 

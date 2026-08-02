@@ -5,9 +5,12 @@ use crate::{
 };
 
 use super::{
-    CliError, OutputFormat,
-    command::{parse_freshness, value_after},
-    render_response,
+    super::{
+        CliError, OutputFormat,
+        command::{parse_freshness, value_after},
+        render_response,
+    },
+    selector,
 };
 
 /// Parsed `repo view` command.
@@ -111,7 +114,7 @@ pub(crate) fn request(
     format: OutputFormat,
 ) -> Result<CodebaseViewRequest, CliError> {
     CodebaseViewRequest::new(
-        super::repo_cli::selector(
+        selector(
             command.alias,
             command.ref_selector,
             command.path_filters,

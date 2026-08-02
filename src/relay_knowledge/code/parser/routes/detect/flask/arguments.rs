@@ -1,4 +1,4 @@
-use super::super::python_strings::extract_quoted_string_python;
+use super::super::lexical::python_strings::extract_quoted_string_python;
 
 pub(super) const DYNAMIC_PYTHON_MOUNT_PREFIX: &str = "\0dynamic";
 

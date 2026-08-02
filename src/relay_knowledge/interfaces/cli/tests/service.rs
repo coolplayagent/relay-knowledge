@@ -60,7 +60,7 @@ async fn service_repo_set_refresh_loop_drains_queued_overlay_tasks() {
     assert!(queued.task.is_some());
 
     let (shutdown, shutdown_receiver) = tokio::sync::watch::channel(false);
-    let worker = tokio::spawn(super::service_cli::run_code_repository_set_refresh_loop(
+    let worker = tokio::spawn(super::service::run_code_repository_set_refresh_loop(
         service.clone(),
         Duration::from_millis(10),
         shutdown_receiver,
@@ -99,7 +99,7 @@ async fn service_code_index_worker_pool_uses_configured_parallelism() {
     );
     let (shutdown, shutdown_receiver) = tokio::sync::watch::channel(false);
 
-    let workers = super::service_cli::run_code_index_worker_pool(
+    let workers = super::service::run_code_index_worker_pool(
         service,
         3,
         Duration::from_millis(10),

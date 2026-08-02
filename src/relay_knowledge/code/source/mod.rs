@@ -12,7 +12,7 @@ mod repository;
 pub(in crate::code) mod resolution;
 pub(crate) mod roots;
 
-use crate::code::{CodeIndexError, ids, languages, parser, snapshot};
+use crate::code::{CodeIndexError, ids, languages, parser};
 use filters as source_paths;
 use gitlink as source_gitlink;
 use layout as scope;

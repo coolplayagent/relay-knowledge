@@ -3,13 +3,215 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use super::profile::{StoredModelProfile, redacted_url};
 use super::*;
 use crate::net::{
-    http::{QosHttpClientError, QosHttpResponse, send_request_with_qos},
+    http::{HttpConfig, QosHttpClientError, QosHttpResponse, send_request_with_qos},
     qos::{QosPolicy, QosRuntime},
 };
+use crate::retrieval::ReadModelBackendConfig;
+
+/// Request for profile-aware model connectivity checks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelConnectivityProbeRequest {
+    pub profile_name: Option<String>,
+    pub override_config: Option<ModelProfileSaveRequest>,
+    pub timeout_ms: Option<u64>,
+}
+
+/// Request for profile-aware model discovery.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelDiscoveryRequest {
+    pub profile_name: Option<String>,
+    pub override_config: Option<ModelProfileSaveRequest>,
+    pub timeout_ms: Option<u64>,
+}
+
+/// Token counts reported by providers that include usage metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelConnectivityTokenUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+}
+
+/// Provider connectivity diagnostics safe for Web display.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelConnectivityDiagnostics {
+    pub endpoint_reachable: bool,
+    pub auth_valid: bool,
+    pub rate_limited: bool,
+}
+
+/// Result of a provider probe request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelConnectivityProbeResult {
+    pub ok: bool,
+    pub provider: ModelProviderKind,
+    pub model: String,
+    pub latency_ms: u64,
+    pub checked_at_ms: u64,
+    pub diagnostics: ModelConnectivityDiagnostics,
+    pub token_usage: Option<ModelConnectivityTokenUsage>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retryable: bool,
+}
+
+/// Discovered provider model with optional metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelDiscoveryEntry {
+    pub model: String,
+    pub context_window: Option<u32>,
+    pub output_limit: Option<u32>,
+    pub capabilities: ModelCapabilities,
+}
+
+/// Result of a model discovery request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelDiscoveryResult {
+    pub ok: bool,
+    pub provider: ModelProviderKind,
+    pub base_url: String,
+    pub latency_ms: u64,
+    pub checked_at_ms: u64,
+    pub diagnostics: ModelConnectivityDiagnostics,
+    pub models: Vec<String>,
+    pub model_entries: Vec<ModelDiscoveryEntry>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retryable: bool,
+}
+
+impl ModelProviderConfigService {
+    pub async fn probe(
+        &self,
+        http: &HttpConfig,
+        retrieval: &ReadModelBackendConfig,
+        request: ModelConnectivityProbeRequest,
+    ) -> Result<ModelConnectivityProbeResult, ModelProviderError> {
+        let qos = QosRuntime::default();
+        let policy = default_qos_policy();
+        self.probe_with_qos(http, &qos, &policy, retrieval, request)
+            .await
+    }
+
+    pub async fn probe_with_qos(
+        &self,
+        http: &HttpConfig,
+        qos: &QosRuntime,
+        policy: &QosPolicy,
+        retrieval: &ReadModelBackendConfig,
+        request: ModelConnectivityProbeRequest,
+    ) -> Result<ModelConnectivityProbeResult, ModelProviderError> {
+        let profile = self
+            .resolve_probe_profile(retrieval, request.profile_name, request.override_config)
+            .await?;
+        let request_timeout = request_timeout_from_ms(request.timeout_ms);
+        let started = Instant::now();
+        let checked_at_ms = now_millis();
+        if profile.provider == ModelProviderKind::Echo {
+            return Ok(ModelConnectivityProbeResult {
+                ok: true,
+                provider: profile.provider,
+                model: profile.model,
+                latency_ms: elapsed_millis(started),
+                checked_at_ms,
+                diagnostics: ok_diagnostics(),
+                token_usage: Some(ModelConnectivityTokenUsage {
+                    prompt_tokens: 4,
+                    completion_tokens: 2,
+                    total_tokens: 6,
+                }),
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            });
+        }
+        if matches!(
+            profile.provider,
+            ModelProviderKind::Maas | ModelProviderKind::Codeagent
+        ) {
+            return Ok(unsupported_probe(profile, started, checked_at_ms));
+        }
+
+        let client = provider_http_client(http, &profile)?;
+        let response =
+            send_probe_request_with_qos(&client, qos, policy, &profile, request_timeout).await;
+        Ok(probe_result_from_http(profile, started, checked_at_ms, response).await)
+    }
+
+    pub async fn discover(
+        &self,
+        http: &HttpConfig,
+        retrieval: &ReadModelBackendConfig,
+        request: ModelDiscoveryRequest,
+    ) -> Result<ModelDiscoveryResult, ModelProviderError> {
+        let qos = QosRuntime::default();
+        let policy = default_qos_policy();
+        self.discover_with_qos(http, &qos, &policy, retrieval, request)
+            .await
+    }
+
+    pub async fn discover_with_qos(
+        &self,
+        http: &HttpConfig,
+        qos: &QosRuntime,
+        policy: &QosPolicy,
+        retrieval: &ReadModelBackendConfig,
+        request: ModelDiscoveryRequest,
+    ) -> Result<ModelDiscoveryResult, ModelProviderError> {
+        let profile = self
+            .resolve_probe_profile(retrieval, request.profile_name, request.override_config)
+            .await?;
+        let request_timeout = request_timeout_from_ms(request.timeout_ms);
+        let started = Instant::now();
+        let checked_at_ms = now_millis();
+        if profile.provider == ModelProviderKind::Echo {
+            return Ok(ModelDiscoveryResult {
+                ok: true,
+                provider: profile.provider,
+                base_url: redacted_url(&profile.base_url),
+                latency_ms: elapsed_millis(started),
+                checked_at_ms,
+                diagnostics: ok_diagnostics(),
+                models: vec![profile.model.clone()],
+                model_entries: vec![ModelDiscoveryEntry {
+                    model: profile.model,
+                    context_window: None,
+                    output_limit: None,
+                    capabilities: ModelCapabilities::default(),
+                }],
+                error_code: None,
+                error_message: None,
+                retryable: false,
+            });
+        }
+        if matches!(
+            profile.provider,
+            ModelProviderKind::Maas | ModelProviderKind::Codeagent
+        ) {
+            return Ok(unsupported_discovery(profile, started, checked_at_ms));
+        }
+
+        let client = provider_http_client(http, &profile)?;
+        let response =
+            send_discovery_request_with_qos(&client, qos, policy, &profile, request_timeout).await;
+        Ok(discovery_result_from_http(profile, started, checked_at_ms, response).await)
+    }
+}
+
+fn default_qos_policy() -> QosPolicy {
+    QosPolicy::new(
+        crate::net::qos::DEFAULT_MAX_CONNECTIONS,
+        crate::net::qos::DEFAULT_MAX_IN_FLIGHT_REQUESTS,
+        crate::net::qos::DEFAULT_MAX_QUEUE_DEPTH,
+    )
+    .expect("default QoS policy should validate")
+}
 
 #[cfg(test)]
 pub(super) async fn send_probe_request(
@@ -18,7 +220,7 @@ pub(super) async fn send_probe_request(
     request_timeout: Option<Duration>,
 ) -> Result<QosHttpResponse, QosHttpClientError> {
     let qos = QosRuntime::default();
-    let policy = default_test_qos_policy();
+    let policy = default_qos_policy();
     send_probe_request_with_qos(client, &qos, &policy, profile, request_timeout).await
 }
 
@@ -87,7 +289,7 @@ pub(super) async fn send_discovery_request(
     request_timeout: Option<Duration>,
 ) -> Result<QosHttpResponse, QosHttpClientError> {
     let qos = QosRuntime::default();
-    let policy = default_test_qos_policy();
+    let policy = default_qos_policy();
     send_discovery_request_with_qos(client, &qos, &policy, profile, request_timeout).await
 }
 
@@ -113,16 +315,6 @@ pub(super) async fn send_discovery_request_with_qos(
         ),
     )
     .await
-}
-
-#[cfg(test)]
-fn default_test_qos_policy() -> QosPolicy {
-    QosPolicy::new(
-        crate::net::qos::DEFAULT_MAX_CONNECTIONS,
-        crate::net::qos::DEFAULT_MAX_IN_FLIGHT_REQUESTS,
-        crate::net::qos::DEFAULT_MAX_QUEUE_DEPTH,
-    )
-    .expect("default QoS policy should validate")
 }
 
 pub(super) fn provider_http_client(
@@ -453,18 +645,6 @@ pub(super) fn ok_diagnostics() -> ModelConnectivityDiagnostics {
     }
 }
 
-pub(super) fn redacted_url(value: &str) -> String {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return value.to_owned();
-    };
-    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let (authority, suffix) = rest.split_at(authority_end);
-    authority
-        .rsplit_once('@')
-        .map(|(_, host)| format!("{scheme}://{host}{suffix}"))
-        .unwrap_or_else(|| value.to_owned())
-}
-
 pub(super) fn request_timeout_from_ms(timeout_ms: Option<u64>) -> Option<Duration> {
     timeout_ms.map(Duration::from_millis)
 }
@@ -482,3 +662,7 @@ pub(super) fn now_millis() -> u64 {
     )
     .unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+#[path = "connectivity_tests.rs"]
+mod tests;

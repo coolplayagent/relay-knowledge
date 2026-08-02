@@ -21,6 +21,8 @@ The foundational runtime layer separates environment, paths, networking, QoS, an
 
 Business modules receive typed config and must not call `std::env`.
 
+`application::runtime` composes the typed snapshot but does not own every domain parser in one file. Its `retrieval` owner exclusively validates semantic/vector backend modes, rerank policy, remote embedding provider metadata, model names, dimensions, batching, concurrency, and timeouts. Its `file_index` owner exclusively resolves authorized roots, normalizes platform paths, derives stable root identities, and validates scan/query budgets. Its `worker` owner exclusively validates external worker endpoints, bounds general and code-index concurrency, and maps worker kinds to configured endpoints. Its `agent` owner exclusively validates the MCP endpoint, comma-separated origin and scope policy, request runtime budget, and audit queue settings. Its `storage` owner exclusively parses the supported single-database and partitioned-SQLite topology choices. Tests attach directly to these owners; the runtime root only maps their stable errors into bootstrap composition.
+
 ## 3. Path Boundary
 
 `paths` is the only module that constructs runtime paths. Defaults follow platform conventions and keep configuration, data, logs, cache, temporary files, dead letters, and service definitions separate.

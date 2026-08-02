@@ -4,14 +4,14 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 
 use crate::{domain::CodeRepositoryRemovalSummary, storage::StorageError};
 
-use super::{code_cleanup::delete_scope_index, code_status};
+use super::{cleanup::delete_scope_index, status};
 
-pub(super) fn remove_repository(
+pub(in crate::storage::sqlite::code) fn remove_repository(
     connection: &mut Connection,
     repository: &str,
     now_ms: u64,
 ) -> Result<Option<CodeRepositoryRemovalSummary>, StorageError> {
-    let Some(status) = code_status::repository_status(connection, repository)? else {
+    let Some(status) = status::repository_status(connection, repository)? else {
         return Ok(None);
     };
     let repository_id = status.repository_id;

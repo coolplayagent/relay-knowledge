@@ -97,12 +97,12 @@ change CLI, service, Web, indexing, retrieval, or release workflow behavior.
   temporal/community context, freshness metadata, truncation state, and ranking
   explanations.
 - Structured graph facts for evidence, entities, typed relations, claims,
-  events, source spans, confidence, graph versions, and accepted/proposed
-  grounding status.
-- Code repository registration, tree-sitter indexing, full and incremental
-  refresh, worktree overlay indexing, symbol/reference/chunk retrieval, impact
-  analysis, and thin multi-repository `repo-set` overlay queries without
-  copying base facts.
+  events, source spans, confidence, graph versions, and accepted/proposed grounding status;
+  `domain/graph/{multimodal,mutation,retrieval}/` keeps each contract with its direct tests.
+- Code repository registration, tree-sitter indexing, full/incremental refresh,
+  worktree overlays, retrieval, context, freshness, scope, impact, and software projection live in named application subdomains;
+  physical repo-set membership, freshness, refresh, status, and query owners avoid copied base facts, while `interfaces/code_index_mode/`
+  shares worktree semantics across CLI/Web; content/language/generated primitives, symbol/reference identity, source snapshots, verified blobs, safe filesystem access, and hashes have physical owners/tests.
 - Optional monorepo workspace detection for pnpm workspaces, Go workspaces
   (`go.work`), and Cargo workspace members. When `CodeIndexRequest`
   enables workspace detection, cross-repository import resolution maps
@@ -111,30 +111,30 @@ change CLI, service, Web, indexing, retrieval, or release workflow behavior.
   cross-repo references. CLI indexing keeps the default disabled, so
   single-repository indexing paths are completely unaffected. Ecosystem,
   workspace-format, manifest, package-prefix, and import-statement
-  normalization rules are isolated in the storage `code_workspace::ecosystem`
-  owner with direct sibling tests; SQLite set, mapping, and cross-edge
-  orchestration remain in the workspace facade.
+  normalization rules are isolated in `code::workspace::ecosystem`; automatic
+  set lifecycle/status, package mapping, cross-edge resolution, and target-file
+  selection have paired-test owners; the facade only coordinates their acyclic workflow.
 - Software global projection for repository-scoped files, documentation topics,
   config/code relationships, dependencies, and unresolved SDK/API usage, exposed
   through `repo software` without query-time repository scans. Deterministic
   knowledge-map, documentation, dependency/build manifest, deployment, test,
   template, configuration, and source classification is isolated in the
-  SQLite software `file_role` owner with direct sibling tests.
+  SQLite software `file_role` owner with direct sibling tests. The software root is a declaration-only facade: physical `projection/`, `query_scope/`, and `schema/` owners contain refresh/read orchestration, bounded scope/filter SQL, and projection schema lifecycle with direct tests; `software::graph` separates file, topic, and relationship materialization/query/mapping into directly tested owners; `software::dependency_usage::python` is declared from its matching physical `python.rs` owner without a production path redirect; the `software/lifecycle/` directory separates build, infrastructure-as-code, design, indexed-document, and shared syntax owners behind a small orchestration facade.
 - Local file-location indexing without Everything, Spotlight, Windows Search,
-  locate, or other external search software: explicitly scan authorized roots
-  and use SQLite/FTS5 to quickly find files by name, path, extension, and
-  directory.
-- Bounded index refresh queues, persistent leases, retry/dead-letter handling,
-  startup reconciliation, stale diagnostics, and scoped cursor metadata.
+  locate, or other external search software: explicitly scan authorized roots;
+  the physical `file_index/scanner/` owner isolates bounded filesystem work and
+  its unit contract, while SQLite/FTS5 serves name, path, extension, and directory queries.
+- Bounded index refresh queues whose physical SQLite `metadata/`, `cursor_metadata/`,
+  `diagnostics/`, and `task_queue/` owners separate codecs, cursor identity, observability, and lease-fenced transitions with direct tests.
 - Worker queues, deterministic fallback proposals, manual proposal acceptance,
-  persistent audit events, silent-update operator state, and service definition
-  generation for platform service managers.
+  persistent audit events, silent-update operator state, and service definition generation; physical version-check subdomains pair config, cache,
+  SemVer, release aggregation, and notice workflow with direct tests, then use a technology-neutral release-metadata port backed by bounded QoS-aware HTTP transport.
 - Service deployment topologies documenting `embedded_cli`,
   `resident_single_process`, `resident_partitioned_sqlite`, and future split
   worker control-plane/data-plane boundaries.
-- MCP Streamable HTTP and local ACP adapter access through the shared
-  application service, with scope policy, QoS admission, cancellation,
-  resources/prompts, durable audit metadata, and OTLP-ready agent metrics.
+- MCP Streamable HTTP and local ACP adapter access through the shared application service, with scope policy, QoS admission, cancellation,
+  resources/prompts, durable audit metadata, and OTLP-ready agent metrics; the foundational HTTP and QoS owners are physically grouped in
+  `net/http/` and `net/qos/`, with their unit contracts colocated in each subdomain.
 - Real OTLP HTTP/protobuf traces and metrics export for resident service mode,
   with local diagnostics when Collector export fails.
 - Static Web diagnostics, categorized agent/model settings, persisted model
@@ -201,13 +201,14 @@ Use the repository scripts by responsibility:
 ./check.sh
 ```
 
-The reusable domain model keeps its public `domain::*` facade while its physical
-ownership follows `domain/core`, `domain/graph`, `domain/code`,
-`domain/knowledge`, and `domain/operations`. These are real Rust modules with
-acyclic dependencies, not production path aliases. Validating domain owners
-attach their sibling unit-test files directly, so repository registration,
-scope identity, retrieval requests, repository status, and index summaries do
-not share a catch-all test module.
+The reusable domain model keeps its public `domain::*` facade while physical
+ownership follows five acyclic domain directories. `domain/operations/runtime/`
+owns worker, proposal, audit, service-operator, and lifecycle contracts with direct
+tests; `software/` groups request, dependency, graph, lifecycle, projection, and
+validation owners behind the operations facade. Shared API operation contracts
+live under `api/operations`, while stable request, response, status, and streaming
+contracts live under `api/contracts`; both roots only re-export named subdomains.
+The code domain likewise groups call-target policy, context, dependencies, graph records, repository contracts, index state, repository sets, staleness, views, and workspaces into directly tested physical owners instead of sharing flat implementation or test files.
 
 ### Self-Iteration Harness
 
@@ -283,20 +284,21 @@ workloads.
 ### Runtime and Storage
 
 The binary starts a Tokio runtime, and the shared application service exposes
-async entrypoints from the CLI boundary inward. SQLite storage is opened through
-the storage boundary, and blocking database work is isolated behind Tokio
-blocking workers.
+async entrypoints from the CLI boundary inward. `application::runtime::status` owns runtime/API diagnostic projection with direct sibling tests. Physical `storage/contracts/` owners separate async errors, topology, graph, search, health, index, operational requests, code graph, canvas, repository code, and file-index contracts behind the stable root facade.
+SQLite storage is opened through that boundary; `sqlite::store` owns schema-aware connection lifecycle and bounded blocking workers, while the physical `sqlite::graph/` domain assigns graph-fact transactions/evidence invariants to `mutation`, inspection/version reads to its `mod.rs` facade, and commit-time validity normalization to `version`, each with a directly paired test owner.
+Their direct sibling tests protect worker contention, mutation validation, state defaults, and stable evidence identities; `sqlite/{evidence_identity,mutation_log,scope_filters,table_stats,store}/` are physical owners, storage-port mappings live under `store/implementations.rs`, and cross-owner persistence scenarios live under `sqlite/tests/`. The physical `sqlite/schema/` module owns columns, initialization, compatibility markers, and migration without root path redirects, while `sqlite/mod.rs` only composes named adapter owners. The `net::http::outbound` owner contains client construction plus bounded raw JSON transport and response validation, while `qos_client` retains reqwest permit/body accounting; both attach direct sibling tests and the HTTP facade keeps configuration, server runtime, and cross-boundary integration contracts.
 
-The application service `retrieval` owner coordinates source-scope validation,
-freshness reconciliation, backend degradation, bounded search/rerank,
-provenance budgeting, and response assembly. Its direct sibling tests protect
-trace staleness and truncation contracts; the service facade retains
-construction and cross-workflow composition.
+Physical application-service subdomains separate health, retrieval, service status,
+storage diagnostics/provider, watcher, and lifecycle workflows. Retrieval owns
+source-scope validation, freshness reconciliation, bounded search/rerank, and
+response budgets; the service facade retains construction and cross-owner composition.
+The domain `graph::retrieval` facade separately owns policy, backend status,
+diagnostics, evidence, hits, traversal provenance, and context-pack contracts.
 
-The default storage topology is `single_sqlite`. Set
-`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` to keep global control
-state in the main runtime database while routing repository code facts,
-checkpoints, and scoped code queries into per-repository SQLite shard files
+The default storage topology is `single_sqlite`; `application::runtime::storage` exclusively validates this selection. Set
+`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite` keeps global control state
+in the main database while repository, catalog, routing, diagnostics, status,
+totals, and checkpoint/file/lifecycle/retention indexing owners coordinate shards
 under the runtime data directory. Repository-set overlay refresh still requires
 `single_sqlite` until cross-shard import/export aggregation is implemented.
 After partitioned shard catalog rows become active, startup with
@@ -311,9 +313,9 @@ authorized and budgeted by shared application services. See
 for the full contract.
 
 The storage contract includes the v1 code graph data surface for tree-sitter
-output. Versioned code files, symbols, references, chunks, and parse-status
-diagnostics are committed through storage traits rather than direct SQLite
-access.
+output. SQLite `code_graph` keeps a declaration-only facade over physical `batch/`,
+`schema/`, `query/`, and `tests/` directories. `schema` owns DDL, `batch` owns
+transactional replacement, while its query owners keep bounded reads and direct tests.
 
 SQLite writes stay on a single writer lane. Code queries, reports, graph reads,
 file queries, and health diagnostics use bounded read-only connections where
@@ -340,8 +342,8 @@ Code repository indexing currently parses Rust, Python, JavaScript/JSX,
 TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, Bash,
 SQL, Markdown, XML, Bazel/Starlark, Make, CMake, Dockerfile/Containerfile, Java
 properties, TOML, INI, YAML, JSON, Go module files, Ninja, Jinja2, and Go
-templates with tree-sitter grammars. Unsupported or degraded files fall back to
-text chunks.
+templates with tree-sitter grammars. Physical `code::index` subdomains separate filesystem delta, full/incremental snapshots, planning, impact paths, and deleted symbols; worktree overlays further separate change recording, directories, scope, plan, snapshot, and untracked policy with direct tests. The `code::parser` root contains only its facade, cross-domain tests, and named physical subdomains; shared chunks, manual extraction, node/range primitives, record materialization, syntax capture, and text validation each have a dedicated owner. Its `languages` root keeps C-family references, configuration definitions, enum members, and Markdown imports in physical, directly tested shared domains beside language-specific directories. Structured configuration parsing keeps call aggregation, language detection, key/value facts, knowledge-map facts, normalized records, and source-line primitives in directly tested physical `code::config_files` owners. `code::parser::file` separates shared parse contracts, parse-status diagnostics, text-only topics, route projection, and feature-flag projection into direct-tested owners; feature-flag comment shielding, boolean configuration scanning, and extractors likewise live in named, directly tested subdomains.
+The file facade retains parsing orchestration; unsupported or degraded files fall back to text chunks.
 
 SQL files contribute schema object symbols such as tables, views and
 materialized views, functions and procedures, triggers, and types, plus SQL
@@ -366,10 +368,10 @@ such as symbols, references, or imports.
 C/C++ recovery keeps declaration-head token/type/qualifier recognition separate
 from function-signature, parameter, operator, method-suffix, postfix-attribute,
 and recovery-decorator recognition. The signature owner depends one-way on the
-lower declaration and literal-aware scan owners, and both carry direct sibling
-tests for accepted and rejected shapes.
+lower declaration and literal-aware scan owners, and both carry direct sibling tests; the C-language adapter keeps declaration symbols, GCC recovery, lexical predicates, macro functions, node kinds, and preprocessor lifecycle in physical, directly tested owner directories, with parser-wide C/GCC scenarios under `languages/c/tests/`; the C++ adapter keeps deterministic tree-sitter classification in directly tested `node_kinds/`, and manual head rules, decorated type recovery, and structured/GCC-decorated function recovery in directly tested `manual::{lexical,type_definitions,function_definitions}` owners, while manual header recovery delegates byte-stable text, top-level scans,
+class/member name recognition, and nested member collection to directly tested `cpp_header_recovery::{source_text,top_level_scan,declarators,member_collection}` owners. These owners are real directory modules with direct sibling contracts, not facade files plus production path redirects.
 
-Full Git repository indexing first discovers the tracked source layout. It then
+Full Git repository indexing first discovers the tracked source layout; `source/layout/discovery` owns bounded root inference and effective filters, `source/layout/path_scope` owns normalized intersection and submodule-child projection, `source/layout/selection` owns Git/filesystem admission reasons, `source/layout/scoped_snapshot` owns source resolution, selected entries, effective filters, content hashes, and filesystem-ref consistency, `source/layout/preview` owns bounded exclusion/largest-file samples and preview counts, and `source/layout/impact_partition` owns stable in/out-of-scope change partitioning. SQLite snapshot persistence keeps repository attachment, metadata/scope import, and its direct legacy regression in `code/snapshot/repository_import`, while `scope_tables` owns the table-copy contract shared with incremental scope cloning. It then
 uses resource-bounded SQLite batches with durable checkpoints and a finalize
 phase for cross-batch references, includes, and call edges, so large scopes
 expose `indexing` progress without replacing the previous fresh scope until
@@ -388,13 +390,13 @@ into the whole root.
 Incremental updates use the same source-layout policy when new files appear
 outside `src/`.
 
-A cold full `repo index` queues a durable code-index task and returns a `task`
+A cold full `repo index` queues a durable code-index task through `storage::sqlite::code::tasks::queue` and returns a `task`
 handle immediately. The CLI starts a bounded single-shot worker,
 non-interactive agents can call
 `repo index-worker --task-id <id> --format json` for one explicit drain attempt,
-and `service run` drains the same queue with a bounded code-index worker pool
-controlled by `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` plus one repository-set
-overlay refresh worker.
+and `service run` drains the same queue with a bounded code-index worker pool;
+`application::runtime::worker` owns endpoint validation and concurrency from
+`RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT`, plus one set-overlay refresh worker.
 
 Local CLIs can query a deployed resident service with `--remote <base-url>` or
 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote repository index commands submit
@@ -405,7 +407,7 @@ running `repo index-worker`. Remote read-only repository graph commands
 `repo software`) read service-host index state and preserve their CLI `--kind`
 arguments. Remote maintenance commands such as
 `repo index --reset` and `repo index-worker` are rejected by a remote-selected
-CLI and must be run on the service host. Remote dispatch validates the remote
+CLI and must be run on the service host; `storage::sqlite::code::tasks::reset` owns the atomic local reset. Remote dispatch validates the remote
 URL and outbound network settings before HTTP; unrelated local runtime and
 retrieval settings are validated only when a command falls back to local state.
 
@@ -417,12 +419,12 @@ latest compatible completed scope when the requested ref and filters are still
 being indexed, marking the response stale rather than blocking behind the
 writer.
 
-`repo status` reports `active_task`, checkpoint counters, and scope retention.
+`repo status` reports `active_task`, checkpoint counters, and scope retention; `storage::sqlite::code::tasks::status` owns task lookup and the bounded queue projection, while `checkpoint` owns scope and latest-progress reads.
 Successful background tasks retain the active scope, the two latest completed
-scopes, and unfinished task scopes while pruning older repository scopes.
+scopes, and unfinished task scopes while pruning older repository scopes; `storage::sqlite::code::tasks::retention` owns that plan and its transactional cleanup.
 
-Code-index task leases are attempt-scoped. Expired running leases are recovered
-to retry or dead-letter before claim/status paths report them, stale workers
+Code-index task leases are attempt-scoped, with claim, renewal, listing, and bounded recovery owned by `storage::sqlite::code::tasks::lease`. Expired running leases are recovered
+to retry or dead-letter before claim/status paths report them; `storage::sqlite::code::tasks::completion` owns the lease-checked success, retry, and dead-letter transitions. Stale workers
 cannot complete or fail a reclaimed task, and active workers renew the lease
 before expensive batch parsing, after each committed checkpoint batch, around
 finalization, and before task completion.
@@ -493,9 +495,9 @@ queryable by explicit ref, rebase or force-moved heads require a new index
 before query, and same-tree branches reuse the same scope while preserving
 requested-ref audit metadata.
 
-Worktree overlays use Git status for Git repositories. `.gitignore`-ignored
-untracked files are skipped, and untracked broad dependency/cache/build
-directories require explicit path opt-in before recursive expansion.
+Worktree overlays use Git status for Git repositories. Their narrow `worktree_overlay::mod` facade delegates identity/snapshot assembly to `snapshot`, regular path classification and recording to `change_recording`, and bounded submodule transitions to the physical `gitlinks/` subdomain.
+`.gitignore`-ignored untracked files are skipped, broad directories require explicit path opt-in, and every overlay behavior owner carries direct same-level unit tests.
+The physical `code/source` root separates change-status parsing, bounded declaration fallback, non-Git filesystem policy, filter constants, Git execution, ref/snapshot resolution, and source-root candidates into directly tested owner directories. Tracked-entry admission lives in `changes/scope`; bounded recursive tree enumeration and submodule-state reporting live in paired-test `changes/tracked_entries`; validated name-status loading lives in paired-test `changes/diff`; `changes/submodule_repository` owns safe worktree/gitdir resolution.
 
 Gitlink and submodule source access is grouped under `code/source/gitlink/`.
 Tree commit detection, child-filtered entry discovery, initialized or
@@ -539,10 +541,10 @@ Web route detection groups Express orchestration, import/factory and
 application/router alias discovery, call/path syntax, argument/handler parsing,
 bounded multiline statement aggregation, direct and chained registration
 recording, mount discovery, and mount materialization under one
-`detect/express/` subdomain with direct unit tests for each owner. Python static
-route strings and JavaScript
-comment/string/regex lexical state remain separate named modules rather than a
-generic shared parser bucket across language boundaries. Spring annotation and
+`detect/express/` subdomain with direct unit tests for each owner. The physical
+`detect/lexical/` boundary keeps Python static route strings and JavaScript
+comment/string/regex lexical state in separate language owner modules rather than a
+generic shared implementation across language boundaries. Spring annotation and
 Java type-scope detection is grouped under its own `detect/spring/` subdomain;
 Java comment/text-block filtering and declaration recognition have a dedicated
 owner, while annotation path/method attribute parsing has another dedicated
@@ -569,49 +571,53 @@ not full build-system or linker analysis.
 
 Code repository lexical retrieval uses a SQLite FTS candidate table for
 symbols, references, calls, imports, SBOM dependencies, and chunks. Effective
-path filters are applied inside the FTS candidate window before bounded
-scoring, graph-edge candidates are ordered by BM25 before truncation, fuzzy
-symbol recall can match any query term while typed graph edge queries keep their
-narrower semantics, and Rust scoring recognizes snake_case/CamelCase identifier
-parts, multi-part symbol names, call-direction context, and declaration-shaped
-API chunks.
-
+path filters apply before bounded scoring and graph-edge candidates use BM25.
+FTS planning is split across public plan, hybrid recall, normalized terms, and
+bounded compound-identifier owners with direct tests and one-way dependencies.
+Fuzzy symbol recall remains broad while typed graph edges stay narrow; scoring
+recognizes identifier parts, call direction, and declaration-shaped API chunks. SQLite code-store persistence is one physical `storage::sqlite::code` tree: `batch`, `feature_flags`, `generated`, `impact`, `lifecycle`, `query`, `routes`, `schema`, `search`, `set`, `snapshot`, `symbols`, `tasks`, `tests`, `views`, and `workspace` are named directories; behavior owners mount direct tests, cross-owner fixtures and regressions live under `tests/`, and the facade retains only composition and port implementation. The impact facade coordinates bounded retrieval while `seed`, `evidence`, and `path_selection` separately own graph seeds, SQLite evidence/hit mapping, and changed-path/language admission with paired tests. `query::{hits,prepare}`, `tasks::worktree`, `set::refresh_tasks`, and `lifecycle::{cleanup,removal,report,status}` belong to their real parents without production path redirects or duplicate file loading.
+Call retrieval is a real `code::query::calls` module tree: `mod.rs` only declares owners and re-exports the query entry point, `search` coordinates bounded identity/FTS paths, `row_store` owns SQL and decoding, `identity_query` owns directional exact gates, `hit_projection` owns scoring and hit conversion, `execution_order` owns call-site ordering, and `display` owns caller labels. Named children continue to own ambiguous targets, caller counts, direction filters, indirect binding recovery, site/context scoring, and target ranking without root path aliases; focused owners carry direct same-level tests. Cross-cutting ranking likewise uses the real `code::query::scoring` tree, whose directly declared API-sequence, chunk-path, initializer, flow, inline-usage, interface, lifecycle, local-callable, path-ranking, and proximity owners attach their same-level regressions without root aliases. Hybrid planning uses the real `code::query::hybrid` tree: chunk/direct gates, exact-path decisions, and bounded planning are direct owners, while shared hybrid regressions are assembled through a physical `tests::hybrid` module. Import retrieval is a real `code::query::imports` tree: its facade only coordinates layered fallback, `row_store` owns bounded direct/identifier/FTS SQL and decoding, `hit_projection` owns enrichment/ranking/hit conversion, `scoring` owns ranking signals, `path_context` owns path/target classification, `binding_terms` owns named-binding and usage-term extraction, and `targets` owns target-symbol and usage context; focused owners carry direct tests and dependencies stay one-way toward primitives. Reference retrieval is a directly declared physical `code::query::references` domain, not a root alias: `identifier_text` owns identifier scans, `identity_gate` bounds exact admission, `call_shape` owns call recognition, `same_name_path` owns source-file demotion, and `type_context` owns parameter/type affinity; all carry direct regressions. The sibling `chunks` owner keeps exact definition/reference fallback admission, declaration scoring, and canonical-leaf matching, while `chunks::search` owns layered FTS planning, SQL/value binding, row mapping, and chunk scoring. The code-query facade also declares `symbols` directly rather than through `code_query_symbols`; symbol retrieval keeps orchestration, exact/API identity admission, FTS planning, row decoding, ranking, bounded direct recovery, and typed function-value interpretation in named owners, each with direct tests. The code-query root contains only `accuracy`, `api_identities`, `calls`, `chunks`, `conversion_terms`, `excerpts`, `hits`, `hybrid`, `identifiers`, `imports`, `line_ranges`, `prepare`, `references`, `relevance`, `routes`, `rows`, `sbom`, `scoring`, `symbols`, and `tests` directories plus its facade. Cross-domain primitives are directory owners, behavior tests live beside their owner, and consumers use real module identities instead of flat siblings, `code_query_*` aliases, or root `#[path]` redirects.
+The shared code-query test root likewise contains only `calls`, `field_filters`, `generated`, `hybrid`, `identity`, `line_context`, `ranking`, `score`, and `unit` domains plus its declaration facade; the query-test facade declares each domain directly, and the code-store facade does not remount individual query regressions through cross-layer path attributes.
 Graph retrieval keeps deterministic token signatures, local hashed vectors,
-semantic overlap, cosine similarity, and identifier-aware lexical overlap in
-the SQLite retrieval `local_model` owner with direct sibling tests.
-`advanced`, `context`, and `derived` consume this pure lower layer, while the
-retrieval facade retains schema, document materialization, and search
-orchestration.
+semantic overlap, cosine similarity, and identifier-aware lexical overlap in `local_model/`; `aliases/`, `bm25/`, `bm25_fallback/`, and
+the context, derived, label-trigram, and ranking directories own their named behavior and direct tests. The shared `retrieval::terms` owner exposes only normalized terms used by reranking.
+The physical `read_model/` subdomain assigns DDL/retry to `schema`, rebuilds
+to `migration`, document writes to `documents`, shared candidates/BM25 mapping
+to `candidate`/`bm25_hit`, and retrieval orchestration to `search`; the sibling `advanced/` subdomain separates relation/claim/event path assembly in `path`, temporal parsing and filtering in `temporal`, scoped summaries in `community`, shared event reads in `event`, and evidence grouping in `support`. SQLite graph-canvas projection likewise assigns request state/budgeting to `context`, stable node formatting to `nodes`, evidence/entity reads to `knowledge`, relation/claim/event reads to `facts`, and code facts to `code`, with owner-local tests and a validation-only facade.
 
+Feature-flag extraction separates source-key rules, SDK receiver/call tracking, and shared literal-aware lexical primitives; each owner has direct sibling tests and the extractor facade only re-exports the stable internal surface. Repository-set orchestration assigns membership APIs to `membership`, moving-ref and fact-version freshness to `status`, set-specific storage errors to `errors`, and synchronous plus leased overlay rebuilds to `refresh`; the physical `query/` domain separates pure overlay ranking in `mod.rs`, async member/fallback coordination in `workflow`, dependency API planning in `plan`, and ranking signals in `domain_affinity` and `identity_coverage`, with directly paired tests. SQLite repository-set persistence likewise separates member lifecycle/status mapping in `code::set::membership` from overlay status, refresh, import/export matching, and cross-edge reads in `code::set::overlay`; the `code::set` facade only re-exports their narrow entry points. Its paired-test `manifest/` domain separates database coordination, Go workspaces, pnpm/package exports, module-key expansion, and bounded path/glob rules.
+The physical `code::set` root contains only `manifest`, `membership`, `overlay`, `refresh_tasks`, and `tests` directories plus its facade. The three behavior owners carry direct `mod_tests.rs`; cross-owner workspace coverage and fixtures are isolated under `tests/`, so flat implementation or test siblings cannot return beside `manifest/`.
 Code-index schema initialization keeps only ordering, legacy-column
-compatibility, and migration orchestration in the `code_schema` facade.
-Repository facts, durable index tasks, repository-set/workspace state, and
-FTS/retrieval indexes have separate schema owners with direct sibling contract
-tests. The `search_backfill` owner isolates one-time FTS document
+compatibility, and migration orchestration in the `code::schema` facade.
+Repository facts, durable index tasks, repository-set/workspace state, and FTS/retrieval
+indexes have separate schema owners with direct sibling contract tests. The `search_backfill` owner isolates one-time FTS document
 materialization for symbols, references, imports, dependencies, feature flags,
 calls, routes, and chunks, plus search-metadata synchronization and
-transactional call-document rebuilding after signature upgrades. Its sibling
-tests protect legacy call-language inheritance and idempotent metadata
-synchronization.
+transactional call-document rebuilding after signature upgrades. Checkpointed
+indexing gives `code::batch/{checkpoint,dependencies,persistence,session}/` physical owner directories with direct `mod_tests.rs`,
+and finalization similarly groups call targets/edges, files, imported/ordinary references, phases, search documents, and symbols into directly tested owners while cross-owner TypeScript cases live in `finalize/tests`; its `imports/{module_paths,specifier,symbol_targets}/` owners pair bounded normalization/extraction/matching with direct `mod_tests.rs` beside the existing language subtree. Both facades retain only declarations and stable re-exports; shared code-identity import resolution separates
+context/module paths, symbol matching, and outcome mapping with direct sibling tests. SQLite index lifecycle keeps
+schema, cursor status, refresh diagnostics, metadata codecs, and durable task
+queue behavior in separate owners; its facade contains only direct re-exports.
 
 `repo query --kind sbom` returns dependency inventory facts extracted during
 indexing from Cargo, npm, Go, Python, Maven effective `pom.xml`/BOM, Gradle,
 and Conan manifest or lock files. It does not execute package managers, contact
 registries, or provide vulnerability/license analysis.
 
-Maven effective POM handling resolves repository-local parent POMs, properties,
-dependency management, profiles, plugin management, modules, and imported BOM
-declarations from indexed evidence only.
+Maven effective POM handling gives physical `pom_path/`, `property_interpolation/`,
+and `xml/` owners direct tests; `model/` separates coordinate aliases, dependency management, and plugin/execution inheritance into paired-test owners while its facade composes parent/profile/BOM resolution.
+Cross-owner review regressions remain under `tests/`, and all resolution uses indexed evidence only.
 
 Call excerpts use a `source_scope + symbol_snapshot_id` chunk lookup and line
 containment so high fan-out caller/callee queries do not multiply one call edge
 across unrelated chunks.
 
-Code repository queries also use bounded internal exact-text source fallback.
-AST and indexed lexical layers run first; then the product scans materialized
-indexed-commit candidate content when definition/reference/hybrid recall has a
-specific gap or an import points at an unresolved external dependency target
-that is not indexed as a code graph target.
+Code repository queries also use bounded internal exact-text source fallback. The
+`code::search::candidate_scope` owner applies safe-path validation, deduplication,
+generated-path exclusion, path/language filters, and the 256-file budget before
+materialization. `materialization` owns commit re-verification, byte/read budgets, and
+temporary-tree lifecycle; `scanner` owns bounded excerpts and result ordering.
 
 For non-Git filesystem commits, fallback first verifies that the current
 synthetic snapshot still equals the indexed `filesystem:` commit. If it has
@@ -672,16 +678,16 @@ those hits by parent to avoid duplicate context items, and background or
 maintenance workers commit OCR/caption/table/layout outputs through
 `commit_multimodal_extraction` rather than query hot paths.
 
-Operational productization persists worker tasks, manual proposals, audit
-events, and silent-update operator state. Multimodal ingest queues
+Operational productization uses `storage::sqlite::operations::schema` to initialize and compatibly upgrade worker-task, proposal, audit, and operator tables; `operations::worker_tasks`, `proposals`, and `audit_events` separately own worker queues, proposal/conflict lifecycle, and audit writes/queries, while `service_operator` owns silent-update operator state and JSON row mapping.
+Multimodal ingest queues
 embedding/OCR/vision/extractor work; `worker run-once` calls a configured HTTP
 endpoint when available or creates a deterministic fallback proposal;
 `proposal accept` commits through the same graph mutation path; and service
 manager commands now expose staged install, upgrade, rollback, and uninstall
-lifecycle plans. Dry-run is the default; explicit `service lifecycle ... --execute`
-runs local file steps and platform service-manager commands with rollback steps
-if a later stage fails, and failed executions return an operation error with the
-failed step id instead of a successful response.
+lifecycle plans. Plan assembly, forward/rollback steps, checkpoint files, bounded process execution, step policy, and platform definitions use directly tested owners. Dry-run
+is the default; explicit `service lifecycle
+... --execute` runs local file steps and platform service-manager commands with
+rollback steps if a later stage fails; failures return the failed step id.
 
 The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate
 for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous
@@ -693,11 +699,11 @@ including scope moves and structured-fact evidence references. Scoped index
 cursors track kind/scope/modality freshness plus source hash, backend cursor,
 and optional model name/dimension metadata for semantic/vector workers.
 
-`ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and
-`service doctor` share the bounded refresh queue, active lease/attempt guards,
-retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve
-dead-letter isolation, explicit refresh paths surface queue-cap failures instead
-of reporting false freshness, and `index_refresh.stale_reasons` explains
+`application::knowledge/{ingest,multimodal,file_freshness,index_refresh,map}/`
+owns each workflow and direct UT; their callers share the bounded refresh queue. Its physical `task_queue/`
+owners separate planning, enqueue/upsert, lease recovery, completion, failure,
+and persisted record identity/decoding. All transitions remain lease-fenced,
+bounded, observable, and recovery-safe. `index_refresh.stale_reasons` explains
 index-family and scoped-cursor lag or failure by kind, scope, modality, lag
 versions, and last error.
 
@@ -706,15 +712,15 @@ versions, and last error.
 Current CLI commands use the compiled `relay-knowledge` binary with git-style
 subcommands:
 
-The adapter groups global option/token parsing and command-family dispatch in
-the paired-test `interfaces::cli::command::parse` owner, while shared flag-value
-and freshness validation live in `command::values`. CLI errors, structured
-grammar diagnostics, exit-code classification, and text/JSON stderr encoding
-live in `command::diagnostics`. The CLI root re-exports these stable contracts
-and retains the process facade. Process-free fast paths, remote/local
-environment composition, and shared-service action dispatch live in the
-paired-test `runtime::dispatch` owner; explicit versus environment remote URL
-selection and remote eligibility live in `runtime::selection`.
+The adapter groups global option/token parsing and command-family dispatch in the
+paired-test `interfaces::cli::command::parse` owner; shared flag-value and
+freshness validation live in `command::values`. CLI errors, grammar diagnostics,
+exit-code classification, and stderr encoding live in `command::diagnostics`;
+the root only re-exports these contracts and retains the process facade. Every `command`, `files`, `grammar`, `knowledge`, `map`, `operations`, `remote`, `render`, `repo`, `repo_set`, `runtime`, `service`, `setup`, `spec`, and `version` owner is a physical directory; behavior owners mount direct `mod_tests.rs` contracts, while the CLI root contains only those named domains, `tests/`, and `mod.rs`, without `*_cli` aliases or production path redirects. The
+repository family keeps command data in `repo::mod`, grammar and validation in
+paired-test `repo::parser`, and async service execution/rendering in paired-test
+`repo::runner`; `repo::view` owns the nested view contract and workflow instead of appearing as a CLI-root sibling. Machine-readable command metadata uses the physical
+`spec::{data,files,repo,repo_set}` module tree; `repo::{lifecycle,indexing,retrieval}` own repository builders and paired tests while `data::{core,map,operations,service}` own aggregation families. Process-free dispatch stays in `runtime::dispatch`; explicit versus environment remote selection and eligibility stay in `runtime::selection`.
 
 ```bash
 relay-knowledge status --format json
@@ -811,14 +817,18 @@ should inspect `relay-knowledge help --format json` before issuing commands. It
 describes each command path, operation, read/write effect, required parameters,
 defaults, allowed values, repeatability, examples, and notes.
 
-Local file indexing roots must be absolute and present in
-`RELAY_KNOWLEDGE_FILE_INDEX_ROOTS`; relative entries are rejected before a
-background or explicit scan starts. `RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS`
-sets the per-root scan timeout budget. `files query --format json` returns a
-top-level `freshness` object with root cursors, index lag, stale/degraded
-reasons, bounded-rescan state, and direct-source-read instructions. Use
-`--freshness wait-until-fresh` to suppress pending, degraded, or overflowed
-file-index answers until a bounded scan has completed.
+Local file indexing roots must be absolute and present in `RELAY_KNOWLEDGE_FILE_INDEX_ROOTS`;
+`application::runtime::file_index` owns root normalization, stable root IDs,
+authorization and scan/query budgets before scanning. The application `file_index` subtree separates async APIs from the bounded scanner;
+its physical `content/` domain assigns read-byte accounting, extraction/chunking, and capability-root reads to `budget`, `extract`, and `read`, each with a directly paired test.
+`RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS` sets the per-root timeout.
+`files query --format json` returns freshness, cursor, lag, bounded-rescan, and
+direct-source-read diagnostics; `--freshness wait-until-fresh` suppresses
+pending, degraded, or overflowed answers until a bounded scan completes.
+
+SQLite `file_index` keeps metadata schema, transactional root updates, retirement, path FTS search, diagnostics, content, and cross-owner tests in physical directory owners; its facade only re-exports stable store boundaries.
+The nested `content` domain separately owns schema, identity, persistence, bounded FTS search, and fact-candidate extraction with paired tests;
+the store adapter retains the stable `file_index::content::search` boundary, while production and test files never mix beside root subdirectories.
 
 ### File Watcher (fs.watch)
 
@@ -833,19 +843,18 @@ RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS=1024
 RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY=4096
 ```
 
-The watcher uses the `notify` crate for cross-platform file system events
-(Linux inotify, macOS FSEvents, Windows ReadDirectoryChangesW). Events are
-debounced, content-hash filtered, and path-filtered before generating
-`WorktreeOverlay` task payloads that existing code-index workers claim through
-leases, retry, and dead-letter handling. Watcher diagnostics (state, watched
-repository count, event/drop counts, queued task count, degraded reason) appear
-in `service status --format json`.
+The watcher root keeps `config/`, `event_filter/`, `hash_cache/`, and `task_seed/`
+as directly tested owners; `engine/` separates handles, the `notify` event loop,
+repository registration, task projection, and diagnostics. Events remain debounced,
+hash/path-filtered, and queued through existing leases, retry, and dead-letter handling.
+Diagnostics (state, watched repositories, event/drop and queued-task counts,
+degraded reason) appear in `service status --format json`.
 
 ### Semantic and Vector Backends
 
-Semantic/vector read-model backend metadata is configured only through the
-`env` boundary. The default mode is local deterministic read models; external
-worker metadata can be selected with:
+Semantic/vector read-model metadata enters only through the `env` boundary;
+`application::runtime::retrieval` exclusively owns typed backend, rerank, and
+remote-embedding validation. Defaults are local; external metadata uses:
 
 ```bash
 RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external
@@ -873,8 +882,8 @@ model environment variables, including the configured MCP origin allow-list.
 
 Model provider settings manage named chat/completion profiles, fallback
 policies, catalog refresh from `models.dev`, endpoint probes, and model
-discovery through `/api/configs/model/*`. Profile and fallback files live under
-the resolved config directory as `model-profiles.json` and
+discovery through `/api/configs/model/*`; `model_provider::profiles` owns profile CRUD, secret
+preservation and runtime-profile resolution; `model_provider::profile` owns public profile contracts, persisted shapes, and redacted projection; `profile_config` owns normalization and validation; `model_provider::fallback` owns fallback types, defaults, validation, and persistence; `model_provider::catalog` owns catalog contracts, cache fallback, refresh, and payload parsing; `model_provider::connectivity` owns probe/discovery contracts, QoS HTTP workflows, redaction, and diagnostics. Profile and fallback files live under the resolved config directory as `model-profiles.json` and
 `model-fallback.json`; the public catalog cache lives under the resolved cache
 directory as `model-catalog-cache.json`. Secret values are accepted only on save
 and are returned to the browser as configured booleans or redacted headers.
@@ -901,10 +910,10 @@ bind, defaulting to `http://127.0.0.1:8791/` and
 `http://127.0.0.1:8791/mcp`. MCP is disabled unless requested by the command or
 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`; graph tools require
 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` unless
-`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured or
-the requested scope matches a code repository alias already registered in this
-runtime. Registered repository aliases are promoted into a process-local MCP
-allow-list on first use; unknown scopes are still rejected with the missing
+`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured or the requested scope matches a code repository alias already registered in this runtime. The physical Web adapter keeps `assets/`, `files/`, `model_config/`, `operation_request/`, and `code/` as named subdomains with directly paired tests; `web/mod.rs` only composes their routes and shared response/error boundary, while assembled-router file integration coverage remains facade-owned. The `code/` domain assigns versioned repository routes to `mod.rs`, CLI-shaped index payload mapping to `index_request`, and code-view payload mapping to `view_request`, without flat feature siblings or production `#[path]` redirects. The physical MCP root groups audit, HTTP, JSON-RPC, metrics, notifications, prompts, resources, scope authorization, session state, tool contracts, and the tool registry into directly tested owner directories, while assembled protocol/tool scenarios and fixtures live under `mcp/tests/`. Its `runtime/` subtree gives shared server state, HTTP transport lifecycle, JSON-RPC dispatch, cancellable tool execution, built-in read-only tools, and method-error mapping to `runtime::{server,transport,dispatch,tool_runtime,builtin_tools,method_error}`; code-tool schemas, requests, retrieval, and insights remain under focused `code_tools` owners.
+`application::runtime::agent` owns these endpoint, origin, scope,
+request-budget, and audit-queue settings. Registered repository aliases are
+promoted into a process-local MCP allow-list on first use; unknown scopes are still rejected with the missing
 scope and the exact `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` repair hint.
 
 The adapter validates `initialize` params, then issues an unpredictable
@@ -950,11 +959,11 @@ small Prometheus-compatible snapshot for graph version, index refresh backlog,
 dead letters, QoS request counts, and per-index stale state.
 
 Agent requests write bounded in-process audit events with runtime identity,
-scope, freshness, QoS decision, budget, truncation, result count, and status.
+scope, freshness, QoS decision, budget, truncation, result count, and status; the
+physical `interfaces/agent/audit/` owns the log and JSONL sink; `policy/` owns shared validation and authorization policy, and both keep direct tests.
 Set `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` to mirror those events to
-the path-owned JSONL file `logs/agent-audit.jsonl`; the sink uses a bounded
-async queue controlled by `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` and capped
-at 65536 entries.
+the path-owned JSONL file `logs/agent-audit.jsonl`; its bounded async queue is
+controlled by `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` and capped at 65536 entries.
 
 The local ACP session adapter exposes the same retrieval contract for
 agent-client sessions, including progress updates, cancellation, and context

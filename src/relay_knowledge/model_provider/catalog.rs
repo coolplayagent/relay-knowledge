@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::fs;
 
 use super::{
-    ModelCapabilities, ModelCatalogCache, ModelCatalogModel, ModelCatalogProvider,
-    ModelCatalogResult, ModelProviderConfigService, ModelProviderError, ModelProviderKind,
+    ModelCapabilities, ModelProviderConfigService, ModelProviderError, ModelProviderKind,
     connectivity::{now_millis, status_error_code},
     persistence::write_json,
 };
@@ -11,6 +11,49 @@ use crate::net::{
     http::{HttpConfig, send_request_with_qos},
     qos::{QosPolicy, QosRuntime},
 };
+
+/// Public model catalog provider entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelCatalogProvider {
+    pub id: String,
+    pub name: String,
+    pub runtime_provider: ModelProviderKind,
+    pub api: Option<String>,
+    pub doc: Option<String>,
+    pub env: Vec<String>,
+    pub models: Vec<ModelCatalogModel>,
+}
+
+/// Public model catalog model entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelCatalogModel {
+    pub id: String,
+    pub name: String,
+    pub family: Option<String>,
+    pub context_window: Option<u32>,
+    pub output_limit: Option<u32>,
+    pub capabilities: ModelCapabilities,
+}
+
+/// Catalog fetch result with cache provenance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelCatalogResult {
+    pub ok: bool,
+    pub source_url: String,
+    pub fetched_at_ms: Option<u64>,
+    pub cache_age_seconds: Option<u64>,
+    pub stale: bool,
+    pub providers: Vec<ModelCatalogProvider>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(super) struct ModelCatalogCache {
+    pub(super) source_url: String,
+    pub(super) fetched_at_ms: u64,
+    pub(super) providers: Vec<ModelCatalogProvider>,
+}
 
 impl ModelProviderConfigService {
     pub async fn catalog(
@@ -336,3 +379,7 @@ pub(super) fn catalog_result_from_cache(
         error_message,
     }
 }
+
+#[cfg(test)]
+#[path = "catalog_tests.rs"]
+mod tests;

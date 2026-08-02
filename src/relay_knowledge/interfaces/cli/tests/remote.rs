@@ -95,7 +95,7 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
             .await
             .expect("response body should write");
     });
-    let action = CliAction::Repo(repo_cli::RepoCommand::Query {
+    let action = CliAction::Repo(repo::RepoCommand::Query {
         alias: "org/repo".to_owned(),
         query: "retry_policy".to_owned(),
         kind: CodeQueryKind::Definition,
@@ -107,7 +107,7 @@ async fn remote_repo_query_posts_stable_code_api_and_renders_response() {
         exclude_generated: true,
     });
 
-    let output = remote_cli::run_remote(
+    let output = remote::run_remote(
         &NetworkEnvOverrides::default(),
         &format!("http://{addr}"),
         &action,
@@ -194,13 +194,13 @@ async fn remote_repo_index_worktree_ref_posts_overlay_request() {
             .await
             .expect("response body should write");
     });
-    let action = CliAction::Repo(repo_cli::RepoCommand::Index {
+    let action = CliAction::Repo(repo::RepoCommand::Index {
         alias: "fixture".to_owned(),
         ref_selector: "worktree".to_owned(),
         dry_run: false,
     });
 
-    let output = remote_cli::run_remote(
+    let output = remote::run_remote(
         &NetworkEnvOverrides::default(),
         &format!("http://{addr}"),
         &action,
@@ -300,7 +300,7 @@ async fn remote_repo_software_posts_stable_code_api_and_kind() {
             .await
             .expect("response body should write");
     });
-    let action = CliAction::Repo(repo_cli::RepoCommand::Software {
+    let action = CliAction::Repo(repo::RepoCommand::Software {
         alias: "fixture".to_owned(),
         ref_selector: "HEAD".to_owned(),
         kind: SoftwareGlobalKind::Relationships,
@@ -308,7 +308,7 @@ async fn remote_repo_software_posts_stable_code_api_and_kind() {
         limit: 25,
     });
 
-    let output = remote_cli::run_remote(
+    let output = remote::run_remote(
         &NetworkEnvOverrides::default(),
         &format!("http://{addr}"),
         &action,
@@ -334,12 +334,12 @@ async fn remote_repo_software_posts_stable_code_api_and_kind() {
 #[tokio::test]
 async fn remote_index_reset_and_worker_are_rejected_without_local_fallback() {
     for action in [
-        CliAction::Repo(repo_cli::RepoCommand::IndexReset {
+        CliAction::Repo(repo::RepoCommand::IndexReset {
             alias: "fixture".to_owned(),
         }),
-        CliAction::Repo(repo_cli::RepoCommand::IndexWorker { task_id: None }),
+        CliAction::Repo(repo::RepoCommand::IndexWorker { task_id: None }),
     ] {
-        let error = remote_cli::run_remote(
+        let error = remote::run_remote(
             &NetworkEnvOverrides::default(),
             "http://127.0.0.1:1",
             &action,

@@ -2,7 +2,7 @@ use super::{mark_schema_initialization_current, schema_initialization_is_current
 
 #[test]
 fn schema_marker_reports_current_only_after_successful_mark() {
-    let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let connection = store.connection.lock().expect("connection should lock");
 
     assert!(
@@ -18,7 +18,7 @@ fn schema_marker_reports_current_only_after_successful_mark() {
 
 #[test]
 fn schema_marker_requires_label_gram_table() {
-    let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let connection = store.connection.lock().expect("connection should lock");
     mark_schema_initialization_current(&connection).expect("marker should write");
 
@@ -34,7 +34,7 @@ fn schema_marker_requires_label_gram_table() {
 
 #[test]
 fn schema_marker_requires_file_content_schema() {
-    let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let connection = store.connection.lock().expect("connection should lock");
     mark_schema_initialization_current(&connection).expect("marker should write");
 
@@ -50,7 +50,7 @@ fn schema_marker_requires_file_content_schema() {
 
 #[test]
 fn schema_marker_requires_workspace_mapping_ecosystem_unique_key() {
-    let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let connection = store.connection.lock().expect("connection should lock");
     mark_schema_initialization_current(&connection).expect("marker should write");
     connection
@@ -82,7 +82,7 @@ fn schema_marker_requires_workspace_mapping_ecosystem_unique_key() {
 
 #[test]
 fn schema_marker_rejects_previous_label_gram_migration_version() {
-    let store = super::super::SqliteGraphStore::open_in_memory().expect("store should open");
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let connection = store.connection.lock().expect("connection should lock");
     super::initialize_schema_marker(&connection).expect("marker table should initialize");
     connection

@@ -61,7 +61,7 @@ async fn run_command(
         } else {
             None
         };
-        return crate::interfaces::cli::map_cli::run_map(
+        return crate::interfaces::cli::map::run_map(
             map_command,
             service.as_ref(),
             context,
