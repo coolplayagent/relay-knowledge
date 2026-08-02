@@ -4,7 +4,9 @@ use std::fs;
 
 use super::changes::{GitChange, parse_name_status_z, tracked_entries};
 use super::git::git_batch_blobs;
-use super::source::source_language_filter_allows;
+use super::source::{
+    reset_source_read_counts_for_root, source_language_filter_allows, source_read_counts_for_root,
+};
 use super::test_fixtures::{TempGitRepo, TempSourceDir, reference, symbol};
 
 #[test]
@@ -421,6 +423,40 @@ fn incremental_deletions_survive_new_gitignore_rules() {
     .expect("incremental delete should index");
 
     assert_eq!(snapshot.deleted_paths, ["src/lib.rs"]);
+}
+
+#[test]
+fn incremental_regular_changes_use_a_bounded_batch_blob_read() {
+    let repo = TempGitRepo::create("incremental-batch-blob-read");
+    for index in 0..48 {
+        repo.write(
+            &format!("src/file_{index:02}.rs"),
+            &format!("pub fn value_{index:02}() -> u64 {{ {index} }}\n"),
+        );
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+    for index in 0..48 {
+        repo.write(
+            &format!("src/file_{index:02}.rs"),
+            &format!("pub fn value_{index:02}() -> u64 {{ {} }}\n", index + 100),
+        );
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update files"]);
+    reset_source_read_counts_for_root(repo.path.clone());
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::incremental(base, "HEAD").expect("incremental mode should validate"),
+        Vec::new(),
+    )
+    .expect("incremental changes should index");
+
+    assert_eq!(snapshot.files.len(), 48);
+    assert_eq!(source_read_counts_for_root(&repo.path), (0, 1));
 }
 
 #[test]

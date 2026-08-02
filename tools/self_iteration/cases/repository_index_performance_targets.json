@@ -7,8 +7,27 @@
       "scope": "all",
       "path_filters": [],
       "language_filters": ["rust"],
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 1024,
       "index_budget_ms": 12000,
       "register_index_budget_ms": 13000,
+      "incremental_index_budget_ms": 3000,
+      "incremental_max_blob_reads": 2,
+      "incremental_max_parsed_files": 2,
+      "incremental_changes": [
+        {
+          "path": "src/shard_000/file_0000.rs",
+          "content": "pub fn rk_perf_target_0000(input: u64) -> u64 { input.wrapping_add(10000) }\n"
+        },
+        {
+          "path": "src/incremental/new_target.rs",
+          "content": "pub fn rk_perf_incremental_target(input: u64) -> u64 { input.rotate_left(7) }\n"
+        },
+        {
+          "path": "src/shard_000/file_0001.rs",
+          "delete": true
+        }
+      ],
       "query_p50_budget_ms": 120,
       "query_p95_budget_ms": 240
     },
@@ -19,8 +38,27 @@
       "scope": "all",
       "path_filters": [],
       "language_filters": ["rust"],
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 2048,
       "index_budget_ms": 30000,
       "register_index_budget_ms": 32000,
+      "incremental_index_budget_ms": 5000,
+      "incremental_max_blob_reads": 2,
+      "incremental_max_parsed_files": 2,
+      "incremental_changes": [
+        {
+          "path": "crates/perf_core/src/shard_000/file_0000.rs",
+          "content": "pub struct RkWideRecord0000 { pub value: u64 }\npub fn rk_wide_target_0000(input: u64) -> u64 { input.wrapping_add(10000).rotate_left(7) }\npub fn rk_wide_map_0000(items: &[u64]) -> u64 { items.iter().copied().map(rk_wide_target_0000).sum() }\n"
+        },
+        {
+          "path": "crates/perf_core/src/incremental_target.rs",
+          "content": "pub fn rk_wide_incremental_target(input: u64) -> u64 { input.rotate_right(11) }\n"
+        },
+        {
+          "path": "crates/perf_core/src/shard_000/file_0001.rs",
+          "delete": true
+        }
+      ],
       "query_p50_budget_ms": 160,
       "query_p95_budget_ms": 320,
       "query_max_budget_ms": 1200
@@ -74,6 +112,24 @@
       "case_group": "index_performance"
     },
     {
+      "id": "index_performance_many_files_incremental_symbol",
+      "repository": "index_performance_many_files",
+      "kind": "symbol",
+      "query": "rk_perf_incremental_target",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "src/incremental/new_target.rs",
+          "excerpt_contains": "rk_perf_incremental_target"
+        }
+      ],
+      "degraded_reason": false,
+      "case_group": "index_performance"
+    },
+    {
       "id": "index_performance_wide_tail_symbol",
       "repository": "index_performance_wide_mixed_files",
       "kind": "symbol",
@@ -86,6 +142,24 @@
         {
           "path": "crates/perf_core/src/shard_031/file_2047.rs",
           "excerpt_contains": "rk_wide_target_2047"
+        }
+      ],
+      "degraded_reason": false,
+      "case_group": "index_performance"
+    },
+    {
+      "id": "index_performance_wide_incremental_symbol",
+      "repository": "index_performance_wide_mixed_files",
+      "kind": "symbol",
+      "query": "rk_wide_incremental_target",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "crates/perf_core/src/incremental_target.rs",
+          "excerpt_contains": "rk_wide_incremental_target"
         }
       ],
       "degraded_reason": false,

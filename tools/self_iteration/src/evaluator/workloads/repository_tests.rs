@@ -5,7 +5,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::evaluate_repository;
+use super::{
+    cold_index_completion_validation, evaluate_repository, incremental_index_completion_validation,
+};
 use crate::evaluator::runtime::contracts::{EvalRuntime, Limiter};
 
 #[test]
@@ -47,4 +49,51 @@ fn repository_workload_rejects_non_full_scope_before_running_product_commands() 
             .contains("must use full scope=all")
     );
     fs::remove_dir_all(&root).expect("test repository path should be removed");
+}
+
+#[test]
+fn cold_index_validation_rejects_cached_noop_measurements() {
+    let config = serde_json::json!({"cold_index_min_file_count": 1024});
+    let warm_payload = serde_json::json!({
+        "summary": {"progress": {"parsed_file_count": 0}},
+        "status": {"indexed_file_count": 1024}
+    });
+    let cold_payload = serde_json::json!({
+        "task": {"state": "succeeded"},
+        "status": {"indexed_file_count": 1024}
+    });
+
+    assert!(
+        !cold_index_completion_validation("fixture", &config, &warm_payload)
+            .expect("validation")
+            .passed()
+    );
+    assert!(
+        cold_index_completion_validation("fixture", &config, &cold_payload)
+            .expect("validation")
+            .passed()
+    );
+}
+
+#[test]
+fn incremental_index_validation_enforces_delta_work_and_head() {
+    let config = serde_json::json!({
+        "incremental_max_blob_reads": 2,
+        "incremental_max_parsed_files": 2
+    });
+    let payload = serde_json::json!({
+        "summary": {
+            "resolved_commit_sha": "head-sha",
+            "changed_path_count": 3,
+            "progress": {"blob_read_count": 2, "parsed_file_count": 2}
+        }
+    });
+
+    assert!(
+        incremental_index_completion_validation("fixture", &config, 3, "head-sha", &payload)
+            .passed()
+    );
+    assert!(
+        !incremental_index_completion_validation("fixture", &config, 3, "other", &payload).passed()
+    );
 }

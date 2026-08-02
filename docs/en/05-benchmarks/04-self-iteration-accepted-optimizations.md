@@ -7,7 +7,7 @@ This page is the compact English companion for the self-iteration optimization l
 ## Issue #168: Large-Repository Register-To-Index Throughput
 
 - Algorithm and architecture: the default full-code-index batch now covers 512 files while retaining the 16 MiB blob cap and raising the bounded row cap to 150k. Checkpointed SQLite batch apply skips the empty-scope path-index existence probe for the first new batch, while later batches still keep collision cleanup and replay idempotency.
-- Guardrails: the default fast self-iteration profile includes the generated `index_performance_many_files` repository with 1024 small Rust files, recording both `*_index_ms` and `*_register_index_ms` through the real `repo register` plus `repo index` path.
+- Guardrails: the default fast self-iteration profile includes the generated `index_performance_many_files` repository with 1024 small Rust files, recording cold register/index and incremental-update latency through the real `repo register`, `repo index`, and `repo update` paths.
 - Higher full-profile standard: full and exhaustive self-iteration now add `index_performance_wide_mixed_files`, a generated 2048-file Rust workspace with cross-shard bridge queries and separate cold index, register-plus-index, query p50, query p95, and query max budgets. The default fast profile is unchanged.
 - Limits: no CLI/API shape, SQLite schema, parser fact, FTS document semantics, edge finalization, freshness/status, task lease, checkpoint, or source-fallback budget changed. Performance fixes must not skip indexing work, hide degraded states, use unbounded timeouts, or special-case repositories, paths, queries, symbols, or case ids.
 
@@ -55,3 +55,9 @@ This page is the compact English companion for the self-iteration optimization l
 
 - Algorithm and architecture: `tools/self_iteration` now includes a read-only `research-plan` mode that turns the arXiv, X.com, Reddit, open-source, and systems-engineering deep research workflow into a Markdown plan covering source ledgers, credibility tiers, synthesis matrices, competitive issue extraction, bilingual docs, archive validation, and remote-main publication evidence.
 - Invariants and limits: the mode does not call Codex, run evaluation, write self-iteration history, or change product CLI/API, indexing, storage, network, or release behavior. It gives future research iterations a reusable starting checklist while preserving real-source, independently testable issue, and documentation-archive requirements.
+
+## 2026-08-02 Minute-Scale Cold and Incremental Index Evaluation
+
+- Candidate generation now defaults to `gpt-5.6-sol` with `xhigh`. Performance fixtures recreate a repository-scoped runtime home and require cold task or parsed-file completion evidence, so a cached zero-change index cannot masquerade as a cold-index improvement.
+- Cold Git blob loading first tries one bounded `cat-file --batch` and retains the existing missing-object/submodule fallback. Incremental Git indexing prefetches ordinary changed blobs within the existing 512-file/16 MiB budget instead of spawning one `git show` per changed file.
+- The 1024-file fast fixture and 2048-file full fixture create a second commit with modified, added, and deleted paths, run `repo update` from the persisted base, record explicit cold/incremental metrics, and enforce bounded delta read/parse counts. Durable leases, checkpoints, single-writer ownership, retry policy, freshness, FTS writes, and edge finalization remain unchanged.

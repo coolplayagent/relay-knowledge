@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn codex_command_defaults_to_gpt55_xhigh() {
+fn codex_command_defaults_to_gpt56_sol_xhigh() {
     let config = Config::parse(vec![
         "once".to_owned(),
         "--workspace".to_owned(),
@@ -19,7 +19,7 @@ fn codex_command_defaults_to_gpt55_xhigh() {
             "-C",
             "/tmp/relay-knowledge",
             "-m",
-            "gpt-5.5",
+            "gpt-5.6-sol",
             "-c",
             "model_reasoning_effort=\"xhigh\"",
             "-"
