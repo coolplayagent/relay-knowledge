@@ -194,11 +194,22 @@ pub(in crate::code) fn git_batch_blobs(
     commit: &str,
     paths: &[String],
 ) -> Result<Vec<Vec<u8>>, CodeIndexError> {
+    git_batch_blobs_without_fallback(root, commit, paths)
+        .or_else(|_| git_blobs_one_path_at_a_time(root, commit, paths))
+}
+
+pub(in crate::code) fn git_batch_blobs_without_fallback(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+) -> Result<Vec<Vec<u8>>, CodeIndexError> {
     if paths
         .iter()
         .any(|path| path.contains('\n') || path.contains('\r'))
     {
-        return git_blobs_one_path_at_a_time(root, commit, paths);
+        return Err(CodeIndexError::InvalidInput(
+            "git cat-file batch paths must not contain line separators".to_owned(),
+        ));
     }
 
     let output = cat_file_output(root, ["cat-file", "--batch"], commit, paths)?;
@@ -210,7 +221,6 @@ pub(in crate::code) fn git_batch_blobs(
     }
 
     parse_cat_file_batch(paths, &output.stdout)
-        .or_else(|_| git_blobs_one_path_at_a_time(root, commit, paths))
 }
 
 pub(in crate::code) fn git_batch_blob_sizes(

@@ -115,7 +115,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
 | `--research-slug VALUE` | `research-iteration` | 用于归档、issue 或报告文件名的稳定 slug；只允许小写 ASCII、数字、`.`、`-`、`_`。 |
 | `--research-date YYYY-MM-DD` | `YYYY-MM-DD` 占位值 | 写入生成计划的日期。 |
 | `--yolo` | false；启动脚本默认传入 | 映射到非交互 Codex approvals 和 `danger-full-access` sandbox。 |
-| `--model MODEL` | `gpt-5.5` | 候选生成使用的 Codex 模型。 |
+| `--model MODEL` | `gpt-5.6-sol` | 候选生成使用的 Codex 模型。 |
 | `--codex-reasoning-effort VALUE` | `xhigh`；取值：`low`、`medium`、`high`、`xhigh` | 设置 `model_reasoning_effort`。 |
 | `--codex-profile NAME` | 未设置 | 向 Codex 传入 `-p NAME`。 |
 | `--codex-path PATH` | `codex` | Codex 可执行文件路径。 |
@@ -162,10 +162,10 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
 本地 Codex CLI 没有字面意义上的 `--yolo` 参数。本框架会把 `--yolo` 映射到当前非交互、高权限 Codex 调用：
 
 ```bash
-codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -
+codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -m gpt-5.6-sol -c 'model_reasoning_effort="xhigh"' -
 ```
 
-只应在外部可信的工作区中使用。默认生成模型为 `gpt-5.5`，推理强度为 `model_reasoning_effort="xhigh"`；需要更低成本或不同生成模式时，用 `--model` 和 `--codex-reasoning-effort low|medium|high|xhigh` 覆盖。
+只应在外部可信的工作区中使用。默认生成模型为 `gpt-5.6-sol`，推理强度为 `model_reasoning_effort="xhigh"`；需要更低成本或不同生成模式时，用 `--model` 和 `--codex-reasoning-effort low|medium|high|xhigh` 覆盖。
 
 `research-plan` 是只读模式：不调用 Codex、不运行评估、不创建历史记录。它会把图数据库、CodeGraph、X.com、Reddit 和 arXiv 深度研究中的可重复方法整理为 Markdown 计划，包含来源台账 checklist、综合矩阵模板、竞品 issue 提取规则、文档/归档产物、验证门禁和完成证据。
 
@@ -207,7 +207,7 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 | repository-set | 默认保留 `temporal_go_workspace` 的 2 条跨仓门槛 case。 |
 | semantic/vector | 默认运行 1 条 guardrail query。 |
 | coding-agent 工作流 | `fast` 默认跳过；通过 `--categories agent_workflows` 或 PR benchmark workflow 运行。 |
-| 复用缓存 | 复用 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/`，减少重复注册和索引成本。 |
+| 复用缓存 | 普通 workload 复用 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/`；冷索引性能 fixture 会删除并重建仓库级隔离 runtime home，避免旧 scope 把性能指标变成 no-op。 |
 
 `fast` 默认不跑产品 release build、全量 clippy、全量 test、本地文件 fixture 或 research judge。`full`/`exhaustive` 会恢复这些 rail，并运行完整仓库评估、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
 
@@ -233,7 +233,9 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 ```
 
-`full` 和 `exhaustive` 额外运行 `index_performance_wide_mixed_files`，它生成 2048 个 Rust 目标文件与跨 shard bridge 查询，并记录 cold `*_index_ms`、`*_register_index_ms`、query p50/p95/max 指标，用更宽的 workload 提高性能门槛。
+`full` 和 `exhaustive` 额外运行 `index_performance_wide_mixed_files`，生成 2048 个 Rust 目标文件和跨 shard bridge 查询。两个生成式性能仓库都使用隔离 runtime home，要求冷索引完成证据（`task.state=succeeded` 或非零 parsed-file summary），随后创建包含修改、新增和删除文件的第二个 Git 提交，并针对已持久化 base 执行 `repo update`。报告记录 `*_cold_index_ms`、`*_cold_register_index_ms`、`*_incremental_index_ms` 和 query p50/p95/max；完成性 guard 会拒绝缓存 no-op 冷索引，以及读取或解析文件数超过有界 delta 的增量索引。
+
+`.github/workflows/benchmark-checks.yml` 会在 pull request 上运行 1024 文件性能 fixture，并从 JSON 报告直接验证冷任务/checkpoint 已完成、三路径增量 delta、两文件 blob/parse 预算、完成性命令和三项延迟预算。
 
 ### coding-agent 工作流门禁
 
@@ -343,7 +345,7 @@ and (
 | 跨语言语法 fixture | 覆盖 C 调 C++、C++ 调 C、Go cgo 调 C、Rust FFI 调 C，让默认 fast 不依赖额外大仓也能验证多语言调用图。 |
 | 额外多语言 fixture | 覆盖 Python、JavaScript、TypeScript/TSX、Go、Java、Rust、Bash、C#、Kotlin、PHP、Ruby、Scala 和 Swift；矩阵见 `docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md`。 |
 | repository-set targets | 注册每个成员为 `scope=all` 仓库，创建显式 `repo-set`，刷新跨仓 overlay，再运行 `repo-set query`；case 可要求具体 member、source_scope、路径、行号和 excerpt 证据。 |
-| register-to-index 性能 targets | `repository_index_performance_targets.json` 收紧 `index_budget_ms` 并新增 `register_index_budget_ms`；默认 fast 包含 1024 文件 fixture，`full`/`exhaustive` 还包含 2048 文件 wide fixture。 |
+| 冷索引与增量索引性能 targets | `repository_index_performance_targets.json` 配置冷索引 `index_budget_ms`/`register_index_budget_ms`、增量 `incremental_index_budget_ms`、完成性证据和 delta 读/解析上限；默认 fast 包含 1024 文件 fixture，`full`/`exhaustive` 还包含 2048 文件 wide fixture。 |
 | 软件全域投影 targets | `repository_software_global_targets.json` 运行 `repo software`，覆盖 dependencies、sdks、files、topics、relationships、build、iac、design 和 all 投影 kind，且事实只能来自已索引证据。 |
 | CLI contract cases | 直接运行产品 CLI，不需要大仓；默认 fast 覆盖 `repo index-worker` help、idle JSON 和 streaming JSON。 |
 | semantic/vector suite | 写入小型 evidence，刷新 semantic/vector 索引，验证 query 命中 `retriever_sources`、`backend_statuses` 和相关排序；外部 provider 只从运行时环境继承。 |

@@ -451,7 +451,9 @@ fn commit_generated_repository(
         .collect()
 }
 
-fn generated_git_env(env: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+pub(in crate::evaluator) fn generated_git_env(
+    env: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
     let mut scoped = env.clone();
     scoped.insert(
         "GIT_AUTHOR_DATE".to_owned(),

@@ -115,7 +115,7 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
 | `--research-slug VALUE` | `research-iteration` | Stable slug for archive, issue, or report filenames; lowercase ASCII, digits, `.`, `-`, and `_` only. |
 | `--research-date YYYY-MM-DD` | `YYYY-MM-DD` placeholder | Date written into the generated plan. |
 | `--yolo` | false; launcher passes it by default | Maps to non-interactive Codex approvals and the `danger-full-access` sandbox. |
-| `--model MODEL` | `gpt-5.5` | Codex model for candidate generation. |
+| `--model MODEL` | `gpt-5.6-sol` | Codex model for candidate generation. |
 | `--codex-reasoning-effort VALUE` | `xhigh`; values: `low`, `medium`, `high`, `xhigh` | Sets `model_reasoning_effort`. |
 | `--codex-profile NAME` | unset | Passes `-p NAME` to Codex. |
 | `--codex-path PATH` | `codex` | Codex executable path. |
@@ -162,10 +162,10 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate [mode] [options]
 The local Codex CLI does not expose a literal `--yolo` flag. The harness maps `--yolo` to the current non-interactive high-permission Codex invocation:
 
 ```bash
-codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -
+codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -m gpt-5.6-sol -c 'model_reasoning_effort="xhigh"' -
 ```
 
-Use it only in an externally trusted workspace. Candidate generation defaults to `gpt-5.5` with `model_reasoning_effort="xhigh"`; override with `--model` and `--codex-reasoning-effort low|medium|high|xhigh` when a run needs a cheaper or different generation mode.
+Use it only in an externally trusted workspace. Candidate generation defaults to `gpt-5.6-sol` with `model_reasoning_effort="xhigh"`; override with `--model` and `--codex-reasoning-effort low|medium|high|xhigh` when a run needs a cheaper or different generation mode.
 
 `research-plan` is read-only: it does not call Codex, run evaluation, or create history records. It turns the graph database, CodeGraph, X.com, Reddit, and arXiv research workflow into a Markdown plan with a source-ledger checklist, synthesis matrix template, competitive issue extraction rules, documentation/archive outputs, validation gates, and completion evidence.
 
@@ -207,7 +207,7 @@ The prompt injects only bounded summaries, so long-running iteration does not gr
 | Repository sets | 2 cross-repository threshold cases from `temporal_go_workspace`. |
 | Semantic/vector | 1 guardrail query. |
 | Coding-agent workflows | Skipped by default in `fast`; run with `--categories agent_workflows` or by the PR benchmark workflow. |
-| Cache reuse | Reuses `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce registration and indexing cost. |
+| Cache reuse | Reuses `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` for ordinary workloads. Cold-index performance fixtures delete and recreate a repository-scoped isolated runtime home so a previous scope cannot turn the metric into a no-op. |
 
 `fast` does not run product release build, full clippy, full tests, local file fixtures, or the research judge by default. `full` and `exhaustive` restore those rails and run complete repository evaluation, repository-set cases, local file fixtures, semantic/vector fixtures, and the research judge.
 
@@ -233,7 +233,9 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 ```
 
-`full` and `exhaustive` also run `index_performance_wide_mixed_files`, which generates 2048 Rust target files and cross-shard bridge queries, then records cold `*_index_ms`, `*_register_index_ms`, and query p50/p95/max metrics to raise the performance bar with a wider workload.
+`full` and `exhaustive` also run `index_performance_wide_mixed_files`, which generates 2048 Rust target files and cross-shard bridge queries. Both generated performance repositories use an isolated runtime home, require cold completion evidence (`task.state=succeeded` or a non-zero parsed-file summary), create a second Git commit with modified, added, and deleted files, and run `repo update` against the persisted base. Reports record `*_cold_index_ms`, `*_cold_register_index_ms`, `*_incremental_index_ms`, and query p50/p95/max metrics. The completion guards reject cached no-op cold runs and incremental runs that read or parse more files than the bounded delta permits.
+
+`.github/workflows/benchmark-checks.yml` runs the 1024-file performance fixture on pull requests and verifies the completed cold task/checkpoint, the three-path incremental delta, the two-file blob/parse budget, completion commands, and all three latency budgets directly from the JSON report.
 
 ### Coding-Agent Workflow Gate
 
@@ -343,7 +345,7 @@ Regressions are recorded as degradation feedback for the next Codex prompt; posi
 | Cross-language syntax fixture | Covers C calling C++, C++ calling C, Go cgo calling C, and Rust FFI calling C so default fast runs can validate multi-language call graph retrieval without another large checkout. |
 | Additional multilingual fixtures | Cover Python, JavaScript, TypeScript/TSX, Go, Java, Rust, Bash, C#, Kotlin, PHP, Ruby, Scala, and Swift; the matrix is documented in `docs/en/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md`. |
 | Repository-set targets | Register each member as a full `scope=all` repository, create an explicit `repo-set`, refresh cross-repository overlays, and run `repo-set query`; cases can require member, source scope, path, line, and excerpt evidence. |
-| Register-to-index performance targets | `repository_index_performance_targets.json` tightens `index_budget_ms` and adds `register_index_budget_ms`; default fast includes a 1024-file fixture, while `full` and `exhaustive` also include a 2048-file wide fixture. |
+| Cold and incremental index performance targets | `repository_index_performance_targets.json` sets cold `index_budget_ms`/`register_index_budget_ms`, incremental `incremental_index_budget_ms`, completion evidence, and delta read/parse caps; default fast includes a 1024-file fixture, while `full` and `exhaustive` also include a 2048-file wide fixture. |
 | Software global projection targets | `repository_software_global_targets.json` runs `repo software` for dependencies, sdks, files, topics, relationships, build, iac, design, and all projection kinds, with facts derived only from indexed evidence. |
 | CLI contract cases | Run product CLI commands without indexing a large repository; default fast covers `repo index-worker` help, idle JSON, and streaming JSON. |
 | Semantic/vector suite | Writes a small evidence fixture, refreshes semantic/vector indexes, and verifies `retriever_sources`, `backend_statuses`, and relevant ranking; external providers are inherited only from the runtime environment. |
