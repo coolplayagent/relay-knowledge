@@ -1,4 +1,8 @@
 # 自迭代采纳优化记录
+## 候选优化说明：run-1785677193-bounded-index-lookahead
+- 算法/架构：checkpointed full index 从串行“解析一批、写一批”改为一批有界 lookahead pipeline；当前批次仍由唯一 SQLite writer 提交时，下一批在既有 blocking worker 边界读取与解析，`tokio::join!` 在推进 checkpoint 前同时收敛两侧结果，最多同时保留当前与下一批两个受 512 files/16 MiB/150k rows 预算约束的 batch。
+- 不变量/预期影响/风险：不改变 parser facts、批次顺序、事务/FTS/edge finalize、单仓单 writer、task lease/checkpoint replay、重试、freshness、repo-set、semantic/vector、CLI/API、env/paths/net 或安装发布；预期让 Git/blob/CPU 与 SQLite DML 重叠，降低 OpenTelemetry 等多语言大仓 cold index 和后续 repo-set add 的 wall time。风险是峰值 batch 内存最多由一批升至两批，仍严格有界；任一侧失败时已提交 checkpoint 保持可重放，未提交的预解析批次直接丢弃。
+- 回归与策略关联：默认 fast 的 `index_performance_many_files_*` cold-index 完成证据、延迟 key metric、增量 blob/parse 上限及既有 recovery/SQLite-lock cases 共同保护吞吐和崩溃语义；相同 release 二进制环境与同一 OTel Contrib commit 的隔离 cold-index A/B 从基线 664.88 s 降至 357.46 s（-46.2%），13,098 files、703,968 symbols、1,381,087 references、715,126 chunks 计数不变，repo-set add 0.04 s 成功且双仓 overlay 43.48 s 刷新为 fresh。本候选建立在已采纳的 512-file Git batch read/prefetch 策略上，避免最近五轮 rejected parser/reference-finalize 局部改写及其 OpenTelemetry timeout、research/ranking 回退模式。
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
 ## 候选优化说明：run-1780645380018333834-vector-token-signature-admission
@@ -992,3 +996,18 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - 算法：Git 冷索引先直接尝试有界 `cat-file --batch`，仅在缺失对象或 submodule 路径时回退 batch-check/逐路径读取；普通 Git 增量变更在 512 文件、16 MiB 默认预算内预取 blob，避免每个变更文件启动一次 `git show`。
 - 回归面：1024 文件 fast fixture 和 2048 文件 full fixture 都创建第二个含修改、新增、删除的提交，执行 `repo update`，记录 `*_cold_index_ms`、`*_cold_register_index_ms`、`*_incremental_index_ms`，并限制 delta blob read/parse 数量；PR benchmark workflow 会直接审计 JSON 完成证据和预算。
 - 架构不变量与风险：任务租约、单仓单 writer、checkpoint、重试、资源预算、FTS/边终结、freshness 和查询事实不变；额外内存严格受现有 batch 文件/字节上限约束。submodule 或 batch 读取失败仍走原有有界回退，风险由 Git/submodule 测试、增量 batch-read 测试和真实 CLI 性能 gate 覆盖。
+
+## run-1785677193
+
+- patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches-v2/run-1785677193.patch`
+- score: 0.986247 (foundational=1.000000, competitive=0.993590, accuracy=0.996795, semantic_vector=1.000000, research_judge=n/a, performance=0.931431, stability=1.000000)
+- cases: 109/109 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository/indexing/mod.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=4516ms; self_iteration_cargo_fmt_check_ms=504ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=243ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=464ms; code_index_recovery_cases_ms=1228ms; code_index_sqlite_lock_cases_ms=946ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+

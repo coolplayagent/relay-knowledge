@@ -159,17 +159,20 @@ impl RelayKnowledgeService {
             .begin_code_index_session(session.clone())
             .await
             .map_err(storage_api_error)?;
-        loop {
-            refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
-            let (next_plan, batch) = run_blocking_code(move || plan.parse_next_batch()).await?;
+        refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
+        let (next_plan, batch) = run_blocking_code(move || plan.parse_next_batch()).await?;
+        plan = next_plan;
+        let mut pending_batch = batch;
+        while let Some(batch) = pending_batch {
+            // One-batch lookahead overlaps blocking source/parse work with the
+            // single durable writer without allowing an unbounded producer.
+            let parse_next = run_blocking_code(move || plan.parse_next_batch());
+            let apply_current = store.apply_code_index_batch(batch);
+            let (parsed, applied) = tokio::join!(parse_next, apply_current);
+            applied.map_err(storage_api_error)?;
+            let (next_plan, next_batch) = parsed?;
             plan = next_plan;
-            let Some(batch) = batch else {
-                break;
-            };
-            store
-                .apply_code_index_batch(batch)
-                .await
-                .map_err(storage_api_error)?;
+            pending_batch = next_batch;
             refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
         }
 
