@@ -352,6 +352,26 @@ pub(super) fn query_command(
     command
 }
 
+pub(super) fn incremental_update_command(
+    binary: &Path,
+    alias: &str,
+    base_ref: &str,
+    head_ref: &str,
+) -> Vec<String> {
+    vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "update".to_owned(),
+        alias.to_owned(),
+        "--base".to_owned(),
+        base_ref.to_owned(),
+        "--head".to_owned(),
+        head_ref.to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+    ]
+}
+
 pub(super) fn software_query_command(
     binary: &Path,
     alias: &str,

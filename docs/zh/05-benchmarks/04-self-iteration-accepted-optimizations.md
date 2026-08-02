@@ -985,3 +985,10 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 
 - 算法/架构：`tools/self_iteration` 新增只读 `research-plan` 模式，把本次 arXiv、X.com、Reddit、开源项目与系统工程深度研究流程抽象为 Markdown 计划，覆盖来源台账、可信度分层、综合矩阵、竞品 issue 拆解、双语文档、归档验证和远端 main 发布证据。
 - 不变量/预期影响/风险：该模式不调用 Codex、不运行评估、不写 self-iteration 历史、不修改产品 CLI/API、索引、存储、网络或发布行为；后续 research 迭代可先生成计划底稿，再按来源真实、issue 独立可验收和文档归档完整性推进。风险主要是输出模板过于保守，由 harness 单元测试和双语 README 参数覆盖约束。
+
+## 2026-08-02 冷索引与增量索引分钟级性能评估
+
+- 目标与测量修复：Codex 候选生成默认升级为 `gpt-5.6-sol` + `xhigh`；性能 fixture 使用每仓隔离 runtime home，并验证 cold task/parsed-file 完成证据，禁止把缓存命中的 `changed_path_count=0` no-op 计作冷索引改善。
+- 算法：Git 冷索引先直接尝试有界 `cat-file --batch`，仅在缺失对象或 submodule 路径时回退 batch-check/逐路径读取；普通 Git 增量变更在 512 文件、16 MiB 默认预算内预取 blob，避免每个变更文件启动一次 `git show`。
+- 回归面：1024 文件 fast fixture 和 2048 文件 full fixture 都创建第二个含修改、新增、删除的提交，执行 `repo update`，记录 `*_cold_index_ms`、`*_cold_register_index_ms`、`*_incremental_index_ms`，并限制 delta blob read/parse 数量；PR benchmark workflow 会直接审计 JSON 完成证据和预算。
+- 架构不变量与风险：任务租约、单仓单 writer、checkpoint、重试、资源预算、FTS/边终结、freshness 和查询事实不变；额外内存严格受现有 batch 文件/字节上限约束。submodule 或 batch 读取失败仍走原有有界回退，风险由 Git/submodule 测试、增量 batch-read 测试和真实 CLI 性能 gate 覆盖。

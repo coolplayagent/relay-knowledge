@@ -35,6 +35,57 @@ jobs:
       - name: Code repository benchmark regression gate
         run: cargo test --test benchmarks --all-features -- --nocapture
 
+  index-performance-regression:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    env:
+      RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS: index_performance_many_files
+      RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS: __index_performance_ci_only__
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+
+      - name: Build self-iteration harness
+        run: cargo build --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
+
+      - name: Cold and incremental index regression gate
+        run: |
+          tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate \
+            --workspace . \
+            --profile fast \
+            --categories performance \
+            --use-current-candidate \
+            --jobs 4 \
+            --repo-jobs 1 \
+            --query-jobs 2 \
+            --command-timeout-seconds 300
+          report="$(ls -t .git/relay-knowledge-self-iteration/reports-v2/manual-evaluate-*.json | head -n 1)"
+          jq -e '
+            ([.evaluation.gates[] | select(.passed | not)] | length) == 0 and
+            ([.evaluation.cases[] | select(.passed | not)] | length) == 0 and
+            ([.evaluation.repositories[] |
+              select(.repository == "index_performance_many_files")] | length) == 1 and
+            (.evaluation.repositories[] |
+              select(.repository == "index_performance_many_files") |
+              (.index_summary.cold.task.state == "succeeded") and
+              (.index_summary.cold.checkpoint.state == "completed") and
+              (.index_summary.incremental.summary.changed_path_count == 3) and
+              (.index_summary.incremental.summary.progress.blob_read_count == 2) and
+              (.index_summary.incremental.summary.progress.parsed_file_count == 2) and
+              ([.commands[] |
+                select(.name == "index_performance_many_files_cold_index_completion" or
+                       .name == "index_performance_many_files_incremental_index_completion") |
+                select(.exit_code == 0)] | length) == 2 and
+              ([.metrics[] |
+                select(.name == "index_performance_many_files_cold_index_ms" or
+                       .name == "index_performance_many_files_cold_register_index_ms" or
+                       .name == "index_performance_many_files_incremental_index_ms") |
+                select(.budget != null and .value <= .budget)] | length) == 3)
+          ' "$report"
+
   agent-workflow-regression:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest

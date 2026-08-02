@@ -1,4 +1,4 @@
-pub const DEFAULT_CODEX_MODEL: &str = "gpt-5.5";
+pub const DEFAULT_CODEX_MODEL: &str = "gpt-5.6-sol";
 pub const DEFAULT_CODEX_REASONING_EFFORT: &str = "xhigh";
 
 mod categories;

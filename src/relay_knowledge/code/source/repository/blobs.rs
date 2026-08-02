@@ -5,7 +5,7 @@ use std::{fs, path::PathBuf, sync::Mutex};
 
 use super::super::{
     CodeIndexError,
-    git::{git_batch_blob_sizes, git_batch_blobs, git_bytes},
+    git::{git_batch_blob_sizes, git_batch_blobs, git_batch_blobs_without_fallback, git_bytes},
     source_gitlink,
 };
 use super::{
@@ -28,6 +28,17 @@ static FILESYSTEM_POLICY_READ_MUTATION: Mutex<Option<FileSystemPolicyReadMutatio
     Mutex::new(None);
 
 #[cfg(test)]
+#[derive(Debug)]
+struct SourceReadObserver {
+    root: PathBuf,
+    single_reads: usize,
+    batch_reads: usize,
+}
+
+#[cfg(test)]
+static SOURCE_READ_OBSERVER: Mutex<Option<SourceReadObserver>> = Mutex::new(None);
+
+#[cfg(test)]
 pub(crate) fn mutate_next_filesystem_policy_read(root: PathBuf, path: &str, content: &[u8]) {
     *FILESYSTEM_POLICY_READ_MUTATION
         .lock()
@@ -43,6 +54,7 @@ fn source_bytes_after_policy_verification(
     commit: &str,
     path: &str,
 ) -> Result<Vec<u8>, CodeIndexError> {
+    record_source_single_read(root);
     match git_bytes(root, ["show", &format!("{commit}:{path}")]) {
         Ok(bytes) => Ok(bytes),
         Err(error) => source_gitlink::submodule_bytes(root, commit, path).map_err(|_| error),
@@ -89,6 +101,10 @@ fn source_batch_bytes_after_policy_verification(
 ) -> Result<Vec<Vec<u8>>, CodeIndexError> {
     if paths.is_empty() {
         return Ok(Vec::new());
+    }
+    record_source_batch_read(root);
+    if let Ok(blobs) = git_batch_blobs_without_fallback(root, commit, paths) {
+        return Ok(blobs);
     }
     let sizes = match git_batch_blob_sizes(root, commit, paths) {
         Ok(sizes) => sizes,
@@ -140,6 +156,52 @@ fn source_batch_bytes_after_policy_verification(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_source_read_counts_for_root(root: PathBuf) {
+    *SOURCE_READ_OBSERVER
+        .lock()
+        .expect("source read observer should lock") = Some(SourceReadObserver {
+        root,
+        single_reads: 0,
+        batch_reads: 0,
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn source_read_counts_for_root(root: &Path) -> (usize, usize) {
+    SOURCE_READ_OBSERVER
+        .lock()
+        .expect("source read observer should lock")
+        .as_ref()
+        .filter(|observer| observer.root == root)
+        .map(|observer| (observer.single_reads, observer.batch_reads))
+        .unwrap_or_default()
+}
+
+fn record_source_single_read(_root: &Path) {
+    #[cfg(test)]
+    if let Some(observer) = SOURCE_READ_OBSERVER
+        .lock()
+        .expect("source read observer should lock")
+        .as_mut()
+        && observer.root == _root
+    {
+        observer.single_reads += 1;
+    }
+}
+
+fn record_source_batch_read(_root: &Path) {
+    #[cfg(test)]
+    if let Some(observer) = SOURCE_READ_OBSERVER
+        .lock()
+        .expect("source read observer should lock")
+        .as_mut()
+        && observer.root == _root
+    {
+        observer.batch_reads += 1;
+    }
 }
 
 pub(in crate::code) fn source_batch_bytes_after_content_verification(

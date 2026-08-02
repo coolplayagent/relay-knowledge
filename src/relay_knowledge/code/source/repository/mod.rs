@@ -15,7 +15,10 @@ pub(in crate::code) struct RegistrationSource {
 
 pub(in crate::code) use super::filesystem::{FileSystemScanPolicy, normalize_path_filter};
 #[cfg(test)]
-pub(crate) use blobs::mutate_next_filesystem_policy_read;
+pub(crate) use blobs::{
+    mutate_next_filesystem_policy_read, reset_source_read_counts_for_root,
+    source_read_counts_for_root,
+};
 pub(in crate::code) use blobs::{
     source_batch_bytes_after_content_verification, source_blob_sizes_after_policy_verification,
     source_bytes_after_content_verification, source_snapshot_batch_bytes, source_snapshot_bytes,

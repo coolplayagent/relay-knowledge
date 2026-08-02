@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, path::Path};
 
 use serde_json::Value;
 
@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::super::{
-    fixtures::prepare_repository_path,
+    fixtures::{prepare_incremental_repository_change, prepare_repository_path},
     runtime::{
         concurrency::{parallel_map, run_limited, run_writer_limited},
         contracts::{EvalRuntime, RepoReport},
@@ -17,7 +17,9 @@ use super::super::{
     },
 };
 use super::{
-    cli_cases::{query_command, register_command, software_query_command},
+    cli_cases::{
+        incremental_update_command, query_command, register_command, software_query_command,
+    },
     repository_scoring::{score_query_case, score_software_case},
     selection::guardrail_gate_from_case,
 };
@@ -30,6 +32,8 @@ pub(in crate::evaluator) fn evaluate_repository(
     repo_cases: Vec<Value>,
     software_cases: Vec<Value>,
 ) -> Result<RepoReport, String> {
+    let owned_runtime = isolated_repository_runtime(runtime, run_home, repo_name, repo_config)?;
+    let runtime = &owned_runtime;
     let alias = string_or(repo_config, "alias", repo_name);
     let ref_selector = string_or(repo_config, "ref", "HEAD");
     let scope = string_or(repo_config, "scope", "all").to_owned();
@@ -171,16 +175,16 @@ pub(in crate::evaluator) fn evaluate_repository(
             runtime.timeout,
         ),
     );
-    let index_json = parse_json_output(&index.stdout);
+    let mut index_json = parse_json_output(&index.stdout);
     metrics.push(MetricObservation {
-        name: format!("{repo_name}_index_ms"),
+        name: format!("{repo_name}_cold_index_ms"),
         value: index.duration_ms as f64,
         budget: budget(repo_config, "index_budget_ms"),
         lower_is_better: true,
         key: true,
     });
     metrics.push(MetricObservation {
-        name: format!("{repo_name}_register_index_ms"),
+        name: format!("{repo_name}_cold_register_index_ms"),
         value: (register.duration_ms + index.duration_ms) as f64,
         budget: budget(repo_config, "register_index_budget_ms"),
         lower_is_better: true,
@@ -191,6 +195,76 @@ pub(in crate::evaluator) fn evaluate_repository(
         return Ok(repo_report(
             repo_name, scope, commands, cases, metrics, index_json,
         ));
+    }
+    if let Some(validation) = cold_index_completion_validation(repo_name, repo_config, &index_json)
+    {
+        let passed = validation.passed();
+        commands.push(validation);
+        if !passed {
+            return Ok(repo_report(
+                repo_name, scope, commands, cases, metrics, index_json,
+            ));
+        }
+    }
+
+    if let Some(incremental) =
+        prepare_incremental_repository_change(runtime, repo_name, &path, repo_config)?
+    {
+        let setup_passed = incremental.commands.iter().all(CommandResult::passed)
+            && !incremental.base_ref.is_empty()
+            && !incremental.head_ref.is_empty();
+        commands.extend(incremental.commands);
+        if !setup_passed {
+            return Ok(repo_report(
+                repo_name, scope, commands, cases, metrics, index_json,
+            ));
+        }
+        let update = run_writer_limited(
+            runtime,
+            CommandSpec::new(
+                format!("{repo_name}_incremental_index"),
+                incremental_update_command(
+                    &runtime.binary,
+                    alias,
+                    &incremental.base_ref,
+                    &incremental.head_ref,
+                ),
+                &runtime.workspace,
+                Some(runtime.env.clone()),
+                runtime.timeout,
+            ),
+        );
+        let update_json = parse_json_output(&update.stdout);
+        metrics.push(MetricObservation {
+            name: format!("{repo_name}_incremental_index_ms"),
+            value: update.duration_ms as f64,
+            budget: budget(repo_config, "incremental_index_budget_ms"),
+            lower_is_better: true,
+            key: true,
+        });
+        let update_passed = update.passed();
+        commands.push(update);
+        if !update_passed {
+            index_json = serde_json::json!({"cold": index_json, "incremental": update_json});
+            return Ok(repo_report(
+                repo_name, scope, commands, cases, metrics, index_json,
+            ));
+        }
+        let validation = incremental_index_completion_validation(
+            repo_name,
+            repo_config,
+            incremental.changed_path_count,
+            &incremental.head_ref,
+            &update_json,
+        );
+        let validation_passed = validation.passed();
+        commands.push(validation);
+        index_json = serde_json::json!({"cold": index_json, "incremental": update_json});
+        if !validation_passed {
+            return Ok(repo_report(
+                repo_name, scope, commands, cases, metrics, index_json,
+            ));
+        }
     }
 
     let query_results = parallel_map(repo_cases, runtime.query_jobs.max(1), {
@@ -276,6 +350,158 @@ pub(in crate::evaluator) fn evaluate_repository(
     let mut report = repo_report(repo_name, scope, commands, cases, metrics, index_json);
     report.gates = guardrail_gates;
     Ok(report)
+}
+
+fn isolated_repository_runtime(
+    runtime: &EvalRuntime,
+    run_home: &Path,
+    repo_name: &str,
+    repo_config: &Value,
+) -> Result<EvalRuntime, String> {
+    if !repo_config
+        .get("isolated_index_home")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(runtime.clone());
+    }
+    if repo_name.is_empty()
+        || !repo_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(format!(
+            "isolated repository name must be a safe path component: {repo_name:?}"
+        ));
+    }
+    let home = run_home.join("isolated-index-homes").join(repo_name);
+    if home.exists() {
+        fs::remove_dir_all(&home)
+            .map_err(|error| format!("failed to remove {}: {error}", home.display()))?;
+    }
+    fs::create_dir_all(&home)
+        .map_err(|error| format!("failed to create {}: {error}", home.display()))?;
+    let mut isolated = runtime.clone();
+    isolated.env.insert(
+        "RELAY_KNOWLEDGE_HOME".to_owned(),
+        home.display().to_string(),
+    );
+    eprintln!(
+        "[self-iterate] repository isolated index home name={} home={}",
+        repo_name,
+        home.display()
+    );
+    Ok(isolated)
+}
+
+fn cold_index_completion_validation(
+    repo_name: &str,
+    repo_config: &Value,
+    payload: &Value,
+) -> Option<CommandResult> {
+    let minimum_files = repo_config
+        .get("cold_index_min_file_count")
+        .and_then(Value::as_u64)?;
+    let indexed_files = payload
+        .pointer("/status/indexed_file_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let parsed_files = payload
+        .pointer("/summary/progress/parsed_file_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let task_succeeded =
+        payload.pointer("/task/state").and_then(Value::as_str) == Some("succeeded");
+    let passed =
+        indexed_files >= minimum_files && (task_succeeded || parsed_files >= minimum_files);
+    let evidence = serde_json::json!({
+        "minimum_files": minimum_files,
+        "indexed_files": indexed_files,
+        "parsed_files": parsed_files,
+        "task_succeeded": task_succeeded,
+    });
+    Some(CommandResult {
+        name: format!("{repo_name}_cold_index_completion"),
+        command: vec!["validate".to_owned(), "cold-index-completion".to_owned()],
+        exit_code: i32::from(!passed),
+        duration_ms: 0,
+        stdout: if passed {
+            evidence.to_string()
+        } else {
+            String::new()
+        },
+        stderr: if passed {
+            String::new()
+        } else {
+            format!("cold index completion evidence failed: {evidence}")
+        },
+    })
+}
+
+fn incremental_index_completion_validation(
+    repo_name: &str,
+    repo_config: &Value,
+    expected_changed_paths: usize,
+    expected_head_ref: &str,
+    payload: &Value,
+) -> CommandResult {
+    let changed_paths = payload
+        .pointer("/summary/changed_path_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let blob_reads = payload
+        .pointer("/summary/progress/blob_read_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(u64::MAX);
+    let parsed_files = payload
+        .pointer("/summary/progress/parsed_file_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(u64::MAX);
+    let resolved_head = payload
+        .pointer("/summary/resolved_commit_sha")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let max_blob_reads = repo_config
+        .get("incremental_max_blob_reads")
+        .and_then(Value::as_u64)
+        .unwrap_or(expected_changed_paths as u64);
+    let max_parsed_files = repo_config
+        .get("incremental_max_parsed_files")
+        .and_then(Value::as_u64)
+        .unwrap_or(expected_changed_paths as u64);
+    let passed = changed_paths == expected_changed_paths as u64
+        && blob_reads <= max_blob_reads
+        && parsed_files <= max_parsed_files
+        && resolved_head == expected_head_ref;
+    let evidence = serde_json::json!({
+        "expected_changed_paths": expected_changed_paths,
+        "changed_paths": changed_paths,
+        "blob_reads": blob_reads,
+        "max_blob_reads": max_blob_reads,
+        "parsed_files": parsed_files,
+        "max_parsed_files": max_parsed_files,
+        "expected_head_ref": expected_head_ref,
+        "resolved_head": resolved_head,
+    });
+    CommandResult {
+        name: format!("{repo_name}_incremental_index_completion"),
+        command: vec![
+            "validate".to_owned(),
+            "incremental-index-completion".to_owned(),
+        ],
+        exit_code: i32::from(!passed),
+        duration_ms: 0,
+        stdout: if passed {
+            evidence.to_string()
+        } else {
+            String::new()
+        },
+        stderr: if passed {
+            String::new()
+        } else {
+            format!("incremental index completion evidence failed: {evidence}")
+        },
+    }
 }
 
 #[cfg(test)]
