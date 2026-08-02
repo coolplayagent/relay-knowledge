@@ -168,6 +168,15 @@ fn parses_repo_feature_flags_with_optional_filter_and_scope() {
 
 #[test]
 fn parses_repo_command_forms_and_validation_errors() {
+    assert_eq!(
+        parse_repo(&["list".to_owned()]).expect("list command should parse"),
+        RepoCommand::List
+    );
+    assert_eq!(
+        parse_repo(&["list".to_owned(), "extra".to_owned()])
+            .expect_err("list command should reject arguments"),
+        CliError::UnexpectedArgument("extra".to_owned())
+    );
     let register = parse_repo(&[
         "register".to_owned(),
         "/work/repo".to_owned(),

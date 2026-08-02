@@ -295,6 +295,28 @@ async fn executes_read_and_index_operations_through_shared_service() {
         3
     );
 
+    let repositories = execute_json(
+        service.clone(),
+        json!({
+            "snapshot": {
+                "name": "Indexed repositories",
+                "command": "relay-knowledge repo list --format json",
+                "payload": {
+                    "operation": "code.repo.list"
+                }
+            }
+        }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(repositories["operation"], "code.repo.list");
+    assert!(
+        repositories["result"]["repositories"]
+            .as_array()
+            .expect("repositories should be an array")
+            .is_empty()
+    );
+
     let status = execute_json(
         service,
         json!({

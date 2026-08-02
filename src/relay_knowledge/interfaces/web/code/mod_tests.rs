@@ -47,6 +47,20 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
         .await
         .expect("repository should register");
     let router = router(service.clone(), crate::net::http::DEFAULT_MAX_BODY_BYTES);
+    let registered_only = request_json(
+        router.clone(),
+        "GET",
+        "/api/v1/code/repositories",
+        None,
+        StatusCode::OK,
+    )
+    .await;
+    assert!(
+        registered_only["repositories"]
+            .as_array()
+            .expect("repositories should be an array")
+            .is_empty()
+    );
     let selector = CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), Vec::new())
         .expect("selector should validate");
     let index_request = CodeIndexRequest {
@@ -105,6 +119,17 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
             .await
             .expect("index worker should run");
     }
+
+    let repositories = request_json(
+        router.clone(),
+        "GET",
+        "/api/v1/code/repositories",
+        None,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(repositories["repositories"][0]["alias"], "fixture");
+    assert!(repositories["repositories"][0]["last_indexed_scope_id"].is_string());
 
     let status = request_json(
         router.clone(),

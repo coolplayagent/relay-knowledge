@@ -403,8 +403,8 @@ Local CLIs can query a deployed resident service with `--remote <base-url>` or
 durable tasks to the service and return task/status/checkpoint JSON; the remote
 `service run --web` worker pool drains those tasks rather than the local CLI
 running `repo index-worker`. Remote read-only repository graph commands
-(`repo query`, `repo context`, `repo feature-flags`, `repo impact`, `repo report`, and
-`repo software`) read service-host index state and preserve their CLI `--kind`
+(`repo list`, `repo query`, `repo context`, `repo feature-flags`, `repo impact`,
+`repo report`, `repo software`, and `repo view`) read service-host index state and preserve their CLI `--kind`
 arguments. Remote maintenance commands such as
 `repo index --reset` and `repo index-worker` are rejected by a remote-selected
 CLI and must be run on the service host; `storage::sqlite::code::tasks::reset` owns the atomic local reset. Remote dispatch validates the remote
@@ -420,6 +420,7 @@ being indexed, marking the response stale rather than blocking behind the
 writer.
 
 `repo status` reports `active_task`, checkpoint counters, and scope retention; `storage::sqlite::code::tasks::status` owns task lookup and the bounded queue projection, while `checkpoint` owns scope and latest-progress reads.
+`repo list` returns the stable status inventory of repositories with at least one completed indexed scope and omits registrations that have never completed indexing.
 Successful background tasks retain the active scope, the two latest completed
 scopes, and unfinished task scopes while pruning older repository scopes; `storage::sqlite::code::tasks::retention` owns that plan and its transactional cleanup.
 
@@ -743,6 +744,7 @@ relay-knowledge repo-set add workspace relay-knowledge --ref HEAD --priority 10 
 relay-knowledge repo-set remove workspace relay-knowledge --format json
 relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
 relay-knowledge repo impact relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo list --format json
 relay-knowledge repo status relay-knowledge --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json

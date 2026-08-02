@@ -7,6 +7,7 @@ fn environment_urls_only_select_remote_capable_commands() {
     let status = CliCommand::parse(["status"]).expect("status should parse");
     let repo_status =
         CliCommand::parse(["repo", "status", "org/repo"]).expect("repo status should parse");
+    let repo_list = CliCommand::parse(["repo", "list"]).expect("repo list should parse");
     let repo_software =
         CliCommand::parse(["repo", "software", "org/repo", "--kind", "relationships"])
             .expect("repo software should parse");
@@ -15,6 +16,7 @@ fn environment_urls_only_select_remote_capable_commands() {
 
     assert!(!remote_environment_needed(&status));
     assert!(remote_environment_needed(&repo_status));
+    assert!(remote_environment_needed(&repo_list));
     assert!(remote_environment_needed(&repo_software));
     assert!(remote_environment_needed(&repo_reset));
     assert_eq!(

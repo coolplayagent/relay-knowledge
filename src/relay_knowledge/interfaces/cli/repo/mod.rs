@@ -20,6 +20,7 @@ pub use runner::run_repo;
 /// Parsed `repo` CLI command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoCommand {
+    List,
     Register {
         root_path: String,
         alias: String,

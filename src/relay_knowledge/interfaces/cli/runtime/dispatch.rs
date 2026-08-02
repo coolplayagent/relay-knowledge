@@ -85,7 +85,7 @@ pub(crate) async fn run_command(command: CliCommand) -> Result<String, CliError>
 
 fn remote_unsupported_error() -> CliError {
     CliError::ApiFailed(
-        "remote CLI mode supports repo index, repo scope preview, repo status, repo query, repo context, repo feature-flags, repo impact, repo report, and repo software"
+        "remote CLI mode supports repo list, repo index, repo scope preview, repo status, repo query, repo context, repo feature-flags, repo impact, repo report, repo software, and repo view"
             .to_owned(),
     )
 }

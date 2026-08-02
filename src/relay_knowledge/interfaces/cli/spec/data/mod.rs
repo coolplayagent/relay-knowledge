@@ -13,6 +13,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         files::files_index(),
         files::files_query(),
         files::files_content(),
+        repo::repo_list(),
         repo::repo_register(),
         repo::repo_remove(),
         repo::repo_index(),

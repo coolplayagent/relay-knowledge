@@ -10,6 +10,8 @@ use super::{
 
 pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
     match tokens.first().map(String::as_str) {
+        Some("list") if tokens.len() == 1 => Ok(RepoCommand::List),
+        Some("list") => Err(CliError::UnexpectedArgument(tokens[1].clone())),
         Some("register") => parse_register(&tokens[1..]),
         Some("remove") => parse_remove(&tokens[1..]),
         Some("index") => parse_index(&tokens[1..]),
