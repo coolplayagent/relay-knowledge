@@ -1009,4 +1009,3 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
