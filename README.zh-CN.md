@@ -165,6 +165,8 @@ competitive-capability macro 探索。
 tree-sitter 语法能力生成的专用 fixture；多语言生成 fixture 扩展同一测评集。复现清单见
 [第五卷第 6 章：C/C++ 语法型自迭代测评集](docs/zh/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
 和 [第五卷第 7 章：多语言语法型自迭代测评集](docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md)。
+大仓库索引的弹性长预算模型、180 秒历史基线、吞吐率计算和上限见
+[第五卷第 12 章：大仓库索引弹性长预算模型](docs/zh/05-benchmarks/12-elastic-index-budgets.md)。
 
 ### 质量门禁
 

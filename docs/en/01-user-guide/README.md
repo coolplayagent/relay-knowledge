@@ -28,6 +28,7 @@ This book only covers paths that users can run, verify, and troubleshoot directl
 - [Chapter 3: CLI Command Reference](03-cli-command-reference.md): command overview, status diagnostics, setup profiles, and provider probe.
 - [Chapter 4: Knowledge Graph](04-knowledge-graph.md): evidence ingest, context pack query, graph inspection, multimodal evidence, and retrieval backend entry points.
 - [Chapter 5: Code Repository Graph Workflow](05-code-repository-graph-workflow.md): repository registration, code graph indexing, symbol and relationship queries, source fallback diagnostics, incremental updates, impact analysis, and reports.
+- [Elastic Index Budgets for Large Repositories](../05-benchmarks/12-elastic-index-budgets.md): the historical 180-second baseline, scale-based long budgets, caps, and recovery semantics.
 - [Chapter 6: Web Workspace](06-web-workspace.md): static assets, same-origin APIs, operation execution, browser integration tests, and safety boundaries.
 - [Chapter 7: MCP Agent Access](07-mcp-agent-access.md): MCP policy, sessions, tools/resources/prompts, and access boundaries.
 - [Chapter 8: ACP Local Adapter](08-acp-local-adapter.md): local ACP sessions, progress, cancellation, and context artifacts.
