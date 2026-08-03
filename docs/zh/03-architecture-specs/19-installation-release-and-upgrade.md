@@ -37,6 +37,7 @@ Installer 或安装脚本支持：版本选择、安装目录选择、dry run、
 ## 4. 运行时状态
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。
+repository-set overlay selector 迁移会在 SQLite schema 初始化时幂等增加虚拟 origin-path 列和 origin/target 复合索引。升级计划必须为一次性索引构建预留时间；旧二进制会忽略这些增量列和索引，因此回滚保持 forward-compatible，不得删除或重建 overlay facts。
 本地文件定位索引的 SQLite/FTS5 状态也写入同一运行态数据区。安装器和 service
 template 不能默认扫描全盘、Linux `/opt`、挂载盘或 Windows 非系统盘；只有用户显式配置
 或通过 CLI 传入这些 root 时才建立索引。

@@ -52,6 +52,12 @@ pub(super) fn initialize_repository_set_schema(
             confidence_basis_points INTEGER NOT NULL,
             confidence_tier TEXT NOT NULL,
             evidence_json TEXT NOT NULL,
+            from_path TEXT GENERATED ALWAYS AS (
+                CASE
+                    WHEN json_valid(evidence_json)
+                    THEN json_extract(evidence_json, '$.from_path')
+                END
+            ) VIRTUAL,
             created_at_ms INTEGER NOT NULL,
             FOREIGN KEY (set_id) REFERENCES code_repository_sets(set_id) ON DELETE CASCADE
         );
@@ -108,6 +114,29 @@ pub(super) fn initialize_repository_set_schema(
         CREATE INDEX IF NOT EXISTS code_workspace_package_mappings_scope
             ON code_workspace_package_mappings(source_scope);
 
+        ",
+    )?;
+    super::super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_cross_edges",
+        "from_path",
+        "TEXT GENERATED ALWAYS AS (
+            CASE
+                WHEN json_valid(evidence_json)
+                THEN json_extract(evidence_json, '$.from_path')
+            END
+        ) VIRTUAL",
+    )?;
+    connection.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS code_repository_cross_edges_origin_selector
+            ON code_repository_cross_edges(
+                set_id, from_source_scope, from_record_kind, from_path
+            );
+        CREATE INDEX IF NOT EXISTS code_repository_cross_edges_target_selector
+            ON code_repository_cross_edges(
+                set_id, to_source_scope, to_record_kind, to_record_id
+            );
         ",
     )?;
     Ok(())

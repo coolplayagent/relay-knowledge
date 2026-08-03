@@ -37,6 +37,7 @@ Exact code-source fallback is implemented inside the product and must not requir
 ## 4. Runtime State
 
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations.
+The repository-set overlay selector migration adds an idempotent virtual origin-path column and composite origin/target indexes during SQLite schema initialization. Upgrade planning must budget for the one-time index build; rollback is forward-compatible because older binaries ignore the additive column and indexes, so rollback must not delete or rebuild overlay facts.
 Local file-location indexes store SQLite/FTS5 state in the same runtime data
 area. Installers and service templates must not default to scanning a whole
 disk, Linux `/opt`, mounted volumes, or non-system Windows drives; those roots

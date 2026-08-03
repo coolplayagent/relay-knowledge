@@ -57,10 +57,7 @@ fn select_origin_edges(
         FROM code_repository_cross_edges edge
         INNER JOIN selected_origin selected
             ON selected.source_scope = edge.from_source_scope
-           AND selected.path = CASE
-               WHEN json_valid(edge.evidence_json)
-               THEN json_extract(edge.evidence_json, '$.from_path')
-           END
+           AND selected.path = edge.from_path
         WHERE edge.set_id = ?
           AND edge.from_record_kind = 'module_reference'
           AND EXISTS (

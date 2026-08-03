@@ -968,6 +968,13 @@ Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
+## run-1785713457 candidate: indexed repository-set overlay selectors
+- 算法：把 import-origin path 从 evidence JSON 投影为 SQLite 虚拟列，并为 origin 与 target identity selector 建立复合索引；候选批查询不再逐 edge 执行 JSON 解析。
+- 架构：延续 `run-1785705797` 的 bounded candidate-driven overlay projection，只改变 overlay 存储布局和 selector 访问路径，不复制单仓事实。
+- 不变量：fan-out、候选上限、排序、bridge bonus、freshness、source fallback、durable lease/checkpoint 及 semantic/vector 路径保持不变；无效 JSON 安全投影为 null。
+- 预期影响：降低 overlay 较大时多仓查询的 CPU 与 p95，并让开销随命中 selector 而不是全 overlay 边数增长；索引维护仍位于有界 refresh/write 边界。
+- 风险：首次升级需一次性构建两个索引，overlay refresh 会承担少量复合索引写放大；升级/回滚文档要求保留增量列、索引和既有 edge facts。
+
 ## run-1785705797
 
 - patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches-v2/run-1785705797.patch`
@@ -981,4 +988,3 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
