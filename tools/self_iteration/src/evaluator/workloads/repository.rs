@@ -448,7 +448,12 @@ fn with_observed_file_count(config: &Value, repository_path: &Path) -> Value {
         return config.clone();
     }
     let Ok(output) = Command::new("git")
-        .args(["-C", &repository_path.display().to_string(), "ls-files", "-z"])
+        .args([
+            "-C",
+            &repository_path.display().to_string(),
+            "ls-files",
+            "-z",
+        ])
         .output()
     else {
         return config.clone();
@@ -462,7 +467,10 @@ fn with_observed_file_count(config: &Value, repository_path: &Path) -> Value {
     }
     let mut effective = config.clone();
     if let Some(object) = effective.as_object_mut() {
-        object.insert("expected_file_count".to_owned(), Value::from(observed as u64));
+        object.insert(
+            "expected_file_count".to_owned(),
+            Value::from(observed as u64),
+        );
     }
     effective
 }

@@ -21,7 +21,10 @@ fn elastic_budget_extends_process_timeout_beyond_global_default() {
         "baseline_files_per_second": 80,
         "max_index_budget_ms": 2_000_000
     });
-    assert_eq!(elastic_timeout_seconds(900, &config, "index_budget_ms"), 1_030);
+    assert_eq!(
+        elastic_timeout_seconds(900, &config, "index_budget_ms"),
+        1_030
+    );
 }
 
 #[test]
