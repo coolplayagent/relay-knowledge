@@ -5,36 +5,38 @@ use rusqlite::{params, params_from_iter, types::Value};
 use crate::storage::StorageError;
 
 pub(crate) struct SearchDocumentInserter<'transaction> {
-    statement: rusqlite::Statement<'transaction>,
-    metadata_statement: rusqlite::Statement<'transaction>,
+    transaction: &'transaction rusqlite::Transaction<'transaction>,
+    documents: Vec<PendingSearchDocument>,
+    last_search_rowid: i64,
     content: String,
     symbol_terms: Vec<String>,
 }
+
+struct PendingSearchDocument {
+    source_scope: String,
+    document_kind: String,
+    record_id: String,
+    path: String,
+    language_id: String,
+    content: String,
+}
+
+const SEARCH_DOCUMENT_INSERT_BATCH_SIZE: usize = 256;
+const SEARCH_DOCUMENT_COLUMN_COUNT: usize = 6;
 
 impl<'transaction> SearchDocumentInserter<'transaction> {
     pub(crate) fn new(
         transaction: &'transaction rusqlite::Transaction<'_>,
     ) -> Result<Self, StorageError> {
-        let statement = transaction.prepare(
-            "
-            INSERT INTO code_repository_search (
-                source_scope, document_kind, record_id, path, language_id, content
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ",
+        let last_search_rowid = transaction.query_row(
+            "SELECT coalesce(max(search_rowid), 0) FROM code_repository_search_metadata",
+            [],
+            |row| row.get::<_, i64>(0),
         )?;
-        let metadata_statement = transaction.prepare(
-            "
-            INSERT OR REPLACE INTO code_repository_search_metadata (
-                source_scope, document_kind, record_id, path, search_rowid
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5)
-            ",
-        )?;
-
         Ok(Self {
-            statement,
-            metadata_statement,
+            transaction,
+            documents: Vec::with_capacity(SEARCH_DOCUMENT_INSERT_BATCH_SIZE),
+            last_search_rowid,
             content: String::new(),
             symbol_terms: Vec::new(),
         })
@@ -55,21 +57,69 @@ impl<'transaction> SearchDocumentInserter<'transaction> {
             document_kind,
             fields,
         );
-        let search_rowid = self.statement.insert(params![
-            source_scope,
-            document_kind,
-            record_id,
-            path,
-            language_id,
-            self.content.as_str()
-        ])?;
-        self.metadata_statement.execute(params![
-            source_scope,
-            document_kind,
-            record_id,
-            path,
-            search_rowid
-        ])?;
+        self.documents.push(PendingSearchDocument {
+            source_scope: source_scope.to_owned(),
+            document_kind: document_kind.to_owned(),
+            record_id: record_id.to_owned(),
+            path: path.to_owned(),
+            language_id: language_id.to_owned(),
+            content: std::mem::take(&mut self.content),
+        });
+        if self.documents.len() == SEARCH_DOCUMENT_INSERT_BATCH_SIZE {
+            self.flush()?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn finish(mut self) -> Result<(), StorageError> {
+        self.flush()
+    }
+
+    fn flush(&mut self) -> Result<(), StorageError> {
+        if self.documents.is_empty() {
+            return Ok(());
+        }
+        let previous_search_rowid = self.last_search_rowid;
+        let placeholders = std::iter::repeat_n("(?, ?, ?, ?, ?, ?)", self.documents.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values = Vec::with_capacity(self.documents.len() * SEARCH_DOCUMENT_COLUMN_COUNT);
+        for document in &self.documents {
+            values.extend([
+                Value::Text(document.source_scope.clone()),
+                Value::Text(document.document_kind.clone()),
+                Value::Text(document.record_id.clone()),
+                Value::Text(document.path.clone()),
+                Value::Text(document.language_id.clone()),
+                Value::Text(document.content.clone()),
+            ]);
+        }
+        self.transaction.execute(
+            &format!(
+                "
+                INSERT INTO code_repository_search (
+                    source_scope, document_kind, record_id, path, language_id, content
+                )
+                VALUES {placeholders}
+                "
+            ),
+            params_from_iter(values),
+        )?;
+        let last_search_rowid = self.transaction.last_insert_rowid();
+        self.transaction.execute(
+            "
+            INSERT OR REPLACE INTO code_repository_search_metadata (
+                source_scope, document_kind, record_id, path, search_rowid
+            )
+            SELECT source_scope, document_kind, record_id, path, rowid
+            FROM code_repository_search
+            WHERE rowid > ?1 AND rowid <= ?2
+            ",
+            params![previous_search_rowid, last_search_rowid],
+        )?;
+        self.last_search_rowid = last_search_rowid;
+        self.documents.clear();
 
         Ok(())
     }
@@ -214,7 +264,8 @@ pub(super) fn insert_search_document<'a>(
         path,
         language_id,
         fields,
-    )
+    )?;
+    inserter.finish()
 }
 
 #[cfg(test)]

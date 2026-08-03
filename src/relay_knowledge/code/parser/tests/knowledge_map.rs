@@ -15,12 +15,12 @@ fn knowledge_map_topics_are_extracted_from_full_source_content() {
             .any(|symbol| { symbol.kind == "knowledge_map_topic" && symbol.name == "late-topic" })
     );
     assert!(
-        !snapshot
+        snapshot
             .chunks
             .iter()
             .filter(|chunk| chunk.symbol_snapshot_id.is_none())
             .any(|chunk| chunk.content.contains("late-topic")),
-        "the regression should prove topic extraction does not depend on truncated chunks"
+        "bounded source windows should retain late authorized content"
     );
 }
 

@@ -202,7 +202,7 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 | --- | --- |
 | 基础质量门禁 | 产品与 harness 的 `fmt --check`、Linux GNU glibc 2.31 baseline 策略门禁、产品 debug build、harness `cargo check`。 |
 | 产品 gate | `skill_metadata_policy_cases`、`code_index_recovery_cases`、`code_index_health_isolation_cases`、`code_index_sqlite_lock_cases`、CLI contract case。 |
-| 默认仓库 | `index_performance_many_files`、`c_syntax_fixture`、`cpp_syntax_fixture`、`cross_language_syntax_fixture`、`typescript_syntax_fixture`、`nonstandard_layout_fixture`、`software_global_fixture`、`project_alias_fixture`、`relay_teams`、`leveldb_cpp`、`temporal_samples_go`、`temporal_sdk_go`。 |
+| 默认仓库 | `index_performance_many_files`、`index_performance_c_fragment`、`c_syntax_fixture`、`cpp_syntax_fixture`、`cross_language_syntax_fixture`、`typescript_syntax_fixture`、`nonstandard_layout_fixture`、`software_global_fixture`、`project_alias_fixture`、`relay_teams`、`leveldb_cpp`、`temporal_samples_go`、`temporal_sdk_go`。 |
 | 默认取样 | 普通仓库默认取前 8 条 query case，并始终保留显式 `guardrail=true` case。 |
 | repository-set | 默认保留 `temporal_go_workspace` 的 2 条跨仓门槛 case。 |
 | semantic/vector | 默认运行 1 条 guardrail query。 |
@@ -227,7 +227,7 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 若要调整默认子集，可设置：
 
 ```bash
-RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=index_performance_many_files,c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,software_global_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go
+RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=index_performance_many_files,index_performance_c_fragment,c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,software_global_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2

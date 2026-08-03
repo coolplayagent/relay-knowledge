@@ -69,6 +69,7 @@ pub(super) fn insert_records(
             ],
         )?;
     }
+    search_documents.finish()?;
 
     Ok(())
 }

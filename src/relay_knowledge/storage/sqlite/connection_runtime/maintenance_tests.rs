@@ -125,6 +125,8 @@ async fn file_backed_connection_applies_large_repository_pragmas() {
                 query_i64(connection, "PRAGMA cache_size")?,
                 query_i64(connection, "PRAGMA temp_store")?,
                 query_i64(connection, "PRAGMA mmap_size")?,
+                query_i64(connection, "PRAGMA page_size")?,
+                query_i64(connection, "PRAGMA wal_autocheckpoint")?,
                 query_i64(connection, "PRAGMA busy_timeout")?,
             ))
         })
@@ -136,7 +138,9 @@ async fn file_backed_connection_applies_large_repository_pragmas() {
     assert_eq!(pragmas.2, SQLITE_CACHE_SIZE_KIB);
     assert_eq!(pragmas.3, 2);
     assert_eq!(pragmas.4, SQLITE_MMAP_SIZE_BYTES);
-    assert_eq!(pragmas.5, 5_000);
+    assert!(pragmas.5 >= 512);
+    assert_eq!(pragmas.6, SQLITE_WAL_AUTOCHECKPOINT_BYTES / pragmas.5);
+    assert_eq!(pragmas.7, 5_000);
     let read_busy_timeout = store
         .run_read(|connection| query_i64(connection, "PRAGMA busy_timeout"))
         .await

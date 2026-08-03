@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 2.9
-> 编制日期: 2026-07-30
+> 文档版本: 3.0
+> 编制日期: 2026-08-03
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -38,6 +38,8 @@ Installer 或安装脚本支持：版本选择、安装目录选择、dry run、
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。
 repository-set overlay selector 迁移会在 SQLite schema 初始化时幂等增加虚拟 origin-path 列和 origin/target 复合索引。升级计划必须为一次性索引构建预留时间；旧二进制会忽略这些增量列和索引，因此回滚保持 forward-compatible，不得删除或重建 overlay facts。
+新建且尚无代码事实的 runtime database 对单批次任务在写入前建立事实查询索引，对多批次任务可把查询索引延迟到 checkpointed finalization 批量构建，fresh scope 发布前必须全部完成。这个选择只使用任务的有界 `max_files_per_batch` 与计划文件数，不依赖仓库名称或路径。已有事实的 runtime database 在 schema 初始化时幂等补齐查询索引，升级不能删除原事实主键、搜索 identity 唯一约束或 FTS 数据；升级计划必须为未完成冷任务的批量索引阶段预留时间，失败后依靠 finalization checkpoint 重放，而不是把缺索引的 scope 发布为 fresh。
+代码索引 batch 还必须先写入 durable staging manifest：manifest 记录 source scope、batch index、文件数、受控事实行数和 `staged/published` 状态。事实发布、checkpoint 更新和 manifest 的 `published` 标记在同一个唯一 writer 事务中完成；若发布前崩溃，保留的 staged manifest 只能作为重放诊断，不能让 scope 变 fresh，也不能绕过 lease 或 checkpoint。manifest 行数按 batch 数有界，并随 source scope 删除级联清理。
 本地文件定位索引的 SQLite/FTS5 状态也写入同一运行态数据区。安装器和 service
 template 不能默认扫描全盘、Linux `/opt`、挂载盘或 Windows 非系统盘；只有用户显式配置
 或通过 CLI 传入这些 root 时才建立索引。

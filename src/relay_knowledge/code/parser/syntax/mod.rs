@@ -1,8 +1,14 @@
 //! Tree-sitter parsing and bounded capture extraction.
 
-use std::panic::{self, AssertUnwindSafe};
+use std::{
+    ops::ControlFlow,
+    panic::{self, AssertUnwindSafe},
+    time::{Duration, Instant},
+};
 
-use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{
+    Node, ParseOptions, Parser, Query, QueryCursor, QueryCursorOptions, StreamingIterator,
+};
 
 use super::{
     super::{CodeIndexError, languages::LanguageSpec},
@@ -19,17 +25,84 @@ pub(super) struct TagCapture {
     pub(super) local_type_parameter: bool,
 }
 
+const SYNTAX_BASE_BUDGET: Duration = Duration::from_millis(100);
+const SYNTAX_MAX_BUDGET: Duration = Duration::from_millis(750);
+const SYNTAX_BUDGET_BYTES_PER_MILLISECOND: usize = 1_024;
+const MIN_REPEATED_INITIALIZER_FRAGMENT_LINES: usize = 32;
+
 pub(super) fn parse_tree(
     language: LanguageSpec,
     content: &str,
 ) -> Result<tree_sitter::Tree, CodeIndexError> {
+    parse_tree_with_budget(language, content, syntax_stage_budget(content.len()))
+}
+
+fn parse_tree_with_budget(
+    language: LanguageSpec,
+    content: &str,
+    budget: Duration,
+) -> Result<tree_sitter::Tree, CodeIndexError> {
+    reject_pathological_c_family_fragment(language.id, content)?;
     let mut parser = Parser::new();
     parser
         .set_language(&(language.language)())
         .map_err(|error| CodeIndexError::TreeSitter(error.to_string()))?;
-    parser
-        .parse(content, None)
-        .ok_or_else(|| CodeIndexError::TreeSitter("parser returned no tree".to_owned()))
+    let deadline = Instant::now() + budget;
+    let mut budget_exhausted = false;
+    let mut progress = |_: &tree_sitter::ParseState| {
+        if Instant::now() >= deadline {
+            budget_exhausted = true;
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    };
+    let bytes = content.as_bytes();
+    let parsed = parser.parse_with_options(
+        &mut |offset, _| bytes.get(offset..).unwrap_or_default(),
+        None,
+        Some(ParseOptions::new().progress_callback(&mut progress)),
+    );
+    if budget_exhausted {
+        return Err(syntax_budget_error("parser", budget));
+    }
+    parsed.ok_or_else(|| CodeIndexError::TreeSitter("parser returned no tree".to_owned()))
+}
+
+fn reject_pathological_c_family_fragment(
+    language_id: &str,
+    content: &str,
+) -> Result<(), CodeIndexError> {
+    if !matches!(language_id, "c" | "cpp") {
+        return Ok(());
+    }
+    let mut significant_lines = 0usize;
+    let mut initializer_lines = 0usize;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("/*") {
+            continue;
+        }
+        significant_lines += 1;
+        initializer_lines += usize::from(designated_initializer_fragment_line(trimmed));
+    }
+    if initializer_lines >= MIN_REPEATED_INITIALIZER_FRAGMENT_LINES
+        && initializer_lines == significant_lines
+    {
+        return Err(CodeIndexError::TreeSitter(
+            "repeated top-level designated initializer fragment exceeds the bounded parser shape"
+                .to_owned(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn designated_initializer_fragment_line(line: &str) -> bool {
+    line.starts_with('{')
+        && (line.ends_with("},") || line.ends_with('}'))
+        && line.contains('.')
+        && line.contains('=')
 }
 
 pub(super) fn parse_tree_safely(
@@ -53,7 +126,23 @@ fn extract_tag_captures(
         .map_err(|error| CodeIndexError::TreeSitter(error.to_string()))?;
     let capture_names = query.capture_names().to_vec();
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, root, content.as_bytes());
+    let budget = syntax_stage_budget(content.len());
+    let deadline = Instant::now() + budget;
+    let mut budget_exhausted = false;
+    let mut progress = |_: &tree_sitter::QueryCursorState| {
+        if Instant::now() >= deadline {
+            budget_exhausted = true;
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    };
+    let mut matches = cursor.matches_with_options(
+        &query,
+        root,
+        content.as_bytes(),
+        QueryCursorOptions::new().progress_callback(&mut progress),
+    );
     let mut captures = Vec::new();
 
     while {
@@ -91,7 +180,27 @@ fn extract_tag_captures(
         }
     }
 
+    drop(matches);
+    if budget_exhausted {
+        return Err(syntax_budget_error("query", budget));
+    }
+
     Ok(captures)
+}
+
+fn syntax_stage_budget(content_len: usize) -> Duration {
+    let size_millis = content_len.saturating_add(SYNTAX_BUDGET_BYTES_PER_MILLISECOND - 1)
+        / SYNTAX_BUDGET_BYTES_PER_MILLISECOND;
+    SYNTAX_BASE_BUDGET
+        .saturating_add(Duration::from_millis(size_millis as u64))
+        .min(SYNTAX_MAX_BUDGET)
+}
+
+fn syntax_budget_error(stage: &str, budget: Duration) -> CodeIndexError {
+    CodeIndexError::TreeSitter(format!(
+        "{stage} exceeded bounded {} ms syntax budget",
+        budget.as_millis()
+    ))
 }
 
 fn local_type_parameter_reference(language_id: &str, content: &str, node: Node<'_>) -> bool {
@@ -178,5 +287,68 @@ pub(super) fn extract_tag_captures_safely(
         Err(_) => Err(CodeIndexError::TreeSitter(
             "query extraction panicked while parsing file".to_owned(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn c_language() -> LanguageSpec {
+        LanguageSpec {
+            id: "c",
+            language: || tree_sitter_c::LANGUAGE.into(),
+            tags_query: "",
+        }
+    }
+
+    #[test]
+    fn syntax_budget_scales_with_content_and_stays_bounded() {
+        assert_eq!(syntax_stage_budget(0), SYNTAX_BASE_BUDGET);
+        assert!(syntax_stage_budget(64 * 1_024) > SYNTAX_BASE_BUDGET);
+        assert_eq!(syntax_stage_budget(usize::MAX), SYNTAX_MAX_BUDGET);
+    }
+
+    #[test]
+    fn parser_cancels_pathological_error_recovery_at_the_budget() {
+        let fragment = "(".repeat(64 * 1_024);
+
+        let error = parse_tree_with_budget(c_language(), &fragment, Duration::ZERO)
+            .expect_err("the progress callback should cancel pathological recovery");
+
+        assert!(
+            error
+                .to_string()
+                .contains("exceeded bounded 0 ms syntax budget")
+        );
+    }
+
+    #[test]
+    fn parser_rejects_repeated_top_level_initializer_fragments_before_grammar_recovery() {
+        let mut fragment = String::new();
+        for index in 0..MIN_REPEATED_INITIALIZER_FRAGMENT_LINES {
+            fragment.push_str(&format!("{{ .flag = {index}, .value = 1 }},\n"));
+        }
+
+        let error = parse_tree(c_language(), &fragment)
+            .expect_err("a repeated declaration-free initializer fragment should be bounded");
+
+        assert!(
+            error
+                .to_string()
+                .contains("top-level designated initializer fragment")
+        );
+    }
+
+    #[test]
+    fn parser_keeps_designated_initializers_inside_a_declaration() {
+        let mut declaration = String::from("static const struct item values[] = {\n");
+        for index in 0..MIN_REPEATED_INITIALIZER_FRAGMENT_LINES {
+            declaration.push_str(&format!("    {{ .flag = {index}, .value = 1 }},\n"));
+        }
+        declaration.push_str("};\n");
+
+        parse_tree(c_language(), &declaration)
+            .expect("a declared initializer table remains eligible for structured parsing");
     }
 }

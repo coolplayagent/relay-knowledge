@@ -1,4 +1,4 @@
-const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1-generated-files-v1-web-routes-v1";
+const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1-generated-files-v1-web-routes-v1-syntax-failure-chunks-v1-bounded-config-chunks-v1-dense-source-windows-v1-c-composite-tags-v1";
 
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(

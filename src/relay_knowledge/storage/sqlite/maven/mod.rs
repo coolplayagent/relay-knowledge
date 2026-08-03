@@ -208,6 +208,7 @@ fn refresh_effective_dependency_records(
             ],
         )?;
     }
+    search_documents.finish()?;
 
     Ok(())
 }

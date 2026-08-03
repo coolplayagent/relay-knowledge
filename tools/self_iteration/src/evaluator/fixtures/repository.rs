@@ -63,6 +63,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     if fixture == "index_performance_many_files_v1" {
         return write_index_performance_many_files_fixture(root);
     }
+    if fixture == "index_performance_c_fragment_v1" {
+        return write_index_performance_c_fragment_fixture(root);
+    }
     if fixture == "index_performance_wide_mixed_files_v1" {
         return write_index_performance_wide_mixed_files_fixture(root);
     }
@@ -326,6 +329,16 @@ fn write_index_performance_many_files_fixture(root: &Path) -> Result<(), String>
     }
 
     Ok(())
+}
+
+fn write_index_performance_c_fragment_fixture(root: &Path) -> Result<(), String> {
+    let mut fragment = String::new();
+    for index in 0..256 {
+        fragment.push_str(&format!(
+            "{{ .flags = RK_PERF_ENTRY_VALID, .family = 6, .model = {index}, .data = 1 }},\n"
+        ));
+    }
+    write_fixture_file(&root.join("include/perf_initializer_fragment.h"), &fragment)
 }
 
 fn write_index_performance_wide_mixed_files_fixture(root: &Path) -> Result<(), String> {

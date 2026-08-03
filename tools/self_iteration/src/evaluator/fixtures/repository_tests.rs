@@ -38,6 +38,11 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
         "index_performance_wide_mixed_files_v1",
     )
     .expect("wide index performance fixture should write");
+    create_generated_repository_files(
+        &root.join("c_fragment_performance"),
+        "index_performance_c_fragment_v1",
+    )
+    .expect("C fragment performance fixture should write");
     create_generated_repository_files(&root.join("agent_workflow"), "agent_workflow_v1")
         .expect("agent workflow fixture should write");
 
@@ -78,6 +83,10 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
     let nonstandard_cpp =
         std::fs::read_to_string(root.join("nonstandard/external_deps/cpp_sdk/session_client.cpp"))
             .expect("nonstandard C++ source");
+    let c_fragment = std::fs::read_to_string(
+        root.join("c_fragment_performance/include/perf_initializer_fragment.h"),
+    )
+    .expect("C initializer fragment source");
     let performance_tail =
         std::fs::read_to_string(root.join("index_performance/src/shard_015/file_1023.rs"))
             .expect("index performance tail source");
@@ -115,6 +124,8 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
     assert!(project_alias_source.contains("stable_project_entry"));
     assert!(nonstandard_ts.contains("ExternalTypeScriptSessionClient"));
     assert!(nonstandard_cpp.contains("#include <external_session_client.hpp>"));
+    assert_eq!(c_fragment.lines().count(), 256);
+    assert!(c_fragment.contains(".flags = RK_PERF_ENTRY_VALID"));
     assert!(performance_tail.contains("rk_perf_target_1023"));
     assert!(wide_performance_tail.contains("rk_wide_target_2047"));
     assert!(wide_performance_bridge.contains("rk_wide_bridge_dispatch"));

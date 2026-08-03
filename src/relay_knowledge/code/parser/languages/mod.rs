@@ -93,6 +93,9 @@ pub(super) fn manual_definition_candidate(language_id: &str, node_kind: &str) ->
             matches!(
                 node_kind,
                 "declaration"
+                    | "enum_specifier"
+                    | "struct_specifier"
+                    | "union_specifier"
                     | "ERROR"
                     | "preproc_def"
                     | "preproc_function_def"

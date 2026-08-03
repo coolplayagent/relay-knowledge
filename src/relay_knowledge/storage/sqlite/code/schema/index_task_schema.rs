@@ -58,6 +58,22 @@ pub(super) fn initialize_index_task_schema(connection: &Connection) -> Result<()
             UNIQUE (repository_id, input_fingerprint)
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_index_batch_staging (
+            source_scope TEXT NOT NULL,
+            batch_index INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            file_count INTEGER NOT NULL,
+            fact_row_count INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            PRIMARY KEY (source_scope, batch_index),
+            FOREIGN KEY (source_scope) REFERENCES code_repository_index_checkpoints(source_scope)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS code_repository_index_batch_staging_state
+            ON code_repository_index_batch_staging(source_scope, state, batch_index);
+
         CREATE INDEX IF NOT EXISTS code_repository_index_tasks_claimable
             ON code_repository_index_tasks(state, next_retry_at_ms, created_at_ms);
         CREATE INDEX IF NOT EXISTS code_repository_index_tasks_repository

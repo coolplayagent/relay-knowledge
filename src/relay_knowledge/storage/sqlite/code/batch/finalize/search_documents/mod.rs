@@ -49,6 +49,7 @@ pub(super) fn rebuild_reference_search_documents(
             ],
         )?;
     }
+    inserter.finish()?;
 
     Ok(())
 }
@@ -86,6 +87,7 @@ pub(super) fn rebuild_import_search_documents(
             [module.as_str(), target_hint.as_str(), path.as_str()],
         )?;
     }
+    inserter.finish()?;
 
     Ok(())
 }
@@ -141,6 +143,7 @@ pub(super) fn rebuild_call_search_documents(
             ],
         )?;
     }
+    inserter.finish()?;
 
     Ok(())
 }

@@ -44,6 +44,8 @@ use super::{
 
 pub(super) use task::recover_code_index_task_leases;
 
+const PARSED_BATCH_QUEUE_CAPACITY: usize = 2;
+
 impl RelayKnowledgeService {
     /// Builds or updates the tree-sitter code index for a registered repository.
     pub async fn index_code_repository(
@@ -145,7 +147,7 @@ impl RelayKnowledgeService {
         resource_budget: CodeIndexResourceBudget,
         task_lease: Option<CodeIndexTaskLeaseContext>,
     ) -> Result<crate::domain::CodeIndexSummary, ApiError> {
-        let mut plan = run_blocking_code(move || {
+        let plan = run_blocking_code(move || {
             prepare_full_index_plan_with_workspace_detection(
                 registration,
                 selector,
@@ -160,21 +162,38 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?;
         refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
-        let (next_plan, batch) = run_blocking_code(move || plan.parse_next_batch()).await?;
-        plan = next_plan;
-        let mut pending_batch = batch;
-        while let Some(batch) = pending_batch {
-            // One-batch lookahead overlaps blocking source/parse work with the
-            // single durable writer without allowing an unbounded producer.
-            let parse_next = run_blocking_code(move || plan.parse_next_batch());
-            let apply_current = store.apply_code_index_batch(batch);
-            let (parsed, applied) = tokio::join!(parse_next, apply_current);
-            applied.map_err(storage_api_error)?;
-            let (next_plan, next_batch) = parsed?;
-            plan = next_plan;
-            pending_batch = next_batch;
-            refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
+        let (batch_sender, mut batch_receiver) =
+            tokio::sync::mpsc::channel(PARSED_BATCH_QUEUE_CAPACITY);
+        let parser = tokio::spawn(run_blocking_code(move || {
+            let mut plan = plan;
+            loop {
+                let (next_plan, batch) = plan.parse_next_batch()?;
+                plan = next_plan;
+                let Some(batch) = batch else {
+                    return Ok(());
+                };
+                if batch_sender.blocking_send(batch).is_err() {
+                    return Ok(());
+                }
+            }
+        }));
+        let writer_result = async {
+            while let Some(batch) = batch_receiver.recv().await {
+                store
+                    .apply_code_index_batch(batch)
+                    .await
+                    .map_err(storage_api_error)?;
+                refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
+            }
+            Ok::<(), ApiError>(())
         }
+        .await;
+        drop(batch_receiver);
+        let parser_result = parser
+            .await
+            .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+        writer_result?;
+        parser_result?;
 
         refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
         let summary = store

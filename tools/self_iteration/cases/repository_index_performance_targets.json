@@ -1,5 +1,19 @@
 {
   "repositories": {
+    "index_performance_c_fragment": {
+      "generated_fixture": "index_performance_c_fragment_v1",
+      "alias": "index-performance-c-fragment-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["c"],
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 1,
+      "index_budget_ms": 5000,
+      "register_index_budget_ms": 6000,
+      "query_p50_budget_ms": 120,
+      "query_p95_budget_ms": 240
+    },
     "index_performance_many_files": {
       "generated_fixture": "index_performance_many_files_v1",
       "alias": "index-performance-many-files-self-iteration",
@@ -76,12 +90,22 @@
       "register_index_budget_ms": 122000
     },
     "linux_sample": {
-      "index_budget_ms": 180000,
-      "register_index_budget_ms": 181000
+      "index_budget_mode": "elastic",
+      "baseline_file_count": 34150,
+      "expected_file_count": 93601,
+      "baseline_index_budget_ms": 180000,
+      "baseline_files_per_second": 80,
+      "register_overhead_budget_ms": 1000,
+      "max_index_budget_ms": 1800000
     },
     "linux_full": {
-      "index_budget_ms": 180000,
-      "register_index_budget_ms": 181000
+      "index_budget_mode": "elastic",
+      "baseline_file_count": 34150,
+      "expected_file_count": 93601,
+      "baseline_index_budget_ms": 180000,
+      "baseline_files_per_second": 80,
+      "register_overhead_budget_ms": 1000,
+      "max_index_budget_ms": 1800000
     },
     "kubernetes_go_sample": {
       "index_budget_ms": 210000,
@@ -93,6 +117,23 @@
     }
   },
   "query_cases": [
+    {
+      "id": "index_performance_c_fragment_source_fallback",
+      "repository": "index_performance_c_fragment",
+      "kind": "hybrid",
+      "query": "RK_PERF_ENTRY_VALID family model data",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "include/perf_initializer_fragment.h",
+          "excerpt_contains": "RK_PERF_ENTRY_VALID"
+        }
+      ],
+      "case_group": "index_performance"
+    },
     {
       "id": "index_performance_many_files_tail_symbol",
       "repository": "index_performance_many_files",

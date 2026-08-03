@@ -38,6 +38,7 @@ fn import_attached_repository(
     import_repository_metadata(&transaction, repository_id)?;
     if let Some(source_scope) = source_scope {
         import_code_scope(&transaction, repository_id, source_scope)?;
+        super::super::schema::ensure_code_query_indexes(&transaction)?;
     }
     transaction.commit()?;
 

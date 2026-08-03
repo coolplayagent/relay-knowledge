@@ -13,6 +13,30 @@ use crate::{
 };
 
 #[tokio::test]
+async fn single_batch_session_builds_query_indexes_before_fact_writes() {
+    let store = registered_store().await;
+
+    store
+        .begin_code_index_session(session_for_scope("git_snapshot:single-batch-indexes", 1))
+        .await
+        .expect("single-batch session should begin");
+
+    assert!(query_index_exists(&store, "code_repository_symbols_lookup").await);
+}
+
+#[tokio::test]
+async fn multi_batch_cold_session_defers_query_indexes_until_finalization() {
+    let store = registered_store().await;
+
+    store
+        .begin_code_index_session(session_for_scope("git_snapshot:multi-batch-indexes", 2))
+        .await
+        .expect("multi-batch session should begin");
+
+    assert!(!query_index_exists(&store, "code_repository_symbols_lookup").await);
+}
+
+#[tokio::test]
 async fn checkpointed_batches_finalize_cross_batch_call_edges() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:call-finalize";
@@ -688,6 +712,10 @@ async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
         .apply_code_index_batch(batch.clone())
         .await
         .expect("first batch should persist");
+    let resumed = store
+        .begin_code_index_session(session_for_scope(source_scope, 1))
+        .await
+        .expect("restarted session should retain checkpoint progress");
     let replayed = store
         .apply_code_index_batch(batch)
         .await
@@ -700,6 +728,9 @@ async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
 
     assert_eq!(first.committed_file_count, 1);
     assert_eq!(first.committed_symbol_count, 1);
+    assert_eq!(resumed.committed_file_count, 1);
+    assert_eq!(resumed.committed_symbol_count, 1);
+    assert_eq!(resumed.batch_count, 1);
     assert_eq!(replayed.committed_file_count, 1);
     assert_eq!(replayed.committed_symbol_count, 1);
     assert_eq!(replayed.batch_count, 1);
@@ -997,4 +1028,20 @@ async fn search_document_count(
         })
         .await
         .expect("search document count should load")
+}
+
+async fn query_index_exists(store: &SqliteGraphStore, name: &str) -> bool {
+    let name = name.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
+                    [name],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("query-index state should load")
 }

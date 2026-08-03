@@ -647,6 +647,8 @@ fn parser_panics_are_recorded_as_failed_file_diagnostics() {
             .any(|diagnostic| diagnostic.message.contains("tree-sitter parse failed"))
     );
     assert!(snapshot.symbols.is_empty());
+    assert_eq!(snapshot.chunks.len(), 1);
+    assert!(snapshot.chunks[0].content.contains("retry_policy"));
 }
 
 #[test]

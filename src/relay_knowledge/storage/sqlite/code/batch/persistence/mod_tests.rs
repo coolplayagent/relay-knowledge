@@ -58,6 +58,10 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
         })
         .await
         .expect("batch should persist");
+    assert_eq!(
+        batch_staging_state(&store, source_scope, 1).await,
+        "published"
+    );
     assert!(
         search_document_languages(&store, source_scope)
             .await
@@ -90,6 +94,26 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
         languages.get(&("import".to_owned(), "py/app.py".to_owned())),
         Some(&"python".to_owned())
     );
+}
+
+async fn batch_staging_state(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+    batch_index: usize,
+) -> String {
+    let source_scope = source_scope.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "SELECT state FROM code_repository_index_batch_staging WHERE source_scope = ?1 AND batch_index = ?2",
+                    rusqlite::params![source_scope, batch_index],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("batch staging state should load")
 }
 
 #[tokio::test]

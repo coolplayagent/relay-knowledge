@@ -10,7 +10,11 @@ use crate::{
 
 use super::super::{clock::now_millis, errors::storage_api_error};
 
-pub(super) const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
+// A lease bounds crash recovery independently of the elastic repository
+// budget. Long indexes renew this lease while making progress; a dead worker
+// becomes reclaimable after fifteen minutes instead of pinning a checkpoint
+// for the entire large-repository timeout.
+pub(super) const CODE_INDEX_TASK_LEASE_MS: u64 = 15 * 60 * 1000;
 pub(super) const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
 pub(super) const CODE_INDEX_TASK_RETRY_BACKOFF_MS: u64 = 60_000;
 pub(super) const CODE_INDEX_WORKER_LEASE_OWNER_PREFIX: &str = "code-index-worker-";

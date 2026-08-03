@@ -2,6 +2,8 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
+use super::migrations::table_has_columns;
+
 #[cfg(test)]
 #[path = "search_schema_tests.rs"]
 mod tests;
@@ -23,14 +25,22 @@ pub(super) fn initialize_search_schema(connection: &Connection) -> Result<(), St
             document_kind TEXT NOT NULL,
             record_id TEXT NOT NULL,
             path TEXT NOT NULL,
-            search_rowid INTEGER NOT NULL UNIQUE,
-            PRIMARY KEY (source_scope, document_kind, record_id)
+            search_rowid INTEGER PRIMARY KEY,
+            UNIQUE (source_scope, document_kind, record_id)
         );
-        CREATE INDEX IF NOT EXISTS code_repository_search_metadata_scope_kind
-            ON code_repository_search_metadata(source_scope, document_kind);
+        DROP INDEX IF EXISTS code_repository_search_metadata_scope_kind;
+        CREATE INDEX IF NOT EXISTS code_repository_scopes_lookup
+            ON code_repository_scopes(repository_id, resolved_commit_sha, path_filters_json, language_filters_json);
+        ",
+    )?;
+    Ok(())
+}
+
+pub(super) fn ensure_search_query_indexes(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute_batch(
+        "
         CREATE INDEX IF NOT EXISTS code_repository_search_metadata_scope_path
             ON code_repository_search_metadata(source_scope, path);
-
         CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup
             ON code_repository_symbols(source_scope, name, qualified_name, path);
         CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup
@@ -59,9 +69,37 @@ pub(super) fn initialize_search_schema(connection: &Connection) -> Result<(), St
             ON code_repository_chunks(source_scope, path);
         CREATE INDEX IF NOT EXISTS code_repository_chunks_symbol_lookup
             ON code_repository_chunks(source_scope, symbol_snapshot_id);
-        CREATE INDEX IF NOT EXISTS code_repository_scopes_lookup
-            ON code_repository_scopes(repository_id, resolved_commit_sha, path_filters_json, language_filters_json);
         ",
     )?;
+    if table_has_columns(
+        connection,
+        "code_repository_calls",
+        &["source_scope", "caller_name", "path", "line_start"],
+    )? {
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS code_repository_calls_caller_lookup
+             ON code_repository_calls(source_scope, caller_name, path, line_start)",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn ensure_search_query_indexes_for_existing_facts(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    let fact_exists = connection.query_row(
+        "
+        SELECT EXISTS (
+            SELECT 1 FROM code_repository_files LIMIT 1
+        )
+        ",
+        [],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if fact_exists {
+        ensure_search_query_indexes(connection)?;
+    }
+
     Ok(())
 }

@@ -10,6 +10,7 @@ use crate::storage::{StorageError, sqlite::maven};
 mod tests;
 
 pub(crate) const RESOLVE_REFERENCES: &str = "finalizing:resolve_references";
+pub(crate) const BUILD_QUERY_INDEXES: &str = "finalizing:build_query_indexes";
 pub(crate) const RESOLVE_IMPORTS: &str = "finalizing:resolve_imports";
 pub(crate) const RESOLVE_CALL_TARGETS: &str = "finalizing:resolve_call_targets";
 pub(crate) const REFRESH_DEPENDENCIES: &str = "finalizing:refresh_dependencies";

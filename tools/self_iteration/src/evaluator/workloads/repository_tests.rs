@@ -6,9 +6,23 @@ use std::{
 };
 
 use super::{
-    cold_index_completion_validation, evaluate_repository, incremental_index_completion_validation,
+    cold_index_completion_validation, elastic_timeout_seconds, evaluate_repository,
+    incremental_index_completion_validation,
 };
 use crate::evaluator::runtime::contracts::{EvalRuntime, Limiter};
+
+#[test]
+fn elastic_budget_extends_process_timeout_beyond_global_default() {
+    let config = serde_json::json!({
+        "index_budget_mode": "elastic",
+        "baseline_file_count": 100,
+        "expected_file_count": 80_000,
+        "baseline_index_budget_ms": 10_000,
+        "baseline_files_per_second": 80,
+        "max_index_budget_ms": 2_000_000
+    });
+    assert_eq!(elastic_timeout_seconds(900, &config, "index_budget_ms"), 1_030);
+}
 
 #[test]
 fn repository_workload_rejects_non_full_scope_before_running_product_commands() {

@@ -1,6 +1,6 @@
 //! Coordinates checkpointed session startup, finalization, and atomic scope publication.
 
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use super::super::{
     cleanup::{count_code_rows, delete_scope_index},
@@ -45,11 +45,28 @@ fn begin_session_once(
     }
 
     let transaction = connection.transaction()?;
-    delete_scope_index(&transaction, &session.source_scope)?;
-    transaction.execute(
-        "DELETE FROM code_repository_index_checkpoints WHERE source_scope = ?1",
-        params![session.source_scope],
-    )?;
+    let resumable = transaction
+        .query_row(
+            "SELECT committed_file_count FROM code_repository_index_checkpoints WHERE source_scope = ?1 AND state = 'indexing'",
+            params![session.source_scope],
+            |row| row.get::<_, u64>(0),
+        )
+        .optional()?
+        .is_some_and(|committed_file_count| committed_file_count > 0);
+    if session.total_path_count <= session.resource_budget.max_files_per_batch {
+        super::super::schema::ensure_code_query_indexes(&transaction)?;
+    }
+    if !resumable {
+        delete_scope_index(&transaction, &session.source_scope)?;
+        transaction.execute(
+            "DELETE FROM code_repository_index_batch_staging WHERE source_scope = ?1",
+            params![session.source_scope],
+        )?;
+        transaction.execute(
+            "DELETE FROM code_repository_index_checkpoints WHERE source_scope = ?1",
+            params![session.source_scope],
+        )?;
+    }
     transaction.execute(
         "
         UPDATE code_repositories
@@ -58,7 +75,9 @@ fn begin_session_once(
         ",
         params![session.repository_id],
     )?;
-    checkpoint::insert(&transaction, session, "indexing", None)?;
+    if !resumable {
+        checkpoint::insert(&transaction, session, "indexing", None)?;
+    }
     transaction.commit()?;
 
     checkpoint::load(connection, &session.source_scope)
@@ -68,6 +87,12 @@ fn finalize_session_once(
     connection: &mut Connection,
     session: &CodeIndexSession,
 ) -> Result<CodeIndexSummary, StorageError> {
+    run_finalize_phase(
+        connection,
+        &session.source_scope,
+        finalize::phases::BUILD_QUERY_INDEXES,
+        |transaction| super::super::schema::ensure_code_query_indexes(transaction),
+    )?;
     run_finalize_phase(
         connection,
         &session.source_scope,

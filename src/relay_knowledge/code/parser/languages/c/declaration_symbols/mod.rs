@@ -18,6 +18,38 @@ pub(super) fn direct_function_definition_symbol(
         .map(|name| (name, "function", syntax_range(node)))
 }
 
+pub(super) fn direct_composite_type_symbol(
+    content: &str,
+    node: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    if !matches!(
+        node.kind(),
+        "enum_specifier" | "struct_specifier" | "union_specifier"
+    ) || !composite_type_is_top_level(node)
+        || !node_text(content, node).contains('{')
+    {
+        return None;
+    }
+    let name = node.child_by_field_name("name")?;
+    let name = node_text(content, name);
+
+    data_symbol_name(&name).then(|| (name, "type", syntax_range(node)))
+}
+
+fn composite_type_is_top_level(mut node: Node<'_>) -> bool {
+    while let Some(parent) = node.parent() {
+        match parent.kind() {
+            "translation_unit" => return true,
+            "declaration" => {}
+            kind if kind.starts_with("preproc_") => {}
+            _ => return false,
+        }
+        node = parent;
+    }
+
+    false
+}
+
 pub(super) fn top_level_declaration_symbols(
     content: &str,
     declaration: Node<'_>,
