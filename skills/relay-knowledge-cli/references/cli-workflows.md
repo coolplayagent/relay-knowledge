@@ -122,6 +122,15 @@ the runtime cache directory.
 
 ## Code Repository Index Query Flow
 
+Inspect existing completed repository scopes before adding a registration:
+
+```bash
+relay-knowledge repo list --format json
+```
+
+The list is read-only and omits repositories that have never completed an
+indexed scope. Reuse a matching alias instead of creating a duplicate.
+
 Register a Git worktree or non-Git source directory:
 
 ```bash
@@ -145,6 +154,14 @@ relay-knowledge repo scope preview core --ref HEAD --format json
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo status core --format json
 ```
+
+Large-repository indexing uses elastic budgets by default. The 180-second value
+is a historical baseline only; the effective budget scales from authorized Git
+file count and throughput baseline and is bounded by a configured maximum. Do
+not treat a caller timeout as indexing failure: inspect checkpoint progress,
+lease state, and freshness, then let the managed worker or a bounded
+`repo index-worker` attempt continue the durable task. Fixed/strict behavior is
+only an explicit benchmark override.
 
 For non-Git source directories, keep the normal selector as `HEAD`. Indexing
 resolves it into a `filesystem:<hash>` snapshot, and queries should use `HEAD`

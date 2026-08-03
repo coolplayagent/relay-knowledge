@@ -48,6 +48,12 @@ machine-readable JSON and streaming JSON results for claimed tasks and for the
 no-task case; a timed-out worker attempt should be followed by status
 inspection rather than treated as an indexing failure.
 
+Before registering, inspect existing completed scopes with
+`repo list --format json` and reuse a matching alias. Large-repository budgets
+are elastic by default: the historical 180-second value is a baseline, while
+the effective budget scales with authorized file count and throughput and is
+bounded by an explicit cap.
+
 ## Package Contents
 
 - `SKILL.md`: agent instructions and skill metadata.
