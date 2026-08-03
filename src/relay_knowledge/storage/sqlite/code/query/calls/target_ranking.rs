@@ -4,6 +4,7 @@ use super::super::relevance::SymbolIdentityQuery;
 
 const HIGH_CONFIDENCE_INFERRED_TARGET_BONUS: f64 = 1.15;
 const HIGH_CONFIDENCE_INFERRED_TARGET_MIN_BPS: u16 = 7_000;
+const EXACT_LOCAL_BINDING_BONUS: f64 = 1.25;
 
 pub(super) fn high_confidence_inferred_target_bonus(
     base_score: f64,
@@ -31,6 +32,21 @@ pub(super) fn high_confidence_inferred_target_bonus(
     };
     if identity.matches_symbol(target_leaf, target_hint, "", target_hint) {
         HIGH_CONFIDENCE_INFERRED_TARGET_BONUS
+    } else {
+        0.0
+    }
+}
+
+pub(super) fn exact_local_binding_bonus(
+    base_score: f64,
+    confidence_tier: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score > 0.0
+        && request.code_query_kind == CodeQueryKind::Callers
+        && confidence_tier == "exact"
+    {
+        EXACT_LOCAL_BINDING_BONUS
     } else {
         0.0
     }

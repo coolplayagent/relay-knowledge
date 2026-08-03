@@ -102,7 +102,7 @@ pub(in crate::storage::sqlite) fn ensure_column(
     column: &str,
     definition: &str,
 ) -> Result<(), StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut statement = connection.prepare(&format!("PRAGMA table_xinfo({table})"))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
     let columns = rows
         .collect::<Result<Vec<_>, _>>()

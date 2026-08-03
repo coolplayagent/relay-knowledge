@@ -5,7 +5,7 @@ use super::super::{
     relevance::{
         fts_match_query, fts_path_and_language_filter_sql, language_filter_sql_for_columns,
         path_filter_sql_for_column, push_language_filter_values, push_path_filter_values,
-        push_query_path_substring_filter_values,
+        push_query_path_substring_filter_sql, push_query_path_substring_filter_values,
     },
     required_scope,
     rows::CallRow,
@@ -34,6 +34,7 @@ struct IndirectCallBindings {
 
 const INDIRECT_CALL_BINDING_LIMIT: usize = 80;
 const MAX_INDIRECT_CALL_FIELDS: usize = 24;
+const EXACT_LOCAL_BINDING_CONFIDENCE_BPS: u16 = 9_500;
 
 pub(super) fn search_indirect_call_identity_rows(
     connection: &Connection,
@@ -107,9 +108,14 @@ pub(super) fn search_indirect_call_identity_rows(
         let same_path = row.path == binding.binding_path;
         row.target_hint = Some(binding.target_name.clone());
         row.resolution_state = "inferred".to_owned();
-        let confidence_floor = if same_path { 7_500 } else { 5_500 };
+        let confidence_floor = if same_path {
+            row.confidence_tier = "exact".to_owned();
+            EXACT_LOCAL_BINDING_CONFIDENCE_BPS
+        } else {
+            row.confidence_tier = "inferred".to_owned();
+            5_500
+        };
         row.confidence_basis_points = row.confidence_basis_points.max(confidence_floor);
-        row.confidence_tier = "inferred".to_owned();
         true
     });
 
@@ -120,6 +126,110 @@ pub(super) fn search_indirect_call_identity_rows(
 }
 
 fn search_indirect_call_bindings(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    target_name: &str,
+) -> Result<IndirectCallBindings, StorageError> {
+    let structured_rows =
+        search_structured_indirect_binding_chunks(connection, status, request, target_name)?;
+    let structured_saturated = structured_rows.len() > INDIRECT_CALL_BINDING_LIMIT;
+    let structured_bindings = collect_indirect_call_bindings(
+        structured_rows
+            .into_iter()
+            .take(INDIRECT_CALL_BINDING_LIMIT),
+        target_name,
+    );
+    if !structured_bindings.is_empty() {
+        return Ok(IndirectCallBindings {
+            bindings: structured_bindings,
+            saturated: structured_saturated,
+        });
+    }
+
+    search_indirect_call_bindings_from_fts(connection, status, request, target_name)
+}
+
+fn search_structured_indirect_binding_chunks(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    target_name: &str,
+) -> Result<Vec<(String, String)>, StorageError> {
+    let path_filter = path_filter_sql_for_column("r.path", status, request);
+    let language_filter =
+        language_filter_sql_for_columns("f.language_id", "f.path", status, request);
+    let mut query_path_clauses = Vec::new();
+    push_query_path_substring_filter_sql(
+        &mut query_path_clauses,
+        "r.path",
+        &request.query_path_substrings,
+    );
+    let query_path_filter = if query_path_clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", query_path_clauses.join(" AND "))
+    };
+    let generated_filter = if request.exclude_generated {
+        "AND f.is_generated = 0"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "
+        SELECT r.path,
+               (
+                   SELECT chunk.content
+                   FROM code_repository_chunks chunk
+                   WHERE chunk.source_scope = r.source_scope
+                     AND chunk.path = r.path
+                     AND chunk.line_start <= r.line_start
+                     AND chunk.line_end >= r.line_start
+                   ORDER BY (chunk.line_end - chunk.line_start) ASC,
+                            chunk.line_start DESC,
+                            chunk.chunk_id ASC
+                   LIMIT 1
+               ) AS source_excerpt
+        FROM code_repository_references r
+        INNER JOIN code_repository_files f
+            ON f.source_scope = r.source_scope AND f.path = r.path
+        WHERE r.source_scope = ?
+          AND r.name = ?
+          {path_filter}
+          {query_path_filter}
+          {language_filter}
+          {generated_filter}
+        ORDER BY f.is_generated ASC, r.path ASC, r.line_start ASC, r.reference_id ASC
+        LIMIT ?
+        "
+    );
+    let mut values = vec![
+        Value::Text(required_scope(status)?.to_owned()),
+        Value::Text(target_name.to_owned()),
+    ];
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, &request.query_language_filters);
+    values.push(Value::Integer((INDIRECT_CALL_BINDING_LIMIT + 1) as i64));
+
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|(path, excerpt)| excerpt.map(|excerpt| (path, excerpt)))
+        .collect())
+}
+
+fn search_indirect_call_bindings_from_fts(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
@@ -165,6 +275,18 @@ fn search_indirect_call_bindings(
         .map_err(StorageError::from)?;
     let saturated = rows.len() > INDIRECT_CALL_BINDING_LIMIT;
     rows.truncate(INDIRECT_CALL_BINDING_LIMIT);
+    let bindings = collect_indirect_call_bindings(rows, target_name);
+
+    Ok(IndirectCallBindings {
+        bindings,
+        saturated,
+    })
+}
+
+fn collect_indirect_call_bindings(
+    rows: impl IntoIterator<Item = (String, String)>,
+    target_name: &str,
+) -> Vec<IndirectCallBinding> {
     let mut bindings: Vec<IndirectCallBinding> = Vec::new();
     for (path, excerpt) in rows {
         for field_name in indirect_call_binding_fields(&excerpt, target_name) {
@@ -185,22 +307,25 @@ fn search_indirect_call_bindings(
         }
     }
 
-    Ok(IndirectCallBindings {
-        bindings,
-        saturated,
-    })
+    bindings
 }
 
 fn best_indirect_call_binding<'a>(
     bindings: &'a [IndirectCallBinding],
     row: &CallRow,
 ) -> Option<&'a IndirectCallBinding> {
-    bindings.iter().find(|binding| {
-        binding.field_name == row.callee_name
-            && (binding.binding_path == row.path
-                || row_has_indirect_target_evidence(row, &binding.target_name)
-                || row_has_indirect_binding_context(row, binding))
-    })
+    let matching_field = || {
+        bindings
+            .iter()
+            .filter(|binding| binding.field_name == row.callee_name)
+    };
+    matching_field()
+        .find(|binding| binding.binding_path == row.path)
+        .or_else(|| {
+            matching_field()
+                .find(|binding| row_has_indirect_target_evidence(row, &binding.target_name))
+        })
+        .or_else(|| matching_field().find(|binding| row_has_indirect_binding_context(row, binding)))
 }
 
 fn row_has_indirect_target_evidence(row: &CallRow, target_name: &str) -> bool {

@@ -19,10 +19,10 @@ pub use code::{
     CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
     CodeImpactChanges, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
     CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal,
-    CodeIndexTaskSeed, CodeRepositorySetMemberSeed, CodeRepositorySetRefreshTaskClaimRequest,
-    CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskFailure,
-    CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
-    CodeScopeRetentionRequest,
+    CodeIndexTaskSeed, CodeRepositorySetEdgeSelector, CodeRepositorySetMemberSeed,
+    CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
+    CodeRepositorySetRefreshTaskFailure, CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed,
+    CodeRepositoryStore, CodeScopeRetentionRequest,
 };
 pub use code_graph::{
     CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest, CodeSymbolSearchRequest,

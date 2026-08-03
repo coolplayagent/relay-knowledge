@@ -230,6 +230,10 @@ set alias
 
 Repository-set 查询必须直接搜索成员保存的 `source_scope`。查询时传入的 path 和 language filter 作为额外收窄条件应用在这个 scope 上；它们不得和成员 selector 合并成 OR 语义，也不得让查询改按仓库当前注册默认值解析。
 
+成员检索与有界 source fallback 收敛后，查询必须从候选 hit 构造去重的 import-origin file 与 target symbol/file selector，再按固定 batch 从持久化 overlay 投影相关边；不得在每次查询中加载整张 repository-set overlay。投影结果必须按原 edge 顺序恢复并沿用既有 evidence attachment、bridge bonus、priority、dedupe、diversity 和 top-k 语义；selector 为空时返回空 evidence，storage 兼容实现可以回退完整 overlay 读取但不得改变结果。
+
+SQLite 把 evidence JSON 中的 import-origin path 安全投影为虚拟列，并分别为 `(set, origin scope, origin kind, origin path)` 与 `(set, target scope, target kind, target id)` 建立索引。候选投影必须使用这些 identity index，不得在查询热路径逐条解析整张 overlay。无效 evidence JSON 的 origin path 投影为 null 并保留存储诊断语义；它不能中止检索或获得 origin evidence。
+
 ## 7. 排序与精度约束
 
 单仓查询不得引入多仓库排序信号。多仓库 query 可以增加以下信号：

@@ -173,6 +173,34 @@ fn candidate_limit_keeps_single_member_depth_and_shares_multi_member_budget() {
 }
 
 #[test]
+fn overlay_selector_dedupes_candidate_origin_and_target_keys() {
+    let first = hit("repo-a", "scope-a", "src/client.rs", 1, 1.0, false);
+    let duplicate = first.clone();
+    let second = hit("repo-b", "scope-b", "src/service.rs", 2, 1.0, false);
+
+    let selector = overlay_edge_selector([&first, &duplicate, &second]);
+
+    assert_eq!(
+        selector.origin_files,
+        vec![
+            ("scope-a".to_owned(), "src/client.rs".to_owned()),
+            ("scope-b".to_owned(), "src/service.rs".to_owned()),
+        ]
+    );
+    assert_eq!(selector.target_records.len(), 4);
+    assert!(selector.target_records.contains(&(
+        "scope-a".to_owned(),
+        "code_symbol_snapshot".to_owned(),
+        "symbol-1".to_owned(),
+    )));
+    assert!(selector.target_records.contains(&(
+        "scope-b".to_owned(),
+        "code_file".to_owned(),
+        "file-1".to_owned(),
+    )));
+}
+
+#[test]
 fn evidence_backed_member_priority_is_bounded_workspace_ranking_intent() {
     let preferred = member_status("app", "scope-app", 10);
     let dependency = member_status("sdk", "scope-sdk", 0);

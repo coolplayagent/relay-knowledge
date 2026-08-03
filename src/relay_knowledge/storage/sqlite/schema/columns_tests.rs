@@ -104,6 +104,40 @@ fn ensure_column_is_idempotent() {
     assert_eq!(label_columns, 1);
 }
 
+#[test]
+fn ensure_column_recognizes_virtual_generated_columns() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute(
+            "CREATE TABLE sample (
+                value INTEGER NOT NULL,
+                doubled INTEGER GENERATED ALWAYS AS (value * 2) VIRTUAL
+            )",
+            [],
+        )
+        .expect("sample table should initialize");
+
+    ensure_column(
+        &connection,
+        "sample",
+        "doubled",
+        "INTEGER GENERATED ALWAYS AS (value * 2) VIRTUAL",
+    )
+    .expect("existing generated column should be accepted");
+
+    let generated_columns = connection
+        .prepare("PRAGMA table_xinfo(sample)")
+        .expect("extended table metadata should prepare")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("extended table metadata should query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("extended table metadata should collect")
+        .into_iter()
+        .filter(|column| column == "doubled")
+        .count();
+    assert_eq!(generated_columns, 1);
+}
+
 fn legacy_core_schema() -> Connection {
     let connection = Connection::open_in_memory().expect("database should open");
     connection

@@ -554,6 +554,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
         self.run_read(move |connection| set::cross_edges_for_set(connection, &set_id))
     }
 
+    fn code_repository_set_cross_edges_for_selector(
+        &self,
+        set_id: String,
+        selector: crate::storage::CodeRepositorySetEdgeSelector,
+    ) -> StorageFuture<'_, Vec<crate::domain::CodeRepositoryCrossEdge>> {
+        self.run_read(move |connection| {
+            set::cross_edges_for_selector(connection, &set_id, &selector)
+        })
+    }
+
     fn queue_code_repository_set_refresh_task(
         &self,
         task: crate::storage::CodeRepositorySetRefreshTaskSeed,
