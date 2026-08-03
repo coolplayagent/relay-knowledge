@@ -1,6 +1,8 @@
 // Direct tests for C declaration symbol materialization.
 
-use super::{direct_function_definition_symbol, top_level_declaration_symbols};
+use super::{
+    direct_composite_type_symbol, direct_function_definition_symbol, top_level_declaration_symbols,
+};
 
 fn c_tree(source: &str) -> tree_sitter::Tree {
     let mut parser = tree_sitter::Parser::new();
@@ -57,4 +59,49 @@ fn direct_function_definition_materializes_name_kind_and_body_range() {
     assert_eq!(kind, "function");
     assert_eq!((range.line_start, range.line_end), (1, 3));
     assert_eq!(&source[range.byte_start..range.byte_end], source);
+}
+
+#[test]
+fn direct_enum_specifier_materializes_its_tag_type() {
+    let source = "enum Direction { kForward, kReverse };";
+    let tree = c_tree(source);
+    let node = tree
+        .root_node()
+        .named_child(0)
+        .expect("enum specifier should be present");
+
+    let (name, kind, range) =
+        direct_composite_type_symbol(source, node).expect("enum tag should materialize");
+
+    assert_eq!((name.as_str(), kind), ("Direction", "type"));
+    assert_eq!(
+        &source[range.byte_start..range.byte_end],
+        "enum Direction { kForward, kReverse }"
+    );
+}
+
+#[test]
+fn direct_struct_specifier_materializes_its_tag_type() {
+    let source = "#ifndef RK_DRIVER_OPS_H\nstruct rk_driver_ops { int (*read)(void); };\n#endif";
+    let tree = c_tree(source);
+    let mut stack = vec![tree.root_node()];
+    let mut node = None;
+    while let Some(candidate) = stack.pop() {
+        if candidate.kind() == "struct_specifier" {
+            node = Some(candidate);
+            break;
+        }
+        for index in (0..candidate.named_child_count()).rev() {
+            let index = u32::try_from(index).expect("named-child index should fit u32");
+            stack.push(candidate.named_child(index).expect("named child"));
+        }
+    }
+    let node = node.expect("struct specifier should parse inside a preprocessor guard");
+
+    let (name, kind, range) = direct_composite_type_symbol(source, node)
+        .expect("top-level struct tag should materialize");
+
+    assert_eq!(name, "rk_driver_ops");
+    assert_eq!(kind, "type");
+    assert_eq!(range.line_start, 2);
 }

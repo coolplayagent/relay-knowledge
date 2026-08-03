@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, process::Command};
 
 use serde_json::Value;
 
@@ -43,6 +43,7 @@ pub(in crate::evaluator) fn evaluate_repository(
     let mut metrics = Vec::new();
     let (path, setup_commands) =
         prepare_repository_path(runtime, run_home, repo_name, repo_config)?;
+    let elastic_repo_config = with_observed_file_count(repo_config, &path);
     let setup_passed = setup_commands.iter().all(CommandResult::passed);
     commands.extend(setup_commands);
     eprintln!(
@@ -119,7 +120,11 @@ pub(in crate::evaluator) fn evaluate_repository(
             ),
             &runtime.workspace,
             Some(runtime.env.clone()),
-            runtime.timeout,
+            elastic_timeout_seconds(
+                runtime.timeout,
+                &elastic_repo_config,
+                "register_index_budget_ms",
+            ),
         ),
     );
     commands.push(register.clone());
@@ -172,21 +177,21 @@ pub(in crate::evaluator) fn evaluate_repository(
             ],
             &runtime.workspace,
             Some(runtime.env.clone()),
-            runtime.timeout,
+            elastic_timeout_seconds(runtime.timeout, &elastic_repo_config, "index_budget_ms"),
         ),
     );
     let mut index_json = parse_json_output(&index.stdout);
     metrics.push(MetricObservation {
         name: format!("{repo_name}_cold_index_ms"),
         value: index.duration_ms as f64,
-        budget: budget(repo_config, "index_budget_ms"),
+        budget: budget(&elastic_repo_config, "index_budget_ms"),
         lower_is_better: true,
         key: true,
     });
     metrics.push(MetricObservation {
         name: format!("{repo_name}_cold_register_index_ms"),
         value: (register.duration_ms + index.duration_ms) as f64,
-        budget: budget(repo_config, "register_index_budget_ms"),
+        budget: budget(&elastic_repo_config, "register_index_budget_ms"),
         lower_is_better: true,
         key: true,
     });
@@ -238,7 +243,7 @@ pub(in crate::evaluator) fn evaluate_repository(
         metrics.push(MetricObservation {
             name: format!("{repo_name}_incremental_index_ms"),
             value: update.duration_ms as f64,
-            budget: budget(repo_config, "incremental_index_budget_ms"),
+            budget: budget(&elastic_repo_config, "incremental_index_budget_ms"),
             lower_is_better: true,
             key: true,
         });
@@ -436,6 +441,38 @@ fn cold_index_completion_validation(
             format!("cold index completion evidence failed: {evidence}")
         },
     })
+}
+
+fn with_observed_file_count(config: &Value, repository_path: &Path) -> Value {
+    if config.get("index_budget_mode").and_then(Value::as_str) != Some("elastic") {
+        return config.clone();
+    }
+    let Ok(output) = Command::new("git")
+        .args(["-C", &repository_path.display().to_string(), "ls-files", "-z"])
+        .output()
+    else {
+        return config.clone();
+    };
+    if !output.status.success() {
+        return config.clone();
+    }
+    let observed = output.stdout.iter().filter(|byte| **byte == 0).count();
+    if observed == 0 {
+        return config.clone();
+    }
+    let mut effective = config.clone();
+    if let Some(object) = effective.as_object_mut() {
+        object.insert("expected_file_count".to_owned(), Value::from(observed as u64));
+    }
+    effective
+}
+
+fn elastic_timeout_seconds(default_seconds: u64, config: &Value, budget_name: &str) -> u64 {
+    let Some(budget_ms) = budget(config, budget_name) else {
+        return default_seconds;
+    };
+    let budget_seconds = (budget_ms / 1_000.0).ceil() as u64;
+    default_seconds.max(budget_seconds.saturating_add(30))
 }
 
 fn incremental_index_completion_validation(

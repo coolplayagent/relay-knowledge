@@ -22,6 +22,15 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryIndexResetResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &repository).await?;
+        // Reclaim leases whose owner process has exited before applying the
+        // operator reset. This keeps reset idempotent while preserving the
+        // single-writer invariant for genuinely live workers.
+        recover_orphaned_code_index_task_leases(
+            &store,
+            now_millis(),
+            &self.runtime.process.windows_tasklist_command,
+        )
+        .await?;
         let reset_tasks = store
             .reset_code_index_tasks(status.repository_id.clone(), now_millis())
             .await

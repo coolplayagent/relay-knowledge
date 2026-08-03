@@ -23,7 +23,10 @@ use self::search_backfill::{
     backfill_code_repository_search, backfill_code_repository_search_metadata,
     rebuild_call_search_documents_after_signature_upgrade,
 };
-use self::search_schema::initialize_search_schema;
+use self::search_schema::{
+    ensure_search_query_indexes, ensure_search_query_indexes_for_existing_facts,
+    initialize_search_schema,
+};
 
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
@@ -57,24 +60,20 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     super::generated::backfill_all_path_generated_flags(connection)?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
     mark_legacy_route_extraction_scopes_stale_once(connection)?;
-    if table_has_columns(
-        connection,
-        "code_repository_calls",
-        &["source_scope", "caller_name", "path", "line_start"],
-    )? {
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS code_repository_calls_caller_lookup
-             ON code_repository_calls(source_scope, caller_name, path, line_start)",
-            [],
-        )?;
-    }
     backfill_code_repository_aliases(connection)?;
     backfill_code_repository_search(connection)?;
     backfill_code_repository_search_metadata(connection)?;
     rebuild_call_search_documents_after_signature_upgrade(connection)?;
     backfill_edge_search_language_ids(connection)?;
+    ensure_search_query_indexes_for_existing_facts(connection)?;
 
     Ok(())
+}
+
+pub(in super::super) fn ensure_code_query_indexes(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    ensure_search_query_indexes(connection)
 }
 
 fn mark_legacy_generated_detection_scopes_stale_once(

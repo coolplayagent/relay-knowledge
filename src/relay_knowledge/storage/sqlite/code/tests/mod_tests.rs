@@ -241,6 +241,7 @@ async fn schema_indexes_chunks_by_symbol_for_call_excerpt_lookup() {
 
     let index_exists = store
         .run(|connection| {
+            super::schema::ensure_code_query_indexes(connection)?;
             connection
                 .query_row(
                     "

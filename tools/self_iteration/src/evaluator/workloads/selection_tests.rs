@@ -212,6 +212,11 @@ fn fast_default_repositories_include_typescript_import_grep_fixture() {
             .any(|name| name == "index_performance_many_files")
     );
     assert!(
+        names
+            .iter()
+            .any(|name| name == "index_performance_c_fragment")
+    );
+    assert!(
         !names
             .iter()
             .any(|name| name == "index_performance_wide_mixed_files")

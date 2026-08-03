@@ -1,6 +1,11 @@
 //! Plans bounded index batches, row budgets, and workspace metadata.
 
-use std::{collections::BTreeMap, path::PathBuf, thread};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
+    thread,
+};
 
 use crate::domain::{
     CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession, CodeMonorepoWorkspace,
@@ -173,12 +178,13 @@ fn parse_fetched_files(
             .collect();
     }
 
+    let next_index = AtomicUsize::new(0);
     let mut parsed = thread::scope(|scope| {
         let handles = (0..worker_count)
-            .map(|worker_index| {
-                scope.spawn(move || {
-                    parse_worker_stride(plan, paths, blobs, worker_index, worker_count)
-                })
+            .map(|_| {
+                let next_index = &next_index;
+                scope
+                    .spawn(move || parse_worker_queue(plan, paths, blobs, next_index, worker_count))
             })
             .collect::<Vec<_>>();
         let mut parsed = Vec::with_capacity(paths.len());
@@ -218,18 +224,20 @@ fn parse_one_file(
     Ok(build)
 }
 
-fn parse_worker_stride(
+fn parse_worker_queue(
     plan: &CodeIndexPlan,
     paths: &[String],
     blobs: &[Vec<u8>],
-    worker_index: usize,
+    next_index: &AtomicUsize,
     worker_count: usize,
 ) -> Result<Vec<(usize, SnapshotBuild)>, CodeIndexError> {
-    let mut parsed = Vec::new();
-    let mut index = worker_index;
-    while index < paths.len() {
+    let mut parsed = Vec::with_capacity(paths.len().div_ceil(worker_count));
+    loop {
+        let index = next_index.fetch_add(1, Ordering::Relaxed);
+        if index >= paths.len() {
+            break;
+        }
         parsed.push((index, parse_one_file(plan, &paths[index], &blobs[index])?));
-        index += worker_count;
     }
 
     Ok(parsed)

@@ -64,6 +64,45 @@ fn percentile(values: &[u64], percentile_value: u64) -> u64 {
 }
 
 pub(in crate::evaluator) fn budget(value: &Value, name: &str) -> Option<f64> {
+    if value.get("index_budget_mode").and_then(Value::as_str) == Some("elastic")
+        && (name == "index_budget_ms" || name == "register_index_budget_ms")
+    {
+        let baseline_files = value
+            .get("baseline_file_count")
+            .and_then(Value::as_f64)
+            .filter(|count| *count > 0.0)?;
+        let expected_files = value
+            .get("expected_file_count")
+            .and_then(Value::as_f64)
+            .filter(|count| *count > 0.0)
+            .unwrap_or(baseline_files);
+        let baseline_budget = value
+            .get("baseline_index_budget_ms")
+            .and_then(Value::as_f64)
+            .filter(|budget| *budget > 0.0)?;
+        let throughput_budget = value
+            .get("baseline_files_per_second")
+            .and_then(Value::as_f64)
+            .filter(|throughput| *throughput > 0.0)
+            .map(|throughput| expected_files / throughput * 1_000.0);
+        let register_overhead = if name == "register_index_budget_ms" {
+            value
+                .get("register_overhead_budget_ms")
+                .and_then(Value::as_f64)
+                .unwrap_or(1_000.0)
+        } else {
+            0.0
+        };
+        let scaled = throughput_budget
+            .unwrap_or_else(|| baseline_budget * (expected_files / baseline_files))
+            + register_overhead;
+        let maximum = value
+            .get("max_index_budget_ms")
+            .and_then(Value::as_f64)
+            .filter(|budget| *budget > 0.0)
+            .unwrap_or(f64::INFINITY);
+        return Some(scaled.min(maximum));
+    }
     value
         .get(name)
         .and_then(Value::as_f64)

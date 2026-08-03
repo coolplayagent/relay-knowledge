@@ -32,6 +32,7 @@ fn apply_batch_once(
     connection: &mut Connection,
     batch: &CodeIndexBatch,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
+    prepare_batch_staging(connection, batch)?;
     let transaction = connection.transaction()?;
     let batch_is_new = checkpoint_batch_is_new(&transaction, batch)?;
     delete_batch_path_indexes_if_needed(&transaction, batch, batch_is_new)?;
@@ -51,9 +52,70 @@ fn apply_batch_once(
     insert_chunks(&transaction, batch)?;
     insert_diagnostics(&transaction, batch)?;
     update_checkpoint_after_batch(&transaction, batch, batch_is_new)?;
+    mark_batch_staging_published(&transaction, batch)?;
     transaction.commit()?;
 
     checkpoint::load(connection, &batch.source_scope)
+}
+
+/// Commits a durable batch manifest before fact publication so a crash between
+/// staging and publish remains observable and replayable without a second writer.
+fn prepare_batch_staging(
+    connection: &mut Connection,
+    batch: &CodeIndexBatch,
+) -> Result<(), StorageError> {
+    let fact_row_count = batch.files.len()
+        + batch.symbols.len()
+        + batch.references.len()
+        + batch.imports.len()
+        + batch.dependencies.len()
+        + batch.feature_flags.len()
+        + batch.routes.len()
+        + batch.chunks.len()
+        + batch.diagnostics.len();
+    let now = checkpoint::now_millis();
+    let transaction = connection.transaction()?;
+    transaction.execute(
+        "
+        INSERT INTO code_repository_index_batch_staging
+            (source_scope, batch_index, state, file_count, fact_row_count,
+             created_at_ms, updated_at_ms)
+        VALUES (?1, ?2, 'staged', ?3, ?4, ?5, ?5)
+        ON CONFLICT(source_scope, batch_index) DO UPDATE SET
+            state = 'staged',
+            file_count = excluded.file_count,
+            fact_row_count = excluded.fact_row_count,
+            updated_at_ms = excluded.updated_at_ms
+        ",
+        rusqlite::params![
+            batch.source_scope,
+            batch.batch_index,
+            batch.files.len(),
+            fact_row_count,
+            now,
+        ],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn mark_batch_staging_published(
+    transaction: &Transaction<'_>,
+    batch: &CodeIndexBatch,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        UPDATE code_repository_index_batch_staging
+        SET state = 'published', updated_at_ms = ?3
+        WHERE source_scope = ?1 AND batch_index = ?2
+        ",
+        rusqlite::params![
+            batch.source_scope,
+            batch.batch_index,
+            checkpoint::now_millis()
+        ],
+    )?;
+    Ok(())
 }
 
 fn delete_batch_path_indexes_if_needed(
@@ -170,6 +232,9 @@ fn insert_references(
             )?;
         }
     }
+    if let Some(search_documents) = search_documents {
+        search_documents.finish()?;
+    }
 
     Ok(())
 }
@@ -228,6 +293,9 @@ fn insert_imports(
             )?;
         }
     }
+    if let Some(search_documents) = search_documents {
+        search_documents.finish()?;
+    }
 
     Ok(())
 }
@@ -274,6 +342,7 @@ fn insert_chunks(
             ],
         )?;
     }
+    search_documents.finish()?;
 
     Ok(())
 }

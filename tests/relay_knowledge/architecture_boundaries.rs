@@ -587,7 +587,6 @@ fn code_parser_root_contains_only_the_facade_tests_and_named_subdomains() {
             "syntax",
             "tests",
             "text",
-            "web_frameworks",
             "workspace",
         ]
     );

@@ -11,8 +11,9 @@ use crate::storage::{SqliteStorageDiagnostics, StorageError};
 pub(super) const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const READ_SQLITE_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
-const SQLITE_CACHE_SIZE_KIB: i64 = -64_000;
+const SQLITE_CACHE_SIZE_KIB: i64 = -256_000;
 const SQLITE_MMAP_SIZE_BYTES: i64 = 268_435_456;
+const SQLITE_WAL_AUTOCHECKPOINT_BYTES: i64 = 256 * 1024 * 1024;
 const MAINTENANCE_DIAGNOSTICS_ID: i64 = 1;
 
 #[derive(Debug, Clone, Default)]
@@ -31,7 +32,8 @@ pub(in crate::storage) fn configure_connection(
 pub(in crate::storage::sqlite) fn configure_writer_connection(
     connection: &Connection,
 ) -> Result<(), StorageError> {
-    configure_connection(connection)?;
+    connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
+    configure_common_pragmas(connection)?;
     let _journal_mode = connection.query_row("PRAGMA journal_mode = WAL", [], |row| {
         row.get::<_, String>(0)
     })?;
@@ -146,6 +148,12 @@ fn configure_common_pragmas(connection: &Connection) -> Result<(), StorageError>
         PRAGMA mmap_size = {SQLITE_MMAP_SIZE_BYTES};
         "
     ))?;
+    let page_size = connection.query_row("PRAGMA page_size", [], |row| row.get::<_, i64>(0))?;
+    let wal_autocheckpoint_pages = SQLITE_WAL_AUTOCHECKPOINT_BYTES
+        .checked_div(page_size.max(1))
+        .unwrap_or(1)
+        .max(1);
+    connection.pragma_update(None, "wal_autocheckpoint", wal_autocheckpoint_pages)?;
 
     Ok(())
 }

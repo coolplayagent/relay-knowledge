@@ -202,7 +202,7 @@ The prompt injects only bounded summaries, so long-running iteration does not gr
 | --- | --- |
 | Basic gates | Product and harness `fmt --check`, Linux GNU glibc 2.31 baseline policy gate, product debug build, and harness `cargo check`. |
 | Product gates | `skill_metadata_policy_cases`, `code_index_recovery_cases`, `code_index_health_isolation_cases`, `code_index_sqlite_lock_cases`, and CLI contract cases. |
-| Default repositories | `index_performance_many_files`, `c_syntax_fixture`, `cpp_syntax_fixture`, `cross_language_syntax_fixture`, `typescript_syntax_fixture`, `nonstandard_layout_fixture`, `software_global_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`, `temporal_samples_go`, and `temporal_sdk_go`. |
+| Default repositories | `index_performance_many_files`, `index_performance_c_fragment`, `c_syntax_fixture`, `cpp_syntax_fixture`, `cross_language_syntax_fixture`, `typescript_syntax_fixture`, `nonstandard_layout_fixture`, `software_global_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`, `temporal_samples_go`, and `temporal_sdk_go`. |
 | Default sampling | First 8 normal query cases per repository, while always preserving explicit `guardrail=true` cases. |
 | Repository sets | 2 cross-repository threshold cases from `temporal_go_workspace`. |
 | Semantic/vector | 1 guardrail query. |
@@ -227,7 +227,7 @@ Key fast guardrail responsibilities:
 Override the default subset with:
 
 ```bash
-RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=index_performance_many_files,c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,software_global_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go
+RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=index_performance_many_files,index_performance_c_fragment,c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,software_global_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2

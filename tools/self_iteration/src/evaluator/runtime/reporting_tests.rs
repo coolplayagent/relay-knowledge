@@ -25,3 +25,38 @@ fn query_max_budget_records_tail_latency_metric() {
     assert_eq!(max_metric.budget, Some(1000.0));
     assert!(max_metric.key);
 }
+use super::budget;
+use serde_json::json;
+
+#[test]
+fn elastic_index_budget_scales_from_baseline_and_is_capped() {
+    let config = json!({
+        "index_budget_mode": "elastic",
+        "baseline_file_count": 100.0,
+        "expected_file_count": 250.0,
+        "baseline_index_budget_ms": 10_000.0,
+        "register_overhead_budget_ms": 1_000.0,
+        "max_index_budget_ms": 20_000.0
+    });
+    assert_eq!(budget(&config, "index_budget_ms"), Some(20_000.0));
+    assert_eq!(budget(&config, "register_index_budget_ms"), Some(20_000.0));
+}
+
+#[test]
+fn non_elastic_budget_keeps_explicit_contract() {
+    let config = json!({"index_budget_ms": 12_345});
+    assert_eq!(budget(&config, "index_budget_ms"), Some(12_345.0));
+}
+
+#[test]
+fn elastic_budget_prefers_observed_throughput_baseline() {
+    let config = serde_json::json!({
+        "index_budget_mode": "elastic",
+        "baseline_file_count": 100,
+        "expected_file_count": 800,
+        "baseline_index_budget_ms": 10_000,
+        "baseline_files_per_second": 80,
+        "max_index_budget_ms": 20_000
+    });
+    assert_eq!(budget(&config, "index_budget_ms"), Some(10_000.0));
+}

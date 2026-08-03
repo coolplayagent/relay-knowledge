@@ -135,46 +135,18 @@ pub(in crate::code::parser) fn parse_syntax_file(
     let parsed = match parse_tree_safely(input.language, input.content) {
         Ok(parsed) => parsed,
         Err(error) => {
-            parse_status::record_tree_sitter_failure(build, &input, "parse", &error);
-            feature_flag_projection::record_feature_flags(
-                build,
-                input.path,
-                input.file_id,
-                input.language.id,
-                input.content,
-                None,
-            )?;
-            route_projection::record_routes(
-                build,
-                input.path,
-                input.file_id,
-                input.language.id,
-                input.content,
-            );
-            return Ok(());
+            return record_syntax_failure_fallback(build, &input, "parse", &error);
         }
     };
     let root = parsed.root_node();
-    let captures = match extract_tag_captures_safely(input.language, root, input.content) {
-        Ok(captures) => captures,
-        Err(error) => {
-            parse_status::record_tree_sitter_failure(build, &input, "query", &error);
-            feature_flag_projection::record_feature_flags(
-                build,
-                input.path,
-                input.file_id,
-                input.language.id,
-                input.content,
-                None,
-            )?;
-            route_projection::record_routes(
-                build,
-                input.path,
-                input.file_id,
-                input.language.id,
-                input.content,
-            );
-            return Ok(());
+    let captures = if input.language.id == "c" {
+        Vec::new()
+    } else {
+        match extract_tag_captures_safely(input.language, root, input.content) {
+            Ok(captures) => captures,
+            Err(error) => {
+                return record_syntax_failure_fallback(build, &input, "query", &error);
+            }
         }
     };
     let context = FileParseContext {
@@ -254,6 +226,39 @@ pub(in crate::code::parser) fn parse_syntax_file(
         input.content,
     );
 
+    Ok(())
+}
+
+fn record_syntax_failure_fallback(
+    build: &mut SnapshotBuild,
+    input: &SyntaxFileInput<'_>,
+    stage: &str,
+    error: &CodeIndexError,
+) -> Result<(), CodeIndexError> {
+    parse_status::record_tree_sitter_failure(build, input, stage, error);
+    add_file_chunk(
+        build,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
+    )?;
+    record_dependencies(build, input.path, input.file_id, input.content)?;
+    feature_flag_projection::record_feature_flags(
+        build,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
+        None,
+    )?;
+    route_projection::record_routes(
+        build,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
+    );
     Ok(())
 }
 

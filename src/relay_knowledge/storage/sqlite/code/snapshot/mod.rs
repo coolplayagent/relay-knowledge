@@ -136,6 +136,7 @@ pub(super) fn apply_snapshot(
         )?;
     }
     insert_imports_calls_chunks_diagnostics(&transaction, &snapshot)?;
+    super::schema::ensure_code_query_indexes(&transaction)?;
     update_repository_after_snapshot(&transaction, &snapshot)?;
     // Resolve workspace-level cross-repo imports when monorepo workspaces
     // were detected during snapshot build.  No-op when workspaces is empty.

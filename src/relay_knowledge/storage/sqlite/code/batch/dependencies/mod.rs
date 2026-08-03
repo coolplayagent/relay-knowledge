@@ -70,6 +70,7 @@ pub(in crate::storage::sqlite::code) fn insert_dependency_records(
             ],
         )?;
     }
+    search_documents.finish()?;
 
     Ok(())
 }

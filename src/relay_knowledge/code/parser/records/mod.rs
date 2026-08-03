@@ -203,20 +203,32 @@ pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCode
     {
         return;
     }
-    if let Some(existing) = output.symbols.iter_mut().find(|existing| {
-        existing.symbol_snapshot_id == symbol.symbol_snapshot_id
-            || (existing.name == symbol.name
-                && existing.path == symbol.path
-                && existing.line_range.start == symbol.line_range.start
-                && symbol_kinds_overlap(&existing.kind, &symbol.kind)
-                && !symbols_have_distinct_scoped_identities(existing, &symbol)
-                && ranges_overlap(
-                    existing.byte_range.start,
-                    existing.byte_range.end,
-                    symbol.byte_range.start,
-                    symbol.byte_range.end,
-                ))
-    }) {
+    let candidate_key = symbol_candidate_key(&symbol);
+    let existing_index = output
+        .symbol_snapshot_indices
+        .get(&symbol.symbol_snapshot_id)
+        .copied()
+        .or_else(|| {
+            output
+                .symbol_candidate_indices
+                .get(&candidate_key)
+                .and_then(|indices| {
+                    indices.iter().copied().find(|index| {
+                        let existing = &output.symbols[*index];
+                        existing.path == symbol.path
+                            && symbol_kinds_overlap(&existing.kind, &symbol.kind)
+                            && !symbols_have_distinct_scoped_identities(existing, &symbol)
+                            && ranges_overlap(
+                                existing.byte_range.start,
+                                existing.byte_range.end,
+                                symbol.byte_range.start,
+                                symbol.byte_range.end,
+                            )
+                    })
+                })
+        });
+    if let Some(existing_index) = existing_index {
+        let existing = &output.symbols[existing_index];
         let existing_width = existing
             .byte_range
             .end
@@ -226,12 +238,42 @@ pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCode
             .end
             .saturating_sub(symbol.byte_range.start);
         if symbol_width > existing_width || symbol_preferred_over_existing(&symbol, existing) {
-            *existing = symbol;
+            let previous_id = existing.symbol_snapshot_id.clone();
+            let previous_key = symbol_candidate_key(existing);
+            output.symbols[existing_index] = symbol;
+            let replacement = &output.symbols[existing_index];
+            output.symbol_snapshot_indices.remove(&previous_id);
+            output
+                .symbol_snapshot_indices
+                .insert(replacement.symbol_snapshot_id.clone(), existing_index);
+            if previous_key != candidate_key {
+                if let Some(indices) = output.symbol_candidate_indices.get_mut(&previous_key) {
+                    indices.retain(|index| *index != existing_index);
+                }
+                output
+                    .symbol_candidate_indices
+                    .entry(candidate_key)
+                    .or_default()
+                    .push(existing_index);
+            }
         }
         return;
     }
 
+    let symbol_index = output.symbols.len();
+    output
+        .symbol_snapshot_indices
+        .insert(symbol.symbol_snapshot_id.clone(), symbol_index);
+    output
+        .symbol_candidate_indices
+        .entry(candidate_key)
+        .or_default()
+        .push(symbol_index);
     output.symbols.push(symbol);
+}
+
+fn symbol_candidate_key(symbol: &RepositoryCodeSymbolRecord) -> (String, u32) {
+    (symbol.name.clone(), symbol.line_range.start)
 }
 
 fn ranges_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u32) -> bool {
@@ -316,7 +358,6 @@ pub(super) fn upsert_reference(
 fn reference_dedup_key(reference: &RepositoryCodeReferenceRecord) -> ReferenceDedupKey {
     (
         reference.name.clone(),
-        reference.path.clone(),
         reference.line_range.start,
         reference.byte_range.start,
         reference.byte_range.end,
@@ -365,7 +406,7 @@ pub(super) fn symbol_record_with_qualified_suffix(
         qualified_name,
         kind: kind.to_owned(),
         signature,
-        doc_comment: doc_comment_before(context.content, range.line_start, context.language_id),
+        doc_comment: doc_comment_before(context.content, range.byte_start, context.language_id),
         byte_range: RepositoryCodeRange::new("byte_range", range.byte_start, range.byte_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
@@ -527,21 +568,19 @@ fn module_path(path: &str) -> String {
     strip_supported_extension(path).replace(['/', '\\'], "::")
 }
 
-fn doc_comment_before(content: &str, line_start: usize, language_id: &str) -> Option<String> {
-    let lines = content.lines().collect::<Vec<_>>();
-    let mut cursor = line_start.saturating_sub(2);
+fn doc_comment_before(content: &str, byte_start: usize, language_id: &str) -> Option<String> {
+    let prefix = content.get(..byte_start)?;
+    let previous_lines = prefix
+        .rfind('\n')
+        .map_or("", |current_line_start| &prefix[..current_line_start]);
     let mut comments = Vec::new();
-    while let Some(line) = lines.get(cursor) {
-        let trimmed = line.trim();
+    for line in previous_lines.lines().rev() {
+        let trimmed = line.trim_end_matches('\r').trim();
         let text = doc_comment_text(trimmed, language_id);
         let Some(text) = text else {
             break;
         };
         comments.push(text.to_owned());
-        if cursor == 0 {
-            break;
-        }
-        cursor -= 1;
     }
     comments.reverse();
     (!comments.is_empty()).then(|| comments.join("\n"))
