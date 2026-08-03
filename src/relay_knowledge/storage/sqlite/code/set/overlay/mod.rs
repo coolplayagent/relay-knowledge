@@ -1,7 +1,5 @@
 //! Repository-set overlay refresh, edge resolution, and status projection.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde_json::json;
 
@@ -15,15 +13,14 @@ use crate::{
 
 use super::super::super::evidence_identity::stable_id;
 use super::{
-    manifest::{
-        manifest_module_prefixes_for_members, module_keys_for_path_with_prefixes,
-        module_keys_for_symbol_path_with_prefixes, normalize_module_key,
-    },
+    manifest::normalize_module_key,
     membership::{member_statuses, set_by_alias},
 };
 
+mod export_index;
 mod projection;
 
+use export_index::{ExportIndex, ExportTarget};
 pub(in crate::storage::sqlite::code) use projection::cross_edges_for_selector;
 
 pub(in super::super) fn set_status(
@@ -76,7 +73,7 @@ pub(in super::super) fn refresh_overlay(
     }
 
     let imports = imports_for_members(connection, &status.members)?;
-    let exports = ExportIndex::new(exports_for_members(connection, &status.members)?);
+    let exports = ExportIndex::for_members(connection, &status.members)?;
     let mut edges = Vec::new();
     for import in imports {
         if let Some(candidates) = matching_exports(&import, &exports) {
@@ -278,67 +275,10 @@ fn imports_for_members(
     Ok(imports)
 }
 
-fn exports_for_members(
-    connection: &mut Connection,
-    members: &[CodeRepositorySetMemberStatus],
-) -> Result<Vec<ExportTarget>, StorageError> {
-    let module_prefixes = manifest_module_prefixes_for_members(connection, members)?;
-    let mut exports = Vec::new();
-    for member in members {
-        let prefixes = module_prefixes
-            .get(&member.member.source_scope)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let mut file_statement = connection.prepare(
-            "
-            SELECT repository_id, source_scope, file_id, path
-            FROM code_repository_files
-            WHERE source_scope = ?1
-            ",
-        )?;
-        let file_rows = file_statement.query_map(params![member.member.source_scope], |row| {
-            let path = row.get::<_, String>(3)?;
-            let keys = module_keys_for_path_with_prefixes(&path, prefixes);
-            Ok(ExportTarget {
-                repository_id: row.get(0)?,
-                source_scope: row.get(1)?,
-                record_kind: "code_file".to_owned(),
-                record_id: row.get(2)?,
-                keys,
-            })
-        })?;
-        exports.extend(file_rows.collect::<Result<Vec<_>, _>>()?);
-
-        let mut symbol_statement = connection.prepare(
-            "
-            SELECT repository_id, source_scope, symbol_snapshot_id, name, qualified_name, path
-            FROM code_repository_symbols
-            WHERE source_scope = ?1
-            ",
-        )?;
-        let symbol_rows =
-            symbol_statement.query_map(params![member.member.source_scope], |row| {
-                let name = row.get::<_, String>(3)?;
-                let qualified_name = row.get::<_, String>(4)?;
-                let path = row.get::<_, String>(5)?;
-                let mut keys = module_keys_for_symbol_path_with_prefixes(&path, prefixes);
-                keys.insert(normalize_module_key(&name));
-                keys.insert(normalize_module_key(&qualified_name));
-                Ok(ExportTarget {
-                    repository_id: row.get(0)?,
-                    source_scope: row.get(1)?,
-                    record_kind: "code_symbol_snapshot".to_owned(),
-                    record_id: row.get(2)?,
-                    keys,
-                })
-            })?;
-        exports.extend(symbol_rows.collect::<Result<Vec<_>, _>>()?);
-    }
-
-    Ok(exports)
-}
-
-fn matching_exports(import: &ImportRecord, exports: &ExportIndex) -> Option<Vec<ExportTarget>> {
+fn matching_exports<'a>(
+    import: &ImportRecord,
+    exports: &'a ExportIndex,
+) -> Option<Vec<&'a ExportTarget>> {
     if import.resolution_state != "unresolved" || is_local_or_relative_module(&import.module) {
         return None;
     }
@@ -362,7 +302,7 @@ fn matching_exports(import: &ImportRecord, exports: &ExportIndex) -> Option<Vec<
 fn edge_for_import(
     set_id: &str,
     import: &ImportRecord,
-    candidates: &[ExportTarget],
+    candidates: &[&ExportTarget],
     now_ms: u64,
 ) -> CodeRepositoryCrossEdge {
     let (state, confidence, tier, target) = match candidates {
@@ -458,93 +398,6 @@ struct ImportRecord {
     resolution_state: String,
     line_start: u32,
     line_end: u32,
-}
-
-#[derive(Debug, Clone)]
-struct ExportTarget {
-    repository_id: String,
-    source_scope: String,
-    record_kind: String,
-    record_id: String,
-    keys: BTreeSet<String>,
-}
-
-struct ExportIndex {
-    targets: Vec<ExportTarget>,
-    by_key: BTreeMap<String, Vec<usize>>,
-}
-
-impl ExportIndex {
-    fn new(targets: Vec<ExportTarget>) -> Self {
-        let mut by_key = BTreeMap::<String, Vec<usize>>::new();
-        for (position, target) in targets.iter().enumerate() {
-            for key in &target.keys {
-                by_key.entry(key.clone()).or_default().push(position);
-            }
-        }
-
-        Self { targets, by_key }
-    }
-
-    fn matching_targets(&self, import_scope: &str, module: &str) -> Vec<ExportTarget> {
-        let exact = self.targets_for_key(module, import_scope);
-        if !exact.is_empty() {
-            return exact;
-        }
-
-        let Some((parent, imported_name)) = module.rsplit_once('.') else {
-            return Vec::new();
-        };
-        if parent.is_empty() || imported_name.is_empty() {
-            return Vec::new();
-        }
-
-        self.targets_for_key_intersection(parent, imported_name, import_scope)
-    }
-
-    fn targets_for_key(&self, key: &str, import_scope: &str) -> Vec<ExportTarget> {
-        self.by_key
-            .get(key)
-            .into_iter()
-            .flatten()
-            .filter_map(|position| self.target_for_import(*position, import_scope))
-            .cloned()
-            .collect()
-    }
-
-    fn targets_for_key_intersection(
-        &self,
-        left_key: &str,
-        right_key: &str,
-        import_scope: &str,
-    ) -> Vec<ExportTarget> {
-        let Some(left_positions) = self.by_key.get(left_key) else {
-            return Vec::new();
-        };
-        let Some(right_positions) = self.by_key.get(right_key) else {
-            return Vec::new();
-        };
-
-        let (probe, lookup) = if left_positions.len() <= right_positions.len() {
-            (left_positions, right_positions)
-        } else {
-            (right_positions, left_positions)
-        };
-        let lookup = lookup.iter().copied().collect::<BTreeSet<_>>();
-        probe
-            .iter()
-            .copied()
-            .filter(|position| lookup.contains(position))
-            .filter_map(|position| self.target_for_import(position, import_scope))
-            .cloned()
-            .collect()
-    }
-
-    fn target_for_import(&self, position: usize, import_scope: &str) -> Option<&ExportTarget> {
-        self.targets
-            .get(position)
-            .filter(|target| target.source_scope != import_scope)
-    }
 }
 
 fn is_local_or_relative_module(module: &str) -> bool {

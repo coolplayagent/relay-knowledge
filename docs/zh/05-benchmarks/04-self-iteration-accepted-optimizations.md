@@ -1,5 +1,12 @@
 # 自迭代采纳优化记录
 
+## 候选优化说明：run-1785718638-compact-repository-set-export-index
+
+- 算法：repository-set overlay refresh 从 SQLite file/symbol rows 直接构建 export-key postings，不再先物化带完整 key set 的全部 target；匹配返回借用 target，parent/name fallback 用有序 postings 双指针交集替代逐 import 构建 `BTreeSet`。
+- 架构与不变量：新 `overlay::export_index` owner 隔离只读临时索引；import/export module key、exact-first、同 scope 排除、edge identity/resolution/confidence/order、事务替换、freshness、查询 ranking、source fallback、semantic/vector、lease/checkpoint 均不变，postings 仍由 target 插入序保证严格递增。
+- 预期影响：Temporal/OpenTelemetry 等符号密集多仓 refresh 不再同时保留 target-owned keys 与 inverted keys，也不复制候选 target 字符串；fast Temporal 的 62,990 symbols/4,541 imports/4,436 edges 隔离刷新由 baseline 11.36s/183,328 KiB 降至候选三次 11.15/8.79/8.62s 与 132,952–133,252 KiB（峰值 RSS 约 -27.5%）。
+- 风险与策略关联：风险是 postings 顺序或 borrowed candidate 去重语义漂移，受 exact-first、intersection/source-scope 单测和完整 overlay case 保护；候选建立在 `run-1785705797` candidate-driven projection 与 `run-1785713457` indexed selector 策略上，避免无 profile history 时继续做 fixture/ranking 常数小修，也不扩大无界候选或 grep fallback。
+
 ## 候选优化说明：run-1785705797-candidate-driven-overlay-projection
 
 - 算法/架构：Repository-set 查询先并发收集各 member 的有界结构化候选，并用与最终去重完全相同的 repository/scope/path/line/excerpt key 判断 set-level source fallback；fallback 收敛后，从最终候选生成去重的 import-origin file 与 target symbol/file selector。SQLite 不再为每次查询读取、分配、反序列化整张 `code_repository_cross_edges` overlay，而是用 `VALUES` CTE 按固定 128-key batch 只投影可能附着到候选的边，再沿用既有 `OverlayEvidenceIndex`、bridge bonus、priority、diversity 与 top-k。
@@ -988,3 +995,18 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1785718638
+
+- patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches-v2/run-1785718638.patch`
+- score: 0.997645 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.986918, stability=1.000000)
+- cases: 118/118 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code/set/overlay/export_index.rs`, `src/relay_knowledge/storage/sqlite/code/set/overlay/export_index_tests.rs`, `src/relay_knowledge/storage/sqlite/code/set/overlay/mod.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=4581ms; self_iteration_cargo_fmt_check_ms=485ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=243ms; cargo_build_debug_ms=283ms; self_iteration_cargo_check_ms=262ms; code_index_recovery_cases_ms=1228ms; code_index_sqlite_lock_cases_ms=946ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
