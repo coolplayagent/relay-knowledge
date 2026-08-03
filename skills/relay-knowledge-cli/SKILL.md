@@ -223,6 +223,10 @@ upgrade.
 
 For repository questions, make the index state explicit before querying. Use a
 short alias and narrow scope when the user provides relevant paths or languages.
+Start with `repo list --format json` when the runtime may already contain
+registered repositories; reuse a matching completed alias instead of creating
+duplicate registrations. The command is read-only and omits registrations
+that have never completed an indexed scope.
 For code-structure, code-query-kind, or repository relationship prompts, use the
 graph-backed CLI surfaces before raw text search:
 
@@ -273,6 +277,7 @@ the known symbol and report when the CLI exposes only bounded one-hop call
 edges.
 
 ```bash
+relay-knowledge repo list --format json
 relay-knowledge repo register /path/to/repo \
   --alias core \
   --path src \
@@ -282,6 +287,13 @@ relay-knowledge repo scope preview core --ref HEAD --format json
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo status core --format json
 ```
+
+Large-repository budgets are elastic by default. The effective cold-index
+budget scales from the authorized Git file count and throughput baseline, then
+is capped explicitly; the historical 180-second value is not a universal hard
+timeout. Preserve durable staging, leases, checkpoints, single-writer
+behavior, and freshness checks while a long task progresses. Only an explicit
+fixed/strict benchmark mode opts out of elastic calculation.
 
 Non-Git source directories use the same registered path filter and `HEAD`
 selector flow. The resulting indexed commit is a `filesystem:<hash>` snapshot;

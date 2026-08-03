@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay Knowledge CLI"
   short_description: "Background-task repo indexing and graph queries"
-  default_prompt: "Use $relay-knowledge-cli as the repo knowledge backend: for large cold repo indexing, recover timeouts through repo status <alias>, wait for stale lease recovery when needed, drain queued/retrying code-index tasks with service or bounded repo index-worker attempts, then query graph kinds before grep/ripgrep/rg fallback."
+  default_prompt: "Use $relay-knowledge-cli as the repo knowledge backend: inspect existing scopes with repo list --format json, reuse matching aliases, and for large cold repo indexing use the default elastic budget model; recover timeouts through repo status <alias>, wait for stale lease recovery when needed, drain queued/retrying code-index tasks with service or bounded repo index-worker attempts, then query graph kinds before grep/ripgrep/rg fallback."

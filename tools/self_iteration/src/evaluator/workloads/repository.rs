@@ -13,7 +13,9 @@ use super::super::{
     runtime::{
         concurrency::{parallel_map, run_limited, run_writer_limited},
         contracts::{EvalRuntime, RepoReport},
-        reporting::{budget, parse_json_output, push_latency_metrics, repo_report},
+        reporting::{
+            budget, elastic_budget_enabled, parse_json_output, push_latency_metrics, repo_report,
+        },
     },
 };
 use super::{
@@ -444,11 +446,16 @@ fn cold_index_completion_validation(
 }
 
 fn with_observed_file_count(config: &Value, repository_path: &Path) -> Value {
-    if config.get("index_budget_mode").and_then(Value::as_str) != Some("elastic") {
+    if !elastic_budget_enabled(config) {
         return config.clone();
     }
     let Ok(output) = Command::new("git")
-        .args(["-C", &repository_path.display().to_string(), "ls-files", "-z"])
+        .args([
+            "-C",
+            &repository_path.display().to_string(),
+            "ls-files",
+            "-z",
+        ])
         .output()
     else {
         return config.clone();
@@ -462,7 +469,10 @@ fn with_observed_file_count(config: &Value, repository_path: &Path) -> Value {
     }
     let mut effective = config.clone();
     if let Some(object) = effective.as_object_mut() {
-        object.insert("expected_file_count".to_owned(), Value::from(observed as u64));
+        object.insert(
+            "expected_file_count".to_owned(),
+            Value::from(observed as u64),
+        );
     }
     effective
 }

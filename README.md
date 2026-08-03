@@ -245,6 +245,9 @@ documented commits. C/C++ adds tree-sitter-oriented generated syntax fixtures,
 and multilingual generated fixtures extend the same evaluation set. See
 [Book 5, Chapter 6: C/C++ Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
 and [Book 5, Chapter 7: Multilingual Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md).
+The elastic long-budget model for large repository indexing, including the historical
+180-second baseline, throughput calculation, and cap, is documented in
+[Book 5, Chapter 12: Elastic Index Budgets](docs/en/05-benchmarks/12-elastic-index-budgets.md).
 
 ### Quality Gates
 
