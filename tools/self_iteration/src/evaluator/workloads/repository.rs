@@ -13,7 +13,9 @@ use super::super::{
     runtime::{
         concurrency::{parallel_map, run_limited, run_writer_limited},
         contracts::{EvalRuntime, RepoReport},
-        reporting::{budget, parse_json_output, push_latency_metrics, repo_report},
+        reporting::{
+            budget, elastic_budget_enabled, parse_json_output, push_latency_metrics, repo_report,
+        },
     },
 };
 use super::{
@@ -444,7 +446,7 @@ fn cold_index_completion_validation(
 }
 
 fn with_observed_file_count(config: &Value, repository_path: &Path) -> Value {
-    if config.get("index_budget_mode").and_then(Value::as_str) != Some("elastic") {
+    if !elastic_budget_enabled(config) {
         return config.clone();
     }
     let Ok(output) = Command::new("git")

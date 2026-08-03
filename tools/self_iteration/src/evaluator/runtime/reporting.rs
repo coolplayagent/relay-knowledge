@@ -64,7 +64,11 @@ fn percentile(values: &[u64], percentile_value: u64) -> u64 {
 }
 
 pub(in crate::evaluator) fn budget(value: &Value, name: &str) -> Option<f64> {
-    if value.get("index_budget_mode").and_then(Value::as_str) == Some("elastic")
+    if elastic_budget_enabled(value)
+        && value
+            .get("baseline_file_count")
+            .and_then(Value::as_f64)
+            .is_some()
         && (name == "index_budget_ms" || name == "register_index_budget_ms")
     {
         let baseline_files = value
@@ -107,6 +111,14 @@ pub(in crate::evaluator) fn budget(value: &Value, name: &str) -> Option<f64> {
         .get(name)
         .and_then(Value::as_f64)
         .filter(|value| *value > 0.0)
+}
+
+pub(in crate::evaluator) fn elastic_budget_enabled(value: &Value) -> bool {
+    value
+        .get("index_budget_mode")
+        .and_then(Value::as_str)
+        .unwrap_or("elastic")
+        == "elastic"
 }
 
 pub(in crate::evaluator) fn normalized_env(

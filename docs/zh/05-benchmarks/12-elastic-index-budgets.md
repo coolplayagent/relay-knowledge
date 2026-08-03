@@ -6,7 +6,7 @@
 
 ## 预算计算
 
-当性能目标配置 `index_budget_mode=elastic` 时，评估器先在授权 Git 工作树上执行 `git ls-files`，得到实际文件数 `N`。配置中的 `expected_file_count` 只作为无法观测文件数时的回退值。
+系统默认启用 `index_budget_mode=elastic`；未填写该字段等价于 `elastic`。只有显式选择固定/严格模式的目标才不使用弹性计算。启用后，评估器先在授权 Git 工作树上执行 `git ls-files`，得到实际文件数 `N`。配置中的 `expected_file_count` 只作为无法观测文件数时的回退值。
 
 预算按以下优先级计算：
 
@@ -50,4 +50,3 @@ Linux kernel 93,601 文件目标使用历史 34,150 文件/180 秒基线和约 8
 ```bash
 ./self-iterate.sh evaluate --use-current-candidate --profile fast --categories performance
 ```
-

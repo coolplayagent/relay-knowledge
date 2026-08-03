@@ -2,7 +2,7 @@
 
 Large repository indexing no longer uses one fixed 180-second hard timeout. The 180-second value remains a historical baseline for regression comparison; the execution budget scales with repository size and observed throughput.
 
-With `index_budget_mode=elastic`, the evaluator counts authorized Git files with `git ls-files`. If available, that observed count replaces `expected_file_count`.
+Elastic mode is enabled by default: omitting `index_budget_mode` is equivalent to `elastic`. Only an explicitly selected fixed/strict mode disables scale-based calculation. In elastic mode, the evaluator counts authorized Git files with `git ls-files`; when available, that observed count replaces `expected_file_count`.
 
 The budget is calculated in this order:
 

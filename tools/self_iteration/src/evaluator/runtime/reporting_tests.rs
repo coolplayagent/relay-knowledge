@@ -25,7 +25,7 @@ fn query_max_budget_records_tail_latency_metric() {
     assert_eq!(max_metric.budget, Some(1000.0));
     assert!(max_metric.key);
 }
-use super::budget;
+use super::{budget, elastic_budget_enabled};
 use serde_json::json;
 
 #[test]
@@ -59,4 +59,16 @@ fn elastic_budget_prefers_observed_throughput_baseline() {
         "max_index_budget_ms": 20_000
     });
     assert_eq!(budget(&config, "index_budget_ms"), Some(10_000.0));
+}
+
+#[test]
+fn elastic_budget_is_the_default_mode() {
+    let config = json!({
+        "baseline_file_count": 100,
+        "expected_file_count": 200,
+        "baseline_index_budget_ms": 10_000,
+        "max_index_budget_ms": 30_000
+    });
+    assert!(elastic_budget_enabled(&config));
+    assert_eq!(budget(&config, "index_budget_ms"), Some(20_000.0));
 }

@@ -342,7 +342,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 - Watcher 状态和诊断信息必须通过 `service status` API 暴露。
 - 增量索引任务（`CodeIndexTaskSeed`）必须进入持久化任务队列，不得跳过 durable task lease、checkpoint 和 bounded retry。
 
-- 大仓库索引不得把 180 秒历史基线当作所有规模的固定硬超时。启用 `index_budget_mode=elastic` 时，预算必须基于授权 Git 文件数和已记录吞吐基线计算，并受显式 `max_index_budget_ms` 上限约束；注册开销必须单独有界。弹性等待不能绕过 durable staging、唯一 writer、lease、checkpoint、edge/FTS finalization 或 freshness 状态。计算公式、观测字段和运维判读见[大仓库索引弹性长预算模型](../05-benchmarks/12-elastic-index-budgets.md)。
+- 大仓库索引不得把 180 秒历史基线当作所有规模的固定硬超时。系统默认启用 `index_budget_mode=elastic`；除非显式选择固定/严格模式，预算必须基于授权 Git 文件数和已记录吞吐基线计算，并受显式 `max_index_budget_ms` 上限约束；注册开销必须单独有界。弹性等待不能绕过 durable staging、唯一 writer、lease、checkpoint、edge/FTS finalization 或 freshness 状态。计算公式、观测字段和运维判读见[大仓库索引弹性长预算模型](../05-benchmarks/12-elastic-index-budgets.md)。
 - Watcher 根只能包含 facade 与物理 `config/`、`event_filter/`、`hash_cache/`、`task_seed/`、`engine/` 子域。前四个 owner 分别独占 typed runtime configuration、path/language event admission、有界 content-hash observation 与 durable overlay task-seed 构造，并各自直接挂载 `mod_tests.rs`；task-seed invariant 不得漂移到 engine integration test。真实 `watcher::engine` 子树继续由 `mod.rs` 独占公共 handle 与启动，`event_loop`、`repository_registry`、`index_queue` 和 `diagnostics` 分别独占 OS event、动态 watch root、durable-task 投影与状态更新。依赖从 engine 单向进入四个聚焦根 owner，不得反向。跨 owner 异步行为由同目录 engine integration harness 保护；不得恢复平铺 `config.rs`、`event_filter.rs`、`hash_cache.rs`、`task_seed.rs`，也不得重新压平 engine responsibility。
 
 ## 6. 文档与测试硬约束
