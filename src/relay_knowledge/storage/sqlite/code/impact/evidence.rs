@@ -18,6 +18,8 @@ use super::{
     seed::module_import_matches,
 };
 
+const SQLITE_EXPRESSION_BATCH_SIZE: usize = 250;
+
 pub(super) fn chunks_for_paths(
     connection: &Connection,
     status: &CodeRepositoryStatus,
@@ -227,47 +229,10 @@ pub(super) fn importers_for_modules(
         .iter()
         .map(|module| format!("%{module}%"))
         .collect::<Vec<_>>();
-    let module_clause = module_patterns
-        .iter()
-        .map(|_| "i.module LIKE ?")
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let sql = format!(
-        "
-        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
-               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
-               f.is_generated
-        FROM code_repository_imports i
-        INNER JOIN code_repository_files f
-            ON f.source_scope = i.source_scope AND f.path = i.path
-        WHERE i.source_scope = ?1
-          AND ({module_clause})
-        ORDER BY i.path ASC, i.line_start ASC
-        ",
-    );
-    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
-    values.extend(module_patterns.into_iter().map(Value::Text));
-    let mut statement = connection.prepare(&sql)?;
-    let rows = statement.query_map(params_from_iter(values), |row| {
-        Ok(ImpactImportRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            module: row.get(3)?,
-            line_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
-            },
-            target_hint: row.get(6)?,
-            resolution_state: row.get(7)?,
-            confidence_basis_points: row.get(8)?,
-            confidence_tier: row.get(9)?,
-            is_generated: row.get::<_, i64>(10)? != 0,
-        })
-    })?;
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
+    let mut rows = Vec::new();
+    for patterns in module_patterns.chunks(SQLITE_EXPRESSION_BATCH_SIZE) {
+        rows.extend(import_rows_for_patterns(connection, status, patterns)?);
+    }
 
     Ok(rows
         .into_iter()
@@ -302,6 +267,53 @@ pub(super) fn importers_for_modules(
             )
         })
         .collect())
+}
+
+fn import_rows_for_patterns(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    module_patterns: &[String],
+) -> Result<Vec<ImpactImportRow>, StorageError> {
+    let module_clause = module_patterns
+        .iter()
+        .map(|_| "i.module LIKE ?")
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let sql = format!(
+        "
+        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
+               f.is_generated
+        FROM code_repository_imports i
+        INNER JOIN code_repository_files f
+            ON f.source_scope = i.source_scope AND f.path = i.path
+        WHERE i.source_scope = ?1
+          AND ({module_clause})
+        ORDER BY i.path ASC, i.line_start ASC
+        ",
+    );
+    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
+    values.extend(module_patterns.iter().cloned().map(Value::Text));
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
+        Ok(ImpactImportRow {
+            file_id: row.get(0)?,
+            path: row.get(1)?,
+            language_id: row.get(2)?,
+            module: row.get(3)?,
+            line_range: RepositoryCodeRange {
+                start: row.get(4)?,
+                end: row.get(5)?,
+            },
+            target_hint: row.get(6)?,
+            resolution_state: row.get(7)?,
+            confidence_basis_points: row.get(8)?,
+            confidence_tier: row.get(9)?,
+            is_generated: row.get::<_, i64>(10)? != 0,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
 }
 
 fn placeholders(count: usize) -> String {
