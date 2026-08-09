@@ -221,21 +221,15 @@ launcher:
 ./self-iterate.sh chart
 ```
 
-The launcher auto-builds the harness binary when needed. It stores v2 run
-history, progressive memory, reports, patches, and score curves under
-`.git/relay-knowledge-self-iteration/` and only commits candidates that improve
-the configured score.
+The launcher auto-builds the harness binary when needed. It stores v2 run history, progressive memory, reports, patches, and score curves under `.git/relay-knowledge-self-iteration/` and only commits candidates that improve the configured score.
 
-The research judge supports OpenAI-compatible HTTP or an open coding-agent CLI,
-defaulting to `opencode` when no backend is configured. The semantic/vector
-fixture inherits the same `RELAY_KNOWLEDGE_*` embedding environment as normal
-runtime commands and does not persist secrets in benchmark cases.
+The research judge supports OpenAI-compatible HTTP or an open coding-agent CLI, defaulting to `opencode` when no backend is configured. The semantic/vector fixture inherits the same `RELAY_KNOWLEDGE_*` embedding environment as normal runtime commands and does not persist secrets in benchmark cases.
 
-The `unattended-layered` strategy is tuned for 1-2 day runs. It performs short
-smoke-level Codex explores, validates promising candidates with the fast
-profile, persists resume state in
-`.git/relay-knowledge-self-iteration/unattended-state-v2.json`, and escalates to
-longer competitive-capability macro exploration when short attempts stall.
+### CLI Skill A/B Evaluation
+
+See the standalone [relay-knowledge CLI skill evaluator](tools/relay_knowledge_skill_eval/README.md) for paired Pi runs on SWE-bench Verified and DeepSWE.
+
+The `unattended-layered` strategy is tuned for 1-2 day runs. It performs short smoke-level Codex explores, validates promising candidates with the fast profile, persists resume state in `.git/relay-knowledge-self-iteration/unattended-state-v2.json`, and escalates to longer competitive-capability macro exploration when short attempts stall.
 
 External repositories in the self-iteration evaluation set are pinned to
 documented commits. C/C++ adds tree-sitter-oriented generated syntax fixtures,

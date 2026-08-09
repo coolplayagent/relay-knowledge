@@ -324,7 +324,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 
 ## 5. 代码质量硬约束
 
-- tracked source、test、documentation、script 或 workflow 文件不得超过 1000 行。locked build 必需的生成式 release lockfile 例外，当前为 `Cargo.lock`，且必须保持机器生成。
+- tracked source、test、documentation、script 或 workflow 文件不得超过 1000 行。locked build 必需且由对应包管理器校验的生成式 release lockfile 例外，当前包括根 `Cargo.lock` 与 `tools/relay_knowledge_skill_eval/uv.lock`；两者必须保持机器生成，并分别通过 Cargo locked build 与 `uv lock --check` 验证。
 - 根 README 是简洁的入口与导航面；详细实现所有权和运维合同必须放入 README 所链接的职责型 architecture、capability 或 user-guide 文档中，README 增长同样不得绕过 1000 行上限。
 - 不添加 shallow function；函数必须负责校验、转换、外部边界、资源生命周期、错误映射、观测或真实编排。
 - 不保留 dead code、TODO stub、无调用公共 API、无测试 speculative extension point 或注释掉的实现。单元测试不等于生产调用者：共享 retrieval term normalization 只保留 rerank 实际消费的操作，不得把 identifier classifier、stemmer 或 public data shape 隐藏在 `#[allow(dead_code)]` 后。

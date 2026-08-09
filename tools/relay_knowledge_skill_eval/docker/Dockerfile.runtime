@@ -1,0 +1,20 @@
+FROM node:22.19.0-bookworm-slim
+
+ARG PI_VERSION=0.80.3
+
+RUN mkdir -p /opt/pi-eval/bin /opt/pi-eval/skill && \
+    npm install --prefix /opt/pi-eval --omit=dev \
+      "@earendil-works/pi-coding-agent@${PI_VERSION}" && \
+    cp /usr/local/bin/node /opt/pi-eval/bin/node && \
+    ln -s ../node_modules/.bin/pi /opt/pi-eval/bin/pi
+
+COPY skill/ /opt/pi-eval/skill/
+COPY pi-eval /opt/pi-eval/bin/pi-eval
+COPY deepseek-egress-proxy.mjs /opt/pi-eval/bin/deepseek-egress-proxy.mjs
+
+RUN chmod 0755 \
+      /opt/pi-eval/bin/pi-eval \
+      /opt/pi-eval/skill/assets/linux-x86_64/relay-knowledge && \
+    /opt/pi-eval/bin/pi --version && \
+    /opt/pi-eval/skill/assets/linux-x86_64/relay-knowledge version --format json
+VOLUME /opt/pi-eval
