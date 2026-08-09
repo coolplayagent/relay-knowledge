@@ -35,10 +35,14 @@ pub use code::{
     CodeWorkspacePackageMapping, CodebaseViewBudget, CodebaseViewCall, CodebaseViewDependency,
     CodebaseViewEdge, CodebaseViewEvidence, CodebaseViewFile, CodebaseViewKind, CodebaseViewNode,
     CodebaseViewRequest, CodebaseViewSection, CodebaseViewSnapshot, CodebaseViewSymbol,
-    RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, RouteHandlerRole, StalenessHint,
+    IndexedRepositoryDocument, REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT,
+    REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT, REPOSITORY_GRAPH_MAX_DEPTH,
+    REPOSITORY_GRAPH_MAX_EDGE_LIMIT, REPOSITORY_GRAPH_MAX_NODE_LIMIT, RepositoryCodeChunkRecord,
+    RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord, RepositoryGraphEdge, RepositoryGraphNeighborhood,
+    RepositoryGraphNeighborhoodRequest, RepositoryGraphNode, RouteHandlerRole, StalenessHint,
     SymbolRole, code_snapshot_expected_scope_id, code_snapshot_scope_id,
-    code_snapshot_scope_is_fact_versioned,
+    code_snapshot_scope_is_fact_versioned, project_okf_neighborhood,
 };
 pub use core::{
     DomainError, GraphVersion, IndexKind, IndexModality, IndexState, IndexStatus, KnowledgeEntity,

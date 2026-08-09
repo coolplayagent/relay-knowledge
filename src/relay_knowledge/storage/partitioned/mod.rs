@@ -418,6 +418,22 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         routing::codebase_view_snapshot(self.clone(), source_scope, request, row_limit)
     }
 
+    fn repository_documents_for_scope(
+        &self,
+        source_scope: String,
+        path_filters: Vec<String>,
+        max_files: usize,
+        max_bytes: usize,
+    ) -> StorageFuture<'_, Vec<crate::domain::IndexedRepositoryDocument>> {
+        routing::repository_documents_for_scope(
+            self.clone(),
+            source_scope,
+            path_filters,
+            max_files,
+            max_bytes,
+        )
+    }
+
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
         let this = self.clone();
         Box::pin(async move { totals::code_repository_totals(this.control, this.catalog).await })

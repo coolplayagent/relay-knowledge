@@ -18,6 +18,7 @@ relay-knowledge repo index relay-knowledge --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo status relay-knowledge --format json
 ```
@@ -25,6 +26,8 @@ relay-knowledge repo status relay-knowledge --format json
 省略 `--alias` 或传入空 alias 时，注册会使用解析后的 Git root 或 filesystem root 目录名作为稳定仓库 alias。agent 首次注册项目时应优先使用这个默认值，让后续 session 复用同一索引；`--alias` 仍可作为显式覆盖。
 
 `repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language`、`--exclude-generated` 和 freshness policy。`repo register` 会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
+
+`repo graph` 是独立、版本化的 OKF v0.2 投影。它只从解析后的 indexed snapshot 重建 Markdown，忽略保留的 `index.md` 和 `log.md`，返回 concept node、被引用的 external-source node、`concept_link` edge 与 `cites_source` edge。focus path 必须位于显式 `--path` bundle root 内；snapshot 必须 fresh。遍历深度上限为 2，node 上限为 100，edge 上限为 200，发生截断时会在响应中显式标记。同一 application contract 由 `POST /api/v1/code/repositories/{alias}/graph`、remote CLI mode 和 `relay_repository_graph` MCP tool 共用；这些入口都不会读取 live worktree，也不会触发索引。
 
 `definition`、`references` 和 `hybrid` 查询会先使用已索引代码图与 SQLite FTS；当这些层存在明确召回缺口时，才在已索引 commit 的候选文件上执行有界内部 exact-text source fallback。兜底结果以 `lexical` 和 `text_fallback` layer 暴露，不能替代 resolved reference/call/import edge。
 

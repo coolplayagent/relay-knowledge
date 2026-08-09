@@ -5,7 +5,7 @@ mod staleness;
 mod status;
 #[cfg(test)]
 #[path = "test_support.rs"]
-mod test_support;
+pub(super) mod test_support;
 mod worktree;
 #[cfg(test)]
 #[path = "worktree_review_tests.rs"]

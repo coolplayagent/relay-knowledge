@@ -57,6 +57,22 @@ pub(super) struct CodeContextArgs {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct RepositoryGraphArgs {
+    pub(super) repository: String,
+    pub(super) focus_path: String,
+    #[serde(default)]
+    pub(super) ref_selector: Option<String>,
+    #[serde(default)]
+    pub(super) path_filters: Vec<String>,
+    #[serde(default)]
+    pub(super) depth: Option<u8>,
+    #[serde(default)]
+    pub(super) node_limit: Option<usize>,
+    #[serde(default)]
+    pub(super) edge_limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct CodeImpactArgs {
     pub(super) repository: String,
     pub(super) base_ref: String,

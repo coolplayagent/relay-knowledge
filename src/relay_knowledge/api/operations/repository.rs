@@ -7,6 +7,7 @@ use crate::{
         CodeIndexCheckpoint, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryRegistration,
         CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositoryScopePreview,
         CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
+        RepositoryGraphEdge, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
         SoftwareBuildTarget, SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement,
         SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
         SoftwareRelationship, SoftwareSdkUsage, SoftwareTopic,
@@ -104,6 +105,18 @@ pub struct CodeRepositoryQueryResponse {
     pub results: Vec<CodeRetrievalHit>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
+}
+
+/// Versioned, snapshot-bound repository graph neighborhood.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositoryGraphNeighborhoodResponseV1 {
+    pub schema_version: u8,
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub request: RepositoryGraphNeighborhoodRequest,
+    pub nodes: Vec<RepositoryGraphNode>,
+    pub edges: Vec<RepositoryGraphEdge>,
+    pub truncated: bool,
 }
 
 /// Code repository feature-flag graph response.

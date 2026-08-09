@@ -19,6 +19,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("scope") => parse_scope(&tokens[1..]),
         Some("update") => parse_update(&tokens[1..]),
         Some("query") => parse_query(&tokens[1..]),
+        Some("graph") => parse_graph(&tokens[1..]),
         Some("context") => parse_context(&tokens[1..]),
         Some("feature-flags") => parse_feature_flags(&tokens[1..]),
         Some("impact") => parse_impact(&tokens[1..]),
@@ -29,6 +30,65 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some(other) => Err(CliError::UnexpectedArgument(other.to_owned())),
         None => Err(CliError::UnexpectedArgument("repo".to_owned())),
     }
+}
+
+fn parse_graph(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut focus_path = None;
+    let mut depth = 1_u8;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut path_filters = Vec::new();
+    let mut node_limit = crate::domain::REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT;
+    let mut edge_limit = crate::domain::REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--focus" => {
+                focus_path = Some(value_after(tokens, index, "--focus")?);
+                index += 2;
+            }
+            "--depth" => {
+                let value = value_after(tokens, index, "--depth")?;
+                depth = value
+                    .parse::<u8>()
+                    .map_err(|_| CliError::UnexpectedArgument(value.clone()))?;
+                index += 2;
+            }
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--path" => {
+                path_filters.push(value_after(tokens, index, "--path")?);
+                index += 2;
+            }
+            "--node-limit" => {
+                let value = value_after(tokens, index, "--node-limit")?;
+                node_limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            "--edge-limit" => {
+                let value = value_after(tokens, index, "--edge-limit")?;
+                edge_limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::Graph {
+        alias,
+        focus_path: focus_path.ok_or(CliError::MissingValue("--focus"))?,
+        depth,
+        ref_selector,
+        path_filters,
+        node_limit,
+        edge_limit,
+    })
 }
 
 fn parse_register(tokens: &[String]) -> Result<RepoCommand, CliError> {

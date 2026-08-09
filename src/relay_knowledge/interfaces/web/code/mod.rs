@@ -14,7 +14,7 @@ use crate::{
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
         CodeIndexRequest, CodeRepositorySelector, CodeRetrievalRequest, CodebaseViewRequest,
-        SoftwareGlobalRequest,
+        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::normalize_index_request,
 };
@@ -41,6 +41,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/query",
             post(code_repository_query),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/graph",
+            post(code_repository_graph),
         )
         .route(
             "/api/v1/code/repositories/{alias}/context",
@@ -151,6 +155,28 @@ async fn code_repository_query(
     match state
         .service
         .query_code_repository(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_graph(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<RepositoryGraphNeighborhoodRequest>,
+) -> Response {
+    if let Some(error) = normalize_repository_graph_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .repository_graph_neighborhood(request, api_context(&headers))
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -369,6 +395,27 @@ fn normalize_context_request(request: &mut CodeGraphContextRequest) -> Option<Ap
         request.max_context_bytes,
         request.include_code,
         request.exclude_generated,
+    ) {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_repository_graph_request(
+    request: &mut RepositoryGraphNeighborhoodRequest,
+) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match RepositoryGraphNeighborhoodRequest::new(
+        request.repository.clone(),
+        std::mem::take(&mut request.focus_path),
+        request.depth,
+        request.node_limit,
+        request.edge_limit,
     ) {
         Ok(validated) => {
             *request = validated;

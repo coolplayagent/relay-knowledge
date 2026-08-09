@@ -9,7 +9,7 @@ use crate::domain::{
     CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
     CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
     CodeSymbolGenerationCounts, CodebaseViewRequest, CodebaseViewSnapshot,
-    SoftwareGlobalProjection, SoftwareGlobalRequest,
+    IndexedRepositoryDocument, SoftwareGlobalProjection, SoftwareGlobalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -394,6 +394,20 @@ pub trait CodeRepositoryStore: Send + Sync {
             exclude_generated,
             limit,
         )
+    }
+
+    fn repository_documents_for_scope(
+        &self,
+        source_scope: String,
+        _path_filters: Vec<String>,
+        _max_files: usize,
+        _max_bytes: usize,
+    ) -> StorageFuture<'_, Vec<IndexedRepositoryDocument>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "repository documents for source scope '{source_scope}' are unavailable"
+            )))
+        })
     }
 
     fn apply_code_index_snapshot(

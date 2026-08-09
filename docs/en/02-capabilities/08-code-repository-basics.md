@@ -18,6 +18,7 @@ relay-knowledge repo index relay-knowledge --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo status relay-knowledge --format json
 ```
@@ -28,6 +29,8 @@ prefer this default for first-time project registration so later sessions reuse
 the same index; `--alias` remains available as an explicit override.
 
 `repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, `--exclude-generated`, and freshness policy. `repo register` rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results.
+
+`repo graph` is a separate, versioned OKF v0.2 projection. It reconstructs Markdown only from the resolved indexed snapshot, ignores reserved `index.md` and `log.md` files, and returns concept nodes, cited external-source nodes, `concept_link` edges, and `cites_source` edges. The focus path must remain inside an explicit `--path` bundle root. The snapshot must be fresh; traversal depth is capped at 2, nodes at 100, edges at 200, and truncation is explicit in the response. The same application contract is available through `POST /api/v1/code/repositories/{alias}/graph`, remote CLI mode, and the `relay_repository_graph` MCP tool. None of these entry points reads the live worktree or triggers indexing.
 
 `definition`, `references`, and `hybrid` queries use the indexed code graph and SQLite FTS first. When those layers leave a specific recall gap, the query may run bounded internal exact-text source fallback over candidate files from the indexed commit. Fallback results are exposed through `lexical` and `text_fallback` layers and do not replace resolved reference, call, or import edges.
 

@@ -67,7 +67,7 @@ pub(super) fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelecto
         .expect("selector should validate")
 }
 
-pub(super) fn context(name: &str) -> RequestContext {
+pub(crate) fn context(name: &str) -> RequestContext {
     RequestContext::with_ids(
         InterfaceKind::Cli,
         format!("req-{name}"),
@@ -75,7 +75,7 @@ pub(super) fn context(name: &str) -> RequestContext {
     )
 }
 
-pub(super) async fn service_with_memory_store() -> RelayKnowledgeService {
+pub(crate) async fn service_with_memory_store() -> RelayKnowledgeService {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
     service_with_store(store).await
 }
@@ -109,12 +109,12 @@ pub(super) async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKno
     RelayKnowledgeService::with_store(runtime, store)
 }
 
-pub(super) struct FixtureRepo {
-    pub(super) path: PathBuf,
+pub(crate) struct FixtureRepo {
+    pub(crate) path: PathBuf,
 }
 
 impl FixtureRepo {
-    pub(super) fn create(name: &str) -> Self {
+    pub(crate) fn create(name: &str) -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
@@ -128,7 +128,7 @@ impl FixtureRepo {
         repo
     }
 
-    pub(super) fn write(&self, relative: &str, content: &str) {
+    pub(crate) fn write(&self, relative: &str, content: &str) {
         let path = self.path.join(relative);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("parent directory should exist");
@@ -136,7 +136,7 @@ impl FixtureRepo {
         fs::write(path, content).expect("fixture file should be written");
     }
 
-    pub(super) fn git<const N: usize>(&self, args: [&str; N]) {
+    pub(crate) fn git<const N: usize>(&self, args: [&str; N]) {
         let output = git_command(&self.path, args)
             .output()
             .expect("git should run");
@@ -147,7 +147,7 @@ impl FixtureRepo {
         );
     }
 
-    pub(super) fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
+    pub(crate) fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
         let output = git_command(&self.path, args)
             .output()
             .expect("git should run");

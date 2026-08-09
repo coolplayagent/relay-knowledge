@@ -736,6 +736,7 @@ relay-knowledge repo index relay-knowledge --ref main --format json
 relay-knowledge repo index-worker --task-id <task-id> --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo context relay-knowledge --query "retry_policy callers imports" --ref HEAD --path src --freshness wait-until-fresh --limit 8 --max-context-bytes 16384 --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo query relay-knowledge --query retry_policy --kind definition --freshness wait-until-fresh --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo software relay-knowledge --kind relationships --ref HEAD --format json

@@ -49,6 +49,43 @@ async fn candidate_paths_for_scope_apply_filters_before_limit() {
 }
 
 #[tokio::test]
+async fn indexed_markdown_documents_are_reconstructed_from_snapshot_chunks() {
+    let first = "---\ntype: Research Claim\ntitle: 利率\n---\n\n";
+    let second = "结论正文。[^pbc]\n";
+    let mut snapshot = snapshot_with_chunk_status(
+        "repo",
+        "knowledge/investment-research/rates.md",
+        first,
+        CodeParseStatus::TextOnly,
+        None,
+    );
+    snapshot.files[0].language_id = "markdown".to_owned();
+    snapshot.chunks.push(chunk(
+        "rates-second",
+        "file",
+        "knowledge/investment-research/rates.md",
+        second,
+        None,
+    ));
+    let store = store_with_repository_snapshot(snapshot).await;
+
+    let documents = store
+        .repository_documents_for_scope(
+            TEST_SOURCE_SCOPE.to_owned(),
+            vec!["knowledge/investment-research".to_owned()],
+            16,
+            64 * 1_024,
+        )
+        .await
+        .expect("snapshot documents should load");
+
+    assert_eq!(documents.len(), 1);
+    assert_eq!(documents[0].language_id, "markdown");
+    assert!(documents[0].content.contains("type: Research Claim"));
+    assert!(documents[0].content.contains("结论正文"));
+}
+
+#[tokio::test]
 async fn candidate_paths_for_query_scope_use_search_before_scope_budget() {
     let mut snapshot = snapshot_with_chunk_status(
         "repo",

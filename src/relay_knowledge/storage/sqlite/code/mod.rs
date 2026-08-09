@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use super::{scope_filters as code_query_scope, software};
 
 mod batch;
+mod documents;
 mod feature_flags;
 mod generated;
 mod impact;
@@ -50,7 +51,8 @@ use crate::{
         CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
         CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
         CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeSymbolGenerationCounts,
-        CodebaseViewRequest, CodebaseViewSnapshot, SoftwareGlobalProjection, SoftwareGlobalRequest,
+        CodebaseViewRequest, CodebaseViewSnapshot, IndexedRepositoryDocument,
+        SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
@@ -331,6 +333,24 @@ impl CodeRepositoryStore for SqliteGraphStore {
                 &language_filters,
                 exclude_generated,
                 limit,
+            )
+        })
+    }
+
+    fn repository_documents_for_scope(
+        &self,
+        source_scope: String,
+        path_filters: Vec<String>,
+        max_files: usize,
+        max_bytes: usize,
+    ) -> StorageFuture<'_, Vec<IndexedRepositoryDocument>> {
+        self.run_read(move |connection| {
+            documents::read_indexed_markdown(
+                connection,
+                &source_scope,
+                &path_filters,
+                max_files,
+                max_bytes,
             )
         })
     }

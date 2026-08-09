@@ -9,7 +9,8 @@ use crate::interfaces::agent::MAX_AGENT_QUERY_CHARS;
 
 use super::code_tools::{
     code_context_tool_definition, code_feature_flags_tool_definition, code_impact_tool_definition,
-    code_query_tool_definition, code_software_query_tool_definition, codebase_view_tool_definition,
+    code_query_tool_definition, code_repository_graph_tool_definition,
+    code_software_query_tool_definition, codebase_view_tool_definition,
 };
 
 pub(super) const RETRIEVE_CONTEXT_TOOL: &str = "relay_retrieve_context";
@@ -19,6 +20,7 @@ pub(super) const SERVICE_STATUS_TOOL: &str = "relay_service_status";
 pub(super) const INDEX_STATUS_TOOL: &str = "relay_index_status";
 pub(super) const CODE_QUERY_TOOL: &str = "relay_code_query";
 pub(super) const CODE_CONTEXT_TOOL: &str = "relay_codegraph_context";
+pub(super) const CODE_REPOSITORY_GRAPH_TOOL: &str = "relay_repository_graph";
 pub(super) const CODE_FEATURE_FLAGS_TOOL: &str = "relay_code_feature_flags";
 pub(super) const CODE_IMPACT_TOOL: &str = "relay_code_impact";
 pub(super) const CODE_REPOSITORY_SET_QUERY_TOOL: &str = "relay_code_repository_set_query";
@@ -35,6 +37,7 @@ pub(super) fn is_known_tool(name: &str) -> bool {
             | INDEX_STATUS_TOOL
             | CODE_QUERY_TOOL
             | CODE_CONTEXT_TOOL
+            | CODE_REPOSITORY_GRAPH_TOOL
             | CODE_FEATURE_FLAGS_TOOL
             | CODE_IMPACT_TOOL
             | CODE_REPOSITORY_SET_QUERY_TOOL
@@ -55,6 +58,7 @@ pub(super) fn tools_list_result() -> Value {
         no_argument_tool(INDEX_STATUS_TOOL, "Return derived retrieval index status."),
         code_query_tool_definition(),
         code_context_tool_definition(),
+        code_repository_graph_tool_definition(),
         code_feature_flags_tool_definition(),
         code_software_query_tool_definition(),
         codebase_view_tool_definition(),
