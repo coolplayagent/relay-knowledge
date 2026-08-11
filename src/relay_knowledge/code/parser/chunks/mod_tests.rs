@@ -1,6 +1,10 @@
 // Direct tests for source-surface chunk construction.
 
-use crate::{code::SnapshotBuild, domain::CodeRepositoryRegistration};
+use crate::{
+    code::{SnapshotBuild, parser::parse_indexed_file},
+    domain::CodeRepositoryRegistration,
+    storage::{CodeRepositoryStore, SqliteGraphStore},
+};
 
 use super::*;
 
@@ -143,6 +147,61 @@ fn structured_documents_use_bounded_nonduplicating_source_windows() {
     for window in chunks.windows(2) {
         assert_eq!(window[0].byte_range.end, window[1].byte_range.start);
     }
+}
+
+#[tokio::test]
+async fn markdown_windows_round_trip_losslessly_through_snapshot_storage() {
+    let registration = registration();
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree-lossless-markdown".to_owned(),
+        true,
+        1,
+        0,
+    );
+    let mut content =
+        String::from("---\ntype: research\nname: Lossless windows\n---\n\n# Exact Markdown\n\n");
+    for index in 0..240 {
+        content.push_str(&format!(
+            "    indented_{index:03} = value_{index:03}_with_window_padding\n"
+        ));
+    }
+    content.push_str("\n```md\n[inside-fence][ref]\n```\n\n[outside][ref]\n\n[ref]: ./target.md\n");
+    assert!(content.len() > MAX_SOURCE_SURFACE_CHUNK_BYTES);
+    assert!(content.lines().count() > MAX_SOURCE_SURFACE_CHUNK_LINES);
+
+    parse_indexed_file(&mut build, "docs/large.md", content.as_bytes())
+        .expect("large Markdown should parse");
+    let snapshot = build.finish();
+    assert!(snapshot.chunks.len() > 1);
+    assert_eq!(
+        snapshot
+            .chunks
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<String>(),
+        content
+    );
+    let source_scope = snapshot.source_scope.clone();
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .upsert_code_repository(registration)
+        .await
+        .expect("repository should persist");
+    store
+        .apply_code_index_snapshot(snapshot)
+        .await
+        .expect("snapshot should persist");
+
+    let documents = store
+        .repository_documents_for_scope(source_scope, vec!["docs".to_owned()], 1, content.len())
+        .await
+        .expect("lossless Markdown windows should materialize");
+
+    assert_eq!(documents.len(), 1);
+    assert_eq!(documents[0].path, "docs/large.md");
+    assert_eq!(documents[0].content, content);
 }
 
 #[test]

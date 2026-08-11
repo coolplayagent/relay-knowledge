@@ -1,8 +1,8 @@
 use std::{error::Error, fmt};
 
-use crate::{api::AgentAccessPolicy, domain::SourceScope};
+use crate::{api::AgentAccessPolicy, domain::SourceScope, storage::MAX_GRAPH_SEARCH_QUERY_CHARS};
 
-pub const MAX_AGENT_QUERY_CHARS: usize = 10_000;
+pub const MAX_AGENT_QUERY_CHARS: usize = MAX_GRAPH_SEARCH_QUERY_CHARS;
 pub const MAX_AGENT_PATH_CHARS: usize = 4_096;
 
 /// Stable adapter error categories for protocol-level governance.

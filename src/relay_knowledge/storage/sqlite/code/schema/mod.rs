@@ -31,6 +31,8 @@ use self::search_schema::{
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
 pub(super) const GENERATED_DETECTION_REINDEX_MIGRATION: &str = "generated-detection-reindex-v1";
+pub(super) const LOSSLESS_MARKDOWN_REINDEX_MIGRATION: &str =
+    "lossless-markdown-source-windows-reindex-v1";
 const SEARCH_BACKFILL_MIGRATION: &str = "code-search-backfill-v1";
 const SEARCH_METADATA_BACKFILL_MIGRATION: &str = "code-search-metadata-backfill-v1";
 
@@ -60,6 +62,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     super::generated::backfill_all_path_generated_flags(connection)?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
     mark_legacy_route_extraction_scopes_stale_once(connection)?;
+    mark_legacy_markdown_scopes_stale_once(connection)?;
     backfill_code_repository_aliases(connection)?;
     backfill_code_repository_search(connection)?;
     backfill_code_repository_search_metadata(connection)?;
@@ -68,6 +71,45 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     ensure_search_query_indexes_for_existing_facts(connection)?;
 
     Ok(())
+}
+
+fn mark_legacy_markdown_scopes_stale_once(connection: &Connection) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, LOSSLESS_MARKDOWN_REINDEX_MIGRATION)? {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute(
+        "
+        UPDATE code_repository_scopes
+        SET stale = 1
+        WHERE EXISTS (
+            SELECT 1
+            FROM code_repository_files file
+            WHERE file.source_scope = code_repository_scopes.source_scope
+              AND file.language_id = 'markdown'
+        )
+        ",
+        [],
+    )?;
+    transaction.execute(
+        "
+        UPDATE code_repositories
+        SET stale = 1
+        WHERE last_indexed_scope_id IN (
+            SELECT scope.source_scope
+            FROM code_repository_scopes scope
+            WHERE EXISTS (
+                SELECT 1
+                FROM code_repository_files file
+                WHERE file.source_scope = scope.source_scope
+                  AND file.language_id = 'markdown'
+            )
+        )
+        ",
+        [],
+    )?;
+    mark_code_schema_migration(&transaction, LOSSLESS_MARKDOWN_REINDEX_MIGRATION)?;
+    transaction.commit().map_err(StorageError::from)
 }
 
 pub(in super::super) fn ensure_code_query_indexes(

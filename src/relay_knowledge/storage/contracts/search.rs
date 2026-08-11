@@ -2,6 +2,17 @@ use std::ops::Deref;
 
 use crate::domain::{GraphVersion, RetrievalHit, RetrieverSource, TraversalProvenanceTrace};
 
+/// Maximum Unicode scalar values accepted by every graph-search adapter.
+pub const MAX_GRAPH_SEARCH_QUERY_CHARS: usize = 10_000;
+/// Maximum lexical terms admitted to the FTS5 query builder.
+pub const MAX_GRAPH_SEARCH_FTS_TOKENS: usize = 128;
+/// Conservative tokenizer-work bound when Unicode category rules split a phrase.
+pub const MAX_GRAPH_SEARCH_FTS_CODEPOINTS: usize = 1_024;
+/// Maximum UTF-8 bytes in one lexical term admitted to FTS5.
+pub const MAX_GRAPH_SEARCH_TOKEN_BYTES: usize = 128;
+/// Maximum candidate limit accepted by the SQLite graph-search implementation.
+pub const MAX_GRAPH_SEARCH_LIMIT: usize = 1_000;
+
 /// Bounded graph search request against an explicit graph snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphSearchRequest {

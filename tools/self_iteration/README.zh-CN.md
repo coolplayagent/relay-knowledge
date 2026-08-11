@@ -44,8 +44,8 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 | 选择项 | 什么时候用 | 代价和覆盖 |
 | --- | --- | --- |
 | `--profile smoke` | 检查启动器、prompt 或很早期候选 | 不跑仓库评估。 |
-| `--profile fast` | 默认本地迭代和 PR 前快速验证 | 跑格式、debug build、harness check、关键 product gate、默认仓库子集、repo-set 护栏和 semantic/vector guardrail。 |
-| `--profile full` | 需要完整产品和 harness rail 时 | 恢复 release build、clippy、test、本地文件 fixture、完整仓库评估、semantic/vector fixture 和 research judge。 |
+| `--profile fast` | 默认本地迭代和 PR 前快速验证 | 跑格式、debug build、harness check（含 hierarchical BM25 不变量）、默认仓库子集、repo-set 护栏和 semantic/vector guardrail。 |
+| `--profile full` | 需要完整产品和 harness rail 时 | 恢复 release build、clippy、test、具名 hierarchical BM25 gate、本地文件 fixture、完整仓库评估、semantic/vector fixture 和 research judge。 |
 | `--profile exhaustive` | 长周期大仓、完整初始索引和压力验证 | 包含 exhaustive 仓库和更重的性能目标。 |
 | `--categories ...` | 想让一轮聚焦某个分数族 | 仍保留显式 `guardrail=true` 底线 case。 |
 | `--strategy unattended-layered` | 需要 1-2 天无人值守推进 | 用 smoke 探索、fast 验证、macro explore 升级和深度检查组合运行。 |
@@ -220,9 +220,12 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 | `code_index_recovery_cases` | 覆盖过期 task lease 恢复、旧 worker 完成拒绝、attempt budget dead-letter 和 checkpoint batch 续租。 |
 | `code_index_health_isolation_cases` | 验证 no-language-filter 仓库更新时 health 查询有界，`repo query --freshness allow-stale` 能读取最新已提交 scope。 |
 | `code_index_sqlite_lock_cases` | 保护重复进程 SQLite lock 避免、active-task 复用和不同 task fingerprint 的并发 claim。 |
+| `bm25_hierarchy_suite` | 运行 `simhash10-topical4-indexed-scope64-partition-ascii-subset128b-256t-a1-docidlen1-v4` 合同的确定性产品测试：一个 synthetic 4,096-document production-write/query-path fixture 保证 Recall@10 至少 0.9，并把 planned-MATCH result domain 从 768 行减到 448 行；同 v4 routed/flat score parity、selected-document/coarse-score bound、在 SQL scope 保持权威的同时用一个 `graph_bm25 MATCH` 对 business term、zero-weight scope64 token 与 scope-qualified group token 求交、hidden rank 与 rowid-sidecar hydrate、有界 persisted-DF probe、version-leading unscoped historical index、可观察 oversized-label degradation 与 fuzzy-posting bound，以及带 durable owner/expiry、phase/cursor、semantic/vector plan、128-document/4-MiB/8,192-label/8,192-link transaction budget、oversize-document isolation warning、companion-read pause、fence/swap/rollback 的可续跑 shadow rebuild。移除任一 invariant 都会在不依赖 wall-clock timing 的情况下失败。448/768 result-domain invariant 不是 posting scan、VM step 或 query-latency measurement；该 gate 不证明自然语料 recall/performance、equal-score cutoff 的确定 membership 或整个 hybrid pipeline 的 end-to-end bound。 |
 | syntax 与 layout fixture | 保护 external import unresolved metadata、C/C++ 可恢复 parser error、非顶层 `src/` 布局、project alias 复用同一 indexed scope 和 source/text fallback 底线。 |
 | `software_global_fixture` | 确保 `repo software` 投影事实来自已索引证据，不扫描包缓存、云 API、SDK 目录或未索引外部源码。 |
 | `agent_workflow_fixture` | 用生成式 Rust、TypeScript、Python、YAML 和 Markdown 证据重放 coding-agent issue 分析任务，并约束工具调用、源码读取、输出/context 大小、证据数量、fallback 比例和总延迟。 |
+
+通用 library-test rail 会另行验证每篇文档 256 labels、每个 label 1,024 bytes、每篇文档 8,192 grams 的 fuzzy-index limit，以及 request-level disable 跳过全部 graph-search source family；这些 test 不属于按名称过滤的 `bm25_hierarchy_suite` fast gate。
 
 若要调整默认子集，可设置：
 
@@ -346,6 +349,7 @@ and (
 | 额外多语言 fixture | 覆盖 Python、JavaScript、TypeScript/TSX、Go、Java、Rust、Bash、C#、Kotlin、PHP、Ruby、Scala 和 Swift；矩阵见 `docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md`。 |
 | repository-set targets | 注册每个成员为 `scope=all` 仓库，创建显式 `repo-set`，刷新跨仓 overlay，再运行 `repo-set query`；case 可要求具体 member、source_scope、路径、行号和 excerpt 证据。 |
 | 冷索引与增量索引性能 targets | `repository_index_performance_targets.json` 配置冷索引 `index_budget_ms`/`register_index_budget_ms`、增量 `incremental_index_budget_ms`、完成性证据和 delta 读/解析上限；默认 fast 包含 1024 文件 fixture，`full`/`exhaustive` 还包含 2048 文件 wide fixture。 |
+| Hierarchical BM25 算法 gate | `bm25_hierarchy_suite` 是 `fast`、`full`、`exhaustive` 的具名产品测试 gate；固定 SQLite fixture 校验 v4 fingerprint/scope partition、同 schema flat parity、synthetic production-write/query-path Recall@10 >= 0.9 floor、planned-MATCH result-domain reduction、hard SQL authorization、single-FTS hidden-rank/rowid-hydrate shape、persisted-DF 与 65,536-posting admission bound、route-document `fts_rowid`/version/label-state invariant、version-leading global fallback index、可观察 oversized-label degradation 与 8,192-posting exhaustion、durable checkpoint takeover、全部四类 rebuild work budget、oversize-document isolation 与 bounded warning identity、当前 writer fence、companion-read pause、complete-reader activation 与 swap rollback。报告保留 whole-suite gate duration 与捕获的 `BM25_WORK`；二者都不是 query latency 或 FTS posting/VM-step work，equal-score cutoff membership、自然语料和整个 pipeline 的结论不属于该 synthetic gate。 |
 | 软件全域投影 targets | `repository_software_global_targets.json` 运行 `repo software`，覆盖 dependencies、sdks、files、topics、relationships、build、iac、design 和 all 投影 kind，且事实只能来自已索引证据。 |
 | CLI contract cases | 直接运行产品 CLI，不需要大仓；默认 fast 覆盖 `repo index-worker` help、idle JSON 和 streaming JSON。 |
 | semantic/vector suite | 写入小型 evidence，刷新 semantic/vector 索引，验证 query 命中 `retriever_sources`、`backend_statuses` 和相关排序；外部 provider 只从运行时环境继承。 |

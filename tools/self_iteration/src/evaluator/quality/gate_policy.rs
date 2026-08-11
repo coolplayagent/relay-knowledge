@@ -90,6 +90,7 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     ],
                     300,
                 ),
+                bm25_hierarchy_gate(),
             ]),
         ];
     }
@@ -145,6 +146,7 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     ],
                     1200,
                 ),
+                bm25_hierarchy_gate(),
                 quality_gate(
                     "cargo_test",
                     ["cargo", "test", "--all-targets", "--all-features"],
@@ -208,6 +210,22 @@ fn skill_metadata_policy_gate() -> QualityGate {
     )
 }
 
+fn bm25_hierarchy_gate() -> QualityGate {
+    quality_gate(
+        "bm25_hierarchy_suite",
+        [
+            "cargo",
+            "test",
+            "--lib",
+            "--all-features",
+            "bm25_hierarchy_suite",
+            "--",
+            "--nocapture",
+        ],
+        120,
+    )
+}
+
 fn quality_gate<const N: usize>(
     name: &'static str,
     command: [&'static str; N],
@@ -225,6 +243,7 @@ pub(super) fn quality_budget_ms(name: &str) -> Option<f64> {
         "cargo_build_debug" => Some(90_000.0),
         "code_index_recovery_cases" => Some(60_000.0),
         "code_index_sqlite_lock_cases" => Some(60_000.0),
+        "bm25_hierarchy_suite" => Some(30_000.0),
         "self_iteration_cargo_check" => Some(30_000.0),
         "cargo_build_release" => Some(180_000.0),
         "self_iteration_cargo_build_release" => Some(60_000.0),

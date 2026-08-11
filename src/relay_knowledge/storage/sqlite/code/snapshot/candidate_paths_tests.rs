@@ -60,13 +60,26 @@ async fn indexed_markdown_documents_are_reconstructed_from_snapshot_chunks() {
         None,
     );
     snapshot.files[0].language_id = "markdown".to_owned();
-    snapshot.chunks.push(chunk(
+    snapshot.files[0].byte_len = first.len() + second.len();
+    snapshot.files[0].line_count = first.lines().count() + second.lines().count();
+    snapshot.chunks[0].language_id = "markdown".to_owned();
+    snapshot.chunks[0].byte_range = RepositoryCodeRange {
+        start: 0,
+        end: u32::try_from(first.len()).expect("first chunk length should fit"),
+    };
+    let mut second_chunk = chunk(
         "rates-second",
         "file",
         "knowledge/investment-research/rates.md",
         second,
         None,
-    ));
+    );
+    second_chunk.language_id = "markdown".to_owned();
+    second_chunk.byte_range = RepositoryCodeRange {
+        start: u32::try_from(first.len()).expect("first chunk length should fit"),
+        end: u32::try_from(first.len() + second.len()).expect("document length should fit"),
+    };
+    snapshot.chunks.push(second_chunk);
     let store = store_with_repository_snapshot(snapshot).await;
 
     let documents = store
@@ -81,8 +94,7 @@ async fn indexed_markdown_documents_are_reconstructed_from_snapshot_chunks() {
 
     assert_eq!(documents.len(), 1);
     assert_eq!(documents[0].language_id, "markdown");
-    assert!(documents[0].content.contains("type: Research Claim"));
-    assert!(documents[0].content.contains("结论正文"));
+    assert_eq!(documents[0].content, format!("{first}{second}"));
 }
 
 #[tokio::test]

@@ -38,6 +38,9 @@ mod feature_flag_tool_tests;
 #[path = "tests/protocol_tests.rs"]
 mod protocol_tests;
 #[cfg(test)]
+#[path = "tests/repository_graph_tool_tests.rs"]
+mod repository_graph_tool_tests;
+#[cfg(test)]
 #[path = "tests/runtime_guardrail_tests.rs"]
 mod runtime_guardrail_tests;
 #[cfg(test)]

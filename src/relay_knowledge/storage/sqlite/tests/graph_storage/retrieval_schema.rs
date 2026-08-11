@@ -55,6 +55,171 @@ async fn startup_rebuilds_obsolete_bm25_schema_without_deleting_graph_data() {
 }
 
 #[tokio::test]
+async fn startup_recovers_missing_hierarchical_bm25_route_state() {
+    let path = temp_db_path("bm25-route-rebuild");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        commit_evidence(
+            &store,
+            "ev-route-rebuild",
+            "docs",
+            "Hierarchical lexical routing preserves global ranking",
+        )
+        .await;
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("DROP TABLE graph_bm25_route_documents", [])
+            .expect("route document state should drop");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let counts: (usize, usize, usize) = {
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM graph_bm25),
+                    (SELECT COUNT(*) FROM graph_bm25_route_documents),
+                    (SELECT COUNT(*) FROM graph_bm25_route_groups)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("derived index counts should load")
+    };
+    assert_eq!(counts, (1, 1, 1));
+
+    let graph = store.inspect_graph().await.expect("graph should inspect");
+    assert_eq!(graph.evidence_count, 1);
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn startup_rebuilds_missing_hierarchical_bm25_term_state() {
+    for table in ["graph_bm25_route_terms", "graph_bm25_route_term_totals"] {
+        let path = temp_db_path("bm25-route-terms-rebuild");
+        {
+            let store = SqliteGraphStore::open(&path).expect("store should open");
+            commit_evidence(
+                &store,
+                "ev-route-term-rebuild",
+                "docs",
+                "Hierarchical lexical routing maintains aggregate term statistics",
+            )
+            .await;
+            let guard = store.connection.lock().expect("connection should lock");
+            guard
+                .execute(&format!("DROP TABLE {table}"), [])
+                .expect("route term state should drop");
+        }
+
+        let store = SqliteGraphStore::open(&path).expect("store should reopen");
+        let counts: (usize, usize, String) = {
+            let guard = store.connection.lock().expect("connection should lock");
+            guard
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM graph_bm25_route_terms),
+                        (SELECT COUNT(*) FROM graph_bm25_route_term_totals),
+                        (SELECT state FROM graph_bm25_route_state WHERE id = 1)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("rebuilt term state should load")
+        };
+        assert!(
+            counts.0 > 0,
+            "group term rows should rebuild after dropping {table}"
+        );
+        assert!(
+            counts.1 > 0,
+            "global term rows should rebuild after dropping {table}"
+        );
+        assert_eq!(counts.2, "fresh");
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[tokio::test]
+async fn startup_rebuilds_routing_after_pre_v4_writer_marker() {
+    let path = temp_db_path("bm25-pre-v4-writer");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        commit_evidence(
+            &store,
+            "ev-pre-v4-writer",
+            "docs",
+            "Schema rollback must rebuild hierarchical routing state",
+        )
+        .await;
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("UPDATE graph_bm25 SET routing_key = NULL", [])
+            .expect("older writer output should be simulated");
+        guard
+            .execute(
+                "UPDATE relay_storage_schema_state
+                 SET version = 3
+                 WHERE key = 'sqlite_graph_store'",
+                [],
+            )
+            .expect("older schema marker should be simulated");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let state: (usize, String, u64) = {
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM graph_bm25
+                     WHERE routing_key IS NOT NULL AND routing_key <> ''),
+                    (SELECT state FROM graph_bm25_route_state WHERE id = 1),
+                    (SELECT indexed_graph_version FROM graph_bm25_route_state WHERE id = 1)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("rebuilt route state should load")
+    };
+    assert_eq!(state, (1, "fresh".to_owned(), 1));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn relation_only_mutation_advances_bm25_route_generation() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(&store, "ev-route-version", "docs", "BM25 route evidence").await;
+    let relation = GraphRelationRecord::new(
+        "rel-route-version",
+        SourceScope::parse("docs").expect("scope should parse"),
+        "BM25 route",
+        "preserves",
+        "global score",
+        vec!["ev-route-version".to_owned()],
+    )
+    .expect("relation should validate");
+    let batch = GraphMutationBatch::with_facts(Vec::new(), vec![relation], Vec::new(), Vec::new())
+        .expect("relation-only batch should validate");
+
+    let receipt = store
+        .commit_mutation_batch(batch)
+        .await
+        .expect("relation-only mutation should commit");
+    assert_eq!(receipt.graph_version, GraphVersion::new(2));
+    let state: (u64, usize) = store
+        .connection
+        .lock()
+        .expect("connection should lock")
+        .query_row(
+            "SELECT indexed_graph_version, document_count
+             FROM graph_bm25_route_state WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("route state should load");
+    assert_eq!(state, (2, 1));
+}
+
+#[tokio::test]
 async fn startup_creates_missing_label_gram_table_for_current_schema_marker() {
     let path = temp_db_path("label-grams-current-marker");
     {
@@ -106,6 +271,13 @@ async fn startup_resumes_label_gram_backfill_from_previous_schema_marker() {
             .expect("partial label gram backfill should be simulated");
         guard
             .execute(
+                "UPDATE graph_bm25_route_documents
+                 SET label_gram_state = 'pending'",
+                [],
+            )
+            .expect("pending label state should be simulated");
+        guard
+            .execute(
                 "
                 UPDATE relay_storage_schema_state
                 SET version = 1
@@ -129,6 +301,18 @@ async fn startup_resumes_label_gram_backfill_from_previous_schema_marker() {
         .expect("fuzzy search should use resumed label grams");
 
     assert!(hits.iter().any(|hit| hit.evidence_id == "sym-resume"));
+    let label_state = store
+        .connection
+        .lock()
+        .expect("connection should lock")
+        .query_row(
+            "SELECT label_gram_state
+             FROM graph_bm25_route_documents",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("backfilled label state should load");
+    assert_eq!(label_state, "indexed");
     let _ = std::fs::remove_file(path);
 }
 
@@ -205,6 +389,15 @@ async fn initialization_rebuilds_derived_documents_when_tokenizer_version_change
                 [],
             )
             .expect("vector tokenizer version should downgrade");
+        guard
+            .execute(
+                "UPDATE graph_bm25_route_state
+                 SET semantic_generation = 'legacy-tokenizer',
+                     vector_generation = 'legacy-tokenizer'
+                 WHERE id = 1",
+                [],
+            )
+            .expect("persisted companion generations should downgrade");
     }
 
     let store = SqliteGraphStore::open(&path).expect("store should reopen");
@@ -226,13 +419,23 @@ async fn initialization_rebuilds_derived_documents_when_tokenizer_version_change
         .await
         .expect("search should succeed");
 
-    assert_eq!(hits[0].evidence_id, "ev-tokenizer-rebuild");
-    assert!(
-        hits[0]
-            .retriever_sources
-            .contains(&RetrieverSource::Semantic)
-    );
-    assert!(hits[0].retriever_sources.contains(&RetrieverSource::Vector));
+    let hit = hits
+        .first()
+        .expect("rebuilt semantic and vector indexes should return evidence");
+    assert_eq!(hit.evidence_id, "ev-tokenizer-rebuild");
+    assert!(hit.retriever_sources.contains(&RetrieverSource::Semantic));
+    assert!(hit.retriever_sources.contains(&RetrieverSource::Vector));
+    assert!(hit.retriever_sources.iter().all(|source| {
+        ![
+            RetrieverSource::Bm25,
+            RetrieverSource::GraphEvidence,
+            RetrieverSource::CodeGraph,
+            RetrieverSource::GraphPath,
+            RetrieverSource::Temporal,
+            RetrieverSource::CommunitySummary,
+        ]
+        .contains(source)
+    }));
     let guard = store.connection.lock().expect("connection should lock");
     let current_semantic_rows: usize = guard
         .query_row(

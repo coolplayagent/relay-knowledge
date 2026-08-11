@@ -10,10 +10,27 @@ use super::{columns, marker};
 pub(in crate::storage::sqlite) fn initialize_schema(
     connection: &Connection,
 ) -> Result<(), StorageError> {
-    connection_runtime::retry::retry_sqlite_transient(|| initialize_schema_once(connection))
+    connection_runtime::retry::retry_sqlite_transient(|| {
+        initialize_schema_once(connection, |_| Ok(()), false)
+    })
 }
 
-fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
+pub(in crate::storage::sqlite) fn initialize_schema_for_open(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    connection_runtime::retry::retry_sqlite_transient(|| {
+        initialize_schema_once(connection, marker::mark_schema_initialization_current, true)
+    })
+}
+
+fn initialize_schema_once<F>(
+    connection: &Connection,
+    finalize_retrieval_generation: F,
+    mark_current_after_initialization: bool,
+) -> Result<(), StorageError>
+where
+    F: FnOnce(&Connection) -> Result<(), StorageError>,
+{
     connection.execute_batch(
         "
         PRAGMA foreign_keys = ON;
@@ -152,8 +169,14 @@ fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
     file_index::initialize_schema(connection)?;
     connection_runtime::maintenance::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
-    retrieval::initialize_schema(connection)?;
     marker::initialize_schema_marker(connection)?;
+    retrieval::initialize_schema_with_generation_finalizer(
+        connection,
+        finalize_retrieval_generation,
+    )?;
+    if mark_current_after_initialization {
+        marker::mark_schema_initialization_current(connection)?;
+    }
 
     Ok(())
 }

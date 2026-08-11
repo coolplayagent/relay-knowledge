@@ -22,7 +22,7 @@ use super::super::{
     },
 };
 use super::{
-    agent_budget::{apply_agent_code_budget, explore_budget},
+    agent_budget::{apply_agent_code_budget, explore_budget, serialize_repository_graph_output},
     request_contracts::{
         CodeContextArgs, CodeQueryArgs, CodeRepositorySetQueryArgs, RepositoryGraphArgs,
         authorize_code_context_bytes, authorize_code_context_limit, parse_code_query_kind,
@@ -70,14 +70,30 @@ pub(super) async fn repository_graph_tool(
         Ok(selector) => selector,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };
+    let node_limit = match authorize_limit(
+        args.node_limit.or(Some(
+            REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT.min(server.agent.access_policy.max_limit),
+        )),
+        &server.agent.access_policy,
+    ) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
+    let edge_limit = match authorize_limit(
+        args.edge_limit.or(Some(
+            REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT.min(server.agent.access_policy.max_limit),
+        )),
+        &server.agent.access_policy,
+    ) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
     let request = match RepositoryGraphNeighborhoodRequest::new(
         selector,
         args.focus_path,
         args.depth.unwrap_or(1),
-        args.node_limit
-            .unwrap_or(REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT),
-        args.edge_limit
-            .unwrap_or(REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT),
+        node_limit,
+        edge_limit,
     ) {
         Ok(request) => request,
         Err(error) => return tool_error_result(domain_argument_error(error)),
@@ -88,14 +104,23 @@ pub(super) async fn repository_graph_tool(
         .repository_graph_neighborhood(request, request_context(request_id))
         .await
     {
-        Ok(response) => tool_success_result(
-            format!(
-                "repository graph returned {} node(s) and {} edge(s)",
-                response.nodes.len(),
-                response.edges.len()
-            ),
-            json!(response),
-        ),
+        Ok(response) => {
+            let structured = match serialize_repository_graph_output(
+                response,
+                server.agent.access_policy.max_context_bytes,
+            )
+            .await
+            {
+                Ok(structured) => structured,
+                Err(error) => return tool_error_result(error),
+            };
+            let node_count = structured["nodes"].as_array().map_or(0, Vec::len);
+            let edge_count = structured["edges"].as_array().map_or(0, Vec::len);
+            tool_success_result(
+                format!("repository graph returned {node_count} node(s) and {edge_count} edge(s)"),
+                structured,
+            )
+        }
         Err(error) => api_error_result(error),
     }
 }

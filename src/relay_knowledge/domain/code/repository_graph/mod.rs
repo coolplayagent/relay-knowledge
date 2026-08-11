@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -125,16 +125,54 @@ pub struct RepositoryGraphNeighborhood {
     pub truncated: bool,
 }
 
+struct ConceptSelection {
+    paths: BTreeMap<String, u8>,
+    truncated: bool,
+}
+
+struct NodeAssembly {
+    nodes: Vec<RepositoryGraphNode>,
+    concept_paths: BTreeSet<String>,
+    leaf_resources: BTreeSet<String>,
+    truncated: bool,
+}
+
+#[derive(Clone, Copy)]
+enum EdgeCandidate<'a> {
+    SourceConcept {
+        concept: &'a okf::OkfConcept,
+        source: &'a okf::OkfSource,
+        target: &'a str,
+    },
+    SourceLeaf {
+        concept: &'a okf::OkfConcept,
+        source: &'a okf::OkfSource,
+    },
+    ConceptLink {
+        concept: &'a okf::OkfConcept,
+        target: &'a str,
+    },
+}
+
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+enum EdgeCandidateKey<'a> {
+    Source {
+        concept_path: &'a str,
+        resource: &'a str,
+        source_id: Option<&'a str>,
+    },
+    Link {
+        concept_path: &'a str,
+        target: &'a str,
+    },
+}
+
 /// Projects OKF v0.2 concepts from indexed Markdown without reading the live worktree.
 pub fn project_okf_neighborhood(
     documents: &[IndexedRepositoryDocument],
     request: &RepositoryGraphNeighborhoodRequest,
 ) -> Result<RepositoryGraphNeighborhood, DomainError> {
-    let root = request
-        .repository
-        .path_filters
-        .iter()
-        .find(|root| path_is_within(&request.focus_path, root))
+    let root = matching_repository_root(&request.focus_path, &request.repository.path_filters)
         .expect("request validation requires a matching root");
     let concepts = documents
         .iter()
@@ -153,45 +191,24 @@ pub fn project_okf_neighborhood(
         ));
     }
 
-    let selected = selected_concepts(&concepts, &request.focus_path, request.depth);
-    let mut nodes = Vec::new();
-    for path in &selected {
-        if let Some(concept) = concepts.get(path) {
-            nodes.push(concept.node());
-        }
-    }
-    let mut edges = Vec::new();
-    for path in &selected {
-        let concept = &concepts[path];
-        for source in &concept.sources {
-            nodes.push(source.node());
-            edges.push(source.edge_to(concept));
-        }
-        for link in &concept.links {
-            if selected.contains(link) {
-                edges.push(okf::concept_link_edge(concept, link));
-            }
-        }
-    }
-    deduplicate_nodes(&mut nodes);
-    edges.sort_by(|left, right| left.id.cmp(&right.id));
-    edges.dedup_by(|left, right| left.id == right.id);
-
-    let available_node_count = nodes.len();
-    nodes.truncate(request.node_limit);
-    let retained = nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<BTreeSet<_>>();
-    edges.retain(|edge| {
-        retained.contains(edge.source.as_str()) && retained.contains(edge.target.as_str())
-    });
-    let available_edge_count = edges.len();
-    edges.truncate(request.edge_limit);
+    let selected = selected_concepts(
+        &concepts,
+        &request.focus_path,
+        request.depth,
+        request.node_limit,
+    );
+    let source_truncated = concepts.values().any(|concept| concept.truncated);
+    let nodes = assemble_nodes(&concepts, &selected, request.node_limit);
+    let (edges, edges_truncated) = assemble_edges(
+        &concepts,
+        &nodes.concept_paths,
+        &nodes.leaf_resources,
+        request.edge_limit,
+    );
 
     Ok(RepositoryGraphNeighborhood {
-        truncated: available_node_count > nodes.len() || available_edge_count > edges.len(),
-        nodes,
+        truncated: source_truncated || selected.truncated || nodes.truncated || edges_truncated,
+        nodes: nodes.nodes,
         edges,
     })
 }
@@ -200,45 +217,254 @@ fn selected_concepts(
     concepts: &BTreeMap<String, okf::OkfConcept>,
     focus: &str,
     depth: u8,
-) -> BTreeSet<String> {
-    let mut selected = BTreeSet::new();
-    let mut queue = VecDeque::from([(focus.to_owned(), 0_u8)]);
-    while let Some((path, distance)) = queue.pop_front() {
-        if !selected.insert(path.clone()) || distance >= depth {
+    limit: usize,
+) -> ConceptSelection {
+    let mut paths = BTreeMap::from([(focus.to_owned(), 0_u8)]);
+    let mut frontier = BTreeSet::from([focus.to_owned()]);
+    let mut truncated = false;
+    for distance in 1..=depth {
+        let remaining = limit.saturating_sub(paths.len());
+        let candidate_capacity = remaining.saturating_add(1);
+        let mut candidates = BTreeSet::new();
+        for (source_path, concept) in concepts {
+            for target in concept.relationship_targets() {
+                if !concepts.contains_key(target) {
+                    continue;
+                }
+                let candidate = if frontier.contains(source_path) && !paths.contains_key(target) {
+                    Some(target)
+                } else if frontier.contains(target) && !paths.contains_key(source_path) {
+                    Some(source_path.as_str())
+                } else {
+                    None
+                };
+                if let Some(candidate) = candidate {
+                    truncated |= insert_bounded_set(
+                        &mut candidates,
+                        candidate.to_owned(),
+                        candidate_capacity,
+                    );
+                }
+            }
+        }
+        if candidates.len() > remaining {
+            truncated = true;
+            candidates.pop_last();
+        }
+        if candidates.is_empty() {
+            break;
+        }
+        for path in &candidates {
+            paths.insert(path.clone(), distance);
+        }
+        frontier = candidates;
+    }
+    ConceptSelection { paths, truncated }
+}
+
+fn assemble_nodes(
+    concepts: &BTreeMap<String, okf::OkfConcept>,
+    selected: &ConceptSelection,
+    node_limit: usize,
+) -> NodeAssembly {
+    let mut nodes = Vec::with_capacity(node_limit);
+    let mut concept_paths = BTreeSet::new();
+    let mut leaf_resources = BTreeSet::new();
+    let mut truncated = false;
+    let max_distance = selected
+        .paths
+        .values()
+        .copied()
+        .max()
+        .unwrap_or_default()
+        .saturating_add(1);
+
+    for distance in 0..=max_distance {
+        for (path, candidate_distance) in &selected.paths {
+            if *candidate_distance != distance {
+                continue;
+            }
+            if nodes.len() >= node_limit {
+                truncated = true;
+                continue;
+            }
+            nodes.push(concepts[path].node());
+            concept_paths.insert(path.clone());
+        }
+        if distance == 0 {
             continue;
         }
-        let mut neighbors = concepts
-            .get(&path)
-            .map(|concept| concept.links.clone())
-            .unwrap_or_default();
-        neighbors.extend(concepts.iter().filter_map(|(candidate, concept)| {
-            concept.links.contains(&path).then_some(candidate.clone())
-        }));
-        neighbors.sort();
-        neighbors.dedup();
-        for neighbor in neighbors {
-            if concepts.contains_key(&neighbor) {
-                queue.push_back((neighbor, distance + 1));
+
+        let remaining = node_limit.saturating_sub(nodes.len());
+        let candidate_capacity = remaining.saturating_add(1);
+        let mut candidates = BTreeMap::<(bool, &str), &okf::OkfSource>::new();
+        for path in &concept_paths {
+            if selected.paths[path].saturating_add(1) != distance {
+                continue;
+            }
+            for source in &concepts[path].sources {
+                let targets_concept = source
+                    .candidate_path
+                    .as_ref()
+                    .is_some_and(|target| concepts.contains_key(target));
+                if targets_concept || leaf_resources.contains(source.resource.as_str()) {
+                    continue;
+                }
+                truncated |= insert_bounded_map(
+                    &mut candidates,
+                    (source.bundle_path_hint, source.resource.as_str()),
+                    source,
+                    candidate_capacity,
+                );
+            }
+        }
+        if candidates.len() > remaining {
+            truncated = true;
+            candidates.pop_last();
+        }
+        for source in candidates.into_values() {
+            nodes.push(source.leaf_node());
+            leaf_resources.insert(source.resource.clone());
+        }
+    }
+
+    NodeAssembly {
+        nodes,
+        concept_paths,
+        leaf_resources,
+        truncated,
+    }
+}
+
+fn assemble_edges(
+    concepts: &BTreeMap<String, okf::OkfConcept>,
+    concept_paths: &BTreeSet<String>,
+    leaf_resources: &BTreeSet<String>,
+    edge_limit: usize,
+) -> (Vec<RepositoryGraphEdge>, bool) {
+    let candidate_capacity = edge_limit.saturating_add(1);
+    let mut candidates = BTreeMap::new();
+    let mut truncated = false;
+    for path in concept_paths {
+        let concept = &concepts[path];
+        for source in &concept.sources {
+            let candidate = if let Some(target) = source
+                .candidate_path
+                .as_deref()
+                .filter(|target| concepts.contains_key(*target))
+            {
+                concept_paths
+                    .contains(target)
+                    .then_some(EdgeCandidate::SourceConcept {
+                        concept,
+                        source,
+                        target,
+                    })
+            } else {
+                leaf_resources
+                    .contains(source.resource.as_str())
+                    .then_some(EdgeCandidate::SourceLeaf { concept, source })
+            };
+            if let Some(candidate) = candidate {
+                truncated |= insert_bounded_map(
+                    &mut candidates,
+                    EdgeCandidateKey::Source {
+                        concept_path: &concept.path,
+                        resource: &source.resource,
+                        source_id: source.id.as_deref(),
+                    },
+                    candidate,
+                    candidate_capacity,
+                );
+            }
+        }
+        for target in &concept.links {
+            if concept_paths.contains(target) {
+                truncated |= insert_bounded_map(
+                    &mut candidates,
+                    EdgeCandidateKey::Link {
+                        concept_path: &concept.path,
+                        target,
+                    },
+                    EdgeCandidate::ConceptLink { concept, target },
+                    candidate_capacity,
+                );
             }
         }
     }
-    selected
+    if candidates.len() > edge_limit {
+        truncated = true;
+        candidates.pop_last();
+    }
+    let mut edges = candidates
+        .into_values()
+        .map(|candidate| match candidate {
+            EdgeCandidate::SourceConcept {
+                concept,
+                source,
+                target,
+            } => source.edge_to_concept(concept, target),
+            EdgeCandidate::SourceLeaf { concept, source } => source.edge_to_leaf(concept),
+            EdgeCandidate::ConceptLink { concept, target } => {
+                okf::concept_link_edge(concept, target)
+            }
+        })
+        .collect::<Vec<_>>();
+    edges.sort_by(|left, right| left.id.cmp(&right.id));
+    (edges, truncated)
 }
 
-fn deduplicate_nodes(nodes: &mut Vec<RepositoryGraphNode>) {
-    nodes.sort_by(|left, right| {
-        node_priority(left)
-            .cmp(&node_priority(right))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    nodes.dedup_by(|left, right| left.id == right.id);
+fn insert_bounded_set<T: Ord>(set: &mut BTreeSet<T>, value: T, capacity: usize) -> bool {
+    if !set.insert(value) || set.len() <= capacity {
+        return false;
+    }
+    set.pop_last();
+    true
 }
 
-fn node_priority(node: &RepositoryGraphNode) -> u8 {
-    match node.kind.as_str() {
-        "okf_concept" => 0,
-        "external_source" => 1,
-        _ => 2,
+fn insert_bounded_map<K: Ord, V>(
+    map: &mut BTreeMap<K, V>,
+    key: K,
+    value: V,
+    capacity: usize,
+) -> bool {
+    if map.contains_key(&key) {
+        return false;
+    }
+    map.insert(key, value);
+    if map.len() <= capacity {
+        return false;
+    }
+    map.pop_last();
+    true
+}
+
+fn matching_repository_root<'a>(focus: &str, roots: &'a [String]) -> Option<&'a str> {
+    roots
+        .iter()
+        .filter(|root| path_is_within(focus, root))
+        .max_by_key(|root| root_specificity(root))
+        .map(String::as_str)
+}
+
+fn root_specificity(root: &str) -> (usize, usize) {
+    normalize_repository_root(root)
+        .map(|root| {
+            (
+                root.split('/')
+                    .filter(|component| !component.is_empty())
+                    .count(),
+                root.len(),
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn normalize_repository_root(root: &str) -> Option<String> {
+    if root == "." {
+        Some(String::new())
+    } else {
+        normalize_repository_path(root)
     }
 }
 
@@ -249,8 +475,12 @@ fn reserved_okf_path(path: &str) -> bool {
 }
 
 pub(super) fn path_is_within(path: &str, root: &str) -> bool {
-    normalize_repository_path(root).is_some_and(|root| {
-        path == root
+    let Some(path) = normalize_repository_path(path) else {
+        return false;
+    };
+    normalize_repository_root(root).is_some_and(|root| {
+        root.is_empty()
+            || path == root
             || path
                 .strip_prefix(&root)
                 .is_some_and(|rest| rest.starts_with('/'))

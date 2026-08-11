@@ -99,6 +99,7 @@ records that are intentionally listed below as Chinese-only until translated.
 - [Chapter 9: GitNexus Feature and UI Implementation Research 2026](04-research/09-gitnexus-reference-analysis-2026.md)
 - [Chapter 10: Software Global Domain Modeling Research 2026](04-research/10-software-global-domain-modeling-research-2026.md)
 - [Chapter 11: Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](04-research/11-software-global-codegraph-search-everything-comparison-2026.md)
+- [Chapter 12: Hierarchical BM25 Analysis 2026](04-research/12-hierarchical-bm25-analysis-2026.md)
 
 ## Appendix A: Benchmarks
 

@@ -2,8 +2,8 @@
 
 [English](../../en/04-research/README.md) | [中文](../../zh/04-research/README.md)
 
-> Document version: 1.1
-> Prepared: 2026-06-05
+> Document version: 1.2
+> Prepared: 2026-08-11
 > Scope: research sources, research goals, competitive positioning, scenario fit, and forward roadmap.
 
 `04-research` is the forward-looking decision layer for `relay-knowledge`, not a passive archive. Each research note should make four things explicit: why the sources are credible, which product scenario the research serves, what should be adopted or avoided, and which capabilities can become durable competitive strengths.
@@ -37,6 +37,7 @@ Core primary-source entry points:
 - Everything indexes: <https://www.voidtools.com/support/everything/indexes>
 - plocate: <https://plocate.sesse.net/>
 - Sourcegraph/Zoekt: <https://github.com/sourcegraph/zoekt>
+- Hierarchical BM25 paper: <https://arxiv.org/abs/2608.00229>, <https://arxiv.org/html/2608.00229v1>
 - 2026 CodeGraph/Understand Anything X trend captures: <https://trendshift.io/repositories/26949>, <https://trendshift.io/repositories/23482>
 - 2026 CodeGraph/Graphify/Understand Anything Reddit discussions: <https://www.reddit.com/r/ClaudeAI/comments/1rp6pkr/i_built_an_mcp_server_that_gives_claude_code_a/>, <https://www.reddit.com/r/ClaudeAI/comments/1ss28rj/i_built_a_graphify_skill_for_claude_code_that/>, <https://www.reddit.com/r/ClaudeCode/comments/1ttwyr0/understand_anything_vs_graphify_experience_and/>
 
@@ -62,3 +63,4 @@ Core primary-source entry points:
 - [Chapter 9: GitNexus Feature and UI Implementation Research 2026](09-gitnexus-reference-analysis-2026.md): analyzes GitNexus CLI/MCP/HTTP backend, code graph, Web graph UI, agent workflows, and future improvement points.
 - [Chapter 10: Software Global Domain Modeling Research 2026](10-software-global-domain-modeling-research-2026.md): extracts a global modeling route from software engineering KGs, code KGs, SBOMs, SDK/dependency versions, dynamic graphs, and code generation research.
 - [Chapter 11: Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](11-software-global-codegraph-search-everything-comparison-2026.md): compares 2026 arXiv, X.com, Reddit, and open-source sources across global modeling, code graphs, Agentic GraphRAG, deterministic Code RAG, search-everything retrieval, and source-backed competitive feature issues.
+- [Chapter 12: Hierarchical BM25 Analysis 2026](12-hierarchical-bm25-analysis-2026.md): separates the paper's billion-scale evidence from relay-knowledge's single-FTS route-intersection adaptation, correctness boundary, fallback gates, and required benchmarks.

@@ -184,7 +184,11 @@ fn bounded_file_surface_chunks(
             file_id: file_id.to_owned(),
             path: path.to_owned(),
             language_id: language_id.to_owned(),
-            content: excerpt.trim().to_owned(),
+            content: if language_id == "markdown" {
+                excerpt.to_owned()
+            } else {
+                excerpt.trim().to_owned()
+            },
             byte_range: RepositoryCodeRange::new("byte_range", byte_start, byte_end)
                 .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
             line_range: RepositoryCodeRange::new("line_range", line_start, line_end)
@@ -282,7 +286,7 @@ fn add_file_chunk_to_vec(
         file_id: file_id.to_owned(),
         path: path.to_owned(),
         language_id: language_id.to_owned(),
-        content: file_chunk_content(path, content),
+        content: file_chunk_content(path, language_id, content),
         byte_range: RepositoryCodeRange::new("byte_range", 0, byte_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", 1, line_end)
@@ -293,7 +297,10 @@ fn add_file_chunk_to_vec(
     Ok(())
 }
 
-fn file_chunk_content(path: &str, content: &str) -> String {
+fn file_chunk_content(path: &str, language_id: &str, content: &str) -> String {
+    if language_id == "markdown" {
+        return content.to_owned();
+    }
     if keeps_complete_manifest_content(path) {
         content.trim().to_owned()
     } else {

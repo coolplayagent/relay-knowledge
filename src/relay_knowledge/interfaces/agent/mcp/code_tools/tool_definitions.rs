@@ -70,8 +70,8 @@ pub(in crate::interfaces::agent::mcp) fn code_repository_graph_tool_definition()
                 "ref_selector": {"type": "string"},
                 "path_filters": {"type": "array", "minItems": 1, "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "depth": {"type": "integer", "minimum": 1, "maximum": 2},
-                "node_limit": {"type": "integer", "minimum": 1, "maximum": 100},
-                "edge_limit": {"type": "integer", "minimum": 1, "maximum": 200}
+                "node_limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Also capped by the MCP access-policy max_limit."},
+                "edge_limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "Also capped by the MCP access-policy max_limit."}
             },
             "required": ["repository", "focus_path", "path_filters"]
         }

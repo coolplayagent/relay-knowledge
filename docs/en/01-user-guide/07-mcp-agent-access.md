@@ -77,12 +77,17 @@ Current MCP tool surface:
 - Authorized code graph query.
 - Authorized software global-model query.
 - Authorized repository-set code graph query.
+- Authorized bounded OKF repository-neighborhood query.
 - Authorized codebase understanding view.
 - Authorized code impact analysis.
 
 Agent kind selection uses existing product kinds rather than a separate MCP taxonomy. `relay_code_query` accepts `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and `sbom`. `relay_software_query` accepts `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, and `all`. `relay_codebase_view` accepts `architecture_layers`, `business_domains`, `dependency_tour`, `process_flow`, and `affected_scope`, with dash-form aliases accepted for CLI parity. Singular aliases are accepted for agent ergonomics, and `configuration` maps to software `relationships` while `model` or `models` maps to software `design`; configuration-driven feature flags stay on `relay_code_feature_flags`.
 
 `relay_retrieve_context` returns GraphRAG context with `indexes`, `index_cursors`, `index_refresh`, and `context_pack.provenance_trace` diagnostics so agents can inspect BM25, semantic, vector, scoped cursor lag, cited evidence, visited-but-uncited context, ranking contributions, stale/degraded state, and authorization redaction before trusting derived context.
+
+`relay_repository_graph` applies both node and edge limits to the MCP access policy before execution. When either limit is omitted, the effective default is the smaller of the product default (`100` nodes and `200` edges) and `RELAY_KNOWLEDGE_MCP_MAX_LIMIT`. For this tool, `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` caps the UTF-8 byte length of the complete compact-JSON `structuredContent`, including metadata, scope, echoed request, nodes, edges, and truncation state; the outer MCP text summary, `isError`, and JSON-RPC envelope are outside this cap. Bounded compaction preserves the focus node, removes optional details and large echoed filters first, then retains a node prefix and only edges whose endpoints remain. If even the minimal focus-bearing structured content cannot fit, the tool returns a generic `limit_exceeded` error instead of attributing every overflow to the focus node.
+
+Repository-graph projection and output serialization/compaction run on separate four-permit blocking-worker boundaries. Admission waits are bounded. A tool timeout or cancellation stops waiting for a response but cannot forcibly cancel a blocking worker that has already started; such a worker may finish in the background while retaining its permit, so active blocking concurrency stays bounded rather than expanding after timeouts.
 
 `relay_code_query`, `relay_code_feature_flags`, and `relay_codebase_view` return the same code graph freshness object as CLI and Web, including `freshness.state`, `freshness.index_lag`, `freshness.pending`, `freshness.cursor`, and `freshness.direct_source_read_required`. When direct source reads are required, agents must follow `freshness.agent_instructions` and verify `freshness.direct_source_read_paths` before using stale graph evidence for changed files. Codebase views return `nodes`, `edges`, `sections`, `evidence`, and budget truncation metadata; section narratives are derived explanations backed by evidence ids and are not written back as graph facts.
 

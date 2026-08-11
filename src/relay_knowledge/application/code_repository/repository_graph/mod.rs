@@ -10,6 +10,7 @@ use crate::{
 };
 
 use super::{
+    blocking::run_blocking_domain,
     errors::storage_api_error,
     repository::required_code_repository,
     scope::{
@@ -56,8 +57,10 @@ impl RelayKnowledgeService {
             )
             .await
             .map_err(storage_api_error)?;
-        let neighborhood = project_okf_neighborhood(&documents, &request)
-            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let projection_request = request.clone();
+        let neighborhood =
+            run_blocking_domain(move || project_okf_neighborhood(&documents, &projection_request))
+                .await?;
         let graph_version = store
             .current_graph_version()
             .await

@@ -77,12 +77,17 @@ MCP tool surface 当前包括:
 - 已授权代码图谱查询。
 - 已授权软件全域模型查询。
 - 已授权 repository-set 代码图谱查询。
+- 已授权且有界的 OKF 仓库邻域查询。
 - 已授权代码库理解视图。
 - 已授权代码影响分析。
 
 Agent kind 选择复用现有产品 kind，而不是新增一套 MCP taxonomy。`relay_code_query` 接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `sbom`。`relay_software_query` 接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design` 和 `all`。`relay_codebase_view` 接受 `architecture_layers`、`business_domains`、`dependency_tour`、`process_flow` 和 `affected_scope`，并接受与 CLI 一致的短横线别名。为方便 agent 调用，singular alias 会被接受；`configuration` 映射到软件 `relationships`，`model` 或 `models` 映射到软件 `design`；配置驱动 feature flag 仍通过 `relay_code_feature_flags` 查询。
 
 `relay_retrieve_context` 返回带 `indexes`、`index_cursors`、`index_refresh` 和 `context_pack.provenance_trace` 诊断的 GraphRAG context，便于 agent 在信任派生 context 前检查 BM25、semantic、vector、scoped cursor lag、cited evidence、visited-but-uncited context、ranking contributions、stale/degraded 状态和授权裁剪。
+
+`relay_repository_graph` 在执行前分别用 MCP access policy 校验 node limit 与 edge limit。任一 limit 省略时，有效默认值取产品默认值（`100` 个 node、`200` 条 edge）与 `RELAY_KNOWLEDGE_MCP_MAX_LIMIT` 中的较小者。对该工具而言，`RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` 限制完整紧凑 JSON `structuredContent` 的 UTF-8 字节数，计入 metadata、scope、回显 request、nodes、edges 与 truncation 状态；外层 MCP 文本摘要、`isError` 与 JSON-RPC envelope 不计入。其有界裁剪先保留 focus node，移除可选 details 与大体积回显 filter，再保留 node 前缀以及两端 node 都仍存在的 edge。如果连包含 focus 的最小 structured content 都无法容纳，工具返回通用 `limit_exceeded`，不会把所有超限都归因于 focus node。
+
+Repository-graph 投影与输出序列化/裁剪分别运行在四 permit 的 blocking-worker 边界后，准入等待有界。Tool timeout 或 cancellation 只会停止等待响应，不能强制取消已经启动的 blocking worker；该 worker 可以在后台完成并在返回前继续持有 permit，因此 timeout 后活跃 blocking 并发不会无界扩张。
 
 `relay_code_query`、`relay_code_feature_flags` 和 `relay_codebase_view` 返回与 CLI 和 Web 相同的代码图谱 freshness 对象，包括 `freshness.state`、`freshness.index_lag`、`freshness.pending`、`freshness.cursor` 和 `freshness.direct_source_read_required`。当响应要求直接读取源码时，agent 必须遵循 `freshness.agent_instructions`，并在使用 stale 图谱证据处理变化文件前验证 `freshness.direct_source_read_paths`。代码库理解视图返回 `nodes`、`edges`、`sections`、`evidence` 和预算截断元数据；section narrative 只是由 evidence id 支撑的派生说明，不会写回图谱事实。
 

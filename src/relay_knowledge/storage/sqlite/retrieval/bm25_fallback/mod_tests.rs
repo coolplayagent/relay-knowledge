@@ -80,6 +80,41 @@ fn setup_test_schema(connection: &Connection) {
             entity_aliases,
             content
         );
+        CREATE TABLE IF NOT EXISTS graph_semantic_documents (
+            document_id TEXT PRIMARY KEY,
+            document_kind TEXT NOT NULL,
+            evidence_id TEXT NOT NULL,
+            parent_evidence_id TEXT,
+            modality TEXT NOT NULL,
+            created_graph_version INTEGER NOT NULL,
+            source_scope TEXT NOT NULL,
+            source_path TEXT,
+            entity_labels_json TEXT NOT NULL,
+            content TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS graph_semantic_documents_scope_version
+        ON graph_semantic_documents(source_scope, created_graph_version DESC);
+        CREATE INDEX IF NOT EXISTS graph_semantic_documents_version
+        ON graph_semantic_documents(created_graph_version DESC, document_id);
+        CREATE TABLE IF NOT EXISTS graph_bm25_route_documents (
+            document_id TEXT PRIMARY KEY,
+            fts_rowid INTEGER NOT NULL UNIQUE,
+            document_kind TEXT NOT NULL,
+            created_graph_version INTEGER NOT NULL,
+            source_scope TEXT NOT NULL,
+            source_path TEXT,
+            label_gram_state TEXT NOT NULL,
+            group_token TEXT NOT NULL,
+            term_counts_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS graph_bm25_route_documents_label_state
+        ON graph_bm25_route_documents(
+            label_gram_state, source_scope, created_graph_version, document_id
+        );
+        CREATE INDEX IF NOT EXISTS graph_bm25_route_documents_global_label_state
+        ON graph_bm25_route_documents(
+            label_gram_state, created_graph_version, document_id
+        );
         ",
         )
         .expect("schema should initialize");
@@ -99,6 +134,7 @@ fn insert_test_symbol(connection: &Connection, id: &str, scope: &str, labels: &s
             params![id, id, scope, labels, content],
         )
         .expect("should insert test symbol");
+    insert_test_fallback_document(connection, id, "code_symbol", scope, None, labels, content);
     index_test_labels(connection, id, "code_symbol", scope, labels);
 }
 
@@ -122,6 +158,7 @@ fn insert_test_chunk(
             params![id, id, scope, path, labels, content],
         )
         .expect("should insert test chunk");
+    insert_test_fallback_document(connection, id, "code_chunk", scope, path, labels, content);
     index_test_labels(connection, id, "code_chunk", scope, labels);
 }
 
@@ -150,7 +187,29 @@ fn insert_test_evidence(
             params![id, scope, labels, content],
         )
         .expect("should insert test evidence");
+    insert_test_fallback_document(connection, id, "evidence", scope, None, labels, content);
     index_test_labels(connection, id, "evidence", scope, labels);
+}
+
+fn insert_test_fallback_document(
+    connection: &Connection,
+    id: &str,
+    kind: &str,
+    scope: &str,
+    path: Option<&str>,
+    labels: &str,
+    content: &str,
+) {
+    connection
+        .execute(
+            "INSERT INTO graph_semantic_documents (
+                 document_id, document_kind, evidence_id, parent_evidence_id,
+                 modality, created_graph_version, source_scope, source_path,
+                 entity_labels_json, content
+             ) VALUES (?1, ?2, ?1, NULL, 'text_span', 1, ?3, ?4, ?5, ?6)",
+            params![id, kind, scope, path, labels, content],
+        )
+        .expect("fallback read model should insert");
 }
 
 fn index_test_labels(
@@ -190,6 +249,256 @@ fn fallback_candidates_returns_empty_for_short_query() {
     setup_test_schema(&connection);
     let result = fallback_candidates(&connection, &test_request("a")).expect("should succeed");
     assert!(result.is_empty());
+}
+
+#[test]
+fn bm25_hierarchy_suite_unscoped_historical_fallback_uses_version_leading_indexes() {
+    let connection = Connection::open_in_memory().expect("db should open");
+    setup_test_schema(&connection);
+
+    let semantic_plan = explain_query_plan(
+        &connection,
+        "SELECT COUNT(*) FROM (
+             SELECT document_id
+             FROM graph_semantic_documents
+             WHERE created_graph_version <= 7
+             LIMIT 4097
+         )",
+    );
+    assert!(
+        semantic_plan.contains("graph_semantic_documents_version (created_graph_version<?)"),
+        "unscoped corpus probe must use its version-leading index: {semantic_plan}"
+    );
+
+    let label_state_plan = explain_query_plan(
+        &connection,
+        "SELECT label_gram_state
+         FROM graph_bm25_route_documents
+         WHERE label_gram_state IN ('pending', 'not_refreshed', 'skipped:label_count')
+           AND created_graph_version <= 7
+         LIMIT 1",
+    );
+    assert!(
+        label_state_plan.contains("graph_bm25_route_documents_global_label_state")
+            && label_state_plan.contains("created_graph_version<?"),
+        "unscoped label-state probe must use its version-leading index: {label_state_plan}"
+    );
+
+    let label_hydrate_plan = explain_query_plan(
+        &connection,
+        "SELECT document_id
+         FROM graph_bm25_label_grams
+         WHERE label_lower IN ('alpha', 'beta')
+           AND created_graph_version <= 7",
+    );
+    assert!(
+        label_hydrate_plan.contains("graph_bm25_label_grams_global_label_lookup")
+            && label_hydrate_plan.contains("created_graph_version<?"),
+        "unscoped label hydrate must use its version-leading index: {label_hydrate_plan}"
+    );
+}
+
+fn explain_query_plan(connection: &Connection, sql: &str) -> String {
+    let mut statement = connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .expect("query plan should prepare");
+    statement
+        .query_map([], |row| row.get::<_, String>(3))
+        .expect("query plan should execute")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("query plan should load")
+        .join("\n")
+}
+
+#[test]
+fn bm25_hierarchy_suite_bounds_non_match_fallback_scans() {
+    let connection = Connection::open_in_memory().expect("db should open");
+    setup_test_schema(&connection);
+    connection
+        .execute(
+            "WITH RECURSIVE sequence(value) AS (
+                 SELECT 1
+                 UNION ALL
+                 SELECT value + 1 FROM sequence WHERE value <= ?1
+             )
+             INSERT INTO graph_semantic_documents (
+                 document_id, document_kind, evidence_id, parent_evidence_id,
+                 modality, created_graph_version, source_scope, source_path,
+                 entity_labels_json, content
+             )
+             SELECT printf('doc-%05d', value), 'code_chunk', printf('chunk-%05d', value),
+                    NULL, 'text_span', 1, 'scope', NULL, '', 'bounded fallback'
+             FROM sequence",
+            params![MAX_FLAT_FALLBACK_SCAN_DOCUMENTS],
+        )
+        .expect("large fallback fixture should insert");
+
+    assert!(
+        !flat_fallback_scan_is_bounded(&connection, &test_request("missing"))
+            .expect("fallback bound should inspect")
+    );
+    let outcome = fallback_candidates(&connection, &test_request("missing"))
+        .expect("bounded fallback should degrade without failing search");
+    assert!(outcome.degraded_reason.is_some());
+}
+
+#[test]
+fn bm25_hierarchy_suite_bounds_fallback_within_the_authorized_scope() {
+    let connection = Connection::open_in_memory().expect("db should open");
+    setup_test_schema(&connection);
+    connection
+        .execute(
+            "WITH RECURSIVE sequence(value) AS (
+                 SELECT 1
+                 UNION ALL
+                 SELECT value + 1 FROM sequence WHERE value <= ?1
+             )
+             INSERT INTO graph_semantic_documents (
+                 document_id, document_kind, evidence_id, parent_evidence_id,
+                 modality, created_graph_version, source_scope, source_path,
+                 entity_labels_json, content
+             )
+             SELECT printf('other-%05d', value), 'code_chunk', printf('other-%05d', value),
+                    NULL, 'text_span', 1, 'other-scope', NULL, '', 'other content'
+             FROM sequence",
+            params![MAX_FLAT_FALLBACK_SCAN_DOCUMENTS],
+        )
+        .expect("unauthorized-scope fixture should insert");
+    insert_test_symbol(
+        &connection,
+        "authorized-target",
+        "authorized-scope",
+        "[\"authorizedTarget\"]",
+        "authorizedTarget",
+    );
+    let mut request = test_request("authorizedTarget");
+    request.source_scope = Some("authorized-scope".to_owned());
+
+    let outcome = fallback_candidates(&connection, &request).expect("scoped fallback should work");
+
+    assert!(outcome.degraded_reason.is_none());
+    assert!(
+        outcome
+            .iter()
+            .any(|hit| hit.hit.evidence_id == "authorized-target")
+    );
+}
+
+#[test]
+fn bm25_hierarchy_suite_reports_fuzzy_posting_budget_exhaustion() {
+    let connection = Connection::open_in_memory().expect("db should open");
+    setup_test_schema(&connection);
+    connection
+        .execute(
+            "WITH RECURSIVE sequence(value) AS (
+                 SELECT 1
+                 UNION ALL
+                 SELECT value + 1 FROM sequence WHERE value <= ?1
+             )
+             INSERT INTO graph_bm25_label_grams (
+                 document_id, document_kind, source_scope, created_graph_version,
+                 label, label_lower, label_len, gram_size, gram
+             )
+             SELECT printf('doc-%05d', value), 'code_symbol', 'repo', 1,
+                    'aaa', 'aaa', 3, 1, 'a'
+             FROM sequence",
+            params![label_trigrams::MAX_FUZZY_LABEL_POSTINGS],
+        )
+        .expect("common label postings should insert");
+
+    let outcome = fallback_candidates(&connection, &test_request("aaa"))
+        .expect("posting exhaustion should degrade without failing search");
+
+    assert!(outcome.is_empty());
+    assert!(
+        outcome
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("posting budget was exhausted"))
+    );
+}
+
+#[test]
+fn label_gram_degradation_respects_request_graph_version_and_scope() {
+    let connection = Connection::open_in_memory().expect("db should open");
+    setup_test_schema(&connection);
+    connection
+        .execute(
+            "INSERT INTO graph_bm25_route_documents (
+                 document_id, fts_rowid, document_kind, created_graph_version,
+                 source_scope, source_path, label_gram_state, group_token,
+                 term_counts_json
+             ) VALUES (
+                 'future-degraded', 1, 'code_symbol', 2, 'future-scope', NULL,
+                 'skipped:gram_count', 'route', '[]'
+             )",
+            [],
+        )
+        .expect("future label state should insert");
+    let version_one = test_request("missing");
+
+    assert_eq!(
+        label_gram_degraded_reason(&connection, &version_one)
+            .expect("older label state should inspect"),
+        None
+    );
+
+    let mut version_two = test_request("missing");
+    version_two.graph_version = crate::domain::GraphVersion::new(2);
+    assert_eq!(
+        label_gram_degraded_reason(&connection, &version_two)
+            .expect("current label state should inspect")
+            .as_deref(),
+        Some("label fuzzy fallback degraded: skipped:gram_count")
+    );
+
+    version_two.source_scope = Some("other-scope".to_owned());
+    assert_eq!(
+        label_gram_degraded_reason(&connection, &version_two)
+            .expect("other scope label state should inspect"),
+        None
+    );
+}
+
+#[test]
+fn bm25_hierarchy_suite_fallback_fills_after_parent_collapse() {
+    let connection = Connection::open_in_memory().expect("db should open");
+    setup_test_schema(&connection);
+    for index in 0..(FALLBACK_CANDIDATE_LIMIT + 20) {
+        let document_id = format!("child-{index:03}");
+        insert_test_evidence(&connection, &document_id, "scope", "[\"needle\"]", "needle");
+        connection
+            .execute(
+                "UPDATE graph_semantic_documents
+                 SET parent_evidence_id = 'shared-parent'
+                 WHERE document_id = ?1",
+                params![document_id],
+            )
+            .expect("parent group should update");
+    }
+    for index in 0..12 {
+        insert_test_chunk(
+            &connection,
+            &format!("unique-{index:03}"),
+            "scope",
+            None,
+            "[]",
+            "needle",
+        );
+    }
+    let mut request = test_request("needle");
+    request.source_scope = Some("scope".to_owned());
+
+    let outcome = fallback_candidates(&connection, &request).expect("fallback should fill");
+
+    assert!(outcome.len() >= request.limit);
+    assert_eq!(
+        outcome
+            .iter()
+            .filter(|hit| hit.hit.evidence_id == "shared-parent")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -358,15 +667,43 @@ fn adaptive_max_distance_returns_two_for_long_queries() {
 }
 
 #[test]
-fn levenshtein_distance_computes_correct_edit_distance() {
-    assert_eq!(levenshtein_distance("", ""), 0);
-    assert_eq!(levenshtein_distance("abc", ""), 3);
-    assert_eq!(levenshtein_distance("", "abc"), 3);
-    assert_eq!(levenshtein_distance("getUser", "getUsr"), 1);
-    assert_eq!(levenshtein_distance("getUser", "getUssr"), 1);
-    assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
-    assert_eq!(levenshtein_distance("abc", "def"), 3);
-    assert_eq!(levenshtein_distance("abc", "abc"), 0);
+fn bounded_levenshtein_distance_stops_outside_the_requested_band() {
+    assert_eq!(bounded_levenshtein_distance("", "", 2), Some(0));
+    assert_eq!(bounded_levenshtein_distance("abc", "", 2), None);
+    assert_eq!(bounded_levenshtein_distance("", "abc", 3), Some(3));
+    assert_eq!(
+        bounded_levenshtein_distance("getUser", "getUsr", 2),
+        Some(1)
+    );
+    assert_eq!(
+        bounded_levenshtein_distance("getUser", "getUssr", 2),
+        Some(1)
+    );
+    assert_eq!(bounded_levenshtein_distance("kitten", "sitting", 2), None);
+    assert_eq!(
+        bounded_levenshtein_distance("kitten", "sitting", 3),
+        Some(3)
+    );
+    assert_eq!(bounded_levenshtein_distance("abc", "def", 2), None);
+    assert_eq!(bounded_levenshtein_distance("abc", "abc", 0), Some(0));
+}
+
+#[test]
+fn fuzzy_fallback_rejects_oversized_query_before_edit_distance_work() {
+    let connection = Connection::open_in_memory().expect("db should open");
+    setup_test_schema(&connection);
+    insert_test_symbol(
+        &connection,
+        "doc-long-label",
+        "repo",
+        &format!("[\"{}\"]", "x".repeat(MAX_FUZZY_QUERY_BYTES + 1)),
+        "long label",
+    );
+    let oversized_near_match = format!("{}y", "x".repeat(MAX_FUZZY_QUERY_BYTES));
+
+    let result = fallback_candidates(&connection, &test_request(&oversized_near_match))
+        .expect("oversized fuzzy input should be rejected without failing search");
+    assert!(result.is_empty());
 }
 
 #[test]

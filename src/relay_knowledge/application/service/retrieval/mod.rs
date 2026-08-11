@@ -128,6 +128,9 @@ impl RelayKnowledgeService {
             })
             .await
             .map_err(storage_api_error)?;
+        if let Some(reason) = search_outcome.trace.degraded_reason.clone() {
+            degraded_reasons.push(reason);
+        }
         let (mut results, mut rerank) = self
             .runtime
             .retrieval

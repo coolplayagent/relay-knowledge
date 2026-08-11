@@ -162,7 +162,7 @@ MCP scope 授权基于 `AgentAccessPolicy`，由以下环境变量控制：
 | `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` | CSV 字符串 | 无 | 允许的 source scope 白名单 |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE` | bool | `false` | 是否允许不指定 scope |
 | `RELAY_KNOWLEDGE_MCP_MAX_LIMIT` | 正整数 | `10` | 单次检索最大返回条数 |
-| `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | 正整数 | `65536` | 单次检索最大上下文字节数 |
+| `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | 正整数 | `65536` | MCP 上下文输出字节上限；repository graph 按完整 `structuredContent` 计量 |
 
 Scope 授权流程（`scope_authorization.rs`）：
 
@@ -183,9 +183,9 @@ Scope 授权流程（`scope_authorization.rs`）：
 - 请求指定 limit ≤ `max_limit` → 使用请求值。
 - 请求指定 limit > `max_limit` → 返回 `LimitExceeded` 错误。
 
-`max_context_bytes` 在 `AgentRetrievalResult::from_retrieval` 中用于截断过大的检索结果。
+`max_context_bytes` 在 `AgentRetrievalResult::from_retrieval` 中用于截断过大的检索结果。对 `relay_repository_graph`，该值限制完整紧凑 JSON `structuredContent` 的 UTF-8 字节数，计入 metadata、scope、回显 request、nodes、edges 与 truncation 状态，但不计外层文本摘要、`isError` 或 JSON-RPC envelope。Repository-graph 的序列化与近线性裁剪在四 permit 的 blocking-worker 边界执行；外层 timeout/cancellation 只停止等待，不能强制取消已启动的 blocking worker，该 worker 可以在后台完成并在返回前继续持有 permit。
 
-`max_runtime_ms` 由 HTTP 请求超时自动派生（`request_timeout - 1ms`），作为 MCP tool call 的硬超时。
+`max_runtime_ms` 由 HTTP 请求超时自动派生（`request_timeout - 1ms`），作为 MCP tool call 的响应等待上限；它不能强制终止已经进入 blocking worker 的工作。
 
 ### 17.4.2 Origin 限制
 

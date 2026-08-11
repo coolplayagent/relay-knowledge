@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{
     domain::{CommitReceipt, GraphMutationBatch, GraphVersion, SourceScope},
@@ -17,7 +17,8 @@ pub(in crate::storage::sqlite) fn commit_batch(
     connection: &mut Connection,
     batch: GraphMutationBatch,
 ) -> Result<CommitReceipt, StorageError> {
-    let transaction = connection.transaction()?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    retrieval::ensure_bm25_rebuild_inactive(&transaction)?;
     let current = current_graph_version_in_transaction(&transaction)?;
     let next = GraphVersion::new(current.get() + 1);
     let evidence_count = batch.evidence.len();
@@ -172,7 +173,13 @@ pub(in crate::storage::sqlite) fn commit_batch(
                 status: evidence.status,
                 extraction: &extraction,
                 source_hash: &derived_source_hash,
-                graph_version: next.get(),
+                write: retrieval::RetrievalWriteContext {
+                    graph_version: next.get(),
+                    bm25_target: retrieval::Bm25WriteTarget::Live,
+                    refresh_labels: true,
+                    refresh_semantic: true,
+                    refresh_vector: true,
+                },
             },
         )?;
     }
@@ -361,6 +368,7 @@ pub(in crate::storage::sqlite) fn commit_batch(
         ],
     )?;
     indexing::mark_mutation_cursors_stale(&transaction, &affected_scopes)?;
+    retrieval::mark_bm25_route_graph_version(&transaction, next.get())?;
     transaction.execute(
         "UPDATE graph_state SET graph_version = ?1 WHERE id = 1",
         params![next.get()],

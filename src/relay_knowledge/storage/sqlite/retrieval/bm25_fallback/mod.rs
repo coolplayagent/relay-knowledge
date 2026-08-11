@@ -1,6 +1,8 @@
 //! Bounded exact, substring, and fuzzy fallback retrieval when FTS is unavailable.
 
-use rusqlite::{Connection, params, params_from_iter, types::Value};
+use std::ops::Deref;
+
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::storage::{GraphSearchRequest, StorageError};
 
@@ -12,34 +14,40 @@ const MIN_FUZZY_QUERY_LEN: usize = 3;
 const FUZZY_SHORT_QUERY_MAX_DISTANCE: usize = 1;
 const FUZZY_LONG_QUERY_MAX_DISTANCE: usize = 2;
 const FUZZY_SHORT_QUERY_LENGTH_THRESHOLD: usize = 4;
-const FALLBACK_CANDIDATE_LIMIT: usize = 200;
+const FALLBACK_CANDIDATE_LIMIT: usize = 1_000;
 const FUZZY_LABEL_CANDIDATE_LIMIT: usize = FALLBACK_CANDIDATE_LIMIT * 8;
 const FUZZY_MATCHED_NAME_LIMIT: usize = FALLBACK_CANDIDATE_LIMIT;
+const MAX_FUZZY_QUERY_BYTES: usize = 128;
+const MAX_FLAT_FALLBACK_SCAN_DOCUMENTS: usize = 4_096;
 
 const SELECT_COLUMNS: &str = "\
-            graph_bm25.document_id,\n\
-            graph_bm25.document_kind,\n\
-            graph_bm25.evidence_id,\n\
-            graph_bm25.parent_evidence_id,\n\
-            graph_bm25.modality,\n\
-            graph_bm25.source_scope,\n\
-            graph_bm25.source_path,\n\
-            graph_bm25.entity_labels,\n\
-            graph_bm25.content";
+            fallback.document_id,\n\
+            fallback.document_kind,\n\
+            fallback.evidence_id,\n\
+            fallback.parent_evidence_id,\n\
+            fallback.modality,\n\
+            fallback.source_scope,\n\
+            fallback.source_path,\n\
+            fallback.entity_labels_json,\n\
+            fallback.content";
 
 const JOIN_EVIDENCE: &str = "\
-        FROM graph_bm25\n\
+        FROM graph_semantic_documents fallback\n\
         LEFT JOIN evidence e\n\
-          ON graph_bm25.document_kind = 'evidence'\n\
-         AND e.id = graph_bm25.evidence_id";
+          ON fallback.document_kind = 'evidence'\n\
+         AND e.id = fallback.evidence_id";
 
-fn scope_filter(scope_idx: u32, version_idx: u32) -> String {
+fn scope_filter(source_scope: Option<&str>, scope_idx: u32, version_idx: u32) -> String {
+    let source_scope_filter = source_scope.map_or_else(
+        || "1 = 1".to_owned(),
+        |_| format!("fallback.source_scope = ?{scope_idx}"),
+    );
     format!(
         "\
-          AND (?{scope_idx} IS NULL OR graph_bm25.source_scope = ?{scope_idx})\n\
-          AND graph_bm25.created_graph_version <= ?{version_idx}\n\
+          AND {source_scope_filter}\n\
+          AND fallback.created_graph_version <= ?{version_idx}\n\
           AND (\n\
-              graph_bm25.document_kind != 'evidence'\n\
+              fallback.document_kind != 'evidence'\n\
               OR e.status IN ('accepted', 'proposed')\n\
           )"
     )
@@ -58,30 +66,169 @@ struct FallbackCandidate {
     match_score: f64,
 }
 
+pub(super) struct FallbackCandidates {
+    pub(super) hits: Vec<ScoredHit>,
+    pub(super) degraded_reason: Option<String>,
+}
+
+impl Deref for FallbackCandidates {
+    type Target = [ScoredHit];
+
+    fn deref(&self) -> &Self::Target {
+        &self.hits
+    }
+}
+
 pub(super) fn fallback_candidates(
     connection: &Connection,
     request: &GraphSearchRequest,
-) -> Result<Vec<ScoredHit>, StorageError> {
+) -> Result<FallbackCandidates, StorageError> {
     let query = request.query.trim();
     if query.len() < MIN_LIKE_QUERY_LEN {
-        return Ok(Vec::new());
+        return Ok(FallbackCandidates {
+            hits: Vec::new(),
+            degraded_reason: None,
+        });
     }
 
-    let exact_rows = exact_name_rows(connection, request)?;
-    let like_rows = if exact_rows.is_empty() && query.len() >= MIN_LIKE_QUERY_LEN {
+    let flat_scan_allowed = flat_fallback_scan_is_bounded(connection, request)?;
+    let exact_rows = if flat_scan_allowed {
+        exact_name_rows(connection, request)?
+    } else {
+        Vec::new()
+    };
+    let like_rows = if flat_scan_allowed
+        && distinct_fallback_candidate_count(exact_rows.iter()) < request.limit
+        && query.len() >= MIN_LIKE_QUERY_LEN
+    {
         like_substring_rows(connection, request)?
     } else {
         Vec::new()
     };
-    let fuzzy_rows =
-        if exact_rows.is_empty() && like_rows.is_empty() && query.len() >= MIN_FUZZY_QUERY_LEN {
-            fuzzy_levenshtein_rows(connection, request)?
-        } else {
-            Vec::new()
-        };
+    let fuzzy_attempted = distinct_fallback_candidate_count(exact_rows.iter().chain(&like_rows))
+        < request.limit
+        && query.len() >= MIN_FUZZY_QUERY_LEN
+        && query.len() <= MAX_FUZZY_QUERY_BYTES;
+    let fuzzy_outcome = if fuzzy_attempted {
+        fuzzy_levenshtein_rows(connection, request)?
+    } else {
+        FuzzyRows::default()
+    };
 
-    let all_candidates = merge_fallback_candidates(exact_rows, like_rows, fuzzy_rows);
-    convert_fallback_candidates(connection, request, all_candidates)
+    let all_candidates = merge_fallback_candidates(exact_rows, like_rows, fuzzy_outcome.rows);
+    let mut degraded_reasons = Vec::new();
+    if !flat_scan_allowed {
+        degraded_reasons.push(format!(
+            "bm25 exact/substring fallback skipped because the authorized candidate corpus exceeds {MAX_FLAT_FALLBACK_SCAN_DOCUMENTS} documents"
+        ));
+    }
+    if fuzzy_attempted {
+        if let Some(reason) = label_gram_degraded_reason(connection, request)? {
+            degraded_reasons.push(reason);
+        }
+    }
+    if fuzzy_outcome.posting_budget_exhausted {
+        degraded_reasons.push(
+            "label fuzzy fallback skipped because its posting budget was exhausted".to_owned(),
+        );
+    }
+    Ok(FallbackCandidates {
+        hits: convert_fallback_candidates(connection, request, all_candidates)?,
+        degraded_reason: (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; ")),
+    })
+}
+
+fn label_gram_degraded_reason(
+    connection: &Connection,
+    request: &GraphSearchRequest,
+) -> Result<Option<String>, StorageError> {
+    const DEGRADED_STATES: [&str; 5] = [
+        "pending",
+        "not_refreshed",
+        "skipped:label_count",
+        "skipped:label_utf8_bytes",
+        "skipped:gram_count",
+    ];
+    let graph_version = i64::try_from(request.graph_version.get()).map_err(|_| {
+        StorageError::InvalidInput("graph version is too large for sqlite".to_owned())
+    })?;
+    let state = if let Some(source_scope) = request.source_scope.as_deref() {
+        connection
+            .query_row(
+                "SELECT label_gram_state
+                 FROM graph_bm25_route_documents
+                 WHERE label_gram_state IN (?1, ?2, ?3, ?4, ?5)
+                   AND source_scope = ?6
+                   AND created_graph_version <= ?7
+                 LIMIT 1",
+                params![
+                    DEGRADED_STATES[0],
+                    DEGRADED_STATES[1],
+                    DEGRADED_STATES[2],
+                    DEGRADED_STATES[3],
+                    DEGRADED_STATES[4],
+                    source_scope,
+                    graph_version,
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+    } else {
+        connection
+            .query_row(
+                "SELECT label_gram_state
+                 FROM graph_bm25_route_documents
+                 WHERE label_gram_state IN (?1, ?2, ?3, ?4, ?5)
+                   AND created_graph_version <= ?6
+                 LIMIT 1",
+                params![
+                    DEGRADED_STATES[0],
+                    DEGRADED_STATES[1],
+                    DEGRADED_STATES[2],
+                    DEGRADED_STATES[3],
+                    DEGRADED_STATES[4],
+                    graph_version,
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+    };
+    Ok(state.map(|state| format!("label fuzzy fallback degraded: {state}")))
+}
+
+fn flat_fallback_scan_is_bounded(
+    connection: &Connection,
+    request: &GraphSearchRequest,
+) -> Result<bool, StorageError> {
+    let probe_limit = MAX_FLAT_FALLBACK_SCAN_DOCUMENTS.saturating_add(1);
+    let graph_version = i64::try_from(request.graph_version.get()).map_err(|_| {
+        StorageError::InvalidInput("graph version is too large for sqlite".to_owned())
+    })?;
+    let observed = if let Some(source_scope) = request.source_scope.as_deref() {
+        connection.query_row(
+            "SELECT COUNT(*) FROM (
+                 SELECT document_id
+                 FROM graph_semantic_documents
+                 WHERE source_scope = ?1
+                   AND created_graph_version <= ?2
+                 LIMIT ?3
+             )",
+            params![source_scope, graph_version, probe_limit],
+            |row| row.get::<_, usize>(0),
+        )?
+    } else {
+        connection.query_row(
+            "SELECT COUNT(*) FROM (
+                 SELECT document_id
+                 FROM graph_semantic_documents
+                 WHERE created_graph_version <= ?1
+                 LIMIT ?2
+             )",
+            params![graph_version, probe_limit],
+            |row| row.get::<_, usize>(0),
+        )?
+    };
+    Ok(observed <= MAX_FLAT_FALLBACK_SCAN_DOCUMENTS)
 }
 
 fn exact_name_rows(
@@ -90,18 +237,24 @@ fn exact_name_rows(
 ) -> Result<Vec<FallbackCandidate>, StorageError> {
     let name_exact = request.query.trim().to_ascii_lowercase();
     let name_like = json_string_contains_like_pattern(&name_exact)?;
-    let limit = FALLBACK_CANDIDATE_LIMIT.min(request.limit);
-    let filter = scope_filter(3, 4);
+    let limit = request.limit.min(FALLBACK_CANDIDATE_LIMIT);
+    let filter = scope_filter(request.source_scope.as_deref(), 3, 4);
     let sql = format!(
         "\
         SELECT\n\
             {SELECT_COLUMNS}\n\
         {JOIN_EVIDENCE}\n\
         WHERE (\n\
-            graph_bm25.entity_labels LIKE ?1 ESCAPE '\\'\n\
-            OR LOWER(graph_bm25.content) = ?2\n\
+            fallback.entity_labels_json LIKE ?1 ESCAPE '\\'\n\
+            OR LOWER(fallback.content) = ?2\n\
         )\n\
         {filter}\n\
+        GROUP BY fallback.document_kind = 'evidence', CASE\n\
+            WHEN fallback.document_kind = 'evidence'\n\
+                THEN COALESCE(fallback.parent_evidence_id, fallback.evidence_id)\n\
+            ELSE fallback.document_id\n\
+        END\n\
+        ORDER BY fallback.document_id\n\
         LIMIT ?5"
     );
     let mut statement = connection.prepare(&sql)?;
@@ -140,18 +293,24 @@ fn like_substring_rows(
     request: &GraphSearchRequest,
 ) -> Result<Vec<FallbackCandidate>, StorageError> {
     let query_like = contains_like_pattern(request.query.trim());
-    let limit = FALLBACK_CANDIDATE_LIMIT.min(request.limit);
-    let filter = scope_filter(2, 3);
+    let limit = request.limit.min(FALLBACK_CANDIDATE_LIMIT);
+    let filter = scope_filter(request.source_scope.as_deref(), 2, 3);
     let sql = format!(
         "\
         SELECT\n\
             {SELECT_COLUMNS}\n\
         {JOIN_EVIDENCE}\n\
         WHERE (\n\
-            graph_bm25.content LIKE ?1 ESCAPE '\\'\n\
-            OR graph_bm25.source_path LIKE ?1 ESCAPE '\\'\n\
+            fallback.content LIKE ?1 ESCAPE '\\'\n\
+            OR fallback.source_path LIKE ?1 ESCAPE '\\'\n\
         )\n\
         {filter}\n\
+        GROUP BY fallback.document_kind = 'evidence', CASE\n\
+            WHEN fallback.document_kind = 'evidence'\n\
+                THEN COALESCE(fallback.parent_evidence_id, fallback.evidence_id)\n\
+            ELSE fallback.document_id\n\
+        END\n\
+        ORDER BY fallback.document_id\n\
         LIMIT ?4"
     );
     let mut statement = connection.prepare(&sql)?;
@@ -184,31 +343,43 @@ fn like_substring_rows(
     Ok(candidates)
 }
 
+#[derive(Default)]
+struct FuzzyRows {
+    rows: Vec<FallbackCandidate>,
+    posting_budget_exhausted: bool,
+}
+
 fn fuzzy_levenshtein_rows(
     connection: &Connection,
     request: &GraphSearchRequest,
-) -> Result<Vec<FallbackCandidate>, StorageError> {
+) -> Result<FuzzyRows, StorageError> {
     let query = request.query.trim();
     let max_distance = adaptive_max_distance(query);
-    let limit = FALLBACK_CANDIDATE_LIMIT.min(request.limit);
+    let limit = request.limit.min(FALLBACK_CANDIDATE_LIMIT);
 
-    let distinct_names = label_trigrams::fuzzy_label_candidates(
+    let label_candidates = label_trigrams::fuzzy_label_candidates(
         connection,
         request,
         query,
         max_distance,
-        FUZZY_LABEL_CANDIDATE_LIMIT,
+        limit.saturating_mul(8).min(FUZZY_LABEL_CANDIDATE_LIMIT),
     )?;
-    let matching_names = matching_fuzzy_names(distinct_names, query, max_distance);
+    let matching_names = matching_fuzzy_names(label_candidates.names, query, max_distance);
 
     if matching_names.is_empty() {
-        return Ok(Vec::new());
+        return Ok(FuzzyRows {
+            rows: Vec::new(),
+            posting_budget_exhausted: label_candidates.posting_budget_exhausted,
+        });
     }
 
     let mut candidates =
         fuzzy_rows_for_names(connection, request, &matching_names, max_distance, limit)?;
     sort_fuzzy_candidates(&mut candidates);
-    Ok(candidates)
+    Ok(FuzzyRows {
+        rows: candidates,
+        posting_budget_exhausted: label_candidates.posting_budget_exhausted,
+    })
 }
 
 fn fuzzy_rows_for_names(
@@ -230,7 +401,15 @@ fn fuzzy_rows_for_names(
     let scope_idx = (name_matches.len() * 3) + 1;
     let version_idx = scope_idx + 1;
     let limit_idx = version_idx + 1;
-    let filter = scope_filter(scope_idx as u32, version_idx as u32);
+    let filter = scope_filter(
+        request.source_scope.as_deref(),
+        scope_idx as u32,
+        version_idx as u32,
+    );
+    let grams_scope_filter = request.source_scope.as_ref().map_or_else(
+        || "1 = 1".to_owned(),
+        |_| format!("grams.source_scope = ?{scope_idx}"),
+    );
 
     let sql = format!(
         "\
@@ -242,28 +421,30 @@ fn fuzzy_rows_for_names(
             FROM graph_bm25_label_grams grams\n\
             JOIN matched_names\n\
               ON grams.label_lower = matched_names.name_lower\n\
-            WHERE (?{scope_idx} IS NULL OR grams.source_scope = ?{scope_idx})\n\
+            WHERE {grams_scope_filter}\n\
               AND grams.created_graph_version <= ?{version_idx}\n\
             GROUP BY grams.document_id\n\
-            ORDER BY match_score DESC,\n\
-                     rank_order ASC,\n\
-                     grams.document_id ASC\n\
-            LIMIT ?{limit_idx}\n\
         )\n\
         SELECT\n\
             {SELECT_COLUMNS},\n\
             candidate_docs.match_score\n\
         FROM candidate_docs\n\
-        JOIN graph_bm25\n\
-          ON graph_bm25.document_id = candidate_docs.document_id\n\
+        JOIN graph_semantic_documents fallback\n\
+          ON fallback.document_id = candidate_docs.document_id\n\
         LEFT JOIN evidence e\n\
-          ON graph_bm25.document_kind = 'evidence'\n\
-         AND e.id = graph_bm25.evidence_id\n\
+          ON fallback.document_kind = 'evidence'\n\
+         AND e.id = fallback.evidence_id\n\
         WHERE 1 = 1\n\
         {filter}\n\
-        ORDER BY candidate_docs.match_score DESC,\n\
+        GROUP BY fallback.document_kind = 'evidence', CASE\n\
+            WHEN fallback.document_kind = 'evidence'\n\
+                THEN COALESCE(fallback.parent_evidence_id, fallback.evidence_id)\n\
+            ELSE fallback.document_id\n\
+        END\n\
+        ORDER BY MAX(candidate_docs.match_score) DESC,\n\
                  candidate_docs.rank_order ASC,\n\
-                 graph_bm25.document_id ASC"
+                 fallback.document_id ASC\n\
+        LIMIT ?{limit_idx}"
     );
 
     let mut values = Vec::with_capacity((name_matches.len() * 3) + 3);
@@ -341,9 +522,12 @@ fn matching_fuzzy_names(
     let mut matching_names = distinct_names
         .into_iter()
         .filter_map(|name| {
+            if name.len() > MAX_FUZZY_QUERY_BYTES {
+                return None;
+            }
             let name_lower = name.to_ascii_lowercase();
-            let distance = levenshtein_distance(&query_lower, &name_lower);
-            (distance <= max_distance).then_some(FuzzyNameMatch {
+            let distance = bounded_levenshtein_distance(&query_lower, &name_lower, max_distance)?;
+            Some(FuzzyNameMatch {
                 name,
                 name_lower,
                 distance,
@@ -367,41 +551,61 @@ pub(super) fn adaptive_max_distance(query: &str) -> usize {
     }
 }
 
-#[allow(clippy::needless_range_loop)]
-fn levenshtein_distance(a: &str, b: &str) -> usize {
+fn bounded_levenshtein_distance(a: &str, b: &str, max_distance: usize) -> Option<usize> {
     let a_chars: Vec<char> = a.chars().collect();
     let b_chars: Vec<char> = b.chars().collect();
     let a_len = a_chars.len();
     let b_len = b_chars.len();
 
+    if a_len.abs_diff(b_len) > max_distance {
+        return None;
+    }
     if a_len == 0 {
-        return b_len;
+        return (b_len <= max_distance).then_some(b_len);
     }
     if b_len == 0 {
-        return a_len;
+        return (a_len <= max_distance).then_some(a_len);
     }
 
-    let mut prev = vec![0usize; b_len + 1];
-    let mut curr = vec![0usize; b_len + 1];
-
-    for j in 0..=b_len {
-        prev[j] = j;
+    let outside_band = max_distance.saturating_add(1);
+    let mut previous = vec![outside_band; b_len + 1];
+    let mut current = vec![outside_band; b_len + 1];
+    for (column, value) in previous
+        .iter_mut()
+        .enumerate()
+        .take(max_distance.min(b_len) + 1)
+    {
+        *value = column;
     }
 
-    for i in 1..=a_len {
-        curr[0] = i;
-        for j in 1..=b_len {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+    for row in 1..=a_len {
+        current.fill(outside_band);
+        if row <= max_distance {
+            current[0] = row;
+        }
+        let first_column = row.saturating_sub(max_distance).max(1);
+        let last_column = row.saturating_add(max_distance).min(b_len);
+        let mut row_minimum = outside_band;
+        for column in first_column..=last_column {
+            let substitution_cost = if a_chars[row - 1] == b_chars[column - 1] {
                 0
             } else {
                 1
             };
-            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            current[column] = previous[column]
+                .saturating_add(1)
+                .min(current[column - 1].saturating_add(1))
+                .min(previous[column - 1].saturating_add(substitution_cost))
+                .min(outside_band);
+            row_minimum = row_minimum.min(current[column]);
         }
-        std::mem::swap(&mut prev, &mut curr);
+        if row_minimum > max_distance {
+            return None;
+        }
+        std::mem::swap(&mut previous, &mut current);
     }
 
-    prev[b_len]
+    (previous[b_len] <= max_distance).then_some(previous[b_len])
 }
 
 fn merge_fallback_candidates(
@@ -413,12 +617,36 @@ fn merge_fallback_candidates(
     let mut merged = Vec::new();
 
     for candidate in exact.into_iter().chain(like).chain(fuzzy) {
-        if seen.insert(candidate.document_id.clone()) {
+        if seen.insert(fallback_candidate_key(&candidate)) {
             merged.push(candidate);
         }
     }
 
     merged
+}
+
+fn distinct_fallback_candidate_count<'a>(
+    candidates: impl IntoIterator<Item = &'a FallbackCandidate>,
+) -> usize {
+    candidates
+        .into_iter()
+        .map(fallback_candidate_key)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+}
+
+fn fallback_candidate_key(candidate: &FallbackCandidate) -> String {
+    if candidate.document_kind == "evidence" {
+        format!(
+            "evidence_group:{}",
+            candidate
+                .parent_evidence_id
+                .as_deref()
+                .unwrap_or(&candidate.evidence_id)
+        )
+    } else {
+        format!("document:{}", candidate.document_id)
+    }
 }
 
 fn json_string_contains_like_pattern(value: &str) -> Result<String, StorageError> {
@@ -476,6 +704,7 @@ fn convert_fallback_candidates(
                 entity_labels: candidate.entity_labels,
                 content: candidate.content,
                 rank: 0.0,
+                explanation: None,
             };
             let mut scored =
                 scored_bm25_hit(connection, row, request.graph_version, &facts_by_evidence)?;
