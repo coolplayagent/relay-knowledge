@@ -43,8 +43,7 @@ impl SqliteGraphStore {
         configure_writer_connection(&connection)?;
         if !marker::schema_initialization_is_current(&connection)? {
             migration::prepare_existing_database(&connection)?;
-            initialization::initialize_schema(&connection)?;
-            marker::mark_schema_initialization_current(&connection)?;
+            initialization::initialize_schema_for_open(&connection)?;
         }
         let read_pool = ReadConnectionPool::open(&path)?;
 

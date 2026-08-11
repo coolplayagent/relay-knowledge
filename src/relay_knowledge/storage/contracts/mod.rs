@@ -45,7 +45,11 @@ pub use operations::{
     ProposalListRequest, ServiceOperatorUpdate, WorkerTaskClaimRequest, WorkerTaskCompletion,
     WorkerTaskFailure, WorkerTaskSeed,
 };
-pub use search::{GraphSearchOutcome, GraphSearchRequest};
+pub use search::{
+    GraphSearchOutcome, GraphSearchRequest, MAX_GRAPH_SEARCH_FTS_CODEPOINTS,
+    MAX_GRAPH_SEARCH_FTS_TOKENS, MAX_GRAPH_SEARCH_LIMIT, MAX_GRAPH_SEARCH_QUERY_CHARS,
+    MAX_GRAPH_SEARCH_TOKEN_BYTES,
+};
 pub use topology::{StorageShardCatalogEntry, StorageTopology, StorageTopologySnapshot};
 
 /// Combined storage facade used by the application service.

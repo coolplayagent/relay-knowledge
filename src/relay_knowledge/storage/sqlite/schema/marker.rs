@@ -2,8 +2,13 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::storage::StorageError;
 
+use super::introspection::{
+    index_has_columns, table_column_is_not_null, table_exists, table_has_columns,
+    table_has_exact_columns, table_has_primary_key_columns, table_has_unique_columns,
+};
+
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-const SCHEMA_MARKER_VERSION: i64 = 3;
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 4;
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
@@ -11,11 +16,75 @@ const GRAPH_BM25_COLUMNS: &[&str] = &[
     "parent_evidence_id",
     "modality",
     "created_graph_version",
+    "routing_key",
     "source_scope",
     "source_path",
     "entity_labels",
     "entity_aliases",
     "content",
+];
+const GRAPH_BM25_ROUTE_STATE_COLUMNS: &[&str] = &[
+    "id",
+    "indexed_graph_version",
+    "document_count",
+    "state",
+    "algorithm_version",
+    "semantic_generation",
+    "vector_generation",
+    "rebuild_phase",
+    "rebuild_cursor",
+    "rebuild_semantic",
+    "rebuild_vector",
+    "rebuild_owner",
+    "rebuild_lease_expires_at_ms",
+];
+const GRAPH_BM25_ROUTE_DOCUMENT_COLUMNS: &[&str] = &[
+    "document_id",
+    "fts_rowid",
+    "document_kind",
+    "created_graph_version",
+    "source_scope",
+    "source_path",
+    "label_gram_state",
+    "group_token",
+    "term_counts_json",
+];
+const GRAPH_BM25_ROUTE_GROUP_COLUMNS: &[&str] = &["source_scope", "group_token", "document_count"];
+const GRAPH_BM25_ROUTE_TERM_COLUMNS: &[&str] = &[
+    "term",
+    "source_scope",
+    "group_token",
+    "collection_frequency",
+];
+const GRAPH_BM25_ROUTE_TERM_TOTAL_COLUMNS: &[&str] = &["term", "document_frequency"];
+const GRAPH_BM25_ROUTE_PATH_INDEX: &str = "graph_bm25_route_documents_scope_path";
+const GRAPH_BM25_ROUTE_PATH_INDEX_COLUMNS: &[&str] =
+    &["source_scope", "source_path", "document_id"];
+const GRAPH_BM25_LABEL_STATE_INDEX: &str = "graph_bm25_route_documents_label_state";
+const GRAPH_BM25_LABEL_STATE_INDEX_COLUMNS: &[&str] = &[
+    "label_gram_state",
+    "source_scope",
+    "created_graph_version",
+    "document_id",
+];
+const GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX: &str = "graph_bm25_route_documents_global_label_state";
+const GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX_COLUMNS: &[&str] =
+    &["label_gram_state", "created_graph_version", "document_id"];
+const GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX: &str = "graph_bm25_label_grams_lookup";
+const GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX_COLUMNS: &[&str] = &[
+    "source_scope",
+    "gram_size",
+    "gram",
+    "label_len",
+    "created_graph_version",
+];
+const GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX: &str = "graph_bm25_label_grams_global_lookup";
+const GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX_COLUMNS: &[&str] = &[
+    "gram_size",
+    "gram",
+    "label_len",
+    "created_graph_version",
+    "source_scope",
 ];
 const GRAPH_SEMANTIC_COLUMNS: &[&str] = &[
     "document_id",
@@ -51,6 +120,11 @@ const GRAPH_VECTOR_COLUMNS: &[&str] = &[
     "source_hash",
     "tokenizer_version",
 ];
+const GRAPH_SEMANTIC_SCOPE_INDEX: &str = "graph_semantic_documents_scope_version";
+const GRAPH_SEMANTIC_GLOBAL_INDEX: &str = "graph_semantic_documents_version";
+const GRAPH_VECTOR_SCOPE_INDEX: &str = "graph_vector_documents_scope_version";
+const GRAPH_SCOPE_VERSION_INDEX_COLUMNS: &[&str] = &["source_scope", "created_graph_version"];
+const GRAPH_GLOBAL_VERSION_INDEX_COLUMNS: &[&str] = &["created_graph_version", "document_id"];
 const GRAPH_BM25_LABEL_GRAM_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
@@ -61,6 +135,20 @@ const GRAPH_BM25_LABEL_GRAM_COLUMNS: &[&str] = &[
     "label_len",
     "gram_size",
     "gram",
+];
+const GRAPH_BM25_LABEL_LOOKUP_INDEX: &str = "graph_bm25_label_grams_label_lookup";
+const GRAPH_BM25_LABEL_LOOKUP_INDEX_COLUMNS: &[&str] = &[
+    "label_lower",
+    "source_scope",
+    "created_graph_version",
+    "document_id",
+];
+const GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX: &str = "graph_bm25_label_grams_global_label_lookup";
+const GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX_COLUMNS: &[&str] = &[
+    "label_lower",
+    "created_graph_version",
+    "source_scope",
+    "document_id",
 ];
 const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
     "set_id",
@@ -159,17 +247,102 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     if version != Some(SCHEMA_MARKER_VERSION) {
         return Ok(false);
     }
-    if !table_has_columns(connection, "graph_bm25", GRAPH_BM25_COLUMNS)?
-        || !table_has_columns(
+    if !graph_bm25_schema_is_current(connection)?
+        || table_exists(connection, "graph_bm25_vocabulary")?
+        || table_exists(connection, "graph_bm25_retired")?
+        || !table_has_exact_columns(
+            connection,
+            "graph_bm25_route_state",
+            GRAPH_BM25_ROUTE_STATE_COLUMNS,
+        )?
+        || !table_has_exact_columns(
+            connection,
+            "graph_bm25_route_documents",
+            GRAPH_BM25_ROUTE_DOCUMENT_COLUMNS,
+        )?
+        || !table_has_exact_columns(
+            connection,
+            "graph_bm25_route_groups",
+            GRAPH_BM25_ROUTE_GROUP_COLUMNS,
+        )?
+        || !table_has_exact_columns(
+            connection,
+            "graph_bm25_route_terms",
+            GRAPH_BM25_ROUTE_TERM_COLUMNS,
+        )?
+        || !table_has_exact_columns(
+            connection,
+            "graph_bm25_route_term_totals",
+            GRAPH_BM25_ROUTE_TERM_TOTAL_COLUMNS,
+        )?
+        || !bm25_route_primary_keys_are_current(connection)?
+        || !index_has_columns(
+            connection,
+            GRAPH_BM25_ROUTE_PATH_INDEX,
+            GRAPH_BM25_ROUTE_PATH_INDEX_COLUMNS,
+        )?
+        || !index_has_columns(
+            connection,
+            GRAPH_BM25_LABEL_STATE_INDEX,
+            GRAPH_BM25_LABEL_STATE_INDEX_COLUMNS,
+        )?
+        || !index_has_columns(
+            connection,
+            GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX,
+            GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX_COLUMNS,
+        )?
+        || !table_has_exact_columns(
             connection,
             "graph_semantic_documents",
             GRAPH_SEMANTIC_COLUMNS,
         )?
-        || !table_has_columns(connection, "graph_vector_documents", GRAPH_VECTOR_COLUMNS)?
-        || !table_has_columns(
+        || !table_has_primary_key_columns(connection, "graph_semantic_documents", &["document_id"])?
+        || !index_has_columns(
+            connection,
+            GRAPH_SEMANTIC_SCOPE_INDEX,
+            GRAPH_SCOPE_VERSION_INDEX_COLUMNS,
+        )?
+        || !index_has_columns(
+            connection,
+            GRAPH_SEMANTIC_GLOBAL_INDEX,
+            GRAPH_GLOBAL_VERSION_INDEX_COLUMNS,
+        )?
+        || !table_has_exact_columns(connection, "graph_vector_documents", GRAPH_VECTOR_COLUMNS)?
+        || !table_has_primary_key_columns(connection, "graph_vector_documents", &["document_id"])?
+        || !index_has_columns(
+            connection,
+            GRAPH_VECTOR_SCOPE_INDEX,
+            GRAPH_SCOPE_VERSION_INDEX_COLUMNS,
+        )?
+        || !table_has_exact_columns(
             connection,
             "graph_bm25_label_grams",
             GRAPH_BM25_LABEL_GRAM_COLUMNS,
+        )?
+        || !table_has_primary_key_columns(
+            connection,
+            "graph_bm25_label_grams",
+            &["document_id", "label_lower", "gram_size", "gram"],
+        )?
+        || !index_has_columns(
+            connection,
+            GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX,
+            GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX_COLUMNS,
+        )?
+        || !index_has_columns(
+            connection,
+            GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX,
+            GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX_COLUMNS,
+        )?
+        || !index_has_columns(
+            connection,
+            GRAPH_BM25_LABEL_LOOKUP_INDEX,
+            GRAPH_BM25_LABEL_LOOKUP_INDEX_COLUMNS,
+        )?
+        || !index_has_columns(
+            connection,
+            GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX,
+            GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX_COLUMNS,
         )?
         || !workspace_package_mappings_current(connection)?
         || !table_has_columns(
@@ -212,6 +385,81 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     Ok(true)
 }
 
+fn graph_bm25_schema_is_current(connection: &Connection) -> Result<bool, StorageError> {
+    if !table_has_exact_columns(connection, "graph_bm25", GRAPH_BM25_COLUMNS)? {
+        return Ok(false);
+    }
+    let definition = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'graph_bm25'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    Ok(definition.contains("using fts5")
+        && [
+            "content=",
+            "content =",
+            "tokenize=",
+            "tokenize =",
+            "prefix=",
+            "prefix =",
+            "detail=",
+            "detail =",
+            "columnsize=",
+            "columnsize =",
+        ]
+        .iter()
+        .all(|option| !definition.contains(option))
+        && [
+            "document_id",
+            "document_kind",
+            "evidence_id",
+            "parent_evidence_id",
+            "modality",
+            "created_graph_version",
+        ]
+        .iter()
+        .all(|column| definition.contains(&format!("{column} unindexed")))
+        && [
+            "routing_key",
+            "source_scope",
+            "source_path",
+            "entity_labels",
+            "entity_aliases",
+            "content",
+        ]
+        .iter()
+        .all(|column| !definition.contains(&format!("{column} unindexed"))))
+}
+
+fn bm25_route_primary_keys_are_current(connection: &Connection) -> Result<bool, StorageError> {
+    for (table, primary_key) in [
+        ("graph_bm25_route_state", &["id"][..]),
+        ("graph_bm25_route_documents", &["document_id"][..]),
+        (
+            "graph_bm25_route_groups",
+            &["source_scope", "group_token"][..],
+        ),
+        (
+            "graph_bm25_route_terms",
+            &["term", "source_scope", "group_token"][..],
+        ),
+        ("graph_bm25_route_term_totals", &["term"][..]),
+    ] {
+        if !table_has_primary_key_columns(connection, table, primary_key)? {
+            return Ok(false);
+        }
+    }
+    Ok(
+        table_column_is_not_null(connection, "graph_bm25_route_documents", "fts_rowid")?
+            && table_has_unique_columns(connection, "graph_bm25_route_documents", &["fts_rowid"])?,
+    )
+}
+
 pub(super) fn initialize_schema_marker(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
@@ -248,25 +496,6 @@ fn schema_marker_table_exists(connection: &Connection) -> Result<bool, StorageEr
     table_exists(connection, "relay_storage_schema_state")
 }
 
-fn table_has_columns(
-    connection: &Connection,
-    table: &str,
-    required_columns: &[&str],
-) -> Result<bool, StorageError> {
-    if !table_exists(connection, table)? {
-        return Ok(false);
-    }
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    let columns = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(required_columns
-        .iter()
-        .all(|required| columns.iter().any(|column| column == required)))
-}
-
 fn workspace_package_mappings_current(connection: &Connection) -> Result<bool, StorageError> {
     if !table_has_columns(
         connection,
@@ -280,40 +509,6 @@ fn workspace_package_mappings_current(connection: &Connection) -> Result<bool, S
         "code_workspace_package_mappings",
         CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE,
     )
-}
-
-fn table_has_unique_columns(
-    connection: &Connection,
-    table: &str,
-    expected_columns: &[&str],
-) -> Result<bool, StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA index_list({table})"))?;
-    let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)? != 0))
-    })?;
-    let indexes = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    for (index_name, unique) in indexes {
-        if !unique {
-            continue;
-        }
-        let mut statement = connection.prepare(&format!("PRAGMA index_info({index_name})"))?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
-        let columns = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(StorageError::from)?;
-        if columns
-            .iter()
-            .map(String::as_str)
-            .eq(expected_columns.iter().copied())
-        {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 fn fact_evidence_links_are_current(connection: &Connection) -> Result<bool, StorageError> {
@@ -382,23 +577,6 @@ fn fact_evidence_link_exists(
             )
             ",
             params![fact_kind, fact_id, evidence_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(StorageError::from)
-}
-
-fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT EXISTS (
-                SELECT 1
-                FROM sqlite_master
-                WHERE type = 'table'
-                  AND name = ?1
-            )
-            ",
-            params![table],
             |row| row.get::<_, bool>(0),
         )
         .map_err(StorageError::from)

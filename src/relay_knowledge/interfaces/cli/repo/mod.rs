@@ -61,6 +61,15 @@ pub enum RepoCommand {
         freshness: FreshnessPolicy,
         exclude_generated: bool,
     },
+    Graph {
+        alias: String,
+        focus_path: String,
+        depth: u8,
+        ref_selector: String,
+        path_filters: Vec<String>,
+        node_limit: usize,
+        edge_limit: usize,
+    },
     Context {
         alias: String,
         query: String,

@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use crate::{
     domain::{
         CodeGraphContextRequest, CodeRepositorySelector, CodeRepositorySetQueryRequest,
-        CodeRetrievalRequest,
+        CodeRetrievalRequest, REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT,
+        REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT, RepositoryGraphNeighborhoodRequest,
     },
     interfaces::agent::{
         AgentAdapterError, AgentAdapterErrorKind, authorize_limit, validate_path_texts,
@@ -21,12 +22,108 @@ use super::super::{
     },
 };
 use super::{
-    agent_budget::{apply_agent_code_budget, explore_budget},
+    agent_budget::{apply_agent_code_budget, explore_budget, serialize_repository_graph_output},
     request_contracts::{
-        CodeContextArgs, CodeQueryArgs, CodeRepositorySetQueryArgs, authorize_code_context_bytes,
-        authorize_code_context_limit, parse_code_query_kind,
+        CodeContextArgs, CodeQueryArgs, CodeRepositorySetQueryArgs, RepositoryGraphArgs,
+        authorize_code_context_bytes, authorize_code_context_limit, parse_code_query_kind,
     },
 };
+
+pub(super) async fn repository_graph_tool(
+    server: &McpServer,
+    arguments: Value,
+    request_id: String,
+) -> Value {
+    let args = match serde_json::from_value::<RepositoryGraphArgs>(arguments) {
+        Ok(args) => args,
+        Err(error) => return tool_error_result(invalid_arguments(error)),
+    };
+    let mut validated_paths = args.path_filters.clone();
+    validated_paths.push(args.focus_path.clone());
+    if let Err(error) = validate_path_texts("paths", &validated_paths) {
+        return tool_error_result(error);
+    }
+    let repository = match server
+        .scope_authorizer
+        .authorize_scope(
+            &server.service,
+            &server.agent.access_policy,
+            Some(args.repository),
+        )
+        .await
+    {
+        Ok(Some(repository)) => repository,
+        Ok(None) => {
+            return tool_error_result(AgentAdapterError::new(
+                AgentAdapterErrorKind::InvalidScope,
+                "repository is required for relay_repository_graph",
+            ));
+        }
+        Err(error) => return tool_error_result(error),
+    };
+    let selector = match CodeRepositorySelector::new(
+        repository,
+        args.ref_selector.unwrap_or_else(|| "HEAD".to_owned()),
+        args.path_filters,
+        vec!["markdown".to_owned()],
+    ) {
+        Ok(selector) => selector,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+    let node_limit = match authorize_limit(
+        args.node_limit.or(Some(
+            REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT.min(server.agent.access_policy.max_limit),
+        )),
+        &server.agent.access_policy,
+    ) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
+    let edge_limit = match authorize_limit(
+        args.edge_limit.or(Some(
+            REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT.min(server.agent.access_policy.max_limit),
+        )),
+        &server.agent.access_policy,
+    ) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
+    let request = match RepositoryGraphNeighborhoodRequest::new(
+        selector,
+        args.focus_path,
+        args.depth.unwrap_or(1),
+        node_limit,
+        edge_limit,
+    ) {
+        Ok(request) => request,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+
+    match server
+        .service
+        .repository_graph_neighborhood(request, request_context(request_id))
+        .await
+    {
+        Ok(response) => {
+            let structured = match serialize_repository_graph_output(
+                response,
+                server.agent.access_policy.max_context_bytes,
+            )
+            .await
+            {
+                Ok(structured) => structured,
+                Err(error) => return tool_error_result(error),
+            };
+            let node_count = structured["nodes"].as_array().map_or(0, Vec::len);
+            let edge_count = structured["edges"].as_array().map_or(0, Vec::len);
+            tool_success_result(
+                format!("repository graph returned {node_count} node(s) and {edge_count} edge(s)"),
+                structured,
+            )
+        }
+        Err(error) => api_error_result(error),
+    }
+}
 
 pub(super) async fn code_context_tool(
     server: &McpServer,

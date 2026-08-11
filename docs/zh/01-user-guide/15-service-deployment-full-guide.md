@@ -460,12 +460,14 @@ relay-knowledge repo status my-repo --format json
 
 ```
 preflight doctor
-  → backup or migration checkpoint
+  → 停止 ad hoc CLI writer
+  → 创建事务一致的 runtime-database backup
   → stop service through platform manager
   → install new binary
   → write or update service definition
-  → run schema/index migration through normal startup
   → start service through platform manager
+     → 首次同步打开执行 schema/index migration 与必要的 shadow rebuild
+     → 打开完成后 service 才可用
   → post-upgrade doctor
 ```
 
@@ -475,12 +477,12 @@ preflight doctor
 # 1. 升级前预检
 relay-knowledge setup doctor --format json
 
-# 2. 备份运行时数据
+# 2. 停止 ad hoc CLI writer 和 service，为普通文件备份建立独占访问
+systemctl --user stop relay-knowledge.service
+
+# 3. 备份运行时数据；如需在 service 运行时备份，必须使用 SQLite 事务一致备份方法
 tar -czf relay-knowledge-backup-$(date +%Y%m%d).tar.gz \
   $(relay-knowledge service plan install --format json | jq -r '.runtime_state_paths[]')
-
-# 3. 停止服务
-systemctl --user stop relay-knowledge.service
 
 # 4. 安装新二进制（覆盖旧版本）
 sudo cp relay-knowledge /usr/local/bin/relay-knowledge

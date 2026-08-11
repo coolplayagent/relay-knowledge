@@ -18,11 +18,80 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{
         CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
-        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalKind,
-        SoftwareGlobalRequest,
+        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
+        RepositoryGraphNeighborhoodRequest, SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     env::{EnvironmentConfig, PlatformKind},
 };
+
+#[tokio::test]
+async fn serves_snapshot_scoped_okf_repository_graph_api() {
+    let repo = FixtureRepo::create("web-repository-graph-api");
+    repo.write(
+        "knowledge/research/rates.md",
+        "---\ntype: concept\ntitle: 利率\nsources:\n  - id: pbc\n    resource: https://www.pbc.gov.cn/\n---\n\n利率证据。[^pbc]\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = test_service("web-repository-graph-api").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.to_string_lossy().into_owned(),
+                alias: "fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            RequestContext::for_interface(InterfaceKind::Api),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), Vec::new())
+                    .expect("selector"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            RequestContext::for_interface(InterfaceKind::Api),
+        )
+        .await
+        .expect("repository should index");
+    let request = RepositoryGraphNeighborhoodRequest::new(
+        CodeRepositorySelector::new(
+            "fixture",
+            "HEAD",
+            vec!["knowledge/research".to_owned()],
+            vec!["markdown".to_owned()],
+        )
+        .expect("selector"),
+        "knowledge/research/rates.md",
+        1,
+        100,
+        200,
+    )
+    .expect("graph request");
+
+    let graph = request_json(
+        router(service, crate::net::http::DEFAULT_MAX_BODY_BYTES),
+        "POST",
+        "/api/v1/code/repositories/fixture/graph",
+        Some(json!(request)),
+        StatusCode::OK,
+    )
+    .await;
+
+    assert_eq!(graph["schema_version"], 1);
+    assert_eq!(graph["scope"]["requested_ref"], "HEAD");
+    assert!(
+        graph["nodes"]
+            .as_array()
+            .is_some_and(|nodes| nodes.len() == 2)
+    );
+    assert_eq!(graph["edges"][0]["kind"], "cites_source");
+}
 
 #[tokio::test]
 async fn serves_versioned_code_repository_index_status_and_query_apis() {

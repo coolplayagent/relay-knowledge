@@ -9,11 +9,12 @@ use crate::{
         CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse, CodeRepositoryListResponse,
         CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
         CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, CodebaseViewResponse,
-        ErrorKind, RequestContext, SoftwareGlobalResponse,
+        ErrorKind, RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalResponse,
     },
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
-        CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalRequest,
+        CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
+        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
     },
     env::NetworkEnvOverrides,
     net::{
@@ -37,6 +38,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::Index { .. }
                 | RepoCommand::ScopePreview { .. }
                 | RepoCommand::Query { .. }
+                | RepoCommand::Graph { .. }
                 | RepoCommand::Context { .. }
                 | RepoCommand::FeatureFlags { .. }
                 | RepoCommand::Impact { .. }
@@ -199,6 +201,45 @@ pub(super) async fn run_remote(
 
             render_response(
                 "code.repo.query",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::Graph {
+            alias,
+            focus_path,
+            depth,
+            ref_selector,
+            path_filters,
+            node_limit,
+            edge_limit,
+        } => {
+            let request = RepositoryGraphNeighborhoodRequest::new(
+                repo::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    path_filters.clone(),
+                    vec!["markdown".to_owned()],
+                    format,
+                )?,
+                focus_path.clone(),
+                *depth,
+                *node_limit,
+                *edge_limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, RepositoryGraphNeighborhoodResponseV1>(
+                    alias,
+                    "graph",
+                    &request,
+                )
+                .await?;
+
+            render_response(
+                "code.repo.graph",
                 response.metadata.clone(),
                 &response,
                 format,

@@ -24,6 +24,7 @@ fn code_document_hit_maps_artifact_without_graph_queries() {
             entity_labels: vec!["Symbol".to_owned()],
             content: "Symbol function".to_owned(),
             rank: -2.0,
+            explanation: Some("hierarchical_bm25 fallback=population_guard".to_owned()),
         },
         GraphVersion::new(1),
         &BTreeMap::new(),
@@ -32,6 +33,10 @@ fn code_document_hit_maps_artifact_without_graph_queries() {
 
     assert_eq!(hit.source, RetrieverSource::CodeGraph);
     assert_eq!(hit.source_score, 2.0);
+    assert_eq!(
+        hit.explanation.as_deref(),
+        Some("hierarchical_bm25 fallback=population_guard")
+    );
     assert_eq!(
         hit.hit.code_artifact.expect("code artifact").kind,
         CodeGraphArtifactKind::Symbol

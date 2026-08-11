@@ -22,8 +22,8 @@ pub use operations::{
     IngestEvidence, IngestEvidenceExtraction, IngestRelation, IngestRequest, IngestResponse,
     MultimodalExtractionRequest, MultimodalExtractionResponse, ProposalDecisionApiRequest,
     ProposalDecisionResponse, ProposalListApiRequest, ProposalListResponse, ProposalShowResponse,
-    ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServiceRecoveryReport,
-    ServiceStatusResponse, SoftwareGlobalResponse, StorageShardDiagnostics,
+    RepositoryGraphNeighborhoodResponseV1, ServiceDefinitionWriteResponse, ServiceOperatorResponse,
+    ServiceRecoveryReport, ServiceStatusResponse, SoftwareGlobalResponse, StorageShardDiagnostics,
     StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest, WorkerRunResponse,
     WorkerStatusRequest, WorkerStatusResponse,
 };

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactRequest, CodeRetrievalHit,
-        CodeRetrievalRequest, CodebaseViewRequest, CodebaseViewSnapshot,
+        CodeRetrievalRequest, CodebaseViewRequest, CodebaseViewSnapshot, IndexedRepositoryDocument,
     },
     storage::{
         CodeImpactChanges, CodeRepositoryStore, SqliteGraphStore, StorageError, StorageFuture,
@@ -114,6 +114,26 @@ pub(super) fn codebase_view_snapshot(
         store
             .control
             .codebase_view_snapshot(source_scope, request, row_limit)
+            .await
+    })
+}
+
+pub(super) fn repository_documents_for_scope(
+    store: PartitionedSqliteKnowledgeStore,
+    source_scope: String,
+    path_filters: Vec<String>,
+    max_files: usize,
+    max_bytes: usize,
+) -> StorageFuture<'static, Vec<IndexedRepositoryDocument>> {
+    Box::pin(async move {
+        if let Some(shard) = source_scope_store(&store.catalog, source_scope.clone()).await? {
+            return shard
+                .repository_documents_for_scope(source_scope, path_filters, max_files, max_bytes)
+                .await;
+        }
+        store
+            .control
+            .repository_documents_for_scope(source_scope, path_filters, max_files, max_bytes)
             .await
     })
 }

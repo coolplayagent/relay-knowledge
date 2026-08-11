@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 3.0
-> 编制日期: 2026-08-03
+> 文档版本: 3.3
+> 编制日期: 2026-08-11
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -38,8 +38,19 @@ Installer 或安装脚本支持：版本选择、安装目录选择、dry run、
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。
 repository-set overlay selector 迁移会在 SQLite schema 初始化时幂等增加虚拟 origin-path 列和 origin/target 复合索引。升级计划必须为一次性索引构建预留时间；旧二进制会忽略这些增量列和索引，因此回滚保持 forward-compatible，不得删除或重建 overlay facts。
-新建且尚无代码事实的 runtime database 对单批次任务在写入前建立事实查询索引，对多批次任务可把查询索引延迟到 checkpointed finalization 批量构建，fresh scope 发布前必须全部完成。这个选择只使用任务的有界 `max_files_per_batch` 与计划文件数，不依赖仓库名称或路径。已有事实的 runtime database 在 schema 初始化时幂等补齐查询索引，升级不能删除原事实主键、搜索 identity 唯一约束或 FTS 数据；升级计划必须为未完成冷任务的批量索引阶段预留时间，失败后依靠 finalization checkpoint 重放，而不是把缺索引的 scope 发布为 fresh。
-代码索引 batch 还必须先写入 durable staging manifest：manifest 记录 source scope、batch index、文件数、受控事实行数和 `staged/published` 状态。事实发布、checkpoint 更新和 manifest 的 `published` 标记在同一个唯一 writer 事务中完成；若发布前崩溃，保留的 staged manifest 只能作为重放诊断，不能让 scope 变 fresh，也不能绕过 lease 或 checkpoint。manifest 行数按 batch 数有界，并随 source scope 删除级联清理。
+
+SQLite graph-store schema marker v4 是一次明确的 forward derived-retrieval-state migration。它以包含 scope64 partition token 与 scope-qualified group token 的 indexed、zero-weight `routing_key` 重建 global `graph_bm25` FTS5 table，并新增 route state/document/group/term tables 与持久 global route-term document frequency。Route document 保存 document identity/kind/scope/path、`created_graph_version`、可观测 `label_gram_state`、group token、有界 term-count JSON，以及 `fts_rowid NOT NULL UNIQUE` sidecar。权威 evidence、graph facts、code symbols 与 code chunks 不变，因此所有 v4 retrieval structure 都能从这些 source 重建。
+
+当前 document-write transaction 会一起更新 `routing_key`、route sidecar、route-state document count、每组 collection frequency 与持久 global document frequency。Fresh-open reconciliation 检查 schema、`simhash10-topical4-indexed-scope64-partition-ascii-subset128b-256t-a1-docidlen1-v4` route fingerprint、freshness/version state、持久 semantic/vector generation marker，以及 authoritative/active-global/route-document/group/semantic/vector/state population count；它不会在每次 open 时做无界 identity、逐行 tokenizer 或 aggregate 深扫。Canonical identity 与 tokenizer consistency 只在其他 stale/schema/count 条件已经触发重建后校验；仅有 equal-count per-row drift 不会在 open 时触发 rebuild。
+
+重建会取得带 owner/expiry 的 durable lease，并连同 phase/cursor checkpoint 与固定 semantic/vector rebuild plan 发布 `building`，创建 `graph_bm25_rebuild`；旧 attempt 过期后可接管并从持久 checkpoint 续跑。每个 transaction 最多接纳 128 篇文档、4 MiB 估算权威 source bytes、8,192 个 labels 和 8,192 个 links。单篇文档若超过一个或多个工作预算，会独占 transaction 并发出 identity 受界的 warning；该行为保证前进，不代表单文档绝对 byte bound。旧的 flat `graph_bm25` 保持可读，semantic、vector 与 fuzzy lexical fallback 在 `building` 期间暂停，之后以有界 rowid keyset cleanup 删除 stale label/semantic/vector row。当前 evidence/code writer 使用 `IMMEDIATE` transaction，并在 rebuild 活跃时拒绝写入。完整性校验通过后，一个短事务把 active `graph_bm25` 改名为 `graph_bm25_retired`、提升 shadow、把 route state 发布为 `fresh`，并记录 schema marker v4。Retired table 只在提交后删除，因此 crash 或 rollback 不会发布 partial FTS generation。升级计划必须为 active 与 shadow FTS 同时存在、sidecar、WAL 和短暂 retired cleanup 预留时间及临时磁盘余量。
+
+Query hot path 读取持久 version/count/DF，不运行 full-table `COUNT` 或 `SUM`。对每个实际 query term，它会把持久 global DF 与仅限定 business column、最多探测 `df + 1` 行的 `MATCH` 对比；每个 term 都必须不超过 corpus 的 20%，所有探测合计最多预留 65,536 个 postings。Scoped FTS 还会与 scope64 routing token 求交，普通 SQL scope predicate 仍独立承担硬授权。Single-FTS reader 通过 hidden rank column 排序有界 identity window，再经 `fts_rowid` sidecar hydrate；跨越该 window cutoff 的完全同分不承诺确定 membership。Historical unscoped fallback 的 authorized-corpus、label-state 与 `label_lower` probe 使用 version-leading global indexes，scoped index 继续保留。一次完整 graph search 共用一个 deferred read transaction，因此并发 FTS activation 不会拆分其 SQLite snapshot。不能仅因表已存在就报告 routing 为 fresh。
+
+虽然 v4 scorer 把 `routing_key` weight 设为零，FTS5 仍把该列计入 document length 与 corpus average document length，因此 v4 的数值 BM25 baseline 可能不同于 v3。支持的 parity invariant 仅是：同一个 v4 table 上 routed 与 flat 执行的公共文档具有 bitwise-identical score。
+
+既有 v1.1.13 时期的 code index 可能包含已裁掉首尾空白的 Markdown source window；一次性 code-index migration 会在同一原子事务内把含 Markdown 的 scope 标为 stale 并记录 migration marker，但未持久化的字节无法由 database schema migration 恢复。repository graph 物化还会按 indexed file length 校验连续 chunk byte range，并对受影响 scope 返回明确的 lossless/re-index 错误。该 scope 首次使用 `repo graph` 前，operator 必须显式执行完整 `repo index`；incremental `repo update` 会拒绝 stale base，不能完成这项恢复。Markdown window 通过正常的 durable task、single-writer lease、checkpoint、有界重试与 freshness 发布流程重建。安装或替换二进制不能仅因 schema initialization 成功就宣称这项数据刷新已经完成。
+
 本地文件定位索引的 SQLite/FTS5 状态也写入同一运行态数据区。安装器和 service
 template 不能默认扫描全盘、Linux `/opt`、挂载盘或 Windows 非系统盘；只有用户显式配置
 或通过 CLI 传入这些 root 时才建立索引。
@@ -55,16 +66,25 @@ shard catalog 路由是可迁移的，恢复时会基于当前 runtime data 目�
 
 ```text
 preflight doctor
-  -> backup or migration checkpoint
-  -> install new binary
-  -> run schema/index migration
-  -> service restart through platform manager
+  -> operator 停止所有 ad hoc CLI writer
+  -> operator 创建事务一致的 runtime-database backup
+  -> lifecycle executor 记录 binary/service-definition rollback checkpoint
+  -> lifecycle executor 停止 managed service
+     -> stop 成功且不存在 ad hoc writer 时建立独占访问
+  -> 复制/安装新 binary 并刷新 service definition
+  -> 通过 platform service manager 启动新 binary
+     -> 首次同步打开 database 时运行 schema/index migration 与 shadow rebuild
+     -> 该次打开完成后 service 才可用
   -> post-upgrade doctor
 ```
 
-失败时回滚二进制和 service definition；数据 migration 必须有 checkpoint 或 forward-only 说明。
+停止 ad hoc CLI writer 并创建事务一致的 runtime-database backup 是 operator precondition。Lifecycle 成功停止 managed service 后，结合不存在 ad hoc writer，才建立 migration 所需的 database 独占访问。Lifecycle executor 不会独立探测 exclusive access，也不会创建 runtime-database checkpoint；它的 rollback checkpoint 只覆盖 binary 和 service definition。如果 operator 要求独立的 exclusive-access 检查，必须用外部 maintenance procedure 分阶段执行文档化步骤，不能把一次性 `--execute` 当作该验证。
 
-`service lifecycle upgrade --execute` 必须按 dry-run 中的阶段顺序执行：先记录 rollback checkpoint，再停止 service、复制二进制、写 service definition、刷新平台 service manager、启动 service，并在后置 doctor 前后保留执行报告。Linux systemd unit 必须引用包含空格的路径，并把字面 `$` 转义为 `$$`。install 写入显式 `--install-dir` 前不得覆盖已有目标二进制或 service definition；Windows install 必须把 service 创建和 registry/environment 写入拆成可单独回滚的步骤。upgrade 必须 checkpoint 已有目标二进制和 service definition，checkpoint backup 必须使用 attempt-scoped 文件并通过原子 checkpoint 发布成为当前回滚依据；没有旧备份时失败回滚和显式 rollback 只能删除本次确实复制或写入的目标文件，definition-only upgrade 不得删除当前运行的 binary。Windows 和 macOS upgrade 必须在启动前刷新平台 service registration，使 SCM `BinaryPathName` 或 launchd loaded job 与更新后的 service definition 一致。uninstall 失败回滚和基于 uninstall checkpoint 的显式 rollback 如果需要恢复已删除的 service definition，必须从 uninstall 前 checkpoint 恢复原 definition，再重新注册 service manager。文件或 service manager 状态变化后任一阶段失败时，必须按 `rollback_steps` 尝试恢复已完成步骤；restore、definition rewrite、unregister 或 service-registration rollback step 失败后不得继续执行依赖的删除、reload/start 步骤；任何此类状态变化前失败时，不得停止、disable、恢复、重启或卸载既有 service。只有选中的 rollback steps 全部成功时，执行报告才能把 rollback 标为完成；外部 service manager 或 doctor 子进程必须有有界执行时间，并在等待退出和超时期间持续读取 stdout/stderr，进程退出或超时后的输出收集也必须有边界。`--execute` 出现失败 step 时，API/CLI 操作必须返回错误并带出失败 step id，不能把失败报告包装成成功响应。`service lifecycle rollback --execute` 使用 checkpoint 备份恢复二进制和 service definition；没有 checkpoint 时必须把缺口暴露在 warnings 或执行错误中，不能静默宣称回滚成功。
+失败时 lifecycle executor 回滚 binary 和 service definition。Database rollback 使用 operator 创建的 runtime checkpoint；如果没有该 checkpoint，v4 derived-index migration 将按下文说明保持 forward-only。
+
+只把 binary 回滚到 pre-v4 release 并不会撤销 forward derived-index migration。旧二进制可以忽略 routing sidecar 并使用既有 flat query path，但保留的 v4 `graph_bm25` table 与 v3 index 在数值上并不等价。旧二进制若写入 derived document，不会一致维护 `routing_key` 与 v4 sidecar，此后必须把全部 hierarchical metadata 视为 stale。旧 writer 还会写回旧 schema marker，因此后来启动 v4 时，即使 route state 表面兼容，也会显式将其 invalid，再从权威 document 重建 `routing_key` 与 sidecar，完成后才能重新启用 routing。精确恢复旧 scoring baseline 需要还原 pre-v4 runtime-database checkpoint，而不只是换回旧 executable。v4 的 `IMMEDIATE` 应用 fence 不是跨版本 lock protocol：已经运行的旧 binary 不检查 `building`，可以绕过该 fence 写入。权威 facts 才是 recovery boundary；不能把 route metadata 当作用户数据的唯一副本，upgrade、rebuild 与 rollback 都必须独占 database，不能让新旧 writer 并发写入。
+
+`service lifecycle upgrade --execute` 按现有 dry-run 阶段执行：记录 binary/service-definition rollback checkpoint、停止 managed service、按需复制 binary、写 service definition、刷新平台 service manager、启动 service，并在 post-upgrade doctor 前后保留执行报告。它没有独立的 exclusive-access 验证、runtime-database checkpoint 或 migration/rebuild 阶段。调用前，operator 必须停止 ad hoc CLI writer，并创建必要的事务一致 runtime-database checkpoint；service manager 无法 fence 独立运行的旧进程，lifecycle checkpoint 也不覆盖 runtime data。该命令要求 managed-service stop 步骤成功，但不会另行验证独占性。Platform service manager 启动新 binary 后，binary 会在首次同步打开 database 时执行 schema v4 migration 与必要的 shadow rebuild，并且该次打开完成前 service 不可用。Linux systemd unit 必须引用包含空格的路径，并把字面 `$` 转义为 `$$`。install 写入显式 `--install-dir` 前不得覆盖已有目标二进制或 service definition；Windows install 必须把 service 创建和 registry/environment 写入拆成可单独回滚的步骤。upgrade 必须 checkpoint 已有目标二进制和 service definition，checkpoint backup 必须使用 attempt-scoped 文件并通过原子 checkpoint 发布成为当前回滚依据；没有旧备份时失败回滚和显式 rollback 只能删除本次确实复制或写入的目标文件，definition-only upgrade 不得删除当前运行的 binary。Windows 和 macOS upgrade 必须在启动前刷新 platform service registration，使 SCM `BinaryPathName` 或 launchd loaded job 与更新后的 service definition 一致。uninstall 失败回滚和基于 uninstall checkpoint 的显式 rollback 如果需要恢复已删除的 service definition，必须从 uninstall 前 checkpoint 恢复原 definition，再重新注册 service manager。文件或 service manager 状态变化后任一阶段失败时，必须按 `rollback_steps` 尝试恢复已完成步骤；restore、definition rewrite、unregister 或 service-registration rollback step 失败后不得继续执行依赖的删除、reload/start 步骤；任何此类状态变化前失败时，不得停止、disable、恢复、重启或卸载既有 service。只有选中的 rollback steps 全部成功时，执行报告才能把 rollback 标为完成；外部 service manager 或 doctor 子进程必须有有界执行时间，并在等待退出和超时期间持续读取 stdout/stderr，进程退出或超时后的输出收集也必须有边界。`--execute` 出现失败 step 时，API/CLI 操作必须返回错误并带出失败 step id，不能把失败报告包装成成功响应。`service lifecycle rollback --execute` 使用 checkpoint 备份恢复二进制和 service definition，不恢复 runtime database；没有 lifecycle checkpoint 时必须把缺口暴露在 warnings 或执行错误中，不能静默宣称回滚成功。
 
 `relay-knowledge version check` 是只读诊断入口，输出当前版本、最新稳定版本、来源、release URL 和诊断信息。实际升级仍必须由用户、installer 或包管理器显式执行，并继续遵守 preflight、checkpoint、service restart 和 post-upgrade doctor 流程。
 
@@ -92,6 +112,7 @@ preflight doctor
 - `service lifecycle <action> --dry-run` 输出 service 名称、definition 路径、安装目录、运行时路径、权限要求、rollback 计划和 package manifest 校验链路；`--execute` 只在显式请求时运行，并在失败时执行 rollback steps 且返回操作错误。
 - uninstall 清理服务注册和服务定义，但保留或按用户确认处理 runtime data。
 - 分片 SQLite 拓扑的 shard 目录参与 backup、migration、doctor 和 uninstall 确认。
+- SQLite graph-store upgrade 能识别 schema marker v4，在旧 flat FTS 保持可读时通过可接管续跑的 phase/cursor checkpoint 与有界 document/source-byte/label/link batch，从权威 facts 重建 `graph_bm25_rebuild` 及 rowid/version/label-state sidecar，在 `building` 期间暂停 semantic/vector/fuzzy companion reads，原子激活 route/FTS/marker state，为 rebuild 预留时间/WAL/磁盘，并暴露 v3-to-v4 score-baseline 变化。旧 binary 不遵守应用 fence，因此 upgrade 必须独占访问；binary-only rollback 保留 flat path 但不提供数值 v3 equivalence，精确评分回滚需要恢复 pre-v4 database checkpoint。
 - 控制服务和 split worker 的服务定义、运行时目录、日志、环境变量和权限边界在 plan/install/uninstall 中可诊断、可回滚。
 - Release workflow 或等价门禁必须运行 service lifecycle dry-run smoke，验证发布二进制生成的 service definition、rollback plan 和 package manifest 检查不会与 release tag 漂移。
 

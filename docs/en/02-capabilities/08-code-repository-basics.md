@@ -2,8 +2,8 @@
 
 [English](./08-code-repository-basics.md) | [中文](../../zh/02-capabilities/08-code-repository-basics.md)
 
-> Document version: 2.0
-> Date: 2026-05-30
+> Document version: 2.1
+> Date: 2026-08-11
 > Scope: Book 2 capability guide
 
 ## Capability Positioning
@@ -18,6 +18,7 @@ relay-knowledge repo index relay-knowledge --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo status relay-knowledge --format json
 ```
@@ -28,6 +29,12 @@ prefer this default for first-time project registration so later sessions reuse
 the same index; `--alias` remains available as an explicit override.
 
 `repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, `--exclude-generated`, and freshness policy. `repo register` rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results.
+
+`repo graph` is a separate, versioned [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) projection. It reconstructs parseable YAML-frontmatter Markdown only from the resolved indexed snapshot, ignores reserved `index.md` and `log.md`, and requires the OKF `type` field to be a non-empty string. Each concept admits at most 256 `sources` entries and marks source truncation explicitly; every admitted, resource-bounded entry contributes provenance, and `id` is optional. Resources that resolve to bundle concepts target those concept nodes, URLs and scope descriptors produce `external_source` nodes, and path-shaped resources that do not resolve produce `unresolved_source` nodes with resolution metadata instead of disappearing. BFS selection and node/edge materialization retain only request-budget-sized candidate sets before cloning response objects. The focus path must remain inside an explicit bundle root, where `--path .` means the repository root and the most specific matching root wins. The snapshot must be fresh; traversal depth is capped at 2, nodes at 100, edges at 200, and truncation is explicit. Projection runs behind bounded blocking admission rather than on an async executor. HTTP and CLI use these product limits; `relay_repository_graph` additionally caps both node and edge limits by the MCP access policy and caps the complete compact-JSON `structuredContent` object—including metadata, scope, echoed request, nodes, edges, and truncation state—to `max_context_bytes`. The outer MCP text summary, `isError`, and JSON-RPC envelope are outside that byte count. Serialization and near-linear trimming run on a separate four-permit blocking boundary; if the minimal structured object cannot fit, the tool returns `limit_exceeded`. A response timeout or cancellation stops waiting but cannot forcibly cancel an already running blocking worker; that worker may finish while retaining its permit, so total concurrent work stays bounded. None of these entry points reads the live worktree or triggers indexing.
+
+Concept-to-concept edges come from syntax-aware Markdown inline links and used full, collapsed, or shortcut reference links. Fenced code, inline code, image destinations, and unused reference definitions do not create concept edges. Local destinations support angle brackets, titles, query/fragment removal, ASCII punctuation escapes, and UTF-8 percent decoding. Extraction admits at most 256 unique destinations per concept; a body or syntax budget breach sets the neighborhood's `truncated` flag and is exposed as `link_extraction_truncated=true` in that concept node's details.
+
+Before OKF projection, storage normalizes at most 256 bundle roots through the shared repository path-admission contract and pushes them into SQLite as parameterized, case-sensitive BINARY path ranges. It preflights at most 2,049 matching file-metadata rows against the 2,048-file and 8 MiB cumulative indexed-source budgets before reading chunk content. Markdown source windows preserve their original bytes; materialization then requires contiguous `byte_start`/`byte_end` ranges from zero through `file.byte_len` and concatenates them without synthetic separators. Older indexes whose Markdown chunks were trimmed are rejected with an explicit re-index error. A limit or integrity breach never returns a partial document set that could silently omit or alter the focus concept.
 
 `definition`, `references`, and `hybrid` queries use the indexed code graph and SQLite FTS first. When those layers leave a specific recall gap, the query may run bounded internal exact-text source fallback over candidate files from the indexed commit. Fallback results are exposed through `lexical` and `text_fallback` layers and do not replace resolved reference, call, or import edges.
 

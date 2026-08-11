@@ -2,8 +2,8 @@
 
 [中文](./08-code-repository-basics.md) | [English](../../en/02-capabilities/08-code-repository-basics.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-30
+> 文档版本: 2.1
+> 编制日期: 2026-08-11
 > 适用范围: 第二卷能力说明
 
 ## 能力定位
@@ -18,6 +18,7 @@ relay-knowledge repo index relay-knowledge --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo status relay-knowledge --format json
 ```
@@ -25,6 +26,12 @@ relay-knowledge repo status relay-knowledge --format json
 省略 `--alias` 或传入空 alias 时，注册会使用解析后的 Git root 或 filesystem root 目录名作为稳定仓库 alias。agent 首次注册项目时应优先使用这个默认值，让后续 session 复用同一索引；`--alias` 仍可作为显式覆盖。
 
 `repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language`、`--exclude-generated` 和 freshness policy。`repo register` 会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
+
+`repo graph` 是独立、版本化的 [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) 投影。它只从解析后的 indexed snapshot 重建带可解析 YAML frontmatter 的 Markdown，忽略保留的 `index.md` 和 `log.md`，并要求 OKF `type` 是非空字符串。每个 concept 最多接纳 256 个 `sources` entry，并显式标记 source 截断；每个已接纳、resource 受界的 entry 都贡献 provenance，且 `id` 可选。能解析到 bundle concept 的 resource 指向对应 concept node，URL 与范围描述符生成 `external_source` node，具有路径形态但未解析成功的 resource 则生成带 resolution metadata 的 `unresolved_source` node，不会静默消失。BFS 选择与 node/edge 物化会在克隆响应对象前只保留与请求预算同阶的候选集。focus path 必须位于显式 bundle root 内，`--path .` 表示仓库根，多个 root 命中时使用最具体者。snapshot 必须 fresh；遍历深度上限为 2，node 上限为 100，edge 上限为 200，截断会显式标记。投影通过有界 blocking admission 执行，不占用 async executor。HTTP/CLI 使用产品上限；`relay_repository_graph` 还会用 MCP access policy 同时限制 node/edge，并把包含 metadata、scope、回显 request、nodes、edges 与 truncation 状态的完整 compact-JSON `structuredContent` 对象限制在 `max_context_bytes` 内；外层 MCP 文本摘要、`isError` 和 JSON-RPC envelope 不计入该字节数。序列化与近线性裁剪在独立的四 permit blocking 边界执行；若最小结构化对象仍无法容纳则返回 `limit_exceeded`。响应 timeout 或 cancellation 只停止等待，不能强制取消已运行的 blocking worker；worker 可在持有 permit 时继续完成，因此总并发工作仍受界。这些入口都不会读取 live worktree，也不会触发索引。
+
+concept 间的边只来自语法感知的 Markdown inline link，以及实际被引用的 full、collapsed 或 shortcut reference link。fenced code、inline code、图片目标和未使用的 reference definition 都不会生成 concept edge。本地目标支持尖括号、title、移除 query/fragment、ASCII 标点转义与 UTF-8 百分号解码。每个 concept 最多接纳 256 个唯一目标；正文或语法预算触发截断时，neighborhood 的 `truncated` 会置位，且对应 concept node 的 details 会暴露 `link_extraction_truncated=true`。
+
+OKF 投影前，storage 通过共享 repository path-admission contract 规范化最多 256 个 bundle root，并把它们作为参数化、大小写敏感的 BINARY path range 下推到 SQLite。读取 chunk 正文前，loader 最多预检 2,049 条命中文件 metadata，并校验 2,048 文件与累计 8 MiB indexed-source budget。Markdown source window 保留原始字节；物化时还要求 `byte_start`/`byte_end` 从 0 到 `file.byte_len` 连续无缺口，并直接拼接、绝不插入人工分隔符。旧索引若包含已 trim 的 Markdown chunk，会收到明确的重新索引错误。任何预算或完整性越界都不会返回可能静默漏掉或改变 focus concept 的部分文档集。
 
 `definition`、`references` 和 `hybrid` 查询会先使用已索引代码图与 SQLite FTS；当这些层存在明确召回缺口时，才在已索引 commit 的候选文件上执行有界内部 exact-text source fallback。兜底结果以 `lexical` 和 `text_fallback` layer 暴露，不能替代 resolved reference/call/import edge。
 

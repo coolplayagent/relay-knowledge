@@ -79,7 +79,7 @@ pub(super) fn path_matches_filter(path: &str, filter: &str) -> bool {
     !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
 }
 
-fn normalize_path_filter(filter: &str) -> &str {
+pub(super) fn normalize_path_filter(filter: &str) -> &str {
     let mut filter = filter.trim_end_matches(['/', '\\']);
     while let Some(stripped) = filter.strip_prefix("./") {
         filter = stripped;

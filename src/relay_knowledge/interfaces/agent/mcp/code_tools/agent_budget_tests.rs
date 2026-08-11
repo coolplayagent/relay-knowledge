@@ -1,5 +1,8 @@
+use std::collections::HashSet;
+
 use super::{
-    ExploreBudget, apply_agent_code_budget, container_outline, explore_budget, serialized_len,
+    ExploreBudget, apply_agent_code_budget, apply_repository_graph_budget, container_outline,
+    explore_budget, serialize_repository_graph_output, serialized_len,
 };
 use serde_json::json;
 
@@ -9,6 +12,89 @@ fn explore_budget_scales_by_indexed_file_count() {
     assert_eq!(explore_budget(500).calls, 2);
     assert_eq!(explore_budget(5_000).max_output_chars, 45_000);
     assert_eq!(explore_budget(15_000).max_files, 25);
+}
+
+#[test]
+fn repository_graph_budget_keeps_focus_and_bounds_serialized_output() {
+    let oversized = "界".repeat(900);
+    let mut structured = json!({
+        "schema_version": 1,
+        "metadata": {"request_id": "request", "trace_id": "trace"},
+        "scope": {"path_filters": ["knowledge"], "language_filters": ["markdown"]},
+        "request": {
+            "focus_path": "knowledge/focus.md",
+            "repository": {
+                "repository": "fixture",
+                "path_filters": ["knowledge"],
+                "language_filters": ["markdown"]
+            }
+        },
+        "nodes": [
+            {"id": "focus", "kind": "okf_concept", "label": "Focus", "path": "knowledge/focus.md", "details": {"description": oversized}},
+            {"id": "neighbor-a", "kind": "okf_concept", "label": oversized, "details": {}},
+            {"id": "neighbor-b", "kind": "external_source", "label": oversized, "details": {}}
+        ],
+        "edges": [
+            {"id": "a", "source": "focus", "target": "neighbor-a", "details": {}},
+            {"id": "b", "source": "focus", "target": "neighbor-b", "details": {}}
+        ],
+        "truncated": false
+    });
+
+    assert!(apply_repository_graph_budget(&mut structured, 768));
+    assert!(serialized_len(&structured) <= 768);
+    assert_eq!(structured["nodes"][0]["id"], "focus");
+    assert_eq!(structured["truncated"], true);
+    let node_ids = structured["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<HashSet<_>>();
+    for edge in structured["edges"].as_array().expect("edges") {
+        assert!(node_ids.contains(edge["source"].as_str().expect("edge source")));
+        assert!(node_ids.contains(edge["target"].as_str().expect("edge target")));
+    }
+}
+
+#[tokio::test]
+async fn repository_graph_worker_caps_the_complete_structured_content() {
+    let response = json!({
+        "schema_version": 1,
+        "metadata": {"request_id": "r".repeat(2_000), "trace_id": "t".repeat(2_000)},
+        "scope": {"path_filters": ["knowledge"], "language_filters": ["markdown"]},
+        "request": {"focus_path": "knowledge/focus.md"},
+        "nodes": [{
+            "id": "focus",
+            "kind": "okf_concept",
+            "label": "Focus",
+            "path": "knowledge/focus.md",
+            "details": {"description": "evidence ".repeat(1_000)}
+        }],
+        "edges": [],
+        "truncated": false
+    });
+
+    let structured = serialize_repository_graph_output(response, 1_024)
+        .await
+        .expect("bounded structuredContent should fit after compaction");
+
+    assert!(serialized_len(&structured) <= 1_024);
+    assert_eq!(structured["nodes"][0]["id"], "focus");
+    assert_eq!(structured["truncated"], true);
+}
+
+#[test]
+fn repository_graph_budget_rejects_when_the_minimal_envelope_cannot_fit() {
+    let mut structured = json!({
+        "schema_version": 1,
+        "nodes": [{"id": "focus", "kind": "okf_concept", "label": "Focus"}],
+        "edges": [],
+        "truncated": false
+    });
+
+    assert!(!apply_repository_graph_budget(&mut structured, 32));
+    assert_eq!(structured["nodes"][0]["id"], "focus");
 }
 
 #[test]

@@ -81,7 +81,7 @@ pub(in crate::storage::sqlite::retrieval) fn scored_bm25_hit(
         source,
         source_score: -row.rank,
         modality: row.modality,
-        explanation: None,
+        explanation: row.explanation,
     })
 }
 

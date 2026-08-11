@@ -1,19 +1,18 @@
 use std::{thread, time::Duration};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::storage::StorageError;
+
+use super::introspection::{
+    TableColumn, index_has_columns, table_column_info, table_column_is_not_null, table_exists,
+    table_has_columns, table_has_exact_columns, table_has_primary_key_columns,
+    table_has_unique_columns,
+};
 
 struct DerivedTableSchema {
     table: &'static str,
     required_columns: &'static [&'static str],
-}
-
-#[derive(Debug)]
-struct TableColumn {
-    name: String,
-    not_null: bool,
-    default_value: Option<String>,
 }
 
 const INDEX_REFRESH_TASK_COLUMNS: &[&str] = &[
@@ -45,11 +44,75 @@ const GRAPH_BM25_COLUMNS: &[&str] = &[
     "parent_evidence_id",
     "modality",
     "created_graph_version",
+    "routing_key",
     "source_scope",
     "source_path",
     "entity_labels",
     "entity_aliases",
     "content",
+];
+const GRAPH_BM25_ROUTE_STATE_COLUMNS: &[&str] = &[
+    "id",
+    "indexed_graph_version",
+    "document_count",
+    "state",
+    "algorithm_version",
+    "semantic_generation",
+    "vector_generation",
+    "rebuild_phase",
+    "rebuild_cursor",
+    "rebuild_semantic",
+    "rebuild_vector",
+    "rebuild_owner",
+    "rebuild_lease_expires_at_ms",
+];
+const GRAPH_BM25_ROUTE_DOCUMENT_COLUMNS: &[&str] = &[
+    "document_id",
+    "fts_rowid",
+    "document_kind",
+    "created_graph_version",
+    "source_scope",
+    "source_path",
+    "label_gram_state",
+    "group_token",
+    "term_counts_json",
+];
+const GRAPH_BM25_ROUTE_GROUP_COLUMNS: &[&str] = &["source_scope", "group_token", "document_count"];
+const GRAPH_BM25_ROUTE_TERM_COLUMNS: &[&str] = &[
+    "term",
+    "source_scope",
+    "group_token",
+    "collection_frequency",
+];
+const GRAPH_BM25_ROUTE_TERM_TOTAL_COLUMNS: &[&str] = &["term", "document_frequency"];
+const GRAPH_BM25_ROUTE_PATH_INDEX: &str = "graph_bm25_route_documents_scope_path";
+const GRAPH_BM25_ROUTE_PATH_INDEX_COLUMNS: &[&str] =
+    &["source_scope", "source_path", "document_id"];
+const GRAPH_BM25_LABEL_STATE_INDEX: &str = "graph_bm25_route_documents_label_state";
+const GRAPH_BM25_LABEL_STATE_INDEX_COLUMNS: &[&str] = &[
+    "label_gram_state",
+    "source_scope",
+    "created_graph_version",
+    "document_id",
+];
+const GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX: &str = "graph_bm25_route_documents_global_label_state";
+const GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX_COLUMNS: &[&str] =
+    &["label_gram_state", "created_graph_version", "document_id"];
+const GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX: &str = "graph_bm25_label_grams_lookup";
+const GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX_COLUMNS: &[&str] = &[
+    "source_scope",
+    "gram_size",
+    "gram",
+    "label_len",
+    "created_graph_version",
+];
+const GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX: &str = "graph_bm25_label_grams_global_lookup";
+const GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX_COLUMNS: &[&str] = &[
+    "gram_size",
+    "gram",
+    "label_len",
+    "created_graph_version",
+    "source_scope",
 ];
 
 const GRAPH_SEMANTIC_COLUMNS: &[&str] = &[
@@ -86,6 +149,36 @@ const GRAPH_VECTOR_COLUMNS: &[&str] = &[
     "dimension",
     "source_hash",
     "tokenizer_version",
+];
+const GRAPH_SEMANTIC_SCOPE_INDEX: &str = "graph_semantic_documents_scope_version";
+const GRAPH_SEMANTIC_GLOBAL_INDEX: &str = "graph_semantic_documents_version";
+const GRAPH_VECTOR_SCOPE_INDEX: &str = "graph_vector_documents_scope_version";
+const GRAPH_SCOPE_VERSION_INDEX_COLUMNS: &[&str] = &["source_scope", "created_graph_version"];
+const GRAPH_GLOBAL_VERSION_INDEX_COLUMNS: &[&str] = &["created_graph_version", "document_id"];
+const GRAPH_BM25_LABEL_GRAM_COLUMNS: &[&str] = &[
+    "document_id",
+    "document_kind",
+    "source_scope",
+    "created_graph_version",
+    "label",
+    "label_lower",
+    "label_len",
+    "gram_size",
+    "gram",
+];
+const GRAPH_BM25_LABEL_LOOKUP_INDEX: &str = "graph_bm25_label_grams_label_lookup";
+const GRAPH_BM25_LABEL_LOOKUP_INDEX_COLUMNS: &[&str] = &[
+    "label_lower",
+    "source_scope",
+    "created_graph_version",
+    "document_id",
+];
+const GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX: &str = "graph_bm25_label_grams_global_label_lookup";
+const GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX_COLUMNS: &[&str] = &[
+    "label_lower",
+    "created_graph_version",
+    "source_scope",
+    "document_id",
 ];
 const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
     "set_id",
@@ -195,18 +288,347 @@ pub(in crate::storage::sqlite) fn prepare_existing_database(
 }
 
 fn prepare_existing_database_once(connection: &Connection) -> Result<(), StorageError> {
-    drop_incompatible_table(connection, "graph_bm25", GRAPH_BM25_COLUMNS)?;
-    drop_incompatible_table(
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = prepare_existing_database_in_transaction(connection);
+    match result {
+        Ok(()) => connection
+            .execute_batch("COMMIT")
+            .map_err(StorageError::from),
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn prepare_existing_database_in_transaction(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute("DROP TABLE IF EXISTS graph_bm25_vocabulary", [])?;
+    connection.execute("DROP TABLE IF EXISTS graph_bm25_retired", [])?;
+    let bm25_routing_was_compatible = bm25_routing_schema_is_compatible(connection)?;
+    let graph_bm25_was_compatible =
+        table_exists(connection, "graph_bm25")? && graph_bm25_schema_is_compatible(connection)?;
+    let rebuild_checkpoint_was_compatible = bm25_routing_was_compatible
+        && table_exists(connection, "graph_bm25_rebuild")?
+        && named_graph_bm25_schema_is_compatible(connection, "graph_bm25_rebuild")?;
+    let companion_tables_were_compatible = [
+        (
+            "graph_semantic_documents",
+            GRAPH_SEMANTIC_COLUMNS,
+            &["document_id"][..],
+        ),
+        (
+            "graph_vector_documents",
+            GRAPH_VECTOR_COLUMNS,
+            &["document_id"][..],
+        ),
+        (
+            "graph_bm25_label_grams",
+            GRAPH_BM25_LABEL_GRAM_COLUMNS,
+            &["document_id", "label_lower", "gram_size", "gram"][..],
+        ),
+    ]
+    .into_iter()
+    .map(|(table, columns, key)| {
+        Ok(table_has_exact_columns(connection, table, columns)?
+            && table_has_primary_key_columns(connection, table, key)?)
+    })
+    .collect::<Result<Vec<_>, StorageError>>()?
+    .into_iter()
+    .all(|compatible| compatible);
+    let code_tables_were_compatible = CODE_GRAPH_SCHEMAS
+        .iter()
+        .map(|schema| {
+            Ok(table_exists(connection, schema.table)?
+                && table_has_columns(connection, schema.table, schema.required_columns)?)
+        })
+        .collect::<Result<Vec<_>, StorageError>>()?
+        .into_iter()
+        .all(|compatible| compatible);
+    drop_incompatible_bm25_routing(connection)?;
+    let production_dependencies_were_compatible = bm25_routing_was_compatible
+        && graph_bm25_was_compatible
+        && companion_tables_were_compatible
+        && code_tables_were_compatible;
+    invalidate_bm25_routing_after_schema_change(
+        connection,
+        !production_dependencies_were_compatible,
+        production_dependencies_were_compatible && rebuild_checkpoint_was_compatible,
+    )?;
+    connection.execute_batch(
+        "DROP INDEX IF EXISTS graph_bm25_route_documents_scope_group;
+         DROP INDEX IF EXISTS graph_bm25_route_terms_group;
+         DROP INDEX IF EXISTS graph_bm25_label_grams_document;",
+    )?;
+    if !index_has_columns(
+        connection,
+        GRAPH_BM25_ROUTE_PATH_INDEX,
+        GRAPH_BM25_ROUTE_PATH_INDEX_COLUMNS,
+    )? {
+        connection.execute(
+            "DROP INDEX IF EXISTS graph_bm25_route_documents_scope_path",
+            [],
+        )?;
+    }
+    for (index, columns) in [
+        (
+            GRAPH_BM25_LABEL_STATE_INDEX,
+            GRAPH_BM25_LABEL_STATE_INDEX_COLUMNS,
+        ),
+        (
+            GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX,
+            GRAPH_BM25_GLOBAL_LABEL_STATE_INDEX_COLUMNS,
+        ),
+    ] {
+        if !index_has_columns(connection, index, columns)? {
+            connection.execute(&format!("DROP INDEX IF EXISTS {index}"), [])?;
+        }
+    }
+    for (index, columns) in [
+        (
+            GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX,
+            GRAPH_BM25_LABEL_GRAM_SCOPED_INDEX_COLUMNS,
+        ),
+        (
+            GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX,
+            GRAPH_BM25_LABEL_GRAM_GLOBAL_INDEX_COLUMNS,
+        ),
+    ] {
+        if !index_has_columns(connection, index, columns)? {
+            connection.execute(&format!("DROP INDEX IF EXISTS {index}"), [])?;
+        }
+    }
+    drop_incompatible_exact_primary_key_table(
         connection,
         "graph_semantic_documents",
         GRAPH_SEMANTIC_COLUMNS,
+        &["document_id"],
     )?;
-    drop_incompatible_table(connection, "graph_vector_documents", GRAPH_VECTOR_COLUMNS)?;
+    drop_incompatible_exact_primary_key_table(
+        connection,
+        "graph_vector_documents",
+        GRAPH_VECTOR_COLUMNS,
+        &["document_id"],
+    )?;
+    drop_incompatible_exact_primary_key_table(
+        connection,
+        "graph_bm25_label_grams",
+        GRAPH_BM25_LABEL_GRAM_COLUMNS,
+        &["document_id", "label_lower", "gram_size", "gram"],
+    )?;
+    for (index, columns) in [
+        (
+            GRAPH_SEMANTIC_SCOPE_INDEX,
+            GRAPH_SCOPE_VERSION_INDEX_COLUMNS,
+        ),
+        (
+            GRAPH_SEMANTIC_GLOBAL_INDEX,
+            GRAPH_GLOBAL_VERSION_INDEX_COLUMNS,
+        ),
+        (GRAPH_VECTOR_SCOPE_INDEX, GRAPH_SCOPE_VERSION_INDEX_COLUMNS),
+        (
+            GRAPH_BM25_LABEL_LOOKUP_INDEX,
+            GRAPH_BM25_LABEL_LOOKUP_INDEX_COLUMNS,
+        ),
+        (
+            GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX,
+            GRAPH_BM25_GLOBAL_LABEL_LOOKUP_INDEX_COLUMNS,
+        ),
+    ] {
+        if !index_has_columns(connection, index, columns)? {
+            connection.execute(&format!("DROP INDEX IF EXISTS {index}"), [])?;
+        }
+    }
     rebuild_incompatible_code_graph_tables(connection)?;
     rebuild_incompatible_index_refresh_tasks(connection)?;
     rebuild_incompatible_workspace_package_mappings(connection)?;
 
     Ok(())
+}
+
+fn invalidate_bm25_routing_after_schema_change(
+    connection: &Connection,
+    routing_schema_changed: bool,
+    resumable_building_generation: bool,
+) -> Result<(), StorageError> {
+    if !table_exists(connection, "relay_storage_schema_state")?
+        || !table_exists(connection, "graph_bm25_route_state")?
+    {
+        return Ok(());
+    }
+    let version = connection
+        .query_row(
+            "SELECT version
+             FROM relay_storage_schema_state
+             WHERE key = 'sqlite_graph_store'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    let marker_changed = version != Some(super::marker::SCHEMA_MARKER_VERSION);
+    connection.execute(
+        "UPDATE graph_bm25_route_state
+         SET state = 'stale'
+         WHERE id = 1
+           AND (
+               (state = 'building' AND NOT ?1)
+               OR (state <> 'building' AND (?2 OR ?3))
+           )",
+        params![
+            resumable_building_generation,
+            routing_schema_changed,
+            marker_changed
+        ],
+    )?;
+    Ok(())
+}
+
+fn bm25_routing_schema_is_compatible(connection: &Connection) -> Result<bool, StorageError> {
+    for (table, columns) in [
+        ("graph_bm25_route_state", GRAPH_BM25_ROUTE_STATE_COLUMNS),
+        (
+            "graph_bm25_route_documents",
+            GRAPH_BM25_ROUTE_DOCUMENT_COLUMNS,
+        ),
+        ("graph_bm25_route_groups", GRAPH_BM25_ROUTE_GROUP_COLUMNS),
+        ("graph_bm25_route_terms", GRAPH_BM25_ROUTE_TERM_COLUMNS),
+        (
+            "graph_bm25_route_term_totals",
+            GRAPH_BM25_ROUTE_TERM_TOTAL_COLUMNS,
+        ),
+    ] {
+        if !bm25_route_table_is_compatible(connection, table, columns)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn drop_incompatible_bm25_routing(connection: &Connection) -> Result<(), StorageError> {
+    for (table, columns) in [
+        ("graph_bm25_route_state", GRAPH_BM25_ROUTE_STATE_COLUMNS),
+        (
+            "graph_bm25_route_documents",
+            GRAPH_BM25_ROUTE_DOCUMENT_COLUMNS,
+        ),
+        ("graph_bm25_route_groups", GRAPH_BM25_ROUTE_GROUP_COLUMNS),
+        ("graph_bm25_route_terms", GRAPH_BM25_ROUTE_TERM_COLUMNS),
+        (
+            "graph_bm25_route_term_totals",
+            GRAPH_BM25_ROUTE_TERM_TOTAL_COLUMNS,
+        ),
+    ] {
+        if table_exists(connection, table)?
+            && !bm25_route_table_is_compatible(connection, table, columns)?
+        {
+            connection.execute(&format!("DROP TABLE {table}"), [])?;
+        }
+    }
+    Ok(())
+}
+
+fn bm25_route_table_is_compatible(
+    connection: &Connection,
+    table: &str,
+    columns: &[&str],
+) -> Result<bool, StorageError> {
+    let columns_are_compatible = table_has_exact_columns(connection, table, columns)?;
+    if !columns_are_compatible {
+        return Ok(false);
+    }
+    let primary_key = match table {
+        "graph_bm25_route_state" => Some(&["id"][..]),
+        "graph_bm25_route_documents" => Some(&["document_id"][..]),
+        "graph_bm25_route_groups" => Some(&["source_scope", "group_token"][..]),
+        "graph_bm25_route_terms" => Some(&["term", "source_scope", "group_token"][..]),
+        "graph_bm25_route_term_totals" => Some(&["term"][..]),
+        _ => None,
+    };
+    match primary_key {
+        Some(primary_key) => {
+            if !table_has_primary_key_columns(connection, table, primary_key)? {
+                return Ok(false);
+            }
+            if table == "graph_bm25_route_documents" {
+                return Ok(table_column_is_not_null(connection, table, "fts_rowid")?
+                    && table_has_unique_columns(connection, table, &["fts_rowid"])?);
+            }
+            Ok(true)
+        }
+        None => Ok(true),
+    }
+}
+
+fn drop_incompatible_exact_primary_key_table(
+    connection: &Connection,
+    table: &str,
+    columns: &[&str],
+    primary_key: &[&str],
+) -> Result<(), StorageError> {
+    if table_exists(connection, table)?
+        && (!table_has_exact_columns(connection, table, columns)?
+            || !table_has_primary_key_columns(connection, table, primary_key)?)
+    {
+        connection.execute(&format!("DROP TABLE {table}"), [])?;
+    }
+    Ok(())
+}
+
+fn graph_bm25_schema_is_compatible(connection: &Connection) -> Result<bool, StorageError> {
+    named_graph_bm25_schema_is_compatible(connection, "graph_bm25")
+}
+
+fn named_graph_bm25_schema_is_compatible(
+    connection: &Connection,
+    table: &str,
+) -> Result<bool, StorageError> {
+    if !table_has_exact_columns(connection, table, GRAPH_BM25_COLUMNS)? {
+        return Ok(false);
+    }
+    let definition = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table],
+            |row| row.get::<_, String>(0),
+        )?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    Ok(definition.contains("using fts5")
+        && [
+            "content=",
+            "content =",
+            "tokenize=",
+            "tokenize =",
+            "prefix=",
+            "prefix =",
+            "detail=",
+            "detail =",
+            "columnsize=",
+            "columnsize =",
+        ]
+        .iter()
+        .all(|option| !definition.contains(option))
+        && [
+            "document_id",
+            "document_kind",
+            "evidence_id",
+            "parent_evidence_id",
+            "modality",
+            "created_graph_version",
+        ]
+        .iter()
+        .all(|column| definition.contains(&format!("{column} unindexed")))
+        && [
+            "routing_key",
+            "source_scope",
+            "source_path",
+            "entity_labels",
+            "entity_aliases",
+            "content",
+        ]
+        .iter()
+        .all(|column| !definition.contains(&format!("{column} unindexed"))))
 }
 
 fn schema_compatibility_error_is_retryable(error: &StorageError) -> bool {
@@ -266,19 +688,9 @@ fn rebuild_incompatible_index_refresh_tasks(connection: &Connection) -> Result<(
         ",
     );
 
-    connection.execute_batch("BEGIN IMMEDIATE")?;
-    let result = connection
+    connection
         .execute_batch(&migration)
-        .map_err(StorageError::from);
-    match result {
-        Ok(()) => connection
-            .execute_batch("COMMIT")
-            .map_err(StorageError::from),
-        Err(error) => {
-            let _ = connection.execute_batch("ROLLBACK");
-            Err(error)
-        }
-    }
+        .map_err(StorageError::from)
 }
 
 fn index_refresh_tasks_needs_rebuild(columns: &[TableColumn]) -> bool {
@@ -365,19 +777,6 @@ fn column_or(columns: &[TableColumn], column: &str, fallback: &str) -> String {
 
 fn has_column(columns: &[TableColumn], expected: &str) -> bool {
     columns.iter().any(|column| column.name == expected)
-}
-
-fn drop_incompatible_table(
-    connection: &Connection,
-    table: &str,
-    required_columns: &[&str],
-) -> Result<(), StorageError> {
-    if table_exists(connection, table)? && !table_has_columns(connection, table, required_columns)?
-    {
-        connection.execute(&format!("DROP TABLE {table}"), [])?;
-    }
-
-    Ok(())
 }
 
 fn rebuild_incompatible_code_graph_tables(connection: &Connection) -> Result<(), StorageError> {
@@ -469,88 +868,6 @@ fn rebuild_incompatible_workspace_package_mappings(
         ",
     )?;
     Ok(())
-}
-
-fn table_has_columns(
-    connection: &Connection,
-    table: &str,
-    required_columns: &[&str],
-) -> Result<bool, StorageError> {
-    let columns = table_columns(connection, table)?;
-
-    Ok(required_columns
-        .iter()
-        .all(|required| columns.iter().any(|column| column == required)))
-}
-
-fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
-fn table_has_unique_columns(
-    connection: &Connection,
-    table: &str,
-    expected_columns: &[&str],
-) -> Result<bool, StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA index_list({table})"))?;
-    let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)? != 0))
-    })?;
-    let indexes = rows.collect::<Result<Vec<_>, _>>()?;
-
-    for (index_name, unique) in indexes {
-        if !unique {
-            continue;
-        }
-        let mut statement = connection.prepare(&format!("PRAGMA index_info({index_name})"))?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
-        let columns = rows.collect::<Result<Vec<_>, _>>()?;
-        if columns
-            .iter()
-            .map(String::as_str)
-            .eq(expected_columns.iter().copied())
-        {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-fn table_column_info(
-    connection: &Connection,
-    table: &str,
-) -> Result<Vec<TableColumn>, StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| {
-        Ok(TableColumn {
-            name: row.get(1)?,
-            not_null: row.get(3)?,
-            default_value: row.get(4)?,
-        })
-    })?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
-fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT EXISTS (
-                SELECT 1 FROM sqlite_master
-                WHERE type = 'table' AND name = ?1
-            )
-            ",
-            params![table],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(StorageError::from)
 }
 
 #[cfg(test)]

@@ -2,6 +2,40 @@ use super::*;
 use crate::domain::CodeQueryKind;
 
 #[test]
+fn parses_snapshot_scoped_repository_graph() {
+    let command = parse_repo(&[
+        "graph".to_owned(),
+        "core".to_owned(),
+        "--focus".to_owned(),
+        "knowledge/research/rates.md".to_owned(),
+        "--path".to_owned(),
+        "knowledge/research".to_owned(),
+        "--ref".to_owned(),
+        "main".to_owned(),
+        "--depth".to_owned(),
+        "2".to_owned(),
+        "--node-limit".to_owned(),
+        "40".to_owned(),
+        "--edge-limit".to_owned(),
+        "80".to_owned(),
+    ])
+    .expect("repo graph should parse");
+
+    assert_eq!(
+        command,
+        RepoCommand::Graph {
+            alias: "core".to_owned(),
+            focus_path: "knowledge/research/rates.md".to_owned(),
+            depth: 2,
+            ref_selector: "main".to_owned(),
+            path_filters: vec!["knowledge/research".to_owned()],
+            node_limit: 40,
+            edge_limit: 80,
+        }
+    );
+}
+
+#[test]
 fn parses_repo_query_with_kind_filters_and_freshness() {
     let command = parse_repo(&[
         "query".to_owned(),

@@ -232,11 +232,13 @@ relay-knowledge service worker run --task-id <id> --format json
 
 ```text
 preflight doctor
-  -> backup or migration checkpoint
+  -> 停止 ad hoc CLI writer
+  -> 创建事务一致的 runtime-database backup
   -> stop service through platform manager
   -> install new binary and service definition
-  -> run schema/index migration through normal startup
   -> start service through platform manager
+     -> 首次同步打开执行 schema/index migration 与必要的 shadow rebuild
+     -> 打开完成后 service 才可用
   -> post-upgrade doctor
 ```
 
@@ -249,7 +251,7 @@ relay-knowledge service lifecycle upgrade --dry-run --target-version 1.2.3 --ins
 relay-knowledge service doctor --format json
 ```
 
-备份必须覆盖 `runtime_state_paths` 中列出的所有路径。`partitioned_sqlite` 下必须同时备份主数据库和 shard 目录，只备份主库会让代码事实不可见。
+备份必须是事务一致的，并覆盖 `runtime_state_paths` 中列出的所有路径。`partitioned_sqlite` 下必须同时备份主数据库和 shard 目录，只备份主库会让代码事实不可见。Lifecycle checkpoint 只覆盖 binary 和 service definition，不覆盖 runtime database；`--execute` 要求 stop-service 步骤成功，但不会独立验证是否还有 unmanaged writer。
 
 卸载服务但保留 runtime data:
 

@@ -70,6 +70,8 @@ relay-knowledge service lifecycle rollback --execute --install-dir /opt/relay-kn
 relay-knowledge service lifecycle uninstall --execute --format json
 ```
 
+Before a v4-affecting upgrade, stop every ad hoc CLI writer and create a transactionally consistent backup of every database and shard listed in `runtime_state_paths`. The lifecycle checkpoint covers only the binary and service definition, not runtime databases. The lifecycle stop step must succeed before the new binary starts; its first synchronous database open performs schema/index migration and any shadow rebuild, so the service is unavailable until that open completes. The command does not independently verify that no unmanaged writer remains.
+
 If a lifecycle execution stage fails, the execution report records completed steps, failed step id, rollback steps attempted, and whether rollback completed. Rollback is only marked complete when every selected rollback step succeeds; failures before any mutating lifecycle step do not stop or uninstall an existing service. Installs with an explicit `--install-dir` reject an existing target binary instead of overwriting it; upgrades checkpoint an existing target binary and remove the copied binary during rollback when no prior binary backup existed. External service-manager and doctor commands are time-bounded so hung child processes return an execution report instead of waiting forever. The uninstall path removes service registration and generated service definitions, but runtime data stays in `runtime_state_paths` unless the user explicitly removes it.
 
 ## 9.4 Silent Update Operator

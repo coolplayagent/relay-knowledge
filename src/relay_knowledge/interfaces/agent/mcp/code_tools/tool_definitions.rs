@@ -9,7 +9,7 @@ use crate::{
 
 use super::super::tool_registry::{
     CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL,
-    CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL,
+    CODE_REPOSITORY_GRAPH_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL,
 };
 
 const CODE_QUERY_KIND_SCHEMA_VALUES: &[&str] = &[
@@ -54,6 +54,26 @@ pub(in crate::interfaces::agent::mcp) fn code_query_tool_definition() -> Value {
                 }
             },
             "required": ["repository", "query"]
+        }
+    })
+}
+
+pub(in crate::interfaces::agent::mcp) fn code_repository_graph_tool_definition() -> Value {
+    json!({
+        "name": CODE_REPOSITORY_GRAPH_TOOL,
+        "description": "Return a bounded OKF v0.2 concept/source neighborhood from one authorized, fresh indexed repository snapshot. This tool never reads the live worktree or triggers indexing.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repository": {"type": "string", "minLength": 1},
+                "focus_path": {"type": "string", "minLength": 1, "maxLength": MAX_AGENT_PATH_CHARS},
+                "ref_selector": {"type": "string"},
+                "path_filters": {"type": "array", "minItems": 1, "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 2},
+                "node_limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Also capped by the MCP access-policy max_limit."},
+                "edge_limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "Also capped by the MCP access-policy max_limit."}
+            },
+            "required": ["repository", "focus_path", "path_filters"]
         }
     })
 }

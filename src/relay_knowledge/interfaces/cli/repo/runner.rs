@@ -3,7 +3,8 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
-        CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalRequest,
+        CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
+        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request},
 };
@@ -229,6 +230,41 @@ pub async fn run_repo(
 
             render_response(
                 "code.repo.query",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoCommand::Graph {
+            alias,
+            focus_path,
+            depth,
+            ref_selector,
+            path_filters,
+            node_limit,
+            edge_limit,
+        } => {
+            let request = RepositoryGraphNeighborhoodRequest::new(
+                selector(
+                    alias,
+                    ref_selector,
+                    path_filters,
+                    vec!["markdown".to_owned()],
+                    format,
+                )?,
+                focus_path,
+                depth,
+                node_limit,
+                edge_limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = service
+                .repository_graph_neighborhood(request, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "code.repo.graph",
                 response.metadata.clone(),
                 &response,
                 format,

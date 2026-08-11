@@ -85,6 +85,7 @@
 - [第 9 章 GitNexus 功能与界面实现研究 2026](04-research/09-gitnexus-reference-analysis-2026.md)
 - [第 10 章 软件全域建模研究 2026](04-research/10-software-global-domain-modeling-research-2026.md)
 - [第 11 章 软件全域建模、CodeGraph 与 Search Everything 对比研究 2026](04-research/11-software-global-codegraph-search-everything-comparison-2026.md)
+- [第 12 章 分层 BM25 算法分析 2026](04-research/12-hierarchical-bm25-analysis-2026.md)
 
 ## 附录 A：基准记录
 

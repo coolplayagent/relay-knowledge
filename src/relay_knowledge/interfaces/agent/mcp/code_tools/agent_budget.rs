@@ -1,5 +1,20 @@
+use std::{
+    collections::HashSet,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
+
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use tokio::sync::Semaphore;
+
+use crate::interfaces::agent::{AgentAdapterError, AgentAdapterErrorKind};
+
+const REPOSITORY_GRAPH_OUTPUT_QUEUE_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONCURRENT_REPOSITORY_GRAPH_OUTPUTS: usize = 4;
+
+static REPOSITORY_GRAPH_OUTPUT_PERMITS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(MAX_CONCURRENT_REPOSITORY_GRAPH_OUTPUTS)));
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub(super) struct ExploreBudget {
@@ -67,6 +82,152 @@ pub(super) fn apply_agent_code_budget(
         structured["truncated"] = Value::Bool(true);
         structured["agent_output"]["truncated"] = Value::Bool(true);
     }
+}
+
+pub(super) async fn serialize_repository_graph_output<T>(
+    response: T,
+    max_output_bytes: usize,
+) -> Result<Value, AgentAdapterError>
+where
+    T: Serialize + Send + 'static,
+{
+    let permit = tokio::time::timeout(
+        REPOSITORY_GRAPH_OUTPUT_QUEUE_TIMEOUT,
+        Arc::clone(&REPOSITORY_GRAPH_OUTPUT_PERMITS).acquire_owned(),
+    )
+    .await
+    .map_err(|_| {
+        AgentAdapterError::new(
+            AgentAdapterErrorKind::QosRejected,
+            "repository graph output queue remained saturated past its deadline",
+        )
+    })?
+    .map_err(|_| {
+        AgentAdapterError::new(
+            AgentAdapterErrorKind::StorageUnavailable,
+            "repository graph output queue is unavailable",
+        )
+    })?;
+    let task = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let mut structured = serde_json::to_value(response).map_err(|error| {
+            AgentAdapterError::new(
+                AgentAdapterErrorKind::Internal,
+                format!("failed to serialize repository graph structuredContent: {error}"),
+            )
+        })?;
+        if !apply_repository_graph_budget(&mut structured, max_output_bytes) {
+            return Err(AgentAdapterError::new(
+                AgentAdapterErrorKind::LimitExceeded,
+                "repository graph structuredContent exceeds MCP max_context_bytes after bounded compaction",
+            ));
+        }
+
+        Ok(structured)
+    });
+    task.await.map_err(|error| {
+        AgentAdapterError::new(
+            AgentAdapterErrorKind::Internal,
+            format!("repository graph output worker failed: {error}"),
+        )
+    })?
+}
+
+pub(super) fn apply_repository_graph_budget(
+    structured: &mut Value,
+    max_output_bytes: usize,
+) -> bool {
+    if serialized_len(structured) <= max_output_bytes {
+        return true;
+    }
+
+    structured["truncated"] = Value::Bool(true);
+    remove_repository_graph_details(structured);
+    if serialized_len(structured) <= max_output_bytes {
+        return true;
+    }
+
+    compact_echoed_request(structured);
+    compact_scope_filters(structured);
+    compact_metadata(structured);
+    if serialized_len(structured) <= max_output_bytes {
+        return true;
+    }
+
+    trim_repository_graph_arrays(structured, max_output_bytes);
+    serialized_len(structured) <= max_output_bytes
+}
+
+fn remove_repository_graph_details(structured: &mut Value) {
+    for key in ["nodes", "edges"] {
+        if let Some(items) = structured.get_mut(key).and_then(Value::as_array_mut) {
+            for item in items {
+                if let Some(item) = item.as_object_mut() {
+                    item.remove("details");
+                }
+            }
+        }
+    }
+}
+
+fn trim_repository_graph_arrays(structured: &mut Value, max_output_bytes: usize) {
+    let nodes = take_value_array(structured, "nodes");
+    let edges = take_value_array(structured, "edges");
+    let mut output_bytes = serialized_len(structured);
+    let mut retained_nodes = Vec::new();
+
+    for node in nodes {
+        let added_bytes = array_item_bytes(&node, retained_nodes.len());
+        if output_bytes.saturating_add(added_bytes) > max_output_bytes {
+            if retained_nodes.is_empty() {
+                structured["nodes"] = Value::Array(vec![node]);
+                structured["edges"] = Value::Array(Vec::new());
+                return;
+            }
+            break;
+        }
+        output_bytes = output_bytes.saturating_add(added_bytes);
+        retained_nodes.push(node);
+    }
+
+    let retained_ids = retained_nodes
+        .iter()
+        .filter_map(|node| node.get("id").and_then(Value::as_str).map(str::to_owned))
+        .collect::<HashSet<_>>();
+    let mut retained_edges = Vec::new();
+    for edge in edges {
+        let endpoints_retained = edge
+            .get("source")
+            .and_then(Value::as_str)
+            .zip(edge.get("target").and_then(Value::as_str))
+            .is_some_and(|(source, target)| {
+                retained_ids.contains(source) && retained_ids.contains(target)
+            });
+        if !endpoints_retained {
+            continue;
+        }
+        let added_bytes = array_item_bytes(&edge, retained_edges.len());
+        if output_bytes.saturating_add(added_bytes) > max_output_bytes {
+            break;
+        }
+        output_bytes = output_bytes.saturating_add(added_bytes);
+        retained_edges.push(edge);
+    }
+
+    structured["nodes"] = Value::Array(retained_nodes);
+    structured["edges"] = Value::Array(retained_edges);
+}
+
+fn take_value_array(structured: &mut Value, key: &str) -> Vec<Value> {
+    structured
+        .get_mut(key)
+        .and_then(Value::as_array_mut)
+        .map(std::mem::take)
+        .unwrap_or_default()
+}
+
+fn array_item_bytes(item: &Value, retained_count: usize) -> usize {
+    serialized_len(item).saturating_add(usize::from(retained_count > 0))
 }
 
 fn enforce_serialized_budget(structured: &mut Value, max_output_chars: usize) -> bool {

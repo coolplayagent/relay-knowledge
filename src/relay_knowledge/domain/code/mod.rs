@@ -3,6 +3,7 @@ mod context;
 mod dependencies;
 mod graph_records;
 mod repository;
+mod repository_graph;
 mod repository_index;
 mod repository_set;
 mod staleness;
@@ -37,6 +38,13 @@ pub use repository::{
     RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
     RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, code_snapshot_expected_scope_id,
     code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
+};
+pub use repository_graph::{
+    IndexedRepositoryDocument, REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT,
+    REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT, REPOSITORY_GRAPH_MAX_DEPTH,
+    REPOSITORY_GRAPH_MAX_EDGE_LIMIT, REPOSITORY_GRAPH_MAX_NODE_LIMIT, RepositoryGraphEdge,
+    RepositoryGraphNeighborhood, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
+    project_okf_neighborhood,
 };
 pub use repository_index::{
     CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexResourceBudget,

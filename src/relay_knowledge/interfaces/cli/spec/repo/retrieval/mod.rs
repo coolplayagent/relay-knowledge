@@ -108,6 +108,87 @@ pub(in crate::interfaces::cli::spec) fn repo_query() -> CliCommandSpec {
     )
 }
 
+pub(in crate::interfaces::cli::spec) fn repo_graph() -> CliCommandSpec {
+    command!(
+        &["repo", "graph"],
+        "relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth <1|2>] [--node-limit <n>] [--edge-limit <n>]",
+        "Read a bounded OKF concept/source neighborhood from one fresh indexed snapshot.",
+        "code.repo.graph",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[],
+        )],
+        &[
+            opt(
+                "--focus",
+                Some("path"),
+                true,
+                false,
+                "Indexed OKF concept Markdown path.",
+                None,
+                &[],
+            ),
+            opt(
+                "--path",
+                Some("root"),
+                true,
+                true,
+                "Explicit OKF bundle root containing the focus concept.",
+                None,
+                &[],
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Fresh indexed Git ref.",
+                Some("HEAD"),
+                &[],
+            ),
+            opt(
+                "--depth",
+                Some("1|2"),
+                false,
+                false,
+                "Concept-link traversal depth.",
+                Some("1"),
+                &["1", "2"],
+            ),
+            opt(
+                "--node-limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum returned nodes, capped at 100.",
+                Some("100"),
+                &[],
+            ),
+            opt(
+                "--edge-limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum returned edges, capped at 200.",
+                Some("200"),
+                &[],
+            ),
+        ],
+        &[
+            "relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json"
+        ],
+        &[
+            "The graph is derived only from indexed Markdown at the resolved commit; it never reads the live worktree.",
+            "The selected snapshot must be fresh, and the focus must stay inside an explicit path root.",
+        ],
+    )
+}
+
 pub(in crate::interfaces::cli::spec) fn repo_context() -> CliCommandSpec {
     command!(
         &["repo", "context"],

@@ -2,8 +2,8 @@
 
 [中文](../../zh/04-research/README.md) | [English](../../en/04-research/README.md)
 
-> 文档版本: 1.1
-> 编制日期: 2026-06-05
+> 文档版本: 1.2
+> 编制日期: 2026-08-11
 > 范围: 研究来源、研究目标、竞争力判断、场景化落地和前瞻路线。
 
 `04-research` 不是资料归档目录，而是 `relay-knowledge` 的前瞻判断层。研究结论必须回答四个问题: 来源是否可信，目标是否服务产品场景，外部经验如何取长补短，以及哪些能力会形成未来竞争力。
@@ -37,6 +37,7 @@
 - Everything indexes: <https://www.voidtools.com/support/everything/indexes>
 - plocate: <https://plocate.sesse.net/>
 - Sourcegraph/Zoekt: <https://github.com/sourcegraph/zoekt>
+- Hierarchical BM25 论文: <https://arxiv.org/abs/2608.00229>, <https://arxiv.org/html/2608.00229v1>
 - 2026 CodeGraph/Understand Anything X 趋势捕获: <https://trendshift.io/repositories/26949>, <https://trendshift.io/repositories/23482>
 - 2026 CodeGraph/Graphify/Understand Anything Reddit 讨论入口: <https://www.reddit.com/r/ClaudeAI/comments/1rp6pkr/i_built_an_mcp_server_that_gives_claude_code_a/>, <https://www.reddit.com/r/ClaudeAI/comments/1ss28rj/i_built_a_graphify_skill_for_claude_code_that/>, <https://www.reddit.com/r/ClaudeCode/comments/1ttwyr0/understand_anything_vs_graphify_experience_and/>
 
@@ -62,3 +63,4 @@
 - [第 9 章 GitNexus 功能与界面实现研究 2026](09-gitnexus-reference-analysis-2026.md): 分析 GitNexus 的 CLI/MCP/HTTP 后端、代码图谱、Web 图谱界面、Agent 工作流和后续改进点。
 - [第 10 章 软件全域建模研究 2026](10-software-global-domain-modeling-research-2026.md): 从软件工程 KG、代码知识图、SBOM、SDK/依赖版本、动态图谱和代码生成研究中提炼全域建模路线。
 - [第 11 章 软件全域建模、CodeGraph 与 Search Everything 对比研究 2026](11-software-global-codegraph-search-everything-comparison-2026.md): 基于 2026 年 arXiv、X.com、Reddit 和开源项目，对全域建模、代码图谱、Agentic GraphRAG、确定性 Code RAG、全域搜索和已提竞品特性 issue 做来源可追溯的对比。
+- [第 12 章 分层 BM25 算法分析 2026](12-hierarchical-bm25-analysis-2026.md): 区分论文的十亿规模证据与 relay-knowledge 的 single-FTS route-intersection SQLite 落地，并明确正确性边界、fallback 门禁和待测基准。

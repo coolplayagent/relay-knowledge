@@ -1,6 +1,6 @@
 //! Transactional replacement of persisted code-graph facts.
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::{
     domain::{
@@ -17,7 +17,8 @@ pub(in crate::storage::sqlite) fn commit_batch(
     connection: &mut Connection,
     batch: CodeGraphBatch,
 ) -> Result<CodeGraphCommitReceipt, StorageError> {
-    let transaction = connection.transaction()?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    retrieval::ensure_bm25_rebuild_inactive(&transaction)?;
     let current = current_graph_version_in_transaction(&transaction)?;
     let next = GraphVersion::new(current.get() + 1);
     let file_count = batch.files.len();
@@ -64,7 +65,12 @@ fn replace_file_facts(
         "DELETE FROM code_files WHERE source_scope = ?1 AND path = ?2",
         params![file.source_scope.as_str(), file.path],
     )?;
-    retrieval::delete_code_documents(connection, file.source_scope.as_str(), &file.path)?;
+    retrieval::delete_code_documents(
+        connection,
+        file.source_scope.as_str(),
+        &file.path,
+        graph_version.get(),
+    )?;
     connection.execute(
         "INSERT INTO code_files
          (source_scope, path, content_hash, language_id, parse_status, diagnostic,
@@ -135,7 +141,13 @@ fn insert_symbol(
         &symbol_id,
         &name,
         &kind,
-        graph_version.get(),
+        retrieval::RetrievalWriteContext {
+            graph_version: graph_version.get(),
+            bm25_target: retrieval::Bm25WriteTarget::Live,
+            refresh_labels: true,
+            refresh_semantic: true,
+            refresh_vector: true,
+        },
     )?;
 
     Ok(())
@@ -217,7 +229,13 @@ fn insert_chunk(
         &chunk_id,
         &linked_symbol_ids,
         &content,
-        graph_version.get(),
+        retrieval::RetrievalWriteContext {
+            graph_version: graph_version.get(),
+            bm25_target: retrieval::Bm25WriteTarget::Live,
+            refresh_labels: true,
+            refresh_semantic: true,
+            refresh_vector: true,
+        },
     )?;
     for symbol_id in chunk.linked_symbol_ids {
         connection.execute(

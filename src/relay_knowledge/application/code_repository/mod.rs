@@ -7,6 +7,7 @@ mod impact;
 mod indexing;
 mod query;
 mod repository;
+mod repository_graph;
 mod repository_set;
 mod scope;
 mod software_projection;

@@ -78,24 +78,19 @@ This skill-over-CLI path is separate from MCP/ACP protocol access.
 
 ### Release Readiness Notes
 
-Before tagging a new release, verify that user-facing entry points, installation
-guidance, release constraints, checksums, generated skill metadata, and version
-numbers still agree. The release-focused reading path is:
+Before tagging, verify user entry points, installation guidance, release constraints,
+checksums, generated skill metadata, and versions. The release reading path is:
 
 - [Documentation Bookshelf](docs/en/README.md)
 - [Installation and Runtime Directories](docs/en/01-user-guide/01-install-and-runtime.md)
 - [Installation, Release, and Upgrade](docs/en/03-architecture-specs/19-installation-release-and-upgrade.md)
 - [Documentation Release Readiness Audit 2026-06-05](docs/en/06-verification/11-documentation-release-readiness-2026-06-05.md)
 
-This documentation refresh is intentionally documentation-only; it does not
-change CLI, service, Web, indexing, retrieval, or release workflow behavior.
-
 ## What Works Today
 
-- Hybrid GraphRAG context packs with BM25, local semantic signatures,
-  local hashed-vector retrieval, graph evidence fallback, schema paths,
-  temporal/community context, freshness metadata, truncation state, and ranking
-  explanations.
+- Hybrid GraphRAG context packs with flat or bounded single-FTS hierarchical BM25,
+  local semantic/hash-vector retrieval, graph fallback, schema/temporal/community
+  context, freshness, truncation, and ranking explanations.
 - Structured graph facts for evidence, entities, typed relations, claims,
   events, source spans, confidence, graph versions, and accepted/proposed grounding status;
   `domain/graph/{multimodal,mutation,retrieval}/` keeps each contract with its direct tests.
@@ -164,6 +159,7 @@ change CLI, service, Web, indexing, retrieval, or release workflow behavior.
 - [Book 4, Chapter 9: GitNexus Feature and UI Implementation Research](docs/en/04-research/09-gitnexus-reference-analysis-2026.md):
   GitNexus CLI/MCP/HTTP backend, code graph, Web graph UI, agent workflows, and
   product improvement points for relay-knowledge.
+- [Book 4, Chapter 12: Hierarchical BM25 Analysis](docs/en/04-research/12-hierarchical-bm25-analysis-2026.md): paper evidence, the single-FTS SQLite adaptation, rank-safety limits, and benchmark requirements.
 - [Book 2, Chapter 1: Capability Overview](docs/en/02-capabilities/01-capability-overview.md): foundational behaviors and competitive differentiators.
 - [Book 2, Chapter 4: Query and Context Pack Basics](docs/en/02-capabilities/04-query-and-context-pack-basics.md): query metadata, context items, budgets, truncation, and source spans.
 - [Book 2, Chapter 5: Hybrid Retrieval Advantage](docs/en/02-capabilities/05-hybrid-retrieval-advantage.md): BM25, semantic, vector, graph evidence, code graph, RRF, and ranking explanations.
@@ -406,7 +402,7 @@ Local CLIs can query a deployed resident service with `--remote <base-url>` or
 durable tasks to the service and return task/status/checkpoint JSON; the remote
 `service run --web` worker pool drains those tasks rather than the local CLI
 running `repo index-worker`. Remote read-only repository graph commands
-(`repo list`, `repo query`, `repo context`, `repo feature-flags`, `repo impact`,
+(`repo list`, `repo query`, `repo context`, `repo graph`, `repo feature-flags`, `repo impact`,
 `repo report`, `repo software`, and `repo view`) read service-host index state and preserve their CLI `--kind`
 arguments. Remote maintenance commands such as
 `repo index --reset` and `repo index-worker` are rejected by a remote-selected
@@ -583,7 +579,7 @@ recognizes identifier parts, call direction, and declaration-shaped API chunks. 
 Call retrieval is a real `code::query::calls` module tree: `mod.rs` only declares owners and re-exports the query entry point, `search` coordinates bounded identity/FTS paths, `row_store` owns SQL and decoding, `identity_query` owns directional exact gates, `hit_projection` owns scoring and hit conversion, `execution_order` owns call-site ordering, and `display` owns caller labels. Named children continue to own ambiguous targets, caller counts, direction filters, indirect binding recovery, site/context scoring, and target ranking without root path aliases; focused owners carry direct same-level tests. Cross-cutting ranking likewise uses the real `code::query::scoring` tree, whose directly declared API-sequence, chunk-path, initializer, flow, inline-usage, interface, lifecycle, local-callable, path-ranking, and proximity owners attach their same-level regressions without root aliases. Hybrid planning uses the real `code::query::hybrid` tree: chunk/direct gates, exact-path decisions, and bounded planning are direct owners, while shared hybrid regressions are assembled through a physical `tests::hybrid` module. Import retrieval is a real `code::query::imports` tree: its facade only coordinates layered fallback, `row_store` owns bounded direct/identifier/FTS SQL and decoding, `hit_projection` owns enrichment/ranking/hit conversion, `scoring` owns ranking signals, `path_context` owns path/target classification, `binding_terms` owns named-binding and usage-term extraction, and `targets` owns target-symbol and usage context; focused owners carry direct tests and dependencies stay one-way toward primitives. Reference retrieval is a directly declared physical `code::query::references` domain, not a root alias: `identifier_text` owns identifier scans, `identity_gate` bounds exact admission, `call_shape` owns call recognition, `same_name_path` owns source-file demotion, and `type_context` owns parameter/type affinity; all carry direct regressions. The sibling `chunks` owner keeps exact definition/reference fallback admission, declaration scoring, and canonical-leaf matching, while `chunks::search` owns layered FTS planning, SQL/value binding, row mapping, and chunk scoring. The code-query facade also declares `symbols` directly rather than through `code_query_symbols`; symbol retrieval keeps orchestration, exact/API identity admission, FTS planning, row decoding, ranking, bounded direct recovery, and typed function-value interpretation in named owners, each with direct tests. The code-query root contains only `accuracy`, `api_identities`, `calls`, `chunks`, `conversion_terms`, `excerpts`, `hits`, `hybrid`, `identifiers`, `imports`, `line_ranges`, `prepare`, `references`, `relevance`, `routes`, `rows`, `sbom`, `scoring`, `symbols`, and `tests` directories plus its facade. Cross-domain primitives are directory owners, behavior tests live beside their owner, and consumers use real module identities instead of flat siblings, `code_query_*` aliases, or root `#[path]` redirects.
 The shared code-query test root likewise contains only `calls`, `field_filters`, `generated`, `hybrid`, `identity`, `line_context`, `ranking`, `score`, and `unit` domains plus its declaration facade; the query-test facade declares each domain directly, and the code-store facade does not remount individual query regressions through cross-layer path attributes.
 Graph retrieval keeps deterministic token signatures, local hashed vectors,
-semantic overlap, cosine similarity, and identifier-aware lexical overlap in `local_model/`; `aliases/`, `bm25/`, `bm25_fallback/`, and
+semantic overlap, cosine similarity, and identifier-aware lexical overlap in `local_model/`; `aliases/`, `bm25/`, `bm25_routing/`, `bm25_fallback/`, and
 the context, derived, label-trigram, and ranking directories own their named behavior and direct tests. The shared `retrieval::terms` owner exposes only normalized terms used by reranking.
 The physical `read_model/` subdomain assigns DDL/retry to `schema`, rebuilds
 to `migration`, document writes to `documents`, shared candidates/BM25 mapping
@@ -667,6 +663,15 @@ local hashed-vector ANN, configurable external semantic/vector backend metadata,
 graph evidence fallback, schema-guided path traversal, temporal event
 retrieval, community summaries, and code graph documents.
 
+Eligible current graph versions can route scoped BM25 queries through bounded SimHash
+groups while retaining one global FTS index and the SQL scope predicate as the hard
+authorization boundary. Schema-v4 builds this read model through a leased, resumable
+shadow rebuild; semantic, vector, and fuzzy reads pause until finalization. The
+deterministic 4,096-document synthetic production-write/query-path gate requires
+Recall@10 >= 0.9 and a smaller planned-MATCH result domain; it measures neither FTS
+postings/VM work nor query latency and makes no natural-corpus performance claim. See the [hierarchical BM25 analysis](docs/en/04-research/12-hierarchical-bm25-analysis-2026.md)
+for the algorithm identity, rank-safety rules, budgets, migration, and benchmark plan.
+
 It fuses candidates with reciprocal-rank fusion, applies a deterministic local
 rerank before final truncation, and returns a context pack with retriever
 sources, ranking and rerank explanations, entities, source spans, structured
@@ -736,6 +741,7 @@ relay-knowledge repo index relay-knowledge --ref main --format json
 relay-knowledge repo index-worker --task-id <task-id> --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo context relay-knowledge --query "retry_policy callers imports" --ref HEAD --path src --freshness wait-until-fresh --limit 8 --max-context-bytes 16384 --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo query relay-knowledge --query retry_policy --kind definition --freshness wait-until-fresh --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo software relay-knowledge --kind relationships --ref HEAD --format json
@@ -937,12 +943,12 @@ result sets for agent context, reject free-text queries over 10,000 characters
 and path filters over 4,096 characters, and return compact outlines for
 container types when `include_code=true`.
 
-The MCP tool surface includes graph retrieval, graph inspection, health,
+The MCP tool surface includes graph retrieval, bounded OKF repository neighborhoods, graph inspection, health,
 service status, index status, authorized code graph queries, one-call codegraph
 context packs, authorized
 software global-model queries, repository-set code graph queries, and
 authorized code impact analysis. Agent-facing kind selection reuses existing
-product kinds: `relay_code_query` handles code graph kinds,
+product kinds: `relay_repository_graph` returns policy- and byte-bounded OKF neighborhoods, `relay_code_query` handles code graph kinds,
 `relay_codegraph_context` composes bounded hybrid/definition/symbol entry
 queries with references, callers, callees, imports, snippets, budget, freshness,
 and truncation diagnostics,
@@ -988,18 +994,7 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-The static workspace exposes health, GraphRAG, graph canvas, index, worker, and
-operation-composer diagnostics through the same bounded Rust HTTP service.
-See [Web Workspace Capabilities](docs/en/02-capabilities/12-web-workspace-capabilities.md)
-for user workflows and
-[Engineering Hard Constraints](docs/en/03-architecture-specs/02-engineering-hard-constraints.md)
-for the `operation_request` and `assets` ownership and sibling-test contracts.
+The bounded Rust HTTP service exposes health, GraphRAG, canvas, index, worker, and operation diagnostics.
+See [Web Workspace Capabilities](docs/en/02-capabilities/12-web-workspace-capabilities.md) and [Engineering Hard Constraints](docs/en/03-architecture-specs/02-engineering-hard-constraints.md).
 
-### Optional Hooks
-
-Optional local hooks:
-
-```bash
-pre-commit install
-pre-commit run --all-files
-```
+Optional local hooks: `pre-commit install` and `pre-commit run --all-files`.
