@@ -291,7 +291,8 @@ fn mark_active_bm25_rebuild(connection: &Connection) {
         )
         .expect("schema marker should load");
     assert_eq!(
-        marker, 4,
+        marker,
+        super::super::marker::SCHEMA_MARKER_VERSION,
         "rebuild fixture must start at the current marker"
     );
     connection

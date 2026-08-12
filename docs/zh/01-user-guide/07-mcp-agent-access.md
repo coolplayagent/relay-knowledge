@@ -112,7 +112,7 @@ Resources 和 prompts 只提供只读诊断、上下文和调用模板，不能�
 
 ## 7.5 写权限边界
 
-MCP 不暴露 index refresh 或 repository indexing。仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`；derived index refresh 需要通过 CLI/Web 的显式运维 workflow 触发。
+MCP 不暴露 index refresh 或 repository indexing，MCP 自身不会启动这些写操作。启用的受管理 watcher 可以独立通过 durable reconciliation 发布 checked-out commit；否则使用 `relay-knowledge repo index` 或 `relay-knowledge repo update`。derived index refresh 仍需通过 CLI/Web 运维 workflow 触发。
 
 Agent 请求会写入 bounded in-process audit events，包含 runtime identity、scope、freshness、QoS decision、budget、truncation、result count 和 status。发现流程或只读诊断不会为了 durable audit 打开冷存储；当某个 storage-backed tool 已经打开存储后，audit event 才会镜像写入 durable store。Repository-set query 的审计条目会把 `request.set_alias` 记录为 scope，使多仓读取在审计链路中可见。开启持久 audit sink 的方法见 [第 10 章](10-workers-proposals-audit.md)。
 

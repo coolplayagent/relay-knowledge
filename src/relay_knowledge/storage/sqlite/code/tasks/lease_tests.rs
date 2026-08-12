@@ -2,13 +2,153 @@ use super::super::{queue_task, task_by_id as load_task_by_id};
 use super::{claim_task, recover_task_leases_by_task, running_task_leases};
 use crate::{
     domain::{
-        CodeIndexMode, CodeIndexResourceBudget, CodeIndexTaskState, CodeRepositoryRegistration,
+        CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget, CodeIndexTaskState,
+        CodeRepositoryRegistration,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskLeaseRecovery, CodeIndexTaskSeed,
-        CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskLeaseRecovery,
+        CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
     },
 };
+
+#[tokio::test]
+async fn code_index_task_targeted_claim_preserves_repository_fifo_publication_order() {
+    let store = registered_store().await;
+    let first = queue(
+        &store,
+        seed_for_repo("repo", "fixture", "fp-first", "scope-first", 100),
+    )
+    .await;
+    let second = queue(
+        &store,
+        seed_for_repo("repo", "fixture", "fp-second", "scope-second", 100),
+    )
+    .await;
+    assert_eq!(second.created_at_ms, first.created_at_ms + 1);
+
+    let skipped = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(second.task_id.clone()),
+            lease_owner: "worker-later".to_owned(),
+            lease_duration_ms: 1_000,
+            max_attempts: 3,
+            now_ms: 102,
+        })
+        .await
+        .expect("targeted claim should inspect repository order");
+    assert!(skipped.is_none());
+
+    let running_first = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(first.task_id),
+            lease_owner: "worker-first".to_owned(),
+            lease_duration_ms: 1_000,
+            max_attempts: 3,
+            now_ms: 103,
+        })
+        .await
+        .expect("first claim should run")
+        .expect("first repository task should be claimable");
+    store
+        .complete_code_index_task(CodeIndexTaskCompletion {
+            task_id: running_first.task_id.clone(),
+            lease_owner: "worker-first".to_owned(),
+            attempt_count: running_first.attempt_count,
+            now_ms: 104,
+        })
+        .await
+        .expect("first repository task should complete");
+
+    let running_second = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(second.task_id),
+            lease_owner: "worker-later".to_owned(),
+            lease_duration_ms: 1_000,
+            max_attempts: 3,
+            now_ms: 105,
+        })
+        .await
+        .expect("second claim should run")
+        .expect("second task should become claimable after its predecessor completes");
+    assert!(
+        running_second.publication_generation > running_first.publication_generation,
+        "publication generations must follow durable repository queue order"
+    );
+}
+
+#[tokio::test]
+async fn code_index_task_takeover_rejects_stale_sqlite_publication_fence() {
+    let store = registered_store().await;
+    let queued = queue(
+        &store,
+        seed_for_repo("repo", "fixture", "fp-fence", "scope-fence", 0),
+    )
+    .await;
+    let first = store
+        .run({
+            let task_id = queued.task_id.clone();
+            move |connection| {
+                claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-old".to_owned(),
+                        lease_duration_ms: 10,
+                        max_attempts: 3,
+                        now_ms: 1,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("first claim should run")
+        .expect("first attempt should claim");
+    let second = store
+        .run({
+            let task_id = queued.task_id;
+            move |connection| {
+                claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-new".to_owned(),
+                        lease_duration_ms: 100,
+                        max_attempts: 3,
+                        now_ms: 11,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("takeover claim should run")
+        .expect("expired attempt should be reclaimed");
+
+    assert!(second.publication_generation > first.publication_generation);
+    let error = store
+        .run(move |connection| {
+            let fence = CodeIndexPublicationFence {
+                repository_id: first.repository_id,
+                task_id: first.task_id,
+                lease_owner: "worker-old".to_owned(),
+                attempt_count: first.attempt_count,
+                generation: first.publication_generation,
+            };
+            let guard = crate::storage::sqlite::code::lifecycle::publication_fence::prepare_guard(
+                connection, fence, None,
+            )?;
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "UPDATE code_repositories SET state = 'fresh' WHERE repository_id = 'repo'",
+                [],
+            )?;
+            guard.validate(&transaction)?;
+            transaction.commit()?;
+            Ok(())
+        })
+        .await
+        .expect_err("stale attempt must be fenced before commit");
+    assert!(error.to_string().contains("no longer active"));
+}
 
 #[tokio::test]
 async fn selected_running_code_index_task_leases_recover_before_ttl_expiry() {

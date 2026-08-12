@@ -592,16 +592,23 @@ async fn partitioned_sqlite_prune_removes_legacy_control_scopes_after_sharding()
         ))
         .await
         .expect("partitioned reindex succeeds");
-    let retention = store
-        .prune_code_repository_scopes(relay_knowledge::storage::CodeScopeRetentionRequest {
-            repository_id: "repo-legacy".to_owned(),
-            active_scope: "scope-active".to_owned(),
-            retain_recent_successful_scopes: 0,
-        })
-        .await
-        .expect("retention succeeds");
+    let mut legacy_scope_pruned = false;
+    for _ in 0..128 {
+        let retention = store
+            .prune_code_repository_scopes(relay_knowledge::storage::CodeScopeRetentionRequest {
+                repository_id: "repo-legacy".to_owned(),
+                active_scope: "scope-active".to_owned(),
+                retain_recent_successful_scopes: 0,
+            })
+            .await
+            .expect("bounded retention pass succeeds");
+        legacy_scope_pruned |= retention.pruned_scopes.contains(&"scope-legacy".to_owned());
+        if !retention.maintenance_pending {
+            break;
+        }
+    }
 
-    assert!(retention.pruned_scopes.contains(&"scope-legacy".to_owned()));
+    assert!(legacy_scope_pruned);
     assert_eq!(control_code_file_count(&control_path), 0);
 }
 

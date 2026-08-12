@@ -148,7 +148,8 @@ fn scope_connection() -> Connection {
                 resolved_commit_sha TEXT NOT NULL,
                 source_scope TEXT PRIMARY KEY,
                 path_filters_json TEXT NOT NULL,
-                language_filters_json TEXT NOT NULL
+                language_filters_json TEXT NOT NULL,
+                retiring INTEGER NOT NULL DEFAULT 0
             );
             ",
         )

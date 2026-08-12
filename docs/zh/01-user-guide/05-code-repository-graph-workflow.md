@@ -68,7 +68,7 @@ relay-knowledge repo index repo --ref <commit-sha> --format json
 
 当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；非交互式 agent 需要消费 queued 或 retrying 任务时，也可以显式调用 `repo index-worker --task-id <id> --format json`，不用维持一个前台 `service run` 进程。`relay-knowledge service run` 作为 resident master，会在启动时恢复过期 code-index lease，在 stderr 打印启动状态行，并用同一队列上的有界 code-index worker pool 消费任务，默认并发度为 2，可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 调整，最高按文档上限 clamp 到 8。不同 fingerprint 的任务独立排队、独立 lease、独立 checkpoint；完全相同的 full-index fingerprint 会复用当前任务，避免重复 full rebuild。`relay-knowledge service status --format json` 会在 `code_index_workers` 中报告 configured workers、active worker slots、queue depth、queued/running/retrying/dead-letter task counts、running leases 和 last error。跨 batch finalization 期间，`checkpoint.state` 会报告 `finalizing:resolve_references`、`finalizing:rebuild_reference_search`、`finalizing:rebuild_calls` 和 `finalizing:publish_scope` 等具体阶段；只有 checkpoint 到达 `completed` 后，查询才会把该 ref 当作 fresh。
 
-远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
+远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 和 `repo update` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
@@ -88,11 +88,11 @@ relay-knowledge repo index-worker --task-id <task-id-from-repo-index> --format j
 relay-knowledge repo status repo --format json
 ```
 
-如果 `repo index` 已经完成单次 worker，后续 `repo index-worker` 会返回 `claimed=false` 和 `task=null` 的 JSON；此时以 `repo status` 的 checkpoint 进度和 freshness 为准。
+如果 `repo index` 已经完成单次 worker，后续 `repo index-worker` 会返回 `claimed=false` 和 `task=null`，但仍会推进一次有界 retention pass。`maintenance_active=true` 或 `repo status` 仍显示 `maintenance_pending=true` 时应重复调用；可选 `maintenance_error` 非空时应报告并处理它，不能把 `maintenance_active=false` 当作完成。checkpoint 进度、GC 错误和 freshness 仍以 status 为准。
 
 如果旧 service 进程在持有 task lease 时退出，且任务仍然卡住，可以执行 `relay-knowledge repo index repo --reset --format json`，把该仓库未完成 task 重新排队。Reset 不会删除已完成 indexed scope，也不会复活历史 dead-letter task；旧 worker 仍必须匹配当前 lease owner 和 attempt token，因此不能完成已经 reset 的任务。
 
-已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实或 Web 路由事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。对于包含 submodule 的 Git scope，freshness key 还会记录 scope 内 gitlink 是从可用 submodule 对象展开，还是因不可用而跳过；因此先前被跳过的 submodule 在后续初始化后会让旧 scope 失效。带 path filter 的 Git freshness probe 只检查与请求 scope 相交的 gitlink；无 scope 时才回退到 whole-tree submodule 状态。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束；新增文件落在 `external_deps/`、`modules/` 等非 `src/` source root 时会沿用同一 source-layout 策略进入增量索引。
+已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实或 Web 路由事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。对于包含 submodule 的 Git scope，freshness key 还会记录 scope 内 gitlink 是从可用 submodule 对象展开，还是因不可用而跳过；因此先前被跳过的 submodule 在后续初始化后会让旧 scope 失效。带 path filter 的 Git freshness probe 只检查与请求 scope 相交的 gitlink；无 scope 时才回退到 whole-tree submodule 状态。增量 `repo update` 现在与 full index 共用 durable task、lease、retry 和 publication 路径；只有 full rebuild 暴露 batch checkpoint，受界 incremental snapshot 则原子发布。本地 CLI 执行一次有界 drain，远端或 watcher 触发的调用则可能留在队列中由常驻 worker 消费；新增文件落在 `external_deps/`、`modules/` 等非 `src/` source root 时会沿用同一 source-layout 策略进入增量索引。
 
 ## 5.4 符号与关系查询
 
@@ -179,7 +179,9 @@ relay-knowledge repo-set refresh workspace --format json
 relay-knowledge repo-set remove workspace sdk --format json
 ```
 
-`repo-set add` 要求目标 ref 和 path/language filter 已经有匹配的单仓索引 scope；如果不存在，会失败而不是回退到旧 scope。同一 repository 再次加入同一个 set 时会替换原成员 snapshot，并废弃上一版 overlay edges。`repo-set remove` 会删除成员指针、废弃 overlay，并让普通 code-scope retention 在没有其它引用时回收该 snapshot。`repo-set refresh` 只重建跨仓 import/module overlay edges，不复制 `code_repository_files`、`code_repository_symbols` 或 `code_repository_chunks` 基础事实。CLI、Web 或 MCP 排入的异步 repository-set refresh 会由常驻 `service run` 中的 repository-set overlay refresh worker 消费。
+`repo-set add` 要求目标 ref 和 path/language filter 已经有匹配的单仓索引 scope；如果不存在，会失败而不是回退到旧 scope。同一 repository 再次加入同一个 set 时会替换原成员 snapshot，并废弃上一版 overlay edges。`repo-set remove` 会删除成员指针、废弃 overlay，并让普通 code-scope retention 在没有其它引用时回收该 snapshot。`repo-set refresh` 只重建跨仓 import/module overlay edges，不复制 `code_repository_files`、`code_repository_symbols` 或 `code_repository_chunks` 基础事实。CLI/Web 的默认同步与 async refresh 都先进入同一个有界持久队列；本地默认同步请求只在其精确 task 可被定向 claim 时 drain，否则返回 queued，再由常驻 `service run` worker 消费。Overlay edge 与 member replacement 在同一个 attempt-scoped live-lease 事务内发布，takeover 会回滚旧 attempt。该 overlay 能力仍要求 `single_sqlite`；在跨 shard import/export 聚合实现前，`partitioned_sqlite` 会明确报告 unsupported。
+
+手动 set 最多接纳 64 个 member，每次发布最多替换 64 个 member fact version。一次完整 refresh 在所有 member 间共享 manifest 上限：4,096 个 chunk、16 MiB path/content byte 和 32,768 个 derived item；还最多接纳 8,192 条总 import、131,072 个 file/symbol export target 和 8,192 条总 edge。Selector request 的 origin/target key 合计最多 512 个。每个 import 最多观测 11 个 export 并保留最多 10 个 candidate ID，所以歧义匹配的 `candidate_count` 是有界而非完整计数。Cap-plus-one 溢出会返回可重试 `qos_rejected`，不会截断后发布伪 `fresh` overlay。Direct/selector read 最多读取 8,193 条 edge，并排除 origin 或 target scope 已 retiring 的 edge。Refresh/add/member remove 在遗留 overlay 超过 8,192 条 edge 时会在无界删除前拒绝。删除整个 repository 时，受影响 set 超过 64 个，或任一受影响 overlay 超限，也会原子拒绝。当前版未提供有界 legacy-overlay repair 命令，在升级提供 repair tool 前保持数据不变。这些上限只覆盖手动 repository set，不覆盖显式启用的 automatic-workspace cross-edge builder；分阶段 scope GC 会限制过期 workspace state 的删除，但不限制单次 automatic build，因此 workspace detection 仍默认关闭，该 build-path 上限属后续工作。
 
 查询集合时会 fan-out 到成员的真实 `source_scope`，然后合并排序:
 
@@ -196,13 +198,21 @@ relay-knowledge repo-set query workspace \
 
 ## 5.5 增量更新
 
-索引两个 ref 之间的变化:
+从最近发布的 clean snapshot 更新到 checked-out `HEAD`：
 
 ```bash
-relay-knowledge repo update repo --base main --head HEAD --format json
+relay-knowledge repo update repo --format json
 ```
 
-`repo update` 会把 `base` 到 `head` 的 diff 应用到已持久化的 `base` snapshot。`base` 不需要是当前 active snapshot；只要同一 repository id、path filter 和 language filter 下曾经索引过该 base commit，增量更新就会从对应 persisted scope 克隆并只解析变化文件。对于非 Git scope，delta 解析会拒绝不再匹配计划 filesystem content hash 的 live bytes。
+省略 `--base` 时选择最近一次成功发布的 clean Git commit；如果 active identity 是 worktree overlay，服务会解包其 clean base。省略 `--head` 时选择 `HEAD`。durable task 入队前会把两个 ref 与 target tree 解析并固定为不可变 commit，因此 ref 后续移动不会改变任务输入。完成态 response 包含 `summary.base_resolved_commit_sha`；排队态在 `task.mode` 暴露固定后的 base/head。用 `repo status --format json` 查看 task 与 checkpoint 状态。
+
+需要指定提交对时使用：
+
+```bash
+relay-knowledge repo update repo --base <base-commit> --head <head-commit> --format json
+```
+
+`repo update` 会把 `base` 到 `head` 的 diff 应用到已持久化的 `base` snapshot。`base` 不需要是当前 active snapshot；只要同一 repository id、path filter 和 language filter 下曾经索引过该 base commit，增量更新就会从对应 persisted scope 克隆并只解析变化文件。对于非 Git scope，delta 解析会拒绝不再匹配计划 filesystem content hash 的 live bytes。Git changed-path set 在应用注册 path filter 前按整个 commit pair 计算，上限为 512；超过时必须 full index，不能把大 delta 变成无界任务。
 
 如果 CLI 报告找不到 matching indexed base scope，先索引目标 base:
 
@@ -212,6 +222,8 @@ relay-knowledge repo update repo --base main --head HEAD --format json
 ```
 
 增量路径读取 `git diff --name-status --find-renames -z`，只重建新增、修改、复制、重命名或类型变化的文件。删除和重命名源路径会从 cloned base index 移除，rename lineage 会保留为 tombstone。
+
+成功发布后，retention 会保留 active scope 与最近两个成功发布时间窗口的并集（窗口通常已包含 active）、最近一次成功增量的 predecessor、active worktree overlay 的 clean base，再加每个未完成 task 的 target/base 与 repository-set member pin。一个旧 scope 会先原子标成 `retiring` 并退出查询，再由 durable GC job 分阶段删除代码图事实、FTS/search document、software projection、checkpoint、workspace state 和 scope metadata；每个 maintenance transaction 只推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行。同 tree commit 复用内容图，并使用每仓 256 条的 commit alias 窗口。完成态 task 历史按每仓库 128 条 succeeded 和 64 条 failed/dead-letter/cancelled 限制，同时保留每个 retained scope 的最新 success。`repo status` 报告 GC phase/progress/error；被淘汰的历史 ref 必须用 full `repo index` 重建。
 
 ## 5.6 Worktree Overlay
 
@@ -258,7 +270,7 @@ relay-knowledge repo status repo --format json
 
 报告包含 repository id、root、indexed commit、tree hash、文件/符号/reference/chunk 总量、scope、代表性查询、延迟样本和 degradation summary。Markdown 报告适合贴进 PR 或发布说明；JSON 报告适合 CI 比较索引质量。
 
-`repo status --format json` 还会包含 cold index 的 `active_task`、active 或最新 scope 的 `checkpoint` 计数，以及 `retention` 摘要。如果仓库仍处于 `indexing` 但没有 active task，status 会回退显示该仓库最近的 checkpoint，让运维能看到最后一个持久化阶段，而不是空进度。后台 full index 成功后，retention 会保留 active scope、最近两个完成 scope 和未完成任务 scope；更旧的 scope 会被淘汰，避免大型仓库持续累积无界 SQLite 行。
+`repo status --format json` 还会包含 cold index 的 `active_task`、active 或最新 scope 的 `checkpoint` 计数，以及 `retention` 摘要。仓库仍处于 `indexing` 但没有 active task 时，status 回退显示最近 checkpoint。发布后保留 active 与 latest-two-success window 的并集（通常重叠），以及最近 incremental predecessor、active-worktree clean base、未完成 task scope 和 repository-set pin；更旧 scope 被淘汰。
 
 `repo report --format markdown` 还会汇总 edge resolution: resolved、ambiguous 和 unresolved 数量，用于判断当前代码图谱是否主要来自确定 AST 提取，还是存在大量需要人工或后续解析器改进的模糊边。
 

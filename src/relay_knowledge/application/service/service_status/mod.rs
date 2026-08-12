@@ -164,6 +164,15 @@ impl RelayKnowledgeService {
             watcher,
         } = parts;
 
+        let mut watcher = watcher
+            .as_ref()
+            .map(WatcherDiagnostics::from_watcher_state)
+            .unwrap_or_else(WatcherDiagnostics::default_disabled);
+        watcher.enabled = self.runtime.watcher.enabled;
+        watcher.commit_reconcile_interval_ms =
+            u64::try_from(self.runtime.watcher.commit_reconcile_interval.as_millis())
+                .unwrap_or(u64::MAX);
+
         ServiceStatusResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             service_name: PROJECT_NAME.to_owned(),
@@ -186,10 +195,7 @@ impl RelayKnowledgeService {
             code_index_workers,
             proposal_backlog,
             audit_sink,
-            watcher: watcher
-                .as_ref()
-                .map(WatcherDiagnostics::from_watcher_state)
-                .unwrap_or_else(WatcherDiagnostics::default_disabled),
+            watcher,
         }
     }
 }

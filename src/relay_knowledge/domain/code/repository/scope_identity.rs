@@ -42,6 +42,23 @@ pub fn code_snapshot_scope_is_fact_versioned(source_scope: &str) -> bool {
             .all(|character| character.is_ascii_hexdigit())
 }
 
+/// Returns the clean Git commit carried by a persisted snapshot identity.
+///
+/// Clean snapshots already store the commit SHA directly. Worktree overlays use
+/// `worktree:<base-commit>:<overlay-hash>` and deliberately resolve back to the
+/// clean base so a later commit reconciliation never treats dirty files as an
+/// incremental Git base. Filesystem identities are not Git commits.
+pub fn clean_git_commit_from_snapshot_identity(identity: &str) -> Option<&str> {
+    if identity.is_empty() || identity.starts_with("filesystem:") {
+        return None;
+    }
+    let Some(rest) = identity.strip_prefix("worktree:") else {
+        return Some(identity);
+    };
+    let (base_commit, overlay_hash) = rest.split_once(':')?;
+    (!base_commit.is_empty() && !overlay_hash.is_empty()).then_some(base_commit)
+}
+
 fn append_hash_list(input: &mut Vec<u8>, values: &[String]) {
     input.extend_from_slice(&(values.len() as u64).to_le_bytes());
     for value in values {

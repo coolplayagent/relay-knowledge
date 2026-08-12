@@ -19,7 +19,7 @@ relay-knowledge repo query relay-knowledge --query retry_policy --kind definitio
 relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
-relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo update relay-knowledge --format json
 relay-knowledge repo status relay-knowledge --format json
 ```
 
@@ -40,7 +40,7 @@ Before OKF projection, storage normalizes at most 256 bundle roots through the s
 
 Generated files such as protobuf stubs, swagger/OpenAPI clients, minified bundles, root-level build/dist outputs, and `target/generated/` outputs remain indexed for graph completeness. The index records generated-file metadata from path and header signals, report totals split handwritten and generated symbol counts, and default retrieval demotes generated-file hits. `--exclude-generated` removes generated files from structured retrieval and bounded source fallback results.
 
-Cold full `repo index` returns a queued task handle and lets the background code-index worker perform parsing and SQLite writes under a lease. `service run` recovers expired code-index leases at startup, and `repo index <alias> --reset` can requeue unfinished tasks without deleting completed indexed scopes or reviving terminal dead-letter history. `repo status` exposes the active task, checkpoint progress, finalization phase, and retention summary; successful workers keep the active scope, the two latest completed scopes, and unfinished task scopes. If a task is no longer active while the repository is still `indexing`, status reports the latest checkpoint so operators can distinguish a slow finalization phase from missing progress.
+Cold full `repo index` returns a queued task handle and lets the background code-index worker write under a lease and transaction-time publication generation. `repo update` uses the same durable path; omitted base/head default to the last published clean Git commit and `HEAD`, pinned before queueing. Native Git ref changes are hints plus a five-second bounded HEAD reconciliation backstop for linked worktrees, missed events, and restarts. Admission allows at most 32 unfinished tasks per repository and 256 globally, returning retryable `qos_rejected` overload. `service run` recovers expired leases. `repo status` exposes tasks, checkpoints, finalization, and retention. Publication keeps the union of active and the latest-two-success window (normally overlapping), plus the latest incremental predecessor, active-worktree clean base, unfinished-task scopes, and repository-set pins; older fact/search/software state is logically retired, then durable GC advances one scope-GC phase whose physical deletion is capped at 512 rows in aggregate across affected application tables per maintenance transaction. Finished task history is bounded separately.
 
 ## Competitive Features
 

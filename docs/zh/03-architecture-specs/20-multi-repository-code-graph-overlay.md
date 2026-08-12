@@ -25,8 +25,10 @@
 - SQLite 持久化 `code_repository_sets`、`code_repository_set_members`、`code_repository_cross_edges`、overlay status 和 overlay refresh task；基础代码事实表不为 repository set 复制行。
 - 多仓查询在应用层 fan-out 到每个成员持久化的 `source_scope`，按成员 priority、freshness 和 overlay confidence 合并排序；请求级 path/language filter 只收窄成员 scope，不会通过当前仓库注册默认值重新解析或扩大 scope。去重键包含 repository、scope、path、line range 和 excerpt。
 - `repo-set refresh` 构建 import/module 层面的跨仓 overlay edges，支持 resolved、ambiguous 和 unresolved 状态，并暴露 evidence JSON。本地、相对或已在成员仓库内解析的 import 只留在成员仓库内，不会通过跨仓 symbol-name 或 basename fallback 解析。
-- workspace-aware package mapping 支持 Go `go.work`/`go.mod` module roots，以及 pnpm `pnpm-workspace.yaml` 加 package `package.json` 的名称、入口和 export subpath。这些映射只用于 repository-set overlay refresh，不改变单仓 import 解析。
+- workspace-aware package mapping 支持 Go `go.work`/`go.mod` module roots，以及 pnpm `pnpm-workspace.yaml` 加 package `package.json` 的名称、入口和 export subpath。手动 repository-set refresh 使用这些规则，不改变单仓 import 解析。显式启用的 automatic-workspace index 路径使用独立 legacy cross-edge builder，保持默认关闭，且不受下文手动 set materialization 上限保护。
 - scope retention 会保留仍被 repository set member 引用的单仓 snapshot；后台 overlay refresh task 使用持久租约、重试、dead-letter 状态和常驻 `service run` overlay refresh worker。
+
+所有 CLI/Web 默认同步或 async 手动 refresh 都先进入同一个有界持久队列；本地同步调用方只在可定向 claim 精确 task 时 drain。Overlay edge 与最多 64 个 fact-version member replacement 在同一 attempt-scoped live-lease 事务内发布，takeover 使旧 attempt 回滚。每 set 最多 64 个 member。一次 refresh 在所有 member 间共享 4,096 个 manifest chunk、16 MiB manifest path/content byte 和 32,768 个 manifest-derived item，另行限制总 import 8,192 条、file/symbol export target 131,072 个、总 edge 8,192 条与组合 selector key 512 个。Cap-plus-one 溢出返回 `CapacityExceeded`/`qos_rejected`，不会发布截断的 `fresh` overlay。Direct/selector read 最多检查 8,193 条 edge，并排除 retiring endpoint。Refresh、member add/remove 与整仓删除都会预检查遗留 overlay 删除；repository removal 还最多准入 64 个受影响 set。遗留手动 overlay 超限时保持不变并拒绝，本版没有有界 repair 入口。`partitioned_sqlite` 继续明确报告不支持手动 overlay build。分阶段 scope GC 会限制过期 automatic-workspace state 的删除，但不限制单次 automatic-workspace build；该独立路径仍是已知资源有界性缺口。
 
 ## 2. 当前基线
 
@@ -38,7 +40,7 @@
 - `repo register/index/query/impact/status/report` 当前都以一个 repository selector 为入口。
 - 查询 SQL 的候选窗口先限定 `source_scope`，因此单仓检索不会被其他仓库污染。
 
-缺口在于：系统还没有一等 `RepositorySet` / workspace selector，没有跨多个真实 scope 的查询协调层，也没有单独保存跨仓库解析边。
+原始缺口是一等 `RepositorySet` selector、跨多个真实 scope 的查询协调层与单独跨仓库解析边；上文实现状态合同记录了已交付的初始路径与当前上限。
 
 ## 3. 核心模型
 
@@ -298,19 +300,19 @@ MCP 和 Web 入口应使用相同 selector，不允许用普通 `source_scope` �
 
 ## 11. 实施阶段
 
-第一阶段只做薄集合和多仓查询协调：
+第一阶段已交付薄集合和多仓查询协调：
 
 - 新增 repository set 表、domain 类型、storage contract 和 CLI/API 注册入口。
 - `repo-set query` 展开成员并 fan-out 到现有单仓查询。
 - merge/rerank 保留 repository metadata，不做跨仓库边解析。
 
-第二阶段增加跨仓库 import overlay：
+第二阶段已交付跨仓库 import overlay：
 
 - 为 repository set 构建导出 module/symbol 只读索引。
 - 写入 `code_repository_cross_edges`。
 - 查询结果可附带跨仓库 edge evidence。
 
-第三阶段优化性能和恢复：
+第三阶段已交付初始有界性能与恢复路径：
 
 - 增加 overlay freshness cursor、refresh queue、status diagnostics。
 - 增加 bounded parallelism、per-set budgets、candidate window metrics。

@@ -41,6 +41,8 @@ fn creates_repository_set_overlay_and_workspace_schema() {
                   'code_repository_cross_edges_origin_selector',
                   'code_repository_cross_edges_target_selector',
                   'code_repository_set_refresh_tasks_claimable',
+                  'code_repository_set_refresh_tasks_capacity',
+                  'code_repository_set_refresh_tasks_audit',
                   'code_workspace_package_mappings_set_package',
                   'code_workspace_package_mappings_scope'
               )
@@ -49,7 +51,7 @@ fn creates_repository_set_overlay_and_workspace_schema() {
             |row| row.get(0),
         )
         .expect("repository-set indexes should be inspectable");
-    assert_eq!(index_count, 7);
+    assert_eq!(index_count, 9);
 
     let origin_plan = query_plan(
         &connection,

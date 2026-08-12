@@ -5,6 +5,8 @@ mod queue;
 mod record_mapping;
 mod reset;
 mod retention;
+pub(in crate::storage::sqlite::code) mod retention_gc;
+mod scope_capacity;
 mod status;
 mod worktree;
 
@@ -17,6 +19,9 @@ pub(super) use lease::{
 pub(super) use queue::queue_task;
 pub(super) use reset::reset_tasks;
 pub(super) use retention::{prune_scopes, prune_scopes_with_retained, retention_status};
+#[cfg(test)]
+pub(in crate::storage) use scope_capacity::MAX_SCOPE_SLOTS_PER_REPOSITORY;
+pub(super) use scope_capacity::{enforce_rebound_target, enforce_unfenced_target};
 pub(super) use status::{active_task, queue_status, task_by_id};
 
 #[cfg(test)]

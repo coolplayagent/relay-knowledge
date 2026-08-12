@@ -46,6 +46,7 @@ pub(super) fn initialize_index_task_schema(connection: &Connection) -> Result<()
             lease_owner TEXT,
             lease_expires_at_ms INTEGER,
             attempt_count INTEGER NOT NULL,
+            publication_generation INTEGER NOT NULL DEFAULT 0,
             next_retry_at_ms INTEGER NOT NULL,
             input_fingerprint TEXT NOT NULL,
             resource_budget_json TEXT NOT NULL,
@@ -73,12 +74,53 @@ pub(super) fn initialize_index_task_schema(connection: &Connection) -> Result<()
 
         CREATE INDEX IF NOT EXISTS code_repository_index_batch_staging_state
             ON code_repository_index_batch_staging(source_scope, state, batch_index);
+        CREATE INDEX IF NOT EXISTS code_repository_index_checkpoints_repository_scope
+            ON code_repository_index_checkpoints(repository_id, source_scope);
+        CREATE INDEX IF NOT EXISTS code_repository_index_checkpoints_publication_retention
+            ON code_repository_index_checkpoints(
+                repository_id, state, updated_at_ms DESC, source_scope DESC
+            );
 
         CREATE INDEX IF NOT EXISTS code_repository_index_tasks_claimable
             ON code_repository_index_tasks(state, next_retry_at_ms, created_at_ms);
         CREATE INDEX IF NOT EXISTS code_repository_index_tasks_repository
             ON code_repository_index_tasks(repository_id, state, created_at_ms);
+        CREATE INDEX IF NOT EXISTS code_repository_index_tasks_repository_fifo
+            ON code_repository_index_tasks(repository_id, created_at_ms, task_id);
+        CREATE INDEX IF NOT EXISTS code_repository_index_tasks_audit_retention
+            ON code_repository_index_tasks(
+                repository_id, state, updated_at_ms DESC, created_at_ms DESC, task_id DESC
+            );
+        CREATE INDEX IF NOT EXISTS code_repository_index_tasks_scope_retention
+            ON code_repository_index_tasks(
+                source_scope, state, updated_at_ms ASC, task_id ASC
+            );
 
+        CREATE TABLE IF NOT EXISTS code_repository_publication_fences (
+            repository_id TEXT PRIMARY KEY,
+            generation INTEGER NOT NULL,
+            task_id TEXT NOT NULL,
+            attempt_count INTEGER NOT NULL,
+            lease_owner TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+
+        ",
+    )?;
+    super::super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_index_tasks",
+        "publication_generation",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    connection.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS code_repository_index_tasks_publication_retention
+            ON code_repository_index_tasks(
+                repository_id, state, publication_generation DESC,
+                updated_at_ms DESC, created_at_ms DESC, task_id DESC, source_scope
+            );
         ",
     )?;
     Ok(())

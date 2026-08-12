@@ -351,8 +351,17 @@ fn parses_repo_command_forms_and_validation_errors() {
         .expect("update command should parse"),
         RepoCommand::Update {
             alias: "core".to_owned(),
-            base_ref: "main".to_owned(),
-            head_ref: "feature".to_owned(),
+            base_ref: Some("main".to_owned()),
+            head_ref: Some("feature".to_owned()),
+        }
+    );
+    assert_eq!(
+        parse_repo(&["update".to_owned(), "core".to_owned()])
+            .expect("update defaults should parse"),
+        RepoCommand::Update {
+            alias: "core".to_owned(),
+            base_ref: None,
+            head_ref: None,
         }
     );
     assert_eq!(
@@ -475,4 +484,27 @@ fn parses_repo_command_forms_and_validation_errors() {
         parse_repo(&["unknown".to_owned()]).expect_err("unknown subcommand should fail"),
         CliError::UnexpectedArgument("unknown".to_owned())
     );
+}
+
+#[test]
+fn update_parser_rejects_impact_only_and_duplicate_flags() {
+    let limit = parse_repo(&[
+        "update".to_owned(),
+        "core".to_owned(),
+        "--limit".to_owned(),
+        "5".to_owned(),
+    ])
+    .expect_err("update must not silently accept impact flags");
+    assert_eq!(limit, CliError::UnexpectedArgument("--limit".to_owned()));
+
+    let duplicate = parse_repo(&[
+        "update".to_owned(),
+        "core".to_owned(),
+        "--head".to_owned(),
+        "one".to_owned(),
+        "--head".to_owned(),
+        "two".to_owned(),
+    ])
+    .expect_err("duplicate refs should fail closed");
+    assert_eq!(duplicate, CliError::UnexpectedArgument("--head".to_owned()));
 }

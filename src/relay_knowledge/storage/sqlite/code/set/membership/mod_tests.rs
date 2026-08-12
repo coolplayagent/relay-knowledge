@@ -2,7 +2,12 @@
 
 use super::super as set;
 use super::super::tests::support::*;
-use crate::{domain::CodeRepositorySetOverlayStatus, storage::SqliteGraphStore};
+use crate::{
+    domain::CodeRepositorySetOverlayStatus,
+    storage::{SqliteGraphStore, StorageError},
+};
+
+use super::super::capacity::MAX_REPOSITORY_SET_MEMBERS;
 
 #[tokio::test]
 async fn repository_set_members_validate_real_indexed_scopes_and_report_missing_overlay() {
@@ -291,4 +296,77 @@ async fn repository_set_alias_lookup_does_not_match_existing_set_ids() {
     assert_eq!(first_status.repository_set.set_id, first.set_id);
     assert_eq!(colliding_status.repository_set.set_id, colliding.set_id);
     assert_eq!(colliding_status.repository_set.alias, first.set_id);
+}
+
+#[tokio::test]
+async fn repository_set_member_admission_rejects_cap_plus_one_without_partial_write() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let (error, persisted_count) = store
+        .run(|connection| {
+            set::create_set(connection, set_seed("workspace", 10))?;
+            for index in 0..=MAX_REPOSITORY_SET_MEMBERS {
+                let repository_id = format!("repo-{index}");
+                let alias = format!("member-{index}");
+                let scope = format!("scope-{index}");
+                insert_repository_scope(
+                    connection,
+                    &repository_id,
+                    &alias,
+                    &scope,
+                    &format!("tree-{index}"),
+                    false,
+                )?;
+                let result = set::add_member(
+                    connection,
+                    member_seed("workspace", &repository_id, &alias, &scope, 0),
+                );
+                if index < MAX_REPOSITORY_SET_MEMBERS {
+                    result?;
+                } else {
+                    let error = result.expect_err("member cap plus one must be rejected");
+                    let persisted_count = connection.query_row(
+                        "SELECT COUNT(*) FROM code_repository_set_members",
+                        [],
+                        |row| row.get::<_, usize>(0),
+                    )?;
+                    return Ok((error, persisted_count));
+                }
+            }
+            unreachable!("cap plus one iteration should return")
+        })
+        .await
+        .expect("bounded membership fixture should run");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+    assert_eq!(persisted_count, MAX_REPOSITORY_SET_MEMBERS);
+}
+
+#[tokio::test]
+async fn repository_set_member_admission_rejects_a_scope_after_retirement_wins() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let (error, persisted_count) = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            set::create_set(connection, set_seed("workspace", 10))?;
+            connection.execute(
+                "UPDATE code_repository_scopes SET retiring = 1 WHERE source_scope = 'scope-a'",
+                [],
+            )?;
+            let error = set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )
+            .expect_err("a retiring scope must not become a repository-set pin");
+            let persisted_count = connection.query_row(
+                "SELECT COUNT(*) FROM code_repository_set_members",
+                [],
+                |row| row.get::<_, usize>(0),
+            )?;
+            Ok((error, persisted_count))
+        })
+        .await
+        .expect("retiring-scope admission fixture should run");
+
+    assert!(error.to_string().contains("is not indexed"));
+    assert_eq!(persisted_count, 0);
 }

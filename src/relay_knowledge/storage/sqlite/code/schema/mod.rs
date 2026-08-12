@@ -6,6 +6,7 @@ mod index_task_schema;
 mod migrations;
 mod repository_schema;
 mod repository_set_schema;
+mod retention_schema;
 mod route_schema;
 mod search_backfill;
 mod search_schema;
@@ -16,6 +17,7 @@ use self::migrations::{
 };
 use self::repository_schema::initialize_repository_schema;
 use self::repository_set_schema::initialize_repository_set_schema;
+use self::retention_schema::initialize_retention_schema;
 #[cfg(test)]
 pub(super) use self::route_schema::ROUTE_EXTRACTION_REINDEX_MIGRATION;
 use self::route_schema::mark_legacy_route_extraction_scopes_stale_once;
@@ -41,6 +43,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     initialize_index_task_schema(connection)?;
     initialize_repository_set_schema(connection)?;
     initialize_search_schema(connection)?;
+    initialize_retention_schema(connection)?;
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_schema_migrations",

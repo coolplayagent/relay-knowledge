@@ -10,6 +10,9 @@ use super::{CliError, OutputFormat, serialize_line};
 pub(super) struct CodeIndexWorkerRunResponse {
     pub(super) claimed: bool,
     pub(super) task: Option<crate::domain::CodeIndexTaskRecord>,
+    pub(super) maintenance_active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) maintenance_error: Option<String>,
 }
 
 pub(super) fn render_index_worker_response(
@@ -46,11 +49,12 @@ pub(super) async fn finish_started_index_task(
     };
     if response.task.as_ref().map(|task| task.state) != Some(CodeIndexTaskState::Running) {
         let completed = service
-            .run_code_index_task_once(Some(task_id), context.clone())
+            .run_code_index_task_once_with_response(Some(task_id), context.clone())
             .await
             .map_err(|error| CliError::api_failed(error, format))?;
-        if let Some(task) = completed {
+        if let Some((task, indexed)) = completed {
             response.task = Some(task);
+            response.summary = Some(indexed.summary);
         }
     }
     let requested_ref = selector.ref_selector.clone();

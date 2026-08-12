@@ -2,10 +2,15 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     domain::ServicePermissionRequirement,
+    env::{
+        RELAY_KNOWLEDGE_DATA_DIR, RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS,
+        RELAY_KNOWLEDGE_WATCHER_ENABLED,
+    },
     project::{
         LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME, PROJECT_NAME,
         WINDOWS_SERVICE_DEFINITION_FILE_NAME,
     },
+    watcher::WatcherConfig,
 };
 
 pub(super) fn current_platform() -> &'static str {
@@ -66,25 +71,38 @@ pub(super) fn permission_requirements(platform: &str) -> Vec<ServicePermissionRe
 }
 
 pub(super) fn render_definition(platform: &str, executable: &str, data_dir: &str) -> String {
+    let reconcile_interval_ms = WatcherConfig::DEFAULT_COMMIT_RECONCILE_INTERVAL_MS;
     match platform {
         "windows" => format!(
-            "<service><id>{name}</id><name>{name}</name><executable>{executable}</executable><arguments>service run --web --mcp streamable-http</arguments><env name=\"RELAY_KNOWLEDGE_DATA_DIR\" value=\"{data_dir}\"/></service>\n",
+            "<service><id>{name}</id><name>{name}</name><executable>{executable}</executable><arguments>service run --web --mcp streamable-http</arguments><env name=\"{data_dir_name}\" value=\"{data_dir}\"/><env name=\"{watcher_enabled_name}\" value=\"true\"/><env name=\"{reconcile_name}\" value=\"{reconcile_interval_ms}\"/></service>\n",
             name = PROJECT_NAME,
             executable = xml_escape(executable),
-            data_dir = xml_escape(data_dir)
+            data_dir_name = RELAY_KNOWLEDGE_DATA_DIR,
+            data_dir = xml_escape(data_dir),
+            watcher_enabled_name = RELAY_KNOWLEDGE_WATCHER_ENABLED,
+            reconcile_name = RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS,
         ),
         "macos" => format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array><string>{executable}</string><string>service</string><string>run</string><string>--web</string><string>--mcp</string><string>streamable-http</string></array><key>EnvironmentVariables</key><dict><key>RELAY_KNOWLEDGE_DATA_DIR</key><string>{data_dir}</string></dict><key>RunAtLoad</key><true/></dict></plist>\n",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array><string>{executable}</string><string>service</string><string>run</string><string>--web</string><string>--mcp</string><string>streamable-http</string></array><key>EnvironmentVariables</key><dict><key>{data_dir_name}</key><string>{data_dir}</string><key>{watcher_enabled_name}</key><string>true</string><key>{reconcile_name}</key><string>{reconcile_interval_ms}</string></dict><key>RunAtLoad</key><true/></dict></plist>\n",
             label = launchd_label(),
             executable = xml_escape(executable),
-            data_dir = xml_escape(data_dir)
+            data_dir_name = RELAY_KNOWLEDGE_DATA_DIR,
+            data_dir = xml_escape(data_dir),
+            watcher_enabled_name = RELAY_KNOWLEDGE_WATCHER_ENABLED,
+            reconcile_name = RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS,
         ),
         _ => {
-            let environment = format!("RELAY_KNOWLEDGE_DATA_DIR={data_dir}");
+            let data_environment = format!("{RELAY_KNOWLEDGE_DATA_DIR}={data_dir}");
+            let watcher_environment = format!("{RELAY_KNOWLEDGE_WATCHER_ENABLED}=true");
+            let reconcile_environment = format!(
+                "{RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS}={reconcile_interval_ms}"
+            );
             format!(
-                "[Unit]\nDescription=relay-knowledge background service\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} service run --web --mcp streamable-http\nEnvironment={environment}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n",
+                "[Unit]\nDescription=relay-knowledge background service\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} service run --web --mcp streamable-http\nEnvironment={data_environment}\nEnvironment={watcher_environment}\nEnvironment={reconcile_environment}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n",
                 executable = systemd_quote(executable),
-                environment = systemd_quote(&environment)
+                data_environment = systemd_quote(&data_environment),
+                watcher_environment = systemd_quote(&watcher_environment),
+                reconcile_environment = systemd_quote(&reconcile_environment),
             )
         }
     }
@@ -143,7 +161,7 @@ pub(super) fn windows_configure_environment_command(definition_path: &Path) -> V
 
 fn windows_configure_environment_script(definition_path: &Path) -> String {
     format!(
-        "$ErrorActionPreference = 'Stop'; [xml]$definition = Get-Content -Raw -Path {definition_path}; $dataDir = $definition.service.env | Where-Object {{ $_.name -eq 'RELAY_KNOWLEDGE_DATA_DIR' }} | Select-Object -First 1 -ExpandProperty value; New-ItemProperty -Path {registry_path} -Name Environment -PropertyType MultiString -Value \"RELAY_KNOWLEDGE_DATA_DIR=$dataDir\" -Force -ErrorAction Stop | Out-Null",
+        "$ErrorActionPreference = 'Stop'; [xml]$definition = Get-Content -Raw -Path {definition_path}; $serviceEnvironment = @($definition.service.env | ForEach-Object {{ \"$($_.name)=$($_.value)\" }}); if ($serviceEnvironment.Count -eq 0) {{ throw 'service definition contains no environment values' }}; New-ItemProperty -Path {registry_path} -Name Environment -PropertyType MultiString -Value $serviceEnvironment -Force -ErrorAction Stop | Out-Null",
         definition_path = powershell_quote(&definition_path.display().to_string()),
         registry_path = powershell_quote(&format!(
             "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\{}",

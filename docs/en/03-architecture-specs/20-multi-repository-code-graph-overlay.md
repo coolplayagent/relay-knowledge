@@ -25,8 +25,10 @@ The current implementation provides the initial product path across all three ph
 - SQLite persists `code_repository_sets`, `code_repository_set_members`, `code_repository_cross_edges`, overlay status, and overlay refresh tasks. Repository sets do not copy rows into base code fact tables.
 - Multi-repository query fans out at the application layer to each member's persisted `source_scope`, then merges by member priority, freshness, and overlay confidence. Request path/language filters narrow the member scope instead of widening or re-resolving it through current repository defaults. Deduplication includes repository, scope, path, line range, and excerpt.
 - `repo-set refresh` builds import/module-level cross-repository overlay edges with resolved, ambiguous, and unresolved states plus evidence JSON. Local, relative, or already resolved member imports stay inside their member repository and are not resolved through cross-repository symbol-name or basename fallback.
-- Workspace-aware package mapping supports Go `go.work`/`go.mod` module roots and pnpm `pnpm-workspace.yaml` plus package `package.json` names, entry points, and export subpaths. These mappings are used only by repository-set overlay refresh and do not change single-repository import resolution.
+- Workspace-aware package mapping supports Go `go.work`/`go.mod` module roots and pnpm `pnpm-workspace.yaml` plus package `package.json` names, entry points, and export subpaths. Manual repository-set refresh uses these rules without changing single-repository import resolution. The opt-in automatic-workspace index path has a separate legacy cross-edge builder, remains disabled by default, and is not covered by the manual-set materialization ceilings below.
 - Scope retention preserves single-repository snapshots referenced by repository set members. Background overlay refresh tasks use durable leases, retries, dead-letter state, and the resident `service run` overlay refresh worker.
+
+Every CLI/Web default-synchronous or async manual refresh first enters the same bounded durable queue; a local synchronous caller drains only when it can claim the exact task. Overlay edges and up to 64 fact-version member replacements publish in one attempt-scoped live-lease transaction, and takeover rolls back the stale attempt. One set has at most 64 members. Across all members, one refresh shares 4,096 manifest chunks, 16 MiB of manifest path/content bytes, and 32,768 manifest-derived items, then separately caps total imports at 8,192, file/symbol export targets at 131,072, total edges at 8,192, and combined selector keys at 512. Cap-plus-one overflow returns `CapacityExceeded`/`qos_rejected` without publishing a truncated `fresh` overlay. Direct/selector reads inspect at most 8,193 edges and exclude retiring endpoints. Refresh, member add/remove, and whole-repository removal preflight legacy overlay deletes; repository removal also admits at most 64 affected sets. An over-cap legacy manual overlay is rejected unchanged, and this release has no bounded repair entry point. `partitioned_sqlite` continues to report manual overlay build as unsupported. Phased scope GC bounds deletion of obsolete automatic-workspace state, but it does not bound one automatic-workspace build; that separate build path remains a known resource-boundedness gap.
 
 ## 2. Current Baseline
 
@@ -38,7 +40,7 @@ The current implementation already has the foundation:
 - `repo register/index/query/impact/status/report` currently accept one repository selector.
 - Query candidate windows first constrain `source_scope`, so single-repository retrieval is not polluted by other repositories.
 
-The missing pieces are first-class `RepositorySet` / workspace selectors, a coordinator that queries multiple real scopes, and separate cross-repository resolution edges.
+The original missing pieces were first-class `RepositorySet` selectors, a coordinator that queries multiple real scopes, and separate cross-repository resolution edges; the implementation-status contract above records their delivered initial path and current bounds.
 
 ## 3. Core Model
 
@@ -298,19 +300,19 @@ MCP and Web use the same selector. A plain `source_scope` string must not silent
 
 ## 11. Implementation Phases
 
-Phase one implements thin sets and coordinated query:
+Phase one delivered thin sets and coordinated query:
 
 - Add repository set tables, domain types, storage contract, and CLI/API registration entrypoints.
 - `repo-set query` expands members and fans out to existing single-repository queries.
 - Merge/rerank preserves repository metadata and does not resolve cross-repository edges yet.
 
-Phase two adds cross-repository import overlay:
+Phase two delivered the cross-repository import overlay:
 
 - Build a read-only exported module/symbol index for repository set members.
 - Write `code_repository_cross_edges`.
 - Attach cross-repository edge evidence to query responses.
 
-Phase three optimizes performance and recovery:
+Phase three delivered the initial bounded performance and recovery path:
 
 - Add overlay freshness cursor, refresh queue, and status diagnostics.
 - Add bounded parallelism, per-set budgets, and candidate window metrics.

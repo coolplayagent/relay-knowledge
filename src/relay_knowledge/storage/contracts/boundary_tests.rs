@@ -21,6 +21,10 @@ fn storage_errors_preserve_boundary_messages() {
         StorageError::InvalidInput("missing graph version".to_owned()).to_string(),
         "invalid storage input: missing graph version"
     );
+    assert_eq!(
+        StorageError::CapacityExceeded("queue is full".to_owned()).to_string(),
+        "storage capacity exceeded: queue is full"
+    );
 }
 
 #[tokio::test]

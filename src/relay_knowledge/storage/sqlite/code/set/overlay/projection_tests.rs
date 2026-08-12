@@ -3,6 +3,7 @@ use rusqlite::params;
 use super::*;
 use crate::storage::{CodeRepositorySetEdgeSelector, SqliteGraphStore};
 
+use super::super::super::capacity::MAX_OVERLAY_EDGE_SELECTOR_KEYS;
 use super::super::super::tests::support::{insert_repository_scope, member_seed, set_seed};
 
 #[tokio::test]
@@ -82,6 +83,26 @@ async fn projection_returns_only_candidate_origin_and_target_edges() {
 #[test]
 fn selector_values_are_bounded_rows() {
     assert_eq!(selector_values_sql(2, 3), "(?, ?, ?), (?, ?, ?)");
+}
+
+#[tokio::test]
+async fn projection_rejects_selector_cap_plus_one_before_querying_edges() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let selector = CodeRepositorySetEdgeSelector {
+        origin_files: (0..=MAX_OVERLAY_EDGE_SELECTOR_KEYS)
+            .map(|index| (format!("scope-{index}"), format!("path-{index}")))
+            .collect(),
+        target_records: Vec::new(),
+    };
+    let error = store
+        .run(move |connection| cross_edges_for_selector(connection, "set", &selector))
+        .await
+        .expect_err("selector cap plus one must be rejected");
+
+    assert!(matches!(
+        error,
+        crate::storage::StorageError::CapacityExceeded(_)
+    ));
 }
 
 fn insert_edge(

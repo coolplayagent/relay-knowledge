@@ -3,5 +3,12 @@
 use crate::{api::ApiError, storage::StorageError};
 
 pub(super) fn storage_api_error(error: StorageError) -> ApiError {
-    ApiError::storage_unavailable(error.to_string())
+    match error {
+        StorageError::CapacityExceeded(message) => ApiError::qos_rejected(message),
+        other => ApiError::storage_unavailable(other.to_string()),
+    }
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

@@ -1,24 +1,12 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{sync::Arc, time::Duration};
 
 use relay_knowledge::{
-    api::{
-        CodeIndexWorkerRunRequest, CodeRepositoryFreshnessState, CodeRepositoryRegisterRequest,
-        InterfaceKind, RequestContext,
-    },
-    application::{RelayKnowledgeService, RuntimeConfiguration},
+    api::{CodeIndexWorkerRunRequest, CodeRepositoryFreshnessState},
     domain::{
         CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
-        CodeIndexSession, CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy,
+        CodeIndexSession, CodeIndexTaskState, CodeQueryKind, CodeRetrievalRequest, FreshnessPolicy,
     },
-    env::{EnvironmentConfig, PlatformKind},
-    storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, KnowledgeStore, SqliteGraphStore},
+    storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, SqliteGraphStore},
 };
 
 #[tokio::test]
@@ -212,6 +200,181 @@ async fn background_index_prunes_scopes_beyond_active_and_recent_budget() {
         .expect_err("oldest pruned scope should no longer query");
 
     assert!(old.message.contains("no index for ref"));
+}
+
+#[tokio::test]
+async fn managed_watcher_reconciles_a_new_commit_without_an_explicit_update() {
+    let repo = FixtureRepo::create("commit-reconcile-loop");
+    repo.write("src/lib.rs", "pub fn commit_loop_v1() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-commit-loop").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-commit-loop-base"),
+        )
+        .await
+        .expect("base should index");
+    let watcher = service
+        .start_code_repository_watcher()
+        .await
+        .expect("watcher should start")
+        .expect("watcher should be enabled");
+
+    repo.write("src/lib.rs", "pub fn commit_loop_v2() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "next commit"]);
+    let head = repo.git_text(["rev-parse", "HEAD"]);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let published_scope = loop {
+        let _ = service
+            .run_code_index_task_once(None, context("drain-commit-loop"))
+            .await;
+        let status = service
+            .code_repository_status(selector("fixture", &head), context("status-commit-loop"))
+            .await
+            .expect("status should load");
+        if status.status.last_indexed_commit.as_deref() == Some(head.as_str())
+            && !status.status.stale
+        {
+            break status
+                .status
+                .last_indexed_scope_id
+                .expect("published commit should have a scope");
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "managed watcher did not publish commit {head}; diagnostics: {:?}",
+            watcher.diagnostics()
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+
+    let query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "commit_loop_v2",
+                selector("fixture", &head),
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .expect("query should validate"),
+            context("query-commit-loop"),
+        )
+        .await
+        .expect("new commit knowledge should be queryable");
+    assert!(query.results.iter().any(|hit| hit.path == "src/lib.rs"));
+
+    repo.git(["commit", "--allow-empty", "-m", "empty commit"]);
+    let empty_head = repo.git_text(["rev-parse", "HEAD"]);
+    let empty_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let empty_status = loop {
+        let _ = service
+            .run_code_index_task_once(None, context("drain-empty-commit"))
+            .await;
+        let status = service
+            .code_repository_status(
+                selector("fixture", &empty_head),
+                context("status-empty-commit"),
+            )
+            .await
+            .expect("empty commit status should load");
+        if status.status.last_indexed_commit.as_deref() == Some(empty_head.as_str())
+            && !status.status.stale
+        {
+            break status;
+        }
+        assert!(
+            tokio::time::Instant::now() < empty_deadline,
+            "same-tree commit did not advance its durable cursor"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert_eq!(
+        empty_status.status.last_indexed_scope_id.as_deref(),
+        Some(published_scope.as_str()),
+        "same-tree commits should reuse graph content instead of duplicating it"
+    );
+    assert!(empty_status.retention.retained_scope_count <= 2);
+
+    let mut latest_head = empty_head;
+    for version in 3..=6 {
+        repo.write(
+            "src/lib.rs",
+            &format!("pub fn commit_loop_v{version}() -> u32 {{ {version} }}\n"),
+        );
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "advance managed commit loop"]);
+        latest_head = repo.git_text(["rev-parse", "HEAD"]);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let _ = service
+                .run_code_index_task_once(None, context("drain-retained-commit-loop"))
+                .await;
+            let status = service
+                .code_repository_status(
+                    selector("fixture", &latest_head),
+                    context("status-retained-commit-loop"),
+                )
+                .await
+                .expect("managed commit status should load");
+            if status.status.last_indexed_commit.as_deref() == Some(latest_head.as_str())
+                && !status.status.stale
+            {
+                drain_code_scope_maintenance(&service).await;
+                let status = service
+                    .code_repository_status(
+                        selector("fixture", &latest_head),
+                        context("status-retained-after-maintenance"),
+                    )
+                    .await
+                    .expect("managed commit retention status should load");
+                assert_eq!(status.retention.prunable_scope_count, 0);
+                assert!(
+                    status.retention.retained_scope_count <= 3,
+                    "the managed commit stream must keep scope storage bounded: {:?}",
+                    status.retention
+                );
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "managed commit loop stopped after its retention window; diagnostics: {:?}",
+                watcher.diagnostics()
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+    let latest_query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "commit_loop_v6",
+                selector("fixture", &latest_head),
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .expect("latest managed query should validate"),
+            context("query-latest-retained-commit-loop"),
+        )
+        .await
+        .expect("latest managed commit knowledge should remain queryable");
+    assert!(
+        latest_query
+            .results
+            .iter()
+            .any(|hit| hit.path == "src/lib.rs")
+    );
+    assert!(watcher.diagnostics().total_commit_tasks_queued >= 1);
+    watcher.request_shutdown();
 }
 
 #[tokio::test]
@@ -815,180 +978,6 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
     );
 }
 
-async fn query(
-    service: &RelayKnowledgeService,
-    query: &str,
-    kind: CodeQueryKind,
-) -> relay_knowledge::api::CodeRepositoryQueryResponse {
-    query_ref(service, query, "HEAD", kind).await
-}
-
-async fn query_ref(
-    service: &RelayKnowledgeService,
-    query: &str,
-    ref_selector: &str,
-    kind: CodeQueryKind,
-) -> relay_knowledge::api::CodeRepositoryQueryResponse {
-    service
-        .query_code_repository(
-            CodeRetrievalRequest::new(
-                query,
-                selector("fixture", ref_selector),
-                kind,
-                10,
-                FreshnessPolicy::AllowStale,
-            )
-            .expect("query request should validate"),
-            context("query"),
-        )
-        .await
-        .expect("query should succeed")
-}
-
-async fn register_fixture_repo(service: &RelayKnowledgeService, repo: &FixtureRepo, name: &str) {
-    service
-        .register_code_repository(
-            CodeRepositoryRegisterRequest {
-                root_path: repo.path.display().to_string(),
-                alias: "fixture".to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: Vec::new(),
-            },
-            context(name),
-        )
-        .await
-        .expect("repository should register");
-}
-
-fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
-    CodeRepositorySelector::new(alias, ref_selector, Vec::new(), Vec::new())
-        .expect("selector should validate")
-}
-
-fn filtered_selector(alias: &str, ref_selector: &str, path: &str) -> CodeRepositorySelector {
-    CodeRepositorySelector::new(alias, ref_selector, vec![path.to_owned()], Vec::new())
-        .expect("selector should validate")
-}
-
-fn context(name: &str) -> RequestContext {
-    RequestContext::with_ids(
-        InterfaceKind::Cli,
-        format!("req-{name}"),
-        format!("trace-{name}"),
-    )
-}
-
-async fn service_with_memory_store() -> RelayKnowledgeService {
-    service_with_store(Arc::new(
-        SqliteGraphStore::open_in_memory().expect("store should open"),
-    ))
-    .await
-}
-
-async fn service_with_file_store(name: &str) -> RelayKnowledgeService {
-    let path = unique_database_path(name);
-    service_with_store(Arc::new(
-        SqliteGraphStore::open(path).expect("file store should open"),
-    ))
-    .await
-}
-
-async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
-    let environment = test_environment();
-    let runtime = RuntimeConfiguration::from_environment(&environment)
-        .await
-        .expect("runtime should compose");
-
-    RelayKnowledgeService::with_store(runtime, store)
-}
-
-#[cfg(windows)]
-fn test_environment() -> EnvironmentConfig {
-    EnvironmentConfig::from_pairs(
-        PlatformKind::Windows,
-        [
-            ("USERPROFILE", "C:\\Users\\alice"),
-            ("APPDATA", "C:\\Users\\alice\\AppData\\Roaming"),
-            ("LOCALAPPDATA", "C:\\Users\\alice\\AppData\\Local"),
-            ("TEMP", "C:\\Users\\alice\\AppData\\Local\\Temp"),
-            ("RELAY_KNOWLEDGE_HOME", "C:\\relay"),
-        ],
-    )
-    .expect("environment should parse")
-}
-
-#[cfg(not(windows))]
-fn test_environment() -> EnvironmentConfig {
-    EnvironmentConfig::from_pairs(
-        PlatformKind::Unix,
-        [
-            ("HOME", "/home/alice"),
-            ("TMPDIR", "/tmp"),
-            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
-        ],
-    )
-    .expect("environment should parse")
-}
-
-struct FixtureRepo {
-    path: PathBuf,
-}
-
-impl FixtureRepo {
-    fn create(name: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock should be after epoch")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("relay-knowledge-{name}-{nanos}"));
-        fs::create_dir_all(path.join("src")).expect("repo directory should be created");
-        let repo = Self { path };
-        repo.git(["init"]);
-        repo.git(["config", "user.email", "relay@example.invalid"]);
-        repo.git(["config", "user.name", "Relay Test"]);
-        repo
-    }
-
-    fn write(&self, relative: &str, content: &str) {
-        let path = self.path.join(relative);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("parent directory should exist");
-        }
-        fs::write(path, content).expect("fixture file should be written");
-    }
-
-    fn git<const N: usize>(&self, args: [&str; N]) {
-        let output = git_command(&self.path, args)
-            .output()
-            .expect("git should run");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
-        let output = git_command(&self.path, args)
-            .output()
-            .expect("git should run");
-        assert!(output.status.success());
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
-    }
-}
-
-fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
-    let mut command = Command::new("git");
-    command.current_dir(path).args(args);
-    command
-}
-
-fn unique_database_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock should be after epoch")
-        .as_nanos();
-    std::env::temp_dir()
-        .join("relay-knowledge-tests")
-        .join(format!("{name}-{}-{nanos}.sqlite", std::process::id()))
-}
+#[path = "code_repository_background_support.rs"]
+mod support;
+use support::*;

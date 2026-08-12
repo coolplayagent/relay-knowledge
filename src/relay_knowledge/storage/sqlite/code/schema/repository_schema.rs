@@ -51,8 +51,25 @@ pub(super) fn initialize_repository_schema(connection: &Connection) -> Result<()
             chunk_count INTEGER NOT NULL,
             stale INTEGER NOT NULL,
             degraded_reason TEXT,
+            retiring INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS code_repository_commit_scopes (
+            repository_id TEXT NOT NULL,
+            resolved_commit_sha TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            published_sequence INTEGER NOT NULL,
+            PRIMARY KEY (repository_id, resolved_commit_sha, source_scope),
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE,
+            FOREIGN KEY (source_scope) REFERENCES code_repository_scopes(source_scope) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS code_repository_commit_scopes_scope
+            ON code_repository_commit_scopes(source_scope);
+        CREATE INDEX IF NOT EXISTS code_repository_commit_scopes_retention
+            ON code_repository_commit_scopes(
+                repository_id, published_sequence DESC, resolved_commit_sha, source_scope
+            );
 
         CREATE TABLE IF NOT EXISTS code_repository_files (
             repository_id TEXT NOT NULL,

@@ -2,17 +2,87 @@ use std::path::{Path, PathBuf};
 
 use super::WatchedRepository;
 
+/// Builds the single durable reconciliation slot for a repository's checked-out ref.
+///
+/// The fingerprint intentionally excludes the moving commit pair: while one
+/// commit update is unfinished, repeated hints coalesce into that task. Once it
+/// publishes, the same slot can be reset with the next immutable pair.
+pub fn build_commit_task_seed(
+    repository: &WatchedRepository,
+    base_commit: &str,
+    head_commit: &str,
+    tree_hash: &str,
+    now_ms: u64,
+) -> Option<crate::storage::CodeIndexTaskSeed> {
+    if base_commit.is_empty()
+        || head_commit.is_empty()
+        || tree_hash.is_empty()
+        || base_commit == head_commit
+    {
+        return None;
+    }
+    let mode = crate::domain::CodeIndexMode::incremental(base_commit, head_commit).ok()?;
+    let request = crate::domain::CodeIndexRequest {
+        repository: crate::domain::CodeRepositorySelector {
+            repository: repository.alias.clone(),
+            ref_selector: head_commit.to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+        },
+        mode: mode.clone(),
+        workspace_detection: Default::default(),
+        freshness_policy: crate::domain::FreshnessPolicy::WaitUntilFresh,
+    };
+    let mut payload = serde_json::to_value(&request).ok()?;
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "git_event".to_owned(),
+            serde_json::json!({
+                "kind": "ref_reconcile",
+                "ref": "HEAD",
+                "old_oid": base_commit,
+                "new_oid": head_commit,
+            }),
+        );
+    }
+    let path_filters_json = serde_json::to_string(&repository.path_filters).ok()?;
+    let language_filters_json = serde_json::to_string(&repository.language_filters).ok()?;
+    let source_scope = crate::domain::code_snapshot_scope_id(
+        &repository.repository_id,
+        tree_hash,
+        &repository.path_filters,
+        &repository.language_filters,
+    );
+
+    Some(crate::storage::CodeIndexTaskSeed {
+        repository_id: repository.repository_id.clone(),
+        alias: repository.alias.clone(),
+        ref_selector: "HEAD".to_owned(),
+        resolved_commit_sha: head_commit.to_owned(),
+        tree_hash: tree_hash.to_owned(),
+        source_scope,
+        path_filters: repository.path_filters.clone(),
+        language_filters: repository.language_filters.clone(),
+        mode,
+        input_fingerprint: format!(
+            "git_ref_reconcile:{}:HEAD:{}:{}",
+            repository.repository_id, path_filters_json, language_filters_json
+        ),
+        resource_budget: crate::domain::CodeIndexResourceBudget::default(),
+        payload_json: serde_json::to_string(&payload).ok()?,
+        now_ms,
+    })
+}
+
 pub(super) struct ChangedPathSnapshot {
     pub path: PathBuf,
     pub content_hash: u64,
 }
 
+/// Builds a worktree task pinned to the repository's last clean indexed base.
 pub fn build_incremental_task_seed(
     repository: &WatchedRepository,
     changed_paths: &[PathBuf],
-    ref_selector: &str,
-    resolved_commit_sha: &str,
-    tree_hash: &str,
     content_fingerprint: u64,
     now_ms: u64,
 ) -> Option<crate::storage::CodeIndexTaskSeed> {
@@ -23,32 +93,25 @@ pub fn build_incremental_task_seed(
     if relative_paths.is_empty() {
         return None;
     }
+    let base_commit = immutable_worktree_base(&repository.last_indexed_commit)?;
     let path_hash = stable_path_fingerprint(&relative_paths);
-    let effective_ref = if ref_selector.trim().is_empty() {
-        "HEAD"
-    } else {
-        ref_selector
-    };
-    let task_resolved_commit = if resolved_commit_sha.trim().is_empty() {
-        effective_ref.to_owned()
-    } else {
-        resolved_commit_sha.to_owned()
-    };
-    let task_tree_hash = if tree_hash.trim().is_empty() {
-        format!("worktree:pending:{content_fingerprint:016x}")
-    } else {
-        tree_hash.to_owned()
-    };
+    let task_tree_hash = format!("worktree:pending:{base_commit}");
+    let source_scope = crate::domain::code_snapshot_scope_id(
+        &repository.repository_id,
+        &task_tree_hash,
+        &repository.path_filters,
+        &repository.language_filters,
+    );
 
     let input_fingerprint = format!(
         "worktree_overlay:{}:{}:{}:{path_hash:016x}:{content_fingerprint:016x}",
-        repository.repository_id, task_tree_hash, repository.source_scope,
+        repository.repository_id, task_tree_hash, source_scope,
     );
 
     let request = crate::domain::CodeIndexRequest {
         repository: crate::domain::CodeRepositorySelector {
             repository: repository.alias.clone(),
-            ref_selector: effective_ref.to_owned(),
+            ref_selector: base_commit.to_owned(),
             path_filters: Vec::new(),
             language_filters: Vec::new(),
         },
@@ -71,10 +134,10 @@ pub fn build_incremental_task_seed(
     Some(crate::storage::CodeIndexTaskSeed {
         repository_id: repository.repository_id.clone(),
         alias: repository.alias.clone(),
-        ref_selector: effective_ref.to_owned(),
-        resolved_commit_sha: task_resolved_commit,
+        ref_selector: base_commit.to_owned(),
+        resolved_commit_sha: task_tree_hash.clone(),
         tree_hash: task_tree_hash,
-        source_scope: repository.source_scope.clone(),
+        source_scope,
         path_filters: repository.path_filters.clone(),
         language_filters: repository.language_filters.clone(),
         mode: crate::domain::CodeIndexMode::WorktreeOverlay,
@@ -83,6 +146,67 @@ pub fn build_incremental_task_seed(
         payload_json: serde_json::to_string(&payload).ok()?,
         now_ms,
     })
+}
+
+/// Builds the stable periodic worktree reconciliation slot after a missed or
+/// rejected file event. The worker still scans bounded Git status; the marker
+/// is task metadata only and is never interpreted as a source path.
+pub fn build_worktree_reconcile_task_seed(
+    repository: &WatchedRepository,
+    observation_fingerprint: u64,
+    now_ms: u64,
+) -> Option<crate::storage::CodeIndexTaskSeed> {
+    let base_commit = immutable_worktree_base(&repository.last_indexed_commit)?;
+    let task_tree_hash = format!("worktree:pending:{base_commit}");
+    let source_scope = crate::domain::code_snapshot_scope_id(
+        &repository.repository_id,
+        &task_tree_hash,
+        &repository.path_filters,
+        &repository.language_filters,
+    );
+    let request = crate::domain::CodeIndexRequest {
+        repository: crate::domain::CodeRepositorySelector {
+            repository: repository.alias.clone(),
+            ref_selector: base_commit.to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+        },
+        mode: crate::domain::CodeIndexMode::WorktreeOverlay,
+        workspace_detection: Default::default(),
+        freshness_policy: crate::domain::FreshnessPolicy::WaitUntilFresh,
+    };
+    let mut payload = serde_json::to_value(&request).ok()?;
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "watcher".to_owned(),
+            serde_json::json!({
+                "kind": "periodic_worktree_reconcile",
+                "observation_fingerprint": format!("{observation_fingerprint:016x}"),
+            }),
+        );
+    }
+    Some(crate::storage::CodeIndexTaskSeed {
+        repository_id: repository.repository_id.clone(),
+        alias: repository.alias.clone(),
+        ref_selector: base_commit.to_owned(),
+        resolved_commit_sha: task_tree_hash.clone(),
+        tree_hash: task_tree_hash,
+        source_scope,
+        path_filters: repository.path_filters.clone(),
+        language_filters: repository.language_filters.clone(),
+        mode: crate::domain::CodeIndexMode::WorktreeOverlay,
+        input_fingerprint: format!(
+            "worktree_reconcile:{}:{}:{observation_fingerprint:016x}",
+            repository.repository_id, base_commit,
+        ),
+        resource_budget: crate::domain::CodeIndexResourceBudget::default(),
+        payload_json: serde_json::to_string(&payload).ok()?,
+        now_ms,
+    })
+}
+
+fn immutable_worktree_base(snapshot_identity: &str) -> Option<&str> {
+    crate::domain::clean_git_commit_from_snapshot_identity(snapshot_identity)
 }
 
 pub(super) fn changed_content_fingerprint(

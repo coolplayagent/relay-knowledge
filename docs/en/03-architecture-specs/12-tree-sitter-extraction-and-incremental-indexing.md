@@ -32,7 +32,7 @@ resolve snapshot
   -> batch parse and chunk
   -> write file/symbol/reference/feature-flag/chunk facts
   -> finalize cross-batch edges
-  -> refresh code/BM25/semantic/vector indexes
+  -> refresh scoped code search documents and software projection
   -> mark scope fresh
 ```
 
@@ -47,11 +47,19 @@ Incremental indexing first narrows the work set:
 3. Expand affected files through reverse dependencies and import/call/reference edges.
 4. Refresh only affected code facts, chunks, and index families.
 
+Manual `repo update` and resident commit reconciliation both resolve the selected base/head refs to immutable commits and submit the resulting `Incremental` request to the durable code-index task queue. Omitting the manual base chooses the last published clean snapshot, including the clean commit inside a worktree-overlay identity; omitting the head chooses `HEAD`. A repository without that base must complete a full index first. The Git diff is hard-capped at 512 changed paths across the commit pair before registered path filters. Exceeding the cap requires a full index; it is not permission to make the queue, parse set, or write transaction unbounded.
+
+The resident FileWatcher treats `.git/HEAD`, ref, packed-ref, and HEAD-log events as low-latency hints. At startup and on a bounded periodic interval (default 5000 ms), it independently resolves the checked-out HEAD/tree; this reconciliation covers linked worktrees and missed/coalesced events. An advanced HEAD is pinned with the last published clean base into a durable task. A stable fingerprint per repository, checked-out ref, and filter set coalesces repeat hints while the slot is unfinished. Queue admission is transactional and capped at 32 unfinished tasks per repository and 256 globally. The attempt-scoped lease and a monotonically advancing publication generation remain the single-writer authority; every snapshot, batch, workspace, and software-projection transaction validates the live generation before commit, so commit events and detached expired attempts cannot bypass bounded retry/backoff, recovery, or dead-letter state. Full rebuilds retain their batch checkpoints; a bounded incremental attempt is an atomic snapshot transaction and does not claim per-path checkpoint progress.
+
 Import dependency expansion prioritizes indexed code maps and versioned import edges. If an import points to an external dependency or cross-repository target without a code map, the indexer records only the unresolved target hint, resolution reason, and affected current-repository facts; it does not trigger an unauthorized full scan to fill that dependency. This coverage gap is not parser, file, scope, or response degradation. The query layer may use the hint inside the same scope to trigger bounded internal source fallback.
 
 Local configuration relationships resolve only inside the same indexed source scope. Finalization may resolve deterministic local file references, template includes, and build-target references after all files in that scope have been written. Ambiguous local matches and external images, packages, remote labels, or templates remain unresolved or ambiguous metadata rather than degraded parser state.
 
 Feature-flag extraction is an indexing-stage responsibility. Runtime config reads, boolean config declarations, and guarded-code relationships are written as versioned facts under the file scope; the query layer reads only those facts and their FTS documents. Boolean declarations in TOML, YAML, JSON, INI, Java properties, and related config formats reuse the configuration extractor's structured config-key facts instead of a separate feature-flag source. Changes to extractor rules, config files, or guarded branches require a full or incremental index refresh for the affected scope.
+
+Successful publication runs bounded retention only after the new scope and software projection complete. The protected set is the union of active and a rolling window of the two latest successful publications (normally including active), the latest successful incremental predecessor, the clean base of any active worktree overlay, plus all unfinished task targets/bases and repository-set pins. Cleanup atomically marks one older scope `retiring`, removing it from read/base resolution, and persists a restart-safe job. Each subsequent maintenance transaction advances at most one scope-GC phase, whose physical deletion is capped at 512 rows in aggregate across affected application tables, including facts, code FTS/search documents, software projections, checkpoints, workspace state, or scope metadata. The same pass separately deletes at most 512 succeeded task-audit rows, 512 failure-class task-audit rows, and 512 commit-alias rows, capping primary cleanup at 2,048 physical rows plus at most one terminal GC-job bookkeeping row. Same-tree commits reuse the content scope through a bounded 256-row commit-alias window. Finished task history is bounded to 128 successful and 64 failed/dead-letter/cancelled rows per repository, preserving the newest success for each retained scope. Status reports pending/job phase/deleted rows/error, and the managed maintenance worker resumes after failure. Pruned commits require full indexing. This scoped code/software contract is not an atomic publication claim for the generic Knowledge Graph or independent semantic/vector generations.
+
+Every explicit- or implicit-scope-resolving code read must use one deferred SQLite read snapshot from initial scope/`retiring` resolution through all dependent SELECTs. This includes code fact/search reads, repository status/list/scope-status/latest-scope-status, and repository-set status/cross-edge reads; it does not generalize to unrelated single-SELECT reporting. Concurrent phased cleanup may expose the complete old snapshot to that request or a clear retiring error to a later request, never a mixture of partially deleted scope state.
 
 ## 6. High-Performance Boundaries
 
@@ -73,6 +81,8 @@ Unrecoverable parse errors, grammar panics, capture mismatches, and unsupported 
 
 - Large repository indexing reports progress and does not replace the previous fresh scope early.
 - Incremental updates process changed and affected files; they do not disguise full scans as incremental work.
+- Commit advances survive missed watcher hints and restarts through bounded reconciliation and durable task replay.
+- Long commit streams retain recovery bases and repository-set pins without unbounded scope or finished-task history growth.
 - Files that fail parsing remain retrievable through text search.
 - Indexing traces explain time spent in candidate narrowing, parsing, writing, and refresh phases.
 

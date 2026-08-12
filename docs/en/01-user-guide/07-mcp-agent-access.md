@@ -112,7 +112,7 @@ Resources and prompts provide read-only diagnostics, context, and invocation tem
 
 ## 7.5 Write Permission Boundary
 
-MCP does not expose index refresh or repository indexing. Repository indexing must be triggered explicitly through `relay-knowledge repo index` or `relay-knowledge repo update`; derived index refresh must be triggered through CLI/Web operational workflows.
+MCP does not expose index refresh or repository indexing. MCP itself never starts those writes. An enabled managed watcher may independently publish checked-out commits through durable reconciliation; otherwise use `relay-knowledge repo index` or `relay-knowledge repo update`. Derived index refresh remains a CLI/Web operational workflow.
 
 Agent requests are recorded as bounded in-process audit events with runtime identity, scope, freshness, QoS decision, budget, truncation, result count, and status. Durable audit writes do not open cold storage for discovery or read-only diagnostics; once a storage-backed tool has opened storage, audit events are mirrored to the durable store. Repository-set query audit entries record the `request.set_alias` value as the scope so multi-repository reads remain visible in the audit trail. See [Chapter 10](10-workers-proposals-audit.md) for persistent audit sink configuration.
 

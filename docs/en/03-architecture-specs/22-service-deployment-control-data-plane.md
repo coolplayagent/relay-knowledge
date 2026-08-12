@@ -58,7 +58,7 @@ Control-plane APIs must cover:
 - worker task queue, lease, retry, dead-letter, checkpoint, progress, and reset.
 - code-index master-worker diagnostics, including configured workers, active worker slots, queue depth, running leases, and retry/dead-letter state.
 - storage topology, shard catalog, backup/migration/rollback/uninstall diagnostics.
-- repository register/index/status/report/set overlay refresh.
+- repository register/full index/durable incremental update/status/report/set overlay refresh, plus bounded checked-out-HEAD reconciliation for watched repositories.
 - audit, authorization identity, request id, trace id, QoS admission, and overload decisions.
 
 New control-plane interfaces must first define shared `api` request/response types and application service methods, then map them to CLI, Web, MCP, or HTTP routes. Interface layers must not duplicate business logic, read the storage catalog directly, renew worker tasks directly, or bypass QoS. The current read-only control-plane HTTP preview exposes `/api/v1/control/status`, `/api/v1/control/health`, `/api/v1/control/service/status`, and `/api/v1/control/storage/topology`. These routes must remain safe on cold runtimes: health and service-status diagnostics cannot open or migrate storage, topology diagnostics may only use bounded read-only catalog probes that also surface active partitioned catalogs under a single-SQLite configuration, and backlog counters must use storage count APIs instead of unbounded list materialization.
@@ -86,9 +86,13 @@ New backends must pass the same contract tests:
 
 ## 7. API Extension Contract
 
-Control-plane HTTP routes use `/api/*`, and same-origin Web operations continue to use `/api/web/operations/execute`. External control-plane APIs use `/api/v1/control/*` or an equivalent name. The current preview exposes only read-only status, health, service status, and storage topology diagnostics while keeping CLI JSON, Web, and MCP tool semantics compatible. Remote code-repository CLI commands use `/api/v1/code/repositories/{alias}/index`, `/scope/preview`, `/status`, and `/query`; these routes must reuse shared `api` request/response types and must not treat Web composer payloads as the external contract.
+Control-plane HTTP routes use `/api/*`, and same-origin Web operations continue to use `/api/web/operations/execute`. External control-plane APIs use `/api/v1/control/*` or an equivalent name. The current preview exposes only read-only status, health, service status, and storage topology diagnostics while keeping CLI JSON, Web, and MCP tool semantics compatible. Remote code-repository CLI commands use `/api/v1/code/repositories/{alias}/index`, `/update`, `/scope/preview`, `/status`, and `/query`; these routes must reuse shared `api` request/response types and must not treat Web composer payloads as the external contract. `POST .../update` accepts optional `base_ref` and `head_ref`, resolves omissions to the last published clean base and `HEAD`, pins immutable commits, and returns the same durable task/status/checkpoint response family as full indexing.
 
 API responses must include metadata, warnings/degraded state, freshness/truncation, stable error kind, and trace context. Long-running operations return only task handles, checkpoints, and queryable status; they must not synchronously run unbounded indexing, unbounded scans, large external-provider batches, or shard migration.
+
+The resident watcher is part of the control plane, not a second data-plane writer. Narrow Git metadata events are hints, while startup and bounded periodic `HEAD` reconciliation (default 5000 ms) recover linked worktrees, missed events, and restart lag. Reconciliation only persists pinned Incremental tasks under a stable per-ref fingerprint. The durable queue's attempt-scoped lease remains the write authorization and enforces one writer per repository. `service status` exposes reconciliation, queued-commit, and reconciliation-failure counters.
+
+Publication invokes durable retention that preserves the union of active and the latest-two-success window (normally overlapping), plus the latest incremental predecessor, the clean base of any active worktree overlay, unfinished-task bases/targets, and repository-set pins. It atomically marks one old scope `retiring`, then advances one scope-GC phase whose physical deletion is capped at 512 rows in aggregate across affected application tables per maintenance transaction, including code facts, search rows, software projections, checkpoints, workspace and scope state. Finished-task history is bounded to 128 successes and 64 failure-class rows per repository. This is not an atomic publication claim for the generic Knowledge Graph or independent semantic/vector generations.
 
 ## 8. Acceptance Criteria
 
@@ -96,6 +100,7 @@ API responses must include metadata, warnings/degraded state, freshness/truncati
 - `partitioned_sqlite` doctor/status, backup, migration, and uninstall plans cover both the control database and shard directory, with storage diagnostics reporting active/staged/missing shard counts.
 - Split-worker preview claims durable code-index tasks through `service worker run [--task-id <id>]`; workers cannot complete, fail, or write when no task was claimed, the lease expired, or the attempt does not match.
 - `health`, `service status`, and Web diagnostics return bounded degraded status while the data plane is busy.
+- Commit reconciliation remains observable, bounded, restart-safe, and unable to bypass leases; long commit histories remain bounded by protected scope and finished-task retention.
 - New graph/vector/event/workflow adapters enter only as implementation details under storage, retrieval, net, or worker boundaries and do not change domain/API semantics.
 
 ---

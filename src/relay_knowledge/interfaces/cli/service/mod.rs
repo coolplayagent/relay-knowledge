@@ -130,11 +130,12 @@ pub(super) fn run_code_index_worker_pool(
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     (0..worker_count.max(1))
-        .map(|_| {
+        .map(|worker_index| {
             tokio::spawn(run_code_index_loop(
                 service.clone(),
                 interval,
                 shutdown.clone(),
+                worker_index == 0,
             ))
         })
         .collect()
@@ -144,13 +145,27 @@ async fn run_code_index_loop(
     service: RelayKnowledgeService,
     interval: std::time::Duration,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    runs_retention: bool,
 ) {
     loop {
         if *shutdown.borrow() {
             break;
         }
         let context = RequestContext::for_interface(InterfaceKind::Cli);
-        if let Ok(Some(_)) = service.run_code_index_task_once(None, context).await {
+        let task_completed = matches!(
+            service.run_code_index_task_once(None, context).await,
+            Ok(Some(_))
+        );
+        if runs_retention {
+            match service.run_code_scope_retention_once().await {
+                Ok(_) => {}
+                Err(error) => tracing::warn!(
+                    error = %error.message,
+                    "bounded code-scope retention pass will retry"
+                ),
+            }
+        }
+        if task_completed && !runs_retention {
             continue;
         }
         tokio::select! {

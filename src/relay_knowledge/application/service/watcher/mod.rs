@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     api::ApiError,
-    domain::CodeRepositoryStatus,
+    domain::{CodeIndexTaskRecord, CodeIndexTaskState, CodeRepositoryStatus},
     watcher::{FileWatcher, WatchedRepository, WatcherHandle},
 };
 
@@ -33,11 +33,11 @@ impl RelayKnowledgeService {
             .start_with_sink(repositories, move |seed| {
                 let store = Arc::clone(&queue_store);
                 async move {
-                    store
+                    let queued = store
                         .queue_code_index_task(seed)
                         .await
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
+                        .map_err(|error| error.to_string())?;
+                    accept_watcher_task(queued)
                 }
             })
             .map_err(ApiError::storage_unavailable)?;
@@ -89,11 +89,27 @@ impl RelayKnowledgeService {
     }
 }
 
+fn accept_watcher_task(task: CodeIndexTaskRecord) -> Result<(), String> {
+    if task.state != CodeIndexTaskState::DeadLetter {
+        return Ok(());
+    }
+    let failure = task
+        .last_error_message
+        .as_deref()
+        .map(|message| format!(": {message}"))
+        .unwrap_or_default();
+    Err(format!(
+        "durable code index task '{}' remains dead_letter{failure}; reset failed work before retrying repository '{}'",
+        task.task_id, task.alias
+    ))
+}
+
 fn watched_repository_from_status(status: &CodeRepositoryStatus) -> Option<WatchedRepository> {
     if status.stale {
         return None;
     }
     let source_scope = status.last_indexed_scope_id.clone()?;
+    let last_indexed_commit = status.last_indexed_commit.clone()?;
     Some(WatchedRepository {
         repository_id: status.repository_id.clone(),
         alias: status.alias.clone(),
@@ -101,6 +117,7 @@ fn watched_repository_from_status(status: &CodeRepositoryStatus) -> Option<Watch
         path_filters: status.path_filters.clone(),
         language_filters: status.language_filters.clone(),
         source_scope,
+        last_indexed_commit,
     })
 }
 

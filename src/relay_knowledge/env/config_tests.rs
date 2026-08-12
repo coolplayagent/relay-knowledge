@@ -37,6 +37,7 @@ fn parses_platform_and_relay_overrides() {
             (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "1536"),
             (RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS, "120000"),
             (RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS, "600"),
+            (RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS, "7000"),
             (RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED, "true"),
             (RELAY_KNOWLEDGE_UPDATE_SOURCES, "github,crates.io"),
             (RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS, "86400000"),
@@ -101,6 +102,7 @@ fn parses_platform_and_relay_overrides() {
     assert_eq!(config.retrieval.embedding_dimension, Some(1536));
     assert_eq!(config.file_index.scan_timeout_ms, Some(120000));
     assert_eq!(config.file_index.query_timeout_ms, Some(600));
+    assert_eq!(config.watcher.commit_reconcile_interval_ms, Some(7000));
     assert_eq!(config.updates.enabled, Some(true));
     assert_eq!(config.updates.sources, Some("github,crates.io".to_owned()));
     assert_eq!(config.updates.check_interval_ms, Some(86_400_000));

@@ -10,7 +10,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::{
-    api::{ApiError, InterfaceKind, RequestContext},
+    api::{ApiError, CodeRepositoryUpdateRequest, InterfaceKind, RequestContext},
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
         CodeIndexRequest, CodeRepositorySelector, CodeRetrievalRequest, CodebaseViewRequest,
@@ -33,6 +33,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/index",
             post(code_repository_index),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/update",
+            post(code_repository_update),
         )
         .route(
             "/api/v1/code/repositories/{alias}/scope/preview",
@@ -111,6 +115,30 @@ async fn code_repository_index(
     match state
         .service
         .start_code_repository_index(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_update(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<CodeRepositoryUpdateRequest>,
+) -> Response {
+    if request.repository.trim().is_empty() {
+        request.repository = alias.clone();
+    } else if request.repository != alias {
+        return api_error_response(ApiError::invalid_argument(format!(
+            "repository alias '{}' does not match request repository '{}'",
+            alias, request.repository
+        )));
+    }
+    match state
+        .service
+        .start_code_repository_update(request, api_context(&headers))
         .await
     {
         Ok(response) => Json(response).into_response(),

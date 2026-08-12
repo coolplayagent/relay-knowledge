@@ -9,7 +9,7 @@ use crate::{
         CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
         RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
 };
 
 #[tokio::test]
@@ -34,6 +34,27 @@ async fn multi_batch_cold_session_defers_query_indexes_until_finalization() {
         .expect("multi-batch session should begin");
 
     assert!(!query_index_exists(&store, "code_repository_symbols_lookup").await);
+}
+
+#[tokio::test]
+async fn code_index_task_unfenced_checkpoint_session_obeys_scope_capacity() {
+    let store = registered_store().await;
+    for index in 0..super::super::super::MAX_SCOPE_SLOTS_PER_REPOSITORY {
+        store
+            .begin_code_index_session(session_for_scope(
+                &format!("git_snapshot:capacity-{index:03}"),
+                2,
+            ))
+            .await
+            .expect("checkpoint target within scope capacity should begin");
+    }
+
+    let error = store
+        .begin_code_index_session(session_for_scope("git_snapshot:capacity-overflow", 2))
+        .await
+        .expect_err("the next checkpoint target must observe scope maintenance backpressure");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
 }
 
 #[tokio::test]
@@ -678,110 +699,7 @@ async fn checkpointed_batches_finalize_go_package_import_edges_for_symbol_querie
     );
 }
 
-#[tokio::test]
-async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
-    let store = registered_store().await;
-    let source_scope = "git_snapshot:batch-replay";
-    let session = session_for_scope(source_scope, 1);
-    let indexed_file = file(
-        source_scope,
-        "replayed-file",
-        "src/lib.rs",
-        "rust",
-        CodeParseStatus::Parsed,
-    );
-    let indexed_symbol = symbol(
-        source_scope,
-        "replayed-symbol",
-        "replayed-file",
-        "src/lib.rs",
-        "run",
-        "rust",
-    );
-    let batch = CodeIndexBatch {
-        files: vec![indexed_file],
-        symbols: vec![indexed_symbol],
-        ..batch(source_scope, 1)
-    };
-
-    store
-        .begin_code_index_session(session)
-        .await
-        .expect("session should begin");
-    let first = store
-        .apply_code_index_batch(batch.clone())
-        .await
-        .expect("first batch should persist");
-    let resumed = store
-        .begin_code_index_session(session_for_scope(source_scope, 1))
-        .await
-        .expect("restarted session should retain checkpoint progress");
-    let replayed = store
-        .apply_code_index_batch(batch)
-        .await
-        .expect("batch replay should remain idempotent for progress");
-    let status = store
-        .code_repository_status("fixture".to_owned())
-        .await
-        .expect("status should load")
-        .expect("status should exist");
-
-    assert_eq!(first.committed_file_count, 1);
-    assert_eq!(first.committed_symbol_count, 1);
-    assert_eq!(resumed.committed_file_count, 1);
-    assert_eq!(resumed.committed_symbol_count, 1);
-    assert_eq!(resumed.batch_count, 1);
-    assert_eq!(replayed.committed_file_count, 1);
-    assert_eq!(replayed.committed_symbol_count, 1);
-    assert_eq!(replayed.batch_count, 1);
-    assert_eq!(status.indexed_file_count, 1);
-    assert_eq!(status.symbol_count, 1);
-}
-
-#[tokio::test]
-async fn new_checkpoint_batch_replaces_colliding_path_rows() {
-    let store = registered_store().await;
-    let source_scope = "git_snapshot:batch-path-collision";
-    let session = session_for_scope(source_scope, 2);
-    let path = "src/lib.rs";
-    let batch = |batch_index, file_id: &str, symbol_id: &str, name: &str| CodeIndexBatch {
-        files: vec![file(
-            source_scope,
-            file_id,
-            path,
-            "rust",
-            CodeParseStatus::Parsed,
-        )],
-        symbols: vec![symbol(source_scope, symbol_id, file_id, path, name, "rust")],
-        ..batch(source_scope, batch_index)
-    };
-
-    store
-        .begin_code_index_session(session.clone())
-        .await
-        .expect("session should begin");
-    store
-        .apply_code_index_batch(batch(1, "first-file", "legacy-symbol", "legacy_handler"))
-        .await
-        .expect("first batch should persist");
-    store
-        .apply_code_index_batch(batch(2, "second-file", "current-symbol", "current_handler"))
-        .await
-        .expect("colliding new batch should replace path rows");
-    store
-        .finalize_code_index_session(session)
-        .await
-        .expect("session should finalize");
-
-    let old_hits = search(&store, "legacy_handler", CodeQueryKind::Symbol).await;
-    let new_hits = search(&store, "current_handler", CodeQueryKind::Symbol).await;
-
-    assert!(old_hits.is_empty());
-    assert_eq!(new_hits.len(), 1);
-    assert_eq!(new_hits[0].path, path);
-}
-
-async fn registered_store() -> SqliteGraphStore {
+pub(super) async fn registered_store() -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     store
         .upsert_code_repository(
@@ -794,7 +712,7 @@ async fn registered_store() -> SqliteGraphStore {
     store
 }
 
-fn batch(source_scope: &str, batch_index: usize) -> CodeIndexBatch {
+pub(super) fn batch(source_scope: &str, batch_index: usize) -> CodeIndexBatch {
     CodeIndexBatch {
         repository_id: "repo".to_owned(),
         source_scope: source_scope.to_owned(),
@@ -846,7 +764,7 @@ async fn reference_resolution_rows(
         .expect("reference rows should load")
 }
 
-fn file(
+pub(super) fn file(
     source_scope: &str,
     file_id: &str,
     path: &str,
@@ -895,7 +813,7 @@ fn chunk(
     }
 }
 
-fn symbol(
+pub(super) fn symbol(
     source_scope: &str,
     symbol_snapshot_id: &str,
     file_id: &str,
@@ -969,7 +887,7 @@ fn import(
     }
 }
 
-fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSession {
+pub(super) fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSession {
     CodeIndexSession {
         repository_id: "repo".to_owned(),
         source_scope: source_scope.to_owned(),
@@ -989,7 +907,7 @@ fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSe
     }
 }
 
-async fn search(
+pub(super) async fn search(
     store: &SqliteGraphStore,
     query: &str,
     kind: CodeQueryKind,

@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use super::super::{
     cleanup::{count_code_rows, delete_scope_index},
+    lifecycle::commit_scope,
     report, status, workspace,
 };
 use super::{checkpoint, finalize};
@@ -16,12 +17,27 @@ use crate::{
 #[path = "mod_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "checkpoint_batch_tests.rs"]
+mod checkpoint_batch_tests;
+
 pub(in super::super) fn begin_session(
     connection: &mut Connection,
     session: CodeIndexSession,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
+    begin_session_with_fence(connection, session, None)
+}
+
+pub(in super::super) fn begin_session_with_fence(
+    connection: &mut Connection,
+    session: CodeIndexSession,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<CodeIndexCheckpoint, StorageError> {
+    if let Some(fence) = fence {
+        fence.validate_repository(&session.repository_id)?;
+    }
     super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        begin_session_once(connection, &session)
+        begin_session_once(connection, &session, fence)
     })
 }
 
@@ -29,14 +45,26 @@ pub(in super::super) fn finalize_session(
     connection: &mut Connection,
     session: CodeIndexSession,
 ) -> Result<CodeIndexSummary, StorageError> {
+    finalize_session_with_fence(connection, session, None)
+}
+
+pub(in super::super) fn finalize_session_with_fence(
+    connection: &mut Connection,
+    session: CodeIndexSession,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<CodeIndexSummary, StorageError> {
+    if let Some(fence) = fence {
+        fence.validate_repository(&session.repository_id)?;
+    }
     super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        finalize_session_once(connection, &session)
+        finalize_session_once(connection, &session, fence)
     })
 }
 
 fn begin_session_once(
     connection: &mut Connection,
     session: &CodeIndexSession,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
     if !session.full_replace {
         return Err(StorageError::InvalidInput(
@@ -45,6 +73,14 @@ fn begin_session_once(
     }
 
     let transaction = connection.transaction()?;
+    super::super::tasks::retention_gc::reject_retiring_scope(&transaction, &session.source_scope)?;
+    if fence.is_none() {
+        super::super::tasks::enforce_unfenced_target(
+            &transaction,
+            &session.repository_id,
+            &session.source_scope,
+        )?;
+    }
     let resumable = transaction
         .query_row(
             "SELECT committed_file_count FROM code_repository_index_checkpoints WHERE source_scope = ?1 AND state = 'indexing'",
@@ -67,6 +103,11 @@ fn begin_session_once(
             params![session.source_scope],
         )?;
     }
+    commit_scope::preserve_existing_scope_commit(
+        &transaction,
+        &session.repository_id,
+        &session.source_scope,
+    )?;
     transaction.execute(
         "
         UPDATE code_repositories
@@ -78,6 +119,10 @@ fn begin_session_once(
     if !resumable {
         checkpoint::insert(&transaction, session, "indexing", None)?;
     }
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &session.source_scope)?;
+        fence.validate(&transaction)?;
+    }
     transaction.commit()?;
 
     checkpoint::load(connection, &session.source_scope)
@@ -86,17 +131,20 @@ fn begin_session_once(
 fn finalize_session_once(
     connection: &mut Connection,
     session: &CodeIndexSession,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexSummary, StorageError> {
     run_finalize_phase(
         connection,
         &session.source_scope,
         finalize::phases::BUILD_QUERY_INDEXES,
+        fence,
         |transaction| super::super::schema::ensure_code_query_indexes(transaction),
     )?;
     run_finalize_phase(
         connection,
         &session.source_scope,
         finalize::phases::RESOLVE_REFERENCES,
+        fence,
         |transaction| finalize::phases::resolve_references(transaction, &session.source_scope),
     )?;
     let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
@@ -104,6 +152,7 @@ fn finalize_session_once(
         connection,
         &session.source_scope,
         finalize::phases::RESOLVE_IMPORTS,
+        fence,
         |transaction| {
             finalize::phases::resolve_imports(transaction, &session.source_scope, &mut symbol_cache)
         },
@@ -112,12 +161,14 @@ fn finalize_session_once(
         connection,
         &session.source_scope,
         finalize::phases::RESOLVE_CALL_TARGETS,
+        fence,
         |transaction| finalize::phases::resolve_call_targets(transaction, &session.source_scope),
     )?;
     run_finalize_phase(
         connection,
         &session.source_scope,
         finalize::phases::REFRESH_DEPENDENCIES,
+        fence,
         |transaction| {
             finalize::phases::refresh_dependencies(
                 transaction,
@@ -130,6 +181,7 @@ fn finalize_session_once(
         connection,
         &session.source_scope,
         finalize::phases::REBUILD_REFERENCE_SEARCH,
+        fence,
         |transaction| {
             finalize::phases::rebuild_reference_search(transaction, &session.source_scope)
         },
@@ -138,6 +190,7 @@ fn finalize_session_once(
         connection,
         &session.source_scope,
         finalize::phases::REBUILD_CALLS,
+        fence,
         |transaction| {
             finalize::phases::rebuild_calls(
                 transaction,
@@ -147,18 +200,18 @@ fn finalize_session_once(
             )
         },
     )?;
-    checkpoint::mark_state(
-        connection,
+    let transaction = connection.transaction()?;
+    checkpoint::mark_state_in_transaction(
+        &transaction,
         &session.source_scope,
         finalize::phases::PUBLISH_SCOPE,
     )?;
-    checkpoint::mark_state(
-        connection,
+    publish_repository_scope(&transaction, session)?;
+    checkpoint::mark_state_in_transaction(
+        &transaction,
         &session.source_scope,
         finalize::phases::RESOLVE_WORKSPACE_IMPORTS,
     )?;
-    let transaction = connection.transaction()?;
-    publish_repository_scope(&transaction, session)?;
     workspace::resolve_workspace_imports(
         &transaction,
         &session.workspaces,
@@ -166,6 +219,10 @@ fn finalize_session_once(
         &session.source_scope,
     )?;
     checkpoint::mark_completed(&transaction, &session.source_scope)?;
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &session.source_scope)?;
+        fence.validate(&transaction)?;
+    }
     transaction.commit()?;
 
     build_summary(connection, session)
@@ -175,11 +232,16 @@ fn run_finalize_phase(
     connection: &mut Connection,
     source_scope: &str,
     state: &str,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
     operation: impl FnOnce(&Transaction<'_>) -> Result<(), StorageError>,
 ) -> Result<(), StorageError> {
-    checkpoint::mark_state(connection, source_scope, state)?;
     let transaction = connection.transaction()?;
+    checkpoint::mark_state_in_transaction(&transaction, source_scope, state)?;
     operation(&transaction)?;
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, source_scope)?;
+        fence.validate(&transaction)?;
+    }
     transaction.commit()?;
 
     Ok(())
@@ -261,6 +323,12 @@ fn publish_repository_scope(
             degraded_reason,
         ],
     )?;
+    commit_scope::record(
+        transaction,
+        &session.repository_id,
+        &session.resolved_commit_sha,
+        &session.source_scope,
+    )?;
     transaction.execute(
         "
         UPDATE code_repositories
@@ -310,6 +378,7 @@ fn build_summary(
     Ok(CodeIndexSummary {
         repository_id: session.repository_id.clone(),
         source_scope: session.source_scope.clone(),
+        base_resolved_commit_sha: session.base_resolved_commit_sha.clone(),
         resolved_commit_sha: session.resolved_commit_sha.clone(),
         tree_hash: session.tree_hash.clone(),
         indexed_file_count: status.indexed_file_count,

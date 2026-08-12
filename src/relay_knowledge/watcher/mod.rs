@@ -8,7 +8,7 @@ pub use config::WatcherConfig;
 pub use engine::{FileWatcher, WatcherDiagnostics, WatcherHandle, WatcherState};
 pub use event_filter::WatcherEventFilter;
 pub use hash_cache::ContentHashCache;
-pub use task_seed::build_incremental_task_seed;
+pub use task_seed::{build_commit_task_seed, build_incremental_task_seed};
 
 use std::path::PathBuf;
 
@@ -20,4 +20,6 @@ pub struct WatchedRepository {
     pub path_filters: Vec<String>,
     pub language_filters: Vec<String>,
     pub source_scope: String,
+    /// Last successfully published snapshot identity used as the durable base.
+    pub last_indexed_commit: String,
 }

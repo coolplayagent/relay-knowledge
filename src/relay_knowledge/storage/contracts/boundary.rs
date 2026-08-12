@@ -10,6 +10,7 @@ pub enum StorageError {
     Join(tokio::task::JoinError),
     LockPoisoned,
     Busy(String),
+    CapacityExceeded(String),
     InvalidInput(String),
 }
 
@@ -21,6 +22,9 @@ impl fmt::Display for StorageError {
             Self::Join(error) => write!(formatter, "storage worker failed: {error}"),
             Self::LockPoisoned => write!(formatter, "sqlite connection lock was poisoned"),
             Self::Busy(message) => write!(formatter, "storage busy: {message}"),
+            Self::CapacityExceeded(message) => {
+                write!(formatter, "storage capacity exceeded: {message}")
+            }
             Self::InvalidInput(message) => write!(formatter, "invalid storage input: {message}"),
         }
     }

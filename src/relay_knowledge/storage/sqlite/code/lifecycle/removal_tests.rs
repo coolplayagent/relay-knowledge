@@ -1,5 +1,7 @@
 use rusqlite::params;
 
+use crate::storage::sqlite::code::set::MAX_REPOSITORY_SET_OVERLAY_EDGES;
+
 use super::*;
 
 #[test]
@@ -33,6 +35,14 @@ fn repository_remove_deletes_index_aliases_tasks_and_invalidates_sets() {
     insert_index_task(&connection, "repo", "task-a", "scope-a");
     insert_index_task(&connection, "repo", "task-pending", "scope-pending");
     insert_checkpoint(&connection, "repo", "scope-pending");
+    connection
+        .execute(
+            "INSERT INTO code_repository_commit_scopes
+             (repository_id, resolved_commit_sha, source_scope, published_sequence)
+             VALUES ('repo', 'commit', 'scope-a', 1)",
+            [],
+        )
+        .expect("commit scope alias should insert");
     insert_repository_set_fixture(&connection);
 
     let removed =
@@ -64,6 +74,14 @@ fn repository_remove_deletes_index_aliases_tasks_and_invalidates_sets() {
         count_where(
             &connection,
             "code_repository_scopes",
+            "repository_id = 'repo'"
+        ),
+        0
+    );
+    assert_eq!(
+        count_where(
+            &connection,
+            "code_repository_commit_scopes",
             "repository_id = 'repo'"
         ),
         0
@@ -247,6 +265,100 @@ fn repository_remove_rejects_live_repository_set_refresh_task() {
     );
 }
 
+#[test]
+fn repository_remove_rejects_legacy_unbounded_repository_set_overlay_atomically() {
+    let mut connection = Connection::open_in_memory().expect("connection should open");
+    create_minimal_schema(&connection);
+    insert_fixture_repository(&connection, "repo", "app", "scope-a");
+    insert_fixture_repository(&connection, "other", "svc", "scope-b");
+    insert_repository_set_fixture(&connection);
+    let transaction = connection
+        .transaction()
+        .expect("fixture transaction should open");
+    {
+        let mut insert = transaction
+            .prepare("INSERT INTO code_repository_cross_edges (set_id) VALUES ('set-workspace')")
+            .expect("edge insert should prepare");
+        for _ in 1..=MAX_REPOSITORY_SET_OVERLAY_EDGES {
+            insert.execute([]).expect("legacy edge should insert");
+        }
+    }
+    transaction
+        .commit()
+        .expect("fixture transaction should commit");
+
+    let error = remove_repository(&mut connection, "app", 200)
+        .expect_err("legacy unbounded overlay should reject before deletion");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+    assert_eq!(
+        count_where(&connection, "code_repositories", "repository_id = 'repo'"),
+        1
+    );
+    assert_eq!(
+        count_where(
+            &connection,
+            "code_repository_set_members",
+            "repository_id = 'repo'"
+        ),
+        1
+    );
+    assert_eq!(
+        count_where(
+            &connection,
+            "code_repository_cross_edges",
+            "set_id = 'set-workspace'"
+        ),
+        MAX_REPOSITORY_SET_OVERLAY_EDGES + 1
+    );
+}
+
+#[test]
+fn repository_remove_rejects_more_than_the_bounded_affected_set_count() {
+    let mut connection = Connection::open_in_memory().expect("connection should open");
+    create_minimal_schema(&connection);
+    insert_fixture_repository(&connection, "repo", "app", "scope-a");
+    let transaction = connection
+        .transaction()
+        .expect("fixture transaction should open");
+    for index in 0..=MAX_REPOSITORY_SET_MEMBERS {
+        let set_id = format!("set-{index:03}");
+        transaction
+            .execute(
+                "INSERT INTO code_repository_sets (set_id, updated_at_ms) VALUES (?1, 0)",
+                [&set_id],
+            )
+            .expect("set should insert");
+        transaction
+            .execute(
+                "INSERT INTO code_repository_set_members (set_id, repository_id, source_scope)
+                 VALUES (?1, 'repo', 'scope-a')",
+                [&set_id],
+            )
+            .expect("member should insert");
+    }
+    transaction
+        .commit()
+        .expect("fixture transaction should commit");
+
+    let error = remove_repository(&mut connection, "app", 200)
+        .expect_err("too many affected repository sets should reject atomically");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+    assert_eq!(
+        count_where(&connection, "code_repositories", "repository_id = 'repo'"),
+        1
+    );
+    assert_eq!(
+        count_where(
+            &connection,
+            "code_repository_set_members",
+            "repository_id = 'repo'"
+        ),
+        MAX_REPOSITORY_SET_MEMBERS + 1
+    );
+}
+
 fn create_minimal_schema(connection: &Connection) {
     connection
             .execute_batch(
@@ -285,6 +397,12 @@ fn create_minimal_schema(connection: &Connection) {
                     chunk_count INTEGER NOT NULL,
                     stale INTEGER NOT NULL,
                     degraded_reason TEXT
+                );
+                CREATE TABLE code_repository_commit_scopes (
+                    repository_id TEXT NOT NULL,
+                    resolved_commit_sha TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    published_sequence INTEGER NOT NULL
                 );
                 CREATE TABLE code_repository_files (repository_id TEXT NOT NULL, source_scope TEXT NOT NULL, file_id TEXT NOT NULL, path TEXT NOT NULL, language_id TEXT NOT NULL, blob_hash TEXT NOT NULL, byte_len INTEGER NOT NULL, line_count INTEGER NOT NULL, parse_status TEXT NOT NULL, degraded_reason TEXT);
                 CREATE TABLE code_repository_symbols (source_scope TEXT NOT NULL);

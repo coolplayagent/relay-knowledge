@@ -4,7 +4,11 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 
 use crate::{domain::CodeRepositoryRemovalSummary, storage::StorageError};
 
-use super::{cleanup::delete_scope_index, status};
+use super::{
+    super::set::{MAX_REPOSITORY_SET_MEMBERS, ensure_overlay_delete_is_bounded},
+    cleanup::delete_scope_index,
+    status,
+};
 
 pub(in crate::storage::sqlite::code) fn remove_repository(
     connection: &mut Connection,
@@ -21,6 +25,7 @@ pub(in crate::storage::sqlite::code) fn remove_repository(
     let scopes = repository_cleanup_scopes(&transaction, &repository_id)?;
     let affected_set_ids = affected_repository_sets(&transaction, &repository_id)?;
     reject_running_repository_set_refresh_tasks(&transaction, &affected_set_ids, now_ms)?;
+    reject_unbounded_repository_set_cleanup(&transaction, &affected_set_ids)?;
     let removed_repository_set_member_count =
         count_repository_set_members(&transaction, &repository_id)?;
     let removed_index_task_count = count_index_tasks(&transaction, &repository_id)?;
@@ -32,7 +37,6 @@ pub(in crate::storage::sqlite::code) fn remove_repository(
     )?;
     for scope in &scopes {
         delete_scope_index(&transaction, scope)?;
-        delete_scope_lifecycle_projection(&transaction, scope)?;
     }
     transaction.execute(
         "DELETE FROM code_repository_index_checkpoints WHERE repository_id = ?1",
@@ -40,6 +44,10 @@ pub(in crate::storage::sqlite::code) fn remove_repository(
     )?;
     transaction.execute(
         "DELETE FROM code_repository_index_tasks WHERE repository_id = ?1",
+        params![&repository_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_commit_scopes WHERE repository_id = ?1",
         params![&repository_id],
     )?;
     transaction.execute(
@@ -143,40 +151,45 @@ fn repository_cleanup_scopes(
         .map_err(StorageError::from)
 }
 
-fn delete_scope_lifecycle_projection(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-) -> Result<(), StorageError> {
-    for table in [
-        "software_build_targets",
-        "software_iac_resources",
-        "software_design_elements",
-    ] {
-        transaction.execute(
-            &format!("DELETE FROM {table} WHERE source_scope = ?1"),
-            params![source_scope],
-        )?;
-    }
-
-    Ok(())
-}
-
 fn affected_repository_sets(
     transaction: &Transaction<'_>,
     repository_id: &str,
 ) -> Result<Vec<String>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT DISTINCT set_id
-        FROM code_repository_set_members
-        WHERE repository_id = ?1
-        ORDER BY set_id ASC
+        SELECT set_id FROM (
+            SELECT DISTINCT set_id
+            FROM code_repository_set_members
+            WHERE repository_id = ?1
+            ORDER BY set_id ASC
+            LIMIT ?2
+        )
         ",
     )?;
-    let rows = statement.query_map(params![repository_id], |row| row.get::<_, String>(0))?;
+    let rows = statement.query_map(
+        params![repository_id, MAX_REPOSITORY_SET_MEMBERS + 1],
+        |row| row.get::<_, String>(0),
+    )?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
+    let set_ids = rows.collect::<Result<Vec<_>, _>>()?;
+    if set_ids.len() > MAX_REPOSITORY_SET_MEMBERS {
+        return Err(StorageError::CapacityExceeded(format!(
+            "repository '{repository_id}' belongs to more than the bounded removal capacity of \
+             {MAX_REPOSITORY_SET_MEMBERS} repository sets; use a bounded repair or remove \
+             memberships before removing the repository"
+        )));
+    }
+    Ok(set_ids)
+}
+
+fn reject_unbounded_repository_set_cleanup(
+    transaction: &Transaction<'_>,
+    set_ids: &[String],
+) -> Result<(), StorageError> {
+    for set_id in unique_set_ids(set_ids) {
+        ensure_overlay_delete_is_bounded(transaction, set_id)?;
+    }
+    Ok(())
 }
 
 fn count_repository_set_members(

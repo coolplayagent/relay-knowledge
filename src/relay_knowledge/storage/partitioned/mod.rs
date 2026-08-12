@@ -12,12 +12,12 @@ mod totals;
 use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeIndexBatch, CodeIndexCheckpoint,
-        CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary, CodeRepositoryCrossEdge,
-        CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
-        CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
-        CodeRepositorySetStatus, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
-        CodeRetrievalRequest, CodeSymbolGenerationCounts, SoftwareGlobalProjection,
-        SoftwareGlobalRequest,
+        CodeIndexPublicationFence, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
+        CodeRepositoryCrossEdge, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
+        CodeRepositoryReport, CodeRepositorySet, CodeRepositorySetMember,
+        CodeRepositorySetRefreshSummary, CodeRepositorySetStatus, CodeRepositoryStatus,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeSymbolGenerationCounts,
+        SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
     paths::RuntimePaths,
     storage::{
@@ -277,6 +277,14 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         indexing::lifecycle::apply_snapshot(self, snapshot)
     }
 
+    fn apply_code_index_snapshot_with_fence(
+        &self,
+        snapshot: CodeIndexSnapshot,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexSummary> {
+        indexing::lifecycle::apply_snapshot_with_fence(self, snapshot, fence)
+    }
+
     fn clear_code_workspace_state(
         &self,
         repository_id: String,
@@ -284,11 +292,28 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, ()> {
         indexing::lifecycle::clear_workspace(self, repository_id, source_scope)
     }
+
+    fn clear_code_workspace_state_with_fence(
+        &self,
+        repository_id: String,
+        source_scope: String,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, ()> {
+        indexing::lifecycle::clear_workspace_with_fence(self, repository_id, source_scope, fence)
+    }
     fn begin_code_index_session(
         &self,
         session: CodeIndexSession,
     ) -> StorageFuture<'_, CodeIndexCheckpoint> {
         indexing::lifecycle::begin_session(self, session)
+    }
+
+    fn begin_code_index_session_with_fence(
+        &self,
+        session: CodeIndexSession,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        indexing::lifecycle::begin_session_with_fence(self, session, fence)
     }
 
     fn apply_code_index_batch(
@@ -298,11 +323,27 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         indexing::lifecycle::apply_batch(self, batch)
     }
 
+    fn apply_code_index_batch_with_fence(
+        &self,
+        batch: CodeIndexBatch,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        indexing::lifecycle::apply_batch_with_fence(self, batch, fence)
+    }
+
     fn finalize_code_index_session(
         &self,
         session: CodeIndexSession,
     ) -> StorageFuture<'_, CodeIndexSummary> {
         indexing::lifecycle::finalize_session(self, session)
+    }
+
+    fn finalize_code_index_session_with_fence(
+        &self,
+        session: CodeIndexSession,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexSummary> {
+        indexing::lifecycle::finalize_session_with_fence(self, session, fence)
     }
 
     fn search_code(
@@ -480,6 +521,24 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         })
     }
 
+    fn refresh_software_global_projection_with_fence(
+        &self,
+        source_scope: String,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        let this = self.clone();
+        Box::pin(async move {
+            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
+                return shard
+                    .refresh_software_global_projection_with_fence(source_scope, fence)
+                    .await;
+            }
+            this.control
+                .refresh_software_global_projection_with_fence(source_scope, fence)
+                .await
+        })
+    }
+
     fn software_global_projection(
         &self,
         request: SoftwareGlobalRequest,
@@ -563,7 +622,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     fn refresh_code_repository_set_overlay(
         &self,
         set_alias: String,
-        _now_ms: u64,
+        _publication: crate::storage::CodeRepositorySetRefreshPublication,
     ) -> StorageFuture<'_, CodeRepositorySetRefreshSummary> {
         Box::pin(async move {
             Err(StorageError::InvalidInput(format!(

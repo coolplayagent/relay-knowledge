@@ -242,12 +242,27 @@ fn parse_scope(tokens: &[String]) -> Result<RepoCommand, CliError> {
 
 fn parse_update(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let alias = positional_alias(tokens)?;
-    let (base_ref, head_ref, _) = parse_base_head_limit(tokens, 1, 50)?;
+    let mut base_ref = None;
+    let mut head_ref = None;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--base" if base_ref.is_none() => {
+                base_ref = Some(value_after(tokens, index, "--base")?);
+                index += 2;
+            }
+            "--head" if head_ref.is_none() => {
+                head_ref = Some(value_after(tokens, index, "--head")?);
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
 
     Ok(RepoCommand::Update {
         alias,
-        base_ref: base_ref.ok_or(CliError::MissingValue("--base"))?,
-        head_ref: head_ref.ok_or(CliError::MissingValue("--head"))?,
+        base_ref,
+        head_ref,
     })
 }
 

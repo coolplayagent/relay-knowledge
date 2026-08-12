@@ -1,6 +1,6 @@
 schema_version: 1
-map_version: 4
-updated_at: unix:1780636178
+map_version: 5
+updated_at: unix:1786451861
 topics:
 - id: architecture
   title: Architecture knowledge
@@ -25,6 +25,16 @@ sources:
   status: active
   version: 1
   description: Hard architecture constraints for relay-knowledge changes.
+- id: commit-driven-code-index-loop
+  topic: architecture
+  kind: doc
+  uri: docs/zh/03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Managed Git commit reconciliation, durable incremental publication, and bounded scope retention.
 - id: cli-command-reference
   topic: cli
   kind: doc
@@ -78,6 +88,7 @@ sources:
 routes:
 - topic: architecture
   source_order:
+  - commit-driven-code-index-loop
   - architecture-hard-constraints
   fallback: bounded-search
 - topic: benchmarks
@@ -95,19 +106,23 @@ routes:
   - documentation-release-readiness-2026-06-05
   fallback: bounded-search
 history:
-- version: 4
-  action: update
-  actor: codex
-  summary: Added release-readiness documentation audit route.
-- version: 3
-  action: update
-  actor: codex
-  summary: Added profile full performance and source-surface validation documentation.
-- version: 2
-  action: update
-  actor: codex
-  summary: Added benchmark fact-versioning documentation route.
 - version: 1
   action: init
   actor: cli
   summary: Created repository knowledge map contract.
+- version: 2
+  action: update
+  actor: codex
+  summary: Added benchmark fact-versioning documentation route.
+- version: 3
+  action: update
+  actor: codex
+  summary: Added profile full performance and source-surface validation documentation.
+- version: 4
+  action: update
+  actor: codex
+  summary: Added release-readiness documentation audit route.
+- version: 5
+  action: update
+  actor: codex
+  summary: Added the managed Git commit loop and bounded retention architecture route.

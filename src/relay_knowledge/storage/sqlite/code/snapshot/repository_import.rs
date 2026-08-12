@@ -7,7 +7,7 @@ use crate::storage::StorageError;
 use super::{
     import_compat,
     scope_tables::{CODE_SCOPE_TABLES, IMPORTED_DERIVED_SCOPE_TABLES},
-    snapshot_import::{IMPORT_SCHEMA, copy_attached_code_table},
+    snapshot_import::{IMPORT_SCHEMA, attached_code_table_exists, copy_attached_code_table},
 };
 
 pub(in crate::storage::sqlite::code) fn import_repository_from_database(
@@ -110,6 +110,7 @@ fn import_code_scope(
         .optional()?
         .is_some()
     {
+        import_commit_scope_aliases(transaction, repository_id, source_scope)?;
         return Ok(());
     }
     let imported_generated_detection_is_current =
@@ -141,6 +142,7 @@ fn import_code_scope(
             "code repository '{repository_id}' has no importable source scope '{source_scope}'"
         )));
     }
+    import_commit_scope_aliases(transaction, repository_id, source_scope)?;
     for table in CODE_SCOPE_TABLES {
         copy_attached_code_table(transaction, table, source_scope)?;
     }
@@ -154,6 +156,48 @@ fn import_code_scope(
     super::super::search::backfill_search_metadata_for_scope(transaction, source_scope)?;
 
     Ok(())
+}
+
+fn import_commit_scope_aliases(
+    transaction: &rusqlite::Transaction<'_>,
+    repository_id: &str,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    if attached_code_table_exists(transaction, "code_repository_commit_scopes")? {
+        transaction.execute(
+            &format!(
+                "
+                INSERT INTO code_repository_commit_scopes (
+                    repository_id, resolved_commit_sha, source_scope, published_sequence
+                )
+                SELECT repository_id, resolved_commit_sha, source_scope, published_sequence
+                FROM {IMPORT_SCHEMA}.code_repository_commit_scopes
+                WHERE repository_id = ?1 AND source_scope = ?2
+                ON CONFLICT(repository_id, resolved_commit_sha, source_scope) DO UPDATE SET
+                    published_sequence = max(
+                        code_repository_commit_scopes.published_sequence,
+                        excluded.published_sequence
+                    )
+                "
+            ),
+            params![repository_id, source_scope],
+        )?;
+    }
+    let resolved_commit_sha = transaction.query_row(
+        "
+        SELECT resolved_commit_sha
+        FROM code_repository_scopes
+        WHERE repository_id = ?1 AND source_scope = ?2
+        ",
+        params![repository_id, source_scope],
+        |row| row.get::<_, String>(0),
+    )?;
+    super::super::lifecycle::commit_scope::record(
+        transaction,
+        repository_id,
+        &resolved_commit_sha,
+        source_scope,
+    )
 }
 
 #[cfg(test)]

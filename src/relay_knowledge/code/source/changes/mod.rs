@@ -1,5 +1,5 @@
 pub(in crate::code) use super::change_status::{
-    GitChange, WorktreePathChange, parse_name_status_z, split_nul, worktree_changed_paths,
+    GitChange, WorktreePathChange, parse_name_status_z, worktree_changed_paths,
 };
 
 mod diff;
@@ -7,7 +7,7 @@ mod scope;
 mod submodule_repository;
 mod tracked_entries;
 
-pub(in crate::code) use self::diff::diff_changes;
+pub(in crate::code) use self::diff::{MAX_GIT_DIFF_CHANGED_PATHS, diff_changes};
 pub(in crate::code) use self::scope::TrackedEntryScope;
 pub(in crate::code) use self::submodule_repository::{
     submodule_git_dir, submodule_git_dir_from_git_dir, submodule_worktree_root,

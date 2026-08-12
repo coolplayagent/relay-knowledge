@@ -166,7 +166,9 @@ curl http://127.0.0.1:8791/api/health
 curl http://127.0.0.1:8791/api/v1/control/service/status
 ```
 
-`service status` 和 `/api/v1/control/service/status` 返回 code-index worker、operator、storage topology、queue/dead-letter、runtime path 和 degraded reason。它们是短预算诊断入口，不会同步执行大型索引或 shard repair。
+`service status` 和 `/api/v1/control/service/status` 返回 code-index worker、operator、storage topology、queue/dead-letter、runtime path、degraded reason，以及 watcher 的 `enabled`/`commit_reconcile_interval_ms`。它们是短预算诊断入口，不会同步执行大型索引或 shard repair。
+
+安装态服务默认设置 `RELAY_KNOWLEDGE_WATCHER_ENABLED=true` 时，受管理 watcher 同时处理未提交源码变化和 checked-out Git commit。`.git/HEAD`、ref、packed-ref 与 HEAD log 的原生事件只作为低延迟 hint；服务在启动时以及每隔 `RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS` 毫秒（默认 `5000`）受界解析每个 watched repository 的 `HEAD`。periodic reconciliation 是恢复依据，因此 linked worktree、漏报或被合并的 watcher event 无需仓库专用 hook 也能补偿。HEAD 与最近发布 clean commit 不同时，watcher 把不可变 base/head/tree 固定进一个 durable Incremental task；稳定的 per-ref fingerprint 合并重复 hint，常规 task lease 保证每仓库一个 writer。关闭 watcher 会同时关闭源码事件和 commit reconciliation。把该环境变量和 interval 写入 systemd/launchd/Windows Service definition，而不是只在安装 shell 临时 export。
 
 ## 9.5 远端访问
 
@@ -183,6 +185,7 @@ relay-knowledge service run --web --mcp streamable-http
 
 ```bash
 relay-knowledge --remote http://host:8791 repo status my-repo --format json
+relay-knowledge --remote http://host:8791 repo update my-repo --format json
 relay-knowledge --remote http://host:8791 repo query my-repo "service startup" --format json
 ```
 
@@ -192,7 +195,7 @@ relay-knowledge --remote http://host:8791 repo query my-repo "service startup" -
 export RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://host:8791
 ```
 
-远端模式支持 repository index、scope preview、status、query、feature-flags、impact、report 和 software projection。`repo index --reset` 与 `repo index-worker` 必须在服务宿主机执行，不能通过远端 CLI 绕过本地维护边界。
+远端模式支持 repository index/update、scope preview、status、query、feature-flags、impact、report 和 software projection。`repo update` 通过 `POST /api/v1/code/repositories/{alias}/update` 提交；`base_ref` 和 `head_ref` 可省略，分别默认最近发布的 clean base 与 `HEAD`，response 可能仍是 queued task。`repo index --reset` 与 `repo index-worker` 必须在服务宿主机执行，不能通过远端 CLI 绕过本地维护边界。
 
 > ⚠️ **远端 CLI 限制**：以下维护操作仅能在服务宿主机上执行，远端 CLI 不可调用：
 > - `repo index --reset`：代码索引重置

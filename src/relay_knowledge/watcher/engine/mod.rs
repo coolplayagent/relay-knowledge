@@ -59,6 +59,9 @@ pub struct WatcherDiagnostics {
     pub total_events_received: u64,
     pub total_events_filtered: u64,
     pub total_index_tasks_queued: u64,
+    pub total_commit_reconciliations: u64,
+    pub total_commit_tasks_queued: u64,
+    pub total_commit_reconcile_failures: u64,
     pub total_events_dropped: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
@@ -74,6 +77,9 @@ impl Default for WatcherDiagnostics {
             total_events_received: 0,
             total_events_filtered: 0,
             total_index_tasks_queued: 0,
+            total_commit_reconciliations: 0,
+            total_commit_tasks_queued: 0,
+            total_commit_reconcile_failures: 0,
             total_events_dropped: 0,
             last_error: None,
             degraded_reason: None,
@@ -191,6 +197,7 @@ impl FileWatcher {
             diagnostics_tx,
             dropped_events: Arc::new(AtomicU64::new(0)),
             debounce: self.config.debounce,
+            commit_reconcile_interval: self.config.commit_reconcile_interval,
             max_watch_dirs: self.config.max_watch_dirs,
             task_sink: boxed_task_sink(task_sink),
         };
@@ -209,9 +216,13 @@ impl FileWatcher {
 struct WatcherInternalState {
     repositories: Vec<WatchedRepository>,
     hash_cache: ContentHashCache,
+    deferred_changes: ContentHashCache,
     events_received: u64,
     events_filtered: u64,
     index_tasks_queued: u64,
+    commit_reconciliations: u64,
+    commit_tasks_queued: u64,
+    commit_reconcile_failures: u64,
 }
 
 impl WatcherInternalState {
@@ -219,9 +230,13 @@ impl WatcherInternalState {
         Self {
             repositories: Vec::new(),
             hash_cache: ContentHashCache::new(hash_cache_capacity),
+            deferred_changes: ContentHashCache::new(hash_cache_capacity),
             events_received: 0,
             events_filtered: 0,
             index_tasks_queued: 0,
+            commit_reconciliations: 0,
+            commit_tasks_queued: 0,
+            commit_reconcile_failures: 0,
         }
     }
 }
@@ -242,6 +257,7 @@ struct WatcherLoopContext {
     diagnostics_tx: watch::Sender<WatcherDiagnostics>,
     dropped_events: Arc<AtomicU64>,
     debounce: Duration,
+    commit_reconcile_interval: Duration,
     max_watch_dirs: usize,
     task_sink: TaskQueueSink,
 }
@@ -271,7 +287,7 @@ where
 #[cfg(test)]
 use self::{
     diagnostics::emit as emit_diagnostics,
-    index_queue::{process_debounced_paths, should_process_path},
+    index_queue::{process_debounced_paths, reconcile_all_commit_heads, should_process_path},
 };
 
 #[cfg(test)]

@@ -67,7 +67,7 @@ pub(in crate::interfaces::cli::spec) fn repo_index_worker() -> CliCommandSpec {
         @formats &["json", "streaming-json"],
         &["repo", "index-worker"],
         "relay-knowledge repo index-worker [--task-id <id>]",
-        "Run one queued repository index task attempt.",
+        "Run one queued repository index task attempt and one bounded retention pass.",
         "code.repo.index_worker",
         CommandEffect::WritesIndexes,
         &[],
@@ -83,7 +83,8 @@ pub(in crate::interfaces::cli::spec) fn repo_index_worker() -> CliCommandSpec {
         &["relay-knowledge repo index-worker --task-id code-index-task:1 --format json"],
         &[
             "Use this single-shot worker in non-interactive agent sessions when a queued or retrying cold full index needs explicit progress without starting the foreground service.",
-            "When no eligible task is claimed, JSON output reports `claimed=false` and `task=null`.",
+            "Every invocation also advances at most one bounded scope-retention pass; JSON reports `maintenance_active` and an optional `maintenance_error` even when no task is claimed.",
+            "When no eligible task is claimed, JSON output reports `claimed=false` and `task=null`; repeat while `maintenance_active=true` or `repo status` reports `maintenance_pending=true`.",
             "`--format streaming-json` emits started, item, and completed events with the worker result in the item payload.",
             "The command respects durable task leases, retry backoff, checkpoints, and the single-writer indexing boundary.",
         ],
@@ -122,8 +123,8 @@ pub(in crate::interfaces::cli::spec) fn repo_scope_preview() -> CliCommandSpec {
 pub(in crate::interfaces::cli::spec) fn repo_update() -> CliCommandSpec {
     command!(
         &["repo", "update"],
-        "relay-knowledge repo update <alias> --base <ref> --head <ref>",
-        "Incrementally update repository index from base to head.",
+        "relay-knowledge repo update <alias> [--base <ref>] [--head <ref>]",
+        "Resolve immutable refs and queue a durable incremental repository update.",
         "code.repo.update",
         CommandEffect::WritesIndexes,
         &[arg(
@@ -138,25 +139,29 @@ pub(in crate::interfaces::cli::spec) fn repo_update() -> CliCommandSpec {
             opt(
                 "--base",
                 Some("ref"),
-                true,
                 false,
-                "Previously indexed base ref.",
-                None,
+                false,
+                "Previously indexed base ref; defaults to the last published clean snapshot.",
+                Some("latest-published"),
                 &[],
             ),
             opt(
                 "--head",
                 Some("ref"),
-                true,
+                false,
                 false,
                 "Target ref to index.",
-                None,
+                Some("HEAD"),
                 &[],
             ),
         ],
-        &["relay-knowledge repo update core --base main --head HEAD --format json"],
         &[
-            "`--base` may refer to any persisted matching indexed scope for the repository and filters; it does not need to be the currently active repository status."
+            "relay-knowledge repo update core --format json",
+            "relay-knowledge repo update core --base <commit-sha> --head <commit-sha> --format json",
+        ],
+        &[
+            "The service pins both refs before queueing. Omitted `--base` unwraps a worktree snapshot to its clean Git base; a repository without a completed base must be fully indexed first.",
+            "The response may be queued. Wait until `repo status` reports the exact resolved head as fresh before running impact or context queries.",
         ],
     )
 }

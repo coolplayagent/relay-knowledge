@@ -20,9 +20,10 @@ pub use code::{
     CodeImpactChanges, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
     CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal,
     CodeIndexTaskSeed, CodeRepositorySetEdgeSelector, CodeRepositorySetMemberSeed,
-    CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
-    CodeRepositorySetRefreshTaskFailure, CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed,
-    CodeRepositoryStore, CodeScopeRetentionRequest,
+    CodeRepositorySetRefreshPublication, CodeRepositorySetRefreshTaskClaimRequest,
+    CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskFailure,
+    CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
+    CodeScopeRetentionRequest,
 };
 pub use code_graph::{
     CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest, CodeSymbolSearchRequest,

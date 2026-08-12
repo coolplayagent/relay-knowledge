@@ -1,3 +1,4 @@
+use super::super::retention::{RETAIN_FAILED_TASK_AUDIT_ROWS, RETAIN_SUCCEEDED_TASK_AUDIT_ROWS};
 use super::super::{claim_task, queue_task};
 use super::{complete_task, fail_task};
 use crate::{
@@ -61,10 +62,70 @@ async fn completion_transitions_require_active_lease_and_bound_retry_state() {
     assert_eq!(retrying.next_retry_at_ms, 60);
     assert_eq!(retrying.last_error_kind.as_deref(), Some("fixture"));
 
-    let dead_letter = claim(&store, "fp-dead", "scope-dead", 60).await;
-    let dead_letter = fail(&store, dead_letter, 1, 70).await;
+    // A retrying predecessor intentionally holds this repository's FIFO lane.
+    // Exercise the independent dead-letter transition in an isolated store
+    // instead of bypassing that ordering invariant in the fixture.
+    let dead_letter_store = registered_store().await;
+    let dead_letter = claim(&dead_letter_store, "fp-dead", "scope-dead", 60).await;
+    let dead_letter = fail(&dead_letter_store, dead_letter, 1, 70).await;
     assert_eq!(dead_letter.state, CodeIndexTaskState::DeadLetter);
     assert!(dead_letter.lease_owner.is_none());
+}
+
+#[tokio::test]
+async fn code_index_task_completion_and_dead_letter_keep_audit_history_bounded() {
+    let store = registered_store().await;
+    for index in 0..RETAIN_SUCCEEDED_TASK_AUDIT_ROWS + 20 {
+        let task = claim(
+            &store,
+            &format!("success-{index}"),
+            &format!("success-scope-{index}"),
+            100 + index as u64 * 3,
+        )
+        .await;
+        store
+            .run(move |connection| {
+                complete_task(
+                    connection,
+                    CodeIndexTaskCompletion {
+                        task_id: task.task_id,
+                        lease_owner: task.lease_owner.expect("task should have lease owner"),
+                        attempt_count: task.attempt_count,
+                        now_ms: task.updated_at_ms.saturating_add(1),
+                    },
+                )
+            })
+            .await
+            .expect("task should complete");
+    }
+    for index in 0..RETAIN_FAILED_TASK_AUDIT_ROWS + 20 {
+        let task = claim(
+            &store,
+            &format!("dead-{index}"),
+            &format!("dead-scope-{index}"),
+            10_000 + index as u64 * 3,
+        )
+        .await;
+        fail(&store, task, 1, 10_002 + index as u64 * 3).await;
+    }
+
+    let (succeeded, dead_letter) = store
+        .run(|connection| {
+            let count = |state: &str| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM code_repository_index_tasks
+                     WHERE repository_id = 'repo' AND state = ?1",
+                    [state],
+                    |row| row.get::<_, usize>(0),
+                )
+            };
+            Ok((count("succeeded")?, count("dead_letter")?))
+        })
+        .await
+        .expect("audit counts should load");
+
+    assert!(succeeded <= RETAIN_SUCCEEDED_TASK_AUDIT_ROWS);
+    assert!(dead_letter <= RETAIN_FAILED_TASK_AUDIT_ROWS);
 }
 
 async fn registered_store() -> SqliteGraphStore {

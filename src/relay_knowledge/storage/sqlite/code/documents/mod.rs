@@ -11,6 +11,7 @@ const MAX_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
 const MAX_DOCUMENT_PATH_FILTERS: usize = 256;
 const DOCUMENT_BYTE_BUDGET_EXHAUSTED: &str = "repository document byte budget exhausted";
 
+#[cfg(test)]
 pub(super) fn read_indexed_markdown(
     connection: &mut Connection,
     source_scope: &str,
@@ -18,26 +19,42 @@ pub(super) fn read_indexed_markdown(
     max_files: usize,
     max_bytes: usize,
 ) -> Result<Vec<IndexedRepositoryDocument>, StorageError> {
-    validate_budgets(max_files, max_bytes)?;
-    let path_predicate = SqlPathPredicate::new(path_filters)?;
     let transaction = connection.transaction()?;
-    let expected_files = preflight_snapshot_documents(
+    let documents = read_indexed_markdown_in_snapshot(
         &transaction,
         source_scope,
-        &path_predicate,
+        path_filters,
         max_files,
-        max_bytes,
-    )?;
-    let documents = materialize_snapshot_documents(
-        &transaction,
-        source_scope,
-        &path_predicate,
-        expected_files,
         max_bytes,
     )?;
     transaction.commit()?;
 
     Ok(documents)
+}
+
+pub(super) fn read_indexed_markdown_in_snapshot(
+    connection: &Connection,
+    source_scope: &str,
+    path_filters: &[String],
+    max_files: usize,
+    max_bytes: usize,
+) -> Result<Vec<IndexedRepositoryDocument>, StorageError> {
+    validate_budgets(max_files, max_bytes)?;
+    let path_predicate = SqlPathPredicate::new(path_filters)?;
+    let expected_files = preflight_snapshot_documents(
+        connection,
+        source_scope,
+        &path_predicate,
+        max_files,
+        max_bytes,
+    )?;
+    materialize_snapshot_documents(
+        connection,
+        source_scope,
+        &path_predicate,
+        expected_files,
+        max_bytes,
+    )
 }
 
 fn validate_budgets(max_files: usize, max_bytes: usize) -> Result<(), StorageError> {

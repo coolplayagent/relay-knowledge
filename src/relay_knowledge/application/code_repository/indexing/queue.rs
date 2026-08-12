@@ -3,12 +3,13 @@ use std::sync::Arc;
 use crate::{
     api::ApiError,
     domain::{
-        CodeIndexRequest, CodeIndexResourceBudget, CodeRepositoryStatus, code_snapshot_scope_id,
+        CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget, CodeRepositoryStatus,
+        clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     },
     storage::{CodeIndexTaskSeed, KnowledgeStore},
 };
 
-use super::state::previous_index_state_for_index;
+use super::state::{fresh_full_index_probe, previous_index_state_for_index};
 use crate::application::code_repository::{
     clock::now_millis, errors::storage_api_error, scope::merged_filters,
 };
@@ -66,6 +67,84 @@ pub(super) async fn queue_worktree_overlay_index_task(
             resource_budget: CodeIndexResourceBudget::default(),
             payload_json,
             now_ms: queued_at_ms,
+        })
+        .await
+        .map_err(storage_api_error)
+}
+
+pub(super) async fn queue_incremental_index_task(
+    store: &Arc<dyn KnowledgeStore>,
+    status: &CodeRepositoryStatus,
+    request: &CodeIndexRequest,
+) -> Result<crate::domain::CodeIndexTaskRecord, ApiError> {
+    let CodeIndexMode::Incremental { head_ref, .. } = &request.mode else {
+        return Err(ApiError::invalid_argument(
+            "incremental task queue requires incremental index mode",
+        ));
+    };
+    let previous = previous_index_state_for_index(store, status, request).await?;
+    let base_commit = previous.base_resolved_commit_sha.ok_or_else(|| {
+        ApiError::invalid_argument(format!(
+            "incremental update for code repository '{}' requires a resolved base commit",
+            status.alias
+        ))
+    })?;
+    let mut head_selector = request.repository.clone();
+    head_selector.ref_selector = head_ref.clone();
+    let head = fresh_full_index_probe(status, &head_selector).await?;
+    if status
+        .last_indexed_commit
+        .as_deref()
+        .is_some_and(|identity| identity.starts_with("worktree:"))
+        && clean_git_commit_from_snapshot_identity(
+            status.last_indexed_commit.as_deref().unwrap_or_default(),
+        ) == Some(head.resolved_commit_sha.as_str())
+    {
+        return Err(ApiError::invalid_argument(format!(
+            "code repository '{}' still points at a worktree overlay whose clean base is already {}; create a commit first or query the worktree scope explicitly",
+            status.alias, head.resolved_commit_sha
+        )));
+    }
+    let pinned_mode =
+        CodeIndexMode::incremental(base_commit.clone(), head.resolved_commit_sha.clone())
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+    let mut pinned_request = request.clone();
+    pinned_request.repository.ref_selector = head.resolved_commit_sha.clone();
+    pinned_request.mode = pinned_mode.clone();
+    let payload_json = serde_json::to_string(&pinned_request)
+        .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+    let workspace_detection_json = serde_json::to_string(&request.workspace_detection)
+        .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+    let source_scope = code_snapshot_scope_id(
+        &status.repository_id,
+        &head.tree_hash,
+        &head.path_filters,
+        &head.language_filters,
+    );
+    let input_fingerprint = format!(
+        "incremental:{}:{}:{}:{}:{}",
+        status.repository_id,
+        base_commit,
+        head.resolved_commit_sha,
+        source_scope,
+        workspace_detection_json
+    );
+
+    store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: status.repository_id.clone(),
+            alias: status.alias.clone(),
+            ref_selector: head_ref.clone(),
+            resolved_commit_sha: head.resolved_commit_sha,
+            tree_hash: head.tree_hash,
+            source_scope,
+            path_filters: head.path_filters,
+            language_filters: head.language_filters,
+            mode: pinned_mode,
+            input_fingerprint,
+            resource_budget: CodeIndexResourceBudget::default(),
+            payload_json,
+            now_ms: now_millis(),
         })
         .await
         .map_err(storage_api_error)

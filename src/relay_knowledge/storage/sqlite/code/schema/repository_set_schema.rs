@@ -96,6 +96,12 @@ pub(super) fn initialize_repository_set_schema(
             ON code_repository_cross_edges(set_id, from_source_scope, to_source_scope);
         CREATE INDEX IF NOT EXISTS code_repository_set_refresh_tasks_claimable
             ON code_repository_set_refresh_tasks(state, next_retry_at_ms, created_at_ms);
+        CREATE INDEX IF NOT EXISTS code_repository_set_refresh_tasks_capacity
+            ON code_repository_set_refresh_tasks(set_id, state);
+        CREATE INDEX IF NOT EXISTS code_repository_set_refresh_tasks_audit
+            ON code_repository_set_refresh_tasks(
+                set_id, state, updated_at_ms DESC, created_at_ms DESC, task_id DESC
+            );
 
         CREATE TABLE IF NOT EXISTS code_workspace_package_mappings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

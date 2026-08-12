@@ -244,6 +244,10 @@ fn parse_watcher_overrides(values: &EnvironmentValues) -> Result<WatcherEnvOverr
     Ok(WatcherEnvOverrides {
         enabled: bool_var(values, RELAY_KNOWLEDGE_WATCHER_ENABLED)?,
         debounce_ms: positive_u64_var(values, RELAY_KNOWLEDGE_WATCHER_DEBOUNCE_MS)?,
+        commit_reconcile_interval_ms: positive_u64_var(
+            values,
+            RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS,
+        )?,
         max_watch_dirs: positive_usize_var(values, RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS)?,
         hash_cache_capacity: positive_usize_var(
             values,

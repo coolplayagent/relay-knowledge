@@ -20,7 +20,7 @@ MCP Streamable HTTP exposes:
 - Health, service status, and index status resources.
 - Retrieval planning and code impact prompts.
 
-MCP does not expose arbitrary index refresh, repository indexing, or filesystem traversal. Those operations require explicit user CLI/Web action.
+MCP does not expose arbitrary index refresh, repository indexing, or filesystem traversal. MCP itself cannot start those writes; explicit CLI/Web actions remain available, while an enabled managed watcher may independently reconcile and publish checked-out commits through the durable queue.
 
 ## 3. Session and Transport
 

@@ -4,10 +4,20 @@ use serde::{Deserialize, Serialize};
 pub struct WatcherDiagnostics {
     #[serde(default)]
     pub state: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub commit_reconcile_interval_ms: u64,
     pub watched_repository_count: usize,
     pub total_events_received: u64,
     pub total_events_filtered: u64,
     pub total_index_tasks_queued: u64,
+    #[serde(default)]
+    pub total_commit_reconciliations: u64,
+    #[serde(default)]
+    pub total_commit_tasks_queued: u64,
+    #[serde(default)]
+    pub total_commit_reconcile_failures: u64,
     pub total_events_dropped: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
@@ -19,10 +29,15 @@ impl WatcherDiagnostics {
     pub fn default_disabled() -> Self {
         Self {
             state: "disabled".to_owned(),
+            enabled: false,
+            commit_reconcile_interval_ms: 0,
             watched_repository_count: 0,
             total_events_received: 0,
             total_events_filtered: 0,
             total_index_tasks_queued: 0,
+            total_commit_reconciliations: 0,
+            total_commit_tasks_queued: 0,
+            total_commit_reconcile_failures: 0,
             total_events_dropped: 0,
             last_error: None,
             degraded_reason: None,
@@ -32,10 +47,15 @@ impl WatcherDiagnostics {
     pub fn from_watcher_state(inner: &crate::watcher::WatcherDiagnostics) -> Self {
         Self {
             state: inner.state.as_str().to_owned(),
+            enabled: inner.state != crate::watcher::WatcherState::Disabled,
+            commit_reconcile_interval_ms: 0,
             watched_repository_count: inner.watched_repository_count,
             total_events_received: inner.total_events_received,
             total_events_filtered: inner.total_events_filtered,
             total_index_tasks_queued: inner.total_index_tasks_queued,
+            total_commit_reconciliations: inner.total_commit_reconciliations,
+            total_commit_tasks_queued: inner.total_commit_tasks_queued,
+            total_commit_reconcile_failures: inner.total_commit_reconcile_failures,
             total_events_dropped: inner.total_events_dropped,
             last_error: inner.last_error.clone(),
             degraded_reason: inner.degraded_reason.clone(),

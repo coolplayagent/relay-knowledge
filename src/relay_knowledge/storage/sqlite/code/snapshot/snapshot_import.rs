@@ -47,7 +47,7 @@ pub(super) fn copy_attached_code_table(
     Ok(())
 }
 
-fn attached_code_table_exists(
+pub(super) fn attached_code_table_exists(
     transaction: &rusqlite::Transaction<'_>,
     table: &str,
 ) -> Result<bool, StorageError> {

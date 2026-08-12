@@ -32,4 +32,13 @@ fn indexing_specs_keep_worker_preview_and_incremental_options_separate() {
             .iter()
             .any(|option| option.flag == "--base")
     );
+    assert!(repo_update().options.iter().all(|option| !option.required));
+    assert_eq!(
+        repo_update()
+            .options
+            .iter()
+            .find(|option| option.flag == "--head")
+            .and_then(|option| option.default),
+        Some("HEAD")
+    );
 }

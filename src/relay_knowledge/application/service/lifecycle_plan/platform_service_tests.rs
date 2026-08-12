@@ -22,4 +22,10 @@ fn platform_service_specs_keep_manager_commands_and_definition_formats_distinct(
     );
     assert!(render_definition("macos", "/opt/relay", "/tmp/data").contains("<plist"));
     assert!(render_definition("windows", "C:\\relay.exe", "C:\\data").contains("<service>"));
+    for platform in ["linux", "macos", "windows"] {
+        let definition = render_definition(platform, "/opt/relay", "/tmp/data");
+        assert!(definition.contains("RELAY_KNOWLEDGE_WATCHER_ENABLED"));
+        assert!(definition.contains("RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS"));
+        assert!(definition.contains("5000"));
+    }
 }

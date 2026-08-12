@@ -337,6 +337,7 @@ fn sqlite_code_set_root_contains_only_the_facade_and_named_subdomains() {
     assert_eq!(
         directory_entry_names(&set_root),
         [
+            "capacity",
             "manifest",
             "membership",
             "mod.rs",

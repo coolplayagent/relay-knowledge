@@ -13,5 +13,6 @@ mod scope;
 mod software_projection;
 mod source_fallback;
 mod source_surface;
+mod update;
 mod views;
 mod worktree_ref;

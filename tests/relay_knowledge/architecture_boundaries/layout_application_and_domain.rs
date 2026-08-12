@@ -49,6 +49,7 @@ fn code_repository_application_root_contains_only_the_facade_and_named_subdomain
             "software_projection",
             "source_fallback",
             "source_surface",
+            "update",
             "views",
             "worktree_ref",
         ]

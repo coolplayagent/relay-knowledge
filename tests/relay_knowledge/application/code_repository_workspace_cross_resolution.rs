@@ -20,7 +20,10 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeRepositorySetMemberSeed, CodeRepositorySetSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeRepositorySetMemberSeed, CodeRepositorySetRefreshPublication,
+        CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
+        CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
+        SqliteGraphStore,
     },
 };
 
@@ -872,10 +875,60 @@ async fn storage_level_workspace_package_mapping_survives_snapshot_apply() {
         .await
         .expect("lib member should persist");
 
+    let set_status = store
+        .code_repository_set_status(String::from("pnpm-ws"))
+        .await
+        .expect("set status should load")
+        .expect("set should exist");
+    let now_ms = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
+    let queued = store
+        .queue_code_repository_set_refresh_task(CodeRepositorySetRefreshTaskSeed {
+            set_id: set_status.repository_set.set_id.clone(),
+            set_alias: String::from("pnpm-ws"),
+            input_fingerprint: String::from("workspace-package-mapping"),
+            now_ms,
+        })
+        .await
+        .expect("overlay refresh task should queue");
+    let running = store
+        .claim_code_repository_set_refresh_task(CodeRepositorySetRefreshTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: String::from("workspace-package-mapping-worker"),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms,
+        })
+        .await
+        .expect("overlay refresh task should claim")
+        .expect("targeted task should be available");
     let refresh = store
-        .refresh_code_repository_set_overlay(String::from("pnpm-ws"), 2)
+        .refresh_code_repository_set_overlay(
+            String::from("pnpm-ws"),
+            CodeRepositorySetRefreshPublication {
+                task_id: running.task_id.clone(),
+                set_id: running.set_id,
+                lease_owner: String::from("workspace-package-mapping-worker"),
+                attempt_count: running.attempt_count,
+                member_replacements: Vec::new(),
+            },
+        )
         .await
         .expect("overlay refresh should succeed");
+    store
+        .complete_code_repository_set_refresh_task(CodeRepositorySetRefreshTaskCompletion {
+            task_id: running.task_id,
+            lease_owner: String::from("workspace-package-mapping-worker"),
+            attempt_count: running.attempt_count,
+            now_ms: now_ms.saturating_add(1),
+        })
+        .await
+        .expect("overlay refresh task should complete");
 
     assert!(
         refresh.edge_count > 0,

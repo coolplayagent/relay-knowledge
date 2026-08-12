@@ -1,6 +1,9 @@
 //! Bounded Git command execution, ref resolution, and batch blob access.
 
+mod bounded;
+
 use std::{
+    fs,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{ChildStderr, ChildStdin, ChildStdout, Command, Output, Stdio},
@@ -13,8 +16,23 @@ use std::sync::Mutex;
 
 use super::CodeIndexError;
 
+pub(in crate::code) use bounded::{
+    GitNameStatusBudget, GitNulRecordBudget, GitSmallOutputBudget, git_name_status_z_bounded,
+    git_nul_records_match_bounded, git_small_output_bounded,
+};
+
 const GIT_CAT_FILE_BATCH_TIMEOUT: Duration = Duration::from_secs(120);
 const GIT_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const GIT_IDENTITY_TIMEOUT: Duration = Duration::from_secs(5);
+const GIT_IDENTITY_STDOUT_LIMIT: usize = 256;
+const GIT_ROOT_STDOUT_LIMIT: usize = 256 * 1024;
+const GIT_IDENTITY_STDERR_LIMIT: usize = 16 * 1024;
+const GIT_WORKTREE_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
+const GIT_WORKTREE_STATUS_RECORD_LIMIT: usize = 513;
+const GIT_WORKTREE_STATUS_STDERR_LIMIT: usize = 64 * 1024;
+const GIT_WORKTREE_STATUS_STDOUT_LIMIT: usize = 8 * 1024 * 1024;
+const GIT_WORKTREE_OBSERVATION_BYTE_LIMIT: usize =
+    crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH;
 
 #[cfg(test)]
 static GIT_SHOW_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
@@ -58,18 +76,22 @@ pub(crate) fn git_ls_tree_full_scan_call_count_for_root(root: &Path) -> usize {
 }
 
 pub(in crate::code) fn resolve_git_root(path: &Path) -> Result<PathBuf, CodeIndexError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()?;
-    if !output.status.success() {
-        return Err(CodeIndexError::Git {
-            args: vec!["rev-parse".to_owned(), "--show-toplevel".to_owned()],
-            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
+    let root = git_small_output_bounded(
+        path,
+        &["rev-parse", "--show-toplevel"],
+        GitSmallOutputBudget {
+            max_stdout_bytes: GIT_ROOT_STDOUT_LIMIT,
+            max_stderr_bytes: GIT_IDENTITY_STDERR_LIMIT,
+            timeout: GIT_IDENTITY_TIMEOUT,
+        },
+        "Git root resolution",
+    )?;
+    let root = String::from_utf8_lossy(&root).trim().to_owned();
+    if root.is_empty() {
+        return Err(CodeIndexError::InvalidInput(
+            "Git root resolution returned an empty path".to_owned(),
+        ));
     }
-    let root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
 
     Ok(PathBuf::from(root))
 }
@@ -78,15 +100,139 @@ pub(in crate::code) fn resolve_ref(
     root: &Path,
     ref_selector: &str,
 ) -> Result<String, CodeIndexError> {
+    resolve_git_ref_bounded(root, ref_selector)
+}
+
+/// Resolves a ref to one immutable full commit object ID with bounded I/O.
+pub(crate) fn resolve_git_ref_bounded(
+    root: &Path,
+    ref_selector: &str,
+) -> Result<String, CodeIndexError> {
     validate_git_ref_arg("ref_selector", ref_selector)?;
-    git_text(
+    let commit_selector = format!("{ref_selector}^{{commit}}");
+    bounded_git_object_id(
         root,
-        ["rev-parse", "--verify", "--end-of-options", ref_selector],
+        &[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &commit_selector,
+        ],
+        "Git ref resolution",
     )
 }
 
 pub(in crate::code) fn resolve_tree(root: &Path, commit: &str) -> Result<String, CodeIndexError> {
-    git_text(root, ["rev-parse", &format!("{commit}^{{tree}}")])
+    resolve_git_tree_bounded(root, commit)
+}
+
+/// Resolves the tree for a pinned full commit object ID with bounded I/O.
+pub(crate) fn resolve_git_tree_bounded(
+    root: &Path,
+    commit: &str,
+) -> Result<String, CodeIndexError> {
+    validate_full_git_object_id("commit", commit)?;
+    let tree_selector = format!("{commit}^{{commit}}^{{tree}}");
+    bounded_git_object_id(
+        root,
+        &["rev-parse", "--verify", "--end-of-options", &tree_selector],
+        "Git tree resolution",
+    )
+}
+
+/// Derives a stable, bounded identity for tracked and untracked worktree changes.
+pub(crate) fn repository_worktree_observation_bounded(
+    root: &Path,
+) -> Result<Option<u64>, CodeIndexError> {
+    let status = git_small_output_bounded(
+        root,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        GitSmallOutputBudget {
+            max_stdout_bytes: GIT_WORKTREE_STATUS_STDOUT_LIMIT,
+            max_stderr_bytes: GIT_WORKTREE_STATUS_STDERR_LIMIT,
+            timeout: GIT_WORKTREE_STATUS_TIMEOUT,
+        },
+        "Git worktree status observation",
+    )?;
+    if status.is_empty() {
+        return Ok(None);
+    }
+    let changes = super::change_status::worktree_changed_paths(&status);
+    if changes.len() > GIT_WORKTREE_STATUS_RECORD_LIMIT - 1 {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "worktree observation exceeds {} changed paths; commit changes or run a full code index",
+            GIT_WORKTREE_STATUS_RECORD_LIMIT - 1
+        )));
+    }
+    let mut identity = WorktreeObservationHash::new();
+    identity.update(&status);
+    let mut observed_bytes = 0usize;
+    for change in changes {
+        identity.update(change.path.as_bytes());
+        let path = root.join(&change.path);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                let byte_len = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+                observed_bytes = observed_bytes.saturating_add(byte_len);
+                if observed_bytes > GIT_WORKTREE_OBSERVATION_BYTE_LIMIT {
+                    return Err(CodeIndexError::InvalidInput(format!(
+                        "worktree observation exceeds the {} byte budget; commit changes or run a full code index",
+                        GIT_WORKTREE_OBSERVATION_BYTE_LIMIT
+                    )));
+                }
+                let mut file = fs::File::open(path)?;
+                let mut buffer = [0u8; 64 * 1024];
+                loop {
+                    let read = file.read(&mut buffer)?;
+                    if read == 0 {
+                        break;
+                    }
+                    identity.update(&buffer[..read]);
+                }
+            }
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                identity.update(fs::read_link(path)?.as_os_str().as_encoded_bytes());
+            }
+            Ok(metadata) => {
+                identity.update(&metadata.len().to_le_bytes());
+                identity.update(
+                    &metadata
+                        .modified()
+                        .ok()
+                        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|value| value.as_nanos())
+                        .unwrap_or_default()
+                        .to_le_bytes(),
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                identity.update(b"deleted")
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(Some(identity.finish()))
+}
+
+struct WorktreeObservationHash(u64);
+
+impl WorktreeObservationHash {
+    const fn new() -> Self {
+        Self(0xcbf29ce484222325)
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x100000001b3);
+        }
+        self.0 ^= 0xff;
+        self.0 = self.0.wrapping_mul(0x100000001b3);
+    }
+
+    const fn finish(self) -> u64 {
+        self.0
+    }
 }
 
 pub(in crate::code) fn validate_git_ref_arg(
@@ -102,10 +248,35 @@ pub(in crate::code) fn validate_git_ref_arg(
     Ok(())
 }
 
-fn git_text<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, CodeIndexError> {
-    let bytes = git_bytes(root, args)?;
+fn bounded_git_object_id(
+    root: &Path,
+    args: &[&str],
+    operation: &'static str,
+) -> Result<String, CodeIndexError> {
+    let bytes = git_small_output_bounded(
+        root,
+        args,
+        GitSmallOutputBudget {
+            max_stdout_bytes: GIT_IDENTITY_STDOUT_LIMIT,
+            max_stderr_bytes: GIT_IDENTITY_STDERR_LIMIT,
+            timeout: GIT_IDENTITY_TIMEOUT,
+        },
+        operation,
+    )?;
+    let object_id = String::from_utf8_lossy(&bytes).trim().to_owned();
+    validate_full_git_object_id("resolved Git object", &object_id)?;
 
-    Ok(String::from_utf8_lossy(&bytes).trim().to_owned())
+    Ok(object_id)
+}
+
+fn validate_full_git_object_id(field: &str, value: &str) -> Result<(), CodeIndexError> {
+    if matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(());
+    }
+
+    Err(CodeIndexError::InvalidInput(format!(
+        "{field} must be a full SHA-1 or SHA-256 Git object ID"
+    )))
 }
 
 pub(in crate::code) fn git_optional<const N: usize>(

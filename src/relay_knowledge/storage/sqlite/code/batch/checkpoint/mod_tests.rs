@@ -2,14 +2,17 @@
 
 use rusqlite::{Connection, params};
 
-use super::{load, mark_completed, mark_state};
+use super::{load, mark_completed, mark_state_in_transaction};
 use crate::domain::CodeIndexResourceBudget;
 
 #[test]
 fn checkpoint_state_transitions_update_the_persisted_record() {
     let mut connection = checkpoint_database();
 
-    mark_state(&mut connection, "scope", "finalizing:references").expect("state should advance");
+    let transaction = connection.transaction().expect("transaction should open");
+    mark_state_in_transaction(&transaction, "scope", "finalizing:references")
+        .expect("state should advance");
+    transaction.commit().expect("transaction should commit");
     assert_eq!(
         load(&mut connection, "scope")
             .expect("checkpoint should load")

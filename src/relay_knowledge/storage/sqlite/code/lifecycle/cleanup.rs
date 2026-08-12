@@ -29,6 +29,9 @@ pub(in crate::storage::sqlite::code) fn delete_scope_index(
         "software_topics",
         "software_relationships",
         "software_global_status",
+        "software_build_targets",
+        "software_iac_resources",
+        "software_design_elements",
     ] {
         transaction.execute(
             &format!("DELETE FROM {table} WHERE source_scope = ?1"),

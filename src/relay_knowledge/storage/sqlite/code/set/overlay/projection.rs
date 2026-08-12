@@ -9,7 +9,12 @@ use crate::{
     storage::{CodeRepositorySetEdgeSelector, StorageError},
 };
 
+use super::super::capacity::{
+    MAX_OVERLAY_EDGE_SELECTOR_KEYS, MAX_REPOSITORY_SET_OVERLAY_EDGES, capacity_error,
+};
+
 const EDGE_SELECTOR_BATCH_SIZE: usize = 128;
+const EDGE_READ_WINDOW: i64 = (MAX_REPOSITORY_SET_OVERLAY_EDGES + 1) as i64;
 const EDGE_COLUMNS: &str = "
     edge.edge_id, edge.set_id, edge.from_source_scope, edge.from_repository_id,
     edge.from_record_kind, edge.from_record_id, edge.to_source_scope,
@@ -23,6 +28,16 @@ pub(in crate::storage::sqlite::code) fn cross_edges_for_selector(
     set_id: &str,
     selector: &CodeRepositorySetEdgeSelector,
 ) -> Result<Vec<CodeRepositoryCrossEdge>, StorageError> {
+    let selector_key_count = selector
+        .origin_files
+        .len()
+        .saturating_add(selector.target_records.len());
+    if selector_key_count > MAX_OVERLAY_EDGE_SELECTOR_KEYS {
+        return Err(capacity_error(
+            "edge selector key",
+            MAX_OVERLAY_EDGE_SELECTOR_KEYS,
+        ));
+    }
     let mut selected = BTreeMap::new();
     for origins in selector.origin_files.chunks(EDGE_SELECTOR_BATCH_SIZE) {
         select_origin_edges(connection, set_id, origins, &mut selected)?;
@@ -37,6 +52,12 @@ pub(in crate::storage::sqlite::code) fn cross_edges_for_selector(
             .then_with(|| left.from_record_id.cmp(&right.from_record_id))
             .then_with(|| left.edge_id.cmp(&right.edge_id))
     });
+    if edges.len() > MAX_REPOSITORY_SET_OVERLAY_EDGES {
+        return Err(capacity_error(
+            "edge read",
+            MAX_REPOSITORY_SET_OVERLAY_EDGES,
+        ));
+    }
     Ok(edges)
 }
 
@@ -61,24 +82,38 @@ fn select_origin_edges(
         WHERE edge.set_id = ?
           AND edge.from_record_kind = 'module_reference'
           AND EXISTS (
-              SELECT 1
-              FROM code_repository_set_members member
+              SELECT 1 FROM code_repository_set_members member
               WHERE member.set_id = edge.set_id
                 AND member.source_scope = edge.from_source_scope
           )
+          AND EXISTS (
+              SELECT 1 FROM code_repository_scopes source_scope
+              WHERE source_scope.source_scope = edge.from_source_scope
+                AND source_scope.retiring = 0
+          )
+          AND (
+              edge.to_source_scope IS NULL OR EXISTS (
+                  SELECT 1 FROM code_repository_scopes target_scope
+                  WHERE target_scope.source_scope = edge.to_source_scope
+                    AND target_scope.retiring = 0
+              )
+          )
+        LIMIT ?
         "
     );
-    let mut values = Vec::with_capacity(origins.len() * 2 + 1);
+    let mut values = Vec::with_capacity(origins.len() * 2 + 2);
     for (source_scope, path) in origins {
         values.push(Value::Text(source_scope.clone()));
         values.push(Value::Text(path.clone()));
     }
     values.push(Value::Text(set_id.to_owned()));
+    values.push(Value::Integer(EDGE_READ_WINDOW));
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params_from_iter(values), super::edge_from_row)?;
     for edge in rows {
         let edge = edge?;
         selected.insert(edge.edge_id.clone(), edge);
+        ensure_selected_edge_capacity(selected.len())?;
     }
     Ok(())
 }
@@ -109,20 +144,45 @@ fn select_target_edges(
               WHERE member.set_id = edge.set_id
                 AND member.source_scope = edge.from_source_scope
           )
+          AND EXISTS (
+              SELECT 1 FROM code_repository_scopes source_scope
+              WHERE source_scope.source_scope = edge.from_source_scope
+                AND source_scope.retiring = 0
+          )
+          AND (
+              edge.to_source_scope IS NULL OR EXISTS (
+                  SELECT 1 FROM code_repository_scopes target_scope
+                  WHERE target_scope.source_scope = edge.to_source_scope
+                    AND target_scope.retiring = 0
+              )
+          )
+        LIMIT ?
         "
     );
-    let mut values = Vec::with_capacity(targets.len() * 3 + 1);
+    let mut values = Vec::with_capacity(targets.len() * 3 + 2);
     for (source_scope, record_kind, record_id) in targets {
         values.push(Value::Text(source_scope.clone()));
         values.push(Value::Text(record_kind.clone()));
         values.push(Value::Text(record_id.clone()));
     }
     values.push(Value::Text(set_id.to_owned()));
+    values.push(Value::Integer(EDGE_READ_WINDOW));
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params_from_iter(values), super::edge_from_row)?;
     for edge in rows {
         let edge = edge?;
         selected.insert(edge.edge_id.clone(), edge);
+        ensure_selected_edge_capacity(selected.len())?;
+    }
+    Ok(())
+}
+
+fn ensure_selected_edge_capacity(selected_count: usize) -> Result<(), StorageError> {
+    if selected_count > MAX_REPOSITORY_SET_OVERLAY_EDGES {
+        return Err(capacity_error(
+            "edge read",
+            MAX_REPOSITORY_SET_OVERLAY_EDGES,
+        ));
     }
     Ok(())
 }

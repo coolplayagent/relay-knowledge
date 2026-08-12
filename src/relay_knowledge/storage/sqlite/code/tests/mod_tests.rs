@@ -21,6 +21,9 @@ pub(super) use code_snapshot_fixtures::*;
 #[path = "impact.rs"]
 mod impact_tests;
 
+#[path = "read_snapshot.rs"]
+mod read_snapshot_tests;
+
 #[tokio::test]
 async fn feature_flag_query_groups_config_sources_and_guarded_usage() {
     let mut snapshot = snapshot_with_chunk(
@@ -911,6 +914,40 @@ async fn repository_report_counts_materialized_call_edges_once() {
     assert_eq!(report.resolved_edge_count, 0);
     assert_eq!(report.ambiguous_edge_count, 0);
     assert_eq!(report.unresolved_edge_count, 4);
+}
+
+#[tokio::test]
+async fn code_index_task_unfenced_snapshot_publication_obeys_physical_scope_capacity() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+
+    for index in 0..super::tasks::MAX_SCOPE_SLOTS_PER_REPOSITORY {
+        let mut snapshot = snapshot_with_chunk("repo", "src/lib.rs", "fn bounded() {}\n");
+        snapshot.resolved_commit_sha = format!("commit-{index}");
+        snapshot.tree_hash = format!("tree-{index}");
+        retarget_snapshot_to_fact_scope(&mut snapshot);
+        store
+            .apply_code_index_snapshot(snapshot)
+            .await
+            .expect("snapshot within physical scope capacity should publish");
+    }
+
+    let mut overflow = snapshot_with_chunk("repo", "src/lib.rs", "fn overflow() {}\n");
+    overflow.resolved_commit_sha = "commit-overflow".to_owned();
+    overflow.tree_hash = "tree-overflow".to_owned();
+    retarget_snapshot_to_fact_scope(&mut overflow);
+    let error = store
+        .apply_code_index_snapshot(overflow)
+        .await
+        .expect_err("the next direct snapshot must respect scope capacity");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
 }
 
 async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {

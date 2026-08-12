@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::diff_changes;
+use super::{MAX_GIT_DIFF_CHANGED_PATHS, diff_changes};
 use crate::code::{CodeIndexError, source::change_status::GitChange, test_fixtures::TempGitRepo};
 
 #[test]
@@ -39,6 +39,30 @@ fn diff_changes_rejects_option_shaped_head_before_git_lookup() {
         .expect_err("option-shaped head ref should fail");
 
     assert_invalid_ref(error, "head_ref");
+}
+
+#[test]
+fn diff_changes_rejects_the_first_path_past_the_bounded_limit() {
+    let repo = TempGitRepo::create("changes-diff-budget");
+    repo.write("README.md", "base\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+    for index in 0..=MAX_GIT_DIFF_CHANGED_PATHS {
+        repo.write(
+            &format!("generated/file-{index:04}.rs"),
+            "pub fn generated() {}\n",
+        );
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "large delta"]);
+    let head = repo.git_text(["rev-parse", "HEAD"]);
+
+    let error = diff_changes(&repo.path, &base, &head)
+        .expect_err("a diff larger than the path budget should fail");
+
+    assert!(error.to_string().contains("reached 513 changed paths"));
+    assert!(error.to_string().contains("run a full code index"));
 }
 
 fn assert_invalid_ref(error: CodeIndexError, field: &str) {

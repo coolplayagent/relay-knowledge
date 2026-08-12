@@ -103,7 +103,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 ```json
 {
   "project_name": "relay-knowledge",
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "runtime": {
     "config_dir": "/home/user/.config/relay-knowledge",
     "data_dir": "/home/user/.local/share/relay-knowledge",
@@ -138,15 +138,15 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 
 ```json
 {
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "healthy": true,
-  "storage": { "topology": "single", "active_shard_count": 1, "..." },
-  "graph": { "node_count": 1234, "edge_count": 5678, "..." },
-  "repository_code_totals": { "repository_count": 3, "total_files": 15234, "..." },
-  "indexes": [{ "kind": "bm25", "stale": false, "..." }],
-  "index_cursors": [{ "..." }],
-  "index_refresh": { "..." },
-  "file_index": { "..." },
+  "storage": { "topology": "single", "active_shard_count": 1, "_omitted": true },
+  "graph": { "node_count": 1234, "edge_count": 5678, "_omitted": true },
+  "repository_code_totals": { "repository_count": 3, "total_files": 15234, "_omitted": true },
+  "indexes": [{ "kind": "bm25", "stale": false, "_omitted": true }],
+  "index_cursors": [{ "_omitted": true }],
+  "index_refresh": { "_omitted": true },
+  "file_index": { "_omitted": true },
   "runtime": { "config_dir": "..." }
 }
 ```
@@ -167,21 +167,21 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 
 ```json
 {
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "service_name": "relay-knowledge",
   "mode": "standalone",
   "background_enabled": true,
   "silent_updates_enabled": true,
   "service_definition_path": "/home/user/.local/share/relay-knowledge/service/relay-knowledge.service",
-  "storage": { "topology": "single", "active_shard_count": 1, "..." },
-  "index_refresh": { "..." },
-  "file_index": { "..." },
+  "storage": { "topology": "single", "active_shard_count": 1, "_omitted": true },
+  "index_refresh": { "_omitted": true },
+  "file_index": { "_omitted": true },
   "agent_protocols": {
     "mcp": { "enabled": true, "endpoint": "/mcp" },
     "acp_local": { "enabled": false }
   },
-  "operator": { "state": "idle", "..." },
-  "workers": [{ "kind": "index_maintenance", "state": "idle", "..." }],
+  "operator": { "state": "idle", "_omitted": true },
+  "workers": [{ "kind": "index_maintenance", "state": "idle", "_omitted": true }],
   "code_index_workers": {
     "configured_worker_count": 2,
     "active_worker_slots": 1,
@@ -209,7 +209,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 
 ```json
 {
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "storage": {
     "topology": "partitioned",
     "control_database_path": "/home/user/.local/share/relay-knowledge/relay-knowledge.sqlite",
@@ -255,7 +255,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 
 ```json
 {
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "nodes": [
     {
       "id": "node-001",
@@ -333,7 +333,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 | `audit.query` | 查询审计记录 | `limit`；可选 `filter_operation` |
 | `code.repo.register` | 注册代码仓库 | `root_path`；可选 `alias`, `path_filters`, `language_filters` |
 | `code.repo.index` | 全量索引 | `alias`；可选 `ref`, `path_filters`, `language_filters` |
-| `code.repo.update` | 增量索引 | `alias`, `base_ref`, `head_ref` |
+| `code.repo.update` | 增量索引 | `alias`；可选 `base_ref`, `head_ref` |
 | `code.repo.query` / `code.repo.context` | 查询代码仓库 / 打包 one-call codegraph context | `alias`, `query`, `kind` 或 context budget, `freshness`, `limit` |
 | `code.repo.feature_flags` | 特性标志查询 | `alias`, `freshness`, `limit`；可选 `query` |
 | `code.repo.impact` | 变更影响分析 | `alias`, `base_ref`, `head_ref`, `limit` |
@@ -344,7 +344,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 | `code.repo_set.remove` | 移除仓库成员 | `set_alias`, `repository_alias` |
 | `code.repo_set.query` | 跨仓库查询 | `set_alias`, `query`, `kind`, `freshness`, `limit` |
 | `code.repo_set.status` | 仓库集状态 | `set_alias` |
-| `code.repo_set.refresh` | 刷新仓库集索引 | `set_alias`；可选 `async` |
+| `code.repo_set.refresh` | 先进入有界持久队列；默认同步仅在精确 task 可定向 claim 时 drain，否则返回 queued | `set_alias`；可选 `async` |
 | `service.doctor` | 服务诊断 | 无 |
 | `service.run.streamable_http` | 服务状态 | 无 |
 | `provider.embedding.probe` | 嵌入提供者探测 | 无 |
@@ -359,24 +359,24 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 
 ```json
 {
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "operation": "retrieve.context",
   "name": "retrieve-context",
   "command": "检索上下文",
   "result": {
-    "metadata": { "..." },
-    "context_pack": { "..." },
+    "metadata": { "_omitted": true },
+    "context_pack": { "_omitted": true },
     "retrieval_mode": "hybrid",
     "freshness": "allow-stale",
-    "results": [{ "..." }],
-    "fusion": { "..." },
-    "rerank": { "..." },
+    "results": [{ "_omitted": true }],
+    "fusion": { "_omitted": true },
+    "rerank": { "_omitted": true },
     "backend_statuses": [],
     "truncated": false,
-    "budget_used": { "..." },
+    "budget_used": { "_omitted": true },
     "indexes": [{ "kind": "bm25", "stale": false }],
     "index_cursors": [],
-    "index_refresh": { "..." }
+    "index_refresh": { "_omitted": true }
   }
 }
 ```
@@ -438,19 +438,19 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "repository": "my-project",
-  "mode": "Full",
-  "freshness_policy": "AllowStale"
+  "repository": { "repository": "my-project", "ref_selector": "HEAD", "path_filters": [], "language_filters": [] },
+  "mode": "full",
+  "freshness_policy": "allow_stale"
 }
 ```
 
-**约束**：`repository` 必须与路径 `{alias}` 一致；mode 仅接受 `Full`。
+**约束**：`repository.repository` 必须与路径 `{alias}` 一致；mode 仅接受 `full` 或 `worktree_overlay`。
 
 **响应 200**：
 
 ```json
 {
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "scope": {
     "scope_id": "scope-abc",
     "repository_id": "repo_xyz",
@@ -463,17 +463,49 @@ curl -s http://localhost:8080/api/web/operations/execute \
     "index_versions": ["code:scope-abc:hash123"],
     "stale": true
   },
-  "status": { "repository_id": "repo_xyz", "stale": true, "..." },
+  "status": { "repository_id": "repo_xyz", "stale": true, "_omitted": true },
   "task": {
     "task_id": "task-001",
     "state": "queued",
     "repository_id": "repo_xyz",
     "alias": "my-project",
-    "mode": "Full",
-    "..."
+    "mode": "full",
+    "_omitted": true
   }
 }
 ```
+
+### 6.1.1 POST /api/v1/code/repositories/{alias}/update
+
+把 Git 仓库的一个不可变 base-to-head delta 提交为 durable Incremental 索引任务。该 route 不在 HTTP request executor 中直接写图谱。
+
+**请求体**：
+
+```json
+{ "repository": "my-project", "base_ref": "abc123", "head_ref": "def456" }
+```
+
+`base_ref` 和 `head_ref` 都可省略。省略 `base_ref` 时使用最近一次成功发布的 clean Git snapshot；active snapshot 是 worktree overlay 时会解包其 clean base。省略 `head_ref` 时使用 `HEAD`。服务在入队前把两者解析为不可变 commit 并固定 target tree。没有已发布 clean base 时返回 invalid argument，调用方必须先执行 full index。单次 delta 在应用注册 path filter 前按整个 commit pair 计算，最多 512 个 changed path；超过上限必须 full index。
+
+**响应 200（排队态）**：
+
+```json
+{
+  "metadata": { "...": "..." },
+  "scope": { "scope_id": "scope-def", "resolved_commit_sha": "def456", "tree_hash": "tree456", "stale": true },
+  "status": { "repository_id": "repo_xyz", "stale": true, "...": "..." },
+  "task": {
+    "task_id": "task-002",
+    "state": "queued",
+    "mode": { "incremental": { "base_ref": "abc123", "head_ref": "def456" } },
+    "...": "..."
+  }
+}
+```
+
+本地 CLI 可能在一个有界 drain 后返回完成态；此时 response 的 `summary.base_resolved_commit_sha` 是实际 base，`summary.resolved_commit_sha` 是实际 head。远端调用可能保持 queued，由常驻 worker pool 消费；通过 `GET .../status` 观察 `active_task`、checkpoint、freshness 与 retention。Durable queue 每仓库最多接纳 32 个、全局最多 256 个 unfinished task；容量耗尽返回可重试的 `qos_rejected`（HTTP 429）。
+
+成功发布会触发有界 scope/task history retention。旧 scope 会先原子标为 `retiring` 并退出查询，然后由 durable GC job 每个 maintenance transaction 推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行；`retention.maintenance_pending` 与 `retention.retiring_jobs[]` 暴露 phase、累计删除行数和最近错误。`retained_scopes` 与 `prunable_scopes` 各最多返回 64 项；`scope_listing_truncated=true` 表示这些数组和显示计数是有界诊断投影与可观察 lower bound 而非完整保护集合，调用方不得据此自行删除 scope，partitioned shard maintenance 也会在 control-plane pin 投影被截断时暂停。该清理只覆盖 code scope 的 facts、FTS/search row、software projection 与状态数据；不表示 generic Knowledge Graph 或独立 semantic/vector generation 已与该 code scope 原子切代。
 
 ### 6.2 POST /api/v1/code/repositories/{alias}/scope/preview
 
@@ -485,13 +517,13 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "metadata": { "..." },
-  "scope": { "scope_id": "scope-abc", "..." },
+  "metadata": { "_omitted": true },
+  "scope": { "scope_id": "scope-abc", "_omitted": true },
   "preview": {
-    "total_files": 15234,
-    "total_bytes": 123456789,
-    "language_counts": { "Rust": 892, "C": 234, "TypeScript": 156 },
-    "..."
+    "selected_file_count": 15234,
+    "selected_byte_count": 123456789,
+    "language_distribution": [{ "language_id": "rust", "file_count": 892, "byte_count": 123456 }],
+    "_omitted": true
   }
 }
 ```
@@ -505,31 +537,31 @@ curl -s http://localhost:8080/api/web/operations/execute \
 ```json
 {
   "query": "handle_request",
-  "repository": "my-project",
-  "code_query_kind": "Hybrid",
+  "repository": { "repository": "my-project", "ref_selector": "HEAD", "path_filters": [], "language_filters": [] },
+  "code_query_kind": "hybrid",
   "limit": 10,
-  "freshness_policy": "AllowStale"
+  "freshness_policy": "allow_stale"
 }
 ```
 
-`code_query_kind` 枚举：`Hybrid`、`Symbol`、`Definition`、`References`、`Callers`、`Callees`、`Imports`、`Sbom`
+`code_query_kind` 枚举：`hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`、`impact`
 
 **响应 200**：
 
 ```json
 {
-  "metadata": { "..." },
-  "scope": { "scope_id": "scope-abc", "..." },
-  "freshness": { "state": "fresh", "..." },
-  "request": { "query": "handle_request", "..." },
+  "metadata": { "_omitted": true },
+  "scope": { "scope_id": "scope-abc", "_omitted": true },
+  "freshness": { "state": "fresh", "_omitted": true },
+  "request": { "query": "handle_request", "_omitted": true },
   "results": [
     {
-      "hit_id": "hit-001",
-      "symbol_name": "handle_request",
-      "file_path": "src/server/mod.rs",
-      "range": { "start_line": 42, "end_line": 67 },
+      "symbol_snapshot_id": "symbol-001",
+      "excerpt": "pub fn handle_request(...) {...}",
+      "path": "src/server/mod.rs",
+      "line_range": { "start": 42, "end": 67 },
       "score": 0.95,
-      "..."
+      "_omitted": true
     }
   ],
   "degraded_reason": null
@@ -544,9 +576,9 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "repository": "my-project",
+  "repository": { "repository": "my-project", "ref_selector": "HEAD", "path_filters": [], "language_filters": [] },
   "limit": 20,
-  "freshness_policy": "AllowStale"
+  "freshness_policy": "allow_stale"
 }
 ```
 
@@ -554,15 +586,15 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "metadata": { "..." },
-  "scope": { "..." },
-  "freshness": { "..." },
-  "request": { "..." },
+  "metadata": { "_omitted": true },
+  "scope": { "_omitted": true },
+  "freshness": { "_omitted": true },
+  "request": { "_omitted": true },
   "flags": [
     {
-      "flag_name": "FEATURE_NEW_PARSER",
-      "file_paths": ["src/main.rs", "src/parser/mod.rs"],
-      "..."
+      "name": "FEATURE_NEW_PARSER",
+      "usages": [{ "path": "src/main.rs", "_omitted": true }],
+      "_omitted": true
     }
   ]
 }
@@ -576,7 +608,7 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "repository": "my-project",
+  "repository": { "repository": "my-project", "ref_selector": "HEAD", "path_filters": [], "language_filters": [] },
   "base_ref": "main",
   "head_ref": "feature/new-parser",
   "limit": 20
@@ -587,15 +619,15 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "metadata": { "..." },
-  "scope": { "..." },
+  "metadata": { "_omitted": true },
+  "scope": { "_omitted": true },
   "request": { "base_ref": "main", "head_ref": "feature/new-parser" },
   "path_groups": {
-    "changed_files": ["src/parser/mod.rs"],
-    "affected_symbols": [{ "..." }],
-    "..."
+    "in_scope_changed_paths": ["src/parser/mod.rs"],
+    "out_of_scope_changed_paths": [],
+    "_omitted": true
   },
-  "results": [{ "..." }]
+  "results": [{ "_omitted": true }]
 }
 ```
 
@@ -609,12 +641,12 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "metadata": { "..." },
-  "scope": { "scope_id": "scope-abc", "..." },
+  "metadata": { "_omitted": true },
+  "scope": { "scope_id": "scope-abc", "_omitted": true },
   "report": {
     "annotation_counts": { "deprecated": 12, "todo": 45 },
     "language_stats": { "Rust": 892 },
-    "..."
+    "_omitted": true
   }
 }
 ```
@@ -627,26 +659,26 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "repository": "my-project",
-  "kind": "Dependencies",
-  "freshness_policy": "AllowStale",
+  "repository": { "repository": "my-project", "ref_selector": "HEAD", "path_filters": [], "language_filters": [] },
+  "kind": "dependencies",
+  "freshness_policy": "allow_stale",
   "limit": 50
 }
 ```
 
-`kind` 枚举：`Dependencies`、`Sdks`、`Files`、`Topics`、`Relationships`、`Build`、`Iac`、`Design`、`All`
+`kind` 枚举：`dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`all`
 
 **响应 200**：
 
 ```json
 {
-  "metadata": { "..." },
-  "scope": { "..." },
-  "request": { "kind": "Dependencies", "..." },
-  "status": { "..." },
+  "metadata": { "_omitted": true },
+  "scope": { "_omitted": true },
+  "request": { "kind": "dependencies", "_omitted": true },
+  "status": { "_omitted": true },
   "components": [],
   "dependency_usages": [
-    { "package_name": "serde", "version": "1.0", "..." }
+    { "package_name": "serde", "module": "serde", "_omitted": true }
   ],
   "sdk_usages": [],
   "files": [],
@@ -676,7 +708,7 @@ curl -s http://localhost:8080/api/web/operations/execute \
 
 ```json
 {
-  "metadata": { "..." },
+  "metadata": { "_omitted": true },
   "status": {
     "repository_id": "repo_xyz",
     "alias": "my-project",
@@ -687,11 +719,11 @@ curl -s http://localhost:8080/api/web/operations/execute \
     "tree_hash": "hash123",
     "path_filters": [],
     "language_filters": [],
-    "..."
+    "_omitted": true
   },
   "active_task": null,
-  "checkpoint": { "..." },
-  "retention": { "..." }
+  "checkpoint": { "_omitted": true },
+  "retention": { "retained_scope_count": 1, "prunable_scope_count": 0, "pruned_scope_count": 0, "scope_listing_truncated": false, "maintenance_pending": false, "retiring_job_count": 0, "retained_scopes": ["scope-abc"], "prunable_scopes": [], "pruned_scopes": [], "retiring_jobs": [] }
 }
 ```
 
@@ -949,6 +981,7 @@ HTTP 请求默认超时 30 秒，可通过 `RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT
 | GET | `/api/web/graph/canvas` | 图可视化画布 |
 | POST | `/api/web/operations/execute` | 统一操作执行 |
 | POST | `/api/v1/code/repositories/{alias}/index` | 仓库全量索引 |
+| POST | `/api/v1/code/repositories/{alias}/update` | 持久化 Git commit 增量索引 |
 | POST | `/api/v1/code/repositories/{alias}/scope/preview` | 索引范围预览 |
 | POST | `/api/v1/code/repositories/{alias}/query` / `/context` | 仓库代码查询 / codegraph context pack |
 | POST | `/api/v1/code/repositories/{alias}/feature-flags` | 特性标志查询 |

@@ -312,7 +312,8 @@ fn create_test_schema(connection: &Connection) {
                 repository_id TEXT NOT NULL,
                 resolved_commit_sha TEXT NOT NULL,
                 path_filters_json TEXT NOT NULL,
-                language_filters_json TEXT NOT NULL
+                language_filters_json TEXT NOT NULL,
+                retiring INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE code_repositories (
                 repository_id TEXT PRIMARY KEY,

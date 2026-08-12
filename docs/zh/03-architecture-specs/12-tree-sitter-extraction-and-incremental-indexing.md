@@ -32,7 +32,7 @@ resolve snapshot
   -> batch parse and chunk
   -> write file/symbol/reference/feature-flag/chunk facts
   -> finalize cross-batch edges
-  -> refresh code/BM25/semantic/vector indexes
+  -> refresh scoped code search document 与 software projection
   -> mark scope fresh
 ```
 
@@ -47,11 +47,19 @@ resolve snapshot
 3. 用反向依赖和 import/call/reference edge 扩散 affected files。
 4. 只刷新受影响的 code facts、chunks 和 index families。
 
+手动 `repo update` 与常驻 commit reconciliation 都会先把所选 base/head ref 解析为不可变 commit，再把 `Incremental` request 提交到 durable code-index task queue。手动省略 base 时选择最近发布的 clean snapshot，包括 worktree-overlay identity 内的 clean commit；省略 head 时选择 `HEAD`。仓库没有该 base 时必须先完成 full index。Git diff 在应用注册 path filter 前按整个 commit pair 计算，最多接受 512 个 changed path；超过上限明确要求 full index，不能借此把 queue、parse set 或 write transaction 变成无界。
+
+常驻 FileWatcher 把 `.git/HEAD`、ref、packed-ref 和 HEAD log event 作为低延迟 hint。启动时及受界 periodic interval（默认 5000 ms）会独立解析 checked-out HEAD/tree，因此 linked worktree 与漏报/合并 event 仍可恢复。HEAD 推进后，将最近发布 clean base 与新 head 固定进 durable task。每个 repository、checked-out ref 与 filter set 使用稳定 fingerprint，在任务槽未完成时合并重复 hint；queue admission 每仓库限制 32 个、全局限制 256 个未完成 task。Attempt-scoped lease 与单调递增的 publication generation 共同构成 single-writer authority；snapshot、batch、workspace 与 software-projection transaction 都在 commit 前校验 live generation，因此 commit event 或 lease 过期后的游离 attempt 不能绕过有界 retry/backoff、recovery 或 dead-letter。full rebuild 保留 batch checkpoint；受界 incremental attempt 是原子 snapshot transaction，不宣称逐路径 checkpoint 进度。
+
 Import 依赖扩散必须优先使用已索引代码地图和版本化 import edge。若 import 指向的外部依赖或跨仓库目标没有代码地图，索引器只记录 unresolved target hint、resolution reason 和受影响的本仓库事实，不为了补齐该依赖而触发未授权全仓扫描；这个 coverage gap 不是 parser、file、scope 或 response 降级。查询层可在同一 scope 内用该 hint 触发受限内部 source fallback。
 
 本地配置关系只在同一 indexed source scope 内解析。Finalize 可以在该 scope 的全部文件写入后解析确定性的本地文件引用、模板 include 和构建目标引用。有歧义的本地匹配以及外部 image、package、remote label 或 template 继续保留为 unresolved 或 ambiguous metadata，而不是 parser degraded state。
 
 Feature flag 抽取属于索引阶段。运行时配置读取、布尔配置声明和 guarded-code 关系必须随文件 scope 写入版本化事实；查询层只能读这些事实和对应 FTS 文档。TOML、YAML、JSON、INI、Java properties 等配置格式中的布尔声明复用 configuration 抽取器产出的结构化 config-key fact，而不是维护第二套 feature-flag 来源。更新抽取规则、配置文件或 guarded 分支后，必须通过 full 或 incremental index 刷新相关 scope。
+
+只有新 scope 及其 software projection 完成后才运行有界 retention。protected set 是 active scope 与最近两个成功发布时间窗口的并集（窗口通常已包含 active）、最近一次成功增量的 predecessor、active worktree overlay 的 clean base，再加所有未完成 task 的 target/base 和 repository-set pin。清理先原子地把一个旧 scope 标为 `retiring`，使它退出 read/base resolution，并持久化可恢复 job。之后每个 maintenance transaction 最多推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行，包括 facts、code FTS/search document、software projection、checkpoint、workspace state 或 scope metadata。同一 pass 另行最多删除 512 条 succeeded task audit、512 条 failure-class task audit 和 512 条 commit alias，使主清理合计最多 2,048 个物理行，另加最多一个终态 GC-job bookkeeping 行。同 tree commit 复用内容图，并使用每仓 256 条的 commit alias 窗口。完成态 task history 限制为每仓库 128 条 successful 与 64 条 failed/dead-letter/cancelled，同时为每个 retained scope 保存最新 success。状态报告 pending/job phase/deleted rows/error，常驻 maintenance worker 在失败后续跑。被淘汰 commit 必须 full reindex。这里不是 generic Knowledge Graph 或独立 semantic/vector generation 的原子发布声明。
+
+每个显式或隐式解析 scope 的 code read，必须从初始 scope/`retiring` resolution 到后续所有相依 SELECT 全程使用同一个 SQLite deferred read snapshot。该承诺包括 code fact/search read、repository status/list/scope-status/latest-scope-status 以及 repository-set status/cross-edge read，但不泛化到无关的单 SELECT reporting。并发分阶段清理只能让该请求看到完整旧快照，或让后续请求明确收到 retiring 错误，不能返回混合的部分 scope state。
 
 ## 6. 高性能边界
 
@@ -73,6 +81,8 @@ Query-time source fallback 与 Git blob 读取一样必须进入 blocking-worker
 
 - 大仓库索引能报告 progress，不替换旧 fresh scope。
 - 增量更新只处理 changed 和 affected files，不能全仓扫描伪装为增量。
+- commit 推进可通过受界 reconciliation 与 durable task replay 从 watcher 漏报和服务重启中恢复。
+- 持续 commit 会保留 recovery base 与 repository-set pin，同时限制 scope 和完成态 task history 的增长。
 - 解析失败文件仍能通过文本检索召回。
 - 索引 trace 能说明候选缩小、parse、写入和刷新各阶段耗时。
 

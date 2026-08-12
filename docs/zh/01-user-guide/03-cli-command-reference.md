@@ -6,7 +6,7 @@
 
 当请求 `--format json` 或 `--format streaming-json` 时，写入 stderr 的解析诊断和运行期 API 失败都会使用 JSON。运行期 API 失败沿用稳定 API 错误结构，包含 `error_kind`、`message` 和可选 `metadata`；text 和 markdown 格式继续输出便于人工阅读的 stderr 消息。
 
-需要从本地 CLI 访问已部署常驻服务时，使用全局 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`。远端模式覆盖 `repo list`、`repo index`、`repo scope preview`、`repo status`、`repo query`、`repo graph`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，用于访问服务端已经注册的仓库。`repo index --reset` 和 `repo index-worker` 在远端模式选中时会被拒绝，必须在服务端机器执行；仅设置环境变量时，`status`、`health` 等无关本地命令继续使用本机 runtime state。
+需要从本地 CLI 访问已部署常驻服务时，使用全局 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`。远端模式覆盖 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo graph`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，用于访问服务端已经注册的仓库。`repo index --reset` 和 `repo index-worker` 在远端模式选中时会被拒绝，必须在服务端机器执行；仅设置环境变量时，`status`、`health` 等无关本地命令继续使用本机 runtime state。
 
 ## 3.1 常用状态命令
 
@@ -100,7 +100,7 @@ relay-knowledge repo remove <alias>
 relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset]
 relay-knowledge repo index-worker [--task-id <id>]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
-relay-knowledge repo update <alias> --base <ref> --head <ref>
+relay-knowledge repo update <alias> [--base <ref>] [--head <ref>]
 relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports|sbom] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
@@ -152,7 +152,11 @@ Kind 取值按命令家族隔离：
 
 `--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。
 
-冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；`service worker run [--task-id <id>] --format json` 是 split-worker preview 入口，只 claim 一个 durable code-index task，并通过 task id、lease owner 和 attempt count 完成或失败该任务；`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
+冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；每次调用还会推进一次有界 scope-retention pass，并返回 `maintenance_active` 与可选 `maintenance_error`。maintenance error 非空表示该 retention pass 失败，它与 code-index task 结果分开报告，此时不能把 `maintenance_active=false` 当作 drain 完成；应查看 `repo status`、处理错误，再重试一次有界 pass。未运行 `service run` 时，应重复本地命令到它和 `repo status` 都不再报告 pending maintenance。`service worker run [--task-id <id>] --format json` 是 split-worker preview 入口，只 claim 一个 durable code-index task，并通过 task id、lease owner 和 attempt count 完成或失败该任务；它不暴露上述本地 retention 字段。`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
+
+`repo update <alias>` 也通过同一持久队列提交 Incremental task。省略参数时，`--base` 使用最近一次发布的 clean Git commit（worktree-overlay identity 会解包为 clean base），`--head` 使用 `HEAD`；服务会在入队前把两者解析为不可变 commit。没有已发布 clean base 时，先运行 `repo index <alias> --ref HEAD`。本地 CLI 会执行一次有界 drain，远端 `repo update` 则可能返回 `task.state=queued` 交给常驻 worker。完成态 response 的 `summary` 包含 `base_resolved_commit_sha`；排队态可从 `task.mode` 查看固定后的 base/head。单次 Git delta 在应用注册 path filter 前按整个 commit pair 计算，最多 512 个 changed path；超过上限后必须改用 full index。
+
+每次成功发布后运行 scope retention：保留 active scope 与最近两个成功发布时间窗口的并集（窗口通常已包含 active）、最近一次成功增量的 predecessor、active worktree overlay 的 clean base，再加未完成 task 的 target/base scope 和 repository-set pin。它先原子地把一个旧 scope 标为 `retiring`，从查询和增量 base 选择中排除，并记录 durable GC job；后续每个 maintenance transaction 推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行，包括事实、FTS/search row、software projection、checkpoint、workspace state 或 scope metadata。同 tree commit 复用内容图，并使用每仓 256 条的 commit alias 窗口。完成态 task 审计行按仓库限制为最近 128 条 success 和 64 条 failure/dead-letter/cancellation，但每个仍保留 scope 的最新 success 行继续保留。`repo status --format json` 暴露 `maintenance_pending`，以及 retiring job 的 phase、累计删除行数与最近错误；`scope_listing_truncated=true` 表示 retained/prunable 数组和显示计数只是有界诊断投影，不是完整列表。已淘汰 ref 必须先 full reindex。
 
 `repo list` 是只读的已索引仓库清单。它只返回至少拥有一个已完成 indexed scope 的仓库；仅执行过 `repo register`、尚未完成 `repo index` 的仓库不会出现在结果中。text 输出逐行显示 alias、state、文件/符号数、stale、indexed commit 和 root；`--format json` 返回 `metadata` 与按 alias/repository id 稳定排序的 `repositories` 状态数组。使用 `--remote` 时读取服务端清单，不会回退到本机 runtime state。
 

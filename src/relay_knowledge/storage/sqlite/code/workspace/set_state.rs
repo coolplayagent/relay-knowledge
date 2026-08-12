@@ -86,6 +86,21 @@ pub(in super::super) fn clear_auto_workspace_state(
     Ok(())
 }
 
+pub(in super::super) fn clear_auto_workspace_state_with_fence(
+    connection: &mut rusqlite::Connection,
+    repository_id: &str,
+    source_scope: &str,
+    fence: &super::super::lifecycle::publication_fence::PublicationFenceGuard,
+) -> Result<(), StorageError> {
+    fence.validate_repository(repository_id)?;
+    let transaction = connection.transaction()?;
+    clear_workspace_state(&transaction, repository_id, source_scope)?;
+    fence.validate_target_scope(&transaction, source_scope)?;
+    fence.validate(&transaction)?;
+    transaction.commit()?;
+    Ok(())
+}
+
 pub(in super::super) fn clear_workspace_state(
     transaction: &Transaction<'_>,
     repository_id: &str,
@@ -94,7 +109,11 @@ pub(in super::super) fn clear_workspace_state(
     let set_id = workspace_set_id(repository_id);
     transaction.execute(
         "DELETE FROM code_repository_cross_edges
-         WHERE set_id = ?1 AND from_repository_id = ?2 AND from_source_scope = ?3",
+         WHERE set_id = ?1
+           AND (
+               (from_repository_id = ?2 AND from_source_scope = ?3)
+               OR to_source_scope = ?3
+           )",
         params![&set_id, repository_id, source_scope],
     )?;
     transaction.execute(
@@ -191,7 +210,7 @@ fn workspace_member_versions_json(
                scope.tree_hash
         FROM code_repository_set_members member
         JOIN code_repository_scopes scope ON scope.source_scope = member.source_scope
-        WHERE member.set_id = ?1
+        WHERE member.set_id = ?1 AND scope.retiring = 0
         ORDER BY member.repository_alias ASC, member.source_scope ASC
         ",
     )?;
@@ -228,6 +247,7 @@ fn workspace_scope_metadata(
             SELECT resolved_commit_sha, path_filters_json, language_filters_json
             FROM code_repository_scopes
             WHERE source_scope = ?1
+              AND retiring = 0
             ",
             params![source_scope],
             |row| {

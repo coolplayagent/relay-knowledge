@@ -48,12 +48,12 @@ pub(super) fn insert(
     Ok(())
 }
 
-pub(super) fn mark_state(
-    connection: &mut Connection,
+pub(super) fn mark_state_in_transaction(
+    transaction: &Transaction<'_>,
     source_scope: &str,
     state: &str,
 ) -> Result<(), StorageError> {
-    connection.execute(
+    transaction.execute(
         "
         UPDATE code_repository_index_checkpoints
         SET state = ?2, updated_at_ms = ?3
@@ -61,7 +61,6 @@ pub(super) fn mark_state(
         ",
         params![source_scope, state, now_millis()],
     )?;
-
     Ok(())
 }
 

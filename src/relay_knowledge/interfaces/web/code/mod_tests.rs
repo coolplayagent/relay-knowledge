@@ -102,6 +102,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
+    let initial_commit = repo.git_text(["rev-parse", "HEAD"]);
     let service = test_service("web-code-api").await;
     service
         .register_code_repository(
@@ -210,6 +211,47 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     .await;
     assert_eq!(status["status"]["alias"], "fixture");
     assert_eq!(status["status"]["indexed_file_count"], 1);
+
+    repo.write(
+        "src/lib.rs",
+        "pub fn retry_policy() -> &'static str { \"bounded\" }\npub fn commit_event_policy() {}\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "commit event"]);
+    let updated_commit = repo.git_text(["rev-parse", "HEAD"]);
+    let update = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/update",
+        Some(json!({})),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(
+        update["task"]["mode"]["incremental"]["base_ref"],
+        initial_commit
+    );
+    assert_eq!(update["task"]["resolved_commit_sha"], updated_commit);
+    let task_id = update["task"]["task_id"]
+        .as_str()
+        .expect("update should queue")
+        .to_owned();
+    service
+        .run_code_index_task_once(
+            Some(task_id),
+            RequestContext::for_interface(InterfaceKind::Api),
+        )
+        .await
+        .expect("update worker should run");
+    let mismatch = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/update",
+        Some(json!({"repository": "other"})),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(mismatch["error_kind"], "invalid_argument");
 
     let blank_query = request_json(
         router.clone(),
@@ -481,6 +523,21 @@ impl FixtureRepo {
             "git failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
+        let output = git_command(&self.path, args)
+            .output()
+            .expect("git should run");
+        assert!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git output should be utf8")
+            .trim()
+            .to_owned()
     }
 }
 

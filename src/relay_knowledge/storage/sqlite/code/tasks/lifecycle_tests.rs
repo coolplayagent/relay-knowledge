@@ -799,21 +799,33 @@ async fn code_scope_retention_prunes_only_non_retained_scopes() {
     );
     assert!(retention.retained_scopes.contains(&"scope-two".to_owned()));
 
-    let pruned = store
-        .run(|connection| {
-            tasks::prune_scopes(
-                connection,
-                CodeScopeRetentionRequest {
-                    repository_id: "repo".to_owned(),
-                    active_scope: "scope-active".to_owned(),
-                    retain_recent_successful_scopes: 1,
-                },
-            )
-        })
-        .await
-        .expect("prune should run");
-    assert_eq!(pruned.pruned_scopes, ["scope-old", "scope-one"]);
-    assert_eq!(pruned.prunable_scope_count, 2);
+    let mut retired_scopes = Vec::new();
+    let mut initial_prunable_count = 0;
+    for pass_index in 0..128 {
+        let pass = store
+            .run(|connection| {
+                tasks::prune_scopes(
+                    connection,
+                    CodeScopeRetentionRequest {
+                        repository_id: "repo".to_owned(),
+                        active_scope: "scope-active".to_owned(),
+                        retain_recent_successful_scopes: 1,
+                    },
+                )
+            })
+            .await
+            .expect("prune should run");
+        if pass_index == 0 {
+            initial_prunable_count = pass.prunable_scope_count;
+        }
+        retired_scopes.extend(pass.pruned_scopes);
+        if !pass.maintenance_pending {
+            break;
+        }
+    }
+    retired_scopes.sort();
+    assert_eq!(retired_scopes, ["scope-old", "scope-one"]);
+    assert_eq!(initial_prunable_count, 2);
 
     let remaining = store
         .run(|connection| {

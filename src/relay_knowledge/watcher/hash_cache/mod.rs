@@ -91,6 +91,13 @@ impl ContentHashCache {
         self.insertion_order.clear();
     }
 
+    pub(crate) fn snapshots(&self) -> Vec<(PathBuf, u64)> {
+        self.insertion_order
+            .iter()
+            .filter_map(|path| self.entries.get(path).map(|hash| (path.clone(), *hash)))
+            .collect()
+    }
+
     fn evict_oldest(&mut self) {
         while let Some(oldest_key) = self.insertion_order.pop_front() {
             if self.entries.remove(&oldest_key).is_some() {

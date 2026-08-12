@@ -123,6 +123,7 @@ pub struct TelemetryEnvOverrides {
 pub struct WatcherEnvOverrides {
     pub enabled: Option<bool>,
     pub debounce_ms: Option<u64>,
+    pub commit_reconcile_interval_ms: Option<u64>,
     pub max_watch_dirs: Option<usize>,
     pub hash_cache_capacity: Option<usize>,
 }

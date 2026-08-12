@@ -257,8 +257,14 @@ fn windows_install_command_quotes_binary_and_plans_environment_step() {
         .expect("PowerShell configure script should exist");
 
     assert!(configure_script.contains("New-ItemProperty"));
-    assert!(configure_script.contains("RELAY_KNOWLEDGE_DATA_DIR=$dataDir"));
+    assert!(configure_script.contains("$serviceEnvironment"));
+    assert!(configure_script.contains("$($_.name)=$($_.value)"));
     assert!(configure_script.contains(&plan.definition_path));
+    assert!(plan.definition.contains("RELAY_KNOWLEDGE_WATCHER_ENABLED"));
+    assert!(
+        plan.definition
+            .contains("RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS")
+    );
 }
 
 #[test]

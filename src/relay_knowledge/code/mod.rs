@@ -57,6 +57,9 @@ pub use index::{
 };
 pub use registration::register_repository;
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
+pub(crate) use source::git::{
+    repository_worktree_observation_bounded, resolve_git_ref_bounded, resolve_git_tree_bounded,
+};
 pub use source::resolution::{
     resolve_repository_ref, resolve_repository_ref_with_filters,
     resolve_repository_ref_with_path_filters, resolve_repository_snapshot,

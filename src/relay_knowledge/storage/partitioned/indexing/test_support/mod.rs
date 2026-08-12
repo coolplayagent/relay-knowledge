@@ -13,6 +13,16 @@ use crate::{
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn partitioned_store(name: &str) -> super::super::PartitionedSqliteKnowledgeStore {
+    partitioned_store_with_paths(name).0
+}
+
+pub(super) fn partitioned_store_with_paths(
+    name: &str,
+) -> (
+    super::super::PartitionedSqliteKnowledgeStore,
+    PathBuf,
+    RuntimePaths,
+) {
     let root = unique_temp_dir(name);
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::current(),
@@ -24,8 +34,11 @@ pub(super) fn partitioned_store(name: &str) -> super::super::PartitionedSqliteKn
     .expect("environment should parse");
     let paths =
         RuntimePaths::resolve(&environment.platform, &environment.paths).expect("paths resolve");
-    super::super::PartitionedSqliteKnowledgeStore::open(paths.database_file(), paths)
-        .expect("store should open")
+    let control_path = paths.database_file();
+    let store =
+        super::super::PartitionedSqliteKnowledgeStore::open(control_path.clone(), paths.clone())
+            .expect("store should open");
+    (store, control_path, paths)
 }
 
 fn unique_temp_dir(name: &str) -> PathBuf {

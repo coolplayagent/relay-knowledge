@@ -1,5 +1,5 @@
 use crate::{
-    api::{CodeRepositoryRegisterRequest, RequestContext},
+    api::{CodeRepositoryRegisterRequest, CodeRepositoryUpdateRequest, RequestContext},
     application::RelayKnowledgeService,
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
@@ -140,9 +140,16 @@ pub async fn run_repo(
                 .run_code_index_task_once(task_id, context)
                 .await
                 .map_err(|error| CliError::api_failed(error, format))?;
+            let (maintenance_active, maintenance_error) =
+                match service.run_code_scope_retention_once().await {
+                    Ok(active) => (active, None),
+                    Err(error) => (false, Some(error.message)),
+                };
             let response = CodeIndexWorkerRunResponse {
                 claimed: completed.is_some(),
                 task: completed,
+                maintenance_active,
+                maintenance_error,
             };
             render_index_worker_response(&response, format)
         }
@@ -175,26 +182,34 @@ pub async fn run_repo(
             base_ref,
             head_ref,
         } => {
-            let response = service
-                .index_code_repository(
-                    CodeIndexRequest {
-                        repository: selector(
-                            alias,
-                            head_ref.clone(),
-                            Vec::new(),
-                            Vec::new(),
-                            format,
-                        )?,
-                        mode: CodeIndexMode::incremental(base_ref, head_ref).map_err(|error| {
-                            CliError::invalid_api_argument(error.to_string(), format)
-                        })?,
-                        workspace_detection: Default::default(),
-                        freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            let requested_head = head_ref.clone().unwrap_or_else(|| "HEAD".to_owned());
+            let update_selector = selector(
+                alias.clone(),
+                requested_head,
+                Vec::new(),
+                Vec::new(),
+                format,
+            )?;
+            let worker_context = context.clone();
+            let mut response = service
+                .start_code_repository_update(
+                    CodeRepositoryUpdateRequest {
+                        repository: alias,
+                        base_ref,
+                        head_ref,
                     },
                     context,
                 )
                 .await
                 .map_err(|error| CliError::api_failed(error, format))?;
+            finish_started_index_task(
+                service,
+                &mut response,
+                update_selector,
+                worker_context,
+                format,
+            )
+            .await?;
 
             render_response(
                 "code.repo.update",

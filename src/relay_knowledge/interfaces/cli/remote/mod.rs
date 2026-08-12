@@ -8,8 +8,9 @@ use crate::{
         ApiError, CodeGraphContextResponse, CodeRepositoryFeatureFlagsResponse,
         CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse, CodeRepositoryListResponse,
         CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
-        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, CodebaseViewResponse,
-        ErrorKind, RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalResponse,
+        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
+        CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
+        RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalResponse,
     },
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
@@ -36,6 +37,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
         CliAction::Repo(
             RepoCommand::List
                 | RepoCommand::Index { .. }
+                | RepoCommand::Update { .. }
                 | RepoCommand::ScopePreview { .. }
                 | RepoCommand::Query { .. }
                 | RepoCommand::Graph { .. }
@@ -53,7 +55,11 @@ pub(super) fn supports(action: &CliAction) -> bool {
 pub(super) fn blocks_local_fallback(action: &CliAction) -> bool {
     matches!(
         action,
-        CliAction::Repo(RepoCommand::IndexReset { .. } | RepoCommand::IndexWorker { .. })
+        CliAction::Repo(
+            RepoCommand::IndexReset { .. }
+                | RepoCommand::IndexWorker { .. }
+                | RepoCommand::Update { .. }
+        )
     )
 }
 
@@ -163,6 +169,31 @@ pub(super) async fn run_remote(
 
             render_response(
                 "code.repo.scope_preview",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::Update {
+            alias,
+            base_ref,
+            head_ref,
+        } => {
+            let response = client
+                .post_repository::<_, CodeRepositoryIndexStartResponse>(
+                    alias,
+                    "update",
+                    &CodeRepositoryUpdateRequest {
+                        repository: alias.clone(),
+                        base_ref: base_ref.clone(),
+                        head_ref: head_ref.clone(),
+                    },
+                )
+                .await?;
+
+            render_response(
+                "code.repo.update",
                 response.metadata.clone(),
                 &response,
                 format,

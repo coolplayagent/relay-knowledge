@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::{
-    domain::CodeRepositoryStatus,
+    domain::{CodeIndexPublicationFence, CodeRepositoryStatus},
     storage::{SqliteGraphStore, StorageError},
 };
 
@@ -15,7 +15,33 @@ pub(super) async fn mirror_status(
 ) -> Result<(), StorageError> {
     let control = Arc::clone(control);
     control
-        .run(move |connection| mirror_repository_status(connection, &status))
+        .run(move |connection| {
+            let transaction = connection.transaction()?;
+            mirror_repository_status(&transaction, &status)?;
+            transaction.commit()?;
+            Ok(())
+        })
+        .await
+}
+
+pub(super) async fn mirror_status_with_fence(
+    control: &Arc<SqliteGraphStore>,
+    status: CodeRepositoryStatus,
+    fence: CodeIndexPublicationFence,
+) -> Result<(), StorageError> {
+    let control = Arc::clone(control);
+    control
+        .run(move |connection| {
+            let guard = crate::storage::sqlite::code::lifecycle::publication_fence::prepare_guard(
+                connection, fence, None,
+            )?;
+            guard.validate_repository(&status.repository_id)?;
+            let transaction = connection.transaction()?;
+            mirror_repository_status(&transaction, &status)?;
+            guard.validate(&transaction)?;
+            transaction.commit()?;
+            Ok(())
+        })
         .await
 }
 

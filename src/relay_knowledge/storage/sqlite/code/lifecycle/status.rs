@@ -173,7 +173,17 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status(
         LEFT JOIN code_repository_index_checkpoints checkpoint
           ON checkpoint.source_scope = scope.source_scope
         WHERE scope.repository_id = ?1
-          AND scope.resolved_commit_sha = ?2
+          AND scope.retiring = 0
+          AND (
+              scope.resolved_commit_sha = ?2
+              OR EXISTS (
+                  SELECT 1
+                  FROM code_repository_commit_scopes commit_scope
+                  WHERE commit_scope.repository_id = scope.repository_id
+                    AND commit_scope.resolved_commit_sha = ?2
+                    AND commit_scope.source_scope = scope.source_scope
+              )
+          )
         ORDER BY
           CASE
             WHEN scope.path_filters_json = ?3 AND scope.language_filters_json = ?4 THEN 0
@@ -271,6 +281,7 @@ pub(in crate::storage::sqlite::code) fn latest_repository_scope_status(
         LEFT JOIN code_repository_index_checkpoints checkpoint
           ON checkpoint.source_scope = scope.source_scope
         WHERE scope.repository_id = ?1
+          AND scope.retiring = 0
         ORDER BY coalesce(checkpoint.updated_at_ms, 0) DESC, scope.source_scope DESC
         ",
     )?;
@@ -354,6 +365,7 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status_by_source_scope(
             FROM code_repository_scopes scope
             JOIN code_repositories r ON r.repository_id = scope.repository_id
             WHERE scope.source_scope = ?1
+              AND scope.retiring = 0
             ",
             params![source_scope],
             |row| {
@@ -429,6 +441,7 @@ fn reconcile_repository_status_freshness(
             FROM code_repository_scopes
             WHERE source_scope = ?1
               AND repository_id = ?2
+              AND retiring = 0
             ",
             params![source_scope, status.repository_id],
             |row| row.get::<_, bool>(0),

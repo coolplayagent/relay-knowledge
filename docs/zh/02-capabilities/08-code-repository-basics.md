@@ -19,7 +19,7 @@ relay-knowledge repo query relay-knowledge --query retry_policy --kind definitio
 relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
-relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo update relay-knowledge --format json
 relay-knowledge repo status relay-knowledge --format json
 ```
 
@@ -37,7 +37,7 @@ OKF 投影前，storage 通过共享 repository path-admission contract 规范�
 
 protobuf stub、swagger/OpenAPI client、minified bundle、仓库根层 `build/`/`dist/` output 和 `target/generated/` output 等生成文件仍会被索引，以保留图完整性。索引会通过路径和文件头信号记录 generated-file metadata，report totals 会拆分手写与生成 symbol 数量，默认检索会降低生成文件命中的排序分；`--exclude-generated` 会从结构化检索和有界 source fallback 结果中排除生成文件。
 
-冷启动 full `repo index` 会返回 queued task handle，由后台 code-index worker 在 lease 下执行解析和 SQLite 写入。`service run` 会在启动时恢复过期 code-index lease，`repo index <alias> --reset` 可以把未完成 task 重新排队，且不删除已完成 indexed scope，也不复活 terminal dead-letter 历史。`repo status` 暴露 active task、checkpoint 进度、finalization 阶段和 retention 摘要；worker 成功后会保留 active scope、最近两个完成 scope 和未完成任务 scope。如果任务已经不再 active 但仓库仍处于 `indexing`，status 会报告最近 checkpoint，便于区分 finalization 慢和进度缺失。
+冷启动 full `repo index` 返回 queued task handle，由后台 worker 在 lease 与事务级 publication generation 下写入。`repo update` 复用同一 durable path；省略 base/head 时默认最近发布 clean commit 与 `HEAD`，入队前固定 ref。原生 Git ref 变化是 hint，默认五秒的受界 HEAD reconciliation 兜底 linked worktree、漏报与重启。Admission 每仓库最多允许 32 个、全局最多 256 个未完成 task，超载返回可重试的 `qos_rejected`。`service run` 恢复过期 lease，`repo status` 暴露 task/checkpoint/finalization/retention。发布后保留 active 与 latest-two-success window 的并集（通常重叠），以及最近 incremental predecessor、active worktree overlay 的 clean base、未完成 task 和 repository-set pin；旧 fact/search/software state 先逻辑退役，后续 durable GC 每个 maintenance transaction 只推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行。完成态 task history 另行受界。
 
 ## 竞争力特性
 

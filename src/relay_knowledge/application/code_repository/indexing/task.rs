@@ -1,5 +1,7 @@
 //! Owns durable code-index task leases and worker liveness recovery.
 
+use std::{future::Future, time::Duration};
+
 use crate::{
     api::ApiError,
     storage::{
@@ -25,6 +27,7 @@ pub(super) struct CodeIndexTaskLeaseContext {
     pub(super) lease_owner: String,
     pub(super) attempt_count: u32,
     pub(super) lease_duration_ms: u64,
+    pub(super) publication_fence: crate::domain::CodeIndexPublicationFence,
 }
 
 pub(super) async fn refresh_code_index_task_lease(
@@ -50,6 +53,39 @@ pub(super) async fn refresh_code_index_task_lease(
         }
         Err(error) => Err(storage_api_error(error)),
     }
+}
+
+/// Keeps an attempt lease alive while bounded preparation runs and fences the
+/// prepared value before its caller may enter a persistence phase.
+pub(super) async fn await_with_code_index_task_lease<T, F>(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    lease: Option<&CodeIndexTaskLeaseContext>,
+    operation: F,
+) -> Result<T, ApiError>
+where
+    F: Future<Output = Result<T, ApiError>>,
+{
+    let Some(lease) = lease else {
+        return operation.await;
+    };
+    refresh_code_index_task_lease(store, Some(lease)).await?;
+    let heartbeat_ms = (lease.lease_duration_ms / 3).max(1_000);
+    let mut heartbeat = tokio::time::interval(Duration::from_millis(heartbeat_ms));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    heartbeat.tick().await;
+    tokio::pin!(operation);
+    let result = loop {
+        tokio::select! {
+            result = &mut operation => break result,
+            _ = heartbeat.tick() => {
+                refresh_code_index_task_lease(store, Some(lease)).await?;
+            }
+        }
+    };
+    if result.is_ok() {
+        refresh_code_index_task_lease(store, Some(lease)).await?;
+    }
+    result
 }
 
 pub(in crate::application::code_repository) async fn recover_code_index_task_leases(

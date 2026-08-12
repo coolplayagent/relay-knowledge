@@ -20,7 +20,7 @@ MCP Streamable HTTP 暴露：
 - health、service status、index status resources。
 - retrieval planning 和 code impact prompts。
 
-MCP 不暴露任意 index refresh、repo indexing 或文件系统遍历；这些操作需要用户显式 CLI/Web 操作。
+MCP 不暴露任意 index refresh、repo indexing 或文件系统遍历，MCP 自身不能启动这些写操作；显式 CLI/Web 操作仍可用，启用的受管理 watcher 也可独立通过 durable queue 对账并发布 checked-out commit。
 
 ## 3. Session 与传输
 

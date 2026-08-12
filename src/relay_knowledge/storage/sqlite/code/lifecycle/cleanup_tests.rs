@@ -34,6 +34,9 @@ const SCOPE_TABLES: &[&str] = &[
     "software_topics",
     "software_relationships",
     "software_global_status",
+    "software_build_targets",
+    "software_iac_resources",
+    "software_design_elements",
 ];
 
 #[test]

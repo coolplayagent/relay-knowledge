@@ -22,6 +22,20 @@ pub(super) struct PathAliasPattern {
     pub(super) alias_suffix: String,
 }
 
+pub(super) fn module_prefix_item_count(prefixes: &[ModulePrefix]) -> usize {
+    prefixes.iter().fold(0usize, |total, prefix| {
+        let alias_count = prefix
+            .path_aliases
+            .values()
+            .fold(0usize, |count, aliases| count.saturating_add(aliases.len()));
+        total
+            .saturating_add(1)
+            .saturating_add(prefix.path_aliases.len())
+            .saturating_add(alias_count)
+            .saturating_add(prefix.path_alias_patterns.len())
+    })
+}
+
 impl PathAliasPattern {
     fn alias_for_path(&self, path: &str) -> Option<String> {
         if !path.starts_with(&self.path_prefix) || !path.ends_with(&self.path_suffix) {

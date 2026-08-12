@@ -6,6 +6,9 @@ use rusqlite::{Connection, params};
 
 use crate::{domain::CodeRepositorySetMemberStatus, storage::StorageError};
 
+use super::super::capacity::{
+    MAX_MATCHING_EXPORTS_PER_IMPORT, MAX_REPOSITORY_SET_OVERLAY_EXPORTS, capacity_error,
+};
 use super::super::manifest::{
     manifest_module_prefixes_for_members, module_keys_for_path_with_prefixes,
     module_keys_for_symbol_path_with_prefixes, normalize_module_key,
@@ -43,12 +46,16 @@ impl ExportIndex {
                 SELECT repository_id, source_scope, file_id, path
                 FROM code_repository_files
                 WHERE source_scope = ?1
+                LIMIT ?2
                 ",
             )?;
-            let mut file_rows = file_statement.query(params![member.member.source_scope])?;
+            let mut file_rows = file_statement.query(params![
+                member.member.source_scope,
+                remaining_export_window(index.targets.len()),
+            ])?;
             while let Some(row) = file_rows.next()? {
                 let path = row.get::<_, String>(3)?;
-                index.insert(
+                index.insert_bounded(
                     ExportTarget {
                         repository_id: row.get(0)?,
                         source_scope: row.get(1)?,
@@ -56,7 +63,7 @@ impl ExportIndex {
                         record_id: row.get(2)?,
                     },
                     module_keys_for_path_with_prefixes(&path, prefixes),
-                );
+                )?;
             }
 
             let mut symbol_statement = connection.prepare(
@@ -64,9 +71,13 @@ impl ExportIndex {
                 SELECT repository_id, source_scope, symbol_snapshot_id, name, qualified_name, path
                 FROM code_repository_symbols
                 WHERE source_scope = ?1
+                LIMIT ?2
                 ",
             )?;
-            let mut symbol_rows = symbol_statement.query(params![member.member.source_scope])?;
+            let mut symbol_rows = symbol_statement.query(params![
+                member.member.source_scope,
+                remaining_export_window(index.targets.len()),
+            ])?;
             while let Some(row) = symbol_rows.next()? {
                 let name = row.get::<_, String>(3)?;
                 let qualified_name = row.get::<_, String>(4)?;
@@ -74,7 +85,7 @@ impl ExportIndex {
                 let mut keys = module_keys_for_symbol_path_with_prefixes(&path, prefixes);
                 keys.insert(normalize_module_key(&name));
                 keys.insert(normalize_module_key(&qualified_name));
-                index.insert(
+                index.insert_bounded(
                     ExportTarget {
                         repository_id: row.get(0)?,
                         source_scope: row.get(1)?,
@@ -82,7 +93,7 @@ impl ExportIndex {
                         record_id: row.get(2)?,
                     },
                     keys,
-                );
+                )?;
             }
         }
 
@@ -105,12 +116,23 @@ impl ExportIndex {
         self.targets_for_key_intersection(parent, imported_name, import_scope)
     }
 
-    fn insert(&mut self, target: ExportTarget, keys: impl IntoIterator<Item = String>) {
+    fn insert_bounded(
+        &mut self,
+        target: ExportTarget,
+        keys: impl IntoIterator<Item = String>,
+    ) -> Result<(), StorageError> {
+        if self.targets.len() >= MAX_REPOSITORY_SET_OVERLAY_EXPORTS {
+            return Err(capacity_error(
+                "export target",
+                MAX_REPOSITORY_SET_OVERLAY_EXPORTS,
+            ));
+        }
         let position = self.targets.len();
         self.targets.push(target);
         for key in keys {
             self.by_key.entry(key).or_default().push(position);
         }
+        Ok(())
     }
 
     fn targets_for_key(&self, key: &str, import_scope: &str) -> Vec<&ExportTarget> {
@@ -119,6 +141,7 @@ impl ExportIndex {
             .into_iter()
             .flatten()
             .filter_map(|position| self.target_for_import(*position, import_scope))
+            .take(MAX_MATCHING_EXPORTS_PER_IMPORT)
             .collect()
     }
 
@@ -149,6 +172,9 @@ impl ExportIndex {
                     }
                     left += 1;
                     right += 1;
+                    if matches.len() >= MAX_MATCHING_EXPORTS_PER_IMPORT {
+                        break;
+                    }
                 }
             }
         }
@@ -161,6 +187,12 @@ impl ExportIndex {
             .get(position)
             .filter(|target| target.source_scope != import_scope)
     }
+}
+
+fn remaining_export_window(current: usize) -> usize {
+    MAX_REPOSITORY_SET_OVERLAY_EXPORTS
+        .saturating_sub(current)
+        .saturating_add(1)
 }
 
 #[cfg(test)]

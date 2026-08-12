@@ -8,7 +8,10 @@ mod mapping;
 mod member_target;
 mod set_state;
 
-pub(super) use set_state::{clear_auto_workspace_state, clear_workspace_state, workspace_set_id};
+pub(super) use set_state::{
+    clear_auto_workspace_state, clear_auto_workspace_state_with_fence, clear_workspace_state,
+    workspace_set_id,
+};
 
 #[cfg(test)]
 mod test_support;

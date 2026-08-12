@@ -51,6 +51,9 @@ pub(super) async fn run(
 
     let mut pending_paths = HashSet::new();
     let mut debounce_deadline = None;
+    let mut commit_reconcile_task = None;
+    let mut commit_reconcile = tokio::time::interval(context.commit_reconcile_interval);
+    commit_reconcile.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         if let Some(deadline) = debounce_deadline {
             tokio::select! {
@@ -66,6 +69,7 @@ pub(super) async fn run(
                     ).await {
                         flush_pending(state, diagnostics_tx, dropped_events, &mut pending_paths, &context.task_sink).await;
                         diagnostics::mark_failed(diagnostics_tx, state, dropped_events, "event channel closed").await;
+                        stop_commit_reconciliation(&mut commit_reconcile_task).await;
                         repository_registry::unwatch_all(&mut watcher, state).await;
                         return;
                     }
@@ -82,17 +86,25 @@ pub(super) async fn run(
                         ).await,
                         None => {
                             flush_pending(state, diagnostics_tx, dropped_events, &mut pending_paths, &context.task_sink).await;
+                            stop_commit_reconciliation(&mut commit_reconcile_task).await;
                             repository_registry::unwatch_all(&mut watcher, state).await;
                             return;
                         }
                     }
                 }
                 _ = tokio::time::sleep_until(deadline) => {
-                    flush_pending(state, diagnostics_tx, dropped_events, &mut pending_paths, &context.task_sink).await;
+                    let commit_hint = flush_pending(state, diagnostics_tx, dropped_events, &mut pending_paths, &context.task_sink).await;
+                    if commit_hint {
+                        schedule_commit_reconciliation(&mut commit_reconcile_task, &context);
+                    }
                     debounce_deadline = None;
+                }
+                _ = commit_reconcile.tick() => {
+                    schedule_commit_reconciliation(&mut commit_reconcile_task, &context);
                 }
                 _ = shutdown_rx.changed() => {
                     flush_pending(state, diagnostics_tx, dropped_events, &mut pending_paths, &context.task_sink).await;
+                    stop_commit_reconciliation(&mut commit_reconcile_task).await;
                     repository_registry::unwatch_all(&mut watcher, state).await;
                     return;
                 }
@@ -110,6 +122,7 @@ pub(super) async fn run(
                         &mut debounce_deadline,
                     ).await {
                         diagnostics::mark_failed(diagnostics_tx, state, dropped_events, "event channel closed").await;
+                        stop_commit_reconciliation(&mut commit_reconcile_task).await;
                         repository_registry::unwatch_all(&mut watcher, state).await;
                         return;
                     }
@@ -125,12 +138,17 @@ pub(super) async fn run(
                             context.max_watch_dirs,
                         ).await,
                         None => {
+                            stop_commit_reconciliation(&mut commit_reconcile_task).await;
                             repository_registry::unwatch_all(&mut watcher, state).await;
                             return;
                         }
                     }
                 }
+                _ = commit_reconcile.tick() => {
+                    schedule_commit_reconciliation(&mut commit_reconcile_task, &context);
+                }
                 _ = shutdown_rx.changed() => {
+                    stop_commit_reconciliation(&mut commit_reconcile_task).await;
                     repository_registry::unwatch_all(&mut watcher, state).await;
                     return;
                 }
@@ -172,9 +190,9 @@ async fn flush_pending(
     dropped_events: &Arc<AtomicU64>,
     pending_paths: &mut HashSet<PathBuf>,
     task_sink: &TaskQueueSink,
-) {
+) -> bool {
     if pending_paths.is_empty() {
-        return;
+        return false;
     }
     let changed_paths = pending_paths.drain().collect::<Vec<_>>();
     index_queue::process_debounced_paths(
@@ -184,7 +202,36 @@ async fn flush_pending(
         &changed_paths,
         task_sink,
     )
-    .await;
+    .await
+}
+
+fn schedule_commit_reconciliation(
+    task: &mut Option<tokio::task::JoinHandle<()>>,
+    context: &WatcherLoopContext,
+) {
+    if task.as_ref().is_some_and(|task| !task.is_finished()) {
+        return;
+    }
+    let state = Arc::clone(&context.state);
+    let diagnostics_tx = context.diagnostics_tx.clone();
+    let dropped_events = Arc::clone(&context.dropped_events);
+    let task_sink = Arc::clone(&context.task_sink);
+    *task = Some(tokio::spawn(async move {
+        index_queue::reconcile_all_commit_heads(
+            &state,
+            &diagnostics_tx,
+            &dropped_events,
+            &task_sink,
+        )
+        .await;
+    }));
+}
+
+async fn stop_commit_reconciliation(task: &mut Option<tokio::task::JoinHandle<()>>) {
+    if let Some(task) = task.take() {
+        task.abort();
+        let _ = task.await;
+    }
 }
 
 fn create_notify_watcher(

@@ -12,8 +12,9 @@ use relay_knowledge::{
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,
-        CodeRepositorySetCreateRequest, CodeRepositorySetQueryRequest, CodeRetrievalLayer,
-        FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        CodeRepositorySetCreateRequest, CodeRepositorySetQueryRequest,
+        CodeRepositorySetRefreshTaskState, CodeRetrievalLayer, FreshnessPolicy,
+        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         code_snapshot_scope_id,
     },
     env::{EnvironmentConfig, PlatformKind},
@@ -180,6 +181,10 @@ pub fn serve() -> u32 {
             .summary
             .as_ref()
             .is_some_and(|summary| summary.edge_count > 0)
+    );
+    assert_eq!(
+        refreshed.task.as_ref().map(|task| task.state),
+        Some(CodeRepositorySetRefreshTaskState::Succeeded)
     );
     assert!(
         refreshed

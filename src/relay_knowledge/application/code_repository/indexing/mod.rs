@@ -23,14 +23,14 @@ use crate::application::service::RelayKnowledgeService;
 
 use self::{
     fast_path::fresh_full_index_response,
-    queue::queue_worktree_overlay_index_task,
+    queue::{queue_incremental_index_task, queue_worktree_overlay_index_task},
     state::{
         RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request, index_start_from_completed,
         previous_index_state_for_index, requested_index_ref_for_response,
     },
     task::{
         CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
-        CodeIndexTaskLeaseContext, code_index_worker_lease_owner,
+        CodeIndexTaskLeaseContext, await_with_code_index_task_lease, code_index_worker_lease_owner,
         recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
     },
 };
@@ -53,8 +53,32 @@ impl RelayKnowledgeService {
         request: CodeIndexRequest,
         context: RequestContext,
     ) -> Result<CodeRepositoryIndexResponse, ApiError> {
-        self.index_code_repository_inner(request, context, None)
-            .await
+        let started = self
+            .start_code_repository_index(request, context.clone())
+            .await?;
+        if let Some(summary) = started.summary {
+            return Ok(CodeRepositoryIndexResponse {
+                metadata: started.metadata,
+                scope: started.scope,
+                summary,
+                status: started.status,
+            });
+        }
+        let task_id = started
+            .task
+            .as_ref()
+            .map(|task| task.task_id.clone())
+            .ok_or_else(|| {
+                ApiError::storage_unavailable("durable repository index did not return a task")
+            })?;
+        self.run_code_index_task_once_with_response(Some(task_id.clone()), context)
+            .await?
+            .map(|(_, response)| response)
+            .ok_or_else(|| {
+                ApiError::qos_rejected(format!(
+                    "durable repository index task '{task_id}' is already claimed or queued behind another repository writer; inspect repo status and let the managed worker drain it"
+                ))
+            })
     }
 
     async fn index_code_repository_inner(
@@ -65,8 +89,14 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryIndexResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
-        if let Some(response) =
-            fresh_full_index_response(&store, &status, &request, &context).await?
+        if let Some(response) = fresh_full_index_response(
+            &store,
+            &status,
+            &request,
+            &context,
+            task_lease.as_ref().map(|lease| &lease.publication_fence),
+        )
+        .await?
         {
             return Ok(response);
         }
@@ -80,38 +110,70 @@ impl RelayKnowledgeService {
                 selector,
                 request.workspace_detection.clone(),
                 CodeIndexResourceBudget::default(),
-                task_lease,
+                task_lease.clone(),
             )
             .await?
         } else {
             let previous = previous_index_state_for_index(&store, &status, &request).await?;
             let mode = request.mode;
             let workspace_detection = request.workspace_detection.clone();
-            let snapshot = run_blocking_code(move || {
-                build_index_snapshot_with_workspace_detection(
-                    &registration,
-                    &selector,
-                    mode,
-                    previous.fingerprints,
-                    previous.base_resolved_commit_sha,
-                    &workspace_detection,
-                )
-            })
+            let snapshot = await_with_code_index_task_lease(
+                &store,
+                task_lease.as_ref(),
+                run_blocking_code(move || {
+                    build_index_snapshot_with_workspace_detection(
+                        &registration,
+                        &selector,
+                        mode,
+                        previous.fingerprints,
+                        previous.base_resolved_commit_sha,
+                        &workspace_detection,
+                    )
+                }),
+            )
             .await?;
-            store
-                .apply_code_index_snapshot(snapshot)
-                .await
-                .map_err(storage_api_error)?
+            await_with_code_index_task_lease(&store, task_lease.as_ref(), async {
+                match task_lease.as_ref() {
+                    Some(lease) => {
+                        store
+                            .apply_code_index_snapshot_with_fence(
+                                snapshot,
+                                lease.publication_fence.clone(),
+                            )
+                            .await
+                    }
+                    None => store.apply_code_index_snapshot(snapshot).await,
+                }
+                .map_err(storage_api_error)
+            })
+            .await?
         };
+        refresh_code_index_task_lease(&store, task_lease.as_ref()).await?;
         let status = store
             .code_repository_status(summary.repository_id.clone())
             .await
             .map_err(storage_api_error)?
             .ok_or_else(|| ApiError::storage_unavailable("code repository status is missing"))?;
-        let software_projection = store
-            .refresh_software_global_projection(summary.source_scope.clone())
-            .await
-            .map_err(storage_api_error)?;
+        let software_projection =
+            await_with_code_index_task_lease(&store, task_lease.as_ref(), async {
+                match task_lease.as_ref() {
+                    Some(lease) => {
+                        store
+                            .refresh_software_global_projection_with_fence(
+                                summary.source_scope.clone(),
+                                lease.publication_fence.clone(),
+                            )
+                            .await
+                    }
+                    None => {
+                        store
+                            .refresh_software_global_projection(summary.source_scope.clone())
+                            .await
+                    }
+                }
+                .map_err(storage_api_error)
+            })
+            .await?;
         let graph_version = store
             .current_graph_version()
             .await
@@ -147,20 +209,32 @@ impl RelayKnowledgeService {
         resource_budget: CodeIndexResourceBudget,
         task_lease: Option<CodeIndexTaskLeaseContext>,
     ) -> Result<crate::domain::CodeIndexSummary, ApiError> {
-        let plan = run_blocking_code(move || {
-            prepare_full_index_plan_with_workspace_detection(
-                registration,
-                selector,
-                resource_budget,
-                &workspace_detection,
-            )
-        })
+        let plan = await_with_code_index_task_lease(
+            store,
+            task_lease.as_ref(),
+            run_blocking_code(move || {
+                prepare_full_index_plan_with_workspace_detection(
+                    registration,
+                    selector,
+                    resource_budget,
+                    &workspace_detection,
+                )
+            }),
+        )
         .await?;
         let session = plan.session();
-        store
-            .begin_code_index_session(session.clone())
-            .await
-            .map_err(storage_api_error)?;
+        match task_lease.as_ref() {
+            Some(lease) => {
+                store
+                    .begin_code_index_session_with_fence(
+                        session.clone(),
+                        lease.publication_fence.clone(),
+                    )
+                    .await
+            }
+            None => store.begin_code_index_session(session.clone()).await,
+        }
+        .map_err(storage_api_error)?;
         refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
         let (batch_sender, mut batch_receiver) =
             tokio::sync::mpsc::channel(PARSED_BATCH_QUEUE_CAPACITY);
@@ -177,16 +251,25 @@ impl RelayKnowledgeService {
                 }
             }
         }));
-        let writer_result = async {
+        let writer_result = await_with_code_index_task_lease(store, task_lease.as_ref(), async {
             while let Some(batch) = batch_receiver.recv().await {
-                store
-                    .apply_code_index_batch(batch)
-                    .await
-                    .map_err(storage_api_error)?;
+                refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
+                match task_lease.as_ref() {
+                    Some(lease) => {
+                        store
+                            .apply_code_index_batch_with_fence(
+                                batch,
+                                lease.publication_fence.clone(),
+                            )
+                            .await
+                    }
+                    None => store.apply_code_index_batch(batch).await,
+                }
+                .map_err(storage_api_error)?;
                 refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
             }
             Ok::<(), ApiError>(())
-        }
+        })
         .await;
         drop(batch_receiver);
         let parser_result = parser
@@ -195,12 +278,21 @@ impl RelayKnowledgeService {
         writer_result?;
         parser_result?;
 
-        refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
-        let summary = store
-            .finalize_code_index_session(session)
-            .await
-            .map_err(storage_api_error)?;
-        refresh_code_index_task_lease(store, task_lease.as_ref()).await?;
+        let summary = await_with_code_index_task_lease(store, task_lease.as_ref(), async {
+            match task_lease.as_ref() {
+                Some(lease) => {
+                    store
+                        .finalize_code_index_session_with_fence(
+                            session,
+                            lease.publication_fence.clone(),
+                        )
+                        .await
+                }
+                None => store.finalize_code_index_session(session).await,
+            }
+            .map_err(storage_api_error)
+        })
+        .await?;
 
         Ok(summary)
     }
@@ -214,15 +306,18 @@ impl RelayKnowledgeService {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
         if let Some(response) =
-            fresh_full_index_response(&store, &status, &request, &context).await?
+            fresh_full_index_response(&store, &status, &request, &context, None).await?
         {
             return Ok(index_start_from_completed(response, None));
         }
-        if matches!(request.mode, CodeIndexMode::Incremental { .. }) {
-            let response = self.index_code_repository(request, context).await?;
-            return Ok(index_start_from_completed(response, None));
-        }
         recover_code_index_task_leases(&store, now_millis()).await?;
+        if matches!(request.mode, CodeIndexMode::Incremental { .. }) {
+            let requested_ref = requested_index_ref_for_response(&request);
+            let task = queue_incremental_index_task(&store, &status, &request).await?;
+            return self
+                .index_start_response_from_task(&store, status, task, requested_ref, &context)
+                .await;
+        }
         if request.mode == CodeIndexMode::WorktreeOverlay {
             let requested_ref = requested_index_ref_for_response(&request);
             let task = queue_worktree_overlay_index_task(&store, &status, &request).await?;
@@ -352,6 +447,22 @@ impl RelayKnowledgeService {
         task_id: Option<String>,
         context: RequestContext,
     ) -> Result<Option<crate::domain::CodeIndexTaskRecord>, ApiError> {
+        self.run_code_index_task_once_with_response(task_id, context)
+            .await
+            .map(|outcome| outcome.map(|(task, _)| task))
+    }
+
+    pub(crate) async fn run_code_index_task_once_with_response(
+        &self,
+        task_id: Option<String>,
+        context: RequestContext,
+    ) -> Result<
+        Option<(
+            crate::domain::CodeIndexTaskRecord,
+            CodeRepositoryIndexResponse,
+        )>,
+        ApiError,
+    > {
         let store = self.store().await.map_err(storage_api_error)?;
         let lease_owner = code_index_worker_lease_owner();
         let Some(task) = store
@@ -403,6 +514,13 @@ impl RelayKnowledgeService {
             lease_owner: lease_owner.clone(),
             attempt_count: task.attempt_count,
             lease_duration_ms: CODE_INDEX_TASK_LEASE_MS,
+            publication_fence: crate::domain::CodeIndexPublicationFence {
+                repository_id: task.repository_id.clone(),
+                task_id: task.task_id.clone(),
+                lease_owner: lease_owner.clone(),
+                attempt_count: task.attempt_count,
+                generation: task.publication_generation,
+            },
         };
         let result = self
             .index_code_repository_inner(request, context, Some(lease_context.clone()))
@@ -419,14 +537,21 @@ impl RelayKnowledgeService {
                     })
                     .await
                     .map_err(storage_api_error)?;
-                let _ = store
+                if let Err(error) = store
                     .prune_code_repository_scopes(crate::storage::CodeScopeRetentionRequest {
-                        repository_id: response.summary.repository_id,
-                        active_scope: response.summary.source_scope,
+                        repository_id: response.summary.repository_id.clone(),
+                        active_scope: response.summary.source_scope.clone(),
                         retain_recent_successful_scopes: RETAIN_RECENT_CODE_SCOPES,
                     })
-                    .await;
-                Ok(Some(completed))
+                    .await
+                {
+                    tracing::warn!(
+                        task_id = %completed.task_id,
+                        error = %error,
+                        "code index published but bounded scope retention did not complete"
+                    );
+                }
+                Ok(Some((completed, response)))
             }
             Err(error) => {
                 let _ = store

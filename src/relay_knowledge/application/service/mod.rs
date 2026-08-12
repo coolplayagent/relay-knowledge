@@ -1,4 +1,8 @@
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicUsize},
+    time::Instant,
+};
 
 use crate::{
     api::{
@@ -47,6 +51,7 @@ pub struct RelayKnowledgeService {
     pub(super) storage: StorageProvider,
     pub(super) health_cache: Arc<tokio::sync::RwLock<Option<HealthResponse>>>,
     pub(super) watcher: Arc<tokio::sync::RwLock<Option<crate::watcher::WatcherHandle>>>,
+    pub(super) code_retention_cursor: Arc<AtomicUsize>,
 }
 
 impl RelayKnowledgeService {
@@ -57,6 +62,7 @@ impl RelayKnowledgeService {
             runtime,
             health_cache: Arc::new(tokio::sync::RwLock::new(None)),
             watcher: Arc::new(tokio::sync::RwLock::new(None)),
+            code_retention_cursor: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -67,6 +73,7 @@ impl RelayKnowledgeService {
             storage: StorageProvider::ready(store),
             health_cache: Arc::new(tokio::sync::RwLock::new(None)),
             watcher: Arc::new(tokio::sync::RwLock::new(None)),
+            code_retention_cursor: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -573,7 +580,10 @@ pub(super) fn current_time_millis() -> u64 {
 }
 
 pub(super) fn storage_api_error(error: StorageError) -> ApiError {
-    ApiError::storage_unavailable(error.to_string())
+    match error {
+        StorageError::CapacityExceeded(message) => ApiError::qos_rejected(message),
+        other => ApiError::storage_unavailable(other.to_string()),
+    }
 }
 
 pub(super) async fn file_index_diagnostics_or_default(

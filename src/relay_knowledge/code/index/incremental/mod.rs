@@ -12,8 +12,8 @@ use crate::domain::{
 };
 
 use super::{
-    MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS, filesystem_delta::build_filesystem_delta_snapshot,
-    tracked_entry_scope_for_selector,
+    MAX_INCREMENTAL_CHANGED_PATHS, MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+    filesystem_delta::build_filesystem_delta_snapshot, tracked_entry_scope_for_selector,
 };
 use crate::code::{
     CodeIndexError,
@@ -69,7 +69,8 @@ pub(super) fn build_incremental_snapshot(
     let base_commit = resolve_ref(root, request.base_ref)?;
     let commit = resolve_ref(root, request.head_ref)?;
     let parent_tree_hash = resolve_tree(root, &commit)?;
-    let changes = diff_changes(root, request.base_ref, request.head_ref)?;
+    let changes = diff_changes(root, &base_commit, &commit)?;
+    validate_changed_path_budget(changes.len())?;
     let entry_scope = tracked_entry_scope_for_selector(registration, selector);
     let base_entries = tracked_entries_with_scope(root, &base_commit, &entry_scope)?;
     let base_source_layout = discover_source_layout(&base_entries);
@@ -231,6 +232,15 @@ pub(super) fn build_incremental_snapshot(
     }
 
     Ok(build.finish())
+}
+
+fn validate_changed_path_budget(changed_path_count: usize) -> Result<(), CodeIndexError> {
+    if changed_path_count > MAX_INCREMENTAL_CHANGED_PATHS {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "incremental update changes {changed_path_count} paths, exceeding the bounded limit of {MAX_INCREMENTAL_CHANGED_PATHS}; run a full code index"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_expanded_gitlink_change(
@@ -541,4 +551,19 @@ fn gitlink_scope_overlaps(path: &str, context: &ChangedPathParseContext<'_>) -> 
     path_scope_overlaps(path, context.registration, context.selector)
         || scope::submodule_child_scope_filters_from_filters(path, context.effective_path_filters)
             .is_some()
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn changed_path_budget_accepts_boundary_and_rejects_excess() {
+        validate_changed_path_budget(MAX_INCREMENTAL_CHANGED_PATHS)
+            .expect("the configured boundary should be accepted");
+        let error = validate_changed_path_budget(MAX_INCREMENTAL_CHANGED_PATHS + 1)
+            .expect_err("an unbounded delta should be rejected");
+
+        assert!(error.to_string().contains("run a full code index"));
+    }
 }

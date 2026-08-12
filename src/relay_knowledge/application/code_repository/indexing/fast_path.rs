@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::{
     api::{ApiError, ApiMetadata, CodeRepositoryIndexResponse, RequestContext},
     domain::{
-        CodeIndexMode, CodeIndexProgressSummary, CodeIndexRequest, CodeIndexResourceBudget,
-        CodeIndexSummary, CodeRepositoryStatus,
+        CodeIndexMode, CodeIndexProgressSummary, CodeIndexPublicationFence, CodeIndexRequest,
+        CodeIndexResourceBudget, CodeIndexSummary, CodeRepositoryStatus,
         code_snapshot_expected_scope_id as expected_scope_id,
     },
     storage::KnowledgeStore,
@@ -18,6 +18,7 @@ pub(super) async fn fresh_full_index_response(
     status: &CodeRepositoryStatus,
     request: &CodeIndexRequest,
     context: &RequestContext,
+    publication_fence: Option<&CodeIndexPublicationFence>,
 ) -> Result<Option<CodeRepositoryIndexResponse>, ApiError> {
     if request.mode != CodeIndexMode::Full {
         return Ok(None);
@@ -60,14 +61,39 @@ pub(super) async fn fresh_full_index_response(
         .last_indexed_scope_id
         .clone()
         .unwrap_or_default();
-    store
-        .clear_code_workspace_state(scoped_status.repository_id.clone(), source_scope.clone())
-        .await
-        .map_err(storage_api_error)?;
-    let software_projection = store
-        .refresh_software_global_projection(source_scope.clone())
-        .await
-        .map_err(storage_api_error)?;
+    match publication_fence {
+        Some(fence) => {
+            store
+                .clear_code_workspace_state_with_fence(
+                    scoped_status.repository_id.clone(),
+                    source_scope.clone(),
+                    fence.clone(),
+                )
+                .await
+        }
+        None => {
+            store
+                .clear_code_workspace_state(
+                    scoped_status.repository_id.clone(),
+                    source_scope.clone(),
+                )
+                .await
+        }
+    }
+    .map_err(storage_api_error)?;
+    let software_projection = match publication_fence {
+        Some(fence) => {
+            store
+                .refresh_software_global_projection_with_fence(source_scope.clone(), fence.clone())
+                .await
+        }
+        None => {
+            store
+                .refresh_software_global_projection(source_scope.clone())
+                .await
+        }
+    }
+    .map_err(storage_api_error)?;
     let degraded_file_count = degraded_file_count_for_fresh_index(store, &scoped_status).await?;
     let generation_counts = store
         .code_repository_scope_symbol_generation_counts(source_scope.clone())
@@ -76,6 +102,7 @@ pub(super) async fn fresh_full_index_response(
     let summary = CodeIndexSummary {
         repository_id: scoped_status.repository_id.clone(),
         source_scope,
+        base_resolved_commit_sha: None,
         resolved_commit_sha: probe.resolved_commit_sha,
         tree_hash: probe.tree_hash,
         indexed_file_count: scoped_status.indexed_file_count,

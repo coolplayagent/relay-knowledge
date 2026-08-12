@@ -47,6 +47,8 @@ use worktree_overlay::build_worktree_overlay_snapshot;
 
 pub(in crate::code) const MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS: usize =
     CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
+pub(in crate::code) const MAX_INCREMENTAL_CHANGED_PATHS: usize =
+    changes::MAX_GIT_DIFF_CHANGED_PATHS;
 
 /// Builds a code index snapshot from a clean Git commit or incremental diff.
 pub fn build_index_snapshot(

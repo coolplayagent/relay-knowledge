@@ -37,6 +37,14 @@ pub(in super::super) fn refresh_projection(
     connection: &mut Connection,
     source_scope: &str,
 ) -> Result<SoftwareGlobalProjection, StorageError> {
+    refresh_projection_with_fence(connection, source_scope, None)
+}
+
+pub(in super::super) fn refresh_projection_with_fence(
+    connection: &mut Connection,
+    source_scope: &str,
+    fence: Option<&super::super::code::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<SoftwareGlobalProjection, StorageError> {
     let graph_version = current_graph_version(connection)?;
     let transaction = connection.transaction()?;
     transaction.execute(
@@ -109,6 +117,11 @@ pub(in super::super) fn refresh_projection(
         last_error: None,
     };
     upsert_status(&transaction, &status)?;
+    if let Some(fence) = fence {
+        fence.validate_scope_repository(&transaction, source_scope)?;
+        fence.validate_target_scope(&transaction, source_scope)?;
+        fence.validate(&transaction)?;
+    }
     transaction.commit()?;
 
     Ok(SoftwareGlobalProjection {

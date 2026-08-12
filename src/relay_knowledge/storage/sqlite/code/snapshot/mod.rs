@@ -13,6 +13,7 @@ use crate::{
 use super::{
     MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT,
     cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index},
+    lifecycle::commit_scope,
     report,
     search::{backfill_search_metadata_for_scope, insert_search_document},
     status::{canonical_filter_values, canonical_path_filters, parse_json_list},
@@ -42,7 +43,26 @@ pub(super) fn apply_snapshot(
     connection: &mut Connection,
     snapshot: CodeIndexSnapshot,
 ) -> Result<CodeIndexSummary, StorageError> {
+    apply_snapshot_with_fence(connection, snapshot, None)
+}
+
+pub(super) fn apply_snapshot_with_fence(
+    connection: &mut Connection,
+    snapshot: CodeIndexSnapshot,
+    fence: Option<&super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<CodeIndexSummary, StorageError> {
+    if let Some(fence) = fence {
+        fence.validate_repository(&snapshot.repository_id)?;
+    }
     let transaction = connection.transaction()?;
+    super::tasks::retention_gc::reject_retiring_scope(&transaction, &snapshot.source_scope)?;
+    if fence.is_none() {
+        super::tasks::enforce_unfenced_target(
+            &transaction,
+            &snapshot.repository_id,
+            &snapshot.source_scope,
+        )?;
+    }
     if snapshot.full_replace {
         delete_scope_index(&transaction, &snapshot.source_scope)?;
     } else {
@@ -146,6 +166,10 @@ pub(super) fn apply_snapshot(
         &snapshot.repository_id,
         &snapshot.source_scope,
     )?;
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &snapshot.source_scope)?;
+        fence.validate(&transaction)?;
+    }
     transaction.commit()?;
 
     let status = super::status::repository_status(connection, &snapshot.repository_id)?
@@ -158,6 +182,7 @@ pub(super) fn apply_snapshot(
     Ok(CodeIndexSummary {
         repository_id: snapshot.repository_id,
         source_scope: snapshot.source_scope,
+        base_resolved_commit_sha: snapshot.base_resolved_commit_sha,
         resolved_commit_sha: snapshot.resolved_commit_sha,
         tree_hash: snapshot.tree_hash,
         indexed_file_count: status.indexed_file_count,
@@ -214,7 +239,16 @@ fn clone_active_scope_for_incremental(
         SELECT source_scope, tree_hash, path_filters_json, language_filters_json
         FROM code_repository_scopes
         WHERE repository_id = ?1
-          AND resolved_commit_sha = ?4
+          AND (
+              resolved_commit_sha = ?4
+              OR EXISTS (
+                  SELECT 1
+                  FROM code_repository_commit_scopes commit_scope
+                  WHERE commit_scope.repository_id = code_repository_scopes.repository_id
+                    AND commit_scope.resolved_commit_sha = ?4
+                    AND commit_scope.source_scope = code_repository_scopes.source_scope
+              )
+          )
         ORDER BY
           CASE WHEN path_filters_json = ?2 AND language_filters_json = ?3 THEN 0 ELSE 1 END,
           rowid DESC
@@ -583,6 +617,11 @@ fn update_repository_after_snapshot(
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let language_filters_json = serde_json::to_string(&snapshot.language_filters)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    commit_scope::preserve_existing_scope_commit(
+        transaction,
+        &snapshot.repository_id,
+        &snapshot.source_scope,
+    )?;
     transaction.execute(
         "
         INSERT INTO code_repository_scopes (
@@ -617,6 +656,12 @@ fn update_repository_after_snapshot(
             chunk_count,
             degraded_reason,
         ],
+    )?;
+    commit_scope::record(
+        transaction,
+        &snapshot.repository_id,
+        &snapshot.resolved_commit_sha,
+        &snapshot.source_scope,
     )?;
     transaction.execute(
         "

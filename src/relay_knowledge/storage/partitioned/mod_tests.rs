@@ -1,7 +1,10 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -10,14 +13,128 @@ use std::{
 use super::*;
 use crate::{
     domain::{
-        CodeIndexMode, CodeIndexResourceBudget, CodeParseStatus, CodeRepositorySelector,
-        FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-        SoftwareGlobalKind,
+        CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget, CodeParseStatus,
+        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
+        RepositoryCodeFileRecord, RepositoryCodeRange, SoftwareGlobalKind,
     },
     env::{EnvironmentConfig, PlatformKind},
+    storage::CodeRepositorySetRefreshPublication,
 };
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[tokio::test]
+async fn code_index_task_partitioned_takeover_fences_stale_shard_snapshot_publication() {
+    let store = partitioned_store("publication-fence-takeover");
+    let now_ms = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository should register");
+    let queued = store
+        .queue_code_index_task(task_seed("scope-fenced-new"))
+        .await
+        .expect("task should queue");
+    let first = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id.clone()),
+            lease_owner: "worker-old".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms,
+        })
+        .await
+        .expect("first claim should run")
+        .expect("first attempt should claim");
+    let shard = store
+        .catalog
+        .staged_repository_store("repo".to_owned())
+        .await
+        .expect("repository shard should open");
+    store
+        .catalog
+        .import_control_repository(Arc::clone(&shard), "repo".to_owned(), None)
+        .await
+        .expect("control repository should import into the shard");
+    shard
+        .apply_code_index_snapshot_with_fence(
+            snapshot("scope-fenced-new"),
+            publication_fence(&first, "worker-old"),
+        )
+        .await
+        .expect("first attempt should commit its shard while its lease is live");
+    let second = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: "worker-new".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: now_ms.saturating_add(60_000),
+        })
+        .await
+        .expect("takeover claim should run")
+        .expect("expired task should be reclaimed");
+
+    let shard_error = shard
+        .apply_code_index_snapshot_with_fence(
+            snapshot("scope-fenced-new"),
+            publication_fence(&first, "worker-old"),
+        )
+        .await
+        .expect_err("stale shard writer must be fenced");
+    assert!(matches!(shard_error, StorageError::InvalidInput(_)));
+    let stage_error = store
+        .catalog
+        .stage_scope_with_fence(
+            "repo".to_owned(),
+            "scope-fenced-new".to_owned(),
+            publication_fence(&first, "worker-old"),
+        )
+        .await
+        .expect_err("stale writer must not stage catalog routing after takeover");
+    assert!(matches!(stage_error, StorageError::InvalidInput(_)));
+    let catalog_error = store
+        .catalog
+        .record_scope_with_fence(
+            "repo".to_owned(),
+            "scope-fenced-new".to_owned(),
+            publication_fence(&first, "worker-old"),
+        )
+        .await
+        .expect_err("stale writer must not advance the catalog after shard commit");
+    assert!(matches!(catalog_error, StorageError::InvalidInput(_)));
+    assert!(
+        store
+            .catalog
+            .repository_for_scope("scope-fenced-new".to_owned())
+            .await
+            .expect("catalog scope should load")
+            .is_none()
+    );
+    store
+        .apply_code_index_snapshot_with_fence(
+            snapshot("scope-fenced-new"),
+            publication_fence(&second, "worker-new"),
+        )
+        .await
+        .expect("current shard writer should publish and mirror control status");
+
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("repository should exist");
+    assert_eq!(
+        status.last_indexed_scope_id.as_deref(),
+        Some("scope-fenced-new")
+    );
+}
 
 #[tokio::test]
 async fn empty_partitioned_store_delegates_control_defaults_explicitly() {
@@ -145,7 +262,16 @@ async fn empty_partitioned_store_delegates_control_defaults_explicitly() {
 
     assert!(
         store
-            .refresh_code_repository_set_overlay("missing".to_owned(), 1)
+            .refresh_code_repository_set_overlay(
+                "missing".to_owned(),
+                CodeRepositorySetRefreshPublication {
+                    task_id: "missing".to_owned(),
+                    set_id: "missing".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    attempt_count: 1,
+                    member_replacements: Vec::new(),
+                },
+            )
             .await
             .expect_err("partitioned overlay refresh should be explicit")
             .to_string()
@@ -490,6 +616,173 @@ async fn partitioned_checkpoint_lifecycle_finishes_in_staged_shard() {
     assert_eq!(summary.source_scope, "scope-checkpoint");
 }
 
+#[tokio::test]
+async fn code_index_task_partitioned_catalog_route_holds_scope_slot_until_final_release() {
+    let store = partitioned_store("retention-catalog-capacity-reservation");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository should register");
+    store
+        .control
+        .run(|connection| {
+            for index in 0..crate::storage::sqlite::code::MAX_SCOPE_SLOTS_PER_REPOSITORY - 1 {
+                connection.execute(
+                    "INSERT INTO code_repository_scopes (
+                         source_scope, repository_id, resolved_commit_sha, tree_hash,
+                         path_filters_json, language_filters_json, indexed_file_count,
+                         symbol_count, reference_count, chunk_count, stale, degraded_reason
+                     ) VALUES (?1, 'repo', ?2, ?3, '[]', '[]', 0, 0, 0, 0, 0, NULL)",
+                    rusqlite::params![
+                        format!("scope-filler-{index:03}"),
+                        format!("commit-filler-{index:03}"),
+                        format!("tree-filler-{index:03}"),
+                    ],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("published scope fillers should persist");
+    store
+        .catalog
+        .stage_scope("repo".to_owned(), "scope-retiring-route".to_owned())
+        .await
+        .expect("catalog route should reserve the final scope slot");
+
+    let error = store
+        .queue_code_index_task(task_seed("scope-next"))
+        .await
+        .expect_err("a retained catalog route must keep the next target behind backpressure");
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+
+    let removed = store
+        .catalog
+        .remove_scope_route("repo".to_owned(), "scope-retiring-route".to_owned())
+        .await
+        .expect("final-phase coordinator should release the catalog route");
+    assert_eq!(removed, 1);
+    let queued = store
+        .queue_code_index_task(task_seed("scope-next"))
+        .await
+        .expect("the released final slot should admit the next target");
+    assert_eq!(queued.source_scope, "scope-next");
+}
+
+#[tokio::test]
+async fn code_index_task_partitioned_retention_removes_retired_scope_catalog_route() {
+    let store = partitioned_store("retention-catalog-route");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository should register");
+    store
+        .apply_code_index_snapshot(snapshot("scope-old"))
+        .await
+        .expect("old snapshot should apply");
+    store
+        .apply_code_index_snapshot(snapshot("scope-active"))
+        .await
+        .expect("active snapshot should apply");
+    assert_eq!(
+        store
+            .catalog
+            .repository_for_scope("scope-old".to_owned())
+            .await
+            .expect("old catalog route should load")
+            .as_deref(),
+        Some("repo")
+    );
+
+    for _ in 0..160 {
+        let pass = store
+            .prune_code_repository_scopes(CodeScopeRetentionRequest {
+                repository_id: "repo".to_owned(),
+                active_scope: "scope-active".to_owned(),
+                retain_recent_successful_scopes: 0,
+            })
+            .await
+            .expect("partitioned retention pass should run");
+        if !pass.maintenance_pending {
+            break;
+        }
+    }
+
+    assert!(
+        store
+            .catalog
+            .repository_for_scope("scope-old".to_owned())
+            .await
+            .expect("retired catalog route should load")
+            .is_none()
+    );
+    assert!(
+        store
+            .catalog
+            .repository_for_scope("scope-active".to_owned())
+            .await
+            .expect("active catalog route should load")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn code_index_task_partitioned_retention_cleans_staged_partial_scope_route() {
+    let store = partitioned_store("retention-staged-partial-route");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository should register");
+    let partial = snapshot("scope-partial");
+    store
+        .begin_code_index_session(session_from_snapshot(&partial))
+        .await
+        .expect("partial session should begin");
+    store
+        .apply_code_index_batch(batch_from_snapshot(partial))
+        .await
+        .expect("partial batch should persist");
+    assert_eq!(
+        store
+            .catalog
+            .repository_for_scope("scope-partial".to_owned())
+            .await
+            .expect("staged route should load")
+            .as_deref(),
+        Some("repo")
+    );
+
+    for _ in 0..80 {
+        let pass = store
+            .prune_code_repository_scopes(CodeScopeRetentionRequest {
+                repository_id: "repo".to_owned(),
+                active_scope: String::new(),
+                retain_recent_successful_scopes: 2,
+            })
+            .await
+            .expect("staged partial retention should run");
+        if !pass.maintenance_pending {
+            break;
+        }
+    }
+
+    assert!(
+        store
+            .catalog
+            .repository_for_scope("scope-partial".to_owned())
+            .await
+            .expect("retired staged route should load")
+            .is_none()
+    );
+    assert!(
+        store
+            .code_index_checkpoint("scope-partial".to_owned())
+            .await
+            .expect("retired partial checkpoint should query")
+            .is_none()
+    );
+}
+
 fn partitioned_store(name: &str) -> PartitionedSqliteKnowledgeStore {
     let root = unique_temp_dir(name);
     let environment = EnvironmentConfig::from_pairs(
@@ -564,6 +857,19 @@ fn task_seed(source_scope: &str) -> crate::storage::CodeIndexTaskSeed {
         resource_budget: CodeIndexResourceBudget::default(),
         payload_json: "{}".to_owned(),
         now_ms: 1,
+    }
+}
+
+fn publication_fence(
+    task: &crate::domain::CodeIndexTaskRecord,
+    lease_owner: &str,
+) -> CodeIndexPublicationFence {
+    CodeIndexPublicationFence {
+        repository_id: task.repository_id.clone(),
+        task_id: task.task_id.clone(),
+        lease_owner: lease_owner.to_owned(),
+        attempt_count: task.attempt_count,
+        generation: task.publication_generation,
     }
 }
 

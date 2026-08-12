@@ -1,5 +1,15 @@
 # Relay Knowledge CLI Workflows
 
+## Contents
+
+- [Installation and upgrade checks](#installation-and-upgrade-checks)
+- [Safe agent defaults](#safe-agent-defaults)
+- [Code repository index/query flow](#code-repository-index-query-flow)
+- [Commit-driven Git update loop](#commit-driven-git-update-loop)
+- [Knowledge graph query flow](#knowledge-graph-query-flow)
+- [Diagnostics](#diagnostics)
+- [Out of scope](#out-of-scope)
+
 ## Installation and Upgrade Checks
 
 Use the skill's bundled binary first for the current operating system, CPU, and
@@ -80,17 +90,17 @@ the runtime cache directory.
 - Treat `ingest`, `repo index`, `repo update`, `index refresh`,
   `worker run-once`, proposal state changes, and `service definition write` as
   commands that may write runtime state.
-- Treat large cold repository indexing as a status-driven code-index workflow.
-  `repo index` may return a task id or may time out while its bounded
+- Treat cold and incremental repository indexing as status-driven code-index
+  workflows. `repo index` and `repo update` submit durable single-writer tasks;
+  either command may return a task id or time out while its bounded
   foreground worker attempt is still making durable progress. Recover through
   `repo status <alias> --format json`, inspect `active_task`, checkpoint
   counters, and lease expiry, and let a managed service drain the queue when
   one is running. Without a managed service, a killed foreground attempt can
   leave a running lease behind; wait for lease recovery before retrying, then
-  use bounded `repo index-worker --task-id <task-id>` attempts only when the
-  `repo index` response or status shows a queued or retrying task id. Use
-  `repo update` and `index refresh` completion results or status diagnostics
-  instead of assuming they expose task ids.
+  use bounded `repo index-worker --task-id <task-id>` attempts only on the
+  local service host when the response/status shows queued or retrying work;
+  a remote client must let the managed service drain it.
 - Keep runtime state in the platform directories managed by relay-knowledge.
   Do not redirect databases, logs, or caches into arbitrary repository folders
   unless the user explicitly asks for an isolated test home.
@@ -183,8 +193,12 @@ relay-knowledge repo index-worker --task-id <task-id> --format json
 relay-knowledge repo status core --format json
 ```
 
-The idle worker case is still machine-readable: JSON output reports
-`claimed=false` and `task=null`. For event consumers, use streaming JSON and
+The idle worker case is still machine-readable: every invocation also advances
+one bounded retention pass, and JSON reports `maintenance_active` plus optional
+`maintenance_error`. Repeat while it is active or status says maintenance is
+pending. If the error is present, report it and treat a false activity value as
+inconclusive until the fault is resolved; `claimed=false` and `task=null` only
+mean no index task ran. For event consumers, use streaming JSON and
 read the worker result from the `item.payload` event:
 
 ```bash
@@ -267,6 +281,35 @@ relay-knowledge repo software core \
   --format json
 ```
 
+### `repo context` and OKF `repo graph`
+
+Use `repo context` to build one bounded coding-agent context pack from a fresh,
+committed snapshot. Pin `--ref` to an immutable commit after an update; the
+command reads but never starts indexing:
+
+```bash
+relay-knowledge repo context core \
+  --query "trace the retry policy change" \
+  --ref "$pinned_head" \
+  --freshness wait-until-fresh \
+  --max-context-bytes 65536 \
+  --format json
+```
+
+Use `repo graph` for a versioned OKF v0.2 neighborhood over parseable
+YAML-frontmatter Markdown. Supply both a focus file and an authorized bundle
+root; traversal is bounded and never reads the live worktree. This is a
+documentation/concept graph, not the callers/callees code graph:
+
+```bash
+relay-knowledge repo graph core \
+  --focus docs/architecture/commit-loop.md \
+  --path docs \
+  --ref "$pinned_head" \
+  --depth 2 \
+  --format json
+```
+
 Use `grep`, `ripgrep`, `rg`, or other text search only as a fallback after the
 CLI is unavailable, the target repository cannot be indexed, the supported
 query or software kinds cannot express the request, or the user explicitly asks
@@ -300,31 +343,201 @@ Use `grep`, `ripgrep`, `rg`, or another raw text search for feature flag prompts
 only when the CLI is unavailable, the target repository cannot be indexed, or
 the user explicitly asks for raw text or regular-expression matching.
 
-Incremental update and impact:
+## Commit-Driven Git Update Loop
+
+### Managed commit events
+
+When `RELAY_KNOWLEDGE_WATCHER_ENABLED=true` and the resident service is running,
+the managed watcher reconciles Git HEAD/ref changes and submits durable
+commit-to-commit index tasks. Startup and bounded reconciliation recover missed
+notifications. The queue preserves leases, checkpoints, retry backoff, and at
+most one active writer for each repository. Do not add a shell loop, kill a
+competing process, or bypass the task lease.
+
+Use `repo update` as explicit recovery, replay, CI/hook ingress, or a manual
+commit event. It shares the durable task path with managed reconciliation. A
+local invocation may drain one bounded worker attempt; remote mode may return a
+queued task for the service to drain.
+
+### Ref resolution contract
+
+The normal form is:
 
 ```bash
-relay-knowledge repo update core --base main --head HEAD --format json
-relay-knowledge repo impact core --base main --head HEAD --limit 100 --format json
-relay-knowledge repo report core --format markdown
+relay-knowledge repo update core --format json
 ```
 
-If `repo update` cannot find an indexed base, first run:
+`--head` defaults to `HEAD`. `--base` defaults to the last successfully
+published clean Git commit. If the last publication was a worktree overlay, the
+CLI unwraps `worktree:<base-commit>:<content-hash>` and uses its clean base.
+Never assume a branch is named `main`. For audit or replay, either or both refs
+can be explicit:
 
 ```bash
-relay-knowledge repo index core --ref main --format json
+relay-knowledge repo update core --base <base-commit> --head <head-commit> --format json
 ```
 
-For uncommitted Git worktree analysis:
+The queued task pins moving refs before work starts. A local completed response
+contains both immutable identities in `summary.base_resolved_commit_sha` and
+`summary.resolved_commit_sha`; validate and use them when present. For a queued
+response, `.task.mode.incremental.base_ref` and `.task.resolved_commit_sha` are
+the authoritative pair. Do not use `HEAD`, a branch, or the original spelling
+for a downstream comparison, and do not reissue update merely to obtain a
+summary.
+
+### POSIX completion and immutable-ref flow
+
+The parsing example below uses `jq`. Keep polling bounded and issue each status
+check explicitly; do not turn it into an unmanaged daemon loop.
+
+```bash
+update_json="$(relay-knowledge repo update core --format json)"
+printf '%s\n' "$update_json"
+
+task_id="$(printf '%s' "$update_json" | jq -r '.task.task_id // empty')"
+pinned_base="$(printf '%s' "$update_json" | jq -er '.summary.base_resolved_commit_sha // .task.mode.incremental.base_ref')"
+pinned_head="$(printf '%s' "$update_json" | jq -er '.summary.resolved_commit_sha // .task.resolved_commit_sha')"
+printf '%s' "$update_json" | jq -e '
+  .summary == null or .task == null or
+  (.summary.base_resolved_commit_sha == .task.mode.incremental.base_ref and
+   .summary.resolved_commit_sha == .task.resolved_commit_sha)'
+```
+
+If `.summary` is null, let the managed service drain the task. A remote client
+cannot run `repo index-worker`; only on the local service host, when no managed
+service is draining it, run a bounded single-shot attempt. Then inspect status:
+
+```bash
+relay-knowledge repo index-worker --task-id "$task_id" --format json
+status_json="$(relay-knowledge repo status core --format json)"
+printf '%s\n' "$status_json"
+printf '%s' "$status_json" | jq -e --arg head "$pinned_head" \
+  '.status.last_indexed_commit == $head and (.status.stale == false)'
+```
+
+Repeat the bounded status/worker sequence only while the task is queued or
+retrying. Stop and diagnose failed/dead-letter state. Once the exact target is
+fresh, use the already pinned pair directly. Run impact first, then build coding
+context at the immutable head:
+
+```bash
+relay-knowledge repo impact core \
+  --base "$pinned_base" \
+  --head "$pinned_head" \
+  --limit 100 \
+  --format json
+relay-knowledge repo context core \
+  --query "explain the affected implementation and tests" \
+  --ref "$pinned_head" \
+  --freshness wait-until-fresh \
+  --format json
+```
+
+When Markdown, specifications, or `.knowledge/knowledge-map.yaml` changed,
+include topic/relationship projections and the focused OKF neighborhood:
+
+```bash
+relay-knowledge repo software core --kind topics --ref "$pinned_head" --freshness wait-until-fresh --format json
+relay-knowledge repo software core --kind relationships --ref "$pinned_head" --freshness wait-until-fresh --format json
+relay-knowledge repo graph core --focus docs/architecture/commit-loop.md --path docs --ref "$pinned_head" --depth 2 --format json
+```
+
+### PowerShell completion and immutable-ref flow
+
+```powershell
+$update = relay-knowledge repo update core --format json | ConvertFrom-Json
+$taskId = $update.task.task_id
+$pinnedBase = if ($null -ne $update.summary) { $update.summary.base_resolved_commit_sha } else { $update.task.mode.incremental.base_ref }
+$pinnedHead = if ($null -ne $update.summary) { $update.summary.resolved_commit_sha } else { $update.task.resolved_commit_sha }
+if ($null -ne $update.summary -and $null -ne $update.task -and
+    ($update.summary.base_resolved_commit_sha -ne $update.task.mode.incremental.base_ref -or
+     $update.summary.resolved_commit_sha -ne $update.task.resolved_commit_sha)) { throw "resolved commit pair changed" }
+```
+
+If `$update.summary` is null, let the managed service drain it. A remote client
+cannot run `repo index-worker`; only on the local service host, when no managed
+service is draining the task, run one bounded attempt. Re-check exact freshness:
+
+```powershell
+relay-knowledge repo index-worker --task-id $taskId --format json
+$status = relay-knowledge repo status core --format json | ConvertFrom-Json
+if ($status.status.last_indexed_commit -ne $pinnedHead -or $status.status.stale) { throw "queued commit is not fresh" }
+```
+
+Use the immutable values for downstream reads:
+
+```powershell
+relay-knowledge repo impact core --base $pinnedBase --head $pinnedHead --limit 100 --format json
+relay-knowledge repo context core --query "explain the affected implementation and tests" --ref $pinnedHead --freshness wait-until-fresh --format json
+relay-knowledge repo software core --kind topics --ref $pinnedHead --freshness wait-until-fresh --format json
+relay-knowledge repo software core --kind relationships --ref $pinnedHead --freshness wait-until-fresh --format json
+relay-knowledge repo graph core --focus "docs/architecture/commit-loop.md" --path "docs" --ref $pinnedHead --depth 2 --format json
+```
+
+### Scope and index retention
+
+Every successful publication runs bounded scope retention so a long commit
+history does not grow the graph store indefinitely. The policy retains the
+active scope, a small rollback window (currently the two latest successful
+scopes), the latest successful incremental predecessor, the clean base of an
+active worktree overlay, base and target scopes required by unfinished tasks,
+and scopes pinned by repository-set members.
+Same-tree commits reuse content and keep a bounded 256-row commit-alias window.
+Retention first marks one unprotected scope `retiring` atomically, excluding it
+from reads and incremental-base selection, and records a durable GC job. Each
+later maintenance transaction advances one scope-GC phase whose physical
+deletion is capped at 512 rows in aggregate across affected application tables.
+Separate succeeded-audit, failure-class-audit, and commit-alias quotas are each
+512 rows, capping primary cleanup at 2,048 physical rows plus at most one
+terminal GC-job bookkeeping row per pass. The managed worker retries persistent
+work while idle and removes unpinned code facts and their
+derived search/index rows. This bounds live generations and lets SQLite reuse
+free pages; it does not promise immediate OS-visible file shrink, which needs
+a separate explicit bounded compaction. Without the managed service, repeat
+bounded `repo index-worker --format json` calls until `maintenance_active=false`
+with no `maintenance_error` and status reports no pending maintenance. Inspect `retention.maintenance_pending`,
+`retention.retiring_jobs`, `retention.scope_listing_truncated`, `active_task`, and `checkpoint` in
+`repo status <alias> --format json` rather than counting database files.
+When `scope_listing_truncated` is true, treat the retained/prunable arrays and
+displayed counts as bounded diagnostic lower bounds, never as an exhaustive protection set.
+Under partitioned SQLite, preserve the control catalog route as a counted slot
+throughout batched shard fact deletion. Only the retention coordinator removes
+it immediately before the final `scope_metadata` shard transaction; do not
+delete or bypass the route to relieve capacity. A crash in that final gap
+replays the deterministic shard job without restoring a stale route.
+
+Never use a pruned scope as an incremental base. If the requested base has
+expired, run `repo index <alias> --ref <desired-head>` to publish a new full
+snapshot and begin a new comparison window. Do not weaken retention, expand the
+window without a bound, or retry an update in a way that bypasses freshness.
+
+### Worktree and non-Git flows
+
+For uncommitted Git worktree analysis, use the explicit overlay selector:
 
 ```bash
 relay-knowledge repo index core --ref worktree --format json
 relay-knowledge repo query core --query retry_policy --ref worktree --format json
 ```
 
-Do not use `--ref worktree` for non-Git source directories. After editing a
-non-Git directory, rerun `repo index <alias> --ref HEAD`; for diff-aware
-`repo update`, read the previous `filesystem:<hash>` from `repo status` and use
-that value as `--base` with `--head HEAD`.
+An overlay is not a commit event. After the next commit, the default update
+base unwraps the clean commit from the overlay identity and the managed watcher
+reconciles the new HEAD. If other files remain dirty after that partial commit,
+run `repo index core --ref worktree` again; the clean commit update does not
+silently fold the uncommitted remainder into its snapshot.
+
+Do not use `--ref worktree` for non-Git source directories. They have no Git
+HEAD/ref event stream, so managed commit reconciliation does not apply. After a
+change, rerun a full moving-filesystem snapshot:
+
+```bash
+relay-knowledge repo index source-tree --ref HEAD --format json
+```
+
+For an explicitly requested non-Git diff, copy the previous
+`filesystem:<hash>` from `repo status`, pass it as `--base`, and use
+`--head HEAD`. If that filesystem scope was pruned, publish a full snapshot
+instead.
 
 ## Knowledge Graph Query Flow
 

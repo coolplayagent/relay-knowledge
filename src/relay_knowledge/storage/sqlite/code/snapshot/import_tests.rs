@@ -61,6 +61,7 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
             DROP TABLE code_repository_symbols;
             ALTER TABLE legacy_code_repository_symbols RENAME TO code_repository_symbols;
             DROP TABLE code_repository_routes;
+            DROP TABLE code_repository_commit_scopes;
             ",
         )
         .expect("legacy source data should be installed");
@@ -95,10 +96,82 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
             |row| row.get(0),
         )
         .expect("route table should remain queryable");
+    let commit_alias_count: i64 = target
+        .query_row(
+            "SELECT COUNT(*) FROM code_repository_commit_scopes
+             WHERE repository_id = 'repo'
+               AND resolved_commit_sha = 'commit'
+               AND source_scope = 'git_snapshot:test'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy scope should receive a current commit alias");
     fs::remove_file(source_path).expect("temporary source database should be removed");
 
     assert!(symbol_role.is_none());
     assert_eq!(route_count, 0);
+    assert_eq!(commit_alias_count, 1);
+}
+
+#[test]
+fn imports_all_same_tree_commit_aliases_for_the_selected_scope() {
+    let source_path = temporary_sqlite_path("commit-scope-alias-import");
+    let source = Connection::open(&source_path).expect("source database should open");
+    initialize_code_schema(&source).expect("source schema should initialize");
+    source
+        .execute_batch(
+            "
+            INSERT INTO code_repositories (
+                repository_id, alias, root_path, path_filters_json, language_filters_json,
+                last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                indexed_file_count, symbol_count, reference_count, chunk_count, stale
+            ) VALUES (
+                'repo', 'fixture', '/tmp/repo', '[]', '[]', 'git_snapshot:test',
+                'commit-b', 'same-tree', 'fresh', 0, 0, 0, 0, 0
+            );
+            INSERT INTO code_repository_aliases (alias, repository_id)
+            VALUES ('fixture', 'repo');
+            INSERT INTO code_repository_scopes (
+                source_scope, repository_id, resolved_commit_sha, tree_hash,
+                path_filters_json, language_filters_json, indexed_file_count,
+                symbol_count, reference_count, chunk_count, stale
+            ) VALUES (
+                'git_snapshot:test', 'repo', 'commit-b', 'same-tree', '[]', '[]',
+                0, 0, 0, 0, 0
+            );
+            INSERT INTO code_repository_commit_scopes (
+                repository_id, resolved_commit_sha, source_scope, published_sequence
+            ) VALUES
+                ('repo', 'commit-a', 'git_snapshot:test', 1),
+                ('repo', 'commit-b', 'git_snapshot:test', 2);
+            ",
+        )
+        .expect("same-tree aliases should insert");
+    drop(source);
+
+    let mut target = Connection::open_in_memory().expect("target database should open");
+    initialize_code_schema(&target).expect("target schema should initialize");
+    super::import_repository_from_database(
+        &mut target,
+        &source_path,
+        "repo",
+        Some("git_snapshot:test"),
+    )
+    .expect("snapshot aliases should import");
+    let aliases = target
+        .prepare(
+            "SELECT resolved_commit_sha FROM code_repository_commit_scopes
+             WHERE repository_id = 'repo' AND source_scope = 'git_snapshot:test'
+             ORDER BY resolved_commit_sha",
+        )
+        .expect("alias query should prepare")
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("aliases should query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("aliases should decode");
+    fs::remove_file(source_path).expect("temporary source database should be removed");
+
+    assert_eq!(aliases, ["commit-a", "commit-b"]);
 }
 
 #[test]

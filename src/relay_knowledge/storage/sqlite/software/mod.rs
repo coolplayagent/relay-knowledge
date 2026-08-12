@@ -5,7 +5,9 @@ mod projection;
 mod query_scope;
 mod schema;
 
-pub(super) use projection::{projection, projection_for_scope, refresh_projection};
+pub(super) use projection::{
+    projection, projection_for_scope, refresh_projection, refresh_projection_with_fence,
+};
 pub(super) use schema::initialize_schema;
 
 use query_scope::{

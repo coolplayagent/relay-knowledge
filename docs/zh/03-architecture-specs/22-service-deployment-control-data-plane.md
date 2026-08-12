@@ -58,7 +58,7 @@ v1 支持并文档化四种拓扑：
 - worker task queue、lease、retry、dead-letter、checkpoint、progress 和 reset。
 - code-index master-worker 诊断，包括 configured workers、active worker slots、queue depth、running leases、retry/dead-letter state。
 - storage topology、shard catalog、backup/migration/rollback/uninstall diagnostics。
-- repository register/index/status/report/set overlay refresh。
+- repository register/full index/durable incremental update/status/report/set overlay refresh，以及 watched repository 的受界 checked-out-HEAD reconciliation。
 - audit、authorization identity、request id、trace id、QoS admission 和 overload decision。
 
 新增控制面接口必须先定义共享 `api` request/response 类型和 application service 方法，再映射到 CLI、Web、MCP 或 HTTP route。接口层不得复制业务逻辑、直接读取 storage catalog、直接续租 worker task，或绕过 QoS。当前只读控制面 HTTP preview 暴露 `/api/v1/control/status`、`/api/v1/control/health`、`/api/v1/control/service/status` 和 `/api/v1/control/storage/topology`。这些 route 必须在 cold runtime 上保持安全：health 和 service-status 诊断不得打开或迁移 storage；topology diagnostics 只能使用有界只读 catalog probe，并且要暴露 single-SQLite 配置下残留的 active partitioned catalog；backlog counter 必须使用 storage count API，不能 materialize 无界列表。
@@ -86,9 +86,13 @@ v1 支持并文档化四种拓扑：
 
 ## 7. API 扩展契约
 
-控制面 HTTP route 使用 `/api/*`，同源 Web 操作继续使用 `/api/web/operations/execute`。外部控制面 API 使用 `/api/v1/control/*` 或等价命名；当前 preview 只开放只读 status、health、service status 和 storage topology diagnostics，并保持 CLI JSON、Web、MCP tool 的语义兼容。代码仓库远端 CLI 使用 `/api/v1/code/repositories/{alias}/index`、`/scope/preview`、`/status` 和 `/query`；这些 route 必须复用共享 `api` request/response 类型，不能复用 Web composer payload 作为外部契约。
+控制面 HTTP route 使用 `/api/*`，同源 Web 操作继续使用 `/api/web/operations/execute`。外部控制面 API 使用 `/api/v1/control/*` 或等价命名；当前 preview 只开放只读 status、health、service status 和 storage topology diagnostics，并保持 CLI JSON、Web、MCP tool 的语义兼容。代码仓库远端 CLI 使用 `/api/v1/code/repositories/{alias}/index`、`/update`、`/scope/preview`、`/status` 和 `/query`；这些 route 必须复用共享 `api` request/response 类型，不能复用 Web composer payload 作为外部契约。`POST .../update` 接受可选 `base_ref` 和 `head_ref`；省略时分别解析最近发布 clean base 与 `HEAD`，固定不可变 commit，并返回与 full indexing 同一 durable task/status/checkpoint response family。
 
 API response 必须包含 metadata、warnings/degraded state、freshness/truncation、stable error kind 和 trace context。长任务只返回 task handle、checkpoint 和可查询 status；不能同步执行无界索引、无界扫描、外部 provider 大批量调用或 shard 迁移。
+
+常驻 watcher 属于 control plane，不是第二个 data-plane writer。窄 Git metadata event 只作为 hint；启动时与受界 periodic `HEAD` reconciliation（默认 5000 ms）负责恢复 linked worktree、漏报 event 与重启 lag。reconciliation 只会用稳定 per-ref fingerprint 持久化固定输入的 Incremental task；durable queue 的 attempt-scoped lease 仍是写授权，并保证每仓库一个 writer。`service status` 暴露 reconciliation、queued-commit 和 reconciliation-failure 计数。
+
+publication 调用 durable retention：保护 active 与 latest-two-success window 的并集（通常重叠）、最近 incremental predecessor、active worktree overlay 的 clean base、未完成 task base/target 和 repository-set pin。它先原子地把一个旧 scope 标为 `retiring`，再让持久 GC job 在每个 maintenance transaction 内推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行，包括代码事实、search row、software projection、checkpoint、workspace 或 scope state。每仓库完成态 task history 限制为 128 条 success 和 64 条 failure-class row。该清理不是 generic Knowledge Graph 或独立 semantic/vector generation 的原子发布声明。
 
 ## 8. 验收标准
 
@@ -96,6 +100,7 @@ API response 必须包含 metadata、warnings/degraded state、freshness/truncat
 - `partitioned_sqlite` 的 doctor/status、backup、migration、uninstall plan 同时覆盖控制库和 shard 目录，并通过 storage diagnostics 暴露 active/staged/missing shard 计数。
 - split worker preview 通过 `service worker run [--task-id <id>]` claim durable code-index task；未 claim、lease 过期或 attempt 不匹配时无法 complete/fail/write。
 - `health`、`service status` 和 Web diagnostics 在数据面繁忙时仍返回 bounded degraded 状态。
+- Commit reconciliation 保持可观测、有界、restart-safe 且不能绕过 lease；长期 commit history 通过 protected scope 与完成态 task retention 保持有界。
 - 新 graph/vector/event/workflow adapter 只作为实现细节进入 storage、retrieval、net 或 worker boundary，不改变 domain/API 语义。
 
 ---

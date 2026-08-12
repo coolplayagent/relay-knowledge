@@ -326,7 +326,16 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
     );
     assert_unavailable(
         store
-            .refresh_code_repository_set_overlay("set".to_owned(), 1)
+            .refresh_code_repository_set_overlay(
+                "set".to_owned(),
+                CodeRepositorySetRefreshPublication {
+                    task_id: "task".to_owned(),
+                    set_id: "set-id".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    attempt_count: 1,
+                    member_replacements: Vec::new(),
+                },
+            )
             .await,
         "repository set overlay refresh is unavailable",
     );

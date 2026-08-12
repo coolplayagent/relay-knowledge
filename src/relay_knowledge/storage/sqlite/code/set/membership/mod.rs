@@ -1,13 +1,16 @@
 //! Repository-set membership persistence and status mapping.
 
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 
 use crate::{
     domain::{CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetMemberStatus},
     storage::{CodeRepositorySetMemberSeed, CodeRepositorySetSeed, StorageError},
 };
 
-use super::super::{super::evidence_identity::stable_id, status::parse_json_list};
+use super::{
+    super::{super::evidence_identity::stable_id, status::parse_json_list},
+    capacity::{MAX_REPOSITORY_SET_MEMBERS, capacity_error, ensure_overlay_delete_is_bounded},
+};
 
 pub(in super::super) fn create_set(
     connection: &mut Connection,
@@ -43,18 +46,20 @@ pub(in super::super) fn add_member(
     connection: &mut Connection,
     seed: CodeRepositorySetMemberSeed,
 ) -> Result<CodeRepositorySetMember, StorageError> {
-    let set = set_by_alias(connection, &seed.set_alias)?.ok_or_else(|| {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let set = set_by_alias(&transaction, &seed.set_alias)?.ok_or_else(|| {
         StorageError::InvalidInput(format!(
             "code repository set '{}' is not registered",
             seed.set_alias
         ))
     })?;
-    let scope_repository_id = connection
+    let scope_repository_id = transaction
         .query_row(
             "
             SELECT repository_id
             FROM code_repository_scopes
             WHERE source_scope = ?1
+              AND retiring = 0
             ",
             params![seed.source_scope],
             |row| row.get::<_, String>(0),
@@ -74,7 +79,19 @@ pub(in super::super) fn add_member(
     }
 
     let set_id = set.set_id.clone();
-    let transaction = connection.transaction()?;
+    let other_member_count = transaction.query_row(
+        "SELECT COUNT(*) FROM (
+             SELECT 1 FROM code_repository_set_members
+             WHERE set_id = ?1 AND repository_id <> ?2
+             LIMIT ?3
+         )",
+        params![set_id, seed.repository_id, MAX_REPOSITORY_SET_MEMBERS],
+        |row| row.get::<_, usize>(0),
+    )?;
+    if other_member_count >= MAX_REPOSITORY_SET_MEMBERS {
+        return Err(capacity_error("member", MAX_REPOSITORY_SET_MEMBERS));
+    }
+    ensure_overlay_delete_is_bounded(&transaction, &set_id)?;
     transaction.execute(
         "
         DELETE FROM code_repository_set_members
@@ -118,15 +135,17 @@ pub(in super::super) fn add_member(
         ",
         params![set_id],
     )?;
-    transaction.commit()?;
-
-    member_by_key(
-        connection,
+    let member = member_by_key(
+        &transaction,
         &set.set_id,
         &seed.repository_id,
         &seed.source_scope,
     )?
-    .ok_or_else(|| StorageError::InvalidInput("repository set member was not persisted".to_owned()))
+    .ok_or_else(|| {
+        StorageError::InvalidInput("repository set member was not persisted".to_owned())
+    })?;
+    transaction.commit()?;
+    Ok(member)
 }
 
 pub(in super::super) fn remove_member(
@@ -134,18 +153,20 @@ pub(in super::super) fn remove_member(
     set_alias: &str,
     repository_alias: &str,
 ) -> Result<CodeRepositorySetMember, StorageError> {
-    let set = set_by_alias(connection, set_alias)?.ok_or_else(|| {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let set = set_by_alias(&transaction, set_alias)?.ok_or_else(|| {
         StorageError::InvalidInput(format!(
             "code repository set '{set_alias}' is not registered"
         ))
     })?;
-    let removed = member_by_alias(connection, &set.set_id, repository_alias)?.ok_or_else(|| {
-        StorageError::InvalidInput(format!(
-            "repository set '{}' member '{}' is not registered",
-            set.alias, repository_alias
-        ))
-    })?;
-    let transaction = connection.transaction()?;
+    let removed =
+        member_by_alias(&transaction, &set.set_id, repository_alias)?.ok_or_else(|| {
+            StorageError::InvalidInput(format!(
+                "repository set '{}' member '{}' is not registered",
+                set.alias, repository_alias
+            ))
+        })?;
+    ensure_overlay_delete_is_bounded(&transaction, &set.set_id)?;
     transaction.execute(
         "
         DELETE FROM code_repository_set_members
@@ -175,7 +196,7 @@ pub(in super::super) fn remove_member(
 }
 
 pub(in super::super) fn set_by_alias(
-    connection: &mut Connection,
+    connection: &Connection,
     alias: &str,
 ) -> Result<Option<CodeRepositorySet>, StorageError> {
     connection
@@ -193,7 +214,7 @@ pub(in super::super) fn set_by_alias(
 }
 
 fn member_by_key(
-    connection: &mut Connection,
+    connection: &Connection,
     set_id: &str,
     repository_id: &str,
     source_scope: &str,
@@ -214,7 +235,7 @@ fn member_by_key(
 }
 
 fn member_by_alias(
-    connection: &mut Connection,
+    connection: &Connection,
     set_id: &str,
     repository_alias: &str,
 ) -> Result<Option<CodeRepositorySetMember>, StorageError> {
@@ -234,7 +255,7 @@ fn member_by_alias(
 }
 
 pub(super) fn member_statuses(
-    connection: &mut Connection,
+    connection: &Connection,
     set_id: &str,
 ) -> Result<Vec<CodeRepositorySetMemberStatus>, StorageError> {
     let mut statement = connection.prepare(
@@ -247,14 +268,20 @@ pub(super) fn member_statuses(
                scope.language_filters_json
         FROM code_repository_set_members member
         JOIN code_repository_scopes scope ON scope.source_scope = member.source_scope
-        WHERE member.set_id = ?1
+        WHERE member.set_id = ?1 AND scope.retiring = 0
         ORDER BY member.priority DESC, member.repository_alias ASC, member.source_scope ASC
+        LIMIT ?2
         ",
     )?;
-    let rows = statement.query_map(params![set_id], member_status_from_row)?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
+    let rows = statement.query_map(
+        params![set_id, MAX_REPOSITORY_SET_MEMBERS + 1],
+        member_status_from_row,
+    )?;
+    let members = rows.collect::<Result<Vec<_>, _>>()?;
+    if members.len() > MAX_REPOSITORY_SET_MEMBERS {
+        return Err(capacity_error("member", MAX_REPOSITORY_SET_MEMBERS));
+    }
+    Ok(members)
 }
 
 fn set_from_row(row: &Row<'_>) -> rusqlite::Result<CodeRepositorySet> {

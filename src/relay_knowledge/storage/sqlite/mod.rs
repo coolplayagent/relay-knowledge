@@ -5,7 +5,7 @@
 //! responsibility-named modules.
 
 mod canvas;
-mod code;
+pub(in crate::storage) mod code;
 mod code_graph;
 mod connection_runtime;
 mod evidence_identity;
@@ -22,6 +22,7 @@ mod software;
 mod store;
 mod table_stats;
 
+pub(in crate::storage) use code::{preserve_existing_scope_commit, record_commit_scope};
 pub(in crate::storage) use connection_runtime::maintenance::{
     configure_connection, read_only_database_diagnostics,
 };

@@ -137,6 +137,79 @@ async fn latest_scope_status_skips_legacy_fact_version_scope_while_scanning() {
     );
 }
 
+#[tokio::test]
+async fn same_tree_commit_alias_keeps_the_previous_commit_queryable() {
+    let store = empty_store_with_repository().await;
+    let mut first = snapshot_with_chunk("repo", "src/lib.rs", "fn stable_tree() {}");
+    retarget_snapshot_to_fact_scope(&mut first);
+    first.resolved_commit_sha = "commit-a".to_owned();
+    let mut empty_commit = first.clone();
+    empty_commit.resolved_commit_sha = "commit-b".to_owned();
+    let expected_scope = first.source_scope.clone();
+
+    store
+        .apply_code_index_snapshot(first)
+        .await
+        .expect("first commit should persist");
+    store
+        .apply_code_index_snapshot(empty_commit)
+        .await
+        .expect("same-tree commit should persist");
+
+    for commit in ["commit-a", "commit-b"] {
+        let status = store
+            .code_repository_scope_status(
+                "fixture".to_owned(),
+                commit.to_owned(),
+                Vec::new(),
+                Vec::new(),
+            )
+            .await
+            .expect("scope alias should query")
+            .expect("commit should resolve to the shared content scope");
+        assert_eq!(status.last_indexed_commit.as_deref(), Some(commit));
+        assert_eq!(
+            status.last_indexed_scope_id.as_deref(),
+            Some(expected_scope.as_str())
+        );
+    }
+}
+
+#[tokio::test]
+async fn same_tree_commit_alias_remains_a_valid_incremental_base() {
+    let store = empty_store_with_repository().await;
+    let mut first = snapshot_with_chunk("repo", "src/lib.rs", "fn stable_tree() {}");
+    retarget_snapshot_to_fact_scope(&mut first);
+    first.resolved_commit_sha = "commit-a".to_owned();
+    let mut empty_commit = first.clone();
+    empty_commit.resolved_commit_sha = "commit-b".to_owned();
+    store
+        .apply_code_index_snapshot(first)
+        .await
+        .expect("first commit should persist");
+    store
+        .apply_code_index_snapshot(empty_commit)
+        .await
+        .expect("same-tree commit should persist");
+
+    let mut incremental = incremental_snapshot_for_parsed_file();
+    incremental.base_resolved_commit_sha = Some("commit-a".to_owned());
+    incremental.resolved_commit_sha = "commit-c".to_owned();
+    incremental.tree_hash = "tree-c".to_owned();
+    retarget_snapshot_to_fact_scope(&mut incremental);
+
+    let summary = store
+        .apply_code_index_snapshot(incremental)
+        .await
+        .expect("older same-tree alias should seed the incremental snapshot");
+
+    assert_eq!(
+        summary.base_resolved_commit_sha.as_deref(),
+        Some("commit-a")
+    );
+    assert_eq!(summary.resolved_commit_sha, "commit-c");
+}
+
 async fn empty_store_with_repository() -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let registration =

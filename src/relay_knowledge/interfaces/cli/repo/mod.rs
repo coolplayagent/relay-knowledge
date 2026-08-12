@@ -47,8 +47,8 @@ pub enum RepoCommand {
     },
     Update {
         alias: String,
-        base_ref: String,
-        head_ref: String,
+        base_ref: Option<String>,
+        head_ref: Option<String>,
     },
     Query {
         alias: String,

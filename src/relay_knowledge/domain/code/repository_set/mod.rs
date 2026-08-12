@@ -248,6 +248,7 @@ pub enum CodeRepositorySetRefreshTaskState {
     Succeeded,
     Retrying,
     DeadLetter,
+    Cancelled,
 }
 
 impl CodeRepositorySetRefreshTaskState {
@@ -258,6 +259,7 @@ impl CodeRepositorySetRefreshTaskState {
             Self::Succeeded => "succeeded",
             Self::Retrying => "retrying",
             Self::DeadLetter => "dead_letter",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -268,6 +270,7 @@ impl CodeRepositorySetRefreshTaskState {
             "succeeded" => Ok(Self::Succeeded),
             "retrying" => Ok(Self::Retrying),
             "dead_letter" => Ok(Self::DeadLetter),
+            "cancelled" => Ok(Self::Cancelled),
             _ => Err(DomainError::invalid(
                 "repository_set_refresh_task_state",
                 "unknown repository set refresh task state",

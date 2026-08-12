@@ -268,17 +268,21 @@ function 绑定，所有 owner 都直接挂载 UT。
 
 代码仓库 full index 会先发现 tracked source layout；有界 source-root 推导和 effective filter 归 `source/layout/discovery` 所有，归一化 filter 交集与 submodule child 投影归 `source/layout/path_scope` 所有，Git/filesystem 准入原因归 `source/layout/selection` 所有，source 解析、已选 entry、effective filter、内容 hash 与 filesystem-ref 一致性归 `source/layout/scoped_snapshot` 所有，受界 exclusion/largest-file 样本和 preview 计数归 `source/layout/preview` 所有，稳定的 scope 内外变更分组归 `source/layout/impact_partition` 所有。SQLite snapshot 持久化把 repository attachment、metadata/scope import 及其直接 legacy regression 收敛到 `code/snapshot/repository_import`，`scope_tables` 独占与增量 scope clone 共享的 table-copy contract。随后使用受资源预算约束的 SQLite 批次和持久 checkpoint。大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。
 
-增量 `repo update` 在新增文件出现在 `src/` 之外时复用同一套 source-layout 策略。
+增量 `repo update` 在新增文件出现在 `src/` 之外时复用同一套 source-layout 策略。`repo update <alias>` 默认把最近一次发布成功的 clean Git snapshot 作为 base（包括 worktree-overlay identity 包裹的 clean base），把 `HEAD` 作为 head；需要固定不可变提交对时仍可显式传 `--base` 和 `--head`。仓库尚无已发布 base 时必须先完成一次 full `repo index --ref HEAD`。单次 Git 增量在应用注册 path filter 前按整个 commit pair 计算，最多接受 512 个 changed path；超过上限时应运行 full index。
 
-冷启动 full `repo index` 通过 `storage::sqlite::code::tasks::queue` 落持久化 code-index task 并立即返回 `task` handle。CLI 会启动有界单次 worker；非交互式 agent 可调用 `repo index-worker --task-id <id> --format json` 显式 drain 一次；`application::runtime::worker` 独占 endpoint 校验与 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 并发上限，`service run` 依此运行有界 code-index worker pool，并继续运行单个 repository-set overlay refresh worker。
+冷启动 full `repo index` 通过 `storage::sqlite::code::tasks::queue` 落持久化 code-index task 并立即返回 `task` handle。CLI 会启动有界单次 worker；非交互式 agent 可调用 `repo index-worker --task-id <id> --format json` 显式 drain 一次 task 并推进一次有界 retention pass；`application::runtime::worker` 独占 endpoint 校验与 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 并发上限，`service run` 依此运行有界 code-index worker pool，并继续运行单个 repository-set overlay refresh worker。CLI/Web 的 repository-set refresh 无论默认同步还是 async，都会先进入同一个有界持久队列；本地默认同步请求只在能定向 claim 其精确 task 时 drain，否则返回 queued response。Repository-set refresh admission 在同一事务内 supersede 同 set 较旧的 queued/retrying task；unfinished task 每 set 最多 2 个、全局最多 128 个，且同 set 只允许一个 live writer。Overlay edge 与 member replacement 在同一个 attempt-scoped live-lease 事务内发布，takeover 会使旧 attempt 回滚。入队和完成维护为每 set 保留 64 条 succeeded，并为 failed、dead-letter、cancelled 每个 state 各保留 32 条；每条审计清理 DELETE 最多删除 64 行。
 
-本地 CLI 可以用 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问已部署常驻服务。远端 `repo index` 只向服务提交 durable task 并返回 task/status/checkpoint JSON；任务由远端 `service run --web` 的 worker pool 消费，而不是由本地 CLI 执行 `repo index-worker`。远端只读命令包括 `repo list`、`repo query`、`repo context`、`repo graph`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`；其中 `repo list` 只返回至少有一个已完成 indexed scope 的仓库，不包含尚未完成首次索引的注册项。`repo index --reset` 和 `repo index-worker` 这类维护命令在远端配置下会被拒绝，必须在服务端机器执行；`storage::sqlite::code::tasks::reset` 独占本地原子 reset。远端分发只会预先校验远端 URL 与 outbound network 设置；无关本机 runtime 和 retrieval 设置只在命令回落到本机状态时校验。
+手动 repository-set overlay 准入固定为每 set 最多 64 个 member、每次发布最多 64 个 fact-version member replacement。Manifest discovery 在所有 member 间共享整个 refresh 的 4,096 个 chunk、16 MiB path/content byte 和 32,768 个 derived item 预算；其余上限为 8,192 条总 import、131,072 个 file/symbol export target、8,192 条总 edge 和 512 个 origin/target selector key。每个 import 最多匹配 11 个 export，足以区分零个、一个或歧义匹配并保留最多 10 个 candidate ID，因此 `candidate_count` 是有界观测值。每个持久集合使用 cap-plus-one 探测，溢出映射为可重试 `qos_rejected`/`CapacityExceeded`，不会截断后伪造 `fresh` overlay。Direct/selector read 最多读取 8,193 条 edge，并排除 origin 或 target scope 已 retiring 的 edge。Refresh/add/member remove 在删除前同样最多探测 8,193 条已有 edge。Repository removal 保持原子：仓库关联超过 64 个 set，或任一受影响遗留 overlay 超过 8,192 条 edge 时整个拒绝。遗留超大手动 overlay 会保持不变；本版未提供有界 repair 命令，因此需要由后续升级提供 repair tool，不能宣称已形成清理闭环。这些手动 set 上限尚未覆盖显式启用的 automatic-workspace cross-edge build 路径；分阶段 scope GC 只限制其过期状态删除，不限制单次 build 的 materialization。Automatic workspace detection 因此仍是已知资源有界性缺口，且默认关闭。
 
-不同 fingerprint 的 task 会独立排队和持有 lease；完全相同的 full-index fingerprint 会复用现有 task。
+本地 CLI 可以用 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问已部署常驻服务。远端 `repo index` 只向服务提交 durable task 并返回 task/status/checkpoint JSON；任务由远端 `service run --web` 的 worker pool 消费，而不是由本地 CLI 执行 `repo index-worker`。远端 `repo update` 使用 `POST /api/v1/code/repositories/{alias}/update`，同样可能返回 queued task；依赖新 scope 前应查看 `repo status` 及 checkpoint。远端只读命令包括 `repo list`、`repo query`、`repo context`、`repo graph`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`；其中 `repo list` 只返回至少有一个已完成 indexed scope 的仓库，不包含尚未完成首次索引的注册项。`repo index --reset` 和 `repo index-worker` 这类维护命令在远端配置下会被拒绝，必须在服务端机器执行；`storage::sqlite::code::tasks::reset` 独占本地原子 reset。远端分发只会预先校验远端 URL 与 outbound network 设置；无关本机 runtime 和 retrieval 设置只在命令回落到本机状态时校验。
 
-`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention；`storage::sqlite::code::tasks::status` 独占任务查询与有界 queue 投影，`checkpoint` 独占 scope 与 latest-progress 读取。后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope；`storage::sqlite::code::tasks::retention` 独占该计划与事务清理。
+不同 fingerprint 的 task 会独立排队和持有 lease；完全相同的 full-index fingerprint 会复用现有 task。commit reconciliation 对每个 repository、checked-out ref 和注册 filter set 使用一个稳定 fingerprint，因此一个不可变 base-to-head 更新尚未完成时，重复 filesystem hint 会合并到同一任务槽。入队 admission 与写入处于同一个事务：每仓库最多 32 个、整个 control database 最多 256 个未完成 task；先尝试 fingerprint 复用和 worktree supersession，容量仍满时返回可重试的 `qos_rejected`（远端 HTTP 429）。
 
-Code-index task lease 绑定 attempt，`storage::sqlite::code::tasks::lease` 独占 claim、renew、listing 与有界 recovery。过期 running lease 会在 claim/status 路径前恢复为 retry 或 dead-letter；`storage::sqlite::code::tasks::completion` 独占 lease-checked success、retry 与 dead-letter 转换。旧 worker 不能完成或失败已经被新 worker 接管的 task，活跃 worker 会在昂贵 batch 解析前、每次提交 checkpoint batch 后、finalize 前后以及完成 task 前续租。
+没有常驻服务时，每次本地 `repo index-worker --format json` 都会推进一次有界 retention pass，并返回 `maintenance_active` 与可选 `maintenance_error`；error 非空时不能把 `maintenance_active=false` 当作完成，应查看 status、处理已报告故障，再做有界尝试，直到响应与 `repo status` 都不再 pending。在 partitioned storage 中，control-plane route 会在分批删除 shard 数据期间继续占用容量槽，且仅在 shard 最终 `scope_metadata` phase 前删除；若在该最终间隙崩溃，可重放确定性 shard job。这避免慢速 shard GC 期间过早复用槽位。
+
+`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention；`storage::sqlite::code::tasks::status` 独占任务查询与有界 queue 投影，`checkpoint` 独占 scope 与 latest-progress 读取。后台任务成功后保留 active scope 与最近两个成功发布时间窗口的并集（该窗口通常已包含 active）、最近一次成功增量的 predecessor、active worktree overlay 的 clean base，再加每个未完成任务的 target/base 和 repository-set member pin。Retention 先在一个事务内把一个未保护 scope 标成 `retiring` 并持久化可恢复 GC job，使它立即退出查询与增量 base 选择。后续每个 maintenance transaction 最多推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行，包括代码事实、FTS/search row、software projection、checkpoint、workspace state 或 scope metadata。同一 pass 另有三个固定配额：succeeded task audit、failure-class task audit 和 commit alias 各最多删除 512 行，因此主清理合计最多 2,048 个物理行，另加最多一个终态 GC-job bookkeeping 行；常驻 worker 空闲时续跑。当单仓库已经存在 64 个不同的 published、checkpoint 或 unfinished scope identity 时，准入会拒绝新 target，并返回 maintenance backpressure，直到 GC 释放槽位。这会限制保留的 live generation，并让 SQLite 复用释放页面，但不承诺数据库文件立即在 OS 层缩小；回收物理 high-water mark 需要另行执行显式、有界的 maintenance compaction。`repo status` 暴露 `maintenance_pending` 以及每个 job 的 phase、累计删除行数和最近错误；retained/prunable scope 数组各最多 64 项，`scope_listing_truncated=true` 表示数组和显示计数只是有界诊断投影与可观察 lower bound，不是完整保护集合，partitioned shard 清理会暂停而不会信任被截断的 control-plane pin。Shard 进入最终 `scope_metadata` phase 前，分区清理会先删除 control-plane route；崩溃后可按确定性 shard job 重放，不会暴露 stale route。同 tree commit 复用内容图，commit-to-scope alias 每仓保留 256 条，活跃任务引用在完成前额外受保护。完成态 task 审计历史另行限制为每仓库最近 128 条 succeeded 与 64 条 failed/dead-letter/cancelled，并为每个仍保留 scope 保存最新 success 行。task 历史不能恢复已淘汰提交；再次需要该历史 ref 时必须显式 full index。`storage::sqlite::code::tasks::retention` 独占 protected-set 计划和 audit coordination；同级 `retention_gc` 独占可重启的分阶段物理删除状态机。
+
+Code-index task lease 绑定 attempt，`storage::sqlite::code::tasks::lease` 独占 claim、renew、listing 与有界 recovery。每次 claim 还会推进 repository-local publication generation；snapshot、batch、workspace change 与 software projection 都在其 SQLite 发布事务内校验 generation，因 lease 过期而游离的 blocking write 会回滚，不能覆盖接管它的新 attempt。过期 running lease 会在 claim/status 路径前恢复为 retry 或 dead-letter；`storage::sqlite::code::tasks::completion` 独占 lease-checked success、retry 与 dead-letter 转换。旧 worker 不能完成或失败已经被新 worker 接管的 task，活跃 worker 会在昂贵 batch 解析前、每次提交 checkpoint batch 后、finalize 前后以及完成 task 前续租。
 
 未实现可选 lease recovery/renewal hook 的 store 会把这些 hook 当作 no-op，以保持 status 和 indexing 读路径兼容。JSON status 中的 checkpoint 会暴露 `updated_at_ms`，便于区分慢速推进和真正卡住。
 
@@ -310,8 +314,8 @@ worktree overlay 使用 Git status：窄 `worktree_overlay::mod` facade 把 iden
 共享 code-query 测试根同样只能包含 `calls`、`field_filters`、`generated`、`hybrid`、`identity`、`line_context`、`ranking`、`score` 与 `unit` 领域及声明 facade；测试 facade 直接声明每个领域，code-store facade 不得再通过跨层 path attribute 重挂单个 query regression。
 Graph retrieval 根只包含物理 `advanced/`、`aliases/`、`bm25/`、`bm25_routing/`、`bm25_fallback/`、`context/`、`derived/`、`label_trigrams/`、`local_model/`、`ranking/`、`read_model/` 与 facade；每个行为 owner 直接挂载同目录 UT，不得恢复平铺实现或测试 sibling。确定性 token signature、本地 hashed vector、semantic overlap、cosine similarity 与 identifier-aware lexical overlap 归 `local_model/`；共享 `retrieval::terms` owner 只暴露 rerank 生产调用的 normalized-term 操作。物理 `read_model/` 子域把 DDL/retry 交给 `schema`、重建交给 `migration`、文档写入交给 `documents`、共享候选/BM25 映射交给 `candidate`/`bm25_hit`、检索编排交给 `search`。同级 `advanced/` 子域进一步把 relation/claim/event path 组装交给 `path`、时间解析与过滤交给 `temporal`、scope 汇总交给 `community`、共享事件读取交给 `event`、证据归组交给 `support`。
 
-Feature-flag extraction 将环境/配置/预处理来源键规则、SDK receiver/call tracking 和跳过字面量的共享 lexical primitive 分配给独立 owner；每个 owner 都挂载同级直接 UT，extractor facade 只保留稳定内部重导出。Repository-set 编排把 membership API 交给 `membership`、moving-ref 与 fact-version freshness 交给 `status`、set 专用存储错误交给 `errors`、同步与租约化 overlay rebuild 交给 `refresh`；物理 `query/` 域把纯 overlay ranking 交给 `mod.rs`、异步 member/fallback 协调交给 `workflow`、dependency API planning 交给 `plan`、ranking signal 交给 `domain_affinity` 与 `identity_coverage`，并为每个 owner 直接挂载配对 UT。SQLite repository-set 持久化同样把 member 生命周期/状态行映射交给 `code::set::membership`，把 overlay 状态、刷新、import/export 匹配与 cross-edge 读取交给 `code::set::overlay`；`code::set` facade 只重导出两者的窄入口。带配对 UT 的 `manifest/` 域进一步分离数据库编排、Go workspace、pnpm/package exports、module-key 展开与有界 path/glob 规则。
-物理 `code::set` 根只能包含 `manifest`、`membership`、`overlay`、`refresh_tasks` 与 `tests` 目录及 facade。三个行为 owner 直接挂载 `mod_tests.rs`；跨 owner workspace 场景与 fixture 隔离在 `tests/`，不得在 `manifest/` 旁恢复平铺实现或测试 sibling。
+Feature-flag extraction 将环境/配置/预处理来源键规则、SDK receiver/call tracking 和跳过字面量的共享 lexical primitive 分配给独立 owner；每个 owner 都挂载同级直接 UT，extractor facade 只保留稳定内部重导出。Repository-set 编排把 membership API 交给 `membership`、moving-ref 与 fact-version freshness 交给 `status`、set 专用存储错误交给 `errors`、同步与租约化 overlay rebuild 交给 `refresh`；物理 `query/` 域把纯 overlay ranking 交给 `mod.rs`、异步 member/fallback 协调交给 `workflow`、dependency API planning 交给 `plan`、ranking signal 交给 `domain_affinity` 与 `identity_coverage`，并为每个 owner 直接挂载配对 UT。SQLite repository-set 持久化把固定资源/删除准入交给 `code::set::capacity`、member 生命周期/状态行映射交给 `membership`、overlay 状态/刷新/import-export 匹配/cross-edge 读取交给 `overlay`、持久队列租约交给 `refresh_tasks`；`code::set` facade 只暴露窄入口。带配对 UT 的 `manifest/` 域进一步分离数据库编排、Go workspace、pnpm/package exports、module-key 展开与有界 path/glob 规则。
+物理 `code::set` 根只能包含 `capacity`、`manifest`、`membership`、`overlay`、`refresh_tasks` 与 `tests` 目录及 facade。Capacity、membership、overlay 和 refresh-task 四个行为 owner 直接挂载 `mod_tests.rs`；跨 owner workspace 场景与 fixture 隔离在 `tests/`，不得在 `manifest/` 旁恢复平铺实现或测试 sibling。
 Code-index schema 初始化只把执行顺序、旧列兼容与 migration 编排保留在 `code::schema` facade；repository facts、durable index task、repository-set/workspace 状态和 FTS/retrieval index 分属四个 schema owner，并各自挂载同级 contract UT。`search_backfill` owner 独占 symbol、reference、import、dependency、feature flag、call、route 与 chunk 的一次性 FTS document 物化、search metadata 同步，以及 signature 升级后的事务性 call-document 重建；其同级定向测试保护 legacy call language 继承和 metadata 幂等同步合同。
 Checkpointed code indexing 将 batch fact、checkpoint transition、dependency document 与 session scope 发布分别交给物理 `code::batch/{persistence,checkpoint,dependencies,session}/` owner，各自直接挂载 `mod_tests.rs`，batch 根只保留 `mod.rs` 与具名目录；`finalize/` 同样把 call target/edge、file metadata、imported/ordinary reference、phase、search document 与 symbol catalog 目录化并配对直属测试，跨 owner TypeScript 场景归 `finalize/tests`。其 `imports/{module_paths,specifier,symbol_targets}/` 把有界路径归一化、specifier 提取和符号匹配分别与直属 `mod_tests.rs` 配对，语言规则继续位于 `languages/`；共享 code-identity import resolution 只消费这些受界合同。
 
@@ -389,7 +393,8 @@ relay-knowledge query SQLite --freshness wait-until-fresh --format json
 relay-knowledge repo register /path/to/relay-knowledge --path src --format json
 relay-knowledge repo index relay-knowledge --ref main --format json
 relay-knowledge repo index-worker --task-id <task-id> --format json
-relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo update relay-knowledge --format json
+relay-knowledge repo update relay-knowledge --base <commit> --head <commit> --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge --remote http://127.0.0.1:8791 repo query relay-knowledge --query retry_policy --kind definition --freshness wait-until-fresh --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
@@ -487,14 +492,22 @@ SQLite `file_index` 把 metadata schema、事务性 root update、retirement、p
 ```bash
 RELAY_KNOWLEDGE_WATCHER_ENABLED=true
 RELAY_KNOWLEDGE_WATCHER_DEBOUNCE_MS=3000
+RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS=5000
 RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS=1024
 RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY=4096
 ```
 
 Watcher 根把 `config/`、`event_filter/`、`hash_cache/`、`task_seed/` 保留为直接
 测试的 owner；`engine/` 分离 handle、`notify` event loop、repository registration、
-任务投影与 diagnostics。事件仍经 debounce、内容哈希与路径过滤后生成有租约的
-`WorktreeOverlay` 任务；状态、事件计数与降级原因继续由 `service status` 暴露。
+任务投影与 diagnostics。源码事件继续经过 debounce、内容哈希与 path filter；
+`.git/HEAD`、refs、packed refs 和 HEAD log 事件只作为低延迟 hint。受界 periodic
+reconciliation 默认每 5 秒重新解析 checked-out `HEAD`，因此 linked worktree、漏报或
+合并的原生 watcher event 仍能恢复。HEAD 推进后，watcher 会把最近一次发布的 clean
+base 与已解析的 head commit/tree 固定到 durable Incremental task；已有 task lease
+保证每仓库最多一个 writer，启动和后续 tick 会重放 lag，而不会创建 unmanaged loop。
+`RELAY_KNOWLEDGE_WATCHER_ENABLED=false` 会同时关闭源码监听和 commit reconciliation。
+状态、事件/drop/queued-task 计数、commit reconciliation/queue/failure 计数与降级原因
+由 `service status --format json` 暴露。
 
 ### Semantic 与 Vector Backend
 
@@ -542,7 +555,7 @@ Agent-facing kind 选择复用现有产品 kind：`relay_code_query` 处理代�
 
 常见 agent 别名如 `dependency`、`configuration` 和 `models` 会归一到已有 `dependencies`、`relationships` 和 `design` kind，而不是新增重复 kind。
 
-MCP 不暴露 index refresh 或 repository indexing；仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`。
+MCP 不暴露 index refresh 或 repository indexing。受管理常驻服务启用 watcher 时，可由 commit reconciliation 自动发布 checked-out commit；否则仓库索引仍需通过 CLI/Web 主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`。
 
 MCP 服务器也会发布资源和提示：资源暴露服务状态、健康状况、索引状态和 Prometheus 文本指标；只有在 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` 时才发布全图摘要资源。
 

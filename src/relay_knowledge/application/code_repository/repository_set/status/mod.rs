@@ -4,7 +4,6 @@ use crate::{
     api::{ApiError, ApiMetadata, CodeRepositorySetStatusResponse, RequestContext},
     application::service::RelayKnowledgeService,
     domain::{CodeRepositorySelector, CodeRepositorySetMember, CodeRepositorySetStatus},
-    storage::CodeRepositorySetMemberSeed,
 };
 
 use super::{
@@ -61,31 +60,6 @@ pub(super) async fn refreshed_required_set_status(
     refresh_repository_set_freshness(&mut status);
 
     Ok((status, fact_version_replacements))
-}
-
-pub(super) async fn persist_fact_version_member_replacements(
-    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
-    set_alias: &str,
-    replacements: &[CodeRepositorySetMember],
-) -> Result<(), ApiError> {
-    for member in replacements {
-        store
-            .add_code_repository_set_member(CodeRepositorySetMemberSeed {
-                set_alias: set_alias.to_owned(),
-                repository_id: member.repository_id.clone(),
-                repository_alias: member.repository_alias.clone(),
-                ref_selector: member.ref_selector.clone(),
-                resolved_commit_sha: member.resolved_commit_sha.clone(),
-                source_scope: member.source_scope.clone(),
-                path_filters: member.path_filters.clone(),
-                language_filters: member.language_filters.clone(),
-                priority: member.priority,
-            })
-            .await
-            .map_err(storage_api_error)?;
-    }
-
-    Ok(())
 }
 
 async fn refresh_moving_member_freshness(

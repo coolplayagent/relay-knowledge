@@ -4,10 +4,10 @@ This ClawHub-compatible skill teaches LLM agents to operate `relay-knowledge`
 through the local CLI. It is for local knowledge graph ingestion, hybrid
 GraphRAG queries, code repository indexing, code graph search, multi-repository
 queries, software graph relationship queries, feature flag graph queries,
-impact analysis, setup diagnostics, installation checks, and upgrade checks.
-For large repositories, it tells agents to treat cold indexing and freshness
-refresh as durable background tasks so command-runner timeouts do not interrupt
-or obscure indexing progress.
+OKF Markdown neighborhoods, commit-driven impact/context loops, setup
+diagnostics, installation checks, and upgrade checks. For large repositories,
+it tells agents to treat cold and incremental indexing as durable single-writer
+tasks so command-runner timeouts do not interrupt or obscure progress.
 
 For code-structure questions such as function definitions, symbol locations,
 references, callers, callees, call graphs, and call chains, agents should use
@@ -27,6 +27,11 @@ For repository-wide software graph prompts, agents should use
 `repo software --kind relationships` when the user asks for graph
 relationships, dependency paths, architecture maps, or `代码图关系`.
 
+For YAML-frontmatter Markdown knowledge bundles, agents should use `repo graph`
+with an explicit focus file, bundle-root path, and immutable indexed ref. This
+returns the bounded OKF v0.2 concept/source neighborhood; it is distinct from
+the callers/callees code graph.
+
 For feature flag, config gate, environment-variable gate, settings gate, or
 guarded-code questions, agents should use `repo feature-flags`. Feature flags
 are not a `repo query --kind` value.
@@ -37,16 +42,47 @@ Kind values are command-local. Do not use `index refresh --kind` values
 `db`, `ci`, `runtime`, `wiki`, `monitoring`) as `repo query` or
 `repo software` kinds.
 
-For cold repository indexing in non-interactive sessions, agents should run
-`repo index`, then inspect `repo status <alias> --format json` because the
-command may return a task id or may time out after claiming a durable lease.
-Agents should let a managed service drain active tasks, or wait for lease
-recovery when a killed foreground attempt left a running task in a no-service
-session. Use the published `repo index-worker` command for bounded single-shot
-attempts when status shows a queued or retrying task id. The worker exposes
-machine-readable JSON and streaming JSON results for claimed tasks and for the
-no-task case; a timed-out worker attempt should be followed by status
-inspection rather than treated as an indexing failure.
+For cold or incremental repository indexing in non-interactive sessions,
+agents should run `repo index` or `repo update`, then inspect `repo status
+<alias> --format json` because either operation may return a task id or time out
+after claiming a durable lease. Agents should let a managed service drain
+active tasks; only a local/service-host client may use `repo index-worker` for
+bounded single-shot attempts when status shows queued/retrying work. Each local
+attempt also advances one bounded retention pass and returns
+`maintenance_active` plus optional `maintenance_error`; an error makes a false
+activity value inconclusive, so status remains the maintenance source of truth.
+
+The normal Git loop is `repo update <alias>`: head defaults to `HEAD` and base
+defaults to the last published clean commit, including unwrapping a prior
+worktree identity. Agents must wait until the exact resolved target is fresh,
+use a local completed response's `summary.base_resolved_commit_sha` and
+`summary.resolved_commit_sha` when present, or treat a queued task's pinned
+incremental base/head as authoritative, run `repo impact` on that immutable
+pair, then run `repo context --ref <resolved-head>` without reissuing update to
+obtain a summary.
+Markdown/spec/map changes also require
+`repo software --kind topics|relationships` and a focused `repo graph` read.
+With the managed watcher enabled, service-side Git ref reconciliation submits
+the same durable update automatically; CLI update remains recovery/manual
+ingress rather than an unmanaged polling loop.
+
+Successful publication prunes old graph scopes and derived indexes. It retains
+the active scope plus a rolling window containing the two latest successful
+scopes (the window normally includes the active scope), the latest incremental
+predecessor, the clean base of an active worktree overlay, unfinished-task
+bases/targets, and repository-set pins. Same-tree commit aliases use a bounded
+256-row window. Each maintenance transaction advances one scope-GC phase whose physical
+deletion is capped at 512 rows in aggregate across affected application tables;
+separate succeeded-audit, failure-class-audit, and alias quotas cap primary
+cleanup at 2,048 physical rows plus at most one terminal job row per pass. GC
+bounds live generations and lets SQLite reuse free pages; it
+does not promise immediate OS-visible file shrink, which requires a separate
+explicit bounded compaction. In partitioned storage, the control catalog route
+remains a counted slot throughout batched shard deletion and only the retention
+coordinator removes it immediately before final `scope_metadata`; agents must
+not delete or bypass that route to relieve capacity. Pruned refs cannot be incremental bases; agents must publish a
+new full snapshot. Non-Git directories stay on the separate
+`repo index --ref HEAD` flow and receive no Git commit events.
 
 Before registering, inspect existing completed scopes with
 `repo list --format json` and reuse a matching alias. Large-repository budgets

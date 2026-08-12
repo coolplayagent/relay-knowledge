@@ -28,6 +28,7 @@ pub struct SqliteGraphStore {
     pub(super) connection: Arc<Mutex<Connection>>,
     pub(super) read_pool: Option<Arc<ReadConnectionPool>>,
     pub(super) database_path: Option<PathBuf>,
+    pub(super) publication_authority_path: Option<PathBuf>,
     pub(super) maintenance: Arc<Mutex<SqliteMaintenanceState>>,
 }
 
@@ -51,6 +52,7 @@ impl SqliteGraphStore {
             connection: Arc::new(Mutex::new(connection)),
             read_pool: Some(Arc::new(read_pool)),
             database_path: Some(path),
+            publication_authority_path: None,
             maintenance: Arc::new(Mutex::new(SqliteMaintenanceState::default())),
         })
     }
@@ -65,8 +67,18 @@ impl SqliteGraphStore {
             connection: Arc::new(Mutex::new(connection)),
             read_pool: None,
             database_path: None,
+            publication_authority_path: None,
             maintenance: Arc::new(Mutex::new(SqliteMaintenanceState::default())),
         })
+    }
+
+    pub(in crate::storage) fn open_with_publication_authority(
+        path: impl AsRef<Path>,
+        authority_path: impl AsRef<Path>,
+    ) -> Result<Self, StorageError> {
+        let mut store = Self::open(path)?;
+        store.publication_authority_path = Some(authority_path.as_ref().to_path_buf());
+        Ok(store)
     }
 
     pub(in crate::storage) fn run<T, F>(&self, operation: F) -> StorageFuture<'_, T>
@@ -104,6 +116,35 @@ impl SqliteGraphStore {
         }
 
         self.run(operation)
+    }
+
+    /// Runs related SELECTs in one deferred SQLite snapshot.
+    pub(super) fn run_read_snapshot<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
+        self.run_read(move |connection| {
+            if !connection.is_autocommit() {
+                return Err(StorageError::InvalidInput(
+                    "sqlite read snapshot requires an idle connection".to_owned(),
+                ));
+            }
+            connection.execute_batch("BEGIN DEFERRED TRANSACTION")?;
+            match operation(connection) {
+                Ok(output) => {
+                    if let Err(error) = connection.execute_batch("COMMIT") {
+                        let _ = connection.execute_batch("ROLLBACK");
+                        return Err(StorageError::from(error));
+                    }
+                    Ok(output)
+                }
+                Err(error) => {
+                    let _ = connection.execute_batch("ROLLBACK");
+                    Err(error)
+                }
+            }
+        })
     }
 
     pub(super) fn run_read_until<T, F>(

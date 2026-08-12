@@ -7,6 +7,104 @@ use std::{
 };
 
 #[test]
+fn bounded_git_root_resolution_accepts_a_nested_repository_path() {
+    let repo = TestRepo::create("bounded-root");
+    repo.write("src/lib.rs", "pub fn nested_root() {}\n");
+
+    let resolved = resolve_git_root(&repo.root.join("src"))
+        .expect("bounded root resolution should find the repository");
+
+    assert_eq!(resolved, repo.root);
+}
+
+#[test]
+fn bounded_identity_resolution_returns_pinned_commit_and_tree_ids() {
+    let repo = TestRepo::create("bounded-identity");
+    repo.write("src/lib.rs", "pub fn identity() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let expected_commit = repo.git_text(["rev-parse", "HEAD"]);
+    let expected_tree = repo.git_text(["rev-parse", "HEAD^{tree}"]);
+
+    let commit = resolve_git_ref_bounded(&repo.root, "HEAD")
+        .expect("bounded ref resolution should return a commit");
+    let tree = resolve_git_tree_bounded(&repo.root, &commit)
+        .expect("bounded tree resolution should accept the pinned commit");
+
+    assert_eq!(commit, expected_commit);
+    assert_eq!(tree, expected_tree);
+}
+
+#[test]
+fn bounded_ref_resolution_peels_annotated_tags_to_commits() {
+    let repo = TestRepo::create("bounded-annotated-tag");
+    repo.write("src/lib.rs", "pub fn tagged() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    repo.git(["tag", "-a", "v1", "-m", "release"]);
+    let expected_commit = repo.git_text(["rev-parse", "HEAD"]);
+    let tag_object = repo.git_text(["rev-parse", "v1"]);
+
+    let resolved = resolve_git_ref_bounded(&repo.root, "v1")
+        .expect("annotated tag should resolve to its immutable commit");
+
+    assert_eq!(resolved, expected_commit);
+    assert_ne!(resolved, tag_object);
+}
+
+#[test]
+fn bounded_tree_resolution_requires_a_pinned_full_object_id() {
+    let repo = TestRepo::create("bounded-tree-pinned");
+
+    let error = resolve_git_tree_bounded(&repo.root, "HEAD")
+        .expect_err("a moving ref must not be accepted as a pinned commit");
+
+    assert!(error.to_string().contains("full SHA-1 or SHA-256"));
+}
+
+#[test]
+fn bounded_tree_resolution_rejects_a_pinned_non_commit_object() {
+    let repo = TestRepo::create("bounded-tree-commit-type");
+    repo.write("src/lib.rs", "pub fn tree_object() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let tree = repo.git_text(["rev-parse", "HEAD^{tree}"]);
+
+    let error = resolve_git_tree_bounded(&repo.root, &tree)
+        .expect_err("a tree object ID must not be accepted as a commit ID");
+
+    assert!(matches!(error, CodeIndexError::Git { .. }));
+}
+
+#[test]
+fn bounded_worktree_observation_is_stable_and_changes_with_file_bytes() {
+    let repo = TestRepo::create("bounded-worktree-observation");
+    repo.write("src/lib.rs", "pub fn clean() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    assert_eq!(
+        repository_worktree_observation_bounded(&repo.root)
+            .expect("clean observation should succeed"),
+        None
+    );
+    repo.write("src/lib.rs", "pub fn dirty() {}\n");
+
+    let first = repository_worktree_observation_bounded(&repo.root)
+        .expect("dirty observation should succeed")
+        .expect("dirty worktree should have an identity");
+    let unchanged = repository_worktree_observation_bounded(&repo.root)
+        .expect("repeat observation should succeed")
+        .expect("dirty worktree should remain observable");
+    repo.write("src/lib.rs", "pub fn changed_again() {}\n");
+    let changed = repository_worktree_observation_bounded(&repo.root)
+        .expect("changed observation should succeed")
+        .expect("changed worktree should have an identity");
+
+    assert_eq!(first, unchanged);
+    assert_ne!(first, changed);
+}
+
+#[test]
 fn git_dir_bytes_reads_committed_blob_without_worktree_context() {
     let repo = TestRepo::create("git-dir-read");
     repo.write("src/alpha.rs", "pub fn alpha() {}\n");

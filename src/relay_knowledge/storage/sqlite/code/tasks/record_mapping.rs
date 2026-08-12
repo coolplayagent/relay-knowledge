@@ -9,7 +9,7 @@ use super::super::status::parse_json_list;
 const TASK_RECORD_COLUMNS: &str = "
     task_id, repository_id, alias, ref_selector, resolved_commit_sha, tree_hash,
     source_scope, path_filters_json, language_filters_json, mode_json, state,
-    lease_owner, lease_expires_at_ms, attempt_count, next_retry_at_ms,
+    lease_owner, lease_expires_at_ms, attempt_count, publication_generation, next_retry_at_ms,
     input_fingerprint, resource_budget_json, payload_json, last_error_kind,
     last_error_message, created_at_ms, updated_at_ms
 ";
@@ -34,9 +34,9 @@ pub(super) fn task_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexTaskReco
         rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(error))
     })?;
     let resource_budget =
-        serde_json::from_str(row.get::<_, String>(16)?.as_str()).map_err(|error| {
+        serde_json::from_str(row.get::<_, String>(17)?.as_str()).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                16,
+                17,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
@@ -56,14 +56,15 @@ pub(super) fn task_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexTaskReco
         lease_owner: row.get(11)?,
         lease_expires_at_ms: row.get(12)?,
         attempt_count: row.get(13)?,
-        next_retry_at_ms: row.get(14)?,
-        input_fingerprint: row.get(15)?,
+        publication_generation: row.get(14)?,
+        next_retry_at_ms: row.get(15)?,
+        input_fingerprint: row.get(16)?,
         resource_budget,
-        payload_json: row.get(17)?,
-        last_error_kind: row.get(18)?,
-        last_error_message: row.get(19)?,
-        created_at_ms: row.get(20)?,
-        updated_at_ms: row.get(21)?,
+        payload_json: row.get(18)?,
+        last_error_kind: row.get(19)?,
+        last_error_message: row.get(20)?,
+        created_at_ms: row.get(21)?,
+        updated_at_ms: row.get(22)?,
     })
 }
 

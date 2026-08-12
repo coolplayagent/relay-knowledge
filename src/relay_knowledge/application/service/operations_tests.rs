@@ -13,13 +13,14 @@ use crate::{
     },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        CodeIndexMode, CodeIndexResourceBudget, CodeRepositoryRegistration, EvidenceModality,
-        ProposalState, ServiceManagerAction, ServiceOperatorState, WorkerKind,
+        CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSession, CodeParseStatus,
+        CodeRepositoryRegistration, EvidenceModality, ProposalState, RepositoryCodeFileRecord,
+        ServiceManagerAction, ServiceOperatorState, WorkerKind,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore, KnowledgeStore,
-        SqliteGraphStore,
+        CodeIndexTaskClaimRequest, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore,
+        KnowledgeStore, SqliteGraphStore,
     },
 };
 
@@ -49,6 +50,215 @@ async fn service_status_reports_current_graph_version() {
 
     assert_eq!(response.metadata.graph_version, 1);
     assert_eq!(response.metadata.trace_id, "trace-service");
+    assert!(response.watcher.enabled);
+    assert_eq!(response.watcher.commit_reconcile_interval_ms, 5000);
+}
+
+#[tokio::test]
+async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_active_publication() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let queued = store
+        .queue_code_index_task(code_index_seed("partial", "scope-partial", 10))
+        .await
+        .expect("failed full task should queue");
+    let claimed = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: "worker-partial".to_owned(),
+            lease_duration_ms: 1_000,
+            max_attempts: 1,
+            now_ms: 20,
+        })
+        .await
+        .expect("failed full task should claim")
+        .expect("failed full task should exist");
+    store
+        .begin_code_index_session(CodeIndexSession {
+            repository_id: "repo".to_owned(),
+            source_scope: "scope-partial".to_owned(),
+            base_resolved_commit_sha: None,
+            resolved_commit_sha: "commit-scope-partial".to_owned(),
+            tree_hash: "tree-scope-partial".to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            full_replace: true,
+            total_path_count: 2,
+            changed_path_count: 2,
+            skipped_unchanged_count: 0,
+            deleted_paths: Vec::new(),
+            tombstones: Vec::new(),
+            workspaces: Vec::new(),
+            resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024)
+                .expect("budget should validate"),
+        })
+        .await
+        .expect("failed full checkpoint should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: "scope-partial".to_owned(),
+            batch_index: 0,
+            parsed_byte_count: 1,
+            files: vec![RepositoryCodeFileRecord {
+                repository_id: "repo".to_owned(),
+                source_scope: "scope-partial".to_owned(),
+                file_id: "file".to_owned(),
+                path: "src/lib.rs".to_owned(),
+                language_id: "rust".to_owned(),
+                blob_hash: "blob".to_owned(),
+                byte_len: 1,
+                line_count: 1,
+                parse_status: CodeParseStatus::Parsed,
+                is_generated: false,
+                degraded_reason: None,
+            }],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: Vec::new(),
+            dependencies: Vec::new(),
+            feature_flags: Vec::new(),
+            routes: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("partial fact batch should persist");
+    store
+        .fail_code_index_task(CodeIndexTaskFailure {
+            task_id: claimed.task_id.clone(),
+            lease_owner: claimed
+                .lease_owner
+                .expect("claimed task should own a lease"),
+            attempt_count: claimed.attempt_count,
+            error_kind: "fixture".to_owned(),
+            error_message: "stopped".to_owned(),
+            retry_backoff_ms: 1,
+            max_attempts: 1,
+            now_ms: 30,
+        })
+        .await
+        .expect("failed full task should become dead-letter");
+    let service = RelayKnowledgeService::with_store(
+        runtime().await,
+        store.clone() as Arc<dyn KnowledgeStore>,
+    );
+
+    let mut made_progress = false;
+    for _ in 0..80 {
+        let pending = service
+            .run_code_scope_retention_once()
+            .await
+            .expect("idle retention pass should run");
+        made_progress |= pending;
+        if !pending {
+            break;
+        }
+    }
+
+    assert!(made_progress);
+    assert!(
+        store
+            .code_index_checkpoint("scope-partial".to_owned())
+            .await
+            .expect("partial checkpoint should query")
+            .is_none()
+    );
+    assert!(
+        store
+            .code_index_task(claimed.task_id)
+            .await
+            .expect("partial task should query")
+            .is_none()
+    );
+    assert!(
+        store
+            .code_file_fingerprints_for_scope("scope-partial".to_owned())
+            .await
+            .expect("partial facts should query")
+            .is_empty()
+    );
+    let retention = store
+        .code_scope_retention("repo".to_owned())
+        .await
+        .expect("retention status should query");
+    assert!(!retention.maintenance_pending);
+    assert!(retention.retiring_jobs.is_empty());
+}
+
+#[tokio::test]
+async fn code_index_task_local_maintenance_reports_errors_without_starving_healthy_work() {
+    let database_root = unique_temp_dir("code-index-maintenance-errors");
+    let database_path = database_root.join("knowledge.db");
+    let store = Arc::new(SqliteGraphStore::open(&database_path).expect("store should open"));
+    for (repository_id, alias) in [
+        ("repo-pending", "a-pending"),
+        ("repo-idle", "m-idle"),
+        ("repo-broken", "z-broken"),
+    ] {
+        store
+            .upsert_code_repository(
+                CodeRepositoryRegistration::new(
+                    repository_id,
+                    alias,
+                    format!("/tmp/{repository_id}"),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .expect("registration should validate"),
+            )
+            .await
+            .expect("repository should persist");
+    }
+    let mut seed = code_index_seed("broken-retention", "scope-broken", 10);
+    seed.repository_id = "repo-broken".to_owned();
+    seed.alias = "z-broken".to_owned();
+    let queued = store
+        .queue_code_index_task(seed)
+        .await
+        .expect("broken repository task should queue before corruption");
+    let fixture_connection =
+        rusqlite::Connection::open(database_path).expect("fixture database connection should open");
+    fixture_connection
+        .execute(
+            "INSERT INTO code_repository_scopes (
+                 source_scope, repository_id, resolved_commit_sha, tree_hash,
+                 path_filters_json, language_filters_json, indexed_file_count,
+                 symbol_count, reference_count, chunk_count, stale, degraded_reason
+             ) VALUES ('scope-pending', 'repo-pending', 'commit-pending', 'tree-pending',
+                       '[]', '[]', 0, 0, 0, 0, 0, NULL)",
+            [],
+        )
+        .expect("healthy pending scope should insert");
+    fixture_connection
+        .execute(
+            "UPDATE code_repository_index_tasks SET mode_json = '{' WHERE task_id = ?1",
+            [&queued.task_id],
+        )
+        .expect("invalid persisted mode fixture should update");
+    drop(fixture_connection);
+    let service = RelayKnowledgeService::with_store(
+        runtime().await,
+        store.clone() as Arc<dyn KnowledgeStore>,
+    );
+
+    let error = service
+        .run_code_scope_retention_once()
+        .await
+        .expect_err("idle and healthy repositories must not mask a maintenance error");
+
+    assert!(error.message.contains("invalid mode"));
+    let pending = store
+        .code_scope_retention("repo-pending".to_owned())
+        .await
+        .expect("healthy repository retention should remain queryable");
+    assert_eq!(pending.retiring_job_count, 1);
 }
 
 #[tokio::test]

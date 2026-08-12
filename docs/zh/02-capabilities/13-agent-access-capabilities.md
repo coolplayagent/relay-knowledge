@@ -24,7 +24,7 @@ MCP tools 暴露 retrieve context、inspect graph、health、service status、in
 
 ## 命令/API 入口
 
-MCP 不暴露任意 repository indexing；仓库索引需要用户主动运行 `repo index` 或 `repo update`。`relay_codegraph_context` 复用 `relay_code_query` 的 scope 授权、limit 授权、freshness 解析和 audit 行为，但只报告 stale、pending 或 degraded 状态，不启动索引。本地 ACP session adapter 复用相同检索 contract；带 repository 的 prompt 调用共享 codegraph context service，并返回支持 progress、cancellation、QoS admission 和 audit 的 context artifact。
+MCP 不暴露任意 repository indexing，也不会从 tool request 启动索引。用户可运行 `repo index` 或 `repo update`；启用的受管理 watcher 可独立通过 durable reconciliation 发布 checked-out commit。`relay_codegraph_context` 复用 `relay_code_query` 的 scope 授权、limit 授权、freshness 解析和 audit 行为，但只报告 stale、pending 或 degraded 状态，不启动索引。本地 ACP session adapter 复用相同检索 contract；带 repository 的 prompt 调用共享 codegraph context service，并返回支持 progress、cancellation、QoS admission 和 audit 的 context artifact。
 
 ## 降级与诊断
 

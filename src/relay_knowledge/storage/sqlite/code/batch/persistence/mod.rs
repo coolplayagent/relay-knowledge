@@ -23,16 +23,28 @@ pub(in super::super) fn apply_batch(
     connection: &mut Connection,
     batch: CodeIndexBatch,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
+    apply_batch_with_fence(connection, batch, None)
+}
+
+pub(in super::super) fn apply_batch_with_fence(
+    connection: &mut Connection,
+    batch: CodeIndexBatch,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<CodeIndexCheckpoint, StorageError> {
+    if let Some(fence) = fence {
+        fence.validate_repository(&batch.repository_id)?;
+    }
     super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        apply_batch_once(connection, &batch)
+        apply_batch_once(connection, &batch, fence)
     })
 }
 
 fn apply_batch_once(
     connection: &mut Connection,
     batch: &CodeIndexBatch,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
-    prepare_batch_staging(connection, batch)?;
+    prepare_batch_staging(connection, batch, fence)?;
     let transaction = connection.transaction()?;
     let batch_is_new = checkpoint_batch_is_new(&transaction, batch)?;
     delete_batch_path_indexes_if_needed(&transaction, batch, batch_is_new)?;
@@ -53,6 +65,10 @@ fn apply_batch_once(
     insert_diagnostics(&transaction, batch)?;
     update_checkpoint_after_batch(&transaction, batch, batch_is_new)?;
     mark_batch_staging_published(&transaction, batch)?;
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &batch.source_scope)?;
+        fence.validate(&transaction)?;
+    }
     transaction.commit()?;
 
     checkpoint::load(connection, &batch.source_scope)
@@ -63,6 +79,7 @@ fn apply_batch_once(
 fn prepare_batch_staging(
     connection: &mut Connection,
     batch: &CodeIndexBatch,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<(), StorageError> {
     let fact_row_count = batch.files.len()
         + batch.symbols.len()
@@ -95,6 +112,10 @@ fn prepare_batch_staging(
             now,
         ],
     )?;
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &batch.source_scope)?;
+        fence.validate(&transaction)?;
+    }
     transaction.commit()?;
     Ok(())
 }
@@ -379,6 +400,7 @@ fn should_materialize_intermediate_edge_search(
             FROM code_repository_scopes
             WHERE source_scope = ?1
               AND repository_id = ?2
+              AND retiring = 0
             ",
             params![batch.source_scope, batch.repository_id],
             |_| Ok(()),

@@ -2,14 +2,15 @@
 
 use crate::domain::{
     CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
-    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
-    CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeRepositoryCrossEdge,
-    CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
-    CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
-    CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
-    CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
-    CodeSymbolGenerationCounts, CodebaseViewRequest, CodebaseViewSnapshot,
-    IndexedRepositoryDocument, SoftwareGlobalProjection, SoftwareGlobalRequest,
+    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexPublicationFence, CodeIndexSession,
+    CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskQueueStatus, CodeIndexTaskRecord,
+    CodeRepositoryCrossEdge, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
+    CodeRepositoryReport, CodeRepositorySet, CodeRepositorySetMember,
+    CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus,
+    CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
+    CodeScopeRetentionSummary, CodeSymbolGenerationCounts, CodebaseViewRequest,
+    CodebaseViewSnapshot, IndexedRepositoryDocument, SoftwareGlobalProjection,
+    SoftwareGlobalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -163,6 +164,21 @@ pub struct CodeRepositorySetRefreshTaskClaimRequest {
     pub lease_duration_ms: u64,
     pub max_attempts: u32,
     pub now_ms: u64,
+}
+
+/// Attempt-scoped authority required to publish a repository-set overlay.
+///
+/// Storage implementations must validate every field against a live running
+/// task in the same transaction that replaces the overlay rows. A worker that
+/// loses its lease or is superseded by a later attempt therefore cannot publish
+/// a stale DELETE/INSERT sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepositorySetRefreshPublication {
+    pub task_id: String,
+    pub set_id: String,
+    pub lease_owner: String,
+    pub attempt_count: u32,
+    pub member_replacements: Vec<CodeRepositorySetMemberSeed>,
 }
 
 /// Completion report guarded by task lease and attempt token.
@@ -415,12 +431,39 @@ pub trait CodeRepositoryStore: Send + Sync {
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary>;
 
+    fn apply_code_index_snapshot_with_fence(
+        &self,
+        snapshot: CodeIndexSnapshot,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexSummary> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped snapshot publication for task '{}' scope '{}' is unavailable",
+                fence.task_id, snapshot.source_scope
+            )))
+        })
+    }
+
     fn clear_code_workspace_state(
         &self,
         _repository_id: String,
         _source_scope: String,
     ) -> StorageFuture<'_, ()> {
         Box::pin(async { Ok(()) })
+    }
+
+    fn clear_code_workspace_state_with_fence(
+        &self,
+        repository_id: String,
+        source_scope: String,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, ()> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped workspace publication for task '{}' repository '{}' scope '{}' is unavailable",
+                fence.task_id, repository_id, source_scope
+            )))
+        })
     }
 
     fn begin_code_index_session(
@@ -431,6 +474,19 @@ pub trait CodeRepositoryStore: Send + Sync {
             Err(StorageError::InvalidInput(format!(
                 "checkpointed code index sessions for scope '{}' are unavailable",
                 session.source_scope
+            )))
+        })
+    }
+
+    fn begin_code_index_session_with_fence(
+        &self,
+        session: CodeIndexSession,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped session startup for task '{}' scope '{}' is unavailable",
+                fence.task_id, session.source_scope
             )))
         })
     }
@@ -447,6 +503,19 @@ pub trait CodeRepositoryStore: Send + Sync {
         })
     }
 
+    fn apply_code_index_batch_with_fence(
+        &self,
+        batch: CodeIndexBatch,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped batch publication for task '{}' scope '{}' is unavailable",
+                fence.task_id, batch.source_scope
+            )))
+        })
+    }
+
     fn finalize_code_index_session(
         &self,
         session: CodeIndexSession,
@@ -455,6 +524,19 @@ pub trait CodeRepositoryStore: Send + Sync {
             Err(StorageError::InvalidInput(format!(
                 "checkpointed code index finalization for scope '{}' is unavailable",
                 session.source_scope
+            )))
+        })
+    }
+
+    fn finalize_code_index_session_with_fence(
+        &self,
+        session: CodeIndexSession,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexSummary> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped session finalization for task '{}' scope '{}' is unavailable",
+                fence.task_id, session.source_scope
             )))
         })
     }
@@ -569,6 +651,19 @@ pub trait CodeRepositoryStore: Send + Sync {
         })
     }
 
+    fn refresh_software_global_projection_with_fence(
+        &self,
+        source_scope: String,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped software projection for task '{}' scope '{}' is unavailable",
+                fence.task_id, source_scope
+            )))
+        })
+    }
+
     fn software_global_projection(
         &self,
         request: SoftwareGlobalRequest,
@@ -644,7 +739,7 @@ pub trait CodeRepositoryStore: Send + Sync {
     fn refresh_code_repository_set_overlay(
         &self,
         _set_alias: String,
-        _now_ms: u64,
+        _publication: CodeRepositorySetRefreshPublication,
     ) -> StorageFuture<'_, CodeRepositorySetRefreshSummary> {
         Box::pin(async {
             Err(StorageError::InvalidInput(

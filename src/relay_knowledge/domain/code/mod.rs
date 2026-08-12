@@ -36,7 +36,8 @@ pub use repository::{
     CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
     CodeRetrievalLayer, CodeRetrievalRequest, CodeRouteRecord, CodeSymbolGenerationCounts,
     RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, code_snapshot_expected_scope_id,
+    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    clean_git_commit_from_snapshot_identity, code_snapshot_expected_scope_id,
     code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
 };
 pub use repository_graph::{
@@ -47,9 +48,10 @@ pub use repository_graph::{
     project_okf_neighborhood,
 };
 pub use repository_index::{
-    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexResourceBudget,
-    CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskQueueStatus,
-    CodeIndexTaskRecord, CodeIndexTaskState, CodeScopeRetentionSummary,
+    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexPublicationFence,
+    CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
+    CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeIndexTaskState, CodeScopeRetentionSummary,
+    CodeScopeRetirementJobStatus,
 };
 pub use repository_set::{
     CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetAddMemberRequest,

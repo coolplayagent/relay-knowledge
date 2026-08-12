@@ -25,9 +25,9 @@
 
 ## 4. 控制面 API Surface
 
-服务化部署的控制面 API 覆盖 runtime/status/health/doctor、service manager plan、operator pause/resume/status、worker task/lease/dead-letter/checkpoint、storage topology/shard catalog diagnostics、repository register/index/status/report、repository set refresh、audit、authorization identity、QoS admission 和 overload decision。
+服务化部署的控制面 API 覆盖 runtime/status/health/doctor、service manager plan、operator pause/resume/status、worker task/lease/dead-letter/checkpoint、storage topology/shard catalog diagnostics、repository register/index/incremental update/status/report、repository set refresh、audit、authorization identity、QoS admission 和 overload decision。
 
-新增控制面能力必须先定义共享 `api` request/response 类型和 application service 方法，再映射到 CLI、Web、MCP 或 HTTP route。现有同源 Web 继续使用 `/api/web/operations/execute`；外部控制面 HTTP API 使用 `/api/v1/control/*` 版本化命名。代码仓库只读 API 使用 `/api/v1/code/repositories/{alias}/*` 版本化路由，其中 `/views` 返回从图谱派生的代码库理解视图。当前 preview 开放只读 `status`、`health`、`service/status`、`storage/topology` 和代码仓库 route，并保持 CLI JSON、Web 和 MCP tool 语义兼容。
+新增控制面能力必须先定义共享 `api` request/response 类型和 application service 方法，再映射到 CLI、Web、MCP 或 HTTP route。现有同源 Web 继续使用 `/api/web/operations/execute`；外部控制面 HTTP API 使用 `/api/v1/control/*` 版本化命名。代码仓库 API 使用 `/api/v1/code/repositories/{alias}/*` 版本化路由，包括写入口 `/index`、`/update`，以及返回图谱派生代码库理解视图的 `/views`。update request 携带可选 `base_ref` 和 `head_ref`，始终返回已有 durable task/status/checkpoint contract，不能同步绕过 worker queue。当前 preview 保持 CLI JSON、Web 和 MCP tool 语义兼容。
 
 ## 5. 错误模型
 

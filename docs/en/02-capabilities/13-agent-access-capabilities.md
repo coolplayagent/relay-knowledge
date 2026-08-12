@@ -24,7 +24,7 @@ MCP tools expose retrieve context, inspect graph, health, service status, index 
 
 ## Command/API Entry Points
 
-MCP does not expose arbitrary repository indexing; users explicitly run `repo index` or `repo update`. `relay_codegraph_context` shares `relay_code_query` scope authorization, limit authorization, freshness parsing, and audit behavior, but only reports stale, pending, or degraded state instead of starting indexing. The local ACP session adapter reuses the same retrieval contract; repository-scoped prompts call the shared codegraph context service and return context artifacts with progress, cancellation, QoS admission, and audit.
+MCP does not expose arbitrary repository indexing and never starts it from a tool request. Users can run `repo index` or `repo update`; an enabled managed watcher can independently publish checked-out commits through durable reconciliation. `relay_codegraph_context` shares `relay_code_query` scope authorization, limit authorization, freshness parsing, and audit behavior, but only reports stale, pending, or degraded state instead of starting indexing. The local ACP session adapter reuses the same retrieval contract; repository-scoped prompts call the shared codegraph context service and return context artifacts with progress, cancellation, QoS admission, and audit.
 
 ## Degradation and Diagnostics
 

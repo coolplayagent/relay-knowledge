@@ -1,6 +1,6 @@
 //! Owns lease-guarded code-index task completion and failure transitions.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{
     domain::{CodeIndexTaskRecord, CodeIndexTaskState},
@@ -34,7 +34,8 @@ pub(in crate::storage::sqlite::code) fn complete_task(
         ",
     );
     let completed = super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        connection
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let completed = transaction
             .query_row(
                 &sql,
                 params![
@@ -46,7 +47,16 @@ pub(in crate::storage::sqlite::code) fn complete_task(
                 task_from_row,
             )
             .optional()
-            .map_err(StorageError::from)
+            .map_err(StorageError::from)?;
+        if let Some(task) = &completed {
+            super::retention::prune_finished_task_history(
+                &transaction,
+                &task.repository_id,
+                Some(&task.task_id),
+            )?;
+        }
+        transaction.commit()?;
+        Ok(completed)
     })?;
 
     completed.ok_or_else(|| inactive_lease_error(&request.task_id))
@@ -85,7 +95,8 @@ pub(in crate::storage::sqlite::code) fn fail_task(
         ",
     );
     let failed = super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        connection
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let failed = transaction
             .query_row(
                 &sql,
                 params![
@@ -101,7 +112,16 @@ pub(in crate::storage::sqlite::code) fn fail_task(
                 task_from_row,
             )
             .optional()
-            .map_err(StorageError::from)
+            .map_err(StorageError::from)?;
+        if let Some(task) = &failed {
+            super::retention::prune_finished_task_history(
+                &transaction,
+                &task.repository_id,
+                Some(&task.task_id),
+            )?;
+        }
+        transaction.commit()?;
+        Ok(failed)
     })?;
 
     failed.ok_or_else(|| inactive_lease_error(&request.task_id))

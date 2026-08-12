@@ -133,6 +133,8 @@ fn run_worker() {
     let idle_worker_value = json_value(&idle_worker);
     assert_eq!(idle_worker_value["claimed"], false);
     assert!(idle_worker_value["task"].is_null());
+    assert_eq!(idle_worker_value["maintenance_active"], false);
+    assert!(idle_worker_value.get("maintenance_error").is_none());
     let idle_worker_stream = run_repo(
         &service,
         RepoCommand::IndexWorker { task_id: None },
@@ -150,6 +152,12 @@ fn run_worker() {
     assert_eq!(stream_events[1]["event"], "item");
     assert_eq!(stream_events[1]["payload"]["claimed"], false);
     assert!(stream_events[1]["payload"]["task"].is_null());
+    assert_eq!(stream_events[1]["payload"]["maintenance_active"], false);
+    assert!(
+        stream_events[1]["payload"]
+            .get("maintenance_error")
+            .is_none()
+    );
     assert_eq!(stream_events[2]["event"], "completed");
 
     let definitions = run_repo(
@@ -221,8 +229,8 @@ pub fn retry_policy_v2() -> u32 {
         &service,
         RepoCommand::Update {
             alias: "fixture".to_owned(),
-            base_ref: base_ref.clone(),
-            head_ref: head_ref.clone(),
+            base_ref: Some(base_ref.clone()),
+            head_ref: Some(head_ref.clone()),
         },
         context("update"),
         OutputFormat::Text,
@@ -235,8 +243,8 @@ pub fn retry_policy_v2() -> u32 {
         &service,
         RepoCommand::Impact {
             alias: "fixture".to_owned(),
-            base_ref,
-            head_ref,
+            base_ref: base_ref.clone(),
+            head_ref: head_ref.clone(),
             limit: 10,
         },
         context("impact"),
@@ -248,6 +256,54 @@ pub fn retry_policy_v2() -> u32 {
         json_value(&impact)["path_groups"]["in_scope_changed_paths"][0],
         "src/lib.rs"
     );
+
+    repo.write("src/lib.rs", "pub fn retry_policy_v3() -> u32 { 7 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "third policy"]);
+    let third_head = repo.git_text(["rev-parse", "HEAD"]);
+    let automatic_update = run_repo(
+        &service,
+        RepoCommand::Update {
+            alias: "fixture".to_owned(),
+            base_ref: None,
+            head_ref: None,
+        },
+        context("automatic-update"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("automatic refs should update");
+    let automatic_update = json_value(&automatic_update);
+    assert_eq!(
+        automatic_update["task"]["mode"]["incremental"]["base_ref"],
+        head_ref
+    );
+    assert_eq!(automatic_update["task"]["resolved_commit_sha"], third_head);
+    assert_eq!(
+        automatic_update["summary"]["base_resolved_commit_sha"],
+        head_ref
+    );
+    assert_eq!(
+        automatic_update["summary"]["resolved_commit_sha"],
+        third_head
+    );
+    assert_eq!(
+        automatic_update["status"]["last_indexed_commit"],
+        third_head
+    );
+
+    let maintenance_worker = run_repo(
+        &service,
+        RepoCommand::IndexWorker { task_id: None },
+        context("index-worker-retention"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("idle index worker should advance bounded scope maintenance");
+    let maintenance_worker = json_value(&maintenance_worker);
+    assert_eq!(maintenance_worker["claimed"], false);
+    assert_eq!(maintenance_worker["maintenance_active"], true);
+    assert!(maintenance_worker.get("maintenance_error").is_none());
 
     let status = run_repo(
         &service,
@@ -277,8 +333,16 @@ pub fn retry_policy_v2() -> u32 {
         removed_value["removed_status"]["repository_id"]
     );
     assert_eq!(removed_value["removed_status"]["alias"], "fixture");
-    assert_eq!(removed_value["summary"]["removed_scope_count"], 2);
-    assert_eq!(removed_value["summary"]["removed_index_task_count"], 1);
+    assert!(
+        removed_value["summary"]["removed_scope_count"]
+            .as_u64()
+            .is_some_and(|count| count >= 2)
+    );
+    assert!(
+        removed_value["summary"]["removed_index_task_count"]
+            .as_u64()
+            .is_some_and(|count| count >= 3)
+    );
     assert!(
         removed_value["summary"]["aliases_removed"]
             .as_array()

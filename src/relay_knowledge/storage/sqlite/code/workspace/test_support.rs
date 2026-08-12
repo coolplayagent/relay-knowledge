@@ -22,7 +22,8 @@ pub(super) fn workspace_schema_connection() -> Connection {
             CREATE TABLE code_repository_scopes (
                 source_scope TEXT PRIMARY KEY, repository_id TEXT NOT NULL,
                 resolved_commit_sha TEXT NOT NULL, tree_hash TEXT NOT NULL,
-                path_filters_json TEXT NOT NULL, language_filters_json TEXT NOT NULL
+                path_filters_json TEXT NOT NULL, language_filters_json TEXT NOT NULL,
+                retiring INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE code_repository_files (
                 repository_id TEXT NOT NULL, source_scope TEXT NOT NULL,

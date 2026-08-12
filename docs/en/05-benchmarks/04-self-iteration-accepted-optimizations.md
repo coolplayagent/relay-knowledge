@@ -4,6 +4,12 @@
 
 This page is the compact English companion for the self-iteration optimization log. The Chinese primary log keeps the full rolling record and archives old detailed entries before they exceed the repository file-length cap.
 
+## Issue #354: Commit-Driven Knowledge Loop
+
+- Architecture: manual `repo update` and managed checked-out-HEAD reconciliation now resolve immutable base/head/tree inputs and enter the durable code-index queue. Native Git ref notifications are latency hints; a bounded five-second reconciliation backstop covers linked worktrees, missed events, and restarts. Stable per-ref fingerprints coalesce repeated hints, and existing attempt-scoped leases preserve one active writer per repository.
+- Resource and storage guardrails: a delta admits at most 512 changed paths, while task admission permits 32 unfinished tasks per repository and 256 globally. Publication retains the union of active and a rolling window of the two latest successes (normally overlapping), plus the latest incremental predecessor, active-worktree clean-base, unfinished-task, and repository-set pins. It atomically retires one old scope, then durable GC advances one scope-GC phase whose physical deletion is capped at 512 rows in aggregate across the affected code/search/software application tables per maintenance transaction. Finished task history is bounded to 128 success and 64 failure-class rows per repository.
+- Regression evidence: existing 1024-file fast and 2048-file full performance fixtures continue to execute the real `repo update` path and enforce bounded blob-read/parse counts. Focused watcher integration tests cover commit task queueing without an explicit update call, repeat-hint coalescing, and reconciliation failure diagnostics. This orchestration change does not claim a new wall-time improvement, generic Knowledge Graph publication, or semantic/vector generation parity; those require separate measured evidence.
+
 ## Issue #168: Large-Repository Register-To-Index Throughput
 
 - Algorithm and architecture: the default full-code-index batch now covers 512 files while retaining the 16 MiB blob cap and raising the bounded row cap to 150k. Checkpointed SQLite batch apply skips the empty-scope path-index existence probe for the first new batch, while later batches still keep collision cleanup and replay idempotency.

@@ -116,6 +116,11 @@ fn repository_set_refresh_task_states_have_stable_wire_values() {
             "dead_letter",
             false,
         ),
+        (
+            CodeRepositorySetRefreshTaskState::Cancelled,
+            "cancelled",
+            false,
+        ),
     ] {
         assert_eq!(state.as_str(), wire);
         assert_eq!(

@@ -46,6 +46,19 @@ fn claim_task_once(
                   AND candidate.state IN ('queued', 'retrying')
                   AND NOT EXISTS (
                       SELECT 1
+                      FROM code_repository_index_tasks predecessor
+                      WHERE predecessor.repository_id = candidate.repository_id
+                        AND predecessor.state IN ('queued', 'running', 'retrying')
+                        AND (
+                            predecessor.created_at_ms < candidate.created_at_ms
+                            OR (
+                                predecessor.created_at_ms = candidate.created_at_ms
+                                AND predecessor.task_id < candidate.task_id
+                            )
+                        )
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
                       FROM code_repository_index_tasks live
                       WHERE live.repository_id = candidate.repository_id
                         AND live.state = 'running'
@@ -65,6 +78,19 @@ fn claim_task_once(
                 WHERE candidate.next_retry_at_ms <= ?1
                   AND candidate.attempt_count < ?2
                   AND candidate.state IN ('queued', 'retrying')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM code_repository_index_tasks predecessor
+                      WHERE predecessor.repository_id = candidate.repository_id
+                        AND predecessor.state IN ('queued', 'running', 'retrying')
+                        AND (
+                            predecessor.created_at_ms < candidate.created_at_ms
+                            OR (
+                                predecessor.created_at_ms = candidate.created_at_ms
+                                AND predecessor.task_id < candidate.task_id
+                            )
+                        )
+                  )
                   AND NOT EXISTS (
                       SELECT 1
                       FROM code_repository_index_tasks live
@@ -121,6 +147,38 @@ fn claim_task_once(
         transaction.commit()?;
         return Ok(None);
     }
+    let (repository_id, attempt_count) = transaction.query_row(
+        "SELECT repository_id, attempt_count FROM code_repository_index_tasks WHERE task_id = ?1",
+        params![&task_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)),
+    )?;
+    let generation = transaction.query_row(
+        "
+        INSERT INTO code_repository_publication_fences (
+            repository_id, generation, task_id, attempt_count, lease_owner, updated_at_ms
+        )
+        VALUES (?1, 1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(repository_id) DO UPDATE SET
+            generation = code_repository_publication_fences.generation + 1,
+            task_id = excluded.task_id,
+            attempt_count = excluded.attempt_count,
+            lease_owner = excluded.lease_owner,
+            updated_at_ms = excluded.updated_at_ms
+        RETURNING generation
+        ",
+        params![
+            repository_id,
+            &task_id,
+            attempt_count,
+            lease_owner,
+            request.now_ms
+        ],
+        |row| row.get::<_, u64>(0),
+    )?;
+    transaction.execute(
+        "UPDATE code_repository_index_tasks SET publication_generation = ?2 WHERE task_id = ?1",
+        params![&task_id, generation],
+    )?;
     let sql = task_select_sql("WHERE task_id = ?1");
     let task = transaction.query_row(&sql, params![&task_id], task_from_row)?;
     transaction.commit()?;

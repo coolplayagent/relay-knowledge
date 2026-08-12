@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use crate::{
     api::{
         ApiError, ApiMetadata, CodeIndexWorkerStatus, CodeRepositoryIndexResetResponse,
@@ -11,9 +13,72 @@ use super::super::{
     errors::storage_api_error,
     repository::{code_status_checkpoint, required_code_repository},
 };
+use super::state::RETAIN_RECENT_CODE_SCOPES;
 use super::task::recover_orphaned_code_index_task_leases;
 
 impl RelayKnowledgeService {
+    /// Runs one bounded, restart-safe retention pass for persistent leftovers.
+    pub(crate) async fn run_code_scope_retention_once(&self) -> Result<bool, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let repositories = store
+            .list_code_repositories()
+            .await
+            .map_err(storage_api_error)?;
+        if repositories.is_empty() {
+            return Ok(false);
+        }
+        let repository_count = repositories.len();
+        let start = self.code_retention_cursor.fetch_add(1, Ordering::Relaxed) % repository_count;
+        let mut first_error = None;
+        let mut pending_repository = None;
+        for status in repositories
+            .into_iter()
+            .cycle()
+            .skip(start)
+            .take(repository_count)
+        {
+            let retention = match store
+                .code_scope_retention(status.repository_id.clone())
+                .await
+            {
+                Ok(retention) => retention,
+                Err(error) => {
+                    first_error.get_or_insert_with(|| storage_api_error(error));
+                    continue;
+                }
+            };
+            if retention.maintenance_pending && pending_repository.is_none() {
+                pending_repository = Some((
+                    status.repository_id,
+                    status.last_indexed_scope_id.unwrap_or_default(),
+                ));
+            }
+        }
+        let maintenance_active = if let Some((repository_id, active_scope)) = pending_repository {
+            match store
+                .prune_code_repository_scopes(crate::storage::CodeScopeRetentionRequest {
+                    repository_id,
+                    active_scope,
+                    retain_recent_successful_scopes: RETAIN_RECENT_CODE_SCOPES,
+                })
+                .await
+            {
+                Ok(pruned) => {
+                    pruned.pruned_scope_count > 0
+                        || pruned.retiring_job_count > 0
+                        || pruned.maintenance_pending
+                }
+                Err(error) => {
+                    first_error.get_or_insert_with(|| storage_api_error(error));
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        first_error.map_or(Ok(maintenance_active), Err)
+    }
+
     /// Resets unfinished full index tasks for a registered repository.
     pub async fn reset_code_repository_index_tasks(
         &self,

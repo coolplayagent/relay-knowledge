@@ -4,18 +4,37 @@ use std::sync::Arc;
 
 use crate::{
     domain::{
-        CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
+        CodeIndexBatch, CodeIndexCheckpoint, CodeIndexPublicationFence, CodeIndexSession,
+        CodeIndexSnapshot, CodeIndexSummary,
     },
     storage::{CodeRepositoryStore, StorageError, StorageFuture},
 };
 
 use super::super::{
-    PartitionedSqliteKnowledgeStore, routing::current_control_scope, status::mirror_status,
+    PartitionedSqliteKnowledgeStore,
+    routing::current_control_scope,
+    status::{mirror_status, mirror_status_with_fence},
 };
 
 pub(in crate::storage::partitioned) fn apply_snapshot(
     store: &PartitionedSqliteKnowledgeStore,
     snapshot: CodeIndexSnapshot,
+) -> StorageFuture<'_, CodeIndexSummary> {
+    apply_snapshot_inner(store, snapshot, None)
+}
+
+pub(in crate::storage::partitioned) fn apply_snapshot_with_fence(
+    store: &PartitionedSqliteKnowledgeStore,
+    snapshot: CodeIndexSnapshot,
+    fence: CodeIndexPublicationFence,
+) -> StorageFuture<'_, CodeIndexSummary> {
+    apply_snapshot_inner(store, snapshot, Some(fence))
+}
+
+fn apply_snapshot_inner(
+    store: &PartitionedSqliteKnowledgeStore,
+    snapshot: CodeIndexSnapshot,
+    fence: Option<CodeIndexPublicationFence>,
 ) -> StorageFuture<'_, CodeIndexSummary> {
     let store = store.clone();
     Box::pin(async move {
@@ -48,8 +67,25 @@ pub(in crate::storage::partitioned) fn apply_snapshot(
                 base_scope,
             )
             .await?;
-        let summary = shard.apply_code_index_snapshot(snapshot).await?;
-        publish_summary(&store, Arc::clone(&shard), &summary, "index").await?;
+        if let Some(fence) = fence.as_ref() {
+            // ATTACH transactions spanning independent WAL files are not
+            // power-loss atomic. Persist the semantic worktree rebind in the
+            // control WAL first; the shard transaction then sees an exact,
+            // idempotent target and only uses ATTACH for the attempt lock.
+            store
+                .catalog
+                .prepare_snapshot_target(&snapshot, fence.clone())
+                .await?;
+        }
+        let summary = match fence.clone() {
+            Some(fence) => {
+                shard
+                    .apply_code_index_snapshot_with_fence(snapshot, fence)
+                    .await?
+            }
+            None => shard.apply_code_index_snapshot(snapshot).await?,
+        };
+        publish_summary(&store, Arc::clone(&shard), &summary, "index", fence).await?;
         Ok(summary)
     })
 }
@@ -77,9 +113,53 @@ pub(in crate::storage::partitioned) fn clear_workspace(
     })
 }
 
+pub(in crate::storage::partitioned) fn clear_workspace_with_fence(
+    store: &PartitionedSqliteKnowledgeStore,
+    repository_id: String,
+    source_scope: String,
+    fence: CodeIndexPublicationFence,
+) -> StorageFuture<'_, ()> {
+    let store = store.clone();
+    Box::pin(async move {
+        if let Some(shard) = store
+            .catalog
+            .existing_repository_store(repository_id.clone())
+            .await?
+        {
+            shard
+                .clear_code_workspace_state_with_fence(
+                    repository_id.clone(),
+                    source_scope.clone(),
+                    fence.clone(),
+                )
+                .await?;
+        }
+        store
+            .control
+            .clear_code_workspace_state_with_fence(repository_id, source_scope, fence)
+            .await
+    })
+}
+
 pub(in crate::storage::partitioned) fn begin_session(
     store: &PartitionedSqliteKnowledgeStore,
     session: CodeIndexSession,
+) -> StorageFuture<'_, CodeIndexCheckpoint> {
+    begin_session_inner(store, session, None)
+}
+
+pub(in crate::storage::partitioned) fn begin_session_with_fence(
+    store: &PartitionedSqliteKnowledgeStore,
+    session: CodeIndexSession,
+    fence: CodeIndexPublicationFence,
+) -> StorageFuture<'_, CodeIndexCheckpoint> {
+    begin_session_inner(store, session, Some(fence))
+}
+
+fn begin_session_inner(
+    store: &PartitionedSqliteKnowledgeStore,
+    session: CodeIndexSession,
+    fence: Option<CodeIndexPublicationFence>,
 ) -> StorageFuture<'_, CodeIndexCheckpoint> {
     let store = store.clone();
     Box::pin(async move {
@@ -94,11 +174,28 @@ pub(in crate::storage::partitioned) fn begin_session(
             .catalog
             .import_control_repository(Arc::clone(&shard), repository_id.clone(), control_scope)
             .await?;
-        let checkpoint = shard.begin_code_index_session(session).await?;
-        store
-            .catalog
-            .stage_scope(repository_id, source_scope)
-            .await?;
+        let checkpoint = match fence.clone() {
+            Some(fence) => {
+                shard
+                    .begin_code_index_session_with_fence(session, fence)
+                    .await?
+            }
+            None => shard.begin_code_index_session(session).await?,
+        };
+        match fence {
+            Some(fence) => {
+                store
+                    .catalog
+                    .stage_scope_with_fence(repository_id, source_scope, fence)
+                    .await?
+            }
+            None => {
+                store
+                    .catalog
+                    .stage_scope(repository_id, source_scope)
+                    .await?
+            }
+        }
         Ok(checkpoint)
     })
 }
@@ -106,6 +203,22 @@ pub(in crate::storage::partitioned) fn begin_session(
 pub(in crate::storage::partitioned) fn apply_batch(
     store: &PartitionedSqliteKnowledgeStore,
     batch: CodeIndexBatch,
+) -> StorageFuture<'_, CodeIndexCheckpoint> {
+    apply_batch_inner(store, batch, None)
+}
+
+pub(in crate::storage::partitioned) fn apply_batch_with_fence(
+    store: &PartitionedSqliteKnowledgeStore,
+    batch: CodeIndexBatch,
+    fence: CodeIndexPublicationFence,
+) -> StorageFuture<'_, CodeIndexCheckpoint> {
+    apply_batch_inner(store, batch, Some(fence))
+}
+
+fn apply_batch_inner(
+    store: &PartitionedSqliteKnowledgeStore,
+    batch: CodeIndexBatch,
+    fence: Option<CodeIndexPublicationFence>,
 ) -> StorageFuture<'_, CodeIndexCheckpoint> {
     let store = store.clone();
     Box::pin(async move {
@@ -120,11 +233,28 @@ pub(in crate::storage::partitioned) fn apply_batch(
             .catalog
             .import_control_repository(Arc::clone(&shard), repository_id.clone(), control_scope)
             .await?;
-        let checkpoint = shard.apply_code_index_batch(batch).await?;
-        store
-            .catalog
-            .stage_scope(repository_id, source_scope)
-            .await?;
+        let checkpoint = match fence.clone() {
+            Some(fence) => {
+                shard
+                    .apply_code_index_batch_with_fence(batch, fence)
+                    .await?
+            }
+            None => shard.apply_code_index_batch(batch).await?,
+        };
+        match fence {
+            Some(fence) => {
+                store
+                    .catalog
+                    .stage_scope_with_fence(repository_id, source_scope, fence)
+                    .await?
+            }
+            None => {
+                store
+                    .catalog
+                    .stage_scope(repository_id, source_scope)
+                    .await?
+            }
+        }
         Ok(checkpoint)
     })
 }
@@ -133,14 +263,37 @@ pub(in crate::storage::partitioned) fn finalize_session(
     store: &PartitionedSqliteKnowledgeStore,
     session: CodeIndexSession,
 ) -> StorageFuture<'_, CodeIndexSummary> {
+    finalize_session_inner(store, session, None)
+}
+
+pub(in crate::storage::partitioned) fn finalize_session_with_fence(
+    store: &PartitionedSqliteKnowledgeStore,
+    session: CodeIndexSession,
+    fence: CodeIndexPublicationFence,
+) -> StorageFuture<'_, CodeIndexSummary> {
+    finalize_session_inner(store, session, Some(fence))
+}
+
+fn finalize_session_inner(
+    store: &PartitionedSqliteKnowledgeStore,
+    session: CodeIndexSession,
+    fence: Option<CodeIndexPublicationFence>,
+) -> StorageFuture<'_, CodeIndexSummary> {
     let store = store.clone();
     Box::pin(async move {
         let shard = store
             .catalog
             .staged_repository_store(session.repository_id.clone())
             .await?;
-        let summary = shard.finalize_code_index_session(session).await?;
-        publish_summary(&store, shard, &summary, "finalize").await?;
+        let summary = match fence.clone() {
+            Some(fence) => {
+                shard
+                    .finalize_code_index_session_with_fence(session, fence)
+                    .await?
+            }
+            None => shard.finalize_code_index_session(session).await?,
+        };
+        publish_summary(&store, shard, &summary, "finalize", fence).await?;
         Ok(summary)
     })
 }
@@ -173,6 +326,7 @@ async fn publish_summary(
     shard: Arc<crate::storage::SqliteGraphStore>,
     summary: &CodeIndexSummary,
     stage: &'static str,
+    fence: Option<CodeIndexPublicationFence>,
 ) -> Result<(), StorageError> {
     let status = shard
         .code_repository_status(summary.repository_id.clone())
@@ -182,11 +336,28 @@ async fn publish_summary(
                 "sharded code repository status is missing after {stage}"
             ))
         })?;
-    store
-        .catalog
-        .record_scope(summary.repository_id.clone(), summary.source_scope.clone())
-        .await?;
-    mirror_status(&store.control, status).await
+    match fence.clone() {
+        Some(fence) => {
+            store
+                .catalog
+                .record_scope_with_fence(
+                    summary.repository_id.clone(),
+                    summary.source_scope.clone(),
+                    fence,
+                )
+                .await?
+        }
+        None => {
+            store
+                .catalog
+                .record_scope(summary.repository_id.clone(), summary.source_scope.clone())
+                .await?
+        }
+    }
+    match fence {
+        Some(fence) => mirror_status_with_fence(&store.control, status, fence).await,
+        None => mirror_status(&store.control, status).await,
+    }
 }
 
 #[cfg(test)]

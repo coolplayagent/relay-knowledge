@@ -386,22 +386,22 @@ roots and do not walk unrelated directories. Explicit path filters opt into
 matching broad build, cache, and dependency directories, and `--path .` opts
 into the whole root.
 
-Incremental updates use the same source-layout policy when new files appear
-outside `src/`.
+Incremental updates use the same source-layout policy when new files appear outside `src/`. `repo update <alias>` defaults its base to the last published clean Git snapshot (including the clean base wrapped by a worktree-overlay identity) and its head to `HEAD`; `--base` and `--head` remain available for an explicit immutable pair. Repositories without a published base must complete `repo index --ref HEAD` first. A Git delta is capped at 512 changed paths across the commit pair before registered path filters; run a full index when exceeded.
 
 A cold full `repo index` queues a durable code-index task through `storage::sqlite::code::tasks::queue` and returns a `task`
 handle immediately. The CLI starts a bounded single-shot worker,
 non-interactive agents can call
-`repo index-worker --task-id <id> --format json` for one explicit drain attempt,
+`repo index-worker --task-id <id> --format json` for one explicit task drain and one bounded retention pass,
 and `service run` drains the same queue with a bounded code-index worker pool;
 `application::runtime::worker` owns endpoint validation and concurrency from
-`RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT`, plus one set-overlay refresh worker.
+`RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT`, plus one set-overlay refresh worker. Every CLI/Web repository-set refresh, whether default-synchronous or async, first enters the same bounded durable queue. A local default-synchronous request drains only when it can claim its exact task; otherwise it returns the queued response. Repository-set refresh admission transactionally supersedes older queued/retrying work for the same set, caps unfinished tasks at 2 per set and 128 globally, and permits only one live writer per set. Overlay edges and member replacements publish together in one attempt-scoped live-lease transaction, so a takeover makes the old attempt roll back. Queue and completion maintenance retain 64 successes per set and 32 rows for each failed, dead-letter, or cancelled state; each audit-prune delete is capped at 64 rows.
+
+Manual repository-set overlay admission is also fixed at 64 members and at most 64 fact-version member replacements per publication. Manifest discovery shares one whole-refresh budget across all members: 4,096 chunks, 16 MiB of path/content bytes, and 32,768 derived items. The remaining ceilings are 8,192 total imports, 131,072 file/symbol export targets, 8,192 total edges, and 512 origin/target selector keys. Matching examines at most 11 exports per import—enough to distinguish zero, one, or ambiguous matches and retain at most 10 candidate IDs—so `candidate_count` is a bounded observation. Each persisted collection uses a cap-plus-one probe and maps overflow to retryable `qos_rejected`/`CapacityExceeded`; it never truncates overflow or publishes a false `fresh` overlay. Direct and selector reads inspect at most 8,193 edges and exclude edges whose origin or target scope is retiring. Refresh, add, and member removal likewise probe at most 8,193 existing edges before deletion. Repository removal is atomic and rejects a repository associated with more than 64 sets or any affected legacy overlay above 8,192 edges. A legacy oversized manual overlay remains unchanged on rejection; this release has no bounded repair command, so remediation requires an upgrade-provided repair tool rather than an implied cleanup loop. These manual-set ceilings do not yet bound the opt-in automatic-workspace cross-edge build path: phased scope GC bounds its obsolete-state deletion, not one build's materialization. Automatic workspace detection therefore remains a documented resource-boundedness gap and is disabled by default.
 
 Local CLIs can query a deployed resident service with `--remote <base-url>` or
 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote repository index commands submit
 durable tasks to the service and return task/status/checkpoint JSON; the remote
-`service run --web` worker pool drains those tasks rather than the local CLI
-running `repo index-worker`. Remote read-only repository graph commands
+`service run --web` worker pool drains those tasks rather than the local CLI running `repo index-worker`. Remote `repo update` uses `POST /api/v1/code/repositories/{alias}/update` and may return a queued task; inspect `repo status` and its checkpoint before depending on the new scope. Remote read-only repository graph commands
 (`repo list`, `repo query`, `repo context`, `repo graph`, `repo feature-flags`, `repo impact`,
 `repo report`, `repo software`, and `repo view`) read service-host index state and preserve their CLI `--kind`
 arguments. Remote maintenance commands such as
@@ -410,8 +410,7 @@ CLI and must be run on the service host; `storage::sqlite::code::tasks::reset` o
 URL and outbound network settings before HTTP; unrelated local runtime and
 retrieval settings are validated only when a command falls back to local state.
 
-Distinct task fingerprints are queued and leased independently, while identical
-full-index fingerprints reuse the active task.
+Distinct task fingerprints are queued and leased independently, while identical full-index fingerprints reuse the active task. Commit reconciliation has one stable fingerprint per repository, checked-out ref, and registered filter set, so repeated filesystem hints coalesce while one immutable base-to-head update is unfinished. Admission is transactional and bounded to 32 unfinished tasks per repository and 256 per control database; overload returns a retryable `qos_rejected` response (HTTP 429 remotely) after fingerprint reuse and worktree supersession have been considered.
 
 `repo query`, `repo context`, and `repo feature-flags` with `allow-stale` continue serving the
 latest compatible completed scope when the requested ref and filters are still
@@ -420,10 +419,11 @@ writer.
 
 `repo status` reports `active_task`, checkpoint counters, and scope retention; `storage::sqlite::code::tasks::status` owns task lookup and the bounded queue projection, while `checkpoint` owns scope and latest-progress reads.
 `repo list` returns the stable status inventory of repositories with at least one completed indexed scope and omits registrations that have never completed indexing.
-Successful background tasks retain the active scope, the two latest completed
-scopes, and unfinished task scopes while pruning older repository scopes; `storage::sqlite::code::tasks::retention` owns that plan and its transactional cleanup.
 
-Code-index task leases are attempt-scoped, with claim, renewal, listing, and bounded recovery owned by `storage::sqlite::code::tasks::lease`. Expired running leases are recovered
+Without a resident service, each local `repo index-worker --format json` invocation advances one bounded retention pass and reports `maintenance_active` plus optional `maintenance_error`; a non-null error makes `maintenance_active=false` inconclusive, so inspect status, resolve the reported failure, and continue bounded attempts until both the response and `repo status` show no pending maintenance. In partitioned storage, the control-plane route remains a counted capacity reservation throughout batched shard deletion and is removed only immediately before the shard's final `scope_metadata` phase; a crash in that final gap replays the deterministic shard job. This prevents premature slot reuse during slow shard GC.
+Successful background tasks retain the union of the active scope and a rolling window of the two latest successful publications (normally including the active scope), the latest successful incremental predecessor, the clean base of any active worktree overlay, plus every unfinished task target/base and repository-set pin. Retention first atomically marks one unprotected scope `retiring`, which removes it from query and incremental-base selection, then persists a restart-safe GC job. Each later maintenance transaction advances at most one scope-GC phase, whose physical deletion is capped at 512 rows in aggregate across the affected application tables, including code facts, FTS/search rows, software projections, checkpoints, workspace state, and scope metadata. The same pass has separate fixed quotas of at most 512 succeeded task-audit rows, 512 failure-class task-audit rows, and 512 commit-alias rows, so primary cleanup is capped at 2,048 physical rows, plus at most one terminal GC-job bookkeeping row; the managed worker retries persistent work while idle. Admission refuses a new target when one repository already has 64 distinct published, checkpointed, or unfinished scope identities, returning maintenance backpressure until GC releases a slot. This bounds retained live generations and lets SQLite reuse freed pages, but does not promise immediate OS-visible database-file shrink; reclaiming that physical high-water mark requires a separate explicit, bounded maintenance compaction. `repo status` exposes `maintenance_pending` and each job's phase, deleted-row count, and last error. Its retained/prunable scope arrays contain at most 64 entries each; `scope_listing_truncated=true` means arrays and displayed counts are bounded diagnostic projections and observable lower bounds, not an exhaustive protection set, and partitioned shard cleanup pauses rather than trusting truncated control-plane pins. Before a shard enters its final `scope_metadata` phase, partitioned cleanup removes the control-plane route; a crash then replays the deterministic shard job without exposing a stale route. Same-tree commits share content and use a bounded 256-row commit-to-scope alias window, with live task references protected until completion. Finished task history is bounded to 128 succeeded and 64 failed/dead-letter/cancelled rows per repository, preserving the newest success row for each retained scope. A pruned ref requires a full index. `storage::sqlite::code::tasks::retention` owns protected-set planning and audit coordination; sibling `retention_gc` exclusively owns the restart-safe phased physical-deletion state machine.
+
+Code-index task leases are attempt-scoped, with claim, renewal, listing, and bounded recovery owned by `storage::sqlite::code::tasks::lease`. Every claim also advances a repository-local publication generation that is checked inside the same SQLite transaction that publishes a snapshot, batch, workspace change, or software projection; a detached blocking write from an expired attempt therefore rolls back instead of overtaking its replacement. Expired running leases are recovered
 to retry or dead-letter before claim/status paths report them; `storage::sqlite::code::tasks::completion` owns the lease-checked success, retry, and dead-letter transitions. Stale workers
 cannot complete or fail a reclaimed task, and active workers renew the lease
 before expensive batch parsing, after each committed checkpoint batch, around
@@ -585,8 +585,8 @@ The physical `read_model/` subdomain assigns DDL/retry to `schema`, rebuilds
 to `migration`, document writes to `documents`, shared candidates/BM25 mapping
 to `candidate`/`bm25_hit`, and retrieval orchestration to `search`; the sibling `advanced/` subdomain separates relation/claim/event path assembly in `path`, temporal parsing and filtering in `temporal`, scoped summaries in `community`, shared event reads in `event`, and evidence grouping in `support`. SQLite graph-canvas projection likewise assigns request state/budgeting to `context`, stable node formatting to `nodes`, evidence/entity reads to `knowledge`, relation/claim/event reads to `facts`, and code facts to `code`, with owner-local tests and a validation-only facade.
 
-Feature-flag extraction separates source-key rules, SDK receiver/call tracking, and shared literal-aware lexical primitives; each owner has direct sibling tests and the extractor facade only re-exports the stable internal surface. Repository-set orchestration assigns membership APIs to `membership`, moving-ref and fact-version freshness to `status`, set-specific storage errors to `errors`, and synchronous plus leased overlay rebuilds to `refresh`; the physical `query/` domain separates pure overlay ranking in `mod.rs`, async member/fallback coordination in `workflow`, dependency API planning in `plan`, and ranking signals in `domain_affinity` and `identity_coverage`, with directly paired tests. SQLite repository-set persistence likewise separates member lifecycle/status mapping in `code::set::membership` from overlay status, refresh, import/export matching, and cross-edge reads in `code::set::overlay`; the `code::set` facade only re-exports their narrow entry points. Its paired-test `manifest/` domain separates database coordination, Go workspaces, pnpm/package exports, module-key expansion, and bounded path/glob rules.
-The physical `code::set` root contains only `manifest`, `membership`, `overlay`, `refresh_tasks`, and `tests` directories plus its facade. The three behavior owners carry direct `mod_tests.rs`; cross-owner workspace coverage and fixtures are isolated under `tests/`, so flat implementation or test siblings cannot return beside `manifest/`.
+Feature-flag extraction separates source-key rules, SDK receiver/call tracking, and shared literal-aware lexical primitives; each owner has direct sibling tests and the extractor facade only re-exports the stable internal surface. Repository-set orchestration assigns membership APIs to `membership`, moving-ref and fact-version freshness to `status`, set-specific storage errors to `errors`, and synchronous plus leased overlay rebuilds to `refresh`; the physical `query/` domain separates pure overlay ranking in `mod.rs`, async member/fallback coordination in `workflow`, dependency API planning in `plan`, and ranking signals in `domain_affinity` and `identity_coverage`, with directly paired tests. SQLite repository-set persistence separates fixed resource/delete admission in `code::set::capacity`, member lifecycle/status mapping in `membership`, overlay status/refresh/import-export matching/cross-edge reads in `overlay`, and durable queue leases in `refresh_tasks`; the `code::set` facade only exposes narrow entry points. Its paired-test `manifest/` domain separates database coordination, Go workspaces, pnpm/package exports, module-key expansion, and bounded path/glob rules.
+The physical `code::set` root contains only `capacity`, `manifest`, `membership`, `overlay`, `refresh_tasks`, and `tests` directories plus its facade. Capacity, membership, overlay, and refresh-task behavior owners carry direct `mod_tests.rs`; cross-owner workspace coverage and fixtures are isolated under `tests`, so flat implementation or test siblings cannot return beside `manifest/`.
 Code-index schema initialization keeps only ordering, legacy-column
 compatibility, and migration orchestration in the `code::schema` facade.
 Repository facts, durable index tasks, repository-set/workspace state, and FTS/retrieval
@@ -739,7 +739,8 @@ relay-knowledge query SQLite --freshness wait-until-fresh --format json
 relay-knowledge repo register /path/to/relay-knowledge --path src --format json
 relay-knowledge repo index relay-knowledge --ref main --format json
 relay-knowledge repo index-worker --task-id <task-id> --format json
-relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo update relay-knowledge --format json
+relay-knowledge repo update relay-knowledge --base <commit> --head <commit> --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo context relay-knowledge --query "retry_policy callers imports" --ref HEAD --path src --freshness wait-until-fresh --limit 8 --max-context-bytes 16384 --format json
@@ -850,16 +851,14 @@ queue automatically. It is enabled by default on supported platforms.
 ```bash
 RELAY_KNOWLEDGE_WATCHER_ENABLED=true
 RELAY_KNOWLEDGE_WATCHER_DEBOUNCE_MS=3000
+RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS=5000
 RELAY_KNOWLEDGE_WATCHER_MAX_WATCH_DIRS=1024
 RELAY_KNOWLEDGE_WATCHER_HASH_CACHE_CAPACITY=4096
 ```
 
 The watcher root keeps `config/`, `event_filter/`, `hash_cache/`, and `task_seed/`
 as directly tested owners; `engine/` separates handles, the `notify` event loop,
-repository registration, task projection, and diagnostics. Events remain debounced,
-hash/path-filtered, and queued through existing leases, retry, and dead-letter handling.
-Diagnostics (state, watched repositories, event/drop and queued-task counts,
-degraded reason) appear in `service status --format json`.
+repository registration, task projection, and diagnostics. Source events remain debounced and hash/path-filtered. `.git/HEAD`, refs, packed refs, and HEAD-log events are low-latency hints; bounded reconciliation resolves checked-out `HEAD` every five seconds by default, covering linked worktrees and missed events. HEAD advances pin the last published clean base plus resolved head/tree into a durable incremental task. Existing leases enforce one writer per repository; startup/ticks replay lag. `RELAY_KNOWLEDGE_WATCHER_ENABLED=false` disables both source watching and commit reconciliation. `service status --format json` exposes event, task, commit reconciliation/queue/failure, and degraded diagnostics.
 
 ### Semantic and Vector Backends
 
@@ -956,10 +955,7 @@ and truncation diagnostics,
 `relay_code_feature_flags` handles configuration-driven feature flags. Common
 agent aliases such as `dependency`, `configuration`, and `models` normalize to
 the existing `dependencies`, `relationships`, and `design` kinds instead of
-creating duplicate kinds. MCP does not expose index refresh or repository indexing;
-run `relay-knowledge repo index`, `relay-knowledge repo update`, or
-`relay-knowledge index refresh` from an explicit CLI/Web workflow before MCP
-queries depend on fresh indexes.
+creating duplicate kinds. MCP does not expose index refresh or repository indexing. Managed watcher reconciliation can publish checked-out commits automatically; otherwise use `repo index`, `repo update`, or `index refresh` through CLI/Web before MCP depends on fresh indexes.
 
 The MCP server also advertises resources and prompts: resources expose service
 status, health, index status, and Prometheus text metrics; the graph-wide

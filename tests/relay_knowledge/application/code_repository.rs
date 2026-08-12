@@ -356,11 +356,11 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
     repo.write("src/lib.rs", "pub fn value() -> u32 { 0 }\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "return to zero"]);
-    let updated_from_persisted_base = service
+    let updated = service
         .index_code_repository(
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
-                mode: CodeIndexMode::incremental(initial, "HEAD")
+                mode: CodeIndexMode::incremental(initial.clone(), "HEAD")
                     .expect("incremental mode should validate"),
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
@@ -370,11 +370,12 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
         .await
         .expect("persisted base scope should seed incremental update");
 
-    assert_eq!(updated_from_persisted_base.summary.changed_path_count, 1);
     assert_eq!(
-        updated_from_persisted_base.summary.progress.blob_read_count,
-        1
+        updated.summary.base_resolved_commit_sha.as_deref(),
+        Some(initial.as_str())
     );
+    assert_eq!(updated.summary.changed_path_count, 1);
+    assert_eq!(updated.summary.progress.blob_read_count, 1);
     assert!(
         query(&service, "value", CodeQueryKind::Definition)
             .await

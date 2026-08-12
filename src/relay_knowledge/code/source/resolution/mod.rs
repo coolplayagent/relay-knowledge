@@ -1,13 +1,20 @@
 //! Git/filesystem ref and snapshot resolution.
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use super::{
     CodeIndexError,
-    changes::split_nul,
-    git::{git_bytes, resolve_ref, resolve_tree},
+    git::{GitNulRecordBudget, git_nul_records_match_bounded},
     scope::scoped_source_snapshot_for_filters,
     source::{source_commit_is_filesystem, source_kind},
+};
+use crate::code::{resolve_git_ref_bounded, resolve_git_tree_bounded};
+
+const GITLINK_PROBE_BUDGET: GitNulRecordBudget = GitNulRecordBudget {
+    max_records: 1_000_000,
+    max_record_bytes: 1024 * 1024,
+    max_stderr_bytes: 64 * 1024,
+    timeout: Duration::from_secs(30),
 };
 
 pub fn resolve_repository_ref(
@@ -36,7 +43,7 @@ pub fn resolve_repository_ref_with_filters(
         return Ok(ref_selector.to_owned());
     }
     if !source_kind(root)?.is_filesystem() {
-        return resolve_ref(root, ref_selector);
+        return resolve_git_ref_bounded(root, ref_selector);
     }
 
     Ok(
@@ -71,17 +78,13 @@ pub fn resolve_repository_snapshot_with_filters(
         return Ok((ref_selector.to_owned(), ref_selector.to_owned()));
     }
     if !source_kind(root)?.is_filesystem() {
-        let commit = resolve_ref(root, ref_selector)?;
+        let commit = resolve_git_ref_bounded(root, ref_selector)?;
         if git_tree_has_scoped_gitlinks(root, &commit, path_filters)? {
-            let snapshot = scoped_source_snapshot_for_filters(
-                root,
-                ref_selector,
-                path_filters,
-                language_filters,
-            )?;
+            let snapshot =
+                scoped_source_snapshot_for_filters(root, &commit, path_filters, language_filters)?;
             return Ok((snapshot.resolved_commit_sha, snapshot.tree_hash));
         }
-        return Ok((commit.clone(), resolve_tree(root, &commit)?));
+        return Ok((commit.clone(), resolve_git_tree_bounded(root, &commit)?));
     }
 
     let snapshot =
@@ -128,17 +131,18 @@ fn git_tree_has_gitlinks_under(
     commit: &str,
     scope: Option<&str>,
 ) -> Result<bool, CodeIndexError> {
-    let bytes = match scope {
-        Some(scope) => git_bytes(root, ["ls-tree", "-r", "-z", commit, "--", scope])?,
-        None => git_bytes(root, ["ls-tree", "-r", "-z", commit])?,
-    };
-    for record in split_nul(&bytes) {
-        if git_tree_record_is_gitlink(&record) {
-            return Ok(true);
-        }
+    let mut args = vec!["ls-tree", "-r", "-z", commit];
+    if let Some(scope) = scope {
+        args.extend(["--", scope]);
     }
 
-    Ok(false)
+    git_nul_records_match_bounded(
+        root,
+        &args,
+        GITLINK_PROBE_BUDGET,
+        git_tree_record_is_gitlink,
+        "Git tree gitlink probe",
+    )
 }
 
 fn git_tree_exact_path_is_gitlink(
@@ -146,20 +150,17 @@ fn git_tree_exact_path_is_gitlink(
     commit: &str,
     path: &str,
 ) -> Result<bool, CodeIndexError> {
-    let bytes = git_bytes(root, ["ls-tree", "-z", commit, "--", path])?;
-
-    Ok(split_nul(&bytes)
-        .into_iter()
-        .any(|record| git_tree_record_is_gitlink(&record)))
+    git_nul_records_match_bounded(
+        root,
+        &["ls-tree", "-z", commit, "--", path],
+        GITLINK_PROBE_BUDGET,
+        git_tree_record_is_gitlink,
+        "Git tree gitlink probe",
+    )
 }
 
-fn git_tree_record_is_gitlink(record: &str) -> bool {
-    let Some((metadata, _)) = record.split_once('\t') else {
-        return false;
-    };
-    let fields = metadata.split_whitespace().collect::<Vec<_>>();
-
-    fields.get(1).copied() == Some("commit")
+fn git_tree_record_is_gitlink(record: &[u8]) -> bool {
+    record.split(|byte| byte.is_ascii_whitespace()).next() == Some(b"160000".as_slice())
 }
 
 fn scoped_gitlink_filters(path_filters: &[String]) -> Vec<String> {

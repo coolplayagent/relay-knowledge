@@ -26,6 +26,21 @@ pub struct CodeRepositoryRegisterRequest {
     pub language_filters: Vec<String>,
 }
 
+/// Requests an incremental update from the last published Git snapshot.
+///
+/// The service resolves both optional refs to immutable commit identities
+/// before durable work is queued. Omitting `base_ref` selects the last
+/// successfully published clean commit; omitting `head_ref` selects `HEAD`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryUpdateRequest {
+    #[serde(default)]
+    pub repository: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref: Option<String>,
+}
+
 /// Code repository registration response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryRegisterResponse {

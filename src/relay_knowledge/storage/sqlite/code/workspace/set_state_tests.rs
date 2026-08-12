@@ -275,3 +275,56 @@ fn clearing_empty_workspace_removes_only_current_retained_scope() {
     assert_eq!(edge_scopes, vec!["scope-old".to_owned()]);
     assert_eq!(overlay_edge_count, 1);
 }
+
+#[test]
+fn clearing_workspace_scope_removes_edges_that_target_the_retired_scope() {
+    let mut connection = workspace_schema_connection();
+    let transaction = connection.transaction().expect("transaction");
+    insert_scope(&transaction, "scope-old", "commit-old");
+    insert_scope(&transaction, "scope-new", "commit-new");
+    insert_unresolved_import(&transaction, "scope-old", "import-old", "@scope/core/old");
+    insert_unresolved_import(&transaction, "scope-new", "import-new", "@scope/core/new");
+    resolve_workspace_imports(
+        &transaction,
+        &[workspace(CodeMonorepoWorkspaceFormat::Pnpm)],
+        "repo",
+        "scope-old",
+    )
+    .expect("old workspace imports should resolve");
+    resolve_workspace_imports(
+        &transaction,
+        &[workspace(CodeMonorepoWorkspaceFormat::Pnpm)],
+        "repo",
+        "scope-new",
+    )
+    .expect("new workspace imports should resolve");
+    transaction
+        .execute(
+            "INSERT INTO code_repository_cross_edges (
+                edge_id, set_id, from_source_scope, from_repository_id,
+                from_record_kind, from_record_id, to_source_scope, to_repository_id,
+                to_record_kind, to_record_id, edge_kind, resolution_state,
+                confidence_basis_points, confidence_tier, evidence_json, created_at_ms
+             )
+             SELECT 'incoming-edge', set_id, 'scope-old', 'repo', 'import', 'incoming',
+                    'scope-new', 'repo', 'symbol', 'target', 'workspace_reference',
+                    'resolved', 10000, 'exact', '{}', 1
+             FROM code_repository_sets
+             LIMIT 1",
+            [],
+        )
+        .expect("incoming edge should insert");
+
+    resolve_workspace_imports(&transaction, &[], "repo", "scope-new")
+        .expect("new scope should clear");
+
+    let incoming_count: u32 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM code_repository_cross_edges
+             WHERE to_source_scope = 'scope-new'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("incoming edge count");
+    assert_eq!(incoming_count, 0);
+}

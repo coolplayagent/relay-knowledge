@@ -242,6 +242,9 @@ pub struct CodeIndexTaskRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lease_expires_at_ms: Option<u64>,
     pub attempt_count: u32,
+    /// Monotonic repository-local generation assigned when this attempt was claimed.
+    #[serde(default)]
+    pub publication_generation: u64,
     pub next_retry_at_ms: u64,
     pub input_fingerprint: String,
     pub resource_budget: CodeIndexResourceBudget,
@@ -252,6 +255,16 @@ pub struct CodeIndexTaskRecord {
     pub last_error_message: Option<String>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
+}
+
+/// Attempt-scoped token required to publish code-index state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexPublicationFence {
+    pub repository_id: String,
+    pub task_id: String,
+    pub lease_owner: String,
+    pub attempt_count: u32,
+    pub generation: u64,
 }
 
 /// Aggregated durable queue state for background code-index tasks.
@@ -273,9 +286,29 @@ pub struct CodeScopeRetentionSummary {
     pub retained_scope_count: usize,
     pub prunable_scope_count: usize,
     pub pruned_scope_count: usize,
+    #[serde(default)]
+    pub scope_listing_truncated: bool,
+    #[serde(default)]
+    pub retiring_job_count: usize,
+    #[serde(default)]
+    pub maintenance_pending: bool,
     pub retained_scopes: Vec<String>,
     pub prunable_scopes: Vec<String>,
     pub pruned_scopes: Vec<String>,
+    #[serde(default)]
+    pub retiring_jobs: Vec<CodeScopeRetirementJobStatus>,
+}
+
+/// Observable progress for one durable, restart-safe scope retirement job.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeScopeRetirementJobStatus {
+    pub repository_id: String,
+    pub source_scope: String,
+    pub phase: String,
+    pub deleted_rows: usize,
+    pub updated_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 /// Coarse phase timing and counts reported by repository indexing.
@@ -297,6 +330,8 @@ pub struct CodeIndexProgressSummary {
 pub struct CodeIndexSummary {
     pub repository_id: String,
     pub source_scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_resolved_commit_sha: Option<String>,
     pub resolved_commit_sha: String,
     pub tree_hash: String,
     pub indexed_file_count: usize,

@@ -20,9 +20,9 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::{
     api::{
-        ApiError, AuditQueryApiRequest, ErrorKind, GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind,
-        GraphCanvasRequest, InterfaceKind, ProposalListApiRequest, RequestContext,
-        WorkerRunRequest, WorkerStatusRequest,
+        ApiError, AuditQueryApiRequest, CodeRepositoryUpdateRequest, ErrorKind,
+        GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, InterfaceKind,
+        ProposalListApiRequest, RequestContext, WorkerRunRequest, WorkerStatusRequest,
     },
     application::RelayKnowledgeService,
     domain::{CodeIndexMode, ProposalState},
@@ -348,13 +348,15 @@ async fn dispatch_operation(
             Ok((response.metadata.clone(), json!(response)))
         }
         "code.repo.update" => {
-            let mode = CodeIndexMode::incremental(
-                string_field(payload, "base_ref")?,
-                string_field(payload, "head_ref")?,
-            )
-            .map_err(|error| WebError::bad_request(error.to_string()))?;
             let response = service
-                .index_code_repository(code_index_request(payload, mode)?, context)
+                .start_code_repository_update(
+                    CodeRepositoryUpdateRequest {
+                        repository: string_field(payload, "alias")?.to_owned(),
+                        base_ref: optional_string_field(payload, "base_ref"),
+                        head_ref: optional_string_field(payload, "head_ref"),
+                    },
+                    context,
+                )
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }

@@ -1,7 +1,36 @@
 use super::{
-    CODE_SNAPSHOT_FACT_VERSION, code_snapshot_expected_scope_id, code_snapshot_scope_id,
-    code_snapshot_scope_is_fact_versioned,
+    CODE_SNAPSHOT_FACT_VERSION, clean_git_commit_from_snapshot_identity,
+    code_snapshot_expected_scope_id, code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
 };
+
+#[test]
+fn clean_git_commit_parses_clean_and_worktree_identities() {
+    assert_eq!(
+        clean_git_commit_from_snapshot_identity("abc123"),
+        Some("abc123")
+    );
+    assert_eq!(
+        clean_git_commit_from_snapshot_identity("worktree:abc123:overlay456"),
+        Some("abc123")
+    );
+}
+
+#[test]
+fn clean_git_commit_rejects_non_git_and_malformed_identities() {
+    assert_eq!(
+        clean_git_commit_from_snapshot_identity("filesystem:abc123"),
+        None
+    );
+    assert_eq!(
+        clean_git_commit_from_snapshot_identity("worktree:abc123"),
+        None
+    );
+    assert_eq!(
+        clean_git_commit_from_snapshot_identity("worktree::hash"),
+        None
+    );
+    assert_eq!(clean_git_commit_from_snapshot_identity(""), None);
+}
 
 #[test]
 fn fact_version_includes_generated_and_web_route_facts() {
