@@ -187,8 +187,11 @@ CI 安装当前最新的 Rust stable 工具链。最终执行 Clippy 门禁前�
 
 OpenTelemetry 依赖必须作为一个兼容族整体升级：`opentelemetry`、
 `opentelemetry_sdk` 与 `opentelemetry-otlp` 保持相同 minor 版本，
-`tracing-opentelemetry` 使用与其匹配的集成版本。只升级其中一部分会引入重复的
-telemetry trait 和不兼容的 provider 类型，因此不能进入发版候选。
+`tracing-opentelemetry` 使用与其匹配的集成版本。安全基线为
+`opentelemetry_sdk` 0.32.1，它落实 GHSA-w9wp-h8wv-79jx 要求的 W3C Baggage
+8,192-byte 与 64-member 上限。只升级其中一部分会引入重复的 telemetry trait 和
+不兼容的 provider 类型，因此不能进入发版候选。XML parser 的安全基线为
+`quick-xml` 0.41.0，用于修复 RUSTSEC-2026-0194 与 RUSTSEC-2026-0195。
 
 自迭代 harness 默认只执行轻量 fast 门禁。完整 profile 的产品与 harness
 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。

@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 3.3
-> Date: 2026-08-11
+> Document version: 3.4
+> Date: 2026-08-12
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -19,7 +19,8 @@ Installation and release are part of product architecture. Stable releases are v
 - The v1.1.13 release preparation pins `Cargo.toml`, `Cargo.lock`, CLI skill metadata, and the release workflow dry-run default to `1.1.13`; publishing remains tag-driven and starts only after pushing `v1.1.13` or `1.1.13` to GitHub.
 - macOS x64 release jobs must use an active Intel runner label, such as `macos-15-intel`, rather than retired `macos-13` images. Artifact upload/download and attestation actions must stay on Node 24-compatible releases so the release workflow remains runnable after GitHub-hosted runner runtime migrations.
 - Linux GNU release jobs must build `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` artifacts on a glibc 2.31 baseline and fail the release if the resulting ELF requires any `GLIBC_*` symbol newer than 2.31. The CLI skill Linux x64 bundled asset must pass the same ABI check after packaging.
-- OpenTelemetry dependencies form one release compatibility family: `opentelemetry`, `opentelemetry_sdk`, and `opentelemetry-otlp` use the same minor release, and `tracing-opentelemetry` uses the corresponding integration release. Dependency automation must update and validate the family together; a release candidate must not contain duplicate OpenTelemetry core or SDK major/minor lines.
+- OpenTelemetry dependencies form one release compatibility family: `opentelemetry`, `opentelemetry_sdk`, and `opentelemetry-otlp` use the same minor release, and `tracing-opentelemetry` uses the corresponding integration release. Dependency automation must update and validate the family together; a release candidate must not contain duplicate OpenTelemetry core or SDK major/minor lines. The current security floor is `opentelemetry_sdk` 0.32.1, which rejects W3C Baggage values above 8,192 bytes and stops after 64 list members as required by GHSA-w9wp-h8wv-79jx / CVE-2026-48504.
+- The XML parser security floor is `quick-xml` 0.41.0, which keeps duplicate-attribute checking linear and caps namespace declarations per element as required by RUSTSEC-2026-0194 and RUSTSEC-2026-0195. Informational unsoundness warnings with an available patch are upgraded in the lockfile rather than ignored.
 - Release archive attestations use the generated `checksums.txt` as their subject manifest, so GitHub artifact attestations cover the same archive digests that users verify locally.
 - CLI version discovery uses configurable dual sources: GitHub Releases and crates.io. Detection must go through the `env`, `paths`, and `net::http` boundaries, inherit proxy, TLS, timeout, and runtime-cache policy, and ordinary commands may only notify about newer stable versions rather than silently replacing binaries.
 - GitHub Releases include a `relay-knowledge-cli-skill-<tag>.tar.gz` skill artifact built from `skills/relay-knowledge-cli`; its version follows `Cargo.toml` and is written into generated `SKILL.md` metadata as numeric semver. The skill artifact includes a root-level `README.md`, Linux x64 and Windows x64 binaries under `assets/`, and the skill instructs agents to prefer the matching bundled asset whenever `version --format json` succeeds. Agents use `PATH` only as a fallback, when the host Linux glibc is older than the bundled asset baseline, or when the user explicitly requests the system install. The release workflow may also publish the same generated skill layout to ClawHub with `clawhub publish` when `CLAWHUB_TOKEN` is configured. This skill-over-CLI artifact is separate from MCP protocol packaging.

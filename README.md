@@ -265,8 +265,11 @@ after the branch is pushed.
 OpenTelemetry dependencies are upgraded as one compatibility family:
 `opentelemetry`, `opentelemetry_sdk`, and `opentelemetry-otlp` stay on the same
 minor release, while `tracing-opentelemetry` uses the matching integration
-release. A partial family update is not release-ready because it can introduce
-duplicate telemetry traits and incompatible provider types.
+release. The security floor is `opentelemetry_sdk` 0.32.1, which enforces the
+W3C Baggage 8,192-byte and 64-member limits from GHSA-w9wp-h8wv-79jx. A partial
+family update is not release-ready because it can introduce duplicate telemetry
+traits and incompatible provider types. The XML parser security floor is
+`quick-xml` 0.41.0, which fixes RUSTSEC-2026-0194 and RUSTSEC-2026-0195.
 
 The self-iteration harness runs its own product and harness quality checks in
 parallel dependency stages and defaults `--jobs auto` to the local CPU count.

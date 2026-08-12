@@ -28,9 +28,9 @@ cap-std = "4.0.2"
 futures-util = "0.3"
 getrandom = "0.2"
 libc = "0.2"
-opentelemetry = "0.31"
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "metrics", "reqwest-client", "reqwest-rustls", "trace"] }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-proto", "metrics", "reqwest-client", "reqwest-rustls", "trace"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled", "hooks", "limits"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -40,7 +40,7 @@ tokio = { version = "1.48", features = ["fs", "io-util", "macros", "net", "rt-mu
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6.10", features = ["limit", "timeout", "trace"] }
 tracing = "0.1"
-tracing-opentelemetry = "0.32"
+tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tree-sitter = "0.26.8"
 tree-sitter-bash = "0.25.1"
@@ -74,7 +74,7 @@ tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
 notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
 unicode-ident = "1.0"
-quick-xml = "0.40.1"
+quick-xml = "0.41"
 
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["trace"] }
