@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn initial_map_routes_the_repository_software_model() {
+    let map = KnowledgeMap::initial("now".to_owned());
+
+    let route = map
+        .routes
+        .iter()
+        .find(|route| route.topic == "software-model")
+        .expect("software-model route should exist");
+    let source = map
+        .sources
+        .iter()
+        .find(|source| source.id == "repository-software-model")
+        .expect("repository software-model source should exist");
+
+    assert_eq!(route.source_order, ["repository-software-model"]);
+    assert_eq!(source.kind, KnowledgeMapSourceKind::Repo);
+    assert_eq!(source.uri, ".");
+    assert_eq!(source.source_scope.as_deref(), Some("repo"));
+    map.validate().expect("initial map should validate");
+}
+
+#[test]
+fn software_model_route_upgrade_is_idempotent() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    map.remove_source("repository-software-model")
+        .expect("legacy fixture should remove the new default");
+
+    assert!(
+        map.ensure_software_model_route()
+            .expect("legacy map should upgrade")
+    );
+    assert!(
+        !map.ensure_software_model_route()
+            .expect("upgraded map should remain valid")
+    );
+}
+
+#[test]
+fn rejects_conflicting_reserved_software_model_source() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    map.sources
+        .iter_mut()
+        .find(|source| source.id == "repository-software-model")
+        .expect("reserved source should exist")
+        .uri = "docs/generated-model.yaml".to_owned();
+
+    let error = map.validate().expect_err("reserved source must not drift");
+
+    assert!(error.to_string().contains("reserved source"));
+    assert!(error.to_string().contains("uri '.'"));
+}
+
+#[test]
 fn adds_source_and_route() {
     let mut map = KnowledgeMap::initial("now".to_owned());
     map.add_source(

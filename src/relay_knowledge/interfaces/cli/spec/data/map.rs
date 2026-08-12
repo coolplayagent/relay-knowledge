@@ -19,14 +19,15 @@ fn map_init() -> CliCommandSpec {
     command!(
         &["map", "init"],
         "relay-knowledge map init",
-        "Create the repository knowledge-map.yaml contract when missing.",
+        "Create or upgrade the repository knowledge-map.yaml contract and its software-model route.",
         "knowledge.map.init",
         CommandEffect::WritesOperationalState,
         &[],
         &[],
         &["relay-knowledge map init --format json"],
         &[
-            "Creates the default knowledge map and leaves AGENTS.md edits explicit.",
+            "Creates the default knowledge map and idempotently ensures the repository code-map-backed software-model route on existing maps.",
+            "A conflicting reserved repository-software-model source is rejected rather than overwritten.",
             "The repository root is discovered from the process start directory by walking up to .git or .knowledge, with AGENTS.md as a compatibility fallback.",
         ],
     )

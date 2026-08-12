@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{DomainError, SourceScope, error::required_text};
 
+const SOFTWARE_MODEL_TOPIC_ID: &str = "software-model";
+const SOFTWARE_MODEL_SOURCE_ID: &str = "repository-software-model";
+const SOFTWARE_MODEL_SOURCE_URI: &str = ".";
+const SOFTWARE_MODEL_SOURCE_SCOPE: &str = "repo";
+
 /// Versioned repository contract that tells agents where project knowledge lives.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KnowledgeMap {
@@ -23,9 +28,9 @@ pub struct KnowledgeMap {
 impl KnowledgeMap {
     pub const SCHEMA_VERSION: u16 = 1;
 
-    /// Creates the smallest valid shared contract.
+    /// Creates the default shared contract with a code-map-backed software-model route.
     pub fn initial(updated_at: String) -> Self {
-        Self {
+        let mut map = Self {
             schema_version: Self::SCHEMA_VERSION,
             map_version: 1,
             updated_at,
@@ -36,9 +41,50 @@ impl KnowledgeMap {
                 version: 1,
                 action: "init".to_owned(),
                 actor: "cli".to_owned(),
-                summary: "Created knowledge map.".to_owned(),
+                summary: "Created knowledge map with repository software-model route.".to_owned(),
             }],
+        };
+        map.ensure_software_model_route()
+            .expect("built-in software-model route must remain valid");
+        map
+    }
+
+    /// Ensures the stable repository entry used to discover code-derived software models.
+    pub fn ensure_software_model_route(&mut self) -> Result<bool, DomainError> {
+        self.validate()?;
+        if let Some(source) = self
+            .sources
+            .iter()
+            .find(|source| source.id == SOFTWARE_MODEL_SOURCE_ID)
+        {
+            validate_software_model_source(source)?;
+            return Ok(false);
         }
+
+        if !self
+            .topics
+            .iter()
+            .any(|topic| topic.id == SOFTWARE_MODEL_TOPIC_ID)
+        {
+            self.topics.push(KnowledgeMapTopic::new(
+                SOFTWARE_MODEL_TOPIC_ID.to_owned(),
+                "Whole-software model".to_owned(),
+                "Code-map-backed architecture, build, deployment, dependency, configuration, and design knowledge."
+                    .to_owned(),
+            )?);
+        }
+        self.add_source(KnowledgeMapSource::new(
+            SOFTWARE_MODEL_SOURCE_ID.to_owned(),
+            SOFTWARE_MODEL_TOPIC_ID.to_owned(),
+            KnowledgeMapSourceKind::Repo,
+            SOFTWARE_MODEL_SOURCE_URI.to_owned(),
+            Some(SOFTWARE_MODEL_SOURCE_SCOPE.to_owned()),
+            Some(
+                "Primary repository code map; consume snapshot-bound repo software and repo view projections with freshness and evidence."
+                    .to_owned(),
+            ),
+        )?)?;
+        Ok(true)
     }
 
     /// Validates the cross-reference invariants that keep the map navigable.
@@ -67,6 +113,9 @@ impl KnowledgeMap {
         let mut source_ids = HashSet::new();
         for source in &self.sources {
             source.validate()?;
+            if source.id == SOFTWARE_MODEL_SOURCE_ID {
+                validate_software_model_source(source)?;
+            }
             if !topic_ids.contains(source.topic.as_str()) {
                 return Err(DomainError::invalid(
                     "sources",
@@ -294,6 +343,22 @@ impl KnowledgeMap {
         self.routes
             .sort_by(|left, right| left.topic.cmp(&right.topic));
     }
+}
+
+fn validate_software_model_source(source: &KnowledgeMapSource) -> Result<(), DomainError> {
+    let compatible = source.topic == SOFTWARE_MODEL_TOPIC_ID
+        && source.kind == KnowledgeMapSourceKind::Repo
+        && source.uri == SOFTWARE_MODEL_SOURCE_URI
+        && source.source_scope.as_deref() == Some(SOFTWARE_MODEL_SOURCE_SCOPE);
+    if compatible {
+        return Ok(());
+    }
+    Err(DomainError::invalid(
+        "sources",
+        format!(
+            "reserved source '{SOFTWARE_MODEL_SOURCE_ID}' must use topic '{SOFTWARE_MODEL_TOPIC_ID}', kind 'repo', uri '{SOFTWARE_MODEL_SOURCE_URI}', and scope '{SOFTWARE_MODEL_SOURCE_SCOPE}'"
+        ),
+    ))
 }
 
 /// Human-readable topic bucket used by agents for routing.

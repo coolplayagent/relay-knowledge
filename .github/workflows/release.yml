@@ -101,6 +101,7 @@ jobs:
           test -f skills/relay-knowledge-cli/SKILL.md
           test -f skills/relay-knowledge-cli/agents/openai.yaml
           test -f skills/relay-knowledge-cli/references/cli-workflows.md
+          test -f skills/relay-knowledge-cli/references/knowledge-map-workflows.md
           grep -q 'Relay Knowledge CLI Skill' skills/relay-knowledge-cli/README.md
           grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/README.md
           grep -q 'does not configure MCP' skills/relay-knowledge-cli/README.md
@@ -113,6 +114,8 @@ jobs:
           grep -q 'Version comparisons are diagnostic only' skills/relay-knowledge-cli/SKILL.md
           grep -q 'HTTPS_PROXY' skills/relay-knowledge-cli/references/cli-workflows.md
           grep -q 'repo query' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'Repository Knowledge Bootstrap' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'Spec-Grounded Incremental Loop' skills/relay-knowledge-cli/SKILL.md
           grep -q 'Do not use this skill for MCP' skills/relay-knowledge-cli/SKILL.md
           grep -q 'default_prompt: "Use \$relay-knowledge-cli' skills/relay-knowledge-cli/agents/openai.yaml
 

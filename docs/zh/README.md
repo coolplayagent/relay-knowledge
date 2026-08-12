@@ -70,6 +70,7 @@
 - [第 20 章 多仓库代码图谱薄覆盖层](03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 - [第 21 章 软件全域建模架构](03-architecture-specs/21-software-global-domain-modeling.md)
 - [第 22 章 服务化部署、控制面与数据面分离](03-architecture-specs/22-service-deployment-control-data-plane.md)
+- [第 24 章 代码地图驱动的 Knowledge 开发闭环](03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
 
 ## 第四卷：研究资料
 

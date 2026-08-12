@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update or verify SKILL.md frontmatter metadata."""
+"""Update or verify SKILL.md metadata and packaged workflow contracts."""
 
 from __future__ import annotations
 
@@ -29,6 +29,62 @@ REQUIRED_SHELL_POLICY_PHRASES = (
     "Do not run the Windows bundled asset from POSIX shells",
     "PowerShell",
     "cmd.exe",
+)
+KNOWLEDGE_WORKFLOW_REFERENCE = Path("references/knowledge-map-workflows.md")
+OPENAI_AGENT_CONFIG = Path("agents/openai.yaml")
+SKILL_KNOWLEDGE_LOOP_ORDER = (
+    "### Repository Knowledge Bootstrap",
+    "relay-knowledge map validate --format json",
+    "relay-knowledge map init --format json",
+    "relay-knowledge repo list --format json",
+    "relay-knowledge repo register . --format json",
+    "relay-knowledge repo index <alias> --ref HEAD --format json",
+    "relay-knowledge repo status <alias> --format json",
+    "relay-knowledge repo software <alias> --kind all",
+    "relay-knowledge repo view <alias> --kind architecture-layers",
+    "relay-knowledge map validate --format json",
+    "### Spec-Grounded Incremental Loop",
+    "relay-knowledge repo update core --format json",
+    "relay-knowledge repo impact core --base <pinned-base> --head <pinned-head>",
+    "relay-knowledge repo context core",
+    "relay-knowledge repo software core --kind all",
+    "relay-knowledge repo view core --kind architecture-layers",
+    "relay-knowledge map validate --format json",
+)
+REFERENCE_KNOWLEDGE_LOOP_ORDER = (
+    "## Repository Knowledge Bootstrap",
+    "relay-knowledge map validate --format json",
+    "relay-knowledge map init --format json",
+    "relay-knowledge repo list --format json",
+    "relay-knowledge repo register . --format json",
+    "relay-knowledge repo index <alias> --ref HEAD --format json",
+    "relay-knowledge repo status <alias> --format json",
+    "relay-knowledge repo software <alias> --kind all",
+    "relay-knowledge repo view <alias> --kind architecture-layers",
+    "relay-knowledge map validate --format json",
+    "## Spec-Grounded Incremental Loop",
+    "relay-knowledge repo update <alias> --format json",
+    "relay-knowledge repo impact <alias> --base <pinned-base> --head <pinned-head>",
+    "relay-knowledge repo context <alias>",
+    "relay-knowledge repo software <alias> --kind all",
+    "relay-knowledge repo view <alias> --kind architecture-layers",
+    "relay-knowledge map validate --format json",
+)
+REFERENCE_KNOWLEDGE_LOOP_PHRASES = (
+    "The code map is the primary source of truth",
+    "must not copy derived architecture narratives",
+    "repository-software-model",
+    "Do not overwrite it",
+    "Do not materialize `repo software` or `repo view` responses into the YAML",
+    "Wait for the exact target and completed checkpoint",
+)
+OPENAI_KNOWLEDGE_LOOP_ORDER = (
+    "knowledge map and code map together",
+    "code map as primary truth",
+    "software model plus architecture view",
+    "After a commit",
+    "update/status/impact/context",
+    "validate the map",
 )
 DOUBLE_QUOTED_ESCAPES = {
     "0": "\0",
@@ -324,6 +380,59 @@ def check_skill_shell_policy(path: Path) -> None:
     check_skill_shell_policy_text(path, path.read_text(encoding="utf-8"))
 
 
+def require_phrases(path: Path, text: str, phrases: tuple[str, ...]) -> None:
+    normalized_text = " ".join(text.split())
+    for phrase in phrases:
+        if " ".join(phrase.split()) not in normalized_text:
+            raise ValueError(f"{path} is missing required workflow phrase: {phrase}")
+
+
+def require_ordered_phrases(path: Path, text: str, phrases: tuple[str, ...]) -> None:
+    cursor = 0
+    for phrase in phrases:
+        index = text.find(phrase, cursor)
+        if index < 0:
+            raise ValueError(
+                f"{path} is missing or misorders required workflow phrase: {phrase}"
+            )
+        cursor = index + len(phrase)
+
+
+def check_knowledge_loop_contract_text(
+    skill_path: Path,
+    skill_text: str,
+    reference_path: Path,
+    reference_text: str,
+    agent_path: Path,
+    agent_text: str,
+) -> None:
+    require_ordered_phrases(skill_path, skill_text, SKILL_KNOWLEDGE_LOOP_ORDER)
+    require_ordered_phrases(
+        reference_path,
+        reference_text,
+        REFERENCE_KNOWLEDGE_LOOP_ORDER,
+    )
+    require_phrases(
+        reference_path,
+        reference_text,
+        REFERENCE_KNOWLEDGE_LOOP_PHRASES,
+    )
+    require_ordered_phrases(agent_path, agent_text, OPENAI_KNOWLEDGE_LOOP_ORDER)
+
+
+def check_knowledge_loop_contract(path: Path) -> None:
+    reference_path = path.parent / KNOWLEDGE_WORKFLOW_REFERENCE
+    agent_path = path.parent / OPENAI_AGENT_CONFIG
+    check_knowledge_loop_contract_text(
+        path,
+        path.read_text(encoding="utf-8"),
+        reference_path,
+        reference_path.read_text(encoding="utf-8"),
+        agent_path,
+        agent_path.read_text(encoding="utf-8"),
+    )
+
+
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
     for index in range(metadata_index + 1, end_index):
         line = lines[index]
@@ -378,6 +487,7 @@ def check_skill_metadata(path: Path, expected: str) -> None:
     check_metadata_version(path, expected)
     check_frontmatter_description(path)
     check_skill_shell_policy(path)
+    check_knowledge_loop_contract(path)
 
 
 def expect_value_error(action: Callable[[], object], expected: str) -> None:
@@ -461,6 +571,35 @@ def run_self_test() -> None:
     expect_value_error(
         lambda: check_skill_shell_policy_text(Path("SKILL.md"), invalid_unfenced),
         "outside a code fence",
+    )
+
+    valid_knowledge_skill = "\n".join(SKILL_KNOWLEDGE_LOOP_ORDER)
+    valid_knowledge_reference = "\n".join(
+        (*REFERENCE_KNOWLEDGE_LOOP_PHRASES, *REFERENCE_KNOWLEDGE_LOOP_ORDER)
+    )
+    valid_openai_config = "\n".join(OPENAI_KNOWLEDGE_LOOP_ORDER)
+    check_knowledge_loop_contract_text(
+        Path("SKILL.md"),
+        valid_knowledge_skill,
+        KNOWLEDGE_WORKFLOW_REFERENCE,
+        valid_knowledge_reference,
+        OPENAI_AGENT_CONFIG,
+        valid_openai_config,
+    )
+    invalid_knowledge_skill = valid_knowledge_skill.replace(
+        "relay-knowledge repo status <alias> --format json\n",
+        "",
+    )
+    expect_value_error(
+        lambda: check_knowledge_loop_contract_text(
+            Path("SKILL.md"),
+            invalid_knowledge_skill,
+            KNOWLEDGE_WORKFLOW_REFERENCE,
+            valid_knowledge_reference,
+            OPENAI_AGENT_CONFIG,
+            valid_openai_config,
+        ),
+        "repo status",
     )
 
     print("self-test OK")

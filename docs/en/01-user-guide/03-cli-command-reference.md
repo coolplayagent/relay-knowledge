@@ -192,7 +192,7 @@ After a bulk code-index snapshot apply or checkpointed finalize succeeds, SQLite
 
 Agent-facing MCP kind access reuses the same kind families rather than introducing parallel names. `relay_code_query` covers code graph kinds, `relay_software_query` covers software global-model kinds, `relay_code_feature_flags` covers configuration-driven feature flags, and `relay_codebase_view` covers the `repo view` kind family. Common agent aliases are normalized to existing kinds: `dependency` to `dependencies`, `configuration` to `relationships`, and `model` or `models` to `design`.
 
-`map` commands maintain the repository-local `.knowledge/knowledge-map.yaml` knowledge navigation contract. The YAML stores topic, source, route, and history metadata only; it does not copy authoritative knowledge out of documents, code, config, CI, runtime systems, or external sources. One topic can contain multiple sources, and `map source add` appends distinct source ids to that topic route order. LLM agents should use `map show` and `map route` to locate sources, maintain the contract through `map source add/update/remove`, and run `map validate --format json` after changes. AGENTS.md should keep only a stable reference such as `Knowledge map: .knowledge/knowledge-map.yaml`.
+`map` commands maintain the repository-local `.knowledge/knowledge-map.yaml` knowledge navigation contract. `map init` creates a new map or idempotently adds the reserved `software-model` route and `repository-software-model` repository source to an older valid map; an incompatible reserved source is rejected rather than overwritten. The YAML stores topic, source, route, history, and stable model-entry metadata only. It does not copy authoritative knowledge or snapshot-bound architecture/build/deployment projection rows out of documents, code, config, CI, runtime systems, or external sources. One topic can contain multiple sources, and `map source add` appends distinct source ids to that topic route order. LLM agents should use `map show` and `map route` to locate sources, maintain the contract through `map source add/update/remove`, and run `map validate --format json` after changes. AGENTS.md should keep only a stable reference such as `Knowledge map: .knowledge/knowledge-map.yaml`.
 
 ## 3.5 Read and Write Impact
 
@@ -206,7 +206,10 @@ The repository ships `skills/relay-knowledge-cli`, a ClawHub-compatible skill
 for LLM agents that should operate relay-knowledge by invoking the local CLI and
 parsing JSON output. It covers installation checks, `version check`, setup and
 health diagnostics, knowledge graph ingestion/query, and code repository
-registration, indexing, query, update, impact, and report workflows.
+registration, indexing, query, update, impact, and report workflows. Its
+repository bootstrap initializes/validates the map and code map together; its
+spec-grounded commit loop pins one ref and combines map routes with software,
+architecture, impact, and code-context evidence.
 
 The skill intentionally does not configure MCP, call MCP tools, or manage ACP
 sessions. Use the MCP/ACP chapters for protocol-level agent access.

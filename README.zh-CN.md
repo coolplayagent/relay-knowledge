@@ -44,8 +44,15 @@ relay-knowledge service doctor
 包会在 `assets/` 下内置 Linux x64 和 Windows x64 二进制；当匹配平台的内置二进制通过
 `version --format json` 校验时，agent 会优先使用它，只有内置二进制不可用、Linux glibc
 低于 2.31，或用户明确要求系统安装版本时才回退到 `PATH`。生成后的 `SKILL.md` metadata 会记录与 `Cargo.toml`
-相同的数字版本。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个生成后的 skill
-布局发布到 ClawHub。skill 包还会携带根目录 `README.md`，供 registry 和包使用者查看：
+相同的数字版本。skill 包还会携带根目录 `README.md`，供 registry 和包使用者查看。
+
+打包后的工作流会同时初始化或升级 `.knowledge/knowledge-map.yaml` 与仓库代码地图，
+把代码地图作为第一真实源，在生成 spec 或代码前读取同 scope 的软件/架构模型，并在
+commit 后刷新模型、impact/context 证据与 map validation。YAML 只保存稳定模型路由，
+不复制与 snapshot 绑定的架构、构建或部署事实。
+
+配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个生成后的 skill 布局发布到
+ClawHub：
 
 ```bash
 clawhub publish skills/relay-knowledge-cli \

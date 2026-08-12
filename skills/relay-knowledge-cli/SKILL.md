@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: "Use relay-knowledge local CLI as an agent knowledge backend for repository graphs and GraphRAG: commit-driven durable repo update/status/impact/context loops; repo query; OKF repo graph; repo software; feature flags/config gates; indexing, retention, setup, install/upgrade diagnostics. Use for 用户代码查询kind/查询类型, git commit知识库增量更新, 图关系, 调用关系, 导入依赖, SDK/API, 代码地图, definitions, references, usage, impact. Treat cold and incremental indexing as durable single-writer tasks: recover through repo status, let the managed service drain work, or run bounded local repo index-worker attempts. Pin resolved immutable base/head commits before impact/context. Prefer graph CLI before grep/ripgrep/rg unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP setup/tools, ACP adapters, or protocol-level agent access."
+description: "Use relay-knowledge local CLI for repository knowledge bootstrap and GraphRAG: initialize/validate .knowledge/knowledge-map.yaml plus the code map; treat the code map as primary truth; read snapshot-bound repo software/view models for specs and coding; run durable update/status/impact/context loops after commits. Use for 知识地图初始化, git commit知识库增量更新, 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, SDK/API, 代码地图, definitions, references, usage, impact. Recover durable single-writer index tasks through repo status, a managed service, or bounded local index-worker attempts. Pin immutable refs. Prefer graph CLI before grep/rg unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP/ACP setup or protocol access."
 metadata:
   version: 1.1.13
   openclaw:
@@ -101,8 +101,10 @@ instead.
 For repository knowledge navigation contracts, use
 `references/knowledge-map-workflows.md`. Prefer `relay-knowledge map` commands
 to create, read, update, delete, validate, and route the shared
-`.knowledge/knowledge-map.yaml` contract. Do not hand-edit the YAML unless the CLI is
-unavailable and the user explicitly asks for manual repair.
+`.knowledge/knowledge-map.yaml` contract. Read that reference for repository
+bootstrap, spec work, coding work, commit refresh, or source reconciliation.
+Do not hand-edit the YAML unless the CLI is unavailable and the user explicitly
+asks for manual repair.
 
 When the user asks for a test, smoke check, or reproduction that should not
 touch existing runtime state, set an explicit temporary `RELAY_KNOWLEDGE_HOME`
@@ -256,6 +258,34 @@ commands use the registered scope plus their ref arguments. For non-Git source
 directories, use `--ref HEAD` for the normal moving filesystem snapshot. The
 `worktree` selector is for Git worktree overlays only.
 
+### Repository Knowledge Bootstrap
+
+For repository initialization, prepare the knowledge map and code map as one
+recoverable workflow. Validate first; create or upgrade the map with `map init`;
+reuse a matching completed alias or register the root; index a clean `HEAD`
+baseline; add a `worktree` overlay only when authorized uncommitted state must
+be modeled. Wait for the exact target before reading the software model. Finish
+with the same-ref architecture view and another map validation:
+
+```bash
+relay-knowledge map validate --format json
+relay-knowledge map init --format json
+relay-knowledge repo list --format json
+relay-knowledge repo register . --format json
+relay-knowledge repo index <alias> --ref HEAD --format json
+relay-knowledge repo status <alias> --format json
+relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge map validate --format json
+```
+
+`map init` idempotently ensures the YAML `software-model` route whose
+`repository-software-model` source points to `.`. YAML remains navigation and
+model-entry metadata; do not copy derived architecture, build, IaC, or resolved
+commit facts into it. Follow `references/knowledge-map-workflows.md` for
+missing/invalid-map handling, conditional register/worktree steps, durable task
+recovery, source reconciliation, and shell-specific examples.
+
 ### `repo query --kind` Code Retrieval
 
 Choose the command-local query kind from the user's intent:
@@ -279,18 +309,6 @@ evidence. For call-chain questions, expand callers or callees step by step from
 the known symbol and report when the CLI exposes only bounded one-hop call
 edges.
 
-```bash
-relay-knowledge repo list --format json
-relay-knowledge repo register /path/to/repo \
-  --alias core \
-  --path src \
-  --format json
-
-relay-knowledge repo scope preview core --ref HEAD --format json
-relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo status core --format json
-```
-
 Large-repository budgets are elastic by default. The effective cold-index
 budget scales from the authorized Git file count and throughput baseline, then
 is capped explicitly; the historical 180-second value is not a universal hard
@@ -303,27 +321,6 @@ selector flow. The resulting indexed commit is a `filesystem:<hash>` snapshot;
 query `HEAD` after indexing unless you intentionally copy an explicit
 `filesystem:<hash>` from `repo status`.
 
-```powershell
-relay-knowledge repo register "D:/workspace/hello" --alias hello --path "云存储服务开发部" --format json
-relay-knowledge repo index hello --ref HEAD --format json
-relay-knowledge repo query hello --query "关键词" --kind hybrid --ref HEAD --format json
-```
-
-Use `repo status` after cold full indexing because initial indexing may return a
-durable background task handle or may time out before the response is captured.
-In non-interactive agent sessions where a long-running platform service is not
-already draining the queue, run one or more explicit single-shot worker
-attempts with the task id returned by `repo index` or shown by `repo status`:
-
-```bash
-relay-knowledge repo index-worker --task-id <task-id> --format json
-relay-knowledge repo status core --format json
-```
-
-`repo index-worker --format json` is parseable and advances one bounded retention pass. With no task it reports `claimed=false`. Report optional `maintenance_error` and treat false activity as inconclusive; otherwise repeat while response or status maintenance is active.
-`--format streaming-json` emits `started`, `item`, and `completed` events, with
-the worker result in the `item.payload`. Each worker attempt still uses durable
-leases, checkpoints, retry backoff, and the single-writer indexing boundary.
 Query only an indexed ref:
 
 ```bash
@@ -390,9 +387,12 @@ scope. It must not recursively scan source at query time. After adding or
 fixing feature flag extraction rules, run `repo index` or `repo update` before
 expecting new facts in this command.
 
-### Commit-driven Git Loop
+### Spec-Grounded Incremental Loop
 
-For a registered Git repository, omit both refs for the normal commit event:
+Before writing a spec, combine relevant `map route` results with a pinned
+`repo software --kind all`, `repo view --kind architecture-layers`, and
+requirement-specific code context. For a registered Git repository, omit both
+refs for the normal commit event:
 
 ```bash
 relay-knowledge repo update core --format json
@@ -418,6 +418,9 @@ a non-null summary:
 ```bash
 relay-knowledge repo impact core --base <pinned-base> --head <pinned-head> --limit 100 --format json
 relay-knowledge repo context core --query "explain the affected implementation" --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge repo software core --kind all --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge repo view core --kind architecture-layers --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge map validate --format json
 ```
 
 When changed evidence includes Markdown, specifications, or the knowledge map,
@@ -425,7 +428,10 @@ also inspect `repo software --kind topics`, `repo software --kind
 relationships`, and the OKF neighborhood with `repo graph --focus
 <changed-markdown> --path <bundle-root> --ref <pinned-head>`. `repo graph`
 requires a fresh indexed Markdown snapshot and is distinct from code call
-edges. See `references/cli-workflows.md` for POSIX and PowerShell recipes.
+edges. Refresh the worktree overlay when an uncommitted map mutation must affect
+the current decision; otherwise commit it and publish it in the next update.
+See `references/knowledge-map-workflows.md` for the complete spec/coding
+contract and `references/cli-workflows.md` for deeper CLI recipes.
 
 When the managed service and watcher are enabled, Git HEAD/ref reconciliation
 automatically submits the same durable incremental work after a commit. Treat

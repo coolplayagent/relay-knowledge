@@ -89,18 +89,34 @@ impl KnowledgeMapService {
         let _lock = self.acquire_write_lock().await?;
         let path = self.map_path();
         if fs::try_exists(&path).await? {
-            let map = self.load_map().await?;
-            map.validate()?;
+            let mut map = self.load_map().await?;
+            if map.ensure_software_model_route()? {
+                map.record_change(
+                    "software-model.ensure",
+                    "Added the repository code-map-backed software-model route.".to_owned(),
+                    now_stamp(),
+                );
+                self.write_map(&map).await?;
+                return Ok(self.mutation_response(
+                    context,
+                    map.map_version,
+                    "initialized repository software-model route".to_owned(),
+                ));
+            }
             return Ok(self.mutation_response(
                 context,
                 map.map_version,
-                "knowledge map already exists".to_owned(),
+                "knowledge map and repository software-model route already exist".to_owned(),
             ));
         }
 
         let map = KnowledgeMap::initial(now_stamp());
         self.write_map(&map).await?;
-        Ok(self.mutation_response(context, map.map_version, "created knowledge map".to_owned()))
+        Ok(self.mutation_response(
+            context,
+            map.map_version,
+            "created knowledge map with repository software-model route".to_owned(),
+        ))
     }
 
     pub async fn show(

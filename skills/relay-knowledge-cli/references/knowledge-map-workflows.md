@@ -1,41 +1,167 @@
-# Knowledge Map Workflows
+# Knowledge Map and Code Map Workflows
 
-Use `relay-knowledge map` when a user asks where project knowledge lives, how
-agents should navigate repository knowledge, how to add or update a knowledge
-source, or how AGENTS.md should reference shared knowledge navigation.
+Use this reference when an agent initializes repository knowledge, plans a
+specification, starts a coding task, reacts to a Git commit, or changes an
+authoritative document/configuration source.
 
-The shared contract is `.knowledge/knowledge-map.yaml`. Treat it as a versioned
-repository contract. Prefer CLI CRUD commands over direct YAML edits so
-`map_version`, route references, and history stay consistent.
+The shared YAML contract is `.knowledge/knowledge-map.yaml`. The code map is
+the primary source of truth for repository facts. The YAML stores stable topic,
+source, route, history, and repository-model entry metadata; it must not copy
+derived architecture narratives, build targets, deployment resources, or
+resolved commit ids. Read those snapshot-bound facts through `repo software`
+and `repo view`.
+
+`map init` creates a new contract or idempotently ensures this default model
+entry on an existing contract:
+
+- topic: `software-model`
+- source: `repository-software-model`
+- kind: `repo`
+- URI: `.`
+- scope: `repo`
+
+If that reserved source id has incompatible fields, stop and report the
+conflict. Do not overwrite it.
 
 ## Agent Decision Rules
 
-- Before reading or changing the contract, run `relay-knowledge map validate
-  --format json`.
-- For read-only navigation, run `relay-knowledge map show --format json` or
-  `relay-knowledge map route <topic> --format json`.
-- Before adding a source, check whether the target topic or source already
-  exists with `map show`.
-- A topic can contain multiple sources. Add each source with a distinct
-  `--id`; the topic route keeps the ordered `source_order` list.
-- Use `map source add`, `map source update`, or `map source remove` for changes.
-- After every mutation, run `relay-knowledge map validate --format json`.
-- Do not copy the full YAML into AGENTS.md. AGENTS.md should only reference
-  `.knowledge/knowledge-map.yaml`.
+- Run `map validate --format json` before reading or changing the contract.
+- A missing map may be created with `map init`; an existing invalid map must
+  not be replaced automatically.
+- Run `map init` during repository bootstrap even when the file exists so an
+  older valid map receives the default software-model route.
+- Use `map show` before adding a source. One topic can contain multiple sources,
+  each with a distinct stable id.
+- Use only `map source add`, `map source update`, or `map source remove` for
+  normal mutations, then validate again.
+- Do not copy the YAML into `AGENTS.md`; keep only
+  `Knowledge map: .knowledge/knowledge-map.yaml`.
+- Do not materialize `repo software` or `repo view` responses into the YAML.
+  They remain derived, source-scope-bound read models.
+- If a map mutation must affect the current uncommitted coding decision,
+  refresh a `worktree` overlay after a clean `HEAD` base exists. Otherwise
+  commit the map with its related sources and publish it in the next update.
 - Edit YAML directly only when the CLI is unavailable and the user explicitly
-  asks for manual repair.
+  requests manual repair.
 
-## POSIX Examples
+## Repository Knowledge Bootstrap
 
-Initialize the contract:
+Bootstrap is complete only when both the map and code map are ready. It is a
+recoverable workflow, not an atomic cross-file/database transaction.
+
+1. Validate the map, create/upgrade it with `map init`, and validate again.
+2. Read `repo list`; reuse an entry whose normalized root and registered scope
+   match. Otherwise register the repository and capture the returned alias.
+3. Index a clean `HEAD` first. If bootstrap changed the map or other authorized
+   uncommitted files must be visible, index `worktree` only after the clean base.
+4. Treat index responses as durable tasks. Recover command timeouts through
+   `repo status`; let an active managed service drain the queue; otherwise use
+   only bounded single-shot `repo index-worker` attempts for queued/retrying
+   work.
+5. Wait for the exact target and completed checkpoint. Do not treat stale,
+   queued, running, retrying, or dead-letter state as success.
+6. At that same immutable ref, read `repo software --kind all` and
+   `repo view --kind architecture-layers`, then validate the map once more.
+7. Report alias, map version, resolved ref, source scope, freshness, degraded
+   diagnostics, and whether direct source reads are required.
+
+POSIX bootstrap commands:
 
 ```bash
+relay-knowledge map validate --format json
 relay-knowledge map init --format json
-relay-knowledge map agent-snippet --format text
+relay-knowledge map validate --format json
+relay-knowledge repo list --format json
+relay-knowledge repo register . --format json
+relay-knowledge repo index <alias> --ref HEAD --format json
+relay-knowledge repo status <alias> --format json
+relay-knowledge repo index <alias> --ref worktree --format json
+relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge map validate --format json
 ```
 
-Add a source:
+The register command is conditional: do not create a duplicate when `repo
+list` already has the matching completed root/scope. The `worktree` command is
+also conditional: omit it when no authorized uncommitted state must be modeled.
+
+PowerShell bootstrap commands:
+
+```powershell
+relay-knowledge map validate --format json
+relay-knowledge map init --format json
+relay-knowledge map validate --format json
+relay-knowledge repo list --format json
+relay-knowledge repo register (Get-Location).Path --format json
+relay-knowledge repo index <alias> --ref HEAD --format json
+relay-knowledge repo status <alias> --format json
+relay-knowledge repo index <alias> --ref worktree --format json
+relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge map validate --format json
+```
+
+cmd.exe bootstrap commands:
+
+```cmd
+relay-knowledge map validate --format json
+relay-knowledge map init --format json
+relay-knowledge map validate --format json
+relay-knowledge repo list --format json
+relay-knowledge repo register "%CD%" --format json
+relay-knowledge repo index <alias> --ref HEAD --format json
+relay-knowledge repo status <alias> --format json
+relay-knowledge repo index <alias> --ref worktree --format json
+relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge map validate --format json
+```
+
+## Spec-Grounded Incremental Loop
+
+For a normal Git commit, run one `repo update <alias>` and capture the immutable
+base/head from its completed summary or queued task. Do not reissue update just
+to obtain a non-null summary. Let the service drain the task or run bounded
+local worker attempts, then require `repo status` to identify the exact head as
+fresh.
+
+Before writing or revising a spec, combine the relevant `map route` with
+snapshot-bound software, architecture, and code context. After implementation,
+run impact on the pinned pair and repeat the model/context reads at the pinned
+head. When Markdown, specs, or the map changed, also inspect software topics,
+relationships, and a focused OKF neighborhood.
+
+```bash
+relay-knowledge repo update <alias> --format json
+relay-knowledge repo status <alias> --format json
+relay-knowledge repo impact <alias> --base <pinned-base> --head <pinned-head> --limit 100 --format json
+relay-knowledge repo context <alias> --query "explain the affected implementation and tests" --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge repo software <alias> --kind all --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge map validate --format json
+```
+
+The spec must map requirements to code symbols, call/dependency edges,
+configuration, build/deployment evidence, and tests. Preserve unresolved
+external targets and degraded diagnostics instead of filling gaps with guesses
+or unbounded text search.
+
+## Source Reconciliation
+
+Add a route only for an authoritative source that actually exists in the
+authorized repository or external scope. Typical mappings are:
+
+| Evidence | Map kind | Typical topic |
+| --- | --- | --- |
+| architecture/design Markdown | `doc` | `architecture` |
+| package/build manifest | `config` | `build` |
+| CI workflow | `ci` | `build` or `release` |
+| container/service/IaC manifest | `config` or `runtime` | `deployment` |
+| repository root/model entry | `repo` | `software-model` |
+
+Check `map show` first, use a stable source id, and preserve route order. Remove
+or move a source only when authoritative evidence confirms the old route is no
+longer valid and the requested task authorizes that mutation.
 
 ```bash
 relay-knowledge map source add \
@@ -46,38 +172,19 @@ relay-knowledge map source add \
   --scope docs \
   --description "CLI command reference" \
   --format json
-relay-knowledge map validate --format json
-```
-
-Update and route:
-
-```bash
-relay-knowledge map source update \
-  --id cli-reference \
-  --description "User-facing CLI command reference" \
-  --format json
+relay-knowledge map source update --id cli-reference --description "User-facing CLI command reference" --format json
 relay-knowledge map route cli --format json
-```
-
-Remove a source:
-
-```bash
-relay-knowledge map source remove --id cli-reference --format json
 relay-knowledge map validate --format json
 ```
 
-## PowerShell Examples
+## Completion Evidence
 
-```powershell
-relay-knowledge map init --format json
-relay-knowledge map source add --id cli-reference --topic cli --kind doc --uri docs/zh/01-user-guide/03-cli-command-reference.md --scope docs --description "CLI command reference" --format json
-relay-knowledge map validate --format json
-```
+A successful handoff records:
 
-## cmd.exe Examples
-
-```cmd
-relay-knowledge map init --format json
-relay-knowledge map source add --id cli-reference --topic cli --kind doc --uri docs/zh/01-user-guide/03-cli-command-reference.md --scope docs --description "CLI command reference" --format json
-relay-knowledge map validate --format json
-```
+- valid map path and `map_version`;
+- matching repository alias/root/scope;
+- pinned ref or base/head and code-index source scope;
+- completed checkpoint and non-stale state;
+- software-model and architecture-view freshness/evidence;
+- impact/context evidence used for the spec or code;
+- every degraded, unresolved, truncated, or direct-source-read requirement.

@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay Knowledge CLI"
-  short_description: "Commit-driven repo graphs and bounded indexing"
-  default_prompt: "Use $relay-knowledge-cli to update the repository through durable commit tasks, pin the response's immutable task or summary base/head, wait for the exact resolved head, run impact and context without replaying update, inspect software or OKF graphs when relevant, and verify retention diagnostics."
+  short_description: "Code-map-backed repository knowledge loop"
+  default_prompt: "Use $relay-knowledge-cli to initialize or validate the knowledge map and code map together, treat the code map as primary truth, wait for the exact resolved ref, and read the same-scope software model plus architecture view before writing a spec or code. After a commit, pin the immutable base/head, run the durable update/status/impact/context loop without replaying update, refresh software/OKF views when relevant, validate the map, and report freshness, evidence, and retention diagnostics."

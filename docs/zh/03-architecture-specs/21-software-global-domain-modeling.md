@@ -119,6 +119,14 @@ source or manifest changed
 - `software_global_status` 记录每个 source scope 的 projected graph version、stale 状态、组件数、SDK usage 数、文件数、主题数、关系数、build target 数、IaC resource 数、design element 数和最后错误。
 - CLI 通过 `relay-knowledge repo software <alias> --kind dependencies|sdks|files|topics|relationships|build|iac|design|all` 暴露投影结果；查询只读取已提交投影，不在热路径扫描包缓存、SDK 目录、云 API、未索引外部源码或全仓文档。
 
+## 8. Knowledge 开发闭环边界
+
+仓库 knowledge map 只保存指向 repository root 的稳定 `software-model`
+路由，不复制 projection row 或生成式 narrative。Repository bootstrap、固定
+ref 的 spec context 和 commit 后的一致性恢复由
+[代码地图驱动的 Knowledge 开发闭环](24-code-map-backed-knowledge-development-loop.md)
+定义。Code index publication 仍是按 source scope 刷新这些软件投影的唯一写入路径。
+
 ---
 
 导航: 上一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md) | 下一章: [22. 服务化部署、控制面与数据面分离](22-service-deployment-control-data-plane.md)

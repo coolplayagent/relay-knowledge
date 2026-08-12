@@ -182,7 +182,7 @@ Kind 取值按命令家族隔离：
 
 面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_software_query` 覆盖软件全域模型 kind，`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
 
-`map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。该 YAML 文件只保存 topic、source、route 和 history 元数据，不复制真实知识内容；真实知识仍以文档、代码、配置、CI、运行态系统或外部知识源为准。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
+`map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。`map init` 会创建新 map，或为旧的有效 map 幂等补齐保留的 `software-model` route 与 `repository-software-model` repository source；保留 source 不兼容时会拒绝覆盖。该 YAML 文件只保存 topic、source、route、history 和稳定模型入口元数据，不复制文档、代码、配置、CI、运行态系统、外部知识源中的真实知识，也不复制与 snapshot 绑定的架构/构建/部署 projection row。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
 
 ## 3.5 读写影响
 
@@ -194,7 +194,9 @@ Kind 取值按命令家族隔离：
 
 仓库随附 `skills/relay-knowledge-cli`，这是一个兼容 ClawHub 的 skill，用于让
 LLM agent 通过本地 CLI 调用 relay-knowledge，并解析 JSON 输出。它覆盖安装检查、
-`version check`、setup/health 诊断、知识图谱 ingest/query，以及代码仓库注册、索引、查询、增量更新、影响分析和报告工作流。
+`version check`、setup/health 诊断、知识图谱 ingest/query，以及代码仓库注册、索引、查询、增量更新、影响分析和报告工作流。Repository bootstrap 会同时初始化/校验
+knowledge map 与 code map；spec-grounded commit loop 会固定一个 ref，并组合 map route、
+software/architecture model、impact 和 code context 证据。
 
 该 skill 不配置 MCP、不调用 MCP 工具，也不管理 ACP session。协议级 agent 接入请使用
 MCP/ACP 对应章节。

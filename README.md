@@ -60,12 +60,13 @@ binaries under `assets/`; agents prefer the matching bundled asset for the
 current operating system, CPU, and active command runner when it passes
 `version --format json`, and use `PATH` only as a fallback, when Linux glibc is
 older than 2.31, or when the user explicitly requests the system install.
-Windows `.exe` asset examples stay in PowerShell or cmd.exe instructions, not
-bash/POSIX command blocks. The generated `SKILL.md` metadata
-records the same numeric version as `Cargo.toml`. The skill package also
-carries a root-level `README.md` for registry and package consumers. The
-release workflow can publish the same generated skill layout to ClawHub when
-`CLAWHUB_TOKEN` is configured:
+Windows `.exe` asset examples stay in PowerShell or cmd.exe instructions, not bash/POSIX command blocks.
+The generated `SKILL.md` metadata records the same numeric version as `Cargo.toml`; the package also carries a root-level `README.md`.
+
+The packaged workflow initializes the knowledge map and code map together, uses same-scope
+software/architecture evidence, and refreshes the model while YAML retains only a stable route.
+
+The release workflow can publish the generated skill to ClawHub when `CLAWHUB_TOKEN` is configured:
 
 ```bash
 clawhub publish skills/relay-knowledge-cli \

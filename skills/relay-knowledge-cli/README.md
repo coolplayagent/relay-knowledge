@@ -9,6 +9,15 @@ diagnostics, installation checks, and upgrade checks. For large repositories,
 it tells agents to treat cold and incremental indexing as durable single-writer
 tasks so command-runner timeouts do not interrupt or obscure progress.
 
+Repository bootstrap initializes or upgrades the
+`.knowledge/knowledge-map.yaml` contract and the code map as one recoverable
+workflow. The YAML contains a stable `software-model` route to the repository;
+snapshot-bound architecture, build, deployment, dependency, and design facts
+remain in the code-derived `repo software`/`repo view` read models. Before a
+spec or coding task, agents pin one ref and combine those models with map routes
+and code context. After a commit, they refresh the durable code task, model,
+impact/context evidence, and map validation together.
+
 For code-structure questions such as function definitions, symbol locations,
 references, callers, callees, call graphs, and call chains, agents should use
 this skill before `grep`, `ripgrep`, `rg`, or plain text search. Fall back to
@@ -96,7 +105,8 @@ bounded by an explicit cap.
 - `agents/openai.yaml`: UI metadata for OpenAI-compatible agent surfaces.
 - `references/cli-workflows.md`: detailed CLI workflows and safety defaults.
 - `references/knowledge-map-workflows.md`: agent workflow for CRUD operations
-  on the `.knowledge/knowledge-map.yaml` navigation contract.
+  on the `.knowledge/knowledge-map.yaml` navigation contract plus repository
+  bootstrap and spec-grounded incremental development.
 - `assets/linux-x86_64/relay-knowledge`: Linux x64 release binary in generated
   release packages, built and checked against the glibc 2.31 baseline.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in

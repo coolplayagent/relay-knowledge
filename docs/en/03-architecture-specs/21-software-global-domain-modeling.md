@@ -119,6 +119,15 @@ The first foundation slice remains bounded by repository snapshot/source scope a
 - `software_global_status` records projected graph version, stale state, component count, SDK usage count, file count, topic count, relationship count, build target count, IaC resource count, design element count, and the last projection error for each source scope.
 - CLI exposes the projection through `relay-knowledge repo software <alias> --kind dependencies|sdks|files|topics|relationships|build|iac|design|all`; query hot paths read committed projection rows and do not scan package caches, SDK directories, cloud APIs, unindexed external source, or the full repository documentation.
 
+## 8. Knowledge Development Loop Boundary
+
+The repository knowledge map records a stable `software-model` route to the
+repository root; it does not duplicate projection rows or generated narratives.
+Repository bootstrap, pinned-ref spec context, and post-commit reconciliation
+are defined by [Code-Map-Backed Knowledge Development Loop](24-code-map-backed-knowledge-development-loop.md).
+Code-index publication remains the only writer path that refreshes these
+software projections for a source scope.
+
 ---
 
 Navigation: Previous: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md) | Next: [22. Service Deployment, Control Plane, and Data Plane](22-service-deployment-control-data-plane.md)

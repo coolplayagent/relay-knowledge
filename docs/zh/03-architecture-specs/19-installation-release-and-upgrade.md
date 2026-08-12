@@ -24,6 +24,7 @@
 - Release archive attestation 使用生成的 `checksums.txt` 作为 subject manifest，使 GitHub artifact attestation 覆盖用户本地校验的同一批 archive digest。
 - CLI 新版本发现使用可配置双源：GitHub Releases 和 crates.io。检测必须走 `env`、`paths`、`net::http` 边界，继承代理、TLS、timeout 和 runtime cache 策略；普通命令只能提示稳定新版，不能静默替换二进制。
 - GitHub Releases 包含从 `skills/relay-knowledge-cli` 构建的 `relay-knowledge-cli-skill-<tag>.tar.gz` skill 产物；其版本跟随 `Cargo.toml`，并会以数字 semver 写入生成后的 `SKILL.md` metadata。skill 产物包含根目录 `README.md`，并在 `assets/` 下内置 Linux x64 和 Windows x64 二进制，要求 agent 在匹配平台的内置二进制通过 `version --format json` 校验时优先使用它。只有内置二进制不可用、宿主 Linux glibc 低于内置 asset baseline，或用户明确要求系统安装版本时，agent 才回退到 `PATH`。配置 `CLAWHUB_TOKEN` 时，release workflow 还可以用 `clawhub publish` 把同一个生成后的 skill 布局发布到 ClawHub。该 skill-over-CLI 产物与 MCP 协议打包分离。
+- Skill 产物包含 `references/knowledge-map-workflows.md`，并通过 policy gate 固化 knowledge-map/code-map 联合 bootstrap 与固定 ref 的 spec 开发默认提示词。升级 skill 只更新 agent 指令；只有获得授权的 agent 显式执行文档中的 CLI 工作流后，才会修改仓库 YAML 或 runtime index state。
 
 ## 3. 安装体验
 
