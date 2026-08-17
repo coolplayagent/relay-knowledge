@@ -3,6 +3,7 @@ mod completion;
 mod lease;
 mod queue;
 mod record_mapping;
+mod repository_retention;
 mod reset;
 mod retention;
 pub(in crate::storage::sqlite::code) mod retention_gc;
@@ -17,6 +18,10 @@ pub(super) use lease::{
     running_task_leases,
 };
 pub(super) use queue::queue_task;
+pub(super) use repository_retention::{
+    complete as complete_repository_retention, job as repository_retention_job,
+    schedule as schedule_repository_retention,
+};
 pub(super) use reset::reset_tasks;
 pub(super) use retention::{prune_scopes, prune_scopes_with_retained, retention_status};
 #[cfg(test)]

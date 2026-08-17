@@ -1,5 +1,8 @@
 use super::*;
-use crate::env::{EnvironmentConfig, PlatformKind, RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT};
+use crate::env::{
+    EnvironmentConfig, PlatformKind, RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT,
+    RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES,
+};
 
 #[test]
 fn resolves_code_index_concurrency_from_environment() {
@@ -30,6 +33,25 @@ fn caps_code_index_concurrency_from_environment() {
         runtime.code_index_max_in_flight,
         WorkerRuntimeConfig::MAX_CODE_INDEX_MAX_IN_FLIGHT
     );
+}
+
+#[test]
+fn resolves_indexed_repository_retention_limit_from_environment() {
+    let default_environment =
+        EnvironmentConfig::from_pairs(PlatformKind::Unix, std::iter::empty::<(&str, &str)>())
+            .expect("empty environment should parse");
+    let default_runtime = WorkerRuntimeConfig::from_environment(&default_environment)
+        .expect("default worker runtime should compose");
+    assert_eq!(default_runtime.code_index_max_indexed_repositories, 10);
+
+    let overridden_environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [(RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES, "12")],
+    )
+    .expect("repository retention limit should parse");
+    let overridden_runtime = WorkerRuntimeConfig::from_environment(&overridden_environment)
+        .expect("overridden worker runtime should compose");
+    assert_eq!(overridden_runtime.code_index_max_indexed_repositories, 12);
 }
 
 #[test]

@@ -92,6 +92,21 @@ pub(super) fn schedule(
          ) VALUES (?1, ?2, ?3, 0, ?4, ?4, NULL)",
         params![source_scope, repository_id, INITIAL_PHASE, now_ms],
     )?;
+    transaction.execute(
+        "UPDATE code_repositories
+         SET last_indexed_scope_id = NULL,
+             last_indexed_commit = NULL,
+             tree_hash = NULL,
+             state = 'registered',
+             indexed_file_count = 0,
+             symbol_count = 0,
+             reference_count = 0,
+             chunk_count = 0,
+             stale = 1,
+             degraded_reason = NULL
+         WHERE repository_id = ?1 AND last_indexed_scope_id = ?2",
+        params![repository_id, source_scope],
+    )?;
     Ok(())
 }
 

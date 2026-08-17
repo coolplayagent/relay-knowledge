@@ -92,6 +92,176 @@ async fn retention_status_bounds_scope_lists_and_reports_truncation() {
 }
 
 #[tokio::test]
+async fn repository_retention_uses_phased_gc_and_preserves_concurrent_work() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            for scope in ["scope-old", "scope-new", "scope-queued"] {
+                insert_scope(connection, scope)?;
+            }
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-old',
+                     last_indexed_commit = 'commit-old',
+                     tree_hash = 'tree-old', state = 'fresh', stale = 0
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_terminal_task(connection, "old", "scope-old", "succeeded", 10)?;
+            insert_terminal_task(connection, "new", "scope-new", "succeeded", 200)?;
+            insert_terminal_task(connection, "queued", "scope-queued", "queued", 90)?;
+            insert_repository_retention_job(connection, "scope-old", 100)?;
+            Ok(())
+        })
+        .await
+        .expect("repository retention fixtures should insert");
+
+    let first_pass = retention_pass(&store, "scope-old", 2).await;
+    assert!(first_pass.pruned_scopes.is_empty());
+    assert_eq!(first_pass.retiring_job_count, 1);
+    assert_eq!(first_pass.retiring_jobs[0].source_scope, "scope-old");
+    assert!(first_pass.repository_retention_job.is_some());
+    let (old_scope_count, active_scope, alias, queued_task_count) = store
+        .run(|connection| {
+            Ok((
+                connection.query_row(
+                    "SELECT COUNT(*) FROM code_repository_scopes
+                     WHERE source_scope = 'scope-old' AND retiring = 1",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )?,
+                connection.query_row(
+                    "SELECT last_indexed_scope_id FROM code_repositories
+                     WHERE repository_id = 'repo'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )?,
+                connection.query_row(
+                    "SELECT alias FROM code_repositories WHERE repository_id = 'repo'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )?,
+                connection.query_row(
+                    "SELECT COUNT(*) FROM code_repository_index_tasks
+                     WHERE source_scope = 'scope-queued' AND state = 'queued'",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )?,
+            ))
+        })
+        .await
+        .expect("first repository retention phase should query");
+    assert_eq!(old_scope_count, 1);
+    assert_eq!(active_scope, None);
+    assert_eq!(alias, "fixture");
+    assert_eq!(queued_task_count, 1);
+
+    let completed = drain_retention(&store, "", 2).await;
+    assert!(completed.pruned_scopes.contains(&"scope-old".to_owned()));
+    let (old_scope_count, new_scope_count, queued_scope_count, parent_job_count) = store
+        .run(|connection| {
+            Ok((
+                scope_count(connection, "scope-old")?,
+                scope_count(connection, "scope-new")?,
+                scope_count(connection, "scope-queued")?,
+                connection.query_row(
+                    "SELECT COUNT(*) FROM code_repository_retention_jobs
+                     WHERE repository_id = 'repo'",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )?,
+            ))
+        })
+        .await
+        .expect("completed repository retention should query");
+    assert_eq!(old_scope_count, 0);
+    assert_eq!(new_scope_count, 1);
+    assert_eq!(queued_scope_count, 1);
+    assert_eq!(parent_job_count, 0);
+}
+
+#[tokio::test]
+async fn repository_retention_stops_when_repository_joins_a_user_set() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            insert_scope(connection, "scope-active")?;
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-active',
+                     last_indexed_commit = 'commit-active', tree_hash = 'tree-active'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_terminal_task(connection, "active", "scope-active", "succeeded", 10)?;
+            insert_repository_retention_job(connection, "scope-active", 100)?;
+            insert_set_member(connection, "user-set", "team", "scope-active")?;
+            Ok(())
+        })
+        .await
+        .expect("user-set repository retention fixtures should insert");
+
+    let pass = retention_pass(&store, "scope-active", 2).await;
+
+    assert!(!pass.maintenance_pending);
+    assert!(pass.repository_retention_job.is_none());
+    assert!(pass.retiring_jobs.is_empty());
+    let (scope_count, parent_job_count) = store
+        .run(|connection| {
+            Ok((
+                scope_count(connection, "scope-active")?,
+                connection.query_row(
+                    "SELECT COUNT(*) FROM code_repository_retention_jobs
+                     WHERE repository_id = 'repo'",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )?,
+            ))
+        })
+        .await
+        .expect("protected repository should query");
+    assert_eq!(scope_count, 1);
+    assert_eq!(parent_job_count, 0);
+}
+
+#[tokio::test]
+async fn repository_retention_protects_same_millisecond_incremental_base() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            for scope in ["scope-old", "scope-new", "scope-base"] {
+                insert_scope(connection, scope)?;
+            }
+            update_scope_commit(connection, "scope-base", "base-commit", "base-tree")?;
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-new',
+                     last_indexed_commit = 'head-commit', tree_hash = 'head-tree'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_successful_incremental_task(
+                connection,
+                "same-millisecond",
+                "scope-new",
+                "base-commit",
+                "head-commit",
+                100,
+            )?;
+            insert_repository_retention_job(connection, "scope-old", 100)?;
+            Ok(())
+        })
+        .await
+        .expect("same-millisecond incremental fixtures should insert");
+
+    let pass = retention_pass(&store, "scope-old", 2).await;
+
+    assert!(pass.retained_scopes.contains(&"scope-new".to_owned()));
+    assert!(pass.retained_scopes.contains(&"scope-base".to_owned()));
+    assert_eq!(pass.retiring_jobs[0].source_scope, "scope-old");
+}
+
+#[tokio::test]
 async fn retention_keeps_active_worktree_overlay_base_scope() {
     let store = registered_store().await;
     store
@@ -663,6 +833,8 @@ async fn drain_retention(
                             repository_id: "repo".to_owned(),
                             active_scope,
                             retain_recent_successful_scopes,
+                            repository_retention_cutoff_ms: None,
+                            repository_retention_initial_scope: None,
                         },
                     )
                 }
@@ -705,6 +877,8 @@ async fn retention_pass(
                         repository_id: "repo".to_owned(),
                         active_scope,
                         retain_recent_successful_scopes,
+                        repository_retention_cutoff_ms: None,
+                        repository_retention_initial_scope: None,
                     },
                 )
             }
@@ -909,6 +1083,34 @@ fn insert_terminal_task(
         ],
     )?;
     Ok(())
+}
+
+fn insert_repository_retention_job(
+    connection: &mut rusqlite::Connection,
+    initial_scope: &str,
+    cutoff_ms: u64,
+) -> Result<(), crate::storage::StorageError> {
+    connection.execute(
+        "INSERT INTO code_repository_retention_jobs (
+             repository_id, initial_scope, cutoff_ms, phase,
+             created_at_ms, updated_at_ms, last_error
+         ) VALUES ('repo', ?1, ?2, 'retiring_scopes', ?2, ?2, NULL)",
+        params![initial_scope, cutoff_ms],
+    )?;
+    Ok(())
+}
+
+fn scope_count(
+    connection: &rusqlite::Connection,
+    scope: &str,
+) -> Result<usize, crate::storage::StorageError> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM code_repository_scopes WHERE source_scope = ?1",
+            params![scope],
+            |row| row.get(0),
+        )
+        .map_err(crate::storage::StorageError::from)
 }
 
 fn insert_successful_incremental_task(

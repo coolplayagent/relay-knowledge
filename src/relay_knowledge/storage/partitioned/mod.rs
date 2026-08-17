@@ -218,6 +218,15 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         indexing::retention::prune(self, request)
     }
 
+    fn schedule_code_repository_retention(
+        &self,
+        max_indexed_repositories: usize,
+        now_ms: u64,
+    ) -> StorageFuture<'_, Option<String>> {
+        self.control
+            .schedule_code_repository_retention(max_indexed_repositories, now_ms)
+    }
+
     fn code_file_fingerprints(
         &self,
         repository_id: String,

@@ -538,10 +538,25 @@ impl RelayKnowledgeService {
                     .await
                     .map_err(storage_api_error)?;
                 if let Err(error) = store
+                    .schedule_code_repository_retention(
+                        self.runtime.workers.code_index_max_indexed_repositories,
+                        now_millis(),
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        task_id = %completed.task_id,
+                        error = %error,
+                        "code index published but repository retention was not scheduled"
+                    );
+                }
+                if let Err(error) = store
                     .prune_code_repository_scopes(crate::storage::CodeScopeRetentionRequest {
                         repository_id: response.summary.repository_id.clone(),
                         active_scope: response.summary.source_scope.clone(),
                         retain_recent_successful_scopes: RETAIN_RECENT_CODE_SCOPES,
+                        repository_retention_cutoff_ms: None,
+                        repository_retention_initial_scope: None,
                     })
                     .await
                 {

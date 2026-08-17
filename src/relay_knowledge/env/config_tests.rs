@@ -196,6 +196,21 @@ fn invalid_telemetry_values_report_the_exact_variable() {
 }
 
 #[test]
+fn indexed_repository_retention_limit_rejects_zero() {
+    let error = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [(RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES, "0")],
+    )
+    .expect_err("zero indexed repository retention limit should fail");
+
+    assert_eq!(
+        error.variable,
+        RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES
+    );
+    assert_eq!(error.kind, EnvErrorKind::ZeroValue);
+}
+
+#[test]
 fn https_proxy_takes_precedence_over_http_proxy() {
     let config = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,

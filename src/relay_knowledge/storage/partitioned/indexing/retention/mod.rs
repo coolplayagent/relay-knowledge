@@ -37,7 +37,7 @@ pub(in crate::storage::partitioned) fn status(
 
 pub(in crate::storage::partitioned) fn prune(
     store: &PartitionedSqliteKnowledgeStore,
-    request: CodeScopeRetentionRequest,
+    mut request: CodeScopeRetentionRequest,
 ) -> StorageFuture<'_, CodeScopeRetentionSummary> {
     let store = store.clone();
     Box::pin(async move {
@@ -53,7 +53,12 @@ pub(in crate::storage::partitioned) fn prune(
             let mut shard_retention = shard
                 .code_scope_retention(request.repository_id.clone())
                 .await?;
-            if control_retention.maintenance_pending {
+            let repository_retention_job = control_retention.repository_retention_job.clone();
+            if let Some(job) = &repository_retention_job {
+                request.repository_retention_cutoff_ms = Some(job.cutoff_ms);
+                request.repository_retention_initial_scope = Some(job.initial_scope.clone());
+            }
+            if control_retention.maintenance_pending || repository_retention_job.is_some() {
                 control_retention = store
                     .control
                     .prune_code_repository_scopes(request.clone())
@@ -63,7 +68,7 @@ pub(in crate::storage::partitioned) fn prune(
             // bounded transactions. Advancing both on every maintenance pass
             // prevents a steady stream of control-plane audit work from
             // starving physical fact deletion in the shard.
-            if shard_retention.maintenance_pending {
+            if shard_retention.maintenance_pending || repository_retention_job.is_some() {
                 let retained_pins = shard_retained_pins(&control_retention)?.to_vec();
                 if let Some(finalizing) = shard_retention
                     .retiring_jobs
@@ -86,11 +91,22 @@ pub(in crate::storage::partitioned) fn prune(
                     .prune_code_repository_scopes_with_retained(request.clone(), retained_pins)
                     .await?;
             }
-            return Ok(merge_scope_retention_summaries(
+            let merged = merge_scope_retention_summaries(
                 request.repository_id,
                 control_retention,
                 shard_retention,
-            ));
+            );
+            if let Some(job) = repository_retention_job
+                && merged.prunable_scope_count == 0
+                && merged.retiring_job_count == 0
+            {
+                store
+                    .control
+                    .complete_code_repository_retention(job.repository_id.clone(), job.cutoff_ms)
+                    .await?;
+                return status(&store, job.repository_id).await;
+            }
+            return Ok(merged);
         }
         store.control.prune_code_repository_scopes(request).await
     })
@@ -123,6 +139,9 @@ pub(super) fn merge_scope_retention_summaries(
     let prunable_scopes = union_scopes([control.prunable_scopes, shard.prunable_scopes]);
     let pruned_scopes = union_scopes([control.pruned_scopes, shard.pruned_scopes]);
     let maintenance_pending = control.maintenance_pending || shard.maintenance_pending;
+    let repository_retention_job = control
+        .repository_retention_job
+        .or(shard.repository_retention_job);
     let mut retiring_jobs = control.retiring_jobs;
     retiring_jobs.extend(shard.retiring_jobs);
     retiring_jobs.sort_by(|left, right| {
@@ -150,6 +169,7 @@ pub(super) fn merge_scope_retention_summaries(
         prunable_scopes,
         pruned_scopes,
         retiring_jobs,
+        repository_retention_job,
     }
 }
 

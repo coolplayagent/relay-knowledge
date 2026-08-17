@@ -700,6 +700,8 @@ async fn code_index_task_partitioned_retention_removes_retired_scope_catalog_rou
                 repository_id: "repo".to_owned(),
                 active_scope: "scope-active".to_owned(),
                 retain_recent_successful_scopes: 0,
+                repository_retention_cutoff_ms: None,
+                repository_retention_initial_scope: None,
             })
             .await
             .expect("partitioned retention pass should run");
@@ -723,6 +725,74 @@ async fn code_index_task_partitioned_retention_removes_retired_scope_catalog_rou
             .await
             .expect("active catalog route should load")
             .is_some()
+    );
+}
+
+#[tokio::test]
+async fn partitioned_repository_retention_drains_control_and_shard_before_completion() {
+    let store = partitioned_store("repository-retention");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository should register");
+    store
+        .apply_code_index_snapshot(snapshot("scope-active"))
+        .await
+        .expect("active snapshot should apply");
+    store
+        .control
+        .run(|connection| {
+            connection.execute(
+                "INSERT INTO code_repository_retention_jobs (
+                     repository_id, initial_scope, cutoff_ms, phase,
+                     created_at_ms, updated_at_ms, last_error
+                 ) VALUES ('repo', 'scope-active', 100, 'retiring_scopes', 100, 100, NULL)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("repository retention job should insert");
+
+    for _ in 0..160 {
+        let pass = store
+            .prune_code_repository_scopes(CodeScopeRetentionRequest {
+                repository_id: "repo".to_owned(),
+                active_scope: "scope-active".to_owned(),
+                retain_recent_successful_scopes: 2,
+                repository_retention_cutoff_ms: None,
+                repository_retention_initial_scope: None,
+            })
+            .await
+            .expect("partitioned repository retention should advance");
+        if !pass.maintenance_pending {
+            break;
+        }
+    }
+
+    assert!(
+        store
+            .catalog
+            .repository_for_scope("scope-active".to_owned())
+            .await
+            .expect("scope route should load")
+            .is_none()
+    );
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("repository status should load")
+        .expect("repository registration should remain");
+    assert!(status.last_indexed_scope_id.is_none());
+    assert_eq!(status.state, "registered");
+    assert!(
+        store
+            .control
+            .code_scope_retention("repo".to_owned())
+            .await
+            .expect("control retention status should load")
+            .repository_retention_job
+            .is_none()
     );
 }
 
@@ -758,6 +828,8 @@ async fn code_index_task_partitioned_retention_cleans_staged_partial_scope_route
                 repository_id: "repo".to_owned(),
                 active_scope: String::new(),
                 retain_recent_successful_scopes: 2,
+                repository_retention_cutoff_ms: None,
+                repository_retention_initial_scope: None,
             })
             .await
             .expect("staged partial retention should run");

@@ -225,6 +225,8 @@ relay-knowledge repo update repo --base main --head HEAD --format json
 
 成功发布后，retention 会保留 active scope 与最近两个成功发布时间窗口的并集（窗口通常已包含 active）、最近一次成功增量的 predecessor、active worktree overlay 的 clean base，再加每个未完成 task 的 target/base 与 repository-set member pin。一个旧 scope 会先原子标成 `retiring` 并退出查询，再由 durable GC job 分阶段删除代码图事实、FTS/search document、software projection、checkpoint、workspace state 和 scope metadata；每个 maintenance transaction 只推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行。同 tree commit 复用内容图，并使用每仓 256 条的 commit alias 窗口。完成态 task 历史按每仓库 128 条 succeeded 和 64 条 failed/dead-letter/cancelled 限制，同时保留每个 retained scope 的最新 success。`repo status` 报告 GC phase/progress/error；被淘汰的历史 ref 必须用 full `repo index` 重建。
 
+运行时还会把用户管理 repository set 之外的已索引仓库数默认限制为 10；可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` 修改这个正数上限。成功发布时间最旧的合格仓库通过同一套持久化分阶段 GC 清理，同时保留仓库注册、alias、未完成 task 和清理调度后产生的新发布。Automatic-workspace set 不会让仓库豁免该上限。
+
 ## 5.6 Worktree Overlay
 
 需要索引未提交 Git 工作区时使用 `--ref worktree`:

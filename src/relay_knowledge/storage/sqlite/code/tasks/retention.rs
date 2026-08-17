@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{
-    domain::{CodeIndexMode, CodeScopeRetentionSummary},
+    domain::{CodeIndexMode, CodeRepositoryRetentionJobStatus, CodeScopeRetentionSummary},
     storage::{CodeScopeRetentionRequest, StorageError},
 };
 
@@ -37,61 +37,14 @@ pub(in crate::storage::sqlite::code) fn retention_status(
         .optional()?
         .flatten()
         .unwrap_or_default();
-    retention_summary(
+    let repository_retention = super::repository_retention_job(connection, repository_id)?;
+    let plan = retention_plan(
         connection,
         repository_id,
         &active_scope,
         2,
-        false,
         Vec::new(),
-    )
-}
-
-pub(in crate::storage::sqlite::code) fn prune_scopes(
-    connection: &mut Connection,
-    request: CodeScopeRetentionRequest,
-) -> Result<CodeScopeRetentionSummary, StorageError> {
-    prune_scopes_with_retained(connection, request, Vec::new())
-}
-
-pub(in crate::storage::sqlite::code) fn prune_scopes_with_retained(
-    connection: &mut Connection,
-    request: CodeScopeRetentionRequest,
-    extra_retained_scopes: Vec<String>,
-) -> Result<CodeScopeRetentionSummary, StorageError> {
-    retention_summary(
-        connection,
-        &request.repository_id,
-        &request.active_scope,
-        request.retain_recent_successful_scopes,
-        true,
-        extra_retained_scopes,
-    )
-}
-
-fn retention_summary(
-    connection: &mut Connection,
-    repository_id: &str,
-    active_scope: &str,
-    retain_recent_successful_scopes: usize,
-    prune: bool,
-    extra_retained_scopes: Vec<String>,
-) -> Result<CodeScopeRetentionSummary, StorageError> {
-    if prune {
-        return run_retention_pass(
-            connection,
-            repository_id,
-            active_scope,
-            retain_recent_successful_scopes,
-            extra_retained_scopes,
-        );
-    }
-    let plan = retention_plan(
-        connection,
-        repository_id,
-        active_scope,
-        retain_recent_successful_scopes,
-        extra_retained_scopes,
+        repository_retention.as_ref(),
     )?;
     let retiring_jobs = retention_gc::jobs(connection, repository_id)?;
     let protected_aliases = protected_alias_commits(
@@ -112,7 +65,57 @@ fn retention_summary(
         Vec::new(),
         retiring_jobs,
         audit_pending,
+        repository_retention,
     ))
+}
+
+pub(in crate::storage::sqlite::code) fn prune_scopes(
+    connection: &mut Connection,
+    request: CodeScopeRetentionRequest,
+) -> Result<CodeScopeRetentionSummary, StorageError> {
+    prune_scopes_with_retained(connection, request, Vec::new())
+}
+
+pub(in crate::storage::sqlite::code) fn prune_scopes_with_retained(
+    connection: &mut Connection,
+    request: CodeScopeRetentionRequest,
+    extra_retained_scopes: Vec<String>,
+) -> Result<CodeScopeRetentionSummary, StorageError> {
+    let explicit_repository_retention = match (
+        request.repository_retention_cutoff_ms,
+        request.repository_retention_initial_scope.clone(),
+    ) {
+        (Some(cutoff_ms), Some(initial_scope)) => Some(CodeRepositoryRetentionJobStatus {
+            repository_id: request.repository_id.clone(),
+            initial_scope,
+            cutoff_ms,
+            phase: "retiring_scopes".to_owned(),
+            created_at_ms: cutoff_ms,
+            updated_at_ms: cutoff_ms,
+            last_error: None,
+        }),
+        (None, None) => None,
+        _ => {
+            return Err(StorageError::InvalidInput(
+                "repository retention cutoff and initial scope must be provided together"
+                    .to_owned(),
+            ));
+        }
+    };
+    let persisted_repository_retention =
+        super::repository_retention_job(connection, &request.repository_id)?;
+    let complete_repository_retention =
+        explicit_repository_retention.is_none() && persisted_repository_retention.is_some();
+    let repository_retention = persisted_repository_retention.or(explicit_repository_retention);
+    run_retention_pass(
+        connection,
+        &request.repository_id,
+        &request.active_scope,
+        request.retain_recent_successful_scopes,
+        extra_retained_scopes,
+        repository_retention,
+        complete_repository_retention,
+    )
 }
 
 fn retention_plan(
@@ -121,6 +124,7 @@ fn retention_plan(
     active_scope: &str,
     retain_recent_successful_scopes: usize,
     extra_retained_scopes: Vec<String>,
+    repository_retention: Option<&CodeRepositoryRetentionJobStatus>,
 ) -> Result<RetentionPlan, StorageError> {
     let mut retained = BTreeSet::new();
     let current_active_scope = connection
@@ -131,36 +135,92 @@ fn retention_plan(
         )
         .optional()?
         .flatten();
-    if let Some(current_active_scope) = &current_active_scope {
-        retained.insert(current_active_scope.clone());
-    }
-    if !active_scope.is_empty() {
-        retained.insert(active_scope.to_owned());
-    }
-    let mut active_scopes = BTreeSet::new();
-    if !active_scope.is_empty() {
-        active_scopes.insert(active_scope.to_owned());
-    }
-    if let Some(current_active_scope) = current_active_scope {
-        active_scopes.insert(current_active_scope);
-    }
-    for scope in active_scopes {
-        retained.extend(active_worktree_base_scopes(
-            connection,
-            repository_id,
-            &scope,
-        )?);
-    }
-    let recent =
-        recent_successful_scopes(connection, repository_id, retain_recent_successful_scopes)?;
-    for scope in recent.scopes {
-        retained.insert(scope);
-    }
+    let user_set_scopes =
+        user_repository_set_member_scopes(connection, repository_id, MAX_EXPLICIT_RETENTION_PINS)?;
+    let repository_set_protected =
+        repository_retention.is_some() && !user_set_scopes.scopes.is_empty();
+    let user_pins_truncated = user_set_scopes.truncated;
+    retained.extend(user_set_scopes.scopes);
+
+    let (latest_incremental_base, publication_history_incomplete) =
+        if let Some(repository_retention) = repository_retention {
+            if repository_set_protected {
+                (None, false)
+            } else {
+                let mut protected_publications = successful_scopes_since(
+                    connection,
+                    repository_id,
+                    repository_retention.cutoff_ms,
+                    MAX_SCOPE_STATUS_ROWS,
+                )?;
+                if let Some(current_active_scope) = current_active_scope
+                    .as_ref()
+                    .filter(|scope| *scope != &repository_retention.initial_scope)
+                {
+                    protected_publications
+                        .scopes
+                        .push(current_active_scope.clone());
+                }
+                protected_publications.scopes.sort();
+                protected_publications.scopes.dedup();
+                for scope in &protected_publications.scopes {
+                    retained.insert(scope.clone());
+                    retained.extend(active_worktree_base_scopes(
+                        connection,
+                        repository_id,
+                        scope,
+                    )?);
+                }
+                (
+                    latest_successful_incremental_base_since(
+                        connection,
+                        repository_id,
+                        repository_retention.cutoff_ms,
+                        current_active_scope
+                            .as_deref()
+                            .filter(|scope| *scope != repository_retention.initial_scope),
+                    )?,
+                    protected_publications.truncated,
+                )
+            }
+        } else {
+            if let Some(current_active_scope) = &current_active_scope {
+                retained.insert(current_active_scope.clone());
+            }
+            if !active_scope.is_empty() {
+                retained.insert(active_scope.to_owned());
+            }
+            let mut active_scopes = BTreeSet::new();
+            if !active_scope.is_empty() {
+                active_scopes.insert(active_scope.to_owned());
+            }
+            if let Some(current_active_scope) = current_active_scope {
+                active_scopes.insert(current_active_scope);
+            }
+            for scope in active_scopes {
+                retained.extend(active_worktree_base_scopes(
+                    connection,
+                    repository_id,
+                    &scope,
+                )?);
+            }
+            let recent = recent_successful_scopes(
+                connection,
+                repository_id,
+                retain_recent_successful_scopes,
+            )?;
+            for scope in recent.scopes {
+                retained.insert(scope);
+            }
+            (
+                latest_successful_incremental_base(connection, repository_id)?,
+                recent.incomplete,
+            )
+        };
     let unfinished_tasks = unfinished_tasks(connection, repository_id)?;
     for scope in unfinished_task_scopes(connection, repository_id, &unfinished_tasks)? {
         retained.insert(scope);
     }
-    let latest_incremental_base = latest_successful_incremental_base(connection, repository_id)?;
     if let Some(base) = &latest_incremental_base {
         retained.extend(scopes_for_commit(
             connection,
@@ -170,16 +230,12 @@ fn retention_plan(
             &base.language_filters_json,
         )?);
     }
-    let user_set_scopes =
-        user_repository_set_member_scopes(connection, repository_id, MAX_EXPLICIT_RETENTION_PINS)?;
-    let user_pins_truncated = user_set_scopes.truncated;
-    retained.extend(user_set_scopes.scopes);
     for scope in extra_retained_scopes {
         retained.insert(scope);
     }
     let (mut prunable, scope_listing_truncated) =
         prunable_scopes(connection, repository_id, &retained, MAX_SCOPE_STATUS_ROWS)?;
-    if recent.incomplete {
+    if publication_history_incomplete || repository_set_protected {
         // A legacy publication history can exceed the fixed candidate window.
         // Audit compaction still advances this pass, but scope retirement waits
         // until the newest distinct publications can be proven without a scan.
@@ -190,7 +246,7 @@ fn retention_plan(
         prunable,
         scope_listing_truncated: scope_listing_truncated
             || user_pins_truncated
-            || recent.incomplete,
+            || publication_history_incomplete,
         unfinished_tasks,
         latest_incremental_base,
     })
@@ -202,6 +258,8 @@ fn run_retention_pass(
     active_scope: &str,
     retain_recent_successful_scopes: usize,
     extra_retained_scopes: Vec<String>,
+    repository_retention: Option<CodeRepositoryRetentionJobStatus>,
+    complete_repository_retention: bool,
 ) -> Result<CodeScopeRetentionSummary, StorageError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let plan = retention_plan(
@@ -210,6 +268,7 @@ fn run_retention_pass(
         active_scope,
         retain_recent_successful_scopes,
         extra_retained_scopes,
+        repository_retention.as_ref(),
     )?;
     let now_ms = current_timestamp_ms();
     let had_job = !retention_gc::jobs(&transaction, repository_id)?.is_empty();
@@ -247,7 +306,23 @@ fn run_retention_pass(
             repository_id,
             &protected_aliases,
         )?;
-    let summary = summary_from_plan(repository_id, plan, pruned, retiring_jobs, audit_pending);
+    let repository_retention =
+        if complete_repository_retention && plan.prunable.is_empty() && retiring_jobs.is_empty() {
+            if let Some(job) = &repository_retention {
+                super::complete_repository_retention(&transaction, repository_id, job.cutoff_ms)?;
+            }
+            None
+        } else {
+            repository_retention
+        };
+    let summary = summary_from_plan(
+        repository_id,
+        plan,
+        pruned,
+        retiring_jobs,
+        audit_pending,
+        repository_retention,
+    );
     transaction.commit()?;
     Ok(summary)
 }
@@ -258,9 +333,12 @@ fn summary_from_plan(
     pruned: Vec<String>,
     retiring_jobs: Vec<crate::domain::CodeScopeRetirementJobStatus>,
     audit_pending: bool,
+    repository_retention_job: Option<CodeRepositoryRetentionJobStatus>,
 ) -> CodeScopeRetentionSummary {
-    let maintenance_pending =
-        !plan.prunable.is_empty() || !retiring_jobs.is_empty() || audit_pending;
+    let maintenance_pending = !plan.prunable.is_empty()
+        || !retiring_jobs.is_empty()
+        || audit_pending
+        || repository_retention_job.is_some();
     let mut retained_scopes = plan.retained.into_iter().collect::<Vec<_>>();
     let retained_scope_count = retained_scopes.len();
     let retained_truncated = retained_scopes.len() > MAX_SCOPE_STATUS_ROWS;
@@ -277,6 +355,7 @@ fn summary_from_plan(
         prunable_scopes: plan.prunable,
         pruned_scopes: pruned,
         retiring_jobs,
+        repository_retention_job,
     }
 }
 
@@ -506,6 +585,58 @@ fn completed_checkpoint_candidates(
         .map_err(StorageError::from)
 }
 
+fn successful_scopes_since(
+    connection: &Connection,
+    repository_id: &str,
+    cutoff_ms: u64,
+    limit: usize,
+) -> Result<ScopePage, StorageError> {
+    let query_limit = limit.saturating_add(1);
+    let mut statement = connection.prepare(
+        "SELECT source_scope
+         FROM code_repository_index_tasks
+         WHERE repository_id = ?1 AND state = 'succeeded' AND updated_at_ms > ?2
+         ORDER BY updated_at_ms DESC, publication_generation DESC, task_id DESC
+         LIMIT ?3",
+    )?;
+    let mut scopes = statement
+        .query_map(params![repository_id, cutoff_ms, query_limit], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+    let mut statement = connection.prepare(
+        "SELECT source_scope
+         FROM code_repository_index_checkpoints
+         WHERE repository_id = ?1 AND state IN ('complete', 'completed')
+           AND updated_at_ms > ?2
+         ORDER BY updated_at_ms DESC, source_scope DESC
+         LIMIT ?3",
+    )?;
+    scopes.extend(
+        statement
+            .query_map(params![repository_id, cutoff_ms, query_limit], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    let query_was_truncated = scopes.len() > limit;
+    scopes.sort();
+    scopes.dedup();
+    let mut queryable = Vec::new();
+    for scope in scopes {
+        if scope_is_queryable(connection, repository_id, &scope)? {
+            queryable.push(scope);
+        }
+    }
+    let truncated = query_was_truncated || queryable.len() > limit;
+    queryable.truncate(limit);
+    Ok(ScopePage {
+        scopes: queryable,
+        truncated,
+    })
+}
+
 fn scope_is_queryable(
     connection: &Connection,
     repository_id: &str,
@@ -602,6 +733,54 @@ fn latest_successful_incremental_base(
     )?;
     let rows = statement.query_map(
         params![repository_id, RETAIN_SUCCEEDED_TASK_AUDIT_ROWS + 1],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    )?;
+    for row in rows {
+        let (mode_json, path_filters_json, language_filters_json) = row?;
+        let mode = serde_json::from_str::<CodeIndexMode>(&mode_json).map_err(|error| {
+            StorageError::InvalidInput(format!(
+                "successful code index task has invalid mode: {error}"
+            ))
+        })?;
+        if let CodeIndexMode::Incremental { base_ref, .. } = mode {
+            return Ok(Some(CommitReference {
+                resolved_commit_sha: base_ref,
+                path_filters_json,
+                language_filters_json,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn latest_successful_incremental_base_since(
+    connection: &Connection,
+    repository_id: &str,
+    cutoff_ms: u64,
+    current_active_scope: Option<&str>,
+) -> Result<Option<CommitReference>, StorageError> {
+    let mut statement = connection.prepare(
+        "SELECT mode_json, path_filters_json, language_filters_json
+         FROM code_repository_index_tasks
+         WHERE repository_id = ?1 AND state = 'succeeded'
+           AND (updated_at_ms > ?2 OR source_scope = ?3)
+         ORDER BY publication_generation DESC, updated_at_ms DESC,
+                  created_at_ms DESC, task_id DESC
+         LIMIT ?4",
+    )?;
+    let rows = statement.query_map(
+        params![
+            repository_id,
+            cutoff_ms,
+            current_active_scope.unwrap_or_default(),
+            RETAIN_SUCCEEDED_TASK_AUDIT_ROWS + 1
+        ],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,

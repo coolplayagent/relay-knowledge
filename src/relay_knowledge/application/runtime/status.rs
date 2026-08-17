@@ -65,6 +65,7 @@ pub(in crate::application) fn runtime_status_with_model_profiles(
         worker_extractor_endpoint_configured: runtime.workers.extractor_endpoint.is_some(),
         worker_max_in_flight: runtime.workers.max_in_flight,
         code_index_max_in_flight: runtime.workers.code_index_max_in_flight,
+        code_index_max_indexed_repositories: runtime.workers.code_index_max_indexed_repositories,
         silent_updates_enabled: runtime.workers.silent_updates_enabled,
         file_index_enabled: runtime.file_index.enabled,
         file_index_root_count: runtime.file_index.roots.len(),

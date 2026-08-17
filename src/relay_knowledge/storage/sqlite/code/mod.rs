@@ -97,6 +97,14 @@ pub(super) fn prune_scopes_with_retained(
     tasks::prune_scopes_with_retained(connection, request, extra_retained_scopes)
 }
 
+pub(super) fn complete_repository_retention(
+    connection: &mut Connection,
+    repository_id: &str,
+    cutoff_ms: u64,
+) -> Result<bool, StorageError> {
+    tasks::complete_repository_retention(connection, repository_id, cutoff_ms)
+}
+
 fn ensure_queryable_code_scope(
     connection: &Connection,
     source_scope: &str,
@@ -284,6 +292,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: crate::storage::CodeScopeRetentionRequest,
     ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
         self.run(move |connection| tasks::prune_scopes(connection, request))
+    }
+
+    fn schedule_code_repository_retention(
+        &self,
+        max_indexed_repositories: usize,
+        now_ms: u64,
+    ) -> StorageFuture<'_, Option<String>> {
+        self.run(move |connection| {
+            tasks::schedule_repository_retention(connection, max_indexed_repositories, now_ms)
+        })
     }
 
     fn code_file_fingerprints(

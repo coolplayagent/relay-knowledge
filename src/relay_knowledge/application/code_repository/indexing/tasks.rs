@@ -20,6 +20,13 @@ impl RelayKnowledgeService {
     /// Runs one bounded, restart-safe retention pass for persistent leftovers.
     pub(crate) async fn run_code_scope_retention_once(&self) -> Result<bool, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
+        store
+            .schedule_code_repository_retention(
+                self.runtime.workers.code_index_max_indexed_repositories,
+                now_millis(),
+            )
+            .await
+            .map_err(storage_api_error)?;
         let repositories = store
             .list_code_repositories()
             .await
@@ -60,6 +67,8 @@ impl RelayKnowledgeService {
                     repository_id,
                     active_scope,
                     retain_recent_successful_scopes: RETAIN_RECENT_CODE_SCOPES,
+                    repository_retention_cutoff_ms: None,
+                    repository_retention_initial_scope: None,
                 })
                 .await
             {

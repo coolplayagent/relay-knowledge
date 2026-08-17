@@ -386,6 +386,8 @@ async fn code_index_task_queue_rejects_incremental_base_after_gc_schedules_retir
             repository_id: "repo".to_owned(),
             active_scope: "active-scope".to_owned(),
             retain_recent_successful_scopes: 0,
+            repository_retention_cutoff_ms: None,
+            repository_retention_initial_scope: None,
         })
         .await
         .expect("retention should schedule the unpinned base");
@@ -450,6 +452,8 @@ async fn code_index_task_queue_rejects_worktree_overlay_after_base_retirement() 
             repository_id: "repo".to_owned(),
             active_scope: "active-scope".to_owned(),
             retain_recent_successful_scopes: 0,
+            repository_retention_cutoff_ms: None,
+            repository_retention_initial_scope: None,
         })
         .await
         .expect("retention should schedule the overlay base");
@@ -495,6 +499,8 @@ async fn code_index_task_queue_pins_incremental_base_before_gc_plans_retirement(
             repository_id: "repo".to_owned(),
             active_scope: "active-scope".to_owned(),
             retain_recent_successful_scopes: 0,
+            repository_retention_cutoff_ms: None,
+            repository_retention_initial_scope: None,
         })
         .await
         .expect("retention should observe the unfinished task pin");

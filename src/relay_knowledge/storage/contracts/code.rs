@@ -122,6 +122,10 @@ pub struct CodeScopeRetentionRequest {
     pub repository_id: String,
     pub active_scope: String,
     pub retain_recent_successful_scopes: usize,
+    /// Whole-repository retention cutoff. Publications after this instant remain protected.
+    pub repository_retention_cutoff_ms: Option<u64>,
+    /// Scope that was current when whole-repository retention was scheduled.
+    pub repository_retention_initial_scope: Option<String>,
 }
 
 /// New repository set metadata to persist.
@@ -350,6 +354,14 @@ pub trait CodeRepositoryStore: Send + Sync {
         &self,
         request: CodeScopeRetentionRequest,
     ) -> StorageFuture<'_, CodeScopeRetentionSummary>;
+
+    fn schedule_code_repository_retention(
+        &self,
+        _max_indexed_repositories: usize,
+        _now_ms: u64,
+    ) -> StorageFuture<'_, Option<String>> {
+        Box::pin(async { Ok(None) })
+    }
 
     fn code_file_fingerprints(
         &self,

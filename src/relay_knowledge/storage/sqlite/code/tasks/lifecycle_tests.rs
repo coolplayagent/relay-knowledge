@@ -810,6 +810,8 @@ async fn code_scope_retention_prunes_only_non_retained_scopes() {
                         repository_id: "repo".to_owned(),
                         active_scope: "scope-active".to_owned(),
                         retain_recent_successful_scopes: 1,
+                        repository_retention_cutoff_ms: None,
+                        repository_retention_initial_scope: None,
                     },
                 )
             })

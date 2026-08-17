@@ -227,6 +227,8 @@ The incremental path reads `git diff --name-status --find-renames -z` and rebuil
 
 After successful publication, retention keeps the union of the active scope and a rolling window of the two latest successful publications (normally including active), the latest successful incremental predecessor, the clean base of any active worktree overlay, plus every unfinished task target/base and repository-set member pin. One older scope is atomically marked `retiring` and excluded from reads. Each maintenance transaction then advances one durable scope-GC phase, whose physical deletion of code graph facts, FTS/search documents, software projections, checkpoints, workspace state, or scope metadata is capped at 512 rows in aggregate across affected application tables. Same-tree commits share content under a bounded 256-row commit-alias window. Finished task history is bounded to 128 successful and 64 failed/dead-letter/cancelled rows per repository, preserving the latest success for each retained scope. `repo status` reports pending GC phase/progress/errors. A pruned historical ref requires full `repo index` before query or incremental reuse.
 
+The runtime also caps indexed repositories outside user-managed repository sets at 10 by default. `RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` changes this positive limit. The oldest eligible repository is cleaned through the same durable phased GC while its registration, aliases, unfinished tasks, and publications made after cleanup scheduling remain available. Automatic-workspace sets do not exempt repositories from the cap.
+
 ## 5.6 Worktree Overlay
 
 Use `--ref worktree` to index uncommitted Git work:

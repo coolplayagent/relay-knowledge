@@ -11,12 +11,14 @@ pub struct WorkerRuntimeConfig {
     pub extractor_endpoint: Option<String>,
     pub max_in_flight: usize,
     pub code_index_max_in_flight: usize,
+    pub code_index_max_indexed_repositories: usize,
     pub silent_updates_enabled: bool,
 }
 
 impl WorkerRuntimeConfig {
     pub const DEFAULT_MAX_IN_FLIGHT: usize = 2;
     pub const DEFAULT_CODE_INDEX_MAX_IN_FLIGHT: usize = 2;
+    pub const DEFAULT_CODE_INDEX_MAX_INDEXED_REPOSITORIES: usize = 10;
     pub const MAX_CODE_INDEX_MAX_IN_FLIGHT: usize = 8;
 
     /// Builds worker config from typed environment overrides.
@@ -41,6 +43,10 @@ impl WorkerRuntimeConfig {
                 .code_index_max_in_flight
                 .unwrap_or(Self::DEFAULT_CODE_INDEX_MAX_IN_FLIGHT)
                 .min(Self::MAX_CODE_INDEX_MAX_IN_FLIGHT),
+            code_index_max_indexed_repositories: environment
+                .workers
+                .code_index_max_indexed_repositories
+                .unwrap_or(Self::DEFAULT_CODE_INDEX_MAX_INDEXED_REPOSITORIES),
             silent_updates_enabled: environment.workers.silent_updates_enabled.unwrap_or(false),
         })
     }

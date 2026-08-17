@@ -251,6 +251,16 @@ impl SqliteGraphStore {
             code::prune_scopes_with_retained(connection, request, extra_retained_scopes)
         })
     }
+
+    pub(in crate::storage) fn complete_code_repository_retention(
+        &self,
+        repository_id: String,
+        cutoff_ms: u64,
+    ) -> StorageFuture<'_, bool> {
+        self.run(move |connection| {
+            code::complete_repository_retention(connection, &repository_id, cutoff_ms)
+        })
+    }
 }
 
 #[cfg(test)]
