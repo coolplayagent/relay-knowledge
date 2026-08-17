@@ -181,6 +181,109 @@ async fn repository_retention_uses_phased_gc_and_preserves_concurrent_work() {
 }
 
 #[tokio::test]
+async fn repository_retention_preserves_initial_scope_republished_after_cutoff() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            for scope in ["scope-initial", "scope-stale", "scope-base"] {
+                insert_scope(connection, scope)?;
+            }
+            update_scope_commit(connection, "scope-base", "base-commit", "base-tree")?;
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-initial',
+                     last_indexed_commit = 'commit-initial', tree_hash = 'tree-initial'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_terminal_task(connection, "initial", "scope-initial", "succeeded", 50)?;
+            insert_successful_incremental_task(
+                connection,
+                "republish",
+                "scope-initial",
+                "base-commit",
+                "commit-initial",
+                90,
+            )?;
+            connection.execute(
+                "UPDATE code_repository_index_tasks
+                 SET state = CASE task_id
+                         WHEN 'task-republish' THEN 'running' ELSE state END,
+                     publication_generation = CASE task_id
+                         WHEN 'task-initial' THEN 1 ELSE publication_generation END",
+                [],
+            )?;
+            insert_repository_retention_job(connection, "scope-initial", 100)?;
+            connection.execute(
+                "UPDATE code_repository_retention_jobs
+                 SET cutoff_publication_generation = 1
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("concurrent republish fixtures should insert");
+
+    let running = retention_pass(&store, "scope-initial", 2).await;
+    assert!(
+        running
+            .retained_scopes
+            .contains(&"scope-initial".to_owned())
+    );
+    assert!(running.retained_scopes.contains(&"scope-base".to_owned()));
+    assert!(
+        running
+            .retiring_jobs
+            .iter()
+            .all(|job| !matches!(job.source_scope.as_str(), "scope-initial" | "scope-base"))
+    );
+    assert!(running.repository_retention_job.is_some());
+
+    store
+        .run(|connection| {
+            connection.execute(
+                "UPDATE code_repository_index_tasks
+                 SET state = 'succeeded', publication_generation = 2, updated_at_ms = 200
+                 WHERE task_id = 'task-republish'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("republished task should complete");
+
+    let published = retention_pass(&store, "scope-initial", 2).await;
+
+    assert!(
+        published
+            .retained_scopes
+            .contains(&"scope-initial".to_owned())
+    );
+    assert!(published.retained_scopes.contains(&"scope-base".to_owned()));
+    assert!(
+        published
+            .retiring_jobs
+            .iter()
+            .all(|job| !matches!(job.source_scope.as_str(), "scope-initial" | "scope-base"))
+    );
+    let initial_scope_retiring = store
+        .run(|connection| {
+            connection
+                .query_row(
+                    "SELECT retiring FROM code_repository_scopes
+                     WHERE source_scope = 'scope-initial'",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("republished scope should query");
+    assert!(!initial_scope_retiring);
+}
+
+#[tokio::test]
 async fn repository_retention_stops_when_repository_joins_a_user_set() {
     let store = registered_store().await;
     store

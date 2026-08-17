@@ -631,16 +631,20 @@ fn successful_scopes_since(
              SELECT source_scope, updated_at_ms
              FROM code_repository_index_tasks
              WHERE repository_id = ?1 AND state = 'succeeded'
-               AND source_scope <> ?4
                AND (
                    (?3 > 0 AND publication_generation > ?3)
-                   OR ((?3 = 0 OR publication_generation = 0) AND updated_at_ms >= ?2)
+                   OR (
+                       (?3 = 0 OR publication_generation = 0)
+                       AND updated_at_ms >= ?2
+                       AND (source_scope <> ?4 OR updated_at_ms > ?2)
+                   )
                )
              UNION ALL
              SELECT source_scope, updated_at_ms
              FROM code_repository_index_checkpoints
              WHERE repository_id = ?1 AND state IN ('complete', 'completed')
-               AND source_scope <> ?4 AND updated_at_ms >= ?2
+               AND updated_at_ms >= ?2
+               AND (source_scope <> ?4 OR updated_at_ms > ?2)
          ) publication
          GROUP BY source_scope
          ORDER BY MAX(updated_at_ms) DESC, source_scope DESC
@@ -810,10 +814,11 @@ fn latest_successful_incremental_base_since(
            AND (
                source_scope = ?5
                OR (
-                   source_scope <> ?4
-                   AND (
-                       (?3 > 0 AND publication_generation > ?3)
-                       OR ((?3 = 0 OR publication_generation = 0) AND updated_at_ms >= ?2)
+                   (?3 > 0 AND publication_generation > ?3)
+                   OR (
+                       (?3 = 0 OR publication_generation = 0)
+                       AND updated_at_ms >= ?2
+                       AND (source_scope <> ?4 OR updated_at_ms > ?2)
                    )
                )
            )
