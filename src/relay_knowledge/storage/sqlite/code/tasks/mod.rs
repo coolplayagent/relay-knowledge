@@ -20,7 +20,7 @@ pub(super) use lease::{
 pub(super) use queue::queue_task;
 pub(super) use repository_retention::{
     complete as complete_repository_retention, job as repository_retention_job,
-    schedule as schedule_repository_retention,
+    schedule as schedule_repository_retention, update_progress as update_repository_retention,
 };
 pub(super) use reset::reset_tasks;
 pub(super) use retention::{prune_scopes, prune_scopes_with_retained, retention_status};

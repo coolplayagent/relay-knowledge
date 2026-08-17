@@ -56,6 +56,8 @@ pub(in crate::storage::partitioned) fn prune(
             let repository_retention_job = control_retention.repository_retention_job.clone();
             if let Some(job) = &repository_retention_job {
                 request.repository_retention_cutoff_ms = Some(job.cutoff_ms);
+                request.repository_retention_cutoff_generation =
+                    Some(job.cutoff_publication_generation);
                 request.repository_retention_initial_scope = Some(job.initial_scope.clone());
             }
             if control_retention.maintenance_pending || repository_retention_job.is_some() {

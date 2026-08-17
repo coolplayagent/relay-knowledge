@@ -701,6 +701,7 @@ async fn code_index_task_partitioned_retention_removes_retired_scope_catalog_rou
                 active_scope: "scope-active".to_owned(),
                 retain_recent_successful_scopes: 0,
                 repository_retention_cutoff_ms: None,
+                repository_retention_cutoff_generation: None,
                 repository_retention_initial_scope: None,
             })
             .await
@@ -761,6 +762,7 @@ async fn partitioned_repository_retention_drains_control_and_shard_before_comple
                 active_scope: "scope-active".to_owned(),
                 retain_recent_successful_scopes: 2,
                 repository_retention_cutoff_ms: None,
+                repository_retention_cutoff_generation: None,
                 repository_retention_initial_scope: None,
             })
             .await
@@ -829,6 +831,7 @@ async fn code_index_task_partitioned_retention_cleans_staged_partial_scope_route
                 active_scope: String::new(),
                 retain_recent_successful_scopes: 2,
                 repository_retention_cutoff_ms: None,
+                repository_retention_cutoff_generation: None,
                 repository_retention_initial_scope: None,
             })
             .await

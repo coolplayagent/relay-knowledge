@@ -122,8 +122,11 @@ pub struct CodeScopeRetentionRequest {
     pub repository_id: String,
     pub active_scope: String,
     pub retain_recent_successful_scopes: usize,
-    /// Whole-repository retention cutoff. Publications after this instant remain protected.
+    /// Whole-repository wall-clock cutoff used for legacy publications and checkpoints.
     pub repository_retention_cutoff_ms: Option<u64>,
+    /// Publication generation current when whole-repository retention was scheduled.
+    /// Newer generations remain protected even when timestamps share one millisecond.
+    pub repository_retention_cutoff_generation: Option<u64>,
     /// Scope that was current when whole-repository retention was scheduled.
     pub repository_retention_initial_scope: Option<String>,
 }

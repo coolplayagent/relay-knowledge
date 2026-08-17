@@ -68,6 +68,7 @@ impl RelayKnowledgeService {
                     active_scope,
                     retain_recent_successful_scopes: RETAIN_RECENT_CODE_SCOPES,
                     repository_retention_cutoff_ms: None,
+                    repository_retention_cutoff_generation: None,
                     repository_retention_initial_scope: None,
                 })
                 .await

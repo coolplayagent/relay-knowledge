@@ -27,6 +27,7 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
             repository_id TEXT PRIMARY KEY,
             initial_scope TEXT NOT NULL,
             cutoff_ms INTEGER NOT NULL,
+            cutoff_publication_generation INTEGER NOT NULL DEFAULT 0,
             phase TEXT NOT NULL,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
@@ -48,6 +49,12 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
         CREATE INDEX IF NOT EXISTS code_repository_cross_edges_to_scope_gc
             ON code_repository_cross_edges(to_source_scope);
         ",
+    )?;
+    super::super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_retention_jobs",
+        "cutoff_publication_generation",
+        "INTEGER NOT NULL DEFAULT 0",
     )?;
     Ok(())
 }

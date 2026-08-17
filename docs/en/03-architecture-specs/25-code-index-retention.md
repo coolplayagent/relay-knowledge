@@ -24,13 +24,14 @@ An unprotected old scope is atomically marked `retiring` and receives a durable 
 
 ## 3. Repository Retention
 
-`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` is a positive integer with default 10. A repository counts when it has a current published scope. Membership in a user-managed repository set excludes it from both the count and candidate selection. A generated set whose alias is `<repository-id>-auto-workspace` is operational metadata and does not grant that exemption.
+`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` is a positive integer with default 10. A repository counts when it has a current published scope. Membership in a user-managed repository set excludes it from both the count and candidate selection. The automatic workspace set is identified by its deterministic set ID derived from the repository ID; its editable alias is not trusted for authorization or exemption decisions.
 
 Scheduling runs after successful publication and before each bounded retention pass used by the resident service or `repo index-worker`. At most one repository-retention parent job is globally active. If eligible indexed repositories exceed the limit, the scheduler selects the repository with the oldest current successful publication and persists:
 
 - `repository_id`;
 - `initial_scope`, the active scope observed during selection;
 - `cutoff_ms`, the scheduling timestamp;
+- `cutoff_publication_generation`, the successful publication generation observed for the initial scope;
 - phase, timestamps, and last error.
 
 The durable parent survives process restart. A maintenance pass loads it and selects child scopes through the existing scope-GC state machine. Repository mode intentionally does not apply the ordinary active/latest-two protection to scopes that existed before the cutoff.
@@ -40,7 +41,7 @@ The durable parent survives process restart. A maintenance pass loads it and sel
 Repository cleanup does not block index admission and does not cancel queued, retrying, or running tasks. It protects:
 
 - target and base scopes referenced by unfinished tasks;
-- successful publications at or after `cutoff_ms`;
+- successful publication generations newer than a nonzero `cutoff_publication_generation`; a zero parent watermark, generation-zero legacy rows, and checkpoints use the inclusive `cutoff_ms` fallback;
 - an active scope that differs from `initial_scope`, including a same-millisecond concurrent publication;
 - the latest incremental predecessor required by such a concurrent publication;
 - active worktree bases.
@@ -53,18 +54,22 @@ If the repository becomes a member of a user-managed set after scheduling, maint
 
 Single-SQLite mode completes the parent only when no repository-mode prunable scope and no child scope-GC job remains. Partitioned SQLite merges control and shard retention state and completes the parent only after both sides converge; catalog routes remain governed by the existing final-phase ordering.
 
-`repo status` retention output includes the optional repository-retention parent job together with child scope-GC jobs. `maintenance_pending` remains true while either kind of job is present. The parent reports repository, initial scope, cutoff, phase, timestamps, and last error.
+`repo status` retention output includes the optional repository-retention parent job together with child scope-GC jobs. `maintenance_pending` remains true while either kind of job is present. The parent reports repository, initial scope, time and publication-generation cutoffs, the active child GC phase, timestamps, and the latest child error.
+
+Post-cutoff successful scopes are deduplicated across task and checkpoint publication records before the bounded history limit is applied. If the distinct result still exceeds the bound, retirement pauses instead of deleting from incomplete evidence.
 
 ## 6. Required Tests
 
 Regression coverage must verify:
 
 - the default is 10, positive overrides work, and zero is rejected;
-- user-managed set members are excluded while automatic-workspace members still count;
+- user-managed set members are excluded while automatic-workspace members still count, independent of aliases and candidate-page position;
 - the oldest eligible successful publication is selected;
 - parent and child jobs resume after reopening SQLite;
 - first-pass logical retirement precedes physical deletion;
 - registration and aliases survive whole-repository index cleanup;
-- unfinished work, post-cutoff publication, and same-millisecond incremental bases survive;
+- unfinished work, post-cutoff publication generations, and same-millisecond incremental bases survive;
+- duplicate task/checkpoint publication records are deduplicated before history bounding;
+- parent phase and error fields follow the active child GC job;
 - joining a user-managed set stops additional retirement;
 - partitioned control and shard cleanup complete the parent only after convergence.

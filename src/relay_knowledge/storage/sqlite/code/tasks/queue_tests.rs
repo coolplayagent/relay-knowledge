@@ -387,6 +387,7 @@ async fn code_index_task_queue_rejects_incremental_base_after_gc_schedules_retir
             active_scope: "active-scope".to_owned(),
             retain_recent_successful_scopes: 0,
             repository_retention_cutoff_ms: None,
+            repository_retention_cutoff_generation: None,
             repository_retention_initial_scope: None,
         })
         .await
@@ -453,6 +454,7 @@ async fn code_index_task_queue_rejects_worktree_overlay_after_base_retirement() 
             active_scope: "active-scope".to_owned(),
             retain_recent_successful_scopes: 0,
             repository_retention_cutoff_ms: None,
+            repository_retention_cutoff_generation: None,
             repository_retention_initial_scope: None,
         })
         .await
@@ -500,6 +502,7 @@ async fn code_index_task_queue_pins_incremental_base_before_gc_plans_retirement(
             active_scope: "active-scope".to_owned(),
             retain_recent_successful_scopes: 0,
             repository_retention_cutoff_ms: None,
+            repository_retention_cutoff_generation: None,
             repository_retention_initial_scope: None,
         })
         .await

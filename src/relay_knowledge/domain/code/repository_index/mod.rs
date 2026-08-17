@@ -307,6 +307,8 @@ pub struct CodeRepositoryRetentionJobStatus {
     pub repository_id: String,
     pub initial_scope: String,
     pub cutoff_ms: u64,
+    #[serde(default)]
+    pub cutoff_publication_generation: u64,
     pub phase: String,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,

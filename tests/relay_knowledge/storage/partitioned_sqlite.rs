@@ -600,6 +600,7 @@ async fn partitioned_sqlite_prune_removes_legacy_control_scopes_after_sharding()
                 active_scope: "scope-active".to_owned(),
                 retain_recent_successful_scopes: 0,
                 repository_retention_cutoff_ms: None,
+                repository_retention_cutoff_generation: None,
                 repository_retention_initial_scope: None,
             })
             .await
@@ -837,6 +838,7 @@ async fn partitioned_sqlite_prune_retains_control_task_scopes() {
             active_scope: "scope-active".to_owned(),
             retain_recent_successful_scopes: 0,
             repository_retention_cutoff_ms: None,
+            repository_retention_cutoff_generation: None,
             repository_retention_initial_scope: None,
         })
         .await

@@ -14,6 +14,7 @@ async fn scheduler_excludes_user_sets_counts_auto_sets_and_recovers_after_reopen
         let store = SqliteGraphStore::open(&database.path).expect("store should open");
         for (repository_id, alias) in [
             ("repo-user", "user"),
+            ("repo-alias-user", "alias-user"),
             ("repo-auto", "auto"),
             ("repo-newer", "newer"),
         ] {
@@ -34,15 +35,29 @@ async fn scheduler_excludes_user_sets_counts_auto_sets_and_recovers_after_reopen
         store
             .run(|connection| {
                 insert_published_scope(connection, "repo-user", "scope-user", 10)?;
+                insert_published_scope(connection, "repo-alias-user", "scope-alias-user", 5)?;
                 insert_published_scope(connection, "repo-auto", "scope-auto", 20)?;
                 insert_published_scope(connection, "repo-newer", "scope-newer", 30)?;
                 insert_set_member(connection, "user-set", "team", "repo-user", "scope-user")?;
+                insert_set_member(
+                    connection,
+                    "user-set-with-auto-alias",
+                    "repo-alias-user-auto-workspace",
+                    "repo-alias-user",
+                    "scope-alias-user",
+                )?;
                 insert_set_member(
                     connection,
                     &super::super::super::workspace::workspace_set_id("repo-auto"),
                     "repo-auto-auto-workspace",
                     "repo-auto",
                     "scope-auto",
+                )?;
+                connection.execute(
+                    "UPDATE code_repository_index_tasks
+                     SET publication_generation = 7
+                     WHERE repository_id = 'repo-auto'",
+                    [],
                 )?;
                 Ok(())
             })
@@ -73,6 +88,70 @@ async fn scheduler_excludes_user_sets_counts_auto_sets_and_recovers_after_reopen
     assert_eq!(job.repository_id, "repo-auto");
     assert_eq!(job.initial_scope, "scope-auto");
     assert_eq!(job.cutoff_ms, 100);
+    assert_eq!(job.cutoff_publication_generation, 7);
+}
+
+#[tokio::test]
+async fn scheduler_scans_past_a_page_of_user_set_repositories() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    for index in 0..65 {
+        let repository_id = format!("repo-protected-{index:03}");
+        store
+            .upsert_code_repository(
+                CodeRepositoryRegistration::new(
+                    repository_id.clone(),
+                    format!("protected-{index:03}"),
+                    format!("/tmp/{repository_id}"),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .expect("registration should validate"),
+            )
+            .await
+            .expect("protected repository should register");
+    }
+    for repository_id in ["repo-eligible-old", "repo-eligible-new"] {
+        store
+            .upsert_code_repository(
+                CodeRepositoryRegistration::new(
+                    repository_id,
+                    repository_id,
+                    format!("/tmp/{repository_id}"),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .expect("registration should validate"),
+            )
+            .await
+            .expect("eligible repository should register");
+    }
+    store
+        .run(|connection| {
+            for index in 0..65 {
+                let repository_id = format!("repo-protected-{index:03}");
+                let scope = format!("scope-protected-{index:03}");
+                insert_published_scope(connection, &repository_id, &scope, index as u64 + 1)?;
+                insert_set_member(
+                    connection,
+                    &format!("set-protected-{index:03}"),
+                    &format!("team-{index:03}"),
+                    &repository_id,
+                    &scope,
+                )?;
+            }
+            insert_published_scope(connection, "repo-eligible-old", "scope-eligible-old", 1000)?;
+            insert_published_scope(connection, "repo-eligible-new", "scope-eligible-new", 1001)?;
+            Ok(())
+        })
+        .await
+        .expect("retention fixtures should insert");
+
+    let selected = store
+        .schedule_code_repository_retention(1, 2000)
+        .await
+        .expect("repository retention should schedule");
+
+    assert_eq!(selected.as_deref(), Some("repo-eligible-old"));
 }
 
 fn insert_published_scope(

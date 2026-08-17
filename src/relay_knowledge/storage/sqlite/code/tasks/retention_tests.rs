@@ -262,6 +262,171 @@ async fn repository_retention_protects_same_millisecond_incremental_base() {
 }
 
 #[tokio::test]
+async fn repository_retention_deduplicates_publication_sources_before_bounding() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            insert_scope(connection, "scope-old")?;
+            insert_terminal_task(connection, "old", "scope-old", "succeeded", 10)?;
+            for index in 0..33 {
+                let scope = format!("scope-new-{index:02}");
+                insert_scope(connection, &scope)?;
+                insert_terminal_task(
+                    connection,
+                    &format!("new-{index:02}"),
+                    &scope,
+                    "succeeded",
+                    200 + index,
+                )?;
+                insert_checkpoint(connection, &scope, 200 + index)?;
+            }
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-new-32',
+                     last_indexed_commit = 'commit-scope-new-32',
+                     tree_hash = 'tree-scope-new-32'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_repository_retention_job(connection, "scope-old", 100)?;
+            Ok(())
+        })
+        .await
+        .expect("duplicate publication fixtures should insert");
+
+    let pass = retention_pass(&store, "scope-old", 2).await;
+
+    assert!(!pass.scope_listing_truncated);
+    assert_eq!(pass.retiring_jobs[0].source_scope, "scope-old");
+    assert_eq!(pass.retained_scope_count, 33);
+}
+
+#[tokio::test]
+async fn repository_retention_protects_all_higher_generations_in_the_cutoff_millisecond() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            for scope in ["scope-old", "scope-intermediate", "scope-current"] {
+                insert_scope(connection, scope)?;
+                insert_terminal_task(connection, scope, scope, "succeeded", 100)?;
+            }
+            connection.execute(
+                "UPDATE code_repository_index_tasks
+                 SET publication_generation = CASE source_scope
+                     WHEN 'scope-old' THEN 1
+                     WHEN 'scope-intermediate' THEN 2
+                     WHEN 'scope-current' THEN 3
+                 END",
+                [],
+            )?;
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-current',
+                     last_indexed_commit = 'commit-scope-current',
+                     tree_hash = 'tree-scope-current'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_repository_retention_job(connection, "scope-old", 100)?;
+            connection.execute(
+                "UPDATE code_repository_retention_jobs
+                 SET cutoff_publication_generation = 1
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("same-millisecond publication fixtures should insert");
+
+    let pass = retention_pass(&store, "scope-old", 2).await;
+
+    assert!(
+        pass.retained_scopes
+            .contains(&"scope-intermediate".to_owned())
+    );
+    assert!(pass.retained_scopes.contains(&"scope-current".to_owned()));
+    assert_eq!(pass.retiring_jobs[0].source_scope, "scope-old");
+}
+
+#[tokio::test]
+async fn repository_retention_uses_time_cutoff_for_migrated_zero_generation_jobs() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            for (scope, timestamp, generation) in [("scope-old", 10, 1), ("scope-current", 200, 2)]
+            {
+                insert_scope(connection, scope)?;
+                insert_terminal_task(connection, scope, scope, "succeeded", timestamp)?;
+                connection.execute(
+                    "UPDATE code_repository_index_tasks
+                     SET publication_generation = ?2
+                     WHERE repository_id = 'repo' AND source_scope = ?1",
+                    params![scope, generation],
+                )?;
+            }
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-current',
+                     last_indexed_commit = 'commit-scope-current',
+                     tree_hash = 'tree-scope-current'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_repository_retention_job(connection, "scope-old", 100)?;
+            Ok(())
+        })
+        .await
+        .expect("migrated repository retention fixtures should insert");
+
+    let pass = retention_pass(&store, "scope-old", 2).await;
+
+    assert!(pass.retained_scopes.contains(&"scope-current".to_owned()));
+    assert_eq!(pass.retiring_jobs[0].source_scope, "scope-old");
+}
+
+#[tokio::test]
+async fn repository_retention_reports_child_gc_phase_and_error() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            insert_scope(connection, "scope-old")?;
+            insert_repository_retention_job(connection, "scope-old", 100)?;
+            Ok(())
+        })
+        .await
+        .expect("repository retention fixtures should insert");
+    let scheduled = retention_pass(&store, "scope-old", 2).await;
+    assert_eq!(
+        scheduled
+            .repository_retention_job
+            .as_ref()
+            .map(|job| job.phase.as_str()),
+        Some("scope_gc:workspace_edges")
+    );
+    store
+        .run(|connection| {
+            connection.execute(
+                "UPDATE code_repository_scope_gc_jobs
+                 SET phase = 'invalid-test-phase'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("invalid test phase should persist");
+
+    let failed = retention_pass(&store, "", 2).await;
+    let parent = failed
+        .repository_retention_job
+        .expect("repository retention should remain pending");
+    assert_eq!(parent.phase, "scope_gc:invalid-test-phase");
+    assert!(parent.last_error.is_some());
+    assert!(parent.updated_at_ms > parent.created_at_ms);
+}
+
+#[tokio::test]
 async fn retention_keeps_active_worktree_overlay_base_scope() {
     let store = registered_store().await;
     store
@@ -834,6 +999,7 @@ async fn drain_retention(
                             active_scope,
                             retain_recent_successful_scopes,
                             repository_retention_cutoff_ms: None,
+                            repository_retention_cutoff_generation: None,
                             repository_retention_initial_scope: None,
                         },
                     )
@@ -878,6 +1044,7 @@ async fn retention_pass(
                         active_scope,
                         retain_recent_successful_scopes,
                         repository_retention_cutoff_ms: None,
+                        repository_retention_cutoff_generation: None,
                         repository_retention_initial_scope: None,
                     },
                 )

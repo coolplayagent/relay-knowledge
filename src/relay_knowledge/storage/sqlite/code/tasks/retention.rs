@@ -89,12 +89,15 @@ pub(in crate::storage::sqlite::code) fn prune_scopes_with_retained(
             repository_id: request.repository_id.clone(),
             initial_scope,
             cutoff_ms,
+            cutoff_publication_generation: request
+                .repository_retention_cutoff_generation
+                .unwrap_or_default(),
             phase: "retiring_scopes".to_owned(),
             created_at_ms: cutoff_ms,
             updated_at_ms: cutoff_ms,
             last_error: None,
         }),
-        (None, None) => None,
+        (None, None) if request.repository_retention_cutoff_generation.is_none() => None,
         _ => {
             return Err(StorageError::InvalidInput(
                 "repository retention cutoff and initial scope must be provided together"
@@ -151,6 +154,8 @@ fn retention_plan(
                     connection,
                     repository_id,
                     repository_retention.cutoff_ms,
+                    repository_retention.cutoff_publication_generation,
+                    &repository_retention.initial_scope,
                     MAX_SCOPE_STATUS_ROWS,
                 )?;
                 if let Some(current_active_scope) = current_active_scope
@@ -176,6 +181,8 @@ fn retention_plan(
                         connection,
                         repository_id,
                         repository_retention.cutoff_ms,
+                        repository_retention.cutoff_publication_generation,
+                        &repository_retention.initial_scope,
                         current_active_scope
                             .as_deref()
                             .filter(|scope| *scope != repository_retention.initial_scope),
@@ -314,6 +321,30 @@ fn run_retention_pass(
             None
         } else {
             repository_retention
+                .map(|mut job| {
+                    let (phase, last_error) = retiring_jobs.first().map_or_else(
+                        || ("retiring_scopes".to_owned(), None),
+                        |scope_job| {
+                            (
+                                format!("scope_gc:{}", scope_job.phase),
+                                scope_job.last_error.clone(),
+                            )
+                        },
+                    );
+                    super::update_repository_retention(
+                        &transaction,
+                        repository_id,
+                        job.cutoff_ms,
+                        &phase,
+                        last_error.as_deref(),
+                        now_ms,
+                    )?;
+                    job.phase = phase;
+                    job.updated_at_ms = now_ms;
+                    job.last_error = last_error;
+                    Ok::<_, StorageError>(job)
+                })
+                .transpose()?
         };
     let summary = summary_from_plan(
         repository_id,
@@ -589,40 +620,45 @@ fn successful_scopes_since(
     connection: &Connection,
     repository_id: &str,
     cutoff_ms: u64,
+    cutoff_publication_generation: u64,
+    initial_scope: &str,
     limit: usize,
 ) -> Result<ScopePage, StorageError> {
     let query_limit = limit.saturating_add(1);
     let mut statement = connection.prepare(
         "SELECT source_scope
-         FROM code_repository_index_tasks
-         WHERE repository_id = ?1 AND state = 'succeeded' AND updated_at_ms > ?2
-         ORDER BY updated_at_ms DESC, publication_generation DESC, task_id DESC
-         LIMIT ?3",
+         FROM (
+             SELECT source_scope, updated_at_ms
+             FROM code_repository_index_tasks
+             WHERE repository_id = ?1 AND state = 'succeeded'
+               AND source_scope <> ?4
+               AND (
+                   (?3 > 0 AND publication_generation > ?3)
+                   OR ((?3 = 0 OR publication_generation = 0) AND updated_at_ms >= ?2)
+               )
+             UNION ALL
+             SELECT source_scope, updated_at_ms
+             FROM code_repository_index_checkpoints
+             WHERE repository_id = ?1 AND state IN ('complete', 'completed')
+               AND source_scope <> ?4 AND updated_at_ms >= ?2
+         ) publication
+         GROUP BY source_scope
+         ORDER BY MAX(updated_at_ms) DESC, source_scope DESC
+         LIMIT ?5",
     )?;
-    let mut scopes = statement
-        .query_map(params![repository_id, cutoff_ms, query_limit], |row| {
-            row.get::<_, String>(0)
-        })?
+    let scopes = statement
+        .query_map(
+            params![
+                repository_id,
+                cutoff_ms,
+                cutoff_publication_generation,
+                initial_scope,
+                query_limit
+            ],
+            |row| row.get::<_, String>(0),
+        )?
         .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    let mut statement = connection.prepare(
-        "SELECT source_scope
-         FROM code_repository_index_checkpoints
-         WHERE repository_id = ?1 AND state IN ('complete', 'completed')
-           AND updated_at_ms > ?2
-         ORDER BY updated_at_ms DESC, source_scope DESC
-         LIMIT ?3",
-    )?;
-    scopes.extend(
-        statement
-            .query_map(params![repository_id, cutoff_ms, query_limit], |row| {
-                row.get::<_, String>(0)
-            })?
-            .collect::<Result<Vec<_>, _>>()?,
-    );
     let query_was_truncated = scopes.len() > limit;
-    scopes.sort();
-    scopes.dedup();
     let mut queryable = Vec::new();
     for scope in scopes {
         if scope_is_queryable(connection, repository_id, &scope)? {
@@ -763,21 +799,34 @@ fn latest_successful_incremental_base_since(
     connection: &Connection,
     repository_id: &str,
     cutoff_ms: u64,
+    cutoff_publication_generation: u64,
+    initial_scope: &str,
     current_active_scope: Option<&str>,
 ) -> Result<Option<CommitReference>, StorageError> {
     let mut statement = connection.prepare(
         "SELECT mode_json, path_filters_json, language_filters_json
          FROM code_repository_index_tasks
          WHERE repository_id = ?1 AND state = 'succeeded'
-           AND (updated_at_ms > ?2 OR source_scope = ?3)
+           AND (
+               source_scope = ?5
+               OR (
+                   source_scope <> ?4
+                   AND (
+                       (?3 > 0 AND publication_generation > ?3)
+                       OR ((?3 = 0 OR publication_generation = 0) AND updated_at_ms >= ?2)
+                   )
+               )
+           )
          ORDER BY publication_generation DESC, updated_at_ms DESC,
                   created_at_ms DESC, task_id DESC
-         LIMIT ?4",
+         LIMIT ?6",
     )?;
     let rows = statement.query_map(
         params![
             repository_id,
             cutoff_ms,
+            cutoff_publication_generation,
+            initial_scope,
             current_active_scope.unwrap_or_default(),
             RETAIN_SUCCEEDED_TASK_AUDIT_ROWS + 1
         ],

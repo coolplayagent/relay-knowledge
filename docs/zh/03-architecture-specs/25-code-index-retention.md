@@ -24,13 +24,14 @@
 
 ## 3. Repository Retention（仓库级保留）
 
-`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` 是正整数，默认值为 10。具有当前已发布 scope 的仓库计入数量。属于用户管理 repository set（仓库集合）的仓库既不计数，也不会成为候选。Alias 为 `<repository-id>-auto-workspace` 的自动生成 set 只是运行元数据，不提供该豁免。
+`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` 是正整数，默认值为 10。具有当前已发布 scope 的仓库计入数量。属于用户管理 repository set（仓库集合）的仓库既不计数，也不会成为候选。自动 workspace set（工作区集合）通过由仓库标识确定性生成的 `set_id`（集合标识）识别；可编辑 alias（别名）不参与授权或豁免判断。
 
 成功发布后，以及 resident service（常驻服务）或 `repo index-worker`（仓库索引工作器）执行每次有界 retention pass（保留处理轮次）前，都会运行调度。全局最多存在一个活动 repository-retention parent job（仓库保留父任务）。合格已索引仓库数超过上限时，调度器选择当前成功发布时间最旧的仓库，并持久化：
 
 - `repository_id`（仓库标识）；
 - `initial_scope`（初始作用域），即选择时观测到的 active scope；
 - `cutoff_ms`（截止时间），即调度时间；
+- `cutoff_publication_generation`（截止发布代次），即初始作用域对应的成功发布代次；
 - phase（阶段）、时间戳和 last error（最近错误）。
 
 持久化父任务可以跨进程重启恢复。Maintenance pass 会加载父任务，并通过既有 scope-GC state machine（作用域垃圾回收状态机）选择和执行子 scope。仓库模式会有意跳过普通 active/latest-two protection（活动/最近两个保护），以清理 cutoff 前已存在的 scope。
@@ -40,7 +41,7 @@
 仓库级清理不阻止 index admission（索引准入），也不取消 queued（排队中）、retrying（重试中）或 running task（运行中任务）。它保护：
 
 - 未完成任务引用的 target scope 和 base scope；
-- `cutoff_ms` 时刻及之后的成功发布；
+- 高于非零 `cutoff_publication_generation` 的成功发布代次；水位为零的旧父任务、发布代次为零的旧数据和 checkpoint（检查点）使用包含边界的 `cutoff_ms` 兼容判断；
 - 与 `initial_scope` 不同的 active scope，包括同一毫秒发生的并发发布；
 - 该并发发布需要的最近 incremental predecessor；
 - active worktree base（活动工作树基线）。
@@ -53,18 +54,22 @@
 
 Single-SQLite（单 SQLite）仅在没有仓库模式可退役 scope、且没有子 scope-GC job 时完成父任务。Partitioned SQLite（分片 SQLite）合并 control（控制面）与 shard（分片）retention state（保留状态），仅在两侧都收敛后完成父任务；catalog route（目录路由）继续遵循既有最终阶段顺序。
 
-`repo status`（仓库状态）的 retention 输出会同时包含可选 repository-retention parent job 与子 scope-GC job。任一任务存在时，`maintenance_pending`（维护待处理）保持为 true。父任务报告仓库、初始作用域、截止时间、阶段、时间戳和最近错误。
+`repo status`（仓库状态）的 retention 输出会同时包含可选 repository-retention parent job 与子 scope-GC job。任一任务存在时，`maintenance_pending`（维护待处理）保持为 true。父任务报告仓库、初始作用域、时间和发布代次截止点、当前子 GC 阶段、时间戳和最近子任务错误。
+
+cutoff（截止点）之后的成功 scope 会先跨 task（任务）与 checkpoint（检查点）发布记录去重，再应用有界历史上限。如果去重后的不同 scope 仍超过上限，则暂停退役，不会根据不完整证据删除。
 
 ## 6. 必须覆盖的测试
 
 回归测试必须验证：
 
 - 默认值为 10，正数 override（覆盖值）生效，0 被拒绝；
-- 用户管理 set 成员被排除，automatic-workspace 成员仍计数；
+- 用户管理 set 成员被排除，automatic-workspace 成员仍计数，且不受 alias 或候选分页位置影响；
 - 选择成功发布时间最旧的合格仓库；
 - 重新打开 SQLite 后父任务和子任务可恢复；
 - 首轮逻辑退役先于物理删除；
 - 整仓索引清理后仓库注册与 alias 仍存在；
-- 未完成任务、cutoff 后发布和同毫秒 incremental base 均保留；
+- 未完成任务、cutoff 后发布代次和同毫秒 incremental base 均保留；
+- task/checkpoint 的重复发布记录在历史上限前完成去重；
+- 父任务 phase 和 last error 跟随当前子 GC 任务；
 - 加入用户管理 set 后停止新增退役；
 - Partitioned control 与 shard 收敛后才完成父任务。

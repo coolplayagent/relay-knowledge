@@ -42,6 +42,7 @@ async fn live_worktree_attempt_rebinds_target_before_publication_and_retention()
             active_scope: real_scope.clone(),
             retain_recent_successful_scopes: 0,
             repository_retention_cutoff_ms: None,
+            repository_retention_cutoff_generation: None,
             repository_retention_initial_scope: None,
         })
         .await
