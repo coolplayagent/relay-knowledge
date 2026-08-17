@@ -53,18 +53,25 @@ pub(in crate::storage::partitioned) fn prune(
             let mut shard_retention = shard
                 .code_scope_retention(request.repository_id.clone())
                 .await?;
-            let repository_retention_job = control_retention.repository_retention_job.clone();
-            if let Some(job) = &repository_retention_job {
+            let initial_repository_retention_job =
+                control_retention.repository_retention_job.clone();
+            if let Some(job) = &initial_repository_retention_job {
                 request.repository_retention_cutoff_ms = Some(job.cutoff_ms);
                 request.repository_retention_cutoff_generation =
                     Some(job.cutoff_publication_generation);
                 request.repository_retention_initial_scope = Some(job.initial_scope.clone());
             }
-            if control_retention.maintenance_pending || repository_retention_job.is_some() {
+            if control_retention.maintenance_pending || initial_repository_retention_job.is_some() {
                 control_retention = store
                     .control
                     .prune_code_repository_scopes(request.clone())
                     .await?;
+            }
+            let repository_retention_job = control_retention.repository_retention_job.clone();
+            if repository_retention_job.is_none() {
+                request.repository_retention_cutoff_ms = None;
+                request.repository_retention_cutoff_generation = None;
+                request.repository_retention_initial_scope = None;
             }
             // The control catalog and the repository shard have independent
             // bounded transactions. Advancing both on every maintenance pass
@@ -101,6 +108,7 @@ pub(in crate::storage::partitioned) fn prune(
             if let Some(job) = repository_retention_job
                 && merged.prunable_scope_count == 0
                 && merged.retiring_job_count == 0
+                && !merged.scope_listing_truncated
             {
                 store
                     .control

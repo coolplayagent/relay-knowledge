@@ -37,6 +37,16 @@ fn retention_schema_adds_logical_retirement_and_durable_jobs() {
         .expect("retention generation column should query");
     assert_eq!(cutoff_generation_column, 1);
 
+    let scan_cursor_table: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_retention_scans'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repository retention scan table should query");
+    assert_eq!(scan_cursor_table, 1);
+
     let member_index_columns = connection
         .prepare("PRAGMA index_info(code_repository_set_members_repository_scope)")
         .expect("set-member retention index should prepare")

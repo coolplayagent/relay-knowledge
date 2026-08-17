@@ -254,6 +254,8 @@ fn retention_plan(
         scope_listing_truncated: scope_listing_truncated
             || user_pins_truncated
             || publication_history_incomplete,
+        publication_history_incomplete,
+        repository_set_protected,
         unfinished_tasks,
         latest_incremental_base,
     })
@@ -313,39 +315,43 @@ fn run_retention_pass(
             repository_id,
             &protected_aliases,
         )?;
-    let repository_retention =
-        if complete_repository_retention && plan.prunable.is_empty() && retiring_jobs.is_empty() {
-            if let Some(job) = &repository_retention {
-                super::complete_repository_retention(&transaction, repository_id, job.cutoff_ms)?;
-            }
-            None
-        } else {
-            repository_retention
-                .map(|mut job| {
-                    let (phase, last_error) = retiring_jobs.first().map_or_else(
-                        || ("retiring_scopes".to_owned(), None),
-                        |scope_job| {
-                            (
-                                format!("scope_gc:{}", scope_job.phase),
-                                scope_job.last_error.clone(),
-                            )
-                        },
-                    );
-                    super::update_repository_retention(
-                        &transaction,
-                        repository_id,
-                        job.cutoff_ms,
-                        &phase,
-                        last_error.as_deref(),
-                        now_ms,
-                    )?;
-                    job.phase = phase;
-                    job.updated_at_ms = now_ms;
-                    job.last_error = last_error;
-                    Ok::<_, StorageError>(job)
-                })
-                .transpose()?
-        };
+    let repository_retention_complete = plan.repository_set_protected
+        || (complete_repository_retention
+            && !plan.publication_history_incomplete
+            && plan.prunable.is_empty()
+            && retiring_jobs.is_empty());
+    let repository_retention = if repository_retention_complete {
+        if let Some(job) = &repository_retention {
+            super::complete_repository_retention(&transaction, repository_id, job.cutoff_ms)?;
+        }
+        None
+    } else {
+        repository_retention
+            .map(|mut job| {
+                let (phase, last_error) = retiring_jobs.first().map_or_else(
+                    || ("retiring_scopes".to_owned(), None),
+                    |scope_job| {
+                        (
+                            format!("scope_gc:{}", scope_job.phase),
+                            scope_job.last_error.clone(),
+                        )
+                    },
+                );
+                super::update_repository_retention(
+                    &transaction,
+                    repository_id,
+                    job.cutoff_ms,
+                    &phase,
+                    last_error.as_deref(),
+                    now_ms,
+                )?;
+                job.phase = phase;
+                job.updated_at_ms = now_ms;
+                job.last_error = last_error;
+                Ok::<_, StorageError>(job)
+            })
+            .transpose()?
+    };
     let summary = summary_from_plan(
         repository_id,
         plan,
@@ -394,6 +400,8 @@ struct RetentionPlan {
     retained: BTreeSet<String>,
     prunable: Vec<String>,
     scope_listing_truncated: bool,
+    publication_history_incomplete: bool,
+    repository_set_protected: bool,
     unfinished_tasks: Vec<UnfinishedTask>,
     latest_incremental_base: Option<CommitReference>,
 }

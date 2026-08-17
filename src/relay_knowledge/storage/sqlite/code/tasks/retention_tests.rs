@@ -405,6 +405,46 @@ async fn repository_retention_deduplicates_publication_sources_before_bounding()
 }
 
 #[tokio::test]
+async fn repository_retention_keeps_parent_when_publication_history_is_incomplete() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            insert_scope(connection, "scope-initial")?;
+            insert_terminal_task(connection, "initial", "scope-initial", "succeeded", 10)?;
+            for index in 0..=64 {
+                let scope = format!("scope-new-{index:02}");
+                insert_scope(connection, &scope)?;
+                insert_terminal_task(
+                    connection,
+                    &format!("new-{index:02}"),
+                    &scope,
+                    "succeeded",
+                    200 + index,
+                )?;
+            }
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-new-64',
+                     last_indexed_commit = 'commit-scope-new-64',
+                     tree_hash = 'tree-scope-new-64'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_repository_retention_job(connection, "scope-initial", 100)?;
+            Ok(())
+        })
+        .await
+        .expect("large publication history fixtures should insert");
+
+    let pass = retention_pass(&store, "scope-new-64", 2).await;
+
+    assert!(pass.scope_listing_truncated);
+    assert!(pass.maintenance_pending);
+    assert!(pass.retiring_jobs.is_empty());
+    assert!(pass.repository_retention_job.is_some());
+}
+
+#[tokio::test]
 async fn repository_retention_protects_all_higher_generations_in_the_cutoff_millisecond() {
     let store = registered_store().await;
     store

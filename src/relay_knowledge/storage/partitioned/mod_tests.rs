@@ -799,6 +799,138 @@ async fn partitioned_repository_retention_drains_control_and_shard_before_comple
 }
 
 #[tokio::test]
+async fn partitioned_repository_retention_stops_after_repository_joins_user_set() {
+    let store = partitioned_store("repository-retention-user-set");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository should register");
+    for scope in ["scope-old", "scope-recent", "scope-active"] {
+        store
+            .apply_code_index_snapshot(snapshot(scope))
+            .await
+            .expect("snapshot should apply");
+    }
+    let shard = store
+        .catalog
+        .checkpoint_repository_store("repo".to_owned())
+        .await
+        .expect("repository shard should load")
+        .expect("repository shard should exist");
+    shard
+        .run(|connection| {
+            for (index, scope) in ["scope-old", "scope-recent", "scope-active"]
+                .into_iter()
+                .enumerate()
+            {
+                connection.execute(
+                    "INSERT INTO code_repository_index_tasks (
+                         task_id, repository_id, alias, ref_selector,
+                         resolved_commit_sha, tree_hash, source_scope,
+                         path_filters_json, language_filters_json, mode_json, state,
+                         attempt_count, next_retry_at_ms, input_fingerprint,
+                         resource_budget_json, payload_json, created_at_ms, updated_at_ms
+                     ) VALUES (?1, 'repo', 'fixture', ?2, ?2, ?3, ?4,
+                               '[]', '[]', '\"full\"', 'succeeded', 1, 0, ?1,
+                               ?5, '{}', ?6, ?6)",
+                    rusqlite::params![
+                        format!("task-{scope}"),
+                        format!("commit-{scope}"),
+                        format!("tree-{scope}"),
+                        scope,
+                        serde_json::to_string(&CodeIndexResourceBudget::default())
+                            .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
+                        10 + index as u64,
+                    ],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("shard publication history should insert");
+    store
+        .control
+        .run(|connection| {
+            connection.execute(
+                "INSERT INTO code_repository_retention_jobs (
+                     repository_id, initial_scope, cutoff_ms, phase,
+                     created_at_ms, updated_at_ms, last_error
+                 ) VALUES ('repo', 'scope-active', 100, 'retiring_scopes', 100, 100, NULL)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("repository retention job should insert");
+    store
+        .create_code_repository_set(CodeRepositorySetSeed {
+            alias: "protected".to_owned(),
+            description: None,
+            default_ref_policy_json: "{}".to_owned(),
+            now_ms: 101,
+        })
+        .await
+        .expect("user set should create");
+    store
+        .add_code_repository_set_member(CodeRepositorySetMemberSeed {
+            set_alias: "protected".to_owned(),
+            repository_id: "repo".to_owned(),
+            repository_alias: "fixture".to_owned(),
+            ref_selector: "HEAD".to_owned(),
+            resolved_commit_sha: "commit-scope-active".to_owned(),
+            source_scope: "scope-active".to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            priority: 0,
+        })
+        .await
+        .expect("repository should join user set");
+
+    for _ in 0..160 {
+        let pass = store
+            .prune_code_repository_scopes(CodeScopeRetentionRequest {
+                repository_id: "repo".to_owned(),
+                active_scope: "scope-active".to_owned(),
+                retain_recent_successful_scopes: 2,
+                repository_retention_cutoff_ms: None,
+                repository_retention_cutoff_generation: None,
+                repository_retention_initial_scope: None,
+            })
+            .await
+            .expect("partitioned retention should advance");
+        if !pass.maintenance_pending {
+            break;
+        }
+    }
+
+    assert!(
+        store
+            .catalog
+            .repository_for_scope("scope-recent".to_owned())
+            .await
+            .expect("recent route should load")
+            .is_some()
+    );
+    assert!(
+        store
+            .catalog
+            .repository_for_scope("scope-active".to_owned())
+            .await
+            .expect("active route should load")
+            .is_some()
+    );
+    assert!(
+        store
+            .control
+            .code_scope_retention("repo".to_owned())
+            .await
+            .expect("control retention status should load")
+            .repository_retention_job
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn code_index_task_partitioned_retention_cleans_staged_partial_scope_route() {
     let store = partitioned_store("retention-staged-partial-route");
     store

@@ -36,6 +36,23 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
                 ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_retention_scans (
+            scan_id INTEGER PRIMARY KEY CHECK (scan_id = 1),
+            max_indexed_repositories INTEGER NOT NULL,
+            cursor_activity_ms INTEGER NOT NULL,
+            cursor_repository_id TEXT NOT NULL,
+            eligible_count INTEGER NOT NULL,
+            oldest_repository_id TEXT,
+            oldest_source_scope TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            CHECK (
+                (oldest_repository_id IS NULL AND oldest_source_scope IS NULL)
+                OR
+                (oldest_repository_id IS NOT NULL AND oldest_source_scope IS NOT NULL)
+            )
+        );
+
         CREATE INDEX IF NOT EXISTS code_repository_scope_gc_jobs_repository
             ON code_repository_scope_gc_jobs(repository_id, updated_at_ms, source_scope);
         CREATE INDEX IF NOT EXISTS code_repository_retention_jobs_updated

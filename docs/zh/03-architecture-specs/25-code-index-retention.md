@@ -34,6 +34,8 @@
 - `cutoff_publication_generation`（截止发布代次），即初始作用域对应的成功发布代次；
 - phase（阶段）、时间戳和 last error（最近错误）。
 
+Candidate discovery（候选发现）在一次调度事务中最多读取 64 条 catalog row（目录记录）。如果该页不足以判断是否超过上限，调度器会持久化单例 scan cursor（扫描游标）、合格数量与最旧候选，并在后续维护轮次或进程重启后从游标继续。上限改变或已有活动父任务时会丢弃游标。创建父任务前会重新校验所选仓库的 current scope、retirement state（退役状态）和用户管理 set 成员关系。
+
 持久化父任务可以跨进程重启恢复。Maintenance pass 会加载父任务，并通过既有 scope-GC state machine（作用域垃圾回收状态机）选择和执行子 scope。仓库模式会有意跳过普通 active/latest-two protection（活动/最近两个保护），以清理 cutoff 前已存在的 scope。
 
 ## 4. 并发与保护
@@ -48,7 +50,7 @@
 
 初始 active scope 开始 retiring 时，事务会原子清空仓库的 current scope pointer（当前作用域指针），仓库状态返回 `registered`（已注册）和 stale（陈旧）。Repository row（仓库记录）、root（根路径）、alias、task history（任务历史）与父任务继续保留。旧子 GC phase 尚未完成时，新任务仍可发布。
 
-仓库在调度后加入用户管理 set 时，maintenance 不再退役更多 scope。已经标记为 `retiring` 的子 scope 仍会完成，因为 reader 已经不再把它视为 live（可用）。
+仓库在调度后加入用户管理 set 时，maintenance 会删除父任务并停止退役更多 scope。Partitioned maintenance 会在调用 shard 前根据 control 结果刷新仓库模式，因此同一轮处理不会向分片转发已经失效的仓库 cutoff。已经标记为 `retiring` 的子 scope 仍会完成，因为 reader 已经不再把它视为 live（可用）。
 
 ## 5. 完成与可观测性
 
@@ -56,7 +58,7 @@ Single-SQLite（单 SQLite）仅在没有仓库模式可退役 scope、且没有
 
 `repo status`（仓库状态）的 retention 输出会同时包含可选 repository-retention parent job 与子 scope-GC job。任一任务存在时，`maintenance_pending`（维护待处理）保持为 true。父任务报告仓库、初始作用域、时间和发布代次截止点、当前子 GC 阶段、时间戳和最近子任务错误。
 
-cutoff（截止点）之后的成功 scope 会先跨 task（任务）与 checkpoint（检查点）发布记录去重，再应用有界历史上限。如果去重后的不同 scope 仍超过上限，则暂停退役，不会根据不完整证据删除。
+cutoff（截止点）之后的成功 scope 会先跨 task（任务）与 checkpoint（检查点）发布记录去重，再应用有界历史上限。如果去重后的不同 scope 仍超过上限，则暂停退役并保持父任务待处理，不会根据不完整证据完成任务。Partitioned completion（分片完成判断）还要求合并后的 scope listing（作用域列表）未被截断。
 
 ## 6. 必须覆盖的测试
 
@@ -64,6 +66,7 @@ cutoff（截止点）之后的成功 scope 会先跨 task（任务）与 checkpo
 
 - 默认值为 10，正数 override（覆盖值）生效，0 被拒绝；
 - 用户管理 set 成员被排除，automatic-workspace 成员仍计数，且不受 alias 或候选分页位置影响；
+- 候选发现在每次调度事务中仅推进一页 64 条记录，并可在重新打开 SQLite 后续跑；
 - 选择成功发布时间最旧的合格仓库；
 - 重新打开 SQLite 后父任务和子任务可恢复；
 - 首轮逻辑退役先于物理删除；
@@ -72,4 +75,5 @@ cutoff（截止点）之后的成功 scope 会先跨 task（任务）与 checkpo
 - task/checkpoint 的重复发布记录在历史上限前完成去重；
 - 父任务 phase 和 last error 跟随当前子 GC 任务；
 - 加入用户管理 set 后停止新增退役；
+- 发布历史不完整时父任务保持待处理；
 - Partitioned control 与 shard 收敛后才完成父任务。

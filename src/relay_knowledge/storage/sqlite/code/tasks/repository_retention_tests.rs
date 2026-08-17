@@ -93,7 +93,8 @@ async fn scheduler_excludes_user_sets_counts_auto_sets_and_recovers_after_reopen
 
 #[tokio::test]
 async fn scheduler_scans_past_a_page_of_user_set_repositories() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let database = TemporaryDatabase::new();
+    let store = SqliteGraphStore::open(&database.path).expect("store should open");
     for index in 0..65 {
         let repository_id = format!("repo-protected-{index:03}");
         store
@@ -146,10 +147,18 @@ async fn scheduler_scans_past_a_page_of_user_set_repositories() {
         .await
         .expect("retention fixtures should insert");
 
-    let selected = store
+    let first_pass = store
         .schedule_code_repository_retention(1, 2000)
         .await
-        .expect("repository retention should schedule");
+        .expect("first bounded candidate page should scan");
+    assert!(first_pass.is_none());
+    drop(store);
+
+    let reopened = SqliteGraphStore::open(&database.path).expect("store should reopen");
+    let selected = reopened
+        .schedule_code_repository_retention(1, 2001)
+        .await
+        .expect("persisted candidate scan should resume");
 
     assert_eq!(selected.as_deref(), Some("repo-eligible-old"));
 }

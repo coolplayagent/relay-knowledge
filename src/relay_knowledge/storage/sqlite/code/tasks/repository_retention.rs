@@ -9,6 +9,15 @@ use super::super::workspace;
 const PHASE: &str = "retiring_scopes";
 const CANDIDATE_PAGE_SIZE: usize = 64;
 
+struct CandidateScan {
+    max_indexed_repositories: usize,
+    cursor_activity_ms: u64,
+    cursor_repository_id: String,
+    eligible_count: usize,
+    oldest_eligible: Option<(String, String)>,
+    created_at_ms: u64,
+}
+
 pub(in crate::storage::sqlite::code) fn job(
     connection: &Connection,
     repository_id: &str,
@@ -57,11 +66,12 @@ pub(in crate::storage::sqlite::code) fn schedule(
         )
         .optional()?
     {
+        clear_candidate_scan(&transaction)?;
         transaction.commit()?;
         return Ok(Some(repository_id));
     }
 
-    let selected = oldest_over_limit_candidate(&transaction, max_indexed_repositories)?;
+    let selected = advance_candidate_scan(&transaction, max_indexed_repositories, now_ms)?;
     if let Some((repository_id, initial_scope)) = &selected {
         let cutoff_publication_generation = transaction.query_row(
             "SELECT COALESCE(MAX(publication_generation), 0)
@@ -89,15 +99,21 @@ pub(in crate::storage::sqlite::code) fn schedule(
     Ok(selected.map(|(repository_id, _)| repository_id))
 }
 
-fn oldest_over_limit_candidate(
+fn advance_candidate_scan(
     connection: &Connection,
     max_indexed_repositories: usize,
+    now_ms: u64,
 ) -> Result<Option<(String, String)>, StorageError> {
-    let mut cursor_activity_ms = None;
-    let mut cursor_repository_id = String::new();
-    let mut eligible_count = 0_usize;
-    let mut oldest_eligible = None;
-    loop {
+    let mut scan = load_candidate_scan(connection)?
+        .filter(|scan| scan.max_indexed_repositories == max_indexed_repositories);
+    if scan.is_none() {
+        clear_candidate_scan(connection)?;
+    }
+    let cursor_activity_ms = scan.as_ref().map(|scan| scan.cursor_activity_ms);
+    let cursor_repository_id = scan
+        .as_ref()
+        .map_or_else(String::new, |scan| scan.cursor_repository_id.clone());
+    let page = {
         let mut statement = connection.prepare(
             "WITH indexed_repository AS (
                  SELECT repository.repository_id,
@@ -134,7 +150,7 @@ fn oldest_over_limit_candidate(
              ORDER BY activity_ms, repository_id
              LIMIT ?3",
         )?;
-        let page = statement
+        statement
             .query_map(
                 params![
                     cursor_activity_ms,
@@ -149,37 +165,170 @@ fn oldest_over_limit_candidate(
                     ))
                 },
             )?
-            .collect::<Result<Vec<_>, _>>()?;
-        if page.is_empty() {
-            return Ok(None);
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    if page.is_empty() {
+        clear_candidate_scan(connection)?;
+        return Ok(None);
+    }
+    let created_at_ms = scan.as_ref().map_or(now_ms, |scan| scan.created_at_ms);
+    let mut eligible_count = scan.as_ref().map_or(0, |scan| scan.eligible_count);
+    let mut oldest_eligible = scan.take().and_then(|scan| scan.oldest_eligible);
+    let mut next_cursor_activity_ms = cursor_activity_ms.unwrap_or_default();
+    let mut next_cursor_repository_id = cursor_repository_id;
+    for (repository_id, source_scope, activity_ms) in &page {
+        next_cursor_activity_ms = *activity_ms;
+        next_cursor_repository_id.clone_from(repository_id);
+        if belongs_to_user_set(connection, repository_id)? {
+            continue;
         }
-        for (repository_id, source_scope, activity_ms) in &page {
-            cursor_activity_ms = Some(*activity_ms);
-            cursor_repository_id.clone_from(repository_id);
-            let automatic_set_id = workspace::workspace_set_id(repository_id);
-            let belongs_to_user_set = connection.query_row(
-                "SELECT EXISTS (
-                     SELECT 1 FROM code_repository_set_members
-                     WHERE repository_id = ?1 AND set_id <> ?2
-                 )",
-                params![repository_id, automatic_set_id],
-                |row| row.get::<_, bool>(0),
-            )?;
-            if belongs_to_user_set {
-                continue;
-            }
-            eligible_count = eligible_count.saturating_add(1);
-            if oldest_eligible.is_none() {
-                oldest_eligible = Some((repository_id.clone(), source_scope.clone()));
-            }
-            if eligible_count > max_indexed_repositories {
-                return Ok(oldest_eligible);
-            }
+        eligible_count = eligible_count.saturating_add(1);
+        if oldest_eligible.is_none() {
+            oldest_eligible = Some((repository_id.clone(), source_scope.clone()));
         }
-        if page.len() < CANDIDATE_PAGE_SIZE {
-            return Ok(None);
+        if eligible_count > max_indexed_repositories {
+            let selected = match oldest_eligible {
+                Some((repository_id, source_scope))
+                    if candidate_is_eligible(connection, &repository_id, &source_scope)? =>
+                {
+                    Some((repository_id, source_scope))
+                }
+                _ => None,
+            };
+            clear_candidate_scan(connection)?;
+            return Ok(selected);
         }
     }
+    if page.len() < CANDIDATE_PAGE_SIZE {
+        clear_candidate_scan(connection)?;
+        return Ok(None);
+    }
+    persist_candidate_scan(
+        connection,
+        &CandidateScan {
+            max_indexed_repositories,
+            cursor_activity_ms: next_cursor_activity_ms,
+            cursor_repository_id: next_cursor_repository_id,
+            eligible_count,
+            oldest_eligible,
+            created_at_ms,
+        },
+        now_ms,
+    )?;
+    Ok(None)
+}
+
+fn load_candidate_scan(connection: &Connection) -> Result<Option<CandidateScan>, StorageError> {
+    connection
+        .query_row(
+            "SELECT max_indexed_repositories, cursor_activity_ms,
+                    cursor_repository_id, eligible_count,
+                    oldest_repository_id, oldest_source_scope, created_at_ms
+             FROM code_repository_retention_scans WHERE scan_id = 1",
+            [],
+            |row| {
+                let oldest_repository_id = row.get::<_, Option<String>>(4)?;
+                let oldest_source_scope = row.get::<_, Option<String>>(5)?;
+                Ok(CandidateScan {
+                    max_indexed_repositories: row.get(0)?,
+                    cursor_activity_ms: row.get(1)?,
+                    cursor_repository_id: row.get(2)?,
+                    eligible_count: row.get(3)?,
+                    oldest_eligible: oldest_repository_id.zip(oldest_source_scope),
+                    created_at_ms: row.get(6)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(StorageError::from)
+}
+
+fn persist_candidate_scan(
+    connection: &Connection,
+    scan: &CandidateScan,
+    now_ms: u64,
+) -> Result<(), StorageError> {
+    let (oldest_repository_id, oldest_source_scope) = scan
+        .oldest_eligible
+        .as_ref()
+        .map_or((None, None), |(repository_id, source_scope)| {
+            (Some(repository_id.as_str()), Some(source_scope.as_str()))
+        });
+    connection.execute(
+        "INSERT INTO code_repository_retention_scans (
+             scan_id, max_indexed_repositories, cursor_activity_ms,
+             cursor_repository_id, eligible_count, oldest_repository_id,
+             oldest_source_scope, created_at_ms, updated_at_ms
+         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(scan_id) DO UPDATE SET
+             max_indexed_repositories = excluded.max_indexed_repositories,
+             cursor_activity_ms = excluded.cursor_activity_ms,
+             cursor_repository_id = excluded.cursor_repository_id,
+             eligible_count = excluded.eligible_count,
+             oldest_repository_id = excluded.oldest_repository_id,
+             oldest_source_scope = excluded.oldest_source_scope,
+             created_at_ms = excluded.created_at_ms,
+             updated_at_ms = excluded.updated_at_ms",
+        params![
+            scan.max_indexed_repositories,
+            scan.cursor_activity_ms,
+            scan.cursor_repository_id,
+            scan.eligible_count,
+            oldest_repository_id,
+            oldest_source_scope,
+            scan.created_at_ms,
+            now_ms,
+        ],
+    )?;
+    Ok(())
+}
+
+fn clear_candidate_scan(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute(
+        "DELETE FROM code_repository_retention_scans WHERE scan_id = 1",
+        [],
+    )?;
+    Ok(())
+}
+
+fn belongs_to_user_set(connection: &Connection, repository_id: &str) -> Result<bool, StorageError> {
+    let automatic_set_id = workspace::workspace_set_id(repository_id);
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM code_repository_set_members
+                 WHERE repository_id = ?1 AND set_id <> ?2
+             )",
+            params![repository_id, automatic_set_id],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::from)
+}
+
+fn candidate_is_eligible(
+    connection: &Connection,
+    repository_id: &str,
+    source_scope: &str,
+) -> Result<bool, StorageError> {
+    if belongs_to_user_set(connection, repository_id)? {
+        return Ok(false);
+    }
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1
+                 FROM code_repositories repository
+                 JOIN code_repository_scopes scope
+                   ON scope.repository_id = repository.repository_id
+                  AND scope.source_scope = repository.last_indexed_scope_id
+                 WHERE repository.repository_id = ?1
+                   AND repository.last_indexed_scope_id = ?2
+                   AND scope.retiring = 0
+             )",
+            params![repository_id, source_scope],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::from)
 }
 
 pub(in crate::storage::sqlite::code) fn update_progress(

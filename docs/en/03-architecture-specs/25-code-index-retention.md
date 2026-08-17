@@ -34,6 +34,8 @@ Scheduling runs after successful publication and before each bounded retention p
 - `cutoff_publication_generation`, the successful publication generation observed for the initial scope;
 - phase, timestamps, and last error.
 
+Candidate discovery reads at most 64 catalog rows in one scheduling transaction. If that page does not establish whether the limit is exceeded, the scheduler persists a singleton scan cursor, eligible count, and oldest candidate, then resumes from that cursor on a later maintenance pass or after process restart. A changed limit or an active parent job discards the cursor. Before creating a parent job, the selected repository is revalidated against its current scope, retirement state, and user-managed set membership.
+
 The durable parent survives process restart. A maintenance pass loads it and selects child scopes through the existing scope-GC state machine. Repository mode intentionally does not apply the ordinary active/latest-two protection to scopes that existed before the cutoff.
 
 ## 4. Concurrency and Protection
@@ -48,7 +50,7 @@ Repository cleanup does not block index admission and does not cancel queued, re
 
 When the initial active scope starts retiring, the repository's current scope pointer is atomically cleared and its state returns to `registered` and stale. The repository row, root, aliases, task history, and parent job remain. A new task may publish while older child GC phases continue.
 
-If the repository becomes a member of a user-managed set after scheduling, maintenance stops retiring additional scopes. A child scope already marked `retiring` still completes because readers have already stopped treating it as live.
+If the repository becomes a member of a user-managed set after scheduling, maintenance removes the parent and stops retiring additional scopes. Partitioned maintenance refreshes repository mode from the control result before invoking the shard, so the same pass cannot forward a stale repository cutoff. A child scope already marked `retiring` still completes because readers have already stopped treating it as live.
 
 ## 5. Completion and Observability
 
@@ -56,7 +58,7 @@ Single-SQLite mode completes the parent only when no repository-mode prunable sc
 
 `repo status` retention output includes the optional repository-retention parent job together with child scope-GC jobs. `maintenance_pending` remains true while either kind of job is present. The parent reports repository, initial scope, time and publication-generation cutoffs, the active child GC phase, timestamps, and the latest child error.
 
-Post-cutoff successful scopes are deduplicated across task and checkpoint publication records before the bounded history limit is applied. If the distinct result still exceeds the bound, retirement pauses instead of deleting from incomplete evidence.
+Post-cutoff successful scopes are deduplicated across task and checkpoint publication records before the bounded history limit is applied. If the distinct result still exceeds the bound, retirement pauses and the parent remains pending instead of completing from incomplete evidence. Partitioned completion also requires an untruncated merged scope listing.
 
 ## 6. Required Tests
 
@@ -64,6 +66,7 @@ Regression coverage must verify:
 
 - the default is 10, positive overrides work, and zero is rejected;
 - user-managed set members are excluded while automatic-workspace members still count, independent of aliases and candidate-page position;
+- candidate discovery advances one 64-row page per scheduling transaction and resumes after reopening SQLite;
 - the oldest eligible successful publication is selected;
 - parent and child jobs resume after reopening SQLite;
 - first-pass logical retirement precedes physical deletion;
@@ -72,4 +75,5 @@ Regression coverage must verify:
 - duplicate task/checkpoint publication records are deduplicated before history bounding;
 - parent phase and error fields follow the active child GC job;
 - joining a user-managed set stops additional retirement;
+- incomplete publication history keeps the parent pending;
 - partitioned control and shard cleanup complete the parent only after convergence.
