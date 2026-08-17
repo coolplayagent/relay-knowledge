@@ -710,6 +710,67 @@ async fn retention_keeps_the_latest_successful_incremental_predecessor() {
 }
 
 #[tokio::test]
+async fn repository_set_cancellation_preserves_latest_incremental_base_alias() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            for scope in ["scope-active", "scope-base"] {
+                insert_scope(connection, scope)?;
+            }
+            update_scope_commit(connection, "scope-base", "same-tree-newer", "same-tree")?;
+            insert_commit_alias(connection, "base-commit", "scope-base", 1)?;
+            for index in 0..(tasks::commit_scope::RETAIN_COMMIT_SCOPE_ALIAS_ROWS + 20) {
+                insert_commit_alias(
+                    connection,
+                    &format!("newer-{index:03}"),
+                    "scope-base",
+                    index as u64 + 2,
+                )?;
+            }
+            insert_successful_incremental_task(
+                connection,
+                "latest-incremental",
+                "scope-active",
+                "base-commit",
+                "head-commit",
+                500,
+            )?;
+            connection.execute(
+                "UPDATE code_repositories
+                 SET last_indexed_scope_id = 'scope-active',
+                     last_indexed_commit = 'head-commit', tree_hash = 'same-tree'
+                 WHERE repository_id = 'repo'",
+                [],
+            )?;
+            insert_repository_retention_job(connection, "scope-active", 600)?;
+            insert_set_member(connection, "user-set", "workspace", "scope-active")?;
+            Ok(())
+        })
+        .await
+        .expect("repository retention cancellation fixtures should insert");
+
+    let pass = retention_pass(&store, "scope-active", 2).await;
+    let (base_alias_count, parent_job_count) = store
+        .run(|connection| {
+            Ok((
+                commit_alias_count_for(connection, "base-commit")?,
+                connection.query_row(
+                    "SELECT COUNT(*) FROM code_repository_retention_jobs
+                     WHERE repository_id = 'repo'",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )?,
+            ))
+        })
+        .await
+        .expect("cancelled repository retention state should query");
+
+    assert!(pass.repository_retention_job.is_none());
+    assert_eq!(parent_job_count, 0);
+    assert_eq!(base_alias_count, 1);
+}
+
+#[tokio::test]
 async fn retention_keeps_queued_worktree_overlay_pinned_base_scope() {
     let store = registered_store().await;
     store

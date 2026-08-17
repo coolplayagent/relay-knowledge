@@ -39,6 +39,7 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
         CREATE TABLE IF NOT EXISTS code_repository_retention_scans (
             scan_id INTEGER PRIMARY KEY CHECK (scan_id = 1),
             max_indexed_repositories INTEGER NOT NULL,
+            catalog_revision INTEGER NOT NULL,
             cursor_activity_ms INTEGER NOT NULL,
             cursor_repository_id TEXT NOT NULL,
             eligible_count INTEGER NOT NULL,
@@ -52,6 +53,96 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
                 (oldest_repository_id IS NOT NULL AND oldest_source_scope IS NOT NULL)
             )
         );
+
+        CREATE TABLE IF NOT EXISTS code_repository_retention_catalog (
+            catalog_id INTEGER PRIMARY KEY CHECK (catalog_id = 1),
+            revision INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO code_repository_retention_catalog (catalog_id, revision)
+            VALUES (1, 1);
+
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_repository_insert
+        AFTER INSERT ON code_repositories BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_repository_delete
+        AFTER DELETE ON code_repositories BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_repository_scope_update
+        AFTER UPDATE OF last_indexed_scope_id ON code_repositories BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_scope_insert
+        AFTER INSERT ON code_repository_scopes BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_scope_delete
+        AFTER DELETE ON code_repository_scopes BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_scope_retiring_update
+        AFTER UPDATE OF retiring ON code_repository_scopes BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_member_insert
+        AFTER INSERT ON code_repository_set_members BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_member_delete
+        AFTER DELETE ON code_repository_set_members BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_member_update
+        AFTER UPDATE ON code_repository_set_members BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_task_insert
+        AFTER INSERT ON code_repository_index_tasks WHEN NEW.state = 'succeeded' BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_task_delete
+        AFTER DELETE ON code_repository_index_tasks WHEN OLD.state = 'succeeded' BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_task_update
+        AFTER UPDATE OF repository_id, source_scope, state, updated_at_ms
+        ON code_repository_index_tasks
+        WHEN OLD.state = 'succeeded' OR NEW.state = 'succeeded' BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_checkpoint_insert
+        AFTER INSERT ON code_repository_index_checkpoints
+        WHEN NEW.state IN ('complete', 'completed') BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_checkpoint_delete
+        AFTER DELETE ON code_repository_index_checkpoints
+        WHEN OLD.state IN ('complete', 'completed') BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS code_repository_retention_catalog_checkpoint_update
+        AFTER UPDATE OF repository_id, source_scope, state, updated_at_ms
+        ON code_repository_index_checkpoints
+        WHEN OLD.state IN ('complete', 'completed')
+          OR NEW.state IN ('complete', 'completed') BEGIN
+            UPDATE code_repository_retention_catalog SET revision = revision + 1
+            WHERE catalog_id = 1;
+        END;
 
         CREATE INDEX IF NOT EXISTS code_repository_scope_gc_jobs_repository
             ON code_repository_scope_gc_jobs(repository_id, updated_at_ms, source_scope);
@@ -71,6 +162,12 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
         connection,
         "code_repository_retention_jobs",
         "cutoff_publication_generation",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_retention_scans",
+        "catalog_revision",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     Ok(())

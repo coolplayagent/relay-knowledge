@@ -170,7 +170,8 @@ worker pool 的并发度。默认值为 2，运行时会限制最大值，保证
 同时 SQLite 写入仍通过单 writer lane 保持一致性。
 
 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` 限制不属于用户管理
-repository set 的已发布索引仓库数。默认值为 10，且必须为正数。Automatic-workspace
+repository set 的已发布索引仓库数。默认值为 10，取值范围必须为 `1..=i64::MAX`，
+与 SQLite 的持久化整数范围一致。Automatic-workspace
 set 不会让仓库豁免该上限。超过上限时，系统会为最旧的合格仓库调度持久化分阶段索引清理；
 仓库注册、alias、queued/running task 和清理期间新发布的 scope 均会保留。
 

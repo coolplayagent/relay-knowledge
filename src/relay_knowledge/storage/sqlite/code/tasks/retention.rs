@@ -145,51 +145,48 @@ fn retention_plan(
     let user_pins_truncated = user_set_scopes.truncated;
     retained.extend(user_set_scopes.scopes);
 
+    let active_repository_retention = repository_retention.filter(|_| !repository_set_protected);
     let (latest_incremental_base, publication_history_incomplete) =
-        if let Some(repository_retention) = repository_retention {
-            if repository_set_protected {
-                (None, false)
-            } else {
-                let mut protected_publications = successful_scopes_since(
+        if let Some(repository_retention) = active_repository_retention {
+            let mut protected_publications = successful_scopes_since(
+                connection,
+                repository_id,
+                repository_retention.cutoff_ms,
+                repository_retention.cutoff_publication_generation,
+                &repository_retention.initial_scope,
+                MAX_SCOPE_STATUS_ROWS,
+            )?;
+            if let Some(current_active_scope) = current_active_scope
+                .as_ref()
+                .filter(|scope| *scope != &repository_retention.initial_scope)
+            {
+                protected_publications
+                    .scopes
+                    .push(current_active_scope.clone());
+            }
+            protected_publications.scopes.sort();
+            protected_publications.scopes.dedup();
+            for scope in &protected_publications.scopes {
+                retained.insert(scope.clone());
+                retained.extend(active_worktree_base_scopes(
+                    connection,
+                    repository_id,
+                    scope,
+                )?);
+            }
+            (
+                latest_successful_incremental_base_since(
                     connection,
                     repository_id,
                     repository_retention.cutoff_ms,
                     repository_retention.cutoff_publication_generation,
                     &repository_retention.initial_scope,
-                    MAX_SCOPE_STATUS_ROWS,
-                )?;
-                if let Some(current_active_scope) = current_active_scope
-                    .as_ref()
-                    .filter(|scope| *scope != &repository_retention.initial_scope)
-                {
-                    protected_publications
-                        .scopes
-                        .push(current_active_scope.clone());
-                }
-                protected_publications.scopes.sort();
-                protected_publications.scopes.dedup();
-                for scope in &protected_publications.scopes {
-                    retained.insert(scope.clone());
-                    retained.extend(active_worktree_base_scopes(
-                        connection,
-                        repository_id,
-                        scope,
-                    )?);
-                }
-                (
-                    latest_successful_incremental_base_since(
-                        connection,
-                        repository_id,
-                        repository_retention.cutoff_ms,
-                        repository_retention.cutoff_publication_generation,
-                        &repository_retention.initial_scope,
-                        current_active_scope
-                            .as_deref()
-                            .filter(|scope| *scope != repository_retention.initial_scope),
-                    )?,
-                    protected_publications.truncated,
-                )
-            }
+                    current_active_scope
+                        .as_deref()
+                        .filter(|scope| *scope != repository_retention.initial_scope),
+                )?,
+                protected_publications.truncated,
+            )
         } else {
             if let Some(current_active_scope) = &current_active_scope {
                 retained.insert(current_active_scope.clone());

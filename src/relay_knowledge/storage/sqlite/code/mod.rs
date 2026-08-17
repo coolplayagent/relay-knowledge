@@ -304,6 +304,10 @@ impl CodeRepositoryStore for SqliteGraphStore {
         })
     }
 
+    fn code_repository_retention_scan_pending(&self) -> StorageFuture<'_, bool> {
+        self.run_read(|connection| tasks::repository_retention_scan_pending(connection))
+    }
+
     fn code_file_fingerprints(
         &self,
         repository_id: String,

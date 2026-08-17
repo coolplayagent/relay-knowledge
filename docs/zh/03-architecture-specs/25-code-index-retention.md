@@ -24,7 +24,7 @@
 
 ## 3. Repository Retention（仓库级保留）
 
-`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` 是正整数，默认值为 10。具有当前已发布 scope 的仓库计入数量。属于用户管理 repository set（仓库集合）的仓库既不计数，也不会成为候选。自动 workspace set（工作区集合）通过由仓库标识确定性生成的 `set_id`（集合标识）识别；可编辑 alias（别名）不参与授权或豁免判断。
+`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` 的取值范围是 `1..=i64::MAX`，默认值为 10。该上限与 SQLite 持久化整数范围一致，并在维护启动前校验。具有当前已发布 scope 的仓库计入数量。属于用户管理 repository set（仓库集合）的仓库既不计数，也不会成为候选。自动 workspace set（工作区集合）通过由仓库标识确定性生成的 `set_id`（集合标识）识别；可编辑 alias（别名）不参与授权或豁免判断。
 
 成功发布后，以及 resident service（常驻服务）或 `repo index-worker`（仓库索引工作器）执行每次有界 retention pass（保留处理轮次）前，都会运行调度。全局最多存在一个活动 repository-retention parent job（仓库保留父任务）。合格已索引仓库数超过上限时，调度器选择当前成功发布时间最旧的仓库，并持久化：
 
@@ -34,7 +34,7 @@
 - `cutoff_publication_generation`（截止发布代次），即初始作用域对应的成功发布代次；
 - phase（阶段）、时间戳和 last error（最近错误）。
 
-Candidate discovery（候选发现）在一次调度事务中最多读取 64 条 catalog row（目录记录）。如果该页不足以判断是否超过上限，调度器会持久化单例 scan cursor（扫描游标）、合格数量与最旧候选，并在后续维护轮次或进程重启后从游标继续。上限改变或已有活动父任务时会丢弃游标。创建父任务前会重新校验所选仓库的 current scope、retirement state（退役状态）和用户管理 set 成员关系。
+Candidate discovery（候选发现）在一次调度事务中最多读取 64 条 catalog row（目录记录）。如果该页不足以判断是否超过上限，调度器会持久化单例 scan cursor（扫描游标）、合格数量、最旧候选和 catalog revision（目录修订号），并在后续维护轮次或进程重启后从游标继续。上限改变、已有活动父任务，或影响候选排序和资格的目录变更，都会丢弃游标并从第一页重启。未完成扫描属于活动维护，因此 `repo index-worker` 会持续报告 `maintenance_active=true`，直到扫描完成或创建父任务。创建父任务前会重新校验所选仓库的 current scope、retirement state（退役状态）和用户管理 set 成员关系。
 
 持久化父任务可以跨进程重启恢复。Maintenance pass 会加载父任务，并通过既有 scope-GC state machine（作用域垃圾回收状态机）选择和执行子 scope。仓库模式会有意跳过普通 active/latest-two protection（活动/最近两个保护），以清理 cutoff 前已存在的 scope。
 

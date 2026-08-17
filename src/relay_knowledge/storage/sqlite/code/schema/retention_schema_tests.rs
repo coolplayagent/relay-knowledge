@@ -47,6 +47,26 @@ fn retention_schema_adds_logical_retirement_and_durable_jobs() {
         .expect("repository retention scan table should query");
     assert_eq!(scan_cursor_table, 1);
 
+    let catalog_revision_column: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_scans')
+             WHERE name = 'catalog_revision' AND type = 'INTEGER' AND \"notnull\" = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("candidate catalog revision column should query");
+    assert_eq!(catalog_revision_column, 1);
+
+    let catalog_table: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_retention_catalog'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repository retention catalog should query");
+    assert_eq!(catalog_table, 1);
+
     let member_index_columns = connection
         .prepare("PRAGMA index_info(code_repository_set_members_repository_scope)")
         .expect("set-member retention index should prepare")
@@ -89,4 +109,37 @@ fn retention_schema_upgrades_parent_jobs_with_a_publication_generation() {
         )
         .expect("upgraded retention generation column should query");
     assert_eq!(cutoff_generation_column, 1);
+}
+
+#[test]
+fn retention_schema_upgrades_candidate_scans_with_a_catalog_revision() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "CREATE TABLE code_repository_retention_scans (
+                 scan_id INTEGER PRIMARY KEY,
+                 max_indexed_repositories INTEGER NOT NULL,
+                 cursor_activity_ms INTEGER NOT NULL,
+                 cursor_repository_id TEXT NOT NULL,
+                 eligible_count INTEGER NOT NULL,
+                 oldest_repository_id TEXT,
+                 oldest_source_scope TEXT,
+                 created_at_ms INTEGER NOT NULL,
+                 updated_at_ms INTEGER NOT NULL
+             );",
+        )
+        .expect("legacy candidate scan table should create");
+
+    initialize_code_schema(&connection).expect("legacy schema should upgrade");
+
+    let catalog_revision_column: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_scans')
+             WHERE name = 'catalog_revision' AND type = 'INTEGER'
+               AND \"notnull\" = 1 AND dflt_value = '0'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("upgraded candidate catalog revision column should query");
+    assert_eq!(catalog_revision_column, 1);
 }

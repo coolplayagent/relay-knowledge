@@ -54,6 +54,28 @@ fn resolves_indexed_repository_retention_limit_from_environment() {
     assert_eq!(overridden_runtime.code_index_max_indexed_repositories, 12);
 }
 
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn rejects_indexed_repository_limit_above_sqlite_integer_range() {
+    let oversized = (i64::MAX as u64 + 1).to_string();
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [(
+            RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES,
+            oversized.as_str(),
+        )],
+    )
+    .expect("platform usize should parse the oversized SQLite value");
+
+    let error = WorkerRuntimeConfig::from_environment(&environment)
+        .expect_err("SQLite-incompatible retention limit should fail early");
+
+    assert_eq!(
+        error,
+        WorkerRuntimeConfigError::IndexedRepositoryLimitTooLarge(i64::MAX as usize + 1)
+    );
+}
+
 #[test]
 fn rejects_endpoint_without_http_host() {
     for endpoint in ["https://worker.local", "http://", "http://:8792"] {

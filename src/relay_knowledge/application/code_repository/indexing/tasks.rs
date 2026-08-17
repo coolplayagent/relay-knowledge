@@ -27,6 +27,10 @@ impl RelayKnowledgeService {
             )
             .await
             .map_err(storage_api_error)?;
+        let repository_scan_pending = store
+            .code_repository_retention_scan_pending()
+            .await
+            .map_err(storage_api_error)?;
         let repositories = store
             .list_code_repositories()
             .await
@@ -86,7 +90,7 @@ impl RelayKnowledgeService {
         } else {
             false
         };
-        first_error.map_or(Ok(maintenance_active), Err)
+        first_error.map_or(Ok(repository_scan_pending || maintenance_active), Err)
     }
 
     /// Resets unfinished full index tasks for a registered repository.

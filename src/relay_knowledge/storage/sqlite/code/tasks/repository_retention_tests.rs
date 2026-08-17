@@ -152,6 +152,12 @@ async fn scheduler_scans_past_a_page_of_user_set_repositories() {
         .await
         .expect("first bounded candidate page should scan");
     assert!(first_pass.is_none());
+    assert!(
+        store
+            .code_repository_retention_scan_pending()
+            .await
+            .expect("persisted candidate scan should query")
+    );
     drop(store);
 
     let reopened = SqliteGraphStore::open(&database.path).expect("store should reopen");
@@ -161,6 +167,123 @@ async fn scheduler_scans_past_a_page_of_user_set_repositories() {
         .expect("persisted candidate scan should resume");
 
     assert_eq!(selected.as_deref(), Some("repo-eligible-old"));
+    assert!(
+        !reopened
+            .code_repository_retention_scan_pending()
+            .await
+            .expect("completed candidate scan should query")
+    );
+}
+
+#[tokio::test]
+async fn scheduler_restarts_when_candidate_activity_changes_between_pages() {
+    let database = TemporaryDatabase::new();
+    let store = SqliteGraphStore::open(&database.path).expect("store should open");
+    for index in 0..100 {
+        let repository_id = format!("repo-{index:03}");
+        store
+            .upsert_code_repository(
+                CodeRepositoryRegistration::new(
+                    repository_id.clone(),
+                    repository_id.clone(),
+                    format!("/tmp/{repository_id}"),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .expect("registration should validate"),
+            )
+            .await
+            .expect("repository should register");
+    }
+    store
+        .run(|connection| {
+            for index in 0..100 {
+                let repository_id = format!("repo-{index:03}");
+                let scope = format!("scope-{index:03}");
+                insert_published_scope(connection, &repository_id, &scope, index + 1)?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("published scopes should insert");
+
+    let indexed_repository_count = store
+        .run(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM code_repositories
+                     WHERE last_indexed_scope_id IS NOT NULL",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("indexed repository count should query");
+    assert_eq!(indexed_repository_count, 100);
+
+    let first_pass = store
+        .schedule_code_repository_retention(100, 200)
+        .await
+        .expect("first candidate page should scan");
+    assert_eq!(first_pass, None);
+    store
+        .run(|connection| {
+            connection.execute(
+                "UPDATE code_repository_index_tasks
+                 SET updated_at_ms = 1000 WHERE task_id = 'task-repo-000'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("candidate activity should update");
+
+    let restarted_pass = store
+        .schedule_code_repository_retention(100, 201)
+        .await
+        .expect("changed catalog should restart the scan");
+    assert_eq!(restarted_pass, None);
+    let completed_pass = store
+        .schedule_code_repository_retention(100, 202)
+        .await
+        .expect("restarted scan should finish");
+    assert_eq!(completed_pass, None);
+    assert!(
+        !store
+            .code_repository_retention_scan_pending()
+            .await
+            .expect("completed candidate scan should query")
+    );
+    let job_count = store
+        .run(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM code_repository_retention_jobs",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("retention job count should query");
+    assert_eq!(job_count, 0);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[tokio::test]
+async fn scheduler_rejects_limit_above_sqlite_integer_range() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+
+    let error = store
+        .schedule_code_repository_retention(i64::MAX as usize + 1, 1)
+        .await
+        .expect_err("SQLite-incompatible limit should fail at the storage boundary");
+
+    assert!(matches!(
+        error,
+        crate::storage::StorageError::InvalidInput(_)
+    ));
 }
 
 fn insert_published_scope(

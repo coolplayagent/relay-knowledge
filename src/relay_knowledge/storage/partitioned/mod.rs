@@ -227,6 +227,10 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             .schedule_code_repository_retention(max_indexed_repositories, now_ms)
     }
 
+    fn code_repository_retention_scan_pending(&self) -> StorageFuture<'_, bool> {
+        self.control.code_repository_retention_scan_pending()
+    }
+
     fn code_file_fingerprints(
         &self,
         repository_id: String,

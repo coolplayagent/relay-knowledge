@@ -11,6 +11,7 @@ const CANDIDATE_PAGE_SIZE: usize = 64;
 
 struct CandidateScan {
     max_indexed_repositories: usize,
+    catalog_revision: u64,
     cursor_activity_ms: u64,
     cursor_repository_id: String,
     eligible_count: usize,
@@ -56,6 +57,12 @@ pub(in crate::storage::sqlite::code) fn schedule(
             "max indexed repositories must be greater than zero".to_owned(),
         ));
     }
+    i64::try_from(max_indexed_repositories).map_err(|_| {
+        StorageError::InvalidInput(format!(
+            "max indexed repositories must not exceed {}",
+            i64::MAX
+        ))
+    })?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(repository_id) = transaction
         .query_row(
@@ -104,8 +111,11 @@ fn advance_candidate_scan(
     max_indexed_repositories: usize,
     now_ms: u64,
 ) -> Result<Option<(String, String)>, StorageError> {
-    let mut scan = load_candidate_scan(connection)?
-        .filter(|scan| scan.max_indexed_repositories == max_indexed_repositories);
+    let catalog_revision = current_catalog_revision(connection)?;
+    let mut scan = load_candidate_scan(connection)?.filter(|scan| {
+        scan.max_indexed_repositories == max_indexed_repositories
+            && scan.catalog_revision == catalog_revision
+    });
     if scan.is_none() {
         clear_candidate_scan(connection)?;
     }
@@ -207,6 +217,7 @@ fn advance_candidate_scan(
         connection,
         &CandidateScan {
             max_indexed_repositories,
+            catalog_revision,
             cursor_activity_ms: next_cursor_activity_ms,
             cursor_repository_id: next_cursor_repository_id,
             eligible_count,
@@ -221,21 +232,22 @@ fn advance_candidate_scan(
 fn load_candidate_scan(connection: &Connection) -> Result<Option<CandidateScan>, StorageError> {
     connection
         .query_row(
-            "SELECT max_indexed_repositories, cursor_activity_ms,
+            "SELECT max_indexed_repositories, catalog_revision, cursor_activity_ms,
                     cursor_repository_id, eligible_count,
                     oldest_repository_id, oldest_source_scope, created_at_ms
              FROM code_repository_retention_scans WHERE scan_id = 1",
             [],
             |row| {
-                let oldest_repository_id = row.get::<_, Option<String>>(4)?;
-                let oldest_source_scope = row.get::<_, Option<String>>(5)?;
+                let oldest_repository_id = row.get::<_, Option<String>>(5)?;
+                let oldest_source_scope = row.get::<_, Option<String>>(6)?;
                 Ok(CandidateScan {
                     max_indexed_repositories: row.get(0)?,
-                    cursor_activity_ms: row.get(1)?,
-                    cursor_repository_id: row.get(2)?,
-                    eligible_count: row.get(3)?,
+                    catalog_revision: row.get(1)?,
+                    cursor_activity_ms: row.get(2)?,
+                    cursor_repository_id: row.get(3)?,
+                    eligible_count: row.get(4)?,
                     oldest_eligible: oldest_repository_id.zip(oldest_source_scope),
-                    created_at_ms: row.get(6)?,
+                    created_at_ms: row.get(7)?,
                 })
             },
         )
@@ -256,12 +268,13 @@ fn persist_candidate_scan(
         });
     connection.execute(
         "INSERT INTO code_repository_retention_scans (
-             scan_id, max_indexed_repositories, cursor_activity_ms,
+             scan_id, max_indexed_repositories, catalog_revision, cursor_activity_ms,
              cursor_repository_id, eligible_count, oldest_repository_id,
              oldest_source_scope, created_at_ms, updated_at_ms
-         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(scan_id) DO UPDATE SET
              max_indexed_repositories = excluded.max_indexed_repositories,
+             catalog_revision = excluded.catalog_revision,
              cursor_activity_ms = excluded.cursor_activity_ms,
              cursor_repository_id = excluded.cursor_repository_id,
              eligible_count = excluded.eligible_count,
@@ -271,6 +284,7 @@ fn persist_candidate_scan(
              updated_at_ms = excluded.updated_at_ms",
         params![
             scan.max_indexed_repositories,
+            scan.catalog_revision,
             scan.cursor_activity_ms,
             scan.cursor_repository_id,
             scan.eligible_count,
@@ -281,6 +295,30 @@ fn persist_candidate_scan(
         ],
     )?;
     Ok(())
+}
+
+fn current_catalog_revision(connection: &Connection) -> Result<u64, StorageError> {
+    connection
+        .query_row(
+            "SELECT revision FROM code_repository_retention_catalog WHERE catalog_id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::from)
+}
+
+pub(in crate::storage::sqlite::code) fn candidate_scan_pending(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM code_repository_retention_scans WHERE scan_id = 1
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::from)
 }
 
 fn clear_candidate_scan(connection: &Connection) -> Result<(), StorageError> {

@@ -19,6 +19,7 @@ pub(super) use lease::{
 };
 pub(super) use queue::queue_task;
 pub(super) use repository_retention::{
+    candidate_scan_pending as repository_retention_scan_pending,
     complete as complete_repository_retention, job as repository_retention_job,
     schedule as schedule_repository_retention, update_progress as update_repository_retention,
 };

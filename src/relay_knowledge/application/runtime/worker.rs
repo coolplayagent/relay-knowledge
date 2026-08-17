@@ -25,6 +25,15 @@ impl WorkerRuntimeConfig {
     pub fn from_environment(
         environment: &EnvironmentConfig,
     ) -> Result<Self, WorkerRuntimeConfigError> {
+        let code_index_max_indexed_repositories = environment
+            .workers
+            .code_index_max_indexed_repositories
+            .unwrap_or(Self::DEFAULT_CODE_INDEX_MAX_INDEXED_REPOSITORIES);
+        if i64::try_from(code_index_max_indexed_repositories).is_err() {
+            return Err(WorkerRuntimeConfigError::IndexedRepositoryLimitTooLarge(
+                code_index_max_indexed_repositories,
+            ));
+        }
         Ok(Self {
             embedding_endpoint: validate_worker_endpoint(
                 environment.workers.embedding_endpoint.clone(),
@@ -43,10 +52,7 @@ impl WorkerRuntimeConfig {
                 .code_index_max_in_flight
                 .unwrap_or(Self::DEFAULT_CODE_INDEX_MAX_IN_FLIGHT)
                 .min(Self::MAX_CODE_INDEX_MAX_IN_FLIGHT),
-            code_index_max_indexed_repositories: environment
-                .workers
-                .code_index_max_indexed_repositories
-                .unwrap_or(Self::DEFAULT_CODE_INDEX_MAX_INDEXED_REPOSITORIES),
+            code_index_max_indexed_repositories,
             silent_updates_enabled: environment.workers.silent_updates_enabled.unwrap_or(false),
         })
     }
@@ -66,6 +72,7 @@ impl WorkerRuntimeConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerRuntimeConfigError {
     InvalidEndpoint(String),
+    IndexedRepositoryLimitTooLarge(usize),
 }
 
 impl fmt::Display for WorkerRuntimeConfigError {
@@ -74,6 +81,11 @@ impl fmt::Display for WorkerRuntimeConfigError {
             Self::InvalidEndpoint(value) => write!(
                 formatter,
                 "worker endpoint '{value}' must use http:// and include a host"
+            ),
+            Self::IndexedRepositoryLimitTooLarge(value) => write!(
+                formatter,
+                "max indexed repositories {value} exceeds the SQLite INTEGER limit {}",
+                i64::MAX
             ),
         }
     }

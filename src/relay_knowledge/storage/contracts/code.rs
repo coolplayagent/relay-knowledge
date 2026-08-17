@@ -366,6 +366,10 @@ pub trait CodeRepositoryStore: Send + Sync {
         Box::pin(async { Ok(None) })
     }
 
+    fn code_repository_retention_scan_pending(&self) -> StorageFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
     fn code_file_fingerprints(
         &self,
         repository_id: String,

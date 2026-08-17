@@ -24,7 +24,7 @@ An unprotected old scope is atomically marked `retiring` and receives a durable 
 
 ## 3. Repository Retention
 
-`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` is a positive integer with default 10. A repository counts when it has a current published scope. Membership in a user-managed repository set excludes it from both the count and candidate selection. The automatic workspace set is identified by its deterministic set ID derived from the repository ID; its editable alias is not trusted for authorization or exemption decisions.
+`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` is an integer in `1..=i64::MAX` with default 10. The upper bound matches SQLite's persistent integer range and is validated before maintenance starts. A repository counts when it has a current published scope. Membership in a user-managed repository set excludes it from both the count and candidate selection. The automatic workspace set is identified by its deterministic set ID derived from the repository ID; its editable alias is not trusted for authorization or exemption decisions.
 
 Scheduling runs after successful publication and before each bounded retention pass used by the resident service or `repo index-worker`. At most one repository-retention parent job is globally active. If eligible indexed repositories exceed the limit, the scheduler selects the repository with the oldest current successful publication and persists:
 
@@ -34,7 +34,7 @@ Scheduling runs after successful publication and before each bounded retention p
 - `cutoff_publication_generation`, the successful publication generation observed for the initial scope;
 - phase, timestamps, and last error.
 
-Candidate discovery reads at most 64 catalog rows in one scheduling transaction. If that page does not establish whether the limit is exceeded, the scheduler persists a singleton scan cursor, eligible count, and oldest candidate, then resumes from that cursor on a later maintenance pass or after process restart. A changed limit or an active parent job discards the cursor. Before creating a parent job, the selected repository is revalidated against its current scope, retirement state, and user-managed set membership.
+Candidate discovery reads at most 64 catalog rows in one scheduling transaction. If that page does not establish whether the limit is exceeded, the scheduler persists a singleton scan cursor, eligible count, oldest candidate, and catalog revision, then resumes from that cursor on a later maintenance pass or after process restart. A changed limit, active parent job, or mutation affecting candidate order or eligibility discards the cursor and restarts from the first page. An unfinished scan is active maintenance, so `repo index-worker` reports `maintenance_active=true` until the scan finishes or creates a parent job. Before creating a parent job, the selected repository is revalidated against its current scope, retirement state, and user-managed set membership.
 
 The durable parent survives process restart. A maintenance pass loads it and selects child scopes through the existing scope-GC state machine. Repository mode intentionally does not apply the ordinary active/latest-two protection to scopes that existed before the cutoff.
 
