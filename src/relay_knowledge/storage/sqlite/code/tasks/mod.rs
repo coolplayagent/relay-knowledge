@@ -7,6 +7,7 @@ mod repository_retention;
 mod reset;
 mod retention;
 pub(in crate::storage::sqlite::code) mod retention_gc;
+mod retention_publications;
 mod scope_capacity;
 mod status;
 mod worktree;
@@ -21,6 +22,7 @@ pub(super) use queue::queue_task;
 pub(super) use repository_retention::{
     candidate_scan_pending as repository_retention_scan_pending,
     complete as complete_repository_retention, job as repository_retention_job,
+    republished_initial_scope as repository_retention_republished_initial_scope,
     schedule as schedule_repository_retention, update_progress as update_repository_retention,
 };
 pub(super) use reset::reset_tasks;

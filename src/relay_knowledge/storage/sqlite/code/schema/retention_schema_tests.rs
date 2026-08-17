@@ -67,6 +67,25 @@ fn retention_schema_adds_logical_retirement_and_durable_jobs() {
         .expect("repository retention catalog should query");
     assert_eq!(catalog_table, 1);
 
+    let activity_table: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_retention_activity'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repository activity table should query");
+    assert_eq!(activity_table, 1);
+
+    let activity_index_columns = connection
+        .prepare("PRAGMA index_info(code_repository_retention_activity_order)")
+        .expect("repository activity index should prepare")
+        .query_map([], |row| row.get::<_, String>(2))
+        .expect("repository activity index should query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("repository activity index columns should collect");
+    assert_eq!(activity_index_columns, ["activity_ms", "repository_id"]);
+
     let member_index_columns = connection
         .prepare("PRAGMA index_info(code_repository_set_members_repository_scope)")
         .expect("set-member retention index should prepare")

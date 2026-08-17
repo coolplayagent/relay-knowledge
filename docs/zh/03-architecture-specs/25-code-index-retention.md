@@ -34,7 +34,9 @@
 - `cutoff_publication_generation`（截止发布代次），即初始作用域对应的成功发布代次；
 - phase（阶段）、时间戳和 last error（最近错误）。
 
-Candidate discovery（候选发现）在一次调度事务中最多读取 64 条 catalog row（目录记录）。如果该页不足以判断是否超过上限，调度器会持久化单例 scan cursor（扫描游标）、合格数量、最旧候选和 catalog revision（目录修订号），并在后续维护轮次或进程重启后从游标继续。上限改变、已有活动父任务，或影响候选排序和资格的目录变更，都会丢弃游标并从第一页重启。未完成扫描属于活动维护，因此 `repo index-worker` 会持续报告 `maintenance_active=true`，直到扫描完成或创建父任务。创建父任务前会重新校验所选仓库的 current scope、retirement state（退役状态）和用户管理 set 成员关系。
+Candidate discovery（候选发现）在一次调度事务中通过 `(activity_ms, repository_id)` 顺序索引，从持久化 `code_repository_retention_activity`（仓库保留活动）投影中最多读取 64 条记录。可能影响仓库 current scope 或成功发布时间的变更会把仓库加入 `code_repository_retention_activity_dirty`（仓库保留活动脏队列）。每次调度事务在扫描前通过有索引的点查询最多刷新 64 个脏仓库；如果仍有脏数据，维护保持 pending（待处理），候选选择会等待，而不会读取陈旧投影。Schema marker（模式标记）版本 6 会在升级时创建并回填该投影。
+
+如果候选页不足以判断是否超过上限，调度器会持久化单例 scan cursor（扫描游标）、合格数量、最旧候选和 catalog revision（目录修订号），并在后续维护轮次或进程重启后从游标继续。上限改变、已有活动父任务、投影刷新，或影响候选排序和资格的目录变更，都会丢弃游标并从第一页重启。未完成扫描或活动刷新属于活动维护，因此 `repo index-worker` 会持续报告 `maintenance_active=true`，直到处理完成或创建父任务。创建父任务前会重新校验所选仓库的 current scope、retirement state（退役状态）和用户管理 set 成员关系。
 
 持久化父任务可以跨进程重启恢复。Maintenance pass 会加载父任务，并通过既有 scope-GC state machine（作用域垃圾回收状态机）选择和执行子 scope。仓库模式会有意跳过普通 active/latest-two protection（活动/最近两个保护），以清理 cutoff 前已存在的 scope。
 
@@ -52,6 +54,8 @@ Candidate discovery（候选发现）在一次调度事务中最多读取 64 条
 
 仓库在调度后加入用户管理 set 时，maintenance 会删除父任务并停止退役更多 scope。Partitioned maintenance 会在调用 shard 前根据 control 结果刷新仓库模式，因此同一轮处理不会向分片转发已经失效的仓库 cutoff。已经标记为 `retiring` 的子 scope 仍会完成，因为 reader 已经不再把它视为 live（可用）。
 
+在 partitioned storage（分区存储）中，如果 `initial_scope` 在 cutoff 所在毫秒以更高 publication generation（发布代次）重新发布，control database（控制数据库）也会识别该情况，并在父任务收敛前将该 scope 作为 shard retention pin（分片保留固定引用）传递，避免分片清理把这次同毫秒发布误判为 cutoff 前数据。
+
 ## 5. 完成与可观测性
 
 Single-SQLite（单 SQLite）仅在没有仓库模式可退役 scope、且没有子 scope-GC job 时完成父任务。Partitioned SQLite（分片 SQLite）合并 control（控制面）与 shard（分片）retention state（保留状态），仅在两侧都收敛后完成父任务；catalog route（目录路由）继续遵循既有最终阶段顺序。
@@ -66,12 +70,12 @@ cutoff（截止点）之后的成功 scope 会先跨 task（任务）与 checkpo
 
 - 默认值为 10，正数 override（覆盖值）生效，0 被拒绝；
 - 用户管理 set 成员被排除，automatic-workspace 成员仍计数，且不受 alias 或候选分页位置影响；
-- 候选发现在每次调度事务中仅推进一页 64 条记录，并可在重新打开 SQLite 后续跑；
+- 活动投影刷新和候选发现每次调度事务都限制为 64 条记录，候选读取使用活动顺序索引且不产生临时排序，并可在重新打开 SQLite 后续跑；
 - 选择成功发布时间最旧的合格仓库；
 - 重新打开 SQLite 后父任务和子任务可恢复；
 - 首轮逻辑退役先于物理删除；
 - 整仓索引清理后仓库注册与 alias 仍存在；
-- 未完成任务、cutoff 后发布代次和同毫秒 incremental base 均保留；
+- 未完成任务、cutoff 后发布代次、同毫秒 incremental base 和同毫秒更高代次的重新发布均保留；
 - task/checkpoint 的重复发布记录在历史上限前完成去重；
 - 父任务 phase 和 last error 跟随当前子 GC 任务；
 - 加入用户管理 set 后停止新增退役；

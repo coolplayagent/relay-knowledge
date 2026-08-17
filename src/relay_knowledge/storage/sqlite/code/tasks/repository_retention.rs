@@ -8,6 +8,7 @@ use super::super::workspace;
 
 const PHASE: &str = "retiring_scopes";
 const CANDIDATE_PAGE_SIZE: usize = 64;
+const ACTIVITY_REFRESH_BATCH_SIZE: usize = 64;
 
 struct CandidateScan {
     max_indexed_repositories: usize,
@@ -47,6 +48,40 @@ pub(in crate::storage::sqlite::code) fn job(
         .map_err(StorageError::from)
 }
 
+pub(in crate::storage::sqlite::code) fn republished_initial_scope(
+    connection: &Connection,
+    repository_id: &str,
+    initial_scope: &str,
+    cutoff_ms: u64,
+    cutoff_publication_generation: u64,
+) -> Result<Option<String>, StorageError> {
+    let republished = connection.query_row(
+        "SELECT EXISTS (
+             SELECT 1
+             FROM code_repository_index_tasks
+                  INDEXED BY code_repository_index_tasks_publication_retention
+             WHERE repository_id = ?1
+               AND source_scope = ?2
+               AND state = 'succeeded'
+               AND (
+                   (?4 > 0 AND publication_generation > ?4)
+                   OR (
+                       (?4 = 0 OR publication_generation = 0)
+                       AND updated_at_ms > ?3
+                   )
+               )
+         )",
+        params![
+            repository_id,
+            initial_scope,
+            cutoff_ms,
+            cutoff_publication_generation
+        ],
+        |row| row.get::<_, bool>(0),
+    )?;
+    Ok(republished.then(|| initial_scope.to_owned()))
+}
+
 pub(in crate::storage::sqlite::code) fn schedule(
     connection: &mut Connection,
     max_indexed_repositories: usize,
@@ -76,6 +111,13 @@ pub(in crate::storage::sqlite::code) fn schedule(
         clear_candidate_scan(&transaction)?;
         transaction.commit()?;
         return Ok(Some(repository_id));
+    }
+
+    let activity_refresh_pending = refresh_repository_activity(&transaction)?;
+    if activity_refresh_pending {
+        clear_candidate_scan(&transaction)?;
+        transaction.commit()?;
+        return Ok(None);
     }
 
     let selected = advance_candidate_scan(&transaction, max_indexed_repositories, now_ms)?;
@@ -125,38 +167,10 @@ fn advance_candidate_scan(
         .map_or_else(String::new, |scan| scan.cursor_repository_id.clone());
     let page = {
         let mut statement = connection.prepare(
-            "WITH indexed_repository AS (
-                 SELECT repository.repository_id,
-                        repository.last_indexed_scope_id AS source_scope,
-                        MAX(
-                            COALESCE((
-                                SELECT MAX(task.updated_at_ms)
-                                FROM code_repository_index_tasks task
-                                WHERE task.repository_id = repository.repository_id
-                                  AND task.source_scope = repository.last_indexed_scope_id
-                                  AND task.state = 'succeeded'
-                            ), 0),
-                            COALESCE((
-                                SELECT MAX(checkpoint.updated_at_ms)
-                                FROM code_repository_index_checkpoints checkpoint
-                                WHERE checkpoint.repository_id = repository.repository_id
-                                  AND checkpoint.source_scope = repository.last_indexed_scope_id
-                                  AND checkpoint.state IN ('complete', 'completed')
-                            ), 0)
-                        ) AS activity_ms
-                 FROM code_repositories repository
-                 WHERE repository.last_indexed_scope_id IS NOT NULL
-                   AND EXISTS (
-                       SELECT 1 FROM code_repository_scopes scope
-                       WHERE scope.repository_id = repository.repository_id
-                         AND scope.source_scope = repository.last_indexed_scope_id
-                         AND scope.retiring = 0
-                   )
-             )
-             SELECT repository_id, source_scope, activity_ms
-             FROM indexed_repository
-             WHERE ?1 IS NULL OR activity_ms > ?1
-                OR (activity_ms = ?1 AND repository_id > ?2)
+            "SELECT repository_id, source_scope, activity_ms
+             FROM code_repository_retention_activity
+                  INDEXED BY code_repository_retention_activity_order
+             WHERE ?1 IS NULL OR (activity_ms, repository_id) > (?1, ?2)
              ORDER BY activity_ms, repository_id
              LIMIT ?3",
         )?;
@@ -227,6 +241,74 @@ fn advance_candidate_scan(
         now_ms,
     )?;
     Ok(None)
+}
+
+fn refresh_repository_activity(connection: &Connection) -> Result<bool, StorageError> {
+    let repository_ids = connection
+        .prepare(
+            "SELECT repository_id
+             FROM code_repository_retention_activity_dirty
+             ORDER BY repository_id
+             LIMIT ?1",
+        )?
+        .query_map(params![ACTIVITY_REFRESH_BATCH_SIZE], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for repository_id in &repository_ids {
+        connection.execute(
+            "DELETE FROM code_repository_retention_activity WHERE repository_id = ?1",
+            params![repository_id],
+        )?;
+        connection.execute(
+            "INSERT INTO code_repository_retention_activity (
+                 repository_id, source_scope, activity_ms
+             )
+             SELECT repository.repository_id,
+                    repository.last_indexed_scope_id,
+                    MAX(
+                        COALESCE((
+                            SELECT MAX(task.updated_at_ms)
+                            FROM code_repository_index_tasks task
+                                 INDEXED BY code_repository_index_tasks_scope_activity
+                            WHERE task.repository_id = repository.repository_id
+                              AND task.source_scope = repository.last_indexed_scope_id
+                              AND task.state = 'succeeded'
+                        ), 0),
+                        COALESCE((
+                            SELECT MAX(checkpoint.updated_at_ms)
+                            FROM code_repository_index_checkpoints checkpoint
+                                 INDEXED BY code_repository_index_checkpoints_scope_activity
+                            WHERE checkpoint.repository_id = repository.repository_id
+                              AND checkpoint.source_scope = repository.last_indexed_scope_id
+                              AND checkpoint.state IN ('complete', 'completed')
+                        ), 0)
+                    )
+             FROM code_repositories repository
+             JOIN code_repository_scopes scope
+               ON scope.repository_id = repository.repository_id
+              AND scope.source_scope = repository.last_indexed_scope_id
+              AND scope.retiring = 0
+             WHERE repository.repository_id = ?1",
+            params![repository_id],
+        )?;
+        connection.execute(
+            "DELETE FROM code_repository_retention_activity_dirty WHERE repository_id = ?1",
+            params![repository_id],
+        )?;
+    }
+    if repository_ids.len() < ACTIVITY_REFRESH_BATCH_SIZE {
+        return Ok(false);
+    }
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM code_repository_retention_activity_dirty LIMIT 1
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(StorageError::from)
 }
 
 fn load_candidate_scan(connection: &Connection) -> Result<Option<CandidateScan>, StorageError> {
@@ -314,6 +396,8 @@ pub(in crate::storage::sqlite::code) fn candidate_scan_pending(
         .query_row(
             "SELECT EXISTS (
                  SELECT 1 FROM code_repository_retention_scans WHERE scan_id = 1
+                 UNION ALL
+                 SELECT 1 FROM code_repository_retention_activity_dirty LIMIT 1
              )",
             [],
             |row| row.get(0),

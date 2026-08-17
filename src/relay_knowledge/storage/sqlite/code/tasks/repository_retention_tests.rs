@@ -161,10 +161,21 @@ async fn scheduler_scans_past_a_page_of_user_set_repositories() {
     drop(store);
 
     let reopened = SqliteGraphStore::open(&database.path).expect("store should reopen");
-    let selected = reopened
+    let resumed = reopened
         .schedule_code_repository_retention(1, 2001)
         .await
         .expect("persisted candidate scan should resume");
+    assert!(resumed.is_none());
+    assert!(
+        reopened
+            .code_repository_retention_scan_pending()
+            .await
+            .expect("second candidate page should remain pending")
+    );
+    let selected = reopened
+        .schedule_code_repository_retention(1, 2002)
+        .await
+        .expect("second candidate page should select the oldest eligible repository");
 
     assert_eq!(selected.as_deref(), Some("repo-eligible-old"));
     assert!(
@@ -222,8 +233,13 @@ async fn scheduler_restarts_when_candidate_activity_changes_between_pages() {
         .expect("indexed repository count should query");
     assert_eq!(indexed_repository_count, 100);
 
-    let first_pass = store
+    let activity_refresh = store
         .schedule_code_repository_retention(100, 200)
+        .await
+        .expect("first activity refresh batch should run");
+    assert_eq!(activity_refresh, None);
+    let first_pass = store
+        .schedule_code_repository_retention(100, 201)
         .await
         .expect("first candidate page should scan");
     assert_eq!(first_pass, None);
@@ -240,12 +256,12 @@ async fn scheduler_restarts_when_candidate_activity_changes_between_pages() {
         .expect("candidate activity should update");
 
     let restarted_pass = store
-        .schedule_code_repository_retention(100, 201)
+        .schedule_code_repository_retention(100, 202)
         .await
         .expect("changed catalog should restart the scan");
     assert_eq!(restarted_pass, None);
     let completed_pass = store
-        .schedule_code_repository_retention(100, 202)
+        .schedule_code_repository_retention(100, 203)
         .await
         .expect("restarted scan should finish");
     assert_eq!(completed_pass, None);
@@ -284,6 +300,43 @@ async fn scheduler_rejects_limit_above_sqlite_integer_range() {
         error,
         crate::storage::StorageError::InvalidInput(_)
     ));
+}
+
+#[tokio::test]
+async fn scheduler_candidate_page_uses_the_activity_order_index() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+
+    let query_plan = store
+        .run(|connection| {
+            let mut statement = connection.prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT repository_id, source_scope, activity_ms
+                 FROM code_repository_retention_activity
+                      INDEXED BY code_repository_retention_activity_order
+                 WHERE ?1 IS NULL OR (activity_ms, repository_id) > (?1, ?2)
+                 ORDER BY activity_ms, repository_id
+                 LIMIT ?3",
+            )?;
+            statement
+                .query_map(params![Option::<u64>::None, "", 64], |row| {
+                    row.get::<_, String>(3)
+                })?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("candidate query plan should load");
+
+    assert!(
+        query_plan
+            .iter()
+            .any(|detail| detail.contains("code_repository_retention_activity_order"))
+    );
+    assert!(
+        query_plan
+            .iter()
+            .all(|detail| !detail.contains("USE TEMP B-TREE"))
+    );
 }
 
 fn insert_published_scope(

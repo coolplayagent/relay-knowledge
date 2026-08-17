@@ -105,6 +105,22 @@ pub(super) fn complete_repository_retention(
     tasks::complete_repository_retention(connection, repository_id, cutoff_ms)
 }
 
+pub(super) fn repository_retention_republished_initial_scope(
+    connection: &Connection,
+    repository_id: &str,
+    initial_scope: &str,
+    cutoff_ms: u64,
+    cutoff_publication_generation: u64,
+) -> Result<Option<String>, StorageError> {
+    tasks::repository_retention_republished_initial_scope(
+        connection,
+        repository_id,
+        initial_scope,
+        cutoff_ms,
+        cutoff_publication_generation,
+    )
+}
+
 fn ensure_queryable_code_scope(
     connection: &Connection,
     source_scope: &str,

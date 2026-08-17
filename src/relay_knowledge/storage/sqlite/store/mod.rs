@@ -261,6 +261,24 @@ impl SqliteGraphStore {
             code::complete_repository_retention(connection, &repository_id, cutoff_ms)
         })
     }
+
+    pub(in crate::storage) fn repository_retention_republished_initial_scope(
+        &self,
+        repository_id: String,
+        initial_scope: String,
+        cutoff_ms: u64,
+        cutoff_publication_generation: u64,
+    ) -> StorageFuture<'_, Option<String>> {
+        self.run(move |connection| {
+            code::repository_retention_republished_initial_scope(
+                connection,
+                &repository_id,
+                &initial_scope,
+                cutoff_ms,
+                cutoff_publication_generation,
+            )
+        })
+    }
 }
 
 #[cfg(test)]

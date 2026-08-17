@@ -55,6 +55,19 @@ pub(in crate::storage::partitioned) fn prune(
                 .await?;
             let initial_repository_retention_job =
                 control_retention.repository_retention_job.clone();
+            let republished_initial_scope = if let Some(job) = &initial_repository_retention_job {
+                store
+                    .control
+                    .repository_retention_republished_initial_scope(
+                        job.repository_id.clone(),
+                        job.initial_scope.clone(),
+                        job.cutoff_ms,
+                        job.cutoff_publication_generation,
+                    )
+                    .await?
+            } else {
+                None
+            };
             if let Some(job) = &initial_repository_retention_job {
                 request.repository_retention_cutoff_ms = Some(job.cutoff_ms);
                 request.repository_retention_cutoff_generation =
@@ -78,7 +91,12 @@ pub(in crate::storage::partitioned) fn prune(
             // prevents a steady stream of control-plane audit work from
             // starving physical fact deletion in the shard.
             if shard_retention.maintenance_pending || repository_retention_job.is_some() {
-                let retained_pins = shard_retained_pins(&control_retention)?.to_vec();
+                let mut retained_pins = shard_retained_pins(&control_retention)?.to_vec();
+                if let Some(scope) = republished_initial_scope
+                    && !retained_pins.contains(&scope)
+                {
+                    retained_pins.push(scope);
+                }
                 if let Some(finalizing) = shard_retention
                     .retiring_jobs
                     .iter()

@@ -34,7 +34,9 @@ Scheduling runs after successful publication and before each bounded retention p
 - `cutoff_publication_generation`, the successful publication generation observed for the initial scope;
 - phase, timestamps, and last error.
 
-Candidate discovery reads at most 64 catalog rows in one scheduling transaction. If that page does not establish whether the limit is exceeded, the scheduler persists a singleton scan cursor, eligible count, oldest candidate, and catalog revision, then resumes from that cursor on a later maintenance pass or after process restart. A changed limit, active parent job, or mutation affecting candidate order or eligibility discards the cursor and restarts from the first page. An unfinished scan is active maintenance, so `repo index-worker` reports `maintenance_active=true` until the scan finishes or creates a parent job. Before creating a parent job, the selected repository is revalidated against its current scope, retirement state, and user-managed set membership.
+Candidate discovery reads at most 64 rows from the durable `code_repository_retention_activity` projection in `(activity_ms, repository_id)` index order in one scheduling transaction. Changes that can affect a repository's current scope or successful-publication activity enqueue that repository in `code_repository_retention_activity_dirty`. Before scanning, each scheduling transaction refreshes at most 64 dirty repositories through indexed point lookups. If dirty work remains, maintenance stays pending and candidate selection waits rather than reading stale projection rows. Schema marker version 6 creates and backfills the projection during upgrade.
+
+If a candidate page does not establish whether the limit is exceeded, the scheduler persists a singleton scan cursor, eligible count, oldest candidate, and catalog revision, then resumes from that cursor on a later maintenance pass or after process restart. A changed limit, active parent job, projection refresh, or mutation affecting candidate order or eligibility discards the cursor and restarts from the first page. An unfinished scan or activity refresh is active maintenance, so `repo index-worker` reports `maintenance_active=true` until the work finishes or creates a parent job. Before creating a parent job, the selected repository is revalidated against its current scope, retirement state, and user-managed set membership.
 
 The durable parent survives process restart. A maintenance pass loads it and selects child scopes through the existing scope-GC state machine. Repository mode intentionally does not apply the ordinary active/latest-two protection to scopes that existed before the cutoff.
 
@@ -52,6 +54,8 @@ When the initial active scope starts retiring, the repository's current scope po
 
 If the repository becomes a member of a user-managed set after scheduling, maintenance removes the parent and stops retiring additional scopes. Partitioned maintenance refreshes repository mode from the control result before invoking the shard, so the same pass cannot forward a stale repository cutoff. A child scope already marked `retiring` still completes because readers have already stopped treating it as live.
 
+In partitioned storage, the control database also detects when `initial_scope` was republished at the cutoff millisecond with a higher publication generation. It forwards that scope as a shard retention pin until the parent job converges, preventing shard cleanup from treating the same-millisecond publication as pre-cutoff data.
+
 ## 5. Completion and Observability
 
 Single-SQLite mode completes the parent only when no repository-mode prunable scope and no child scope-GC job remains. Partitioned SQLite merges control and shard retention state and completes the parent only after both sides converge; catalog routes remain governed by the existing final-phase ordering.
@@ -66,12 +70,12 @@ Regression coverage must verify:
 
 - the default is 10, positive overrides work, and zero is rejected;
 - user-managed set members are excluded while automatic-workspace members still count, independent of aliases and candidate-page position;
-- candidate discovery advances one 64-row page per scheduling transaction and resumes after reopening SQLite;
+- activity projection refresh and candidate discovery are bounded to 64 rows per scheduling transaction, use the activity-order index without a temporary sort, and resume after reopening SQLite;
 - the oldest eligible successful publication is selected;
 - parent and child jobs resume after reopening SQLite;
 - first-pass logical retirement precedes physical deletion;
 - registration and aliases survive whole-repository index cleanup;
-- unfinished work, post-cutoff publication generations, and same-millisecond incremental bases survive;
+- unfinished work, post-cutoff publication generations, same-millisecond incremental bases, and same-millisecond higher-generation republishes survive;
 - duplicate task/checkpoint publication records are deduplicated before history bounding;
 - parent phase and error fields follow the active child GC job;
 - joining a user-managed set stops additional retirement;
