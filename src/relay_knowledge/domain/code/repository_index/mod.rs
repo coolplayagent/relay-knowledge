@@ -297,6 +297,23 @@ pub struct CodeScopeRetentionSummary {
     pub pruned_scopes: Vec<String>,
     #[serde(default)]
     pub retiring_jobs: Vec<CodeScopeRetirementJobStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_retention_job: Option<CodeRepositoryRetentionJobStatus>,
+}
+
+/// Observable progress for one durable whole-repository index retention job.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryRetentionJobStatus {
+    pub repository_id: String,
+    pub initial_scope: String,
+    pub cutoff_ms: u64,
+    #[serde(default)]
+    pub cutoff_publication_generation: u64,
+    pub phase: String,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 /// Observable progress for one durable, restart-safe scope retirement job.

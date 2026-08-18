@@ -50,8 +50,8 @@ pub use repository_graph::{
 pub use repository_index::{
     CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexPublicationFence,
     CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
-    CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeIndexTaskState, CodeScopeRetentionSummary,
-    CodeScopeRetirementJobStatus,
+    CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeIndexTaskState,
+    CodeRepositoryRetentionJobStatus, CodeScopeRetentionSummary, CodeScopeRetirementJobStatus,
 };
 pub use repository_set::{
     CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetAddMemberRequest,

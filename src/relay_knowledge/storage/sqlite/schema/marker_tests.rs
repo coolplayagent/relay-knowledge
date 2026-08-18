@@ -348,7 +348,7 @@ fn schema_marker_requires_workspace_mapping_ecosystem_unique_key() {
 }
 
 #[test]
-fn schema_marker_rejects_previous_label_gram_migration_version() {
+fn schema_marker_rejects_previous_schema_version() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let connection = store.connection.lock().expect("connection should lock");
     super::initialize_schema_marker(&connection).expect("marker table should initialize");
@@ -356,14 +356,14 @@ fn schema_marker_rejects_previous_label_gram_migration_version() {
         .execute(
             "
                 INSERT INTO relay_storage_schema_state (key, version, updated_at_ms)
-                VALUES ('sqlite_graph_store', 1, 0)
+                VALUES ('sqlite_graph_store', ?1, 0)
                 ",
-            [],
+            [super::SCHEMA_MARKER_VERSION - 1],
         )
         .expect("previous marker should insert");
 
     assert!(
         !schema_initialization_is_current(&connection)
-            .expect("previous label gram migration marker should be stale")
+            .expect("previous schema marker should be stale")
     );
 }

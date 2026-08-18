@@ -47,6 +47,7 @@ fn project_status_event_only_attaches_payload_to_item() {
             worker_extractor_endpoint_configured: false,
             worker_max_in_flight: 2,
             code_index_max_in_flight: 2,
+            code_index_max_indexed_repositories: 10,
             silent_updates_enabled: false,
             file_index_enabled: false,
             file_index_root_count: 0,

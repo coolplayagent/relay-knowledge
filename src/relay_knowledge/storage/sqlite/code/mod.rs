@@ -97,6 +97,30 @@ pub(super) fn prune_scopes_with_retained(
     tasks::prune_scopes_with_retained(connection, request, extra_retained_scopes)
 }
 
+pub(super) fn complete_repository_retention(
+    connection: &mut Connection,
+    repository_id: &str,
+    cutoff_ms: u64,
+) -> Result<bool, StorageError> {
+    tasks::complete_repository_retention(connection, repository_id, cutoff_ms)
+}
+
+pub(super) fn repository_retention_republished_initial_scope(
+    connection: &Connection,
+    repository_id: &str,
+    initial_scope: &str,
+    cutoff_ms: u64,
+    cutoff_publication_generation: u64,
+) -> Result<Option<String>, StorageError> {
+    tasks::repository_retention_republished_initial_scope(
+        connection,
+        repository_id,
+        initial_scope,
+        cutoff_ms,
+        cutoff_publication_generation,
+    )
+}
+
 fn ensure_queryable_code_scope(
     connection: &Connection,
     source_scope: &str,
@@ -284,6 +308,20 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: crate::storage::CodeScopeRetentionRequest,
     ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
         self.run(move |connection| tasks::prune_scopes(connection, request))
+    }
+
+    fn schedule_code_repository_retention(
+        &self,
+        max_indexed_repositories: usize,
+        now_ms: u64,
+    ) -> StorageFuture<'_, Option<String>> {
+        self.run(move |connection| {
+            tasks::schedule_repository_retention(connection, max_indexed_repositories, now_ms)
+        })
+    }
+
+    fn code_repository_retention_scan_pending(&self) -> StorageFuture<'_, bool> {
+        self.run_read(|connection| tasks::repository_retention_scan_pending(connection))
     }
 
     fn code_file_fingerprints(

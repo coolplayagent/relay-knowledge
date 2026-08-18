@@ -39,6 +39,8 @@ protobuf stub、swagger/OpenAPI client、minified bundle、仓库根层 `build/`
 
 冷启动 full `repo index` 返回 queued task handle，由后台 worker 在 lease 与事务级 publication generation 下写入。`repo update` 复用同一 durable path；省略 base/head 时默认最近发布 clean commit 与 `HEAD`，入队前固定 ref。原生 Git ref 变化是 hint，默认五秒的受界 HEAD reconciliation 兜底 linked worktree、漏报与重启。Admission 每仓库最多允许 32 个、全局最多 256 个未完成 task，超载返回可重试的 `qos_rejected`。`service run` 恢复过期 lease，`repo status` 暴露 task/checkpoint/finalization/retention。发布后保留 active 与 latest-two-success window 的并集（通常重叠），以及最近 incremental predecessor、active worktree overlay 的 clean base、未完成 task 和 repository-set pin；旧 fact/search/software state 先逻辑退役，后续 durable GC 每个 maintenance transaction 只推进一个 scope-GC phase，该 phase 在受影响的应用表之间合计最多删除 512 个物理行。完成态 task history 另行受界。
 
+仓库级 retention 另行把用户管理 repository set 之外的已索引仓库数默认限制为 10。成功发布后以及有界 maintenance 期间，系统选择成功发布时间最旧的合格仓库，记录持久化 repository-retention 父任务，并通过同一套分阶段 scope GC 退役该仓库的 scope。该流程保留仓库注册和 alias，不阻止新索引准入，并保护未完成 task 的 target/base 以及父任务 cutoff 之后的新发布。Automatic-workspace membership 不提供豁免，用户管理 repository-set membership 提供豁免。
+
 ## 竞争力特性
 
 仓库索引绑定 repository id、resolved commit、tree hash 和 path filter。查询期 language filter 会在完整语言 scope 上继续收窄。相同树可以复用 scope，rebase 或 force-moved head 需要新索引，dirty worktree 通过 worktree overlay 显式建模。

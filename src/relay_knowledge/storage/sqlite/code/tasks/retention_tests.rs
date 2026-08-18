@@ -9,6 +9,9 @@ use crate::{
     },
 };
 
+#[path = "retention_repository_tests.rs"]
+mod repository_tests;
+
 #[tokio::test]
 async fn retention_prunes_auto_workspace_members_without_pruning_user_set_members() {
     let store = registered_store().await;
@@ -89,146 +92,6 @@ async fn retention_status_bounds_scope_lists_and_reports_truncation() {
     assert_eq!(status.prunable_scopes.len(), 64);
     assert_eq!(status.prunable_scope_count, 64);
     assert!(status.maintenance_pending);
-}
-
-#[tokio::test]
-async fn retention_keeps_active_worktree_overlay_base_scope() {
-    let store = registered_store().await;
-    store
-        .run(|connection| {
-            for scope in ["scope-base", "scope-worktree", "scope-old"] {
-                insert_scope(connection, scope)?;
-            }
-            update_scope_commit(connection, "scope-base", "base-commit", "base-tree")?;
-            update_scope_commit(
-                connection,
-                "scope-worktree",
-                "worktree:base-commit:overlay",
-                "worktree:overlay",
-            )?;
-            Ok(())
-        })
-        .await
-        .expect("fixtures should insert");
-
-    let pruned = drain_retention(&store, "scope-worktree", 0).await;
-
-    assert!(
-        pruned
-            .retained_scopes
-            .contains(&"scope-worktree".to_owned())
-    );
-    assert!(pruned.retained_scopes.contains(&"scope-base".to_owned()));
-    assert!(pruned.pruned_scopes.contains(&"scope-old".to_owned()));
-}
-
-#[tokio::test]
-async fn retention_protects_active_worktree_base_alias_beyond_the_audit_window() {
-    let store = registered_store().await;
-    store
-        .run(|connection| {
-            for scope in ["scope-base", "scope-worktree", "scope-old"] {
-                insert_scope(connection, scope)?;
-            }
-            update_scope_commit(connection, "scope-base", "same-tree-newer", "base-tree")?;
-            insert_commit_alias(connection, "base-commit", "scope-base", 1)?;
-            for index in 0..(tasks::commit_scope::RETAIN_COMMIT_SCOPE_ALIAS_ROWS + 20) {
-                insert_commit_alias(
-                    connection,
-                    &format!("newer-{index:03}"),
-                    "scope-base",
-                    index as u64 + 2,
-                )?;
-            }
-            update_scope_commit(
-                connection,
-                "scope-worktree",
-                "worktree:base-commit:overlay",
-                "worktree:overlay",
-            )?;
-            connection.execute(
-                "UPDATE code_repositories
-                 SET last_indexed_scope_id = 'scope-worktree',
-                     last_indexed_commit = 'worktree:base-commit:overlay'
-                 WHERE repository_id = 'repo'",
-                [],
-            )?;
-            Ok(())
-        })
-        .await
-        .expect("active worktree alias fixtures should insert");
-
-    let pruned = drain_retention(&store, "scope-worktree", 0).await;
-    let base_alias_count = store
-        .run(|connection| commit_alias_count_for(connection, "base-commit"))
-        .await
-        .expect("base alias should query");
-
-    assert!(pruned.retained_scopes.contains(&"scope-base".to_owned()));
-    assert!(pruned.pruned_scopes.contains(&"scope-old".to_owned()));
-    assert_eq!(base_alias_count, 1);
-}
-
-#[tokio::test]
-async fn retention_keeps_queued_incremental_target_and_pinned_base_scopes() {
-    let store = registered_store().await;
-    store
-        .run(|connection| {
-            for scope in ["scope-active", "scope-base", "scope-target", "scope-old"] {
-                insert_scope(connection, scope)?;
-            }
-            update_scope_commit(connection, "scope-base", "newer-commit", "base-tree")?;
-            insert_commit_alias(connection, "base-commit", "scope-base", 1)?;
-            Ok(())
-        })
-        .await
-        .expect("fixtures should insert");
-    store
-        .queue_code_index_task(task_seed(
-            "incremental",
-            "scope-target",
-            "head-commit",
-            CodeIndexMode::incremental("base-commit", "head-commit")
-                .expect("incremental mode should validate"),
-            10,
-        ))
-        .await
-        .expect("incremental task should queue");
-
-    let pruned = prune(&store, "scope-active").await;
-
-    assert!(pruned.retained_scopes.contains(&"scope-base".to_owned()));
-    assert!(pruned.retained_scopes.contains(&"scope-target".to_owned()));
-    assert!(pruned.pruned_scopes.contains(&"scope-old".to_owned()));
-}
-
-#[tokio::test]
-async fn retention_keeps_the_latest_successful_incremental_predecessor() {
-    let store = registered_store().await;
-    store
-        .run(|connection| {
-            for scope in ["scope-active", "scope-base", "scope-old"] {
-                insert_scope(connection, scope)?;
-            }
-            update_scope_commit(connection, "scope-base", "same-tree-newer", "same-tree")?;
-            insert_commit_alias(connection, "base-commit", "scope-base", 1)?;
-            insert_successful_incremental_task(
-                connection,
-                "latest-incremental",
-                "scope-active",
-                "base-commit",
-                "head-commit",
-                500,
-            )?;
-            Ok(())
-        })
-        .await
-        .expect("incremental predecessor fixture should insert");
-
-    let pruned = prune(&store, "scope-active").await;
-
-    assert!(pruned.retained_scopes.contains(&"scope-base".to_owned()));
-    assert!(pruned.pruned_scopes.contains(&"scope-old".to_owned()));
 }
 
 #[tokio::test]
@@ -663,6 +526,9 @@ async fn drain_retention(
                             repository_id: "repo".to_owned(),
                             active_scope,
                             retain_recent_successful_scopes,
+                            repository_retention_cutoff_ms: None,
+                            repository_retention_cutoff_generation: None,
+                            repository_retention_initial_scope: None,
                         },
                     )
                 }
@@ -705,6 +571,9 @@ async fn retention_pass(
                         repository_id: "repo".to_owned(),
                         active_scope,
                         retain_recent_successful_scopes,
+                        repository_retention_cutoff_ms: None,
+                        repository_retention_cutoff_generation: None,
+                        repository_retention_initial_scope: None,
                     },
                 )
             }
@@ -909,6 +778,34 @@ fn insert_terminal_task(
         ],
     )?;
     Ok(())
+}
+
+fn insert_repository_retention_job(
+    connection: &mut rusqlite::Connection,
+    initial_scope: &str,
+    cutoff_ms: u64,
+) -> Result<(), crate::storage::StorageError> {
+    connection.execute(
+        "INSERT INTO code_repository_retention_jobs (
+             repository_id, initial_scope, cutoff_ms, phase,
+             created_at_ms, updated_at_ms, last_error
+         ) VALUES ('repo', ?1, ?2, 'retiring_scopes', ?2, ?2, NULL)",
+        params![initial_scope, cutoff_ms],
+    )?;
+    Ok(())
+}
+
+fn scope_count(
+    connection: &rusqlite::Connection,
+    scope: &str,
+) -> Result<usize, crate::storage::StorageError> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM code_repository_scopes WHERE source_scope = ?1",
+            params![scope],
+            |row| row.get(0),
+        )
+        .map_err(crate::storage::StorageError::from)
 }
 
 fn insert_successful_incremental_task(

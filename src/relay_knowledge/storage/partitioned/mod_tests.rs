@@ -21,6 +21,9 @@ use crate::{
     storage::CodeRepositorySetRefreshPublication,
 };
 
+#[path = "indexing/retention/repository_tests.rs"]
+mod repository_retention_tests;
+
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::test]
@@ -617,116 +620,6 @@ async fn partitioned_checkpoint_lifecycle_finishes_in_staged_shard() {
 }
 
 #[tokio::test]
-async fn code_index_task_partitioned_catalog_route_holds_scope_slot_until_final_release() {
-    let store = partitioned_store("retention-catalog-capacity-reservation");
-    store
-        .upsert_code_repository(registration())
-        .await
-        .expect("repository should register");
-    store
-        .control
-        .run(|connection| {
-            for index in 0..crate::storage::sqlite::code::MAX_SCOPE_SLOTS_PER_REPOSITORY - 1 {
-                connection.execute(
-                    "INSERT INTO code_repository_scopes (
-                         source_scope, repository_id, resolved_commit_sha, tree_hash,
-                         path_filters_json, language_filters_json, indexed_file_count,
-                         symbol_count, reference_count, chunk_count, stale, degraded_reason
-                     ) VALUES (?1, 'repo', ?2, ?3, '[]', '[]', 0, 0, 0, 0, 0, NULL)",
-                    rusqlite::params![
-                        format!("scope-filler-{index:03}"),
-                        format!("commit-filler-{index:03}"),
-                        format!("tree-filler-{index:03}"),
-                    ],
-                )?;
-            }
-            Ok(())
-        })
-        .await
-        .expect("published scope fillers should persist");
-    store
-        .catalog
-        .stage_scope("repo".to_owned(), "scope-retiring-route".to_owned())
-        .await
-        .expect("catalog route should reserve the final scope slot");
-
-    let error = store
-        .queue_code_index_task(task_seed("scope-next"))
-        .await
-        .expect_err("a retained catalog route must keep the next target behind backpressure");
-    assert!(matches!(error, StorageError::CapacityExceeded(_)));
-
-    let removed = store
-        .catalog
-        .remove_scope_route("repo".to_owned(), "scope-retiring-route".to_owned())
-        .await
-        .expect("final-phase coordinator should release the catalog route");
-    assert_eq!(removed, 1);
-    let queued = store
-        .queue_code_index_task(task_seed("scope-next"))
-        .await
-        .expect("the released final slot should admit the next target");
-    assert_eq!(queued.source_scope, "scope-next");
-}
-
-#[tokio::test]
-async fn code_index_task_partitioned_retention_removes_retired_scope_catalog_route() {
-    let store = partitioned_store("retention-catalog-route");
-    store
-        .upsert_code_repository(registration())
-        .await
-        .expect("repository should register");
-    store
-        .apply_code_index_snapshot(snapshot("scope-old"))
-        .await
-        .expect("old snapshot should apply");
-    store
-        .apply_code_index_snapshot(snapshot("scope-active"))
-        .await
-        .expect("active snapshot should apply");
-    assert_eq!(
-        store
-            .catalog
-            .repository_for_scope("scope-old".to_owned())
-            .await
-            .expect("old catalog route should load")
-            .as_deref(),
-        Some("repo")
-    );
-
-    for _ in 0..160 {
-        let pass = store
-            .prune_code_repository_scopes(CodeScopeRetentionRequest {
-                repository_id: "repo".to_owned(),
-                active_scope: "scope-active".to_owned(),
-                retain_recent_successful_scopes: 0,
-            })
-            .await
-            .expect("partitioned retention pass should run");
-        if !pass.maintenance_pending {
-            break;
-        }
-    }
-
-    assert!(
-        store
-            .catalog
-            .repository_for_scope("scope-old".to_owned())
-            .await
-            .expect("retired catalog route should load")
-            .is_none()
-    );
-    assert!(
-        store
-            .catalog
-            .repository_for_scope("scope-active".to_owned())
-            .await
-            .expect("active catalog route should load")
-            .is_some()
-    );
-}
-
-#[tokio::test]
 async fn code_index_task_partitioned_retention_cleans_staged_partial_scope_route() {
     let store = partitioned_store("retention-staged-partial-route");
     store
@@ -758,6 +651,9 @@ async fn code_index_task_partitioned_retention_cleans_staged_partial_scope_route
                 repository_id: "repo".to_owned(),
                 active_scope: String::new(),
                 retain_recent_successful_scopes: 2,
+                repository_retention_cutoff_ms: None,
+                repository_retention_cutoff_generation: None,
+                repository_retention_initial_scope: None,
             })
             .await
             .expect("staged partial retention should run");

@@ -189,6 +189,10 @@ fn parse_worker_overrides(values: &EnvironmentValues) -> Result<WorkerEnvOverrid
             values,
             RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT,
         )?,
+        code_index_max_indexed_repositories: positive_usize_var(
+            values,
+            RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES,
+        )?,
         silent_updates_enabled: bool_var(values, RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED)?,
     })
 }

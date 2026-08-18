@@ -1,6 +1,6 @@
 schema_version: 1
-map_version: 8
-updated_at: unix:1786526468
+map_version: 9
+updated_at: unix:1786936776
 topics:
 - id: architecture
   title: Architecture knowledge
@@ -78,6 +78,16 @@ sources:
   status: active
   version: 1
   description: Managed Git commit reconciliation, durable incremental publication, and bounded scope retention.
+- id: code-index-retention
+  topic: architecture
+  kind: doc
+  uri: docs/zh/03-architecture-specs/25-code-index-retention.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Scope retention, indexed-repository limits, durable parent jobs, and phased code-index garbage collection.
 - id: documentation-release-readiness-2026-06-05
   topic: release-documentation
   kind: doc
@@ -111,6 +121,7 @@ sources:
 routes:
 - topic: architecture
   source_order:
+  - code-index-retention
   - commit-driven-code-index-loop
   - architecture-hard-constraints
   - code-map-knowledge-development-loop
@@ -166,3 +177,7 @@ history:
   action: source.update
   actor: cli
   summary: Updated source 'cli-skill-workflows'.
+- version: 9
+  action: source.add
+  actor: codex
+  summary: Added durable code-index retention architecture.

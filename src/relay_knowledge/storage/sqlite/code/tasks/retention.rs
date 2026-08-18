@@ -7,12 +7,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{
-    domain::{CodeIndexMode, CodeScopeRetentionSummary},
+    domain::{CodeIndexMode, CodeRepositoryRetentionJobStatus, CodeScopeRetentionSummary},
     storage::{CodeScopeRetentionRequest, StorageError},
 };
 
 use super::super::{lifecycle::commit_scope, workspace};
 use super::retention_gc;
+use super::retention_publications::{
+    CommitReference, latest_successful_incremental_base, latest_successful_incremental_base_since,
+    scope_is_queryable, successful_scopes_since,
+};
 use super::worktree::{
     active_worktree_base_scopes, compatible_non_retiring_scopes_for_commit,
     worktree_overlay_base_commit, worktree_task_base_commit,
@@ -37,61 +41,14 @@ pub(in crate::storage::sqlite::code) fn retention_status(
         .optional()?
         .flatten()
         .unwrap_or_default();
-    retention_summary(
+    let repository_retention = super::repository_retention_job(connection, repository_id)?;
+    let plan = retention_plan(
         connection,
         repository_id,
         &active_scope,
         2,
-        false,
         Vec::new(),
-    )
-}
-
-pub(in crate::storage::sqlite::code) fn prune_scopes(
-    connection: &mut Connection,
-    request: CodeScopeRetentionRequest,
-) -> Result<CodeScopeRetentionSummary, StorageError> {
-    prune_scopes_with_retained(connection, request, Vec::new())
-}
-
-pub(in crate::storage::sqlite::code) fn prune_scopes_with_retained(
-    connection: &mut Connection,
-    request: CodeScopeRetentionRequest,
-    extra_retained_scopes: Vec<String>,
-) -> Result<CodeScopeRetentionSummary, StorageError> {
-    retention_summary(
-        connection,
-        &request.repository_id,
-        &request.active_scope,
-        request.retain_recent_successful_scopes,
-        true,
-        extra_retained_scopes,
-    )
-}
-
-fn retention_summary(
-    connection: &mut Connection,
-    repository_id: &str,
-    active_scope: &str,
-    retain_recent_successful_scopes: usize,
-    prune: bool,
-    extra_retained_scopes: Vec<String>,
-) -> Result<CodeScopeRetentionSummary, StorageError> {
-    if prune {
-        return run_retention_pass(
-            connection,
-            repository_id,
-            active_scope,
-            retain_recent_successful_scopes,
-            extra_retained_scopes,
-        );
-    }
-    let plan = retention_plan(
-        connection,
-        repository_id,
-        active_scope,
-        retain_recent_successful_scopes,
-        extra_retained_scopes,
+        repository_retention.as_ref(),
     )?;
     let retiring_jobs = retention_gc::jobs(connection, repository_id)?;
     let protected_aliases = protected_alias_commits(
@@ -112,7 +69,60 @@ fn retention_summary(
         Vec::new(),
         retiring_jobs,
         audit_pending,
+        repository_retention,
     ))
+}
+
+pub(in crate::storage::sqlite::code) fn prune_scopes(
+    connection: &mut Connection,
+    request: CodeScopeRetentionRequest,
+) -> Result<CodeScopeRetentionSummary, StorageError> {
+    prune_scopes_with_retained(connection, request, Vec::new())
+}
+
+pub(in crate::storage::sqlite::code) fn prune_scopes_with_retained(
+    connection: &mut Connection,
+    request: CodeScopeRetentionRequest,
+    extra_retained_scopes: Vec<String>,
+) -> Result<CodeScopeRetentionSummary, StorageError> {
+    let explicit_repository_retention = match (
+        request.repository_retention_cutoff_ms,
+        request.repository_retention_initial_scope.clone(),
+    ) {
+        (Some(cutoff_ms), Some(initial_scope)) => Some(CodeRepositoryRetentionJobStatus {
+            repository_id: request.repository_id.clone(),
+            initial_scope,
+            cutoff_ms,
+            cutoff_publication_generation: request
+                .repository_retention_cutoff_generation
+                .unwrap_or_default(),
+            phase: "retiring_scopes".to_owned(),
+            created_at_ms: cutoff_ms,
+            updated_at_ms: cutoff_ms,
+            last_error: None,
+        }),
+        (None, None) if request.repository_retention_cutoff_generation.is_none() => None,
+        _ => {
+            return Err(StorageError::InvalidInput(
+                "repository retention cutoff and initial scope must be provided together"
+                    .to_owned(),
+            ));
+        }
+    };
+    let persisted_repository_retention =
+        super::repository_retention_job(connection, &request.repository_id)?;
+    let complete_repository_retention =
+        explicit_repository_retention.is_none() && persisted_repository_retention.is_some();
+    let repository_retention = persisted_repository_retention.or(explicit_repository_retention);
+    run_retention_pass(
+        connection,
+        &request.repository_id,
+        &request.active_scope,
+        request.retain_recent_successful_scopes,
+        extra_retained_scopes,
+        repository_retention,
+        complete_repository_retention,
+    )
 }
 
 fn retention_plan(
@@ -121,6 +131,7 @@ fn retention_plan(
     active_scope: &str,
     retain_recent_successful_scopes: usize,
     extra_retained_scopes: Vec<String>,
+    repository_retention: Option<&CodeRepositoryRetentionJobStatus>,
 ) -> Result<RetentionPlan, StorageError> {
     let mut retained = BTreeSet::new();
     let current_active_scope = connection
@@ -131,36 +142,93 @@ fn retention_plan(
         )
         .optional()?
         .flatten();
-    if let Some(current_active_scope) = &current_active_scope {
-        retained.insert(current_active_scope.clone());
-    }
-    if !active_scope.is_empty() {
-        retained.insert(active_scope.to_owned());
-    }
-    let mut active_scopes = BTreeSet::new();
-    if !active_scope.is_empty() {
-        active_scopes.insert(active_scope.to_owned());
-    }
-    if let Some(current_active_scope) = current_active_scope {
-        active_scopes.insert(current_active_scope);
-    }
-    for scope in active_scopes {
-        retained.extend(active_worktree_base_scopes(
-            connection,
-            repository_id,
-            &scope,
-        )?);
-    }
-    let recent =
-        recent_successful_scopes(connection, repository_id, retain_recent_successful_scopes)?;
-    for scope in recent.scopes {
-        retained.insert(scope);
-    }
+    let user_set_scopes =
+        user_repository_set_member_scopes(connection, repository_id, MAX_EXPLICIT_RETENTION_PINS)?;
+    let repository_set_protected =
+        repository_retention.is_some() && !user_set_scopes.scopes.is_empty();
+    let user_pins_truncated = user_set_scopes.truncated;
+    retained.extend(user_set_scopes.scopes);
+
+    let active_repository_retention = repository_retention.filter(|_| !repository_set_protected);
+    let (latest_incremental_base, publication_history_incomplete) =
+        if let Some(repository_retention) = active_repository_retention {
+            let mut protected_publications = successful_scopes_since(
+                connection,
+                repository_id,
+                repository_retention.cutoff_ms,
+                repository_retention.cutoff_publication_generation,
+                &repository_retention.initial_scope,
+                MAX_SCOPE_STATUS_ROWS,
+            )?;
+            if let Some(current_active_scope) = current_active_scope
+                .as_ref()
+                .filter(|scope| *scope != &repository_retention.initial_scope)
+            {
+                protected_publications
+                    .scopes
+                    .push(current_active_scope.clone());
+            }
+            protected_publications.scopes.sort();
+            protected_publications.scopes.dedup();
+            for scope in &protected_publications.scopes {
+                retained.insert(scope.clone());
+                retained.extend(active_worktree_base_scopes(
+                    connection,
+                    repository_id,
+                    scope,
+                )?);
+            }
+            (
+                latest_successful_incremental_base_since(
+                    connection,
+                    repository_id,
+                    repository_retention.cutoff_ms,
+                    repository_retention.cutoff_publication_generation,
+                    &repository_retention.initial_scope,
+                    current_active_scope
+                        .as_deref()
+                        .filter(|scope| *scope != repository_retention.initial_scope),
+                )?,
+                protected_publications.truncated,
+            )
+        } else {
+            if let Some(current_active_scope) = &current_active_scope {
+                retained.insert(current_active_scope.clone());
+            }
+            if !active_scope.is_empty() {
+                retained.insert(active_scope.to_owned());
+            }
+            let mut active_scopes = BTreeSet::new();
+            if !active_scope.is_empty() {
+                active_scopes.insert(active_scope.to_owned());
+            }
+            if let Some(current_active_scope) = current_active_scope {
+                active_scopes.insert(current_active_scope);
+            }
+            for scope in active_scopes {
+                retained.extend(active_worktree_base_scopes(
+                    connection,
+                    repository_id,
+                    &scope,
+                )?);
+            }
+            let recent = recent_successful_scopes(
+                connection,
+                repository_id,
+                retain_recent_successful_scopes,
+            )?;
+            for scope in recent.scopes {
+                retained.insert(scope);
+            }
+            (
+                latest_successful_incremental_base(connection, repository_id)?,
+                recent.incomplete,
+            )
+        };
     let unfinished_tasks = unfinished_tasks(connection, repository_id)?;
     for scope in unfinished_task_scopes(connection, repository_id, &unfinished_tasks)? {
         retained.insert(scope);
     }
-    let latest_incremental_base = latest_successful_incremental_base(connection, repository_id)?;
     if let Some(base) = &latest_incremental_base {
         retained.extend(scopes_for_commit(
             connection,
@@ -170,16 +238,12 @@ fn retention_plan(
             &base.language_filters_json,
         )?);
     }
-    let user_set_scopes =
-        user_repository_set_member_scopes(connection, repository_id, MAX_EXPLICIT_RETENTION_PINS)?;
-    let user_pins_truncated = user_set_scopes.truncated;
-    retained.extend(user_set_scopes.scopes);
     for scope in extra_retained_scopes {
         retained.insert(scope);
     }
     let (mut prunable, scope_listing_truncated) =
         prunable_scopes(connection, repository_id, &retained, MAX_SCOPE_STATUS_ROWS)?;
-    if recent.incomplete {
+    if publication_history_incomplete || repository_set_protected {
         // A legacy publication history can exceed the fixed candidate window.
         // Audit compaction still advances this pass, but scope retirement waits
         // until the newest distinct publications can be proven without a scan.
@@ -190,7 +254,9 @@ fn retention_plan(
         prunable,
         scope_listing_truncated: scope_listing_truncated
             || user_pins_truncated
-            || recent.incomplete,
+            || publication_history_incomplete,
+        publication_history_incomplete,
+        repository_set_protected,
         unfinished_tasks,
         latest_incremental_base,
     })
@@ -202,6 +268,8 @@ fn run_retention_pass(
     active_scope: &str,
     retain_recent_successful_scopes: usize,
     extra_retained_scopes: Vec<String>,
+    repository_retention: Option<CodeRepositoryRetentionJobStatus>,
+    complete_repository_retention: bool,
 ) -> Result<CodeScopeRetentionSummary, StorageError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let plan = retention_plan(
@@ -210,6 +278,7 @@ fn run_retention_pass(
         active_scope,
         retain_recent_successful_scopes,
         extra_retained_scopes,
+        repository_retention.as_ref(),
     )?;
     let now_ms = current_timestamp_ms();
     let had_job = !retention_gc::jobs(&transaction, repository_id)?.is_empty();
@@ -247,7 +316,51 @@ fn run_retention_pass(
             repository_id,
             &protected_aliases,
         )?;
-    let summary = summary_from_plan(repository_id, plan, pruned, retiring_jobs, audit_pending);
+    let repository_retention_complete = plan.repository_set_protected
+        || (complete_repository_retention
+            && !plan.publication_history_incomplete
+            && plan.prunable.is_empty()
+            && retiring_jobs.is_empty());
+    let repository_retention = if repository_retention_complete {
+        if let Some(job) = &repository_retention {
+            super::complete_repository_retention(&transaction, repository_id, job.cutoff_ms)?;
+        }
+        None
+    } else {
+        repository_retention
+            .map(|mut job| {
+                let (phase, last_error) = retiring_jobs.first().map_or_else(
+                    || ("retiring_scopes".to_owned(), None),
+                    |scope_job| {
+                        (
+                            format!("scope_gc:{}", scope_job.phase),
+                            scope_job.last_error.clone(),
+                        )
+                    },
+                );
+                super::update_repository_retention(
+                    &transaction,
+                    repository_id,
+                    job.cutoff_ms,
+                    &phase,
+                    last_error.as_deref(),
+                    now_ms,
+                )?;
+                job.phase = phase;
+                job.updated_at_ms = now_ms;
+                job.last_error = last_error;
+                Ok::<_, StorageError>(job)
+            })
+            .transpose()?
+    };
+    let summary = summary_from_plan(
+        repository_id,
+        plan,
+        pruned,
+        retiring_jobs,
+        audit_pending,
+        repository_retention,
+    );
     transaction.commit()?;
     Ok(summary)
 }
@@ -258,9 +371,12 @@ fn summary_from_plan(
     pruned: Vec<String>,
     retiring_jobs: Vec<crate::domain::CodeScopeRetirementJobStatus>,
     audit_pending: bool,
+    repository_retention_job: Option<CodeRepositoryRetentionJobStatus>,
 ) -> CodeScopeRetentionSummary {
-    let maintenance_pending =
-        !plan.prunable.is_empty() || !retiring_jobs.is_empty() || audit_pending;
+    let maintenance_pending = !plan.prunable.is_empty()
+        || !retiring_jobs.is_empty()
+        || audit_pending
+        || repository_retention_job.is_some();
     let mut retained_scopes = plan.retained.into_iter().collect::<Vec<_>>();
     let retained_scope_count = retained_scopes.len();
     let retained_truncated = retained_scopes.len() > MAX_SCOPE_STATUS_ROWS;
@@ -277,6 +393,7 @@ fn summary_from_plan(
         prunable_scopes: plan.prunable,
         pruned_scopes: pruned,
         retiring_jobs,
+        repository_retention_job,
     }
 }
 
@@ -284,13 +401,15 @@ struct RetentionPlan {
     retained: BTreeSet<String>,
     prunable: Vec<String>,
     scope_listing_truncated: bool,
+    publication_history_incomplete: bool,
+    repository_set_protected: bool,
     unfinished_tasks: Vec<UnfinishedTask>,
     latest_incremental_base: Option<CommitReference>,
 }
 
-struct ScopePage {
-    scopes: Vec<String>,
-    truncated: bool,
+pub(super) struct ScopePage {
+    pub(super) scopes: Vec<String>,
+    pub(super) truncated: bool,
 }
 
 struct PublishedScope {
@@ -506,23 +625,6 @@ fn completed_checkpoint_candidates(
         .map_err(StorageError::from)
 }
 
-fn scope_is_queryable(
-    connection: &Connection,
-    repository_id: &str,
-    source_scope: &str,
-) -> Result<bool, StorageError> {
-    connection
-        .query_row(
-            "SELECT EXISTS (
-                 SELECT 1 FROM code_repository_scopes
-                 WHERE repository_id = ?1 AND source_scope = ?2 AND retiring = 0
-             )",
-            params![repository_id, source_scope],
-            |row| row.get(0),
-        )
-        .map_err(StorageError::from)
-}
-
 fn unfinished_tasks(
     connection: &Connection,
     repository_id: &str,
@@ -587,47 +689,6 @@ fn scopes_for_commit(
     )
 }
 
-fn latest_successful_incremental_base(
-    connection: &Connection,
-    repository_id: &str,
-) -> Result<Option<CommitReference>, StorageError> {
-    let mut statement = connection.prepare(
-        "SELECT mode_json, path_filters_json, language_filters_json
-         FROM code_repository_index_tasks
-              INDEXED BY code_repository_index_tasks_publication_retention
-         WHERE repository_id = ?1 AND state = 'succeeded'
-         ORDER BY publication_generation DESC, updated_at_ms DESC,
-                  created_at_ms DESC, task_id DESC
-         LIMIT ?2",
-    )?;
-    let rows = statement.query_map(
-        params![repository_id, RETAIN_SUCCEEDED_TASK_AUDIT_ROWS + 1],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        },
-    )?;
-    for row in rows {
-        let (mode_json, path_filters_json, language_filters_json) = row?;
-        let mode = serde_json::from_str::<CodeIndexMode>(&mode_json).map_err(|error| {
-            StorageError::InvalidInput(format!(
-                "successful code index task has invalid mode: {error}"
-            ))
-        })?;
-        if let CodeIndexMode::Incremental { base_ref, .. } = mode {
-            return Ok(Some(CommitReference {
-                resolved_commit_sha: base_ref,
-                path_filters_json,
-                language_filters_json,
-            }));
-        }
-    }
-    Ok(None)
-}
-
 fn protected_alias_commits(
     connection: &Connection,
     repository_id: &str,
@@ -657,12 +718,6 @@ fn protected_alias_commits(
         protected.extend(task.base_refs()?);
     }
     Ok(protected)
-}
-
-struct CommitReference {
-    resolved_commit_sha: String,
-    path_filters_json: String,
-    language_filters_json: String,
 }
 
 struct UnfinishedTask {

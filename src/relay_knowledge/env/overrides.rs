@@ -82,6 +82,7 @@ pub struct WorkerEnvOverrides {
     pub extractor_endpoint: Option<String>,
     pub max_in_flight: Option<usize>,
     pub code_index_max_in_flight: Option<usize>,
+    pub code_index_max_indexed_repositories: Option<usize>,
     pub silent_updates_enabled: Option<bool>,
 }
 

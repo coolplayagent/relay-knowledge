@@ -66,6 +66,7 @@ fn summary(
         prunable_scopes: strings(prunable),
         pruned_scopes: strings(pruned),
         retiring_jobs: Vec::new(),
+        repository_retention_job: None,
     }
 }
 

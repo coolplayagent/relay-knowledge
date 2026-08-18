@@ -27,6 +27,65 @@ fn retention_schema_adds_logical_retirement_and_durable_jobs() {
         .expect("gc table should query");
     assert_eq!(gc_table, 1);
 
+    let cutoff_generation_column: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_jobs')
+             WHERE name = 'cutoff_publication_generation' AND dflt_value = '0'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("retention generation column should query");
+    assert_eq!(cutoff_generation_column, 1);
+
+    let scan_cursor_table: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_retention_scans'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repository retention scan table should query");
+    assert_eq!(scan_cursor_table, 1);
+
+    let catalog_revision_column: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_scans')
+             WHERE name = 'catalog_revision' AND type = 'INTEGER' AND \"notnull\" = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("candidate catalog revision column should query");
+    assert_eq!(catalog_revision_column, 1);
+
+    let catalog_table: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_retention_catalog'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repository retention catalog should query");
+    assert_eq!(catalog_table, 1);
+
+    let activity_table: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_retention_activity'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("repository activity table should query");
+    assert_eq!(activity_table, 1);
+
+    let activity_index_columns = connection
+        .prepare("PRAGMA index_info(code_repository_retention_activity_order)")
+        .expect("repository activity index should prepare")
+        .query_map([], |row| row.get::<_, String>(2))
+        .expect("repository activity index should query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("repository activity index columns should collect");
+    assert_eq!(activity_index_columns, ["activity_ms", "repository_id"]);
+
     let member_index_columns = connection
         .prepare("PRAGMA index_info(code_repository_set_members_repository_scope)")
         .expect("set-member retention index should prepare")
@@ -38,4 +97,68 @@ fn retention_schema_adds_logical_retirement_and_durable_jobs() {
         member_index_columns,
         ["repository_id", "source_scope", "set_id"]
     );
+}
+
+#[test]
+fn retention_schema_upgrades_parent_jobs_with_a_publication_generation() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "CREATE TABLE code_repository_retention_jobs (
+                 repository_id TEXT PRIMARY KEY,
+                 initial_scope TEXT NOT NULL,
+                 cutoff_ms INTEGER NOT NULL,
+                 phase TEXT NOT NULL,
+                 created_at_ms INTEGER NOT NULL,
+                 updated_at_ms INTEGER NOT NULL,
+                 last_error TEXT
+             );",
+        )
+        .expect("legacy retention table should create");
+
+    initialize_code_schema(&connection).expect("legacy schema should upgrade");
+
+    let cutoff_generation_column: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_jobs')
+             WHERE name = 'cutoff_publication_generation'
+               AND type = 'INTEGER' AND \"notnull\" = 1 AND dflt_value = '0'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("upgraded retention generation column should query");
+    assert_eq!(cutoff_generation_column, 1);
+}
+
+#[test]
+fn retention_schema_upgrades_candidate_scans_with_a_catalog_revision() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "CREATE TABLE code_repository_retention_scans (
+                 scan_id INTEGER PRIMARY KEY,
+                 max_indexed_repositories INTEGER NOT NULL,
+                 cursor_activity_ms INTEGER NOT NULL,
+                 cursor_repository_id TEXT NOT NULL,
+                 eligible_count INTEGER NOT NULL,
+                 oldest_repository_id TEXT,
+                 oldest_source_scope TEXT,
+                 created_at_ms INTEGER NOT NULL,
+                 updated_at_ms INTEGER NOT NULL
+             );",
+        )
+        .expect("legacy candidate scan table should create");
+
+    initialize_code_schema(&connection).expect("legacy schema should upgrade");
+
+    let catalog_revision_column: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_scans')
+             WHERE name = 'catalog_revision' AND type = 'INTEGER'
+               AND \"notnull\" = 1 AND dflt_value = '0'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("upgraded candidate catalog revision column should query");
+    assert_eq!(catalog_revision_column, 1);
 }

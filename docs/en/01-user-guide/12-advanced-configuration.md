@@ -173,6 +173,7 @@ RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT
 RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT
 RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT
 RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT
+RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES
 RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED
 RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
 RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
@@ -182,6 +183,14 @@ RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
 used by `service run`. The default is 2 and the runtime caps the value so
 multiple index tasks can progress independently while SQLite writes still pass
 through the single-writer lane.
+
+`RELAY_KNOWLEDGE_CODE_INDEX_MAX_INDEXED_REPOSITORIES` bounds repositories with
+published code indexes that are not members of a user-managed repository set.
+The default is 10 and the value must be in `1..=i64::MAX`, matching SQLite's
+persistent integer range. Automatic-workspace sets do
+not exempt a repository from this bound. Exceeding the bound schedules the
+oldest eligible repository for durable phased index cleanup; registration,
+aliases, queued/running tasks, and newly published scopes remain intact.
 
 OTLP:
 

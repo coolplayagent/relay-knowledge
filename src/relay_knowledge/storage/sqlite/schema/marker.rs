@@ -8,7 +8,7 @@ use super::introspection::{
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-pub(super) const SCHEMA_MARKER_VERSION: i64 = 5;
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 6;
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
@@ -354,6 +354,21 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
             connection,
             "code_repository_files",
             CODE_REPOSITORY_FILES_COLUMNS,
+        )?
+        || !table_has_columns(
+            connection,
+            "code_repository_retention_activity",
+            &["repository_id", "source_scope", "activity_ms"],
+        )?
+        || !table_has_columns(
+            connection,
+            "code_repository_retention_activity_dirty",
+            &["repository_id"],
+        )?
+        || !index_has_columns(
+            connection,
+            "code_repository_retention_activity_order",
+            &["activity_ms", "repository_id"],
         )?
         || !table_has_columns(connection, "file_index_roots", FILE_INDEX_ROOT_COLUMNS)?
         || !table_has_columns(
