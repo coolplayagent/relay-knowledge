@@ -50,13 +50,13 @@ impl AffectedPaths {
 /// additionally queries the database for paths containing stale references
 /// (whose `target_symbol_snapshot_id` does not exist in the new scope's
 /// symbol table).  When the affected set is empty (resumable session) or
-/// exceeds half the total paths, the result signals full-scope fallback.
+/// exceeds half the total paths in the scope, the result signals full-scope
+/// fallback.
 pub(crate) fn compute(
     transaction: &Transaction<'_>,
     source_scope: &str,
     changed_paths: &[String],
     deleted_paths: &[String],
-    total_path_count: usize,
 ) -> Result<AffectedPaths, StorageError> {
     if changed_paths.is_empty() && deleted_paths.is_empty() {
         return Ok(AffectedPaths::full_scope());
@@ -74,11 +74,7 @@ pub(crate) fn compute(
     paths.sort_unstable();
     paths.dedup();
 
-    let total = if total_path_count > 0 {
-        total_path_count
-    } else {
-        count_distinct_paths(transaction, source_scope)? as usize
-    };
+    let total = count_distinct_paths(transaction, source_scope)? as usize;
 
     let fallback = total == 0 || paths.len() >= total / FALLBACK_FRACTION;
 

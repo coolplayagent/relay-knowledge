@@ -164,7 +164,6 @@ fn finalize_session_once(
             &session.source_scope,
             &session.changed_paths,
             &session.deleted_paths,
-            session.total_path_count,
         )?;
         transaction.commit()?;
         paths
