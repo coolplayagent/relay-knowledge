@@ -247,27 +247,6 @@ pub(super) fn delete_search_documents_for_paths<'path>(
     Ok(())
 }
 
-pub(super) fn insert_search_document<'a>(
-    transaction: &rusqlite::Transaction<'_>,
-    source_scope: &str,
-    document_kind: &str,
-    record_id: &str,
-    path: &str,
-    language_id: &str,
-    fields: impl IntoIterator<Item = &'a str>,
-) -> Result<(), StorageError> {
-    let mut inserter = SearchDocumentInserter::new(transaction)?;
-    inserter.insert(
-        source_scope,
-        document_kind,
-        record_id,
-        path,
-        language_id,
-        fields,
-    )?;
-    inserter.finish()
-}
-
 #[cfg(test)]
 fn search_document_content<'a>(
     document_kind: &str,

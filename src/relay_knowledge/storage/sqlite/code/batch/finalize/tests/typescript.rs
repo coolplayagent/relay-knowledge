@@ -549,6 +549,7 @@ fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSe
         changed_path_count: total_path_count,
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
+        changed_paths: Vec::new(),
         tombstones: Vec::new(),
         workspaces: Vec::new(),
         resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),

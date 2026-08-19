@@ -10,8 +10,8 @@ use crate::{
         CodeRepositoryScopePreviewResponse, RequestContext,
     },
     code::{
-        build_index_snapshot_with_workspace_detection,
-        prepare_full_index_plan_with_workspace_detection, preview_repository_scope,
+        CodeIndexPlan, prepare_full_index_plan_with_workspace_detection,
+        prepare_incremental_index_plan_with_workspace_detection, preview_repository_scope,
     },
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget, CodeRepositorySelector,
@@ -118,36 +118,25 @@ impl RelayKnowledgeService {
             let previous = previous_index_state_for_index(&store, &status, &request).await?;
             let mode = request.mode;
             let workspace_detection = request.workspace_detection.clone();
-            let snapshot = await_with_code_index_task_lease(
+            let resource_budget = CodeIndexResourceBudget::default();
+            let plan = await_with_code_index_task_lease(
                 &store,
                 task_lease.as_ref(),
                 run_blocking_code(move || {
-                    build_index_snapshot_with_workspace_detection(
-                        &registration,
-                        &selector,
+                    prepare_incremental_index_plan_with_workspace_detection(
+                        registration,
+                        selector,
                         mode,
                         previous.fingerprints,
                         previous.base_resolved_commit_sha,
                         &workspace_detection,
+                        resource_budget,
                     )
                 }),
             )
             .await?;
-            await_with_code_index_task_lease(&store, task_lease.as_ref(), async {
-                match task_lease.as_ref() {
-                    Some(lease) => {
-                        store
-                            .apply_code_index_snapshot_with_fence(
-                                snapshot,
-                                lease.publication_fence.clone(),
-                            )
-                            .await
-                    }
-                    None => store.apply_code_index_snapshot(snapshot).await,
-                }
-                .map_err(storage_api_error)
-            })
-            .await?
+            self.apply_code_index_from_plan(&store, plan, task_lease.clone())
+                .await?
         };
         refresh_code_index_task_lease(&store, task_lease.as_ref()).await?;
         let status = store
@@ -223,6 +212,19 @@ impl RelayKnowledgeService {
             }),
         )
         .await?;
+        self.apply_code_index_from_plan(store, plan, task_lease).await
+    }
+
+    /// Runs the checkpointed session lifecycle: begin, batch loop, finalize.
+    ///
+    /// Shared by full and incremental index paths. The plan determines
+    /// whether the session is full-replace or incremental.
+    async fn apply_code_index_from_plan(
+        &self,
+        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+        plan: CodeIndexPlan,
+        task_lease: Option<CodeIndexTaskLeaseContext>,
+    ) -> Result<crate::domain::CodeIndexSummary, ApiError> {
         let session = plan.session();
         match task_lease.as_ref() {
             Some(lease) => {

@@ -739,6 +739,7 @@ async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
             changed_path_count: 8,
             skipped_unchanged_count: 0,
             deleted_paths: Vec::new(),
+            changed_paths: Vec::new(),
             tombstones: Vec::new(),
             workspaces: Vec::new(),
             resource_budget: CodeIndexResourceBudget::default(),

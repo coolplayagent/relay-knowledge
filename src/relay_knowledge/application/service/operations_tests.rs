@@ -93,6 +93,7 @@ async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_acti
             changed_path_count: 2,
             skipped_unchanged_count: 0,
             deleted_paths: Vec::new(),
+            changed_paths: Vec::new(),
             tombstones: Vec::new(),
             workspaces: Vec::new(),
             resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024)

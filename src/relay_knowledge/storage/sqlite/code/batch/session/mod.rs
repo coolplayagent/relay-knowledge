@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use super::super::{
     cleanup::{count_code_rows, delete_scope_index},
     lifecycle::commit_scope,
-    report, status, workspace,
+    report, snapshot::clone_active_scope_for_incremental, status, workspace,
 };
 use super::{checkpoint, finalize};
 use crate::{
@@ -66,12 +66,6 @@ fn begin_session_once(
     session: &CodeIndexSession,
     fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
-    if !session.full_replace {
-        return Err(StorageError::InvalidInput(
-            "checkpointed code indexing currently requires a full-replace session".to_owned(),
-        ));
-    }
-
     let transaction = connection.transaction()?;
     super::super::tasks::retention_gc::reject_retiring_scope(&transaction, &session.source_scope)?;
     if fence.is_none() {
@@ -93,7 +87,27 @@ fn begin_session_once(
         super::super::schema::ensure_code_query_indexes(&transaction)?;
     }
     if !resumable {
-        delete_scope_index(&transaction, &session.source_scope)?;
+        if session.full_replace {
+            delete_scope_index(&transaction, &session.source_scope)?;
+        } else {
+            let mut excluded_paths = session.changed_paths.clone();
+            for deleted_path in &session.deleted_paths {
+                if !excluded_paths.contains(deleted_path) {
+                    excluded_paths.push(deleted_path.clone());
+                }
+            }
+            excluded_paths.sort_unstable();
+            excluded_paths.dedup();
+            clone_active_scope_for_incremental(
+                &transaction,
+                &session.repository_id,
+                &session.source_scope,
+                &session.path_filters,
+                &session.language_filters,
+                session.base_resolved_commit_sha.as_deref(),
+                &excluded_paths,
+            )?;
+        }
         transaction.execute(
             "DELETE FROM code_repository_index_batch_staging WHERE source_scope = ?1",
             params![session.source_scope],

@@ -850,6 +850,7 @@ fn session_for_scope(source_scope: &str) -> CodeIndexSession {
         changed_path_count: 1,
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
+        changed_paths: Vec::new(),
         tombstones: Vec::new(),
         workspaces: Vec::new(),
         resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),

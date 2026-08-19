@@ -427,6 +427,7 @@ async fn repository_status_reports_checkpoint_without_active_task() {
         changed_path_count: 8,
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
+        changed_paths: Vec::new(),
         tombstones: Vec::new(),
         workspaces: Vec::new(),
         resource_budget: CodeIndexResourceBudget::default(),

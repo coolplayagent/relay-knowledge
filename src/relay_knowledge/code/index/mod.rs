@@ -42,6 +42,7 @@ pub(crate) use full_snapshot::mutate_next_filesystem_full_snapshot_read;
 use incremental::{IncrementalSnapshotRequest, build_incremental_snapshot};
 pub use plan::{
     CodeIndexPlan, prepare_full_index_plan, prepare_full_index_plan_with_workspace_detection,
+    prepare_incremental_index_plan_with_workspace_detection,
 };
 use worktree_overlay::build_worktree_overlay_snapshot;
 
