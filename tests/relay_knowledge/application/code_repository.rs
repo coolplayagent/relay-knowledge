@@ -386,6 +386,132 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
 }
 
 #[tokio::test]
+async fn full_index_automatically_reuses_nearest_indexed_first_parent() {
+    let repo = FixtureRepo::create("code-full-history-reuse");
+    repo.write("src/lib.rs", "pub fn historical_value() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-full-history-reuse").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-full-history-base"),
+        )
+        .await
+        .expect("base index should succeed");
+
+    for value in 2..=11 {
+        repo.write(
+            "src/lib.rs",
+            &format!("pub fn historical_value() -> u32 {{ {value} }}\n"),
+        );
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", &format!("advance-{value}")]);
+    }
+    let head = repo.git_text(["rev-parse", "HEAD"]);
+    let request = CodeIndexRequest {
+        repository: selector("fixture", "HEAD"),
+        mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
+        freshness_policy: FreshnessPolicy::WaitUntilFresh,
+    };
+    let first_start = service
+        .start_code_repository_index(request.clone(), context("start-full-history-reuse"))
+        .await
+        .expect("full request should queue from its indexed ancestor");
+    let first_task = first_start.task.expect("cold target should return a task");
+    assert_eq!(
+        first_task.mode,
+        CodeIndexMode::incremental(base.clone(), head.clone())
+            .expect("pinned refs should validate")
+    );
+    let duplicate_start = service
+        .start_code_repository_index(request.clone(), context("repeat-full-history-reuse"))
+        .await
+        .expect("duplicate full request should reuse the target task");
+    assert_eq!(
+        duplicate_start.task.as_ref().map(|task| &task.task_id),
+        Some(&first_task.task_id)
+    );
+
+    let completed = service
+        .index_code_repository(request, context("run-full-history-reuse"))
+        .await
+        .expect("automatic incremental task should run");
+
+    assert_eq!(
+        completed.summary.base_resolved_commit_sha.as_deref(),
+        Some(base.as_str())
+    );
+    assert_eq!(completed.summary.resolved_commit_sha, head);
+    assert_eq!(completed.summary.changed_path_count, 1);
+    assert_eq!(completed.summary.progress.blob_read_count, 1);
+    assert_eq!(completed.summary.progress.parsed_file_count, 1);
+    assert!(
+        query(&service, "historical_value", CodeQueryKind::Definition)
+            .await
+            .results
+            .iter()
+            .any(|hit| hit.excerpt.contains("{ 11 }"))
+    );
+}
+
+#[tokio::test]
+async fn full_index_falls_back_when_ancestor_delta_exceeds_budget() {
+    let repo = FixtureRepo::create("code-full-history-budget");
+    repo.write("src/lib.rs", "pub fn stable_value() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-full-history-budget").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-full-history-budget-base"),
+        )
+        .await
+        .expect("base index should succeed");
+    for index in 0..513 {
+        repo.write(&format!("noise/file-{index:04}.txt"), "noise\n");
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "oversized delta"]);
+
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("start-full-history-budget"),
+        )
+        .await
+        .expect("oversized automatic delta should fall back to full indexing");
+
+    assert_eq!(
+        started
+            .task
+            .expect("full fallback should queue a task")
+            .mode,
+        CodeIndexMode::Full
+    );
+}
+
+#[tokio::test]
 async fn duplicate_root_registration_preserves_existing_aliases() {
     let repo = FixtureRepo::create("code-aliases");
     repo.write("src/lib.rs", "pub fn aliased() -> u32 { 1 }\n");
@@ -928,7 +1054,33 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
-    let environment = EnvironmentConfig::from_pairs(
+    let environment = test_environment();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+
+    RelayKnowledgeService::with_store(runtime, store)
+}
+
+#[cfg(windows)]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [
+            ("USERPROFILE", "C:\\Users\\alice"),
+            ("APPDATA", "C:\\Users\\alice\\AppData\\Roaming"),
+            ("LOCALAPPDATA", "C:\\Users\\alice\\AppData\\Local"),
+            ("TEMP", "C:\\Users\\alice\\AppData\\Local\\Temp"),
+            ("RELAY_KNOWLEDGE_HOME", "C:\\relay"),
+        ],
+    )
+    .expect("environment should parse")
+}
+
+#[cfg(not(windows))]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
             ("HOME", "/home/alice"),
@@ -936,13 +1088,7 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
             ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
         ],
     )
-    .expect("environment should parse");
-    let runtime = RuntimeConfiguration::from_environment(&environment)
-        .await
-        .expect("runtime should compose");
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-
-    RelayKnowledgeService::with_store(runtime, store)
+    .expect("environment should parse")
 }
 
 struct FixtureRepo {

@@ -2,6 +2,9 @@
 
 use std::{error::Error, fmt};
 
+const INCREMENTAL_CHANGED_PATH_LIMIT_PREFIX: &str =
+    "incremental Git diff changed-path budget exceeded:";
+
 /// Blocking code index failure.
 #[derive(Debug)]
 pub enum CodeIndexError {
@@ -25,6 +28,18 @@ impl fmt::Display for CodeIndexError {
 }
 
 impl Error for CodeIndexError {}
+
+impl CodeIndexError {
+    pub(in crate::code) fn incremental_changed_path_limit(observed: usize, limit: usize) -> Self {
+        Self::InvalidInput(format!(
+            "{INCREMENTAL_CHANGED_PATH_LIMIT_PREFIX} reached {observed} changed paths, exceeding the bounded limit of {limit}; run a full code index"
+        ))
+    }
+
+    pub(in crate::code) fn is_incremental_changed_path_limit(&self) -> bool {
+        matches!(self, Self::InvalidInput(message) if message.starts_with(INCREMENTAL_CHANGED_PATH_LIMIT_PREFIX))
+    }
+}
 
 impl From<std::io::Error> for CodeIndexError {
     fn from(error: std::io::Error) -> Self {

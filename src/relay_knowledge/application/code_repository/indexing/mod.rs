@@ -25,8 +25,9 @@ use self::{
     fast_path::fresh_full_index_response,
     queue::{queue_incremental_index_task, queue_worktree_overlay_index_task},
     state::{
-        RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request, index_start_from_completed,
-        previous_index_state_for_index, requested_index_ref_for_response,
+        FullIndexReusePlan, RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request,
+        index_start_from_completed, plan_full_index_reuse, previous_index_state_for_index,
+        requested_index_ref_for_response,
     },
     task::{
         CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
@@ -324,6 +325,28 @@ impl RelayKnowledgeService {
             return self
                 .index_start_response_from_task(&store, status, task, requested_ref, &context)
                 .await;
+        }
+        match plan_full_index_reuse(&store, &status, &request).await? {
+            FullIndexReusePlan::ActiveTask(task) => {
+                return self
+                    .index_start_response_from_task(
+                        &store,
+                        status,
+                        task,
+                        request.repository.ref_selector,
+                        &context,
+                    )
+                    .await;
+            }
+            FullIndexReusePlan::Incremental(incremental_request) => {
+                let requested_ref = request.repository.ref_selector.clone();
+                let task =
+                    queue_incremental_index_task(&store, &status, &incremental_request).await?;
+                return self
+                    .index_start_response_from_task(&store, status, task, requested_ref, &context)
+                    .await;
+            }
+            FullIndexReusePlan::Full => {}
         }
         let payload_json = serde_json::to_string(&request)
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;

@@ -58,7 +58,8 @@ pub use index::{
 pub use registration::register_repository;
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
 pub(crate) use source::git::{
-    repository_worktree_observation_bounded, resolve_git_ref_bounded, resolve_git_tree_bounded,
+    first_parent_ancestors_bounded, repository_worktree_observation_bounded,
+    resolve_git_ref_bounded, resolve_git_tree_bounded,
 };
 pub use source::resolution::{
     resolve_repository_ref, resolve_repository_ref_with_filters,
@@ -85,7 +86,8 @@ use index::impact_paths_from_changes;
 #[cfg(test)]
 pub(crate) use index::mutate_next_filesystem_full_snapshot_read;
 pub(crate) use index::{
-    build_index_snapshot_with_workspace_detection, repository_uses_filesystem_source,
+    build_index_snapshot_with_workspace_detection, incremental_diff_fits_budget,
+    repository_uses_filesystem_source,
 };
 pub(crate) use registration::REGISTRATION_LANGUAGE_FILTER_ERROR;
 pub(crate) use search::{

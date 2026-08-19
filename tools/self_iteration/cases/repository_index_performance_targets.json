@@ -25,7 +25,8 @@
       "cold_index_min_file_count": 1024,
       "index_budget_ms": 12000,
       "register_index_budget_ms": 13000,
-      "incremental_index_budget_ms": 3000,
+      "incremental_via_full_index": true,
+      "initialization_incremental_index_budget_ms": 3000,
       "incremental_max_blob_reads": 2,
       "incremental_max_parsed_files": 2,
       "incremental_changes": [

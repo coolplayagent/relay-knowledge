@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use crate::{
     api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse},
     code::{
-        prepare_full_index_plan, repository_uses_filesystem_source,
-        resolve_repository_snapshot_with_filters,
+        first_parent_ancestors_bounded, incremental_diff_fits_budget, prepare_full_index_plan,
+        repository_uses_filesystem_source, resolve_repository_snapshot_with_filters,
     },
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget, CodeIndexTaskRecord,
@@ -24,6 +24,13 @@ use super::super::{
 };
 
 pub(super) const RETAIN_RECENT_CODE_SCOPES: usize = 2;
+const FULL_INDEX_ANCESTOR_PROBE_LIMIT: usize = 10;
+
+pub(super) enum FullIndexReusePlan {
+    ActiveTask(CodeIndexTaskRecord),
+    Incremental(CodeIndexRequest),
+    Full,
+}
 
 pub(super) struct PreviousIndexState {
     pub(super) fingerprints: Vec<crate::domain::CodeFileFingerprint>,
@@ -221,6 +228,109 @@ pub(super) async fn previous_index_state_for_index(
         fingerprints,
         base_resolved_commit_sha: Some(base_commit),
     })
+}
+
+pub(super) async fn plan_full_index_reuse(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    status: &CodeRepositoryStatus,
+    request: &CodeIndexRequest,
+) -> Result<FullIndexReusePlan, ApiError> {
+    if request.mode != CodeIndexMode::Full {
+        return Ok(FullIndexReusePlan::Full);
+    }
+    let root = PathBuf::from(&status.root_path);
+    if run_blocking_code({
+        let root = root.clone();
+        move || repository_uses_filesystem_source(root)
+    })
+    .await?
+    {
+        return Ok(FullIndexReusePlan::Full);
+    }
+
+    let target = fresh_full_index_probe(status, &request.repository).await?;
+    if let Some(task) = active_index_task_for_target(store, status, request, &target).await? {
+        return Ok(FullIndexReusePlan::ActiveTask(task));
+    }
+    let target_commit = target.resolved_commit_sha;
+    let ancestors = run_blocking_code({
+        let root = root.clone();
+        let target_commit = target_commit.clone();
+        move || {
+            first_parent_ancestors_bounded(&root, &target_commit, FULL_INDEX_ANCESTOR_PROBE_LIMIT)
+        }
+    })
+    .await?;
+    let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
+    let language_filters = merged_filters(
+        &status.language_filters,
+        &request.repository.language_filters,
+    );
+    for ancestor in ancestors {
+        let Some(base_scope) = store
+            .code_repository_scope_status(
+                request.repository.repository.clone(),
+                ancestor.clone(),
+                path_filters.clone(),
+                language_filters.clone(),
+            )
+            .await
+            .map_err(storage_api_error)?
+        else {
+            continue;
+        };
+        if base_scope.stale || !code_scope_matches_current_fact_version(&base_scope) {
+            continue;
+        }
+        let fits_budget = run_blocking_code({
+            let root = root.clone();
+            let ancestor = ancestor.clone();
+            let target_commit = target_commit.clone();
+            move || incremental_diff_fits_budget(root, &ancestor, &target_commit)
+        })
+        .await?;
+        if !fits_budget {
+            return Ok(FullIndexReusePlan::Full);
+        }
+
+        let mut incremental = request.clone();
+        incremental.repository.ref_selector = target_commit.clone();
+        incremental.mode = CodeIndexMode::incremental(ancestor, target_commit.clone())
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        return Ok(FullIndexReusePlan::Incremental(incremental));
+    }
+
+    Ok(FullIndexReusePlan::Full)
+}
+
+async fn active_index_task_for_target(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    status: &CodeRepositoryStatus,
+    request: &CodeIndexRequest,
+    target: &FreshFullIndexProbe,
+) -> Result<Option<CodeIndexTaskRecord>, ApiError> {
+    let Some(active_task) = store
+        .active_code_index_task(status.repository_id.clone())
+        .await
+        .map_err(storage_api_error)?
+    else {
+        return Ok(None);
+    };
+    if !active_task.state.is_unfinished()
+        || active_task.resolved_commit_sha != target.resolved_commit_sha
+    {
+        return Ok(None);
+    }
+    let Ok(active_request) = serde_json::from_str::<CodeIndexRequest>(&active_task.payload_json)
+    else {
+        return Ok(None);
+    };
+    let same_scope_request = active_request.repository.repository == request.repository.repository
+        && active_request.repository.path_filters == request.repository.path_filters
+        && active_request.repository.language_filters == request.repository.language_filters
+        && active_request.workspace_detection == request.workspace_detection;
+
+    Ok(same_scope_request.then_some(active_task))
 }
 
 pub(super) async fn active_full_index_task_for_request(

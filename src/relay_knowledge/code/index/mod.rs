@@ -249,6 +249,19 @@ pub(crate) fn repository_uses_filesystem_source(
     Ok(source_kind(root_path.as_ref())?.is_filesystem())
 }
 
+/// Checks whether a Git delta fits the atomic incremental publication budget.
+pub(crate) fn incremental_diff_fits_budget(
+    root_path: impl AsRef<Path>,
+    base_ref: &str,
+    head_ref: &str,
+) -> Result<bool, CodeIndexError> {
+    match diff_changes(root_path.as_ref(), base_ref, head_ref) {
+        Ok(_) => Ok(true),
+        Err(error) if error.is_incremental_changed_path_limit() => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 pub(in crate::code::index) fn tracked_entry_scope_for_selector(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
