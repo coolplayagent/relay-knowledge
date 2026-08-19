@@ -61,7 +61,10 @@ fn diff_changes_rejects_the_first_path_past_the_bounded_limit() {
     let error = diff_changes(&repo.path, &base, &head)
         .expect_err("a diff larger than the path budget should fail");
 
-    assert!(error.to_string().contains("reached 513 changed paths"));
+    assert!(error.to_string().contains(&format!(
+        "reached {} changed paths",
+        MAX_GIT_DIFF_CHANGED_PATHS + 1
+    )));
     assert!(error.to_string().contains("run a full code index"));
 }
 

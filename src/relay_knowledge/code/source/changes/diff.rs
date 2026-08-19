@@ -8,7 +8,7 @@ use crate::code::{
     },
 };
 
-pub(in crate::code) const MAX_GIT_DIFF_CHANGED_PATHS: usize = 512;
+pub(in crate::code) const MAX_GIT_DIFF_CHANGED_PATHS: usize = 100;
 const MAX_GIT_DIFF_STDOUT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GIT_DIFF_STDERR_BYTES: usize = 64 * 1024;
 const GIT_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
