@@ -10,6 +10,8 @@ mod references;
 mod search_documents;
 mod symbols;
 
+pub(crate) mod affected_paths;
+
 #[cfg(test)]
 #[path = "tests/typescript.rs"]
 mod typescript_integration_tests;

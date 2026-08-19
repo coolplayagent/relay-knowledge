@@ -247,6 +247,62 @@ pub(super) fn delete_search_documents_for_paths<'path>(
     Ok(())
 }
 
+/// Deletes search documents matching both a `document_kind` and a set of
+/// `paths`.  Unlike [`delete_search_documents_for_paths`], this avoids
+/// removing search documents of other kinds that happen to share the same
+/// path — essential for path-aware finalization where reference, import, and
+/// call search rebuilds run on the same affected-path set.
+pub(super) fn delete_search_documents_for_paths_and_kind<'path>(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    document_kind: &str,
+    paths: impl IntoIterator<Item = &'path str>,
+) -> Result<(), StorageError> {
+    let mut paths = paths.into_iter().collect::<Vec<_>>();
+    paths.sort_unstable();
+    paths.dedup();
+    if paths.is_empty() {
+        return Ok(());
+    }
+    for path_chunk in paths.chunks(500) {
+        let placeholders = std::iter::repeat_n("?", path_chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values = Vec::with_capacity(path_chunk.len() + 2);
+        values.push(Value::Text(source_scope.to_owned()));
+        values.push(Value::Text(document_kind.to_owned()));
+        values.extend(
+            path_chunk
+                .iter()
+                .map(|path| Value::Text((*path).to_owned())),
+        );
+        transaction.execute(
+            &format!(
+                "
+                DELETE FROM code_repository_search
+                WHERE rowid IN (
+                    SELECT search_rowid
+                    FROM code_repository_search_metadata
+                    WHERE source_scope = ? AND document_kind = ? AND path IN ({placeholders})
+                )
+                "
+            ),
+            params_from_iter(values.clone()),
+        )?;
+        transaction.execute(
+            &format!(
+                "
+                DELETE FROM code_repository_search_metadata
+                WHERE source_scope = ? AND document_kind = ? AND path IN ({placeholders})
+                "
+            ),
+            params_from_iter(values),
+        )?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 fn search_document_content<'a>(
     document_kind: &str,

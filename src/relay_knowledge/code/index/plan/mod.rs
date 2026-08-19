@@ -8,9 +8,9 @@ use std::{
 };
 
 use crate::domain::{
-    CodeFileFingerprint, CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget,
-    CodeIndexSession, CodeIndexSnapshot, CodeMonorepoWorkspace, CodeRepositoryRegistration,
-    CodeRepositorySelector, CodeWorkspaceDetectionConfig, code_snapshot_scope_id,
+    CodeFileFingerprint, CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSession,
+    CodeIndexSnapshot, CodeMonorepoWorkspace, CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeWorkspaceDetectionConfig, code_snapshot_scope_id,
 };
 
 use super::{
@@ -64,37 +64,45 @@ struct IncrementalPlanData {
 impl CodeIndexPlan {
     /// Returns the durable session metadata that storage checkpoints.
     pub fn session(&self) -> CodeIndexSession {
-        let (full_replace, base_resolved_commit_sha, total_path_count, changed_path_count, skipped_unchanged_count, deleted_paths, changed_paths, tombstones) =
-            match &self.incremental {
-                Some(data) => {
-                    let snapshot = &data.snapshot;
-                    let changed_paths = snapshot
-                        .files
-                        .iter()
-                        .map(|file| file.path.clone())
-                        .collect::<Vec<_>>();
-                    (
-                        false,
-                        snapshot.base_resolved_commit_sha.clone(),
-                        snapshot.files.len(),
-                        snapshot.changed_path_count,
-                        snapshot.skipped_unchanged_count,
-                        snapshot.deleted_paths.clone(),
-                        changed_paths,
-                        snapshot.tombstones.clone(),
-                    )
-                }
-                None => (
-                    true,
-                    None,
-                    self.paths.len(),
-                    self.paths.len(),
-                    0,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                ),
-            };
+        let (
+            full_replace,
+            base_resolved_commit_sha,
+            total_path_count,
+            changed_path_count,
+            skipped_unchanged_count,
+            deleted_paths,
+            changed_paths,
+            tombstones,
+        ) = match &self.incremental {
+            Some(data) => {
+                let snapshot = &data.snapshot;
+                let changed_paths = snapshot
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<Vec<_>>();
+                (
+                    false,
+                    snapshot.base_resolved_commit_sha.clone(),
+                    snapshot.files.len(),
+                    snapshot.changed_path_count,
+                    snapshot.skipped_unchanged_count,
+                    snapshot.deleted_paths.clone(),
+                    changed_paths,
+                    snapshot.tombstones.clone(),
+                )
+            }
+            None => (
+                true,
+                None,
+                self.paths.len(),
+                self.paths.len(),
+                0,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+        };
         CodeIndexSession {
             repository_id: self.registration.repository_id.clone(),
             source_scope: self.source_scope.clone(),

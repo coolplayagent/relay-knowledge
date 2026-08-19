@@ -90,3 +90,75 @@ pub(crate) fn rebuild_calls(
         &mut symbol_cache.symbols,
     )
 }
+
+// ---------------------------------------------------------------------------
+// Path-aware variants — used by incremental sessions to avoid full-scope
+// edge finalization when only a subset of paths changed.
+// ---------------------------------------------------------------------------
+
+pub(crate) fn resolve_references_for_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    affected_paths: &[&str],
+) -> Result<(), StorageError> {
+    references::normalize_unresolved_for_paths(transaction, source_scope, affected_paths)?;
+    references::resolve_for_paths(transaction, source_scope, affected_paths)
+}
+
+pub(crate) fn resolve_imports_for_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    affected_paths: &[&str],
+    symbol_cache: &mut FinalizeSymbolCache,
+) -> Result<(), StorageError> {
+    let file_languages = super::files::load_file_languages(transaction, source_scope)?;
+    imports::resolve_for_paths(
+        transaction,
+        source_scope,
+        &file_languages,
+        affected_paths,
+        &mut symbol_cache.symbols,
+    )?;
+    super::imported_references::resolve_references_for_paths(
+        transaction,
+        source_scope,
+        affected_paths,
+        &mut symbol_cache.symbols,
+    )
+}
+
+pub(crate) fn resolve_call_targets_for_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    affected_paths: &[&str],
+) -> Result<(), StorageError> {
+    super::call_targets::resolve_references_for_paths(transaction, source_scope, affected_paths)
+}
+
+pub(crate) fn rebuild_reference_search_for_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    affected_paths: &[&str],
+) -> Result<(), StorageError> {
+    super::search_documents::rebuild_reference_search_documents_for_paths(
+        transaction,
+        source_scope,
+        affected_paths,
+    )
+}
+
+pub(crate) fn rebuild_calls_for_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    repository_id: &str,
+    affected_paths: &[&str],
+    symbol_cache: &mut FinalizeSymbolCache,
+) -> Result<(), StorageError> {
+    calls::rebuild_for_paths(
+        transaction,
+        source_scope,
+        repository_id,
+        affected_paths,
+        &mut symbol_cache.symbols,
+    )
+}

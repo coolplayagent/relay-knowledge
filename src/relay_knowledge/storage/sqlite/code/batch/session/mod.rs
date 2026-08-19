@@ -5,7 +5,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use super::super::{
     cleanup::{count_code_rows, delete_scope_index},
     lifecycle::commit_scope,
-    report, snapshot::clone_active_scope_for_incremental, status, workspace,
+    report,
+    snapshot::clone_active_scope_for_incremental,
+    status, workspace,
 };
 use super::{checkpoint, finalize};
 use crate::{
@@ -154,66 +156,174 @@ fn finalize_session_once(
         fence,
         |transaction| super::super::schema::ensure_code_query_indexes(transaction),
     )?;
-    run_finalize_phase(
-        connection,
-        &session.source_scope,
-        finalize::phases::RESOLVE_REFERENCES,
-        fence,
-        |transaction| finalize::phases::resolve_references(transaction, &session.source_scope),
-    )?;
-    let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
-    run_finalize_phase(
-        connection,
-        &session.source_scope,
-        finalize::phases::RESOLVE_IMPORTS,
-        fence,
-        |transaction| {
-            finalize::phases::resolve_imports(transaction, &session.source_scope, &mut symbol_cache)
-        },
-    )?;
-    run_finalize_phase(
-        connection,
-        &session.source_scope,
-        finalize::phases::RESOLVE_CALL_TARGETS,
-        fence,
-        |transaction| finalize::phases::resolve_call_targets(transaction, &session.source_scope),
-    )?;
-    run_finalize_phase(
-        connection,
-        &session.source_scope,
-        finalize::phases::REFRESH_DEPENDENCIES,
-        fence,
-        |transaction| {
-            finalize::phases::refresh_dependencies(
-                transaction,
-                &session.source_scope,
-                &session.language_filters,
-            )
-        },
-    )?;
-    run_finalize_phase(
-        connection,
-        &session.source_scope,
-        finalize::phases::REBUILD_REFERENCE_SEARCH,
-        fence,
-        |transaction| {
-            finalize::phases::rebuild_reference_search(transaction, &session.source_scope)
-        },
-    )?;
-    run_finalize_phase(
-        connection,
-        &session.source_scope,
-        finalize::phases::REBUILD_CALLS,
-        fence,
-        |transaction| {
-            finalize::phases::rebuild_calls(
-                transaction,
-                &session.source_scope,
-                &session.repository_id,
-                &mut symbol_cache,
-            )
-        },
-    )?;
+
+    let affected_paths = if !session.full_replace && !session.changed_paths.is_empty() {
+        let transaction = connection.transaction()?;
+        let paths = finalize::affected_paths::compute(
+            &transaction,
+            &session.source_scope,
+            &session.changed_paths,
+            &session.deleted_paths,
+            session.total_path_count,
+        )?;
+        transaction.commit()?;
+        paths
+    } else {
+        finalize::affected_paths::AffectedPaths::full_scope()
+    };
+
+    if affected_paths.is_full_scope() {
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::RESOLVE_REFERENCES,
+            fence,
+            |transaction| finalize::phases::resolve_references(transaction, &session.source_scope),
+        )?;
+        let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::RESOLVE_IMPORTS,
+            fence,
+            |transaction| {
+                finalize::phases::resolve_imports(
+                    transaction,
+                    &session.source_scope,
+                    &mut symbol_cache,
+                )
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::RESOLVE_CALL_TARGETS,
+            fence,
+            |transaction| {
+                finalize::phases::resolve_call_targets(transaction, &session.source_scope)
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::REFRESH_DEPENDENCIES,
+            fence,
+            |transaction| {
+                finalize::phases::refresh_dependencies(
+                    transaction,
+                    &session.source_scope,
+                    &session.language_filters,
+                )
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::REBUILD_REFERENCE_SEARCH,
+            fence,
+            |transaction| {
+                finalize::phases::rebuild_reference_search(transaction, &session.source_scope)
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::REBUILD_CALLS,
+            fence,
+            |transaction| {
+                finalize::phases::rebuild_calls(
+                    transaction,
+                    &session.source_scope,
+                    &session.repository_id,
+                    &mut symbol_cache,
+                )
+            },
+        )?;
+    } else {
+        let path_refs = affected_paths.path_refs();
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::RESOLVE_REFERENCES,
+            fence,
+            |transaction| {
+                finalize::phases::resolve_references_for_paths(
+                    transaction,
+                    &session.source_scope,
+                    &path_refs,
+                )
+            },
+        )?;
+        let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::RESOLVE_IMPORTS,
+            fence,
+            |transaction| {
+                finalize::phases::resolve_imports_for_paths(
+                    transaction,
+                    &session.source_scope,
+                    &path_refs,
+                    &mut symbol_cache,
+                )
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::RESOLVE_CALL_TARGETS,
+            fence,
+            |transaction| {
+                finalize::phases::resolve_call_targets_for_paths(
+                    transaction,
+                    &session.source_scope,
+                    &path_refs,
+                )
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::REFRESH_DEPENDENCIES,
+            fence,
+            |transaction| {
+                finalize::phases::refresh_dependencies(
+                    transaction,
+                    &session.source_scope,
+                    &session.language_filters,
+                )
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::REBUILD_REFERENCE_SEARCH,
+            fence,
+            |transaction| {
+                finalize::phases::rebuild_reference_search_for_paths(
+                    transaction,
+                    &session.source_scope,
+                    &path_refs,
+                )
+            },
+        )?;
+        run_finalize_phase(
+            connection,
+            &session.source_scope,
+            finalize::phases::REBUILD_CALLS,
+            fence,
+            |transaction| {
+                finalize::phases::rebuild_calls_for_paths(
+                    transaction,
+                    &session.source_scope,
+                    &session.repository_id,
+                    &path_refs,
+                    &mut symbol_cache,
+                )
+            },
+        )?;
+    }
     let transaction = connection.transaction()?;
     checkpoint::mark_state_in_transaction(
         &transaction,

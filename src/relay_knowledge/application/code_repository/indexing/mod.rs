@@ -212,7 +212,8 @@ impl RelayKnowledgeService {
             }),
         )
         .await?;
-        self.apply_code_index_from_plan(store, plan, task_lease).await
+        self.apply_code_index_from_plan(store, plan, task_lease)
+            .await
     }
 
     /// Runs the checkpointed session lifecycle: begin, batch loop, finalize.
