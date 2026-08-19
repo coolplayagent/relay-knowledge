@@ -6,9 +6,16 @@ node_modules/
 web/node_modules/
 web/dist/
 .cache/
+.evals/
 .venv/
+.venv*/
 __pycache__/
 *.pyc
+.coverage
+
+# Generated evaluation and official harness output
+/logs/
+/tools/relay_knowledge_skill_eval/logs/
 
 # Local scratch space and cloned research inputs
 tmp/

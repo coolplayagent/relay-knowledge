@@ -44,15 +44,120 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect index-performance candidate changes
+        id: index-changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            relevant=true
+            enforce_latency=true
+            validate_latency_gate=false
+          else
+            code_changed=false
+            gate_changed=false
+            if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+              Cargo.toml Cargo.lock src tests \
+              tools/self_iteration/Cargo.toml \
+              tools/self_iteration/Cargo.lock \
+              tools/self_iteration/cases.json \
+              tools/self_iteration/cases \
+              tools/self_iteration/src; then
+              code_changed=true
+            fi
+            if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+              .github/workflows/benchmark-checks.yml \
+              .github/index-performance-gate.jq; then
+              gate_changed=true
+            fi
+            if [[ "$code_changed" == true || "$gate_changed" == true ]]; then
+              relevant=true
+            else
+              relevant=false
+            fi
+            enforce_latency="$code_changed"
+            validate_latency_gate="$gate_changed"
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "enforce_latency=$enforce_latency" >> "$GITHUB_OUTPUT"
+          echo "validate_latency_gate=$validate_latency_gate" >> "$GITHUB_OUTPUT"
+
+      - name: Validate index-performance latency policy
+        if: steps.index-changes.outputs.validate_latency_gate == 'true'
+        run: |
+          fixture="$(mktemp)"
+          over_budget="$(mktemp)"
+          missing_incremental_completion="$(mktemp)"
+          missing_incremental_metric="$(mktemp)"
+          jq -n '
+            {evaluation: {
+              gates: [],
+              cases: [],
+              repositories: [{
+                repository: "index_performance_many_files",
+                index_summary: {
+                  cold: {task: {state: "succeeded"}, checkpoint: {state: "completed"}},
+                  incremental: {summary: {changed_path_count: 3, progress: {
+                    blob_read_count: 2, parsed_file_count: 2
+                  }}}
+                },
+                commands: [
+                  {name: "index_performance_many_files_cold_index_completion", exit_code: 0},
+                  {name: "index_performance_many_files_incremental_index_completion", exit_code: 0}
+                ],
+                metrics: [
+                  {name: "index_performance_many_files_cold_index_ms", value: 12000, budget: 12000},
+                  {name: "index_performance_many_files_cold_register_index_ms", value: 13000, budget: 13000},
+                  {name: "index_performance_many_files_incremental_index_ms", value: 3000, budget: 3000}
+                ]
+              }]
+            }}
+          ' > "$fixture"
+          ENFORCE_LATENCY=true jq -e -f .github/index-performance-gate.jq "$fixture"
+          jq '.evaluation.repositories[0].metrics[0].value = 12001' \
+            "$fixture" > "$over_budget"
+          if ENFORCE_LATENCY=true jq -e -f .github/index-performance-gate.jq \
+            "$over_budget"; then
+            echo "latency gate accepted an over-budget metric" >&2
+            exit 1
+          fi
+          jq '
+            .evaluation.repositories[0].commands[1].name =
+              "index_performance_many_files_cold_index_completion"
+          ' "$fixture" > "$missing_incremental_completion"
+          if ENFORCE_LATENCY=true jq -e -f .github/index-performance-gate.jq \
+            "$missing_incremental_completion"; then
+            echo "index gate accepted a missing incremental completion" >&2
+            exit 1
+          fi
+          jq '
+            .evaluation.repositories[0].metrics[2].name =
+              "index_performance_many_files_cold_index_ms"
+          ' "$fixture" > "$missing_incremental_metric"
+          if ENFORCE_LATENCY=true jq -e -f .github/index-performance-gate.jq \
+            "$missing_incremental_metric"; then
+            echo "index gate accepted a missing incremental latency metric" >&2
+            exit 1
+          fi
 
       - name: Install Rust toolchain
+        if: steps.index-changes.outputs.relevant == 'true'
         run: rustup toolchain install stable --profile minimal --component rustfmt
 
       - name: Build self-iteration harness
+        if: steps.index-changes.outputs.relevant == 'true'
         run: cargo build --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
 
       - name: Cold and incremental index regression gate
+        if: steps.index-changes.outputs.relevant == 'true'
+        env:
+          ENFORCE_LATENCY: ${{ steps.index-changes.outputs.enforce_latency }}
         run: |
+          set +e
           tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate \
             --workspace . \
             --profile fast \
@@ -62,29 +167,39 @@ jobs:
             --repo-jobs 1 \
             --query-jobs 2 \
             --command-timeout-seconds 300
+          evaluation_status=$?
+          set -e
+          echo "self-iteration candidate-policy status=$evaluation_status; validating deterministic report"
           report="$(ls -t .git/relay-knowledge-self-iteration/reports-v2/manual-evaluate-*.json | head -n 1)"
-          jq -e '
-            ([.evaluation.gates[] | select(.passed | not)] | length) == 0 and
-            ([.evaluation.cases[] | select(.passed | not)] | length) == 0 and
-            ([.evaluation.repositories[] |
-              select(.repository == "index_performance_many_files")] | length) == 1 and
-            (.evaluation.repositories[] |
-              select(.repository == "index_performance_many_files") |
-              (.index_summary.cold.task.state == "succeeded") and
-              (.index_summary.cold.checkpoint.state == "completed") and
-              (.index_summary.incremental.summary.changed_path_count == 3) and
-              (.index_summary.incremental.summary.progress.blob_read_count == 2) and
-              (.index_summary.incremental.summary.progress.parsed_file_count == 2) and
-              ([.commands[] |
+          jq '
+            {
+              enforce_latency: env.ENFORCE_LATENCY,
+              failed_gates: [.evaluation.gates[] | select(.passed | not) | .name],
+              failed_cases: [.evaluation.cases[] | select(.passed | not) | .id],
+              fixture_count: ([.evaluation.repositories[] |
+                select(.repository == "index_performance_many_files")] | length),
+              cold_task_state: (.evaluation.repositories[] |
+                select(.repository == "index_performance_many_files") |
+                .index_summary.cold.task.state),
+              cold_checkpoint_state: (.evaluation.repositories[] |
+                select(.repository == "index_performance_many_files") |
+                .index_summary.cold.checkpoint.state),
+              incremental_summary: (.evaluation.repositories[] |
+                select(.repository == "index_performance_many_files") |
+                .index_summary.incremental.summary |
+                {changed_path_count, progress}),
+              completion_commands: [.evaluation.repositories[].commands[] |
                 select(.name == "index_performance_many_files_cold_index_completion" or
                        .name == "index_performance_many_files_incremental_index_completion") |
-                select(.exit_code == 0)] | length) == 2 and
-              ([.metrics[] |
+                {name, exit_code}],
+              latency_metrics: [.evaluation.repositories[].metrics[] |
                 select(.name == "index_performance_many_files_cold_index_ms" or
                        .name == "index_performance_many_files_cold_register_index_ms" or
                        .name == "index_performance_many_files_incremental_index_ms") |
-                select(.budget != null and .value <= .budget)] | length) == 3)
+                {name, value, budget, within_budget: (.budget != null and .value <= .budget)}]
+            }
           ' "$report"
+          jq -e -f .github/index-performance-gate.jq "$report"
 
   agent-workflow-regression:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false

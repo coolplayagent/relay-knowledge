@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+export PATH="/opt/pi-eval/bin:$PATH"
+export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-/tmp/pi-eval-config}"
+export PI_CODING_AGENT_SESSION_DIR="${PI_CODING_AGENT_SESSION_DIR:-/tmp/pi-eval-sessions}"
+export PI_OFFLINE=1
+export PI_TELEMETRY=0
+mkdir -p "$PI_CODING_AGENT_DIR" "$PI_CODING_AGENT_SESSION_DIR"
+
+exec /opt/pi-eval/bin/pi "$@"

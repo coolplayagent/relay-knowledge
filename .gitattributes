@@ -1,3 +1,6 @@
 # Windows batch files must use CRLF in working trees.
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# This extensionless launcher executes inside the Linux evaluation image.
+tools/relay_knowledge_skill_eval/docker/pi-eval text eol=lf

@@ -238,7 +238,7 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 
 `full` 和 `exhaustive` 额外运行 `index_performance_wide_mixed_files`，生成 2048 个 Rust 目标文件和跨 shard bridge 查询。两个生成式性能仓库都使用隔离 runtime home，要求冷索引完成证据（`task.state=succeeded` 或非零 parsed-file summary），随后创建包含修改、新增和删除文件的第二个 Git 提交，并针对已持久化 base 执行 `repo update`。报告记录 `*_cold_index_ms`、`*_cold_register_index_ms`、`*_incremental_index_ms` 和 query p50/p95/max；完成性 guard 会拒绝缓存 no-op 冷索引，以及读取或解析文件数超过有界 delta 的增量索引。
 
-`.github/workflows/benchmark-checks.yml` 会在 pull request 上运行 1024 文件性能 fixture，并从 JSON 报告直接验证冷任务/checkpoint 已完成、三路径增量 delta、两文件 blob/parse 预算、完成性命令和三项延迟预算。
+`.github/workflows/benchmark-checks.yml` 会在修改根 Rust crate/tests 或 self-iteration harness 的 pull request 上运行 1024 文件性能 fixture，并从 JSON 报告直接验证冷任务/checkpoint 已完成、三路径增量 delta、两文件 blob/parse 预算、完成性命令和三项延迟预算。仅文档或无关工具变更不会产生 Rust candidate diff，因此跳过该 candidate gate；推送到 `main` 和手动触发仍无条件运行。
 
 ### coding-agent 工作流门禁
 
