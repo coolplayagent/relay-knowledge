@@ -19,7 +19,6 @@ use crate::domain::{
     CodeRepositoryRegistration, CodeRepositorySelector, CodeWorkspaceDetectionConfig,
 };
 
-#[cfg(test)]
 use crate::code::source::changes::GitChange;
 use crate::code::{
     CodeIndexError, identity, ids, parser,
@@ -258,10 +257,20 @@ pub(crate) fn historical_reuse_diff_fits_budget(
     head_ref: &str,
 ) -> Result<bool, CodeIndexError> {
     match diff_changes(root_path.as_ref(), base_ref, head_ref) {
-        Ok(changes) => Ok(changes.len() <= MAX_HISTORICAL_REUSE_CHANGED_PATHS),
+        Ok(changes) => Ok(impacted_path_count(&changes) <= MAX_HISTORICAL_REUSE_CHANGED_PATHS),
         Err(error) if error.is_incremental_changed_path_limit() => Ok(false),
         Err(error) => Err(error),
     }
+}
+
+pub(in crate::code) fn impacted_path_count(changes: &[GitChange]) -> usize {
+    changes
+        .iter()
+        .map(|change| match change {
+            GitChange::Renamed { .. } | GitChange::Copied { .. } => 2,
+            _ => 1,
+        })
+        .sum()
 }
 
 pub(in crate::code::index) fn tracked_entry_scope_for_selector(

@@ -64,3 +64,14 @@ fn historical_scope_filters_must_match_incremental_clone() {
         &["go".to_owned()],
     ));
 }
+
+#[test]
+fn historical_reuse_recognizes_retired_base_admission_race() {
+    let unavailable = ApiError::storage_unavailable(
+        "invalid storage input: code index task base commit 'base' has no compatible non-retiring scope for repository 'fixture'",
+    );
+    let unrelated = ApiError::storage_unavailable("sqlite operation failed");
+
+    assert!(historical_reuse_base_became_unavailable(&unavailable));
+    assert!(!historical_reuse_base_became_unavailable(&unrelated));
+}

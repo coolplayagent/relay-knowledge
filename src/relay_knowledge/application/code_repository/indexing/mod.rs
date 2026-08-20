@@ -26,8 +26,8 @@ use self::{
     queue::{queue_incremental_index_task, queue_worktree_overlay_index_task},
     state::{
         FullIndexReusePlan, RETAIN_RECENT_CODE_SCOPES, active_full_index_task_for_request,
-        index_start_from_completed, plan_full_index_reuse, previous_index_state_for_index,
-        requested_index_ref_for_response,
+        historical_reuse_base_became_unavailable, index_start_from_completed,
+        plan_full_index_reuse, previous_index_state_for_index, requested_index_ref_for_response,
     },
     task::{
         CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
@@ -347,11 +347,21 @@ impl RelayKnowledgeService {
             }
             FullIndexReusePlan::Incremental(incremental_request) => {
                 let requested_ref = request.repository.ref_selector.clone();
-                let task =
-                    queue_incremental_index_task(&store, &status, &incremental_request).await?;
-                return self
-                    .index_start_response_from_task(&store, status, task, requested_ref, &context)
-                    .await;
+                match queue_incremental_index_task(&store, &status, &incremental_request).await {
+                    Ok(task) => {
+                        return self
+                            .index_start_response_from_task(
+                                &store,
+                                status,
+                                task,
+                                requested_ref,
+                                &context,
+                            )
+                            .await;
+                    }
+                    Err(error) if historical_reuse_base_became_unavailable(&error) => {}
+                    Err(error) => return Err(error),
+                }
             }
             FullIndexReusePlan::Full => {}
         }

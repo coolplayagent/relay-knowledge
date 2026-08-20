@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse},
+    api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse, ErrorKind},
     code::{
         first_parent_ancestors_bounded, historical_reuse_diff_fits_budget, prepare_full_index_plan,
         repository_uses_filesystem_source, resolve_repository_snapshot_with_filters,
@@ -30,6 +30,13 @@ pub(super) enum FullIndexReusePlan {
     ActiveTask(CodeIndexTaskRecord),
     Incremental(CodeIndexRequest),
     Full,
+}
+
+pub(super) fn historical_reuse_base_became_unavailable(error: &ApiError) -> bool {
+    error.error_kind == ErrorKind::StorageUnavailable
+        && error
+            .message
+            .contains("has no compatible non-retiring scope")
 }
 
 pub(super) struct PreviousIndexState {

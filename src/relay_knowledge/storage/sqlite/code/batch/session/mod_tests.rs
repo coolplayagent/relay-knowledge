@@ -399,6 +399,141 @@ async fn incremental_symbol_cardinality_change_refinalizes_unchanged_calls() {
 }
 
 #[tokio::test]
+async fn incremental_callable_metadata_change_refinalizes_unchanged_calls() {
+    let store = registered_store().await;
+    let base_scope = "git_snapshot:callable-metadata-base";
+    let base_session = session_for_scope(base_scope, 7);
+    let mut base_files = vec![
+        file(
+            base_scope,
+            "definition-a-file",
+            "src/definition-a.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "candidate-b-file",
+            "src/candidate-b.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "consumer-file",
+            "src/consumer.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+    ];
+    for index in 1..=4 {
+        base_files.push(file(
+            base_scope,
+            &format!("extra-{index}-file"),
+            &format!("src/extra-{index}.rs"),
+            "rust",
+            CodeParseStatus::Parsed,
+        ));
+    }
+    let definition_a = symbol(
+        base_scope,
+        "stable-a",
+        "definition-a-file",
+        "src/definition-a.rs",
+        "stable",
+        "rust",
+    );
+    let mut declaration_b = symbol(
+        base_scope,
+        "stable-b",
+        "candidate-b-file",
+        "src/candidate-b.rs",
+        "stable",
+        "rust",
+    );
+    declaration_b.kind = "function_declaration".to_owned();
+    declaration_b.signature = "fn stable();".to_owned();
+    store
+        .begin_code_index_session(base_session.clone())
+        .await
+        .expect("base session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: base_files,
+            symbols: vec![definition_a, declaration_b],
+            references: vec![reference(
+                base_scope,
+                "stable-call",
+                "consumer-file",
+                "src/consumer.rs",
+                "stable",
+            )],
+            ..batch(base_scope, 1)
+        })
+        .await
+        .expect("base batch should persist");
+    store
+        .finalize_code_index_session(base_session)
+        .await
+        .expect("base session should finalize");
+    assert_eq!(
+        reference_resolution_rows(&store, base_scope)
+            .await
+            .get("stable-call")
+            .map(|row| row.0.as_str()),
+        Some("resolved")
+    );
+
+    let target_scope = "git_snapshot:callable-metadata-target";
+    let mut incremental = session_for_scope(target_scope, 7);
+    incremental.base_resolved_commit_sha = Some("commit".to_owned());
+    incremental.resolved_commit_sha = "commit-2".to_owned();
+    incremental.tree_hash = "tree-2".to_owned();
+    incremental.full_replace = false;
+    incremental.changed_path_count = 1;
+    incremental.skipped_unchanged_count = 6;
+    incremental.changed_paths = vec!["src/candidate-b.rs".to_owned()];
+    let definition_b = symbol(
+        target_scope,
+        "stable-b",
+        "candidate-b-file",
+        "src/candidate-b.rs",
+        "stable",
+        "rust",
+    );
+    store
+        .begin_code_index_session(incremental.clone())
+        .await
+        .expect("incremental session should clone its base");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                target_scope,
+                "candidate-b-file",
+                "src/candidate-b.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+            )],
+            symbols: vec![definition_b],
+            ..batch(target_scope, 1)
+        })
+        .await
+        .expect("incremental batch should persist");
+    store
+        .finalize_code_index_session(incremental)
+        .await
+        .expect("incremental session should finalize");
+
+    assert_eq!(
+        reference_resolution_rows(&store, target_scope)
+            .await
+            .get("stable-call")
+            .map(|row| row.0.as_str()),
+        Some("ambiguous")
+    );
+}
+
+#[tokio::test]
 async fn incremental_module_addition_refinalizes_unchanged_side_effect_imports() {
     let store = registered_store().await;
     let base_scope = "git_snapshot:import-base";

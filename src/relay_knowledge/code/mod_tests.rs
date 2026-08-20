@@ -1,4 +1,23 @@
 use super::*;
+
+#[test]
+fn historical_reuse_budget_counts_both_rename_and_copy_paths() {
+    let changes = vec![
+        source::change_status::GitChange::Renamed {
+            old_path: "src/old.rs".to_owned(),
+            new_path: "src/new.rs".to_owned(),
+        },
+        source::change_status::GitChange::Copied {
+            old_path: "src/source.rs".to_owned(),
+            new_path: "src/copy.rs".to_owned(),
+        },
+        source::change_status::GitChange::Deleted {
+            path: "src/deleted.rs".to_owned(),
+        },
+    ];
+
+    assert_eq!(index::impacted_path_count(&changes), 5);
+}
 use crate::domain::CodeIndexResourceBudget;
 use std::fs;
 

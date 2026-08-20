@@ -1,8 +1,8 @@
 //! Computes the set of paths whose edge data needs re-finalization after an
-//! incremental clone. A single SQL query finds references whose target no
-//! longer exists or whose symbol-name cardinality differs from the base scope.
-//! The latter makes unchanged references participate when a name transitions
-//! between unique and ambiguous resolution.
+//! incremental clone. It finds references whose target no longer exists or
+//! whose candidate name/cardinality/callable metadata differs from the base
+//! scope. This makes unchanged references participate whenever resolution can
+//! transition between unique, preferred, and ambiguous candidates.
 
 use std::collections::BTreeSet;
 
@@ -22,7 +22,6 @@ const FALLBACK_FRACTION: usize = 2;
 pub(crate) struct AffectedPaths {
     paths: Vec<String>,
     fallback_to_full_scope: bool,
-    finalize_imports_for_full_scope: bool,
 }
 
 impl AffectedPaths {
@@ -37,18 +36,11 @@ impl AffectedPaths {
         self.paths.iter().map(String::as_str).collect()
     }
 
-    /// Import resolution depends on the complete module/file set, including
-    /// side-effect imports that have no corresponding reference row.
-    pub(crate) fn imports_need_full_scope(&self) -> bool {
-        self.finalize_imports_for_full_scope
-    }
-
     /// Constructs an instance that signals full-scope finalization.
     pub(crate) fn full_scope() -> Self {
         Self {
             paths: Vec::new(),
             fallback_to_full_scope: true,
-            finalize_imports_for_full_scope: true,
         }
     }
 }
@@ -57,9 +49,11 @@ impl AffectedPaths {
 ///
 /// `changed_paths` and `deleted_paths` come from the session.  The function
 /// additionally queries the database for paths containing stale references or
-/// references to names whose symbol count changed from `base_scope`. When the
-/// affected set is empty (resumable session) or exceeds half the total paths
-/// in the scope, the result signals full-scope fallback.
+/// references to names whose symbol count or callable shape changed from
+/// `base_scope`. A module/file-set change promotes all edge finalization to the
+/// full scope so import-driven downstream projections stay consistent. When
+/// the affected set is empty (resumable session) or exceeds half the total
+/// paths in the scope, the result also signals full-scope fallback.
 pub(crate) fn compute(
     transaction: &Transaction<'_>,
     source_scope: &str,
@@ -78,12 +72,8 @@ pub(crate) fn compute(
         .collect();
 
     let changed_symbol_names = load_changed_symbol_names(transaction, source_scope, base_scope)?;
-    let reference_paths = load_reference_affected_paths(
-        transaction,
-        source_scope,
-        base_scope,
-        &changed_symbol_names,
-    )?;
+    let reference_paths =
+        load_reference_affected_paths(transaction, source_scope, &changed_symbol_names)?;
     paths.extend(reference_paths);
 
     paths.sort_unstable();
@@ -91,16 +81,13 @@ pub(crate) fn compute(
 
     let total = count_distinct_paths(transaction, source_scope)? as usize;
 
-    let fallback = total == 0 || paths.len() >= total / FALLBACK_FRACTION;
+    let module_file_set_changed = module_file_set_changed(transaction, source_scope, base_scope)?;
+    let fallback =
+        total == 0 || paths.len() >= total / FALLBACK_FRACTION || module_file_set_changed;
 
     Ok(AffectedPaths {
         paths,
         fallback_to_full_scope: fallback,
-        finalize_imports_for_full_scope: module_file_set_changed(
-            transaction,
-            source_scope,
-            base_scope,
-        )?,
     })
 }
 
@@ -132,6 +119,42 @@ fn load_changed_symbol_names(
         FROM current_symbol_counts current
         LEFT JOIN base_symbol_counts base ON base.name = current.name
         WHERE base.name IS NULL
+        UNION
+        SELECT base.name
+        FROM (
+            SELECT name, kind, signature, COUNT(*) AS shape_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?2
+            GROUP BY name, kind, signature
+        ) base
+        LEFT JOIN (
+            SELECT name, kind, signature, COUNT(*) AS shape_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?1
+            GROUP BY name, kind, signature
+        ) current
+          ON current.name = base.name
+         AND current.kind = base.kind
+         AND current.signature = base.signature
+        WHERE current.name IS NULL OR current.shape_count != base.shape_count
+        UNION
+        SELECT current.name
+        FROM (
+            SELECT name, kind, signature, COUNT(*) AS shape_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?1
+            GROUP BY name, kind, signature
+        ) current
+        LEFT JOIN (
+            SELECT name, kind, signature, COUNT(*) AS shape_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?2
+            GROUP BY name, kind, signature
+        ) base
+          ON base.name = current.name
+         AND base.kind = current.kind
+         AND base.signature = current.signature
+        WHERE base.name IS NULL OR base.shape_count != current.shape_count
         ",
     )?;
     let rows = statement.query_map(params![source_scope, base_scope], |row| row.get(0))?;
@@ -140,75 +163,44 @@ fn load_changed_symbol_names(
         .map_err(StorageError::from)
 }
 
-/// Selects paths with a missing target or a name whose symbol cardinality
-/// changed between the persisted base and the new incremental scope.
+/// Selects paths with a missing target or a candidate name whose symbol
+/// cardinality or callable metadata changed between scopes.
 fn load_reference_affected_paths(
     transaction: &Transaction<'_>,
     source_scope: &str,
-    base_scope: &str,
     changed_symbol_names: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        WITH base_symbol_counts AS (
-            SELECT name, COUNT(*) AS symbol_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?2
-            GROUP BY name
-        ),
-        current_symbol_counts AS (
-            SELECT name, COUNT(*) AS symbol_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?1
-            GROUP BY name
-        ),
-        changed_symbol_names AS (
-            SELECT base.name
-            FROM base_symbol_counts base
-            LEFT JOIN current_symbol_counts current ON current.name = base.name
-            WHERE current.name IS NULL OR current.symbol_count != base.symbol_count
-            UNION
-            SELECT current.name
-            FROM current_symbol_counts current
-            LEFT JOIN base_symbol_counts base ON base.name = current.name
-            WHERE base.name IS NULL
-        )
-        SELECT DISTINCT reference.path
+        SELECT reference.path, reference.name, reference.kind,
+               reference.target_symbol_snapshot_id IS NOT NULL
+                   AND target.symbol_snapshot_id IS NULL AS target_missing
         FROM code_repository_references reference
         LEFT JOIN code_repository_symbols target
           ON target.source_scope = reference.source_scope
          AND target.symbol_snapshot_id = reference.target_symbol_snapshot_id
-        LEFT JOIN changed_symbol_names changed_name ON changed_name.name = reference.name
         WHERE reference.source_scope = ?1
-          AND (
-              (reference.target_symbol_snapshot_id IS NOT NULL
-               AND target.symbol_snapshot_id IS NULL)
-              OR changed_name.name IS NOT NULL
-          )
         ",
     )?;
-    let rows = statement.query_map(params![source_scope, base_scope], |row| {
-        row.get::<_, String>(0)
+    let rows = statement.query_map(params![source_scope], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, bool>(3)?,
+        ))
     })?;
-    let mut paths = rows.collect::<Result<Vec<_>, _>>()?;
-
-    let mut aliases = transaction.prepare(
-        "
-        SELECT path, name
-        FROM code_repository_references
-        WHERE source_scope = ?1 AND kind = 'call'
-        ",
-    )?;
-    let rows = aliases.query_map(params![source_scope], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
+    let mut paths = Vec::new();
     for row in rows {
-        let (path, name) = row?;
-        if call_target_name_candidates(&name, &path)
-            .iter()
-            .skip(1)
-            .any(|candidate| changed_symbol_names.contains(candidate))
-        {
+        let (path, name, kind, target_missing) = row?;
+        let name_changed = if kind == "call" {
+            call_target_name_candidates(&name, &path)
+                .iter()
+                .any(|candidate| changed_symbol_names.contains(candidate))
+        } else {
+            changed_symbol_names.contains(&name)
+        };
+        if target_missing || name_changed {
             paths.push(path);
         }
     }
