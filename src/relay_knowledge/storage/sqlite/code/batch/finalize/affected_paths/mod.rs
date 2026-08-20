@@ -1,12 +1,13 @@
 //! Computes the set of paths whose edge data needs re-finalization after an
-//! incremental clone. It finds references whose target no longer exists or
-//! whose candidate name/cardinality/callable metadata differs from the base
-//! scope. This makes unchanged references participate whenever resolution can
-//! transition between unique, preferred, and ambiguous candidates.
+//! incremental clone. It derives changed symbol names from bounded changed
+//! paths, compares their candidate distributions, and uses indexed exact/FTS
+//! lookups to find dependent references and imports. This makes unchanged
+//! edges participate whenever resolution can transition between unresolved,
+//! unique, preferred, and ambiguous candidates.
 
 use std::collections::BTreeSet;
 
-use rusqlite::{Transaction, params};
+use rusqlite::{Transaction, params, params_from_iter, types::Value};
 
 use crate::{domain::code_call_targets::call_target_name_candidates, storage::StorageError};
 
@@ -18,6 +19,8 @@ mod tests;
 /// scope, the per-path `IN (...)` overhead exceeds the savings from skipping
 /// unaffected paths, so we fall back to full-scope finalization.
 const FALLBACK_FRACTION: usize = 2;
+const NAME_QUERY_BATCH_SIZE: usize = 64;
+const MAX_DISCOVERED_AFFECTED_PATHS: usize = 513;
 
 pub(crate) struct AffectedPaths {
     paths: Vec<String>,
@@ -31,6 +34,10 @@ impl AffectedPaths {
         self.fallback_to_full_scope
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        !self.fallback_to_full_scope && self.paths.is_empty()
+    }
+
     /// Convenience accessor returning `&[&str]` for SQL parameter binding.
     pub(crate) fn path_refs(&self) -> Vec<&str> {
         self.paths.iter().map(String::as_str).collect()
@@ -41,6 +48,13 @@ impl AffectedPaths {
         Self {
             paths: Vec::new(),
             fallback_to_full_scope: true,
+        }
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self {
+            paths: Vec::new(),
+            fallback_to_full_scope: false,
         }
     }
 }
@@ -62,7 +76,7 @@ pub(crate) fn compute(
     deleted_paths: &[String],
 ) -> Result<AffectedPaths, StorageError> {
     if changed_paths.is_empty() && deleted_paths.is_empty() {
-        return Ok(AffectedPaths::full_scope());
+        return Ok(AffectedPaths::empty());
     }
 
     let mut paths: Vec<String> = changed_paths
@@ -71,7 +85,13 @@ pub(crate) fn compute(
         .cloned()
         .collect();
 
-    let changed_symbol_names = load_changed_symbol_names(transaction, source_scope, base_scope)?;
+    let changed_symbol_names = load_changed_symbol_names(
+        transaction,
+        source_scope,
+        base_scope,
+        changed_paths,
+        deleted_paths,
+    )?;
     let reference_paths =
         load_reference_affected_paths(transaction, source_scope, &changed_symbol_names)?;
     paths.extend(reference_paths);
@@ -86,7 +106,13 @@ pub(crate) fn compute(
 
     let total = count_distinct_paths(transaction, source_scope)? as usize;
 
-    let module_file_set_changed = module_file_set_changed(transaction, source_scope, base_scope)?;
+    let module_file_set_changed = module_file_set_changed(
+        transaction,
+        source_scope,
+        base_scope,
+        changed_paths,
+        deleted_paths,
+    )?;
     let fallback =
         total == 0 || paths.len() >= total / FALLBACK_FRACTION || module_file_set_changed;
 
@@ -101,172 +127,252 @@ fn load_named_import_affected_paths(
     source_scope: &str,
     changed_symbol_names: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
+    if changed_symbol_names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut paths = BTreeSet::new();
     let mut statement = transaction.prepare(
         "SELECT imports.path, files.language_id, imports.module
-         FROM code_repository_imports AS imports
+         FROM code_repository_search
+         JOIN code_repository_imports AS imports
+           ON imports.source_scope = code_repository_search.source_scope
+          AND imports.import_id = code_repository_search.record_id
          JOIN code_repository_files AS files
            ON files.source_scope = imports.source_scope AND files.path = imports.path
-         WHERE imports.source_scope = ?1",
+         WHERE code_repository_search MATCH ?2
+           AND code_repository_search.source_scope = ?1
+           AND code_repository_search.document_kind = 'import'
+           AND instr(imports.module, ?4) > 0
+         LIMIT ?3",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    let mut paths = Vec::new();
-    for row in rows {
-        let (path, language, statement) = row?;
-        if super::imports::languages::symbol_dependency_names(language.as_deref(), &statement)
-            .iter()
-            .any(|name| changed_symbol_names.contains(name))
-        {
-            paths.push(path);
+    for name in changed_symbol_names {
+        let rows = statement.query_map(
+            params![
+                source_scope,
+                fts_identifier_query(name),
+                MAX_DISCOVERED_AFFECTED_PATHS as i64,
+                name
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?;
+        for row in rows {
+            let (path, language, statement) = row?;
+            if super::imports::languages::symbol_dependency_names(language.as_deref(), &statement)
+                .iter()
+                .any(|name| changed_symbol_names.contains(name))
+            {
+                paths.insert(path);
+                if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
+                    return Ok(paths.into_iter().collect());
+                }
+            }
         }
     }
 
-    Ok(paths)
+    Ok(paths.into_iter().collect())
 }
 
 fn load_changed_symbol_names(
     transaction: &Transaction<'_>,
     source_scope: &str,
     base_scope: &str,
+    changed_paths: &[String],
+    deleted_paths: &[String],
 ) -> Result<BTreeSet<String>, StorageError> {
+    let impact_paths = changed_paths
+        .iter()
+        .chain(deleted_paths)
+        .collect::<BTreeSet<_>>();
+    if impact_paths.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let placeholders = std::iter::repeat_n("?", impact_paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT DISTINCT name FROM code_repository_symbols
+         WHERE (source_scope = ? AND path IN ({placeholders}))
+            OR (source_scope = ? AND path IN ({placeholders}))"
+    );
+    let mut values = Vec::with_capacity(2 + impact_paths.len() * 2);
+    values.push(Value::Text(source_scope.to_owned()));
+    values.extend(impact_paths.iter().map(|path| Value::Text((*path).clone())));
+    values.push(Value::Text(base_scope.to_owned()));
+    values.extend(impact_paths.iter().map(|path| Value::Text((*path).clone())));
+    let mut statement = transaction.prepare(&sql)?;
+    let candidate_names = statement
+        .query_map(params_from_iter(values), |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut changed = BTreeSet::new();
+    for name in candidate_names {
+        if load_symbol_distribution(transaction, base_scope, &name)?
+            != load_symbol_distribution(transaction, source_scope, &name)?
+        {
+            changed.insert(name);
+        }
+    }
+
+    Ok(changed)
+}
+
+fn load_symbol_distribution(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    name: &str,
+) -> Result<BTreeSet<(String, String, String, i64)>, StorageError> {
     let mut statement = transaction.prepare(
-        "
-        WITH base_symbol_counts AS (
-            SELECT name, COUNT(*) AS symbol_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?2
-            GROUP BY name
-        ),
-        current_symbol_counts AS (
-            SELECT name, COUNT(*) AS symbol_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?1
-            GROUP BY name
-        )
-        SELECT base.name
-        FROM base_symbol_counts base
-        LEFT JOIN current_symbol_counts current ON current.name = base.name
-        WHERE current.name IS NULL OR current.symbol_count != base.symbol_count
-        UNION
-        SELECT current.name
-        FROM current_symbol_counts current
-        LEFT JOIN base_symbol_counts base ON base.name = current.name
-        WHERE base.name IS NULL
-        UNION
-        SELECT base.name
-        FROM (
-            SELECT name, kind, signature, COUNT(*) AS shape_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?2
-            GROUP BY name, kind, signature
-        ) base
-        LEFT JOIN (
-            SELECT name, kind, signature, COUNT(*) AS shape_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?1
-            GROUP BY name, kind, signature
-        ) current
-          ON current.name = base.name
-         AND current.kind = base.kind
-         AND current.signature = base.signature
-        WHERE current.name IS NULL OR current.shape_count != base.shape_count
-        UNION
-        SELECT current.name
-        FROM (
-            SELECT name, kind, signature, COUNT(*) AS shape_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?1
-            GROUP BY name, kind, signature
-        ) current
-        LEFT JOIN (
-            SELECT name, kind, signature, COUNT(*) AS shape_count
-            FROM code_repository_symbols
-            WHERE source_scope = ?2
-            GROUP BY name, kind, signature
-        ) base
-          ON base.name = current.name
-         AND base.kind = current.kind
-         AND base.signature = current.signature
-        WHERE base.name IS NULL OR base.shape_count != current.shape_count
-        ",
+        "SELECT path, kind, signature, COUNT(*)
+         FROM code_repository_symbols
+         WHERE source_scope = ?1 AND name = ?2
+         GROUP BY path, kind, signature",
     )?;
-    let rows = statement.query_map(params![source_scope, base_scope], |row| row.get(0))?;
+    let rows = statement.query_map(params![source_scope, name], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    })?;
 
     rows.collect::<Result<BTreeSet<_>, _>>()
         .map_err(StorageError::from)
 }
 
-/// Selects paths with a missing target or a candidate name whose symbol
-/// cardinality or callable metadata changed between scopes.
+/// Selects paths whose exact or call-alias candidate name changed between scopes.
 fn load_reference_affected_paths(
     transaction: &Transaction<'_>,
     source_scope: &str,
     changed_symbol_names: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
-    let mut statement = transaction.prepare(
-        "
-        SELECT reference.path, reference.name, reference.kind,
-               reference.target_symbol_snapshot_id IS NOT NULL
-                   AND target.symbol_snapshot_id IS NULL AS target_missing
-        FROM code_repository_references reference
-        LEFT JOIN code_repository_symbols target
-          ON target.source_scope = reference.source_scope
-         AND target.symbol_snapshot_id = reference.target_symbol_snapshot_id
-        WHERE reference.source_scope = ?1
-        ",
-    )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, bool>(3)?,
-        ))
-    })?;
-    let mut paths = Vec::new();
-    for row in rows {
-        let (path, name, kind, target_missing) = row?;
-        let name_changed = if kind == "call" {
-            call_target_name_candidates(&name, &path)
-                .iter()
-                .any(|candidate| changed_symbol_names.contains(candidate))
-        } else {
-            changed_symbol_names.contains(&name)
-        };
-        if target_missing || name_changed {
-            paths.push(path);
+    if changed_symbol_names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut paths = BTreeSet::new();
+    let names = changed_symbol_names.iter().collect::<Vec<_>>();
+    for name_batch in names.chunks(NAME_QUERY_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", name_batch.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT reference.path, reference.name, reference.kind
+             FROM code_repository_references AS reference
+             WHERE reference.source_scope = ?
+               AND reference.name IN ({placeholders})"
+        );
+        let mut values = Vec::with_capacity(1 + name_batch.len());
+        values.push(Value::Text(source_scope.to_owned()));
+        values.extend(name_batch.iter().map(|name| Value::Text((*name).clone())));
+        let mut statement = transaction.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (path, name, kind) = row?;
+            let name_changed = if kind == "call" {
+                call_target_name_candidates(&name, &path)
+                    .iter()
+                    .any(|candidate| changed_symbol_names.contains(candidate))
+            } else {
+                changed_symbol_names.contains(&name)
+            };
+            if name_changed {
+                paths.insert(path);
+                if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
+                    return Ok(paths.into_iter().collect());
+                }
+            }
         }
     }
 
-    Ok(paths)
+    let mut alias_statement = transaction.prepare(
+        "SELECT reference.path, reference.name
+         FROM code_repository_search
+         JOIN code_repository_references AS reference
+           ON reference.source_scope = code_repository_search.source_scope
+          AND reference.reference_id = code_repository_search.record_id
+         WHERE code_repository_search MATCH ?2
+           AND code_repository_search.source_scope = ?1
+           AND code_repository_search.document_kind = 'reference'
+           AND reference.kind = 'call'
+           AND instr(reference.name, ?4) > 0
+         LIMIT ?3",
+    )?;
+    for name in changed_symbol_names {
+        let rows = alias_statement.query_map(
+            params![
+                source_scope,
+                fts_identifier_query(name),
+                MAX_DISCOVERED_AFFECTED_PATHS as i64,
+                name
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        for row in rows {
+            let (path, reference_name) = row?;
+            if call_target_name_candidates(&reference_name, &path)
+                .iter()
+                .any(|candidate| changed_symbol_names.contains(candidate))
+            {
+                paths.insert(path);
+                if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
+                    return Ok(paths.into_iter().collect());
+                }
+            }
+        }
+    }
+
+    Ok(paths.into_iter().collect())
+}
+
+fn fts_identifier_query(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
 }
 
 fn module_file_set_changed(
     transaction: &Transaction<'_>,
     source_scope: &str,
     base_scope: &str,
+    changed_paths: &[String],
+    deleted_paths: &[String],
 ) -> Result<bool, StorageError> {
+    let impact_paths = changed_paths
+        .iter()
+        .chain(deleted_paths)
+        .collect::<BTreeSet<_>>();
+    if impact_paths.is_empty() {
+        return Ok(false);
+    }
+    let placeholders = std::iter::repeat_n("?", impact_paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT EXISTS (
+            SELECT path FROM code_repository_files
+            WHERE source_scope = ? AND path IN ({placeholders})
+            EXCEPT
+            SELECT path FROM code_repository_files
+            WHERE source_scope = ? AND path IN ({placeholders})
+        ) OR EXISTS (
+            SELECT path FROM code_repository_files
+            WHERE source_scope = ? AND path IN ({placeholders})
+            EXCEPT
+            SELECT path FROM code_repository_files
+            WHERE source_scope = ? AND path IN ({placeholders})
+        )"
+    );
+    let mut values = Vec::with_capacity(4 + impact_paths.len() * 4);
+    for scope in [source_scope, base_scope, base_scope, source_scope] {
+        values.push(Value::Text(scope.to_owned()));
+        values.extend(impact_paths.iter().map(|path| Value::Text((*path).clone())));
+    }
     transaction
-        .query_row(
-            "
-            SELECT EXISTS (
-                SELECT path FROM code_repository_files WHERE source_scope = ?1
-                EXCEPT
-                SELECT path FROM code_repository_files WHERE source_scope = ?2
-            ) OR EXISTS (
-                SELECT path FROM code_repository_files WHERE source_scope = ?2
-                EXCEPT
-                SELECT path FROM code_repository_files WHERE source_scope = ?1
-            )
-            ",
-            params![source_scope, base_scope],
-            |row| row.get(0),
-        )
+        .query_row(&sql, params_from_iter(values), |row| row.get(0))
         .map_err(StorageError::from)
 }
 

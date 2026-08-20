@@ -2,9 +2,10 @@ use super::*;
 use rusqlite::Connection;
 
 #[test]
-fn full_scope_when_changed_paths_empty() {
-    let result = AffectedPaths::full_scope();
-    assert!(result.is_full_scope());
+fn empty_delta_skips_edge_finalization() {
+    let result = AffectedPaths::empty();
+    assert!(!result.is_full_scope());
+    assert!(result.is_empty());
     assert!(result.path_refs().is_empty());
 }
 
@@ -31,44 +32,79 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 symbol_snapshot_id TEXT,
                 name TEXT,
                 kind TEXT,
-                signature TEXT
+                signature TEXT,
+                path TEXT DEFAULT 'src/default.rs'
             );
             CREATE TABLE code_repository_references (
                 source_scope TEXT,
                 path TEXT,
                 name TEXT,
                 kind TEXT,
-                target_symbol_snapshot_id TEXT
+                target_symbol_snapshot_id TEXT,
+                reference_id TEXT
             );
             CREATE TABLE code_repository_imports (
                 source_scope TEXT,
                 path TEXT,
-                module TEXT
+                module TEXT,
+                import_id TEXT
+            );
+            CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                source_scope UNINDEXED, document_kind UNINDEXED,
+                record_id UNINDEXED, path UNINDEXED,
+                language_id UNINDEXED, content
             );
 
-            INSERT INTO code_repository_symbols VALUES
+            INSERT INTO code_repository_symbols
+                (source_scope, symbol_snapshot_id, name, kind, signature) VALUES
                 ('base', 'base-shared', 'Shared', 'function', 'fn Shared() {}'),
                 ('base', 'base-solo-a', 'Solo', 'function', 'fn Solo() {}'),
                 ('base', 'base-solo-b', 'Solo', 'function', 'fn Solo(i: i32) {}'),
                 ('base', 'base-stable', 'Stable', 'function_declaration', 'fn Stable();'),
+                ('base', 'base-moved', 'Moved', 'function', 'fn Moved() {}'),
                 ('target', 'target-shared-a', 'Shared', 'function', 'fn Shared() {}'),
                 ('target', 'target-shared-b', 'Shared', 'function', 'fn Shared(i: i32) {}'),
                 ('target', 'target-solo', 'Solo', 'function', 'fn Solo() {}'),
-                ('target', 'target-stable', 'Stable', 'function', 'fn Stable() {}');
+                ('target', 'target-stable', 'Stable', 'function', 'fn Stable() {}'),
+                ('target', 'target-moved', 'Moved', 'function', 'fn Moved() {}');
+
+            UPDATE code_repository_symbols SET path = 'src/new.rs'
+            WHERE symbol_snapshot_id IN (
+                'target-shared-b', 'base-solo-b', 'base-stable', 'target-stable'
+            );
+            UPDATE code_repository_symbols SET path = 'src/move-old.rs'
+            WHERE symbol_snapshot_id = 'base-moved';
+            UPDATE code_repository_symbols SET path = 'src/move-new.rs'
+            WHERE symbol_snapshot_id = 'target-moved';
 
             INSERT INTO code_repository_references VALUES
-                ('target', 'src/unique_to_ambiguous.rs', 'Shared', 'type', 'target-shared-a'),
-                ('target', 'src/ambiguous_to_unique.rs', 'Solo', 'type', NULL),
-                ('target', 'src/ffi_call.rs', 'ffi::Shared', 'call', NULL),
-                ('target', 'src/metadata_call.rs', 'Stable', 'call', 'target-stable');
+                ('target', 'src/unique_to_ambiguous.rs', 'Shared', 'type', 'target-shared-a', 'ref-shared'),
+                ('target', 'src/ambiguous_to_unique.rs', 'Solo', 'type', NULL, 'ref-solo'),
+                ('target', 'src/ffi_call.rs', 'ffi::Shared', 'call', NULL, 'ref-ffi'),
+                ('target', 'src/metadata_call.rs', 'Stable', 'call', 'target-stable', 'ref-stable');
+            INSERT INTO code_repository_references VALUES
+                ('target', 'src/move-consumer.rs', 'Moved', 'type', 'target-moved', 'ref-moved');
 
             INSERT INTO code_repository_imports VALUES
                 ('target', 'src/aliased_import.ts',
-                 'import { Shared as LocalShared } from ''./shared'';'),
+                 'import { Shared as LocalShared } from ''./shared'';', 'import-ts'),
                 ('target', 'src/aliased_import.py',
-                 'from shared import Shared as LocalShared'),
+                 'from shared import Shared as LocalShared', 'import-python'),
                 ('target', 'src/AliasedImport.java',
-                 'import static com.example.Shared.Shared;');
+                 'import static com.example.Shared.Shared;', 'import-java'),
+                ('target', 'src/moved_import.ts',
+                 'import { Moved as LocalMoved } from ''./move-new'';', 'import-moved');
+
+            INSERT INTO code_repository_search VALUES
+                ('target', 'reference', 'ref-ffi', 'src/ffi_call.rs', 'rust', 'ffi::Shared'),
+                ('target', 'import', 'import-ts', 'src/aliased_import.ts', 'typescript',
+                 'import Shared LocalShared shared'),
+                ('target', 'import', 'import-python', 'src/aliased_import.py', 'python',
+                 'from shared import Shared LocalShared'),
+                ('target', 'import', 'import-java', 'src/AliasedImport.java', 'java',
+                 'import static com example Shared'),
+                ('target', 'import', 'import-moved', 'src/moved_import.ts', 'typescript',
+                 'import Moved LocalMoved move new');
 
             INSERT INTO code_repository_files (source_scope, path) VALUES
                 ('base', 'src/new.rs'),
@@ -91,6 +127,14 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('base', 'src/extra-10.rs'),
                 ('base', 'src/extra-11.rs'),
                 ('base', 'src/extra-12.rs'),
+                ('base', 'src/extra-13.rs'),
+                ('base', 'src/extra-14.rs'),
+                ('base', 'src/extra-15.rs'),
+                ('base', 'src/extra-16.rs'),
+                ('base', 'src/move-old.rs'),
+                ('base', 'src/move-new.rs'),
+                ('base', 'src/move-consumer.rs'),
+                ('base', 'src/moved_import.ts'),
                 ('target', 'src/new.rs'),
                 ('target', 'src/unique_to_ambiguous.rs'),
                 ('target', 'src/ambiguous_to_unique.rs'),
@@ -111,6 +155,17 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('target', 'src/extra-10.rs'),
                 ('target', 'src/extra-11.rs'),
                 ('target', 'src/extra-12.rs');
+            INSERT INTO code_repository_files (source_scope, path) VALUES
+                ('target', 'src/extra-13.rs'),
+                ('target', 'src/extra-14.rs'),
+                ('target', 'src/extra-15.rs'),
+                ('target', 'src/extra-16.rs');
+            INSERT INTO code_repository_files (source_scope, path) VALUES
+                ('target', 'src/move-old.rs'),
+                ('target', 'src/move-new.rs'),
+                ('target', 'src/move-consumer.rs');
+            INSERT INTO code_repository_files (source_scope, path) VALUES
+                ('target', 'src/moved_import.ts');
 
             UPDATE code_repository_files SET language_id = 'typescript'
             WHERE path = 'src/aliased_import.ts';
@@ -118,6 +173,8 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
             WHERE path = 'src/aliased_import.py';
             UPDATE code_repository_files SET language_id = 'java'
             WHERE path = 'src/AliasedImport.java';
+            UPDATE code_repository_files SET language_id = 'typescript'
+            WHERE path = 'src/moved_import.ts';
             ",
         )
         .expect("fixture schema should persist");
@@ -127,7 +184,11 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
         &transaction,
         "target",
         "base",
-        &["src/new.rs".to_owned()],
+        &[
+            "src/new.rs".to_owned(),
+            "src/move-old.rs".to_owned(),
+            "src/move-new.rs".to_owned(),
+        ],
         &[],
     )
     .expect("affected paths should load");
@@ -142,6 +203,10 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
             "src/ambiguous_to_unique.rs",
             "src/ffi_call.rs",
             "src/metadata_call.rs",
+            "src/move-consumer.rs",
+            "src/move-new.rs",
+            "src/move-old.rs",
+            "src/moved_import.ts",
             "src/new.rs",
             "src/unique_to_ambiguous.rs",
         ]
@@ -159,14 +224,14 @@ fn module_file_set_changes_require_full_import_finalization() {
             );
             CREATE TABLE code_repository_symbols (
                 source_scope TEXT, symbol_snapshot_id TEXT, name TEXT,
-                kind TEXT, signature TEXT
+                kind TEXT, signature TEXT, path TEXT
             );
             CREATE TABLE code_repository_references (
                 source_scope TEXT, path TEXT, name TEXT, kind TEXT,
-                target_symbol_snapshot_id TEXT
+                target_symbol_snapshot_id TEXT, reference_id TEXT
             );
             CREATE TABLE code_repository_imports (
-                source_scope TEXT, path TEXT, module TEXT
+                source_scope TEXT, path TEXT, module TEXT, import_id TEXT
             );
             INSERT INTO code_repository_files (source_scope, path) VALUES
                 ('base', 'src/importer.rs'),

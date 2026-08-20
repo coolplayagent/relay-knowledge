@@ -157,7 +157,9 @@ fn finalize_session_once(
         |transaction| super::super::schema::ensure_code_query_indexes(transaction),
     )?;
 
-    let affected_paths = if !session.full_replace && !session.changed_paths.is_empty() {
+    let affected_paths = if !session.full_replace
+        && (!session.changed_paths.is_empty() || !session.deleted_paths.is_empty())
+    {
         let transaction = connection.transaction()?;
         let base_scope = resolve_incremental_base_scope(
             &transaction,
@@ -175,8 +177,10 @@ fn finalize_session_once(
         )?;
         transaction.commit()?;
         paths
-    } else {
+    } else if session.full_replace {
         finalize::affected_paths::AffectedPaths::full_scope()
+    } else {
+        finalize::affected_paths::AffectedPaths::empty()
     };
 
     if affected_paths.is_full_scope() {
@@ -246,7 +250,7 @@ fn finalize_session_once(
                 )
             },
         )?;
-    } else {
+    } else if !affected_paths.is_empty() {
         let path_refs = affected_paths.path_refs();
         run_finalize_phase(
             connection,

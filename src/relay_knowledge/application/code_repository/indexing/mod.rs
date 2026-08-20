@@ -339,7 +339,7 @@ impl RelayKnowledgeService {
                     .index_start_response_from_task(
                         &store,
                         status,
-                        task,
+                        *task,
                         request.repository.ref_selector,
                         &context,
                     )

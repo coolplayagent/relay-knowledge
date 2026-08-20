@@ -27,7 +27,7 @@ pub(super) const RETAIN_RECENT_CODE_SCOPES: usize = 2;
 const FULL_INDEX_ANCESTOR_PROBE_LIMIT: usize = 10;
 
 pub(super) enum FullIndexReusePlan {
-    ActiveTask(CodeIndexTaskRecord),
+    ActiveTask(Box<CodeIndexTaskRecord>),
     Incremental(CodeIndexRequest),
     Full,
 }
@@ -277,7 +277,7 @@ pub(super) async fn plan_full_index_reuse(
         .language_filters
         .clone_from(&target_session.language_filters);
     if let Some(task) = active_index_task_for_target(store, status, request, &target).await? {
-        return Ok(FullIndexReusePlan::ActiveTask(task));
+        return Ok(FullIndexReusePlan::ActiveTask(Box::new(task)));
     }
     let ancestors = run_blocking_code({
         let root = root.clone();
