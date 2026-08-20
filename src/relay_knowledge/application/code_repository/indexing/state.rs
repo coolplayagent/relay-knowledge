@@ -33,10 +33,12 @@ pub(super) enum FullIndexReusePlan {
 }
 
 pub(super) fn historical_reuse_base_became_unavailable(error: &ApiError) -> bool {
-    error.error_kind == ErrorKind::StorageUnavailable
+    (error.error_kind == ErrorKind::StorageUnavailable
         && error
             .message
-            .contains("has no compatible non-retiring scope")
+            .contains("has no compatible non-retiring scope"))
+        || (error.error_kind == ErrorKind::InvalidArgument
+            && error.message.contains("has no matching indexed base scope"))
 }
 
 pub(super) struct PreviousIndexState {

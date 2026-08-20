@@ -327,3 +327,120 @@ fn saturated_affected_path_discovery_falls_back_to_full_scope() {
 
     assert!(affected.is_full_scope());
 }
+
+#[test]
+fn repeated_alias_rows_at_query_cap_fall_back_to_full_scope() {
+    let mut connection = Connection::open_in_memory().expect("connection should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_files (
+                source_scope TEXT, path TEXT, language_id TEXT
+            );
+            CREATE TABLE code_repository_symbols (
+                source_scope TEXT, symbol_snapshot_id TEXT, name TEXT,
+                kind TEXT, signature TEXT, path TEXT
+            );
+            CREATE TABLE code_repository_references (
+                source_scope TEXT, path TEXT, name TEXT, kind TEXT,
+                target_symbol_snapshot_id TEXT, reference_id TEXT
+            );
+            CREATE TABLE code_repository_imports (
+                source_scope TEXT, path TEXT, module TEXT, import_id TEXT
+            );
+            CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                source_scope UNINDEXED, document_kind UNINDEXED,
+                record_id UNINDEXED, path UNINDEXED,
+                language_id UNINDEXED, content
+            );
+            WITH RECURSIVE paths(value) AS (
+                SELECT 0 UNION ALL SELECT value + 1 FROM paths WHERE value < 1099
+            )
+            INSERT INTO code_repository_files
+            SELECT 'base', printf('src/file-%04d.rs', value), 'rust' FROM paths;
+            INSERT INTO code_repository_files
+            SELECT 'target', path, language_id
+            FROM code_repository_files WHERE source_scope = 'base';
+            INSERT INTO code_repository_symbols VALUES
+                ('base', 'base-hot', 'Hot', 'function', 'fn Hot() {}', 'src/file-0000.rs'),
+                ('target', 'target-hot', 'Hot', 'type', 'struct Hot;', 'src/file-0000.rs');
+            WITH RECURSIVE rows(value) AS (
+                SELECT 1 UNION ALL SELECT value + 1 FROM rows WHERE value < 513
+            )
+            INSERT INTO code_repository_references
+            SELECT 'target', 'src/repeated.rs', 'ns::Hot', 'call', NULL,
+                   printf('reference-%04d', value)
+            FROM rows;
+            WITH RECURSIVE rows(value) AS (
+                SELECT 1 UNION ALL SELECT value + 1 FROM rows WHERE value < 513
+            )
+            INSERT INTO code_repository_search
+            SELECT 'target', 'reference', printf('reference-%04d', value),
+                   'src/repeated.rs', 'rust', 'ns::Hot'
+            FROM rows;
+            ",
+        )
+        .expect("repeated alias fixture should persist");
+    let transaction = connection.transaction().expect("transaction should start");
+
+    let affected = compute(
+        &transaction,
+        "target",
+        "base",
+        &["src/file-0000.rs".to_owned()],
+        &[],
+    )
+    .expect("raw-row saturation should complete");
+
+    assert!(affected.is_full_scope());
+}
+
+#[test]
+fn repeated_named_import_rows_report_query_saturation() {
+    let mut connection = Connection::open_in_memory().expect("connection should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_files (
+                source_scope TEXT, path TEXT, language_id TEXT
+            );
+            CREATE TABLE code_repository_imports (
+                source_scope TEXT, path TEXT, module TEXT, import_id TEXT
+            );
+            CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                source_scope UNINDEXED, document_kind UNINDEXED,
+                record_id UNINDEXED, path UNINDEXED,
+                language_id UNINDEXED, content
+            );
+            INSERT INTO code_repository_files VALUES
+                ('target', 'src/repeated.ts', 'typescript');
+            WITH RECURSIVE rows(value) AS (
+                SELECT 1 UNION ALL SELECT value + 1 FROM rows WHERE value < 513
+            )
+            INSERT INTO code_repository_imports
+            SELECT 'target', 'src/repeated.ts',
+                   'import { Hot as LocalHot } from ''./hot'';',
+                   printf('import-%04d', value)
+            FROM rows;
+            WITH RECURSIVE rows(value) AS (
+                SELECT 1 UNION ALL SELECT value + 1 FROM rows WHERE value < 513
+            )
+            INSERT INTO code_repository_search
+            SELECT 'target', 'import', printf('import-%04d', value),
+                   'src/repeated.ts', 'typescript', 'import Hot LocalHot hot'
+            FROM rows;
+            ",
+        )
+        .expect("repeated import fixture should persist");
+    let transaction = connection.transaction().expect("transaction should start");
+
+    let discovery = load_named_import_affected_paths(
+        &transaction,
+        "target",
+        &BTreeSet::from(["Hot".to_owned()]),
+    )
+    .expect("named import saturation should complete");
+
+    assert!(discovery.saturated);
+    assert_eq!(discovery.paths, vec!["src/repeated.ts"]);
+}

@@ -27,6 +27,11 @@ pub(crate) struct AffectedPaths {
     fallback_to_full_scope: bool,
 }
 
+struct PathDiscovery {
+    paths: Vec<String>,
+    saturated: bool,
+}
+
 impl AffectedPaths {
     /// Returns `true` when the caller should use the existing full-scope
     /// finalization path instead of per-path-scoped phases.
@@ -100,12 +105,10 @@ pub(crate) fn compute(
         &changed_symbol_names,
         &replaced_base_symbol_ids,
     )?;
-    paths.extend(reference_paths);
-    paths.extend(load_named_import_affected_paths(
-        transaction,
-        source_scope,
-        &changed_symbol_names,
-    )?);
+    paths.extend(reference_paths.paths);
+    let import_paths =
+        load_named_import_affected_paths(transaction, source_scope, &changed_symbol_names)?;
+    paths.extend(import_paths.paths);
 
     paths.sort_unstable();
     paths.dedup();
@@ -122,6 +125,8 @@ pub(crate) fn compute(
     let fallback = total == 0
         || paths.len() >= total / FALLBACK_FRACTION
         || paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS
+        || reference_paths.saturated
+        || import_paths.saturated
         || module_file_set_changed;
 
     Ok(AffectedPaths {
@@ -134,9 +139,12 @@ fn load_named_import_affected_paths(
     transaction: &Transaction<'_>,
     source_scope: &str,
     changed_symbol_names: &BTreeSet<String>,
-) -> Result<Vec<String>, StorageError> {
+) -> Result<PathDiscovery, StorageError> {
     if changed_symbol_names.is_empty() {
-        return Ok(Vec::new());
+        return Ok(PathDiscovery {
+            paths: Vec::new(),
+            saturated: false,
+        });
     }
     let mut paths = BTreeSet::new();
     let mut statement = transaction.prepare(
@@ -154,6 +162,7 @@ fn load_named_import_affected_paths(
          LIMIT ?3",
     )?;
     for name in changed_symbol_names {
+        let mut inspected_rows = 0;
         let rows = statement.query_map(
             params![
                 source_scope,
@@ -170,6 +179,7 @@ fn load_named_import_affected_paths(
             },
         )?;
         for row in rows {
+            inspected_rows += 1;
             let (path, language, statement) = row?;
             if super::imports::languages::symbol_dependency_names(language.as_deref(), &statement)
                 .iter()
@@ -177,13 +187,25 @@ fn load_named_import_affected_paths(
             {
                 paths.insert(path);
                 if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
-                    return Ok(paths.into_iter().collect());
+                    return Ok(PathDiscovery {
+                        paths: paths.into_iter().collect(),
+                        saturated: true,
+                    });
                 }
             }
         }
+        if inspected_rows >= MAX_DISCOVERED_AFFECTED_PATHS {
+            return Ok(PathDiscovery {
+                paths: paths.into_iter().collect(),
+                saturated: true,
+            });
+        }
     }
 
-    Ok(paths.into_iter().collect())
+    Ok(PathDiscovery {
+        paths: paths.into_iter().collect(),
+        saturated: false,
+    })
 }
 
 fn load_changed_symbol_names(
@@ -283,9 +305,12 @@ fn load_reference_affected_paths(
     source_scope: &str,
     changed_symbol_names: &BTreeSet<String>,
     replaced_base_symbol_ids: &BTreeSet<String>,
-) -> Result<Vec<String>, StorageError> {
+) -> Result<PathDiscovery, StorageError> {
     if changed_symbol_names.is_empty() && replaced_base_symbol_ids.is_empty() {
-        return Ok(Vec::new());
+        return Ok(PathDiscovery {
+            paths: Vec::new(),
+            saturated: false,
+        });
     }
     let mut paths = BTreeSet::new();
     let names = changed_symbol_names.iter().collect::<Vec<_>>();
@@ -322,7 +347,10 @@ fn load_reference_affected_paths(
             if name_changed {
                 paths.insert(path);
                 if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
-                    return Ok(paths.into_iter().collect());
+                    return Ok(PathDiscovery {
+                        paths: paths.into_iter().collect(),
+                        saturated: true,
+                    });
                 }
             }
         }
@@ -344,13 +372,19 @@ fn load_reference_affected_paths(
         for row in rows {
             paths.insert(row?);
             if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
-                return Ok(paths.into_iter().collect());
+                return Ok(PathDiscovery {
+                    paths: paths.into_iter().collect(),
+                    saturated: true,
+                });
             }
         }
     }
 
     if changed_symbol_names.is_empty() {
-        return Ok(paths.into_iter().collect());
+        return Ok(PathDiscovery {
+            paths: paths.into_iter().collect(),
+            saturated: false,
+        });
     }
 
     let mut alias_statement = transaction.prepare(
@@ -367,6 +401,7 @@ fn load_reference_affected_paths(
          LIMIT ?3",
     )?;
     for name in changed_symbol_names {
+        let mut inspected_rows = 0;
         let rows = alias_statement.query_map(
             params![
                 source_scope,
@@ -377,6 +412,7 @@ fn load_reference_affected_paths(
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )?;
         for row in rows {
+            inspected_rows += 1;
             let (path, reference_name) = row?;
             if call_target_name_candidates(&reference_name, &path)
                 .iter()
@@ -384,13 +420,25 @@ fn load_reference_affected_paths(
             {
                 paths.insert(path);
                 if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
-                    return Ok(paths.into_iter().collect());
+                    return Ok(PathDiscovery {
+                        paths: paths.into_iter().collect(),
+                        saturated: true,
+                    });
                 }
             }
         }
+        if inspected_rows >= MAX_DISCOVERED_AFFECTED_PATHS {
+            return Ok(PathDiscovery {
+                paths: paths.into_iter().collect(),
+                saturated: true,
+            });
+        }
     }
 
-    Ok(paths.into_iter().collect())
+    Ok(PathDiscovery {
+        paths: paths.into_iter().collect(),
+        saturated: false,
+    })
 }
 
 fn fts_identifier_query(name: &str) -> String {
