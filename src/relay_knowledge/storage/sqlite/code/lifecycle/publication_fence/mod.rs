@@ -49,6 +49,10 @@ pub(in crate::storage) fn prepare_guard(
 }
 
 impl PublicationFenceGuard {
+    pub(in crate::storage::sqlite::code) fn checkpoint_identity(&self) -> String {
+        format!("task:{}", self.fence.task_id)
+    }
+
     pub(in crate::storage) fn validate_repository(
         &self,
         repository_id: &str,

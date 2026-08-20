@@ -109,7 +109,6 @@ pub(super) async fn queue_incremental_index_task(
         CodeIndexMode::incremental(base_commit.clone(), head.resolved_commit_sha.clone())
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
     let mut pinned_request = request.clone();
-    pinned_request.repository.ref_selector = head.resolved_commit_sha.clone();
     pinned_request.mode = pinned_mode.clone();
     let payload_json = serde_json::to_string(&pinned_request)
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
@@ -134,7 +133,7 @@ pub(super) async fn queue_incremental_index_task(
         .queue_code_index_task(CodeIndexTaskSeed {
             repository_id: status.repository_id.clone(),
             alias: status.alias.clone(),
-            ref_selector: head_ref.clone(),
+            ref_selector: request.repository.ref_selector.clone(),
             resolved_commit_sha: head.resolved_commit_sha,
             tree_hash: head.tree_hash,
             source_scope,

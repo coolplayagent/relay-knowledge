@@ -77,14 +77,7 @@ fn begin_session_once(
             &session.source_scope,
         )?;
     }
-    let resumable = transaction
-        .query_row(
-            "SELECT committed_file_count FROM code_repository_index_checkpoints WHERE source_scope = ?1 AND state = 'indexing'",
-            params![session.source_scope],
-            |row| row.get::<_, u64>(0),
-        )
-        .optional()?
-        .is_some_and(|committed_file_count| committed_file_count > 0);
+    let resumable = resumable_session_matches(&transaction, session, fence)?;
     if session.total_path_count <= session.resource_budget.max_files_per_batch {
         super::super::schema::ensure_code_query_indexes(&transaction)?;
     }
@@ -134,6 +127,7 @@ fn begin_session_once(
     )?;
     if !resumable {
         checkpoint::insert(&transaction, session, "indexing", None)?;
+        insert_session_identity(&transaction, session, fence)?;
     }
     if let Some(fence) = fence {
         fence.validate_target_scope(&transaction, &session.source_scope)?;
@@ -142,6 +136,85 @@ fn begin_session_once(
     transaction.commit()?;
 
     checkpoint::load(connection, &session.source_scope)
+}
+
+fn resumable_session_matches(
+    transaction: &Transaction<'_>,
+    session: &CodeIndexSession,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<bool, StorageError> {
+    let expected_identity = checkpoint_identity(session, fence);
+    let checkpoint = transaction
+        .query_row(
+            "SELECT checkpoint.committed_file_count,
+                    checkpoint.resolved_commit_sha, checkpoint.tree_hash,
+                    checkpoint.path_filters_json, checkpoint.language_filters_json,
+                    checkpoint.total_path_count, marker.state
+             FROM code_repository_index_checkpoints AS checkpoint
+             LEFT JOIN code_repository_index_batch_staging AS marker
+               ON marker.source_scope = checkpoint.source_scope
+              AND marker.batch_index = 0
+             WHERE checkpoint.source_scope = ?1 AND checkpoint.state = 'indexing'",
+            params![session.source_scope],
+            |row| {
+                Ok((
+                    row.get::<_, usize>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, usize>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((committed, commit, tree, paths, languages, total, identity)) = checkpoint else {
+        return Ok(false);
+    };
+
+    Ok(committed > 0
+        && commit == session.resolved_commit_sha
+        && tree == session.tree_hash
+        && paths == checkpoint::serialize_json(&session.path_filters)?
+        && languages == checkpoint::serialize_json(&session.language_filters)?
+        && total == session.total_path_count
+        && identity.as_deref() == Some(expected_identity.as_str()))
+}
+
+fn insert_session_identity(
+    transaction: &Transaction<'_>,
+    session: &CodeIndexSession,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<(), StorageError> {
+    let now = checkpoint::now_millis();
+    transaction.execute(
+        "INSERT INTO code_repository_index_batch_staging (
+            source_scope, batch_index, state, file_count, fact_row_count,
+            created_at_ms, updated_at_ms
+         ) VALUES (?1, 0, ?2, 0, 0, ?3, ?3)",
+        params![
+            session.source_scope,
+            checkpoint_identity(session, fence),
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+fn checkpoint_identity(
+    session: &CodeIndexSession,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> String {
+    fence.map_or_else(
+        || {
+            session.base_resolved_commit_sha.as_ref().map_or_else(
+                || format!("session:full:{}", session.resolved_commit_sha),
+                |base| format!("session:incremental:{base}:{}", session.resolved_commit_sha),
+            )
+        },
+        |fence| fence.checkpoint_identity(),
+    )
 }
 
 fn finalize_session_once(

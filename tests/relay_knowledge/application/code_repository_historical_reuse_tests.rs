@@ -154,6 +154,7 @@ async fn full_index_with_historical_reuse_uses_nearest_indexed_first_parent() {
         Some(base.as_str())
     );
     assert_eq!(completed.summary.resolved_commit_sha, head);
+    assert_eq!(completed.scope.requested_ref, "HEAD");
     assert_eq!(completed.summary.changed_path_count, 1);
     assert_eq!(completed.summary.progress.blob_read_count, 1);
     assert_eq!(completed.summary.progress.parsed_file_count, 1);

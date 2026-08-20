@@ -108,3 +108,105 @@ async fn new_checkpoint_batch_replaces_colliding_path_rows() {
     assert_eq!(new_hits.len(), 1);
     assert_eq!(new_hits[0].path, path);
 }
+
+#[tokio::test]
+async fn different_incremental_base_resets_partial_target_checkpoint() {
+    let store = registered_store().await;
+    let mut base_a = session_for_scope("git_snapshot:base-a", 1);
+    base_a.resolved_commit_sha = "base-a".to_owned();
+    base_a.tree_hash = "tree-a".to_owned();
+    store
+        .begin_code_index_session(base_a.clone())
+        .await
+        .expect("base A should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                &base_a.source_scope,
+                "a-file",
+                "src/a-only.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+            )],
+            ..batch(&base_a.source_scope, 1)
+        })
+        .await
+        .expect("base A batch should persist");
+    store
+        .finalize_code_index_session(base_a)
+        .await
+        .expect("base A should publish");
+
+    let mut base_b = session_for_scope("git_snapshot:base-b", 1);
+    base_b.resolved_commit_sha = "base-b".to_owned();
+    base_b.tree_hash = "tree-b".to_owned();
+    store
+        .begin_code_index_session(base_b.clone())
+        .await
+        .expect("base B should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                &base_b.source_scope,
+                "b-file",
+                "src/b-only.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+            )],
+            ..batch(&base_b.source_scope, 1)
+        })
+        .await
+        .expect("base B batch should persist");
+    store
+        .finalize_code_index_session(base_b)
+        .await
+        .expect("base B should publish");
+
+    let target_scope = "git_snapshot:shared-target";
+    let mut from_a = session_for_scope(target_scope, 1);
+    from_a.full_replace = false;
+    from_a.base_resolved_commit_sha = Some("base-a".to_owned());
+    from_a.resolved_commit_sha = "target".to_owned();
+    from_a.tree_hash = "target-tree".to_owned();
+    from_a.changed_paths = vec!["src/changed.rs".to_owned()];
+    store
+        .begin_code_index_session(from_a)
+        .await
+        .expect("first incremental session should clone base A");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                target_scope,
+                "changed-file",
+                "src/changed.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+            )],
+            ..batch(target_scope, 1)
+        })
+        .await
+        .expect("first incremental batch should persist");
+
+    let mut from_b = session_for_scope(target_scope, 1);
+    from_b.full_replace = false;
+    from_b.base_resolved_commit_sha = Some("base-b".to_owned());
+    from_b.resolved_commit_sha = "target".to_owned();
+    from_b.tree_hash = "target-tree".to_owned();
+    from_b.changed_paths = vec!["src/changed.rs".to_owned()];
+    let restarted = store
+        .begin_code_index_session(from_b)
+        .await
+        .expect("different base should reset and clone base B");
+    let fingerprints = store
+        .code_file_fingerprints_for_scope(target_scope.to_owned())
+        .await
+        .expect("target fingerprints should load");
+    let paths = fingerprints
+        .into_iter()
+        .map(|fingerprint| fingerprint.path)
+        .collect::<Vec<_>>();
+
+    assert_eq!(restarted.committed_file_count, 0);
+    assert_eq!(restarted.batch_count, 0);
+    assert_eq!(paths, vec!["src/b-only.rs"]);
+}

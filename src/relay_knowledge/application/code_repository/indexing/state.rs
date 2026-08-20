@@ -332,7 +332,6 @@ pub(super) async fn plan_full_index_reuse(
         }
 
         let mut incremental = request.clone();
-        incremental.repository.ref_selector = target_commit.clone();
         incremental.repository.path_filters = path_filters.clone();
         incremental.repository.language_filters = language_filters.clone();
         incremental.mode = CodeIndexMode::incremental(ancestor, target_commit.clone())

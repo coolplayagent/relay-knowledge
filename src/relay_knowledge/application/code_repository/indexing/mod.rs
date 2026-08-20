@@ -546,8 +546,10 @@ impl RelayKnowledgeService {
             {
                 request.repository.ref_selector = base_commit.to_owned();
             }
-        } else {
+        } else if task.mode == CodeIndexMode::Full {
             request.repository.ref_selector = task.resolved_commit_sha.clone();
+        } else {
+            request.repository.ref_selector = task.ref_selector.clone();
         }
         let lease_context = CodeIndexTaskLeaseContext {
             task_id: task.task_id.clone(),
