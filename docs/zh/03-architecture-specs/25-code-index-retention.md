@@ -36,6 +36,8 @@
 
 Candidate discovery（候选发现）在一次调度事务中通过 `(activity_ms, repository_id)` 顺序索引，从持久化 `code_repository_retention_activity`（仓库保留活动）投影中最多读取 64 条记录。可能影响仓库 current scope 或成功发布时间的变更会把仓库加入 `code_repository_retention_activity_dirty`（仓库保留活动脏队列）。每次调度事务在扫描前通过有索引的点查询最多刷新 64 个脏仓库；如果仍有脏数据，维护保持 pending（待处理），候选选择会等待，而不会读取陈旧投影。Schema marker（模式标记）版本 6 会在升级时创建并回填该投影。
 
+Dirty activity（脏活动）的入队通过显式的索引存在性检查保证幂等，而不依赖 trigger（触发器）局部的冲突策略。SQLite 可能把外层语句的 UPSERT 冲突策略传播到 trigger 语句，因此相同 tree 的 commit 发布和终态任务复用不能依赖 `INSERT OR IGNORE` 对同一仓库的 dirty marker 去重。Schema marker 版本 7 会在下次打开数据库时替换旧版 dirty-activity trigger 定义，使现有数据库无需重写已索引事实即可获得该不变量。
+
 如果候选页不足以判断是否超过上限，调度器会持久化单例 scan cursor（扫描游标）、合格数量、最旧候选和 catalog revision（目录修订号），并在后续维护轮次或进程重启后从游标继续。上限改变、已有活动父任务、投影刷新，或影响候选排序和资格的目录变更，都会丢弃游标并从第一页重启。未完成扫描或活动刷新属于活动维护，因此 `repo index-worker` 会持续报告 `maintenance_active=true`，直到处理完成或创建父任务。创建父任务前会重新校验所选仓库的 current scope、retirement state（退役状态）和用户管理 set 成员关系。
 
 持久化父任务可以跨进程重启恢复。Maintenance pass 会加载父任务，并通过既有 scope-GC state machine（作用域垃圾回收状态机）选择和执行子 scope。仓库模式会有意跳过普通 active/latest-two protection（活动/最近两个保护），以清理 cutoff 前已存在的 scope。
@@ -71,6 +73,7 @@ cutoff（截止点）之后的成功 scope 会先跨 task（任务）与 checkpo
 - 默认值为 10，正数 override（覆盖值）生效，0 被拒绝；
 - 用户管理 set 成员被排除，automatic-workspace 成员仍计数，且不受 alias 或候选分页位置影响；
 - 活动投影刷新和候选发现每次调度事务都限制为 64 条记录，候选读取使用活动顺序索引且不产生临时排序，并可在重新打开 SQLite 后续跑；
+- 外层 scope/task UPSERT 内重复 dirty activity 入队仍保持幂等，包括相同 tree 的 commit 发布；
 - 选择成功发布时间最旧的合格仓库；
 - 重新打开 SQLite 后父任务和子任务可恢复；
 - 首轮逻辑退役先于物理删除；

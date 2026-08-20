@@ -8,7 +8,7 @@ use super::introspection::{
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-pub(super) const SCHEMA_MARKER_VERSION: i64 = 6;
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 7;
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
