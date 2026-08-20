@@ -19,6 +19,27 @@ fn defaults_workspace_detection_when_absent() {
         request.workspace_detection,
         CodeWorkspaceDetectionConfig::default()
     );
+    assert!(!request.reuse_historical);
+}
+
+#[test]
+fn parses_historical_reuse_flag() {
+    let mut payload = payload();
+    payload["reuse_historical"] = json!(true);
+
+    let request = code_index_request(&payload, CodeIndexMode::Full).expect("request");
+
+    assert!(request.reuse_historical);
+}
+
+#[test]
+fn rejects_non_boolean_historical_reuse_flag() {
+    let mut payload = payload();
+    payload["reuse_historical"] = json!("yes");
+
+    let error = code_index_request(&payload, CodeIndexMode::Full).expect_err("error");
+
+    assert!(error.message.contains("reuse_historical must be a boolean"));
 }
 
 #[test]

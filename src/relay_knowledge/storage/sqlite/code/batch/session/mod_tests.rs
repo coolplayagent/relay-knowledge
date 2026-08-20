@@ -399,6 +399,91 @@ async fn incremental_symbol_cardinality_change_refinalizes_unchanged_calls() {
 }
 
 #[tokio::test]
+async fn incremental_module_addition_refinalizes_unchanged_side_effect_imports() {
+    let store = registered_store().await;
+    let base_scope = "git_snapshot:import-base";
+    let base_session = session_for_scope(base_scope, 5);
+    let mut base_files = vec![file(
+        base_scope,
+        "importer-file",
+        "src/importer.ts",
+        "typescript",
+        CodeParseStatus::Parsed,
+    )];
+    for index in 1..=4 {
+        base_files.push(file(
+            base_scope,
+            &format!("extra-{index}-file"),
+            &format!("src/extra-{index}.ts"),
+            "typescript",
+            CodeParseStatus::Parsed,
+        ));
+    }
+    store
+        .begin_code_index_session(base_session.clone())
+        .await
+        .expect("base session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: base_files,
+            imports: vec![import(
+                base_scope,
+                "side-effect-import",
+                "importer-file",
+                "src/importer.ts",
+                "import './new_module';",
+            )],
+            ..batch(base_scope, 1)
+        })
+        .await
+        .expect("base batch should persist");
+    store
+        .finalize_code_index_session(base_session)
+        .await
+        .expect("base session should finalize");
+    assert_eq!(
+        import_resolution_state(&store, base_scope, "side-effect-import").await,
+        "unresolved"
+    );
+
+    let target_scope = "git_snapshot:import-target";
+    let mut incremental = session_for_scope(target_scope, 6);
+    incremental.base_resolved_commit_sha = Some("commit".to_owned());
+    incremental.resolved_commit_sha = "commit-2".to_owned();
+    incremental.tree_hash = "tree-2".to_owned();
+    incremental.full_replace = false;
+    incremental.changed_path_count = 1;
+    incremental.skipped_unchanged_count = 5;
+    incremental.changed_paths = vec!["src/new_module.ts".to_owned()];
+    store
+        .begin_code_index_session(incremental.clone())
+        .await
+        .expect("incremental session should clone its base");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                target_scope,
+                "new-module-file",
+                "src/new_module.ts",
+                "typescript",
+                CodeParseStatus::Parsed,
+            )],
+            ..batch(target_scope, 1)
+        })
+        .await
+        .expect("incremental batch should persist");
+    store
+        .finalize_code_index_session(incremental)
+        .await
+        .expect("incremental session should finalize");
+
+    assert_eq!(
+        import_resolution_state(&store, target_scope, "side-effect-import").await,
+        "resolved"
+    );
+}
+
+#[tokio::test]
 async fn checkpointed_batches_finalize_python_import_edges() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:python-imports";
@@ -896,6 +981,28 @@ async fn reference_resolution_rows(
         })
         .await
         .expect("reference rows should load")
+}
+
+async fn import_resolution_state(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+    import_id: &str,
+) -> String {
+    let source_scope = source_scope.to_owned();
+    let import_id = import_id.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "SELECT resolution_state FROM code_repository_imports
+                     WHERE source_scope = ?1 AND import_id = ?2",
+                    rusqlite::params![source_scope, import_id],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("import resolution should load")
 }
 
 pub(super) fn file(

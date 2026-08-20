@@ -4,9 +4,11 @@
 //! The latter makes unchanged references participate when a name transitions
 //! between unique and ambiguous resolution.
 
+use std::collections::BTreeSet;
+
 use rusqlite::{Transaction, params};
 
-use crate::storage::StorageError;
+use crate::{domain::code_call_targets::call_target_name_candidates, storage::StorageError};
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
@@ -20,6 +22,7 @@ const FALLBACK_FRACTION: usize = 2;
 pub(crate) struct AffectedPaths {
     paths: Vec<String>,
     fallback_to_full_scope: bool,
+    finalize_imports_for_full_scope: bool,
 }
 
 impl AffectedPaths {
@@ -34,11 +37,18 @@ impl AffectedPaths {
         self.paths.iter().map(String::as_str).collect()
     }
 
+    /// Import resolution depends on the complete module/file set, including
+    /// side-effect imports that have no corresponding reference row.
+    pub(crate) fn imports_need_full_scope(&self) -> bool {
+        self.finalize_imports_for_full_scope
+    }
+
     /// Constructs an instance that signals full-scope finalization.
     pub(crate) fn full_scope() -> Self {
         Self {
             paths: Vec::new(),
             fallback_to_full_scope: true,
+            finalize_imports_for_full_scope: true,
         }
     }
 }
@@ -67,7 +77,13 @@ pub(crate) fn compute(
         .cloned()
         .collect();
 
-    let reference_paths = load_reference_affected_paths(transaction, source_scope, base_scope)?;
+    let changed_symbol_names = load_changed_symbol_names(transaction, source_scope, base_scope)?;
+    let reference_paths = load_reference_affected_paths(
+        transaction,
+        source_scope,
+        base_scope,
+        &changed_symbol_names,
+    )?;
     paths.extend(reference_paths);
 
     paths.sort_unstable();
@@ -80,7 +96,48 @@ pub(crate) fn compute(
     Ok(AffectedPaths {
         paths,
         fallback_to_full_scope: fallback,
+        finalize_imports_for_full_scope: module_file_set_changed(
+            transaction,
+            source_scope,
+            base_scope,
+        )?,
     })
+}
+
+fn load_changed_symbol_names(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    base_scope: &str,
+) -> Result<BTreeSet<String>, StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        WITH base_symbol_counts AS (
+            SELECT name, COUNT(*) AS symbol_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?2
+            GROUP BY name
+        ),
+        current_symbol_counts AS (
+            SELECT name, COUNT(*) AS symbol_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?1
+            GROUP BY name
+        )
+        SELECT base.name
+        FROM base_symbol_counts base
+        LEFT JOIN current_symbol_counts current ON current.name = base.name
+        WHERE current.name IS NULL OR current.symbol_count != base.symbol_count
+        UNION
+        SELECT current.name
+        FROM current_symbol_counts current
+        LEFT JOIN base_symbol_counts base ON base.name = current.name
+        WHERE base.name IS NULL
+        ",
+    )?;
+    let rows = statement.query_map(params![source_scope, base_scope], |row| row.get(0))?;
+
+    rows.collect::<Result<BTreeSet<_>, _>>()
+        .map_err(StorageError::from)
 }
 
 /// Selects paths with a missing target or a name whose symbol cardinality
@@ -89,6 +146,7 @@ fn load_reference_affected_paths(
     transaction: &Transaction<'_>,
     source_scope: &str,
     base_scope: &str,
+    changed_symbol_names: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
     let mut statement = transaction.prepare(
         "
@@ -132,8 +190,53 @@ fn load_reference_affected_paths(
     let rows = statement.query_map(params![source_scope, base_scope], |row| {
         row.get::<_, String>(0)
     })?;
+    let mut paths = rows.collect::<Result<Vec<_>, _>>()?;
 
-    rows.collect::<Result<Vec<_>, _>>()
+    let mut aliases = transaction.prepare(
+        "
+        SELECT path, name
+        FROM code_repository_references
+        WHERE source_scope = ?1 AND kind = 'call'
+        ",
+    )?;
+    let rows = aliases.query_map(params![source_scope], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (path, name) = row?;
+        if call_target_name_candidates(&name, &path)
+            .iter()
+            .skip(1)
+            .any(|candidate| changed_symbol_names.contains(candidate))
+        {
+            paths.push(path);
+        }
+    }
+
+    Ok(paths)
+}
+
+fn module_file_set_changed(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    base_scope: &str,
+) -> Result<bool, StorageError> {
+    transaction
+        .query_row(
+            "
+            SELECT EXISTS (
+                SELECT path FROM code_repository_files WHERE source_scope = ?1
+                EXCEPT
+                SELECT path FROM code_repository_files WHERE source_scope = ?2
+            ) OR EXISTS (
+                SELECT path FROM code_repository_files WHERE source_scope = ?2
+                EXCEPT
+                SELECT path FROM code_repository_files WHERE source_scope = ?1
+            )
+            ",
+            params![source_scope, base_scope],
+            |row| row.get(0),
+        )
         .map_err(StorageError::from)
 }
 

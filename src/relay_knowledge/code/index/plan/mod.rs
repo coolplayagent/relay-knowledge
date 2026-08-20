@@ -58,6 +58,7 @@ pub struct CodeIndexPlan {
 #[derive(Debug, Clone)]
 struct IncrementalPlanData {
     snapshot: CodeIndexSnapshot,
+    rows_by_path: BTreeMap<String, usize>,
     cursor: usize,
 }
 
@@ -84,7 +85,7 @@ impl CodeIndexPlan {
                 (
                     false,
                     snapshot.base_resolved_commit_sha.clone(),
-                    snapshot.files.len(),
+                    snapshot.changed_path_count,
                     snapshot.changed_path_count,
                     snapshot.skipped_unchanged_count,
                     snapshot.deleted_paths.clone(),
@@ -130,8 +131,12 @@ impl CodeIndexPlan {
             if incremental.cursor >= snapshot.files.len() {
                 return Ok((self, None));
             }
-            let batch_end = (incremental.cursor + self.resource_budget.max_files_per_batch)
-                .min(snapshot.files.len());
+            let batch_end = next_incremental_batch_end(
+                &snapshot.files,
+                &incremental.rows_by_path,
+                incremental.cursor,
+                self.resource_budget,
+            );
             let batch_paths: BTreeSet<&str> = snapshot.files[incremental.cursor..batch_end]
                 .iter()
                 .map(|file| file.path.as_str())
@@ -493,6 +498,7 @@ pub fn prepare_incremental_index_plan_with_workspace_detection(
         next_batch_index: 1,
         resource_budget,
         incremental: Some(IncrementalPlanData {
+            rows_by_path: incremental_rows_by_path(&snapshot),
             snapshot,
             cursor: 0,
         }),
@@ -566,6 +572,70 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
         .saturating_add(build.routes.len())
         .saturating_add(build.chunks.len())
         .saturating_add(build.diagnostics.len())
+}
+
+fn incremental_rows_by_path(snapshot: &CodeIndexSnapshot) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for path in snapshot.files.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.symbols.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.references.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.imports.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.dependencies.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.feature_flags.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.routes.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.chunks.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.diagnostics.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    counts
+}
+
+fn increment_path_count(counts: &mut BTreeMap<String, usize>, path: &str) {
+    let count = counts.entry(path.to_owned()).or_default();
+    *count = count.saturating_add(1);
+}
+
+fn next_incremental_batch_end(
+    files: &[crate::domain::RepositoryCodeFileRecord],
+    rows_by_path: &BTreeMap<String, usize>,
+    cursor: usize,
+    budget: CodeIndexResourceBudget,
+) -> usize {
+    let mut end = cursor;
+    let mut bytes = 0usize;
+    let mut rows = 0usize;
+    while end < files.len() {
+        let file = &files[end];
+        let next_bytes = bytes.saturating_add(file.byte_len);
+        let next_rows = rows.saturating_add(rows_by_path.get(&file.path).copied().unwrap_or(1));
+        if end > cursor
+            && (end - cursor >= budget.max_files_per_batch
+                || next_bytes > budget.max_bytes_per_batch
+                || next_rows > budget.max_rows_per_batch)
+        {
+            break;
+        }
+        bytes = next_bytes;
+        rows = next_rows;
+        end += 1;
+    }
+    end
 }
 
 #[cfg(test)]

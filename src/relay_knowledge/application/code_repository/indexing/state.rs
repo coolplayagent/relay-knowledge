@@ -282,6 +282,9 @@ pub(super) async fn plan_full_index_reuse(
         if base_scope.stale || !code_scope_matches_current_fact_version(&base_scope) {
             continue;
         }
+        if !scope_filters_match_incremental_clone(&base_scope, &path_filters, &language_filters) {
+            continue;
+        }
         let fits_budget = run_blocking_code({
             let root = root.clone();
             let ancestor = ancestor.clone();
@@ -301,6 +304,41 @@ pub(super) async fn plan_full_index_reuse(
     }
 
     Ok(FullIndexReusePlan::Full)
+}
+
+fn scope_filters_match_incremental_clone(
+    scope: &CodeRepositoryStatus,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> bool {
+    canonical_path_filters(&scope.path_filters) == canonical_path_filters(path_filters)
+        && canonical_filter_values(&scope.language_filters)
+            == canonical_filter_values(language_filters)
+}
+
+fn canonical_path_filters(filters: &[String]) -> Vec<String> {
+    let normalized = filters.iter().map(|filter| {
+        let mut value = filter.trim_end_matches(['/', '\\']);
+        while let Some(stripped) = value.strip_prefix("./") {
+            value = stripped;
+        }
+        value.to_owned()
+    });
+    canonical_filter_values_from_iter(normalized)
+}
+
+fn canonical_filter_values(filters: &[String]) -> Vec<String> {
+    canonical_filter_values_from_iter(filters.iter().cloned())
+}
+
+fn canonical_filter_values_from_iter(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut canonical = Vec::new();
+    for value in values {
+        if !canonical.contains(&value) {
+            canonical.push(value);
+        }
+    }
+    canonical
 }
 
 async fn active_index_task_for_target(

@@ -23,8 +23,18 @@ pub(in crate::interfaces::web) fn code_index_request(
         mode,
         workspace_detection: workspace_detection_config(payload)?,
         freshness_policy: FreshnessPolicy::AllowStale,
-        reuse_historical: false,
+        reuse_historical: reuse_historical(payload)?,
     })
+}
+
+fn reuse_historical(payload: &Value) -> Result<bool, WebError> {
+    match payload.get("reuse_historical") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(enabled)) => Ok(*enabled),
+        Some(_) => Err(WebError::bad_request(
+            "reuse_historical must be a boolean".to_owned(),
+        )),
+    }
 }
 
 fn workspace_detection_config(payload: &Value) -> Result<CodeWorkspaceDetectionConfig, WebError> {

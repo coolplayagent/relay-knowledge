@@ -34,3 +34,33 @@ fn status_for_scope() -> CodeRepositoryStatus {
         degraded_reason: None,
     }
 }
+
+#[test]
+fn historical_scope_filters_must_match_incremental_clone() {
+    let canonical = CodeRepositoryStatus {
+        path_filters: vec!["./src/".to_owned(), "src".to_owned()],
+        language_filters: vec!["rust".to_owned(), "rust".to_owned()],
+        ..status_for_scope()
+    };
+    let broader = CodeRepositoryStatus {
+        path_filters: Vec::new(),
+        language_filters: vec!["rust".to_owned()],
+        ..status_for_scope()
+    };
+
+    assert!(scope_filters_match_incremental_clone(
+        &canonical,
+        &["src".to_owned()],
+        &["rust".to_owned()],
+    ));
+    assert!(!scope_filters_match_incremental_clone(
+        &broader,
+        &["src".to_owned()],
+        &["rust".to_owned()],
+    ));
+    assert!(!scope_filters_match_incremental_clone(
+        &canonical,
+        &["src".to_owned()],
+        &["go".to_owned()],
+    ));
+}

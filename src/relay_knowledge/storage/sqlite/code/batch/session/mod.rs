@@ -262,20 +262,36 @@ fn finalize_session_once(
             },
         )?;
         let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::RESOLVE_IMPORTS,
-            fence,
-            |transaction| {
-                finalize::phases::resolve_imports_for_paths(
-                    transaction,
-                    &session.source_scope,
-                    &path_refs,
-                    &mut symbol_cache,
-                )
-            },
-        )?;
+        if affected_paths.imports_need_full_scope() {
+            run_finalize_phase(
+                connection,
+                &session.source_scope,
+                finalize::phases::RESOLVE_IMPORTS,
+                fence,
+                |transaction| {
+                    finalize::phases::resolve_imports(
+                        transaction,
+                        &session.source_scope,
+                        &mut symbol_cache,
+                    )
+                },
+            )?;
+        } else {
+            run_finalize_phase(
+                connection,
+                &session.source_scope,
+                finalize::phases::RESOLVE_IMPORTS,
+                fence,
+                |transaction| {
+                    finalize::phases::resolve_imports_for_paths(
+                        transaction,
+                        &session.source_scope,
+                        &path_refs,
+                        &mut symbol_cache,
+                    )
+                },
+            )?;
+        }
         run_finalize_phase(
             connection,
             &session.source_scope,
