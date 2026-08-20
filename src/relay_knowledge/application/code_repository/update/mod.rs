@@ -45,6 +45,7 @@ impl RelayKnowledgeService {
                 mode,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context,
         )

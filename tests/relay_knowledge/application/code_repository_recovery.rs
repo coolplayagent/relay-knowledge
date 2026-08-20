@@ -190,6 +190,7 @@ async fn queue_index_task(
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context(context_name),
         )

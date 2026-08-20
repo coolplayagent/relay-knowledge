@@ -518,6 +518,7 @@ async fn register_and_index(service: &RelayKnowledgeService, repo: &FixtureRepo,
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context(&format!("index-{alias}")),
         )

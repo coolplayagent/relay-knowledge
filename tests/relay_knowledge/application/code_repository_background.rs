@@ -26,6 +26,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-background-index"),
         )
@@ -38,6 +39,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-background-index-duplicate"),
         )
@@ -64,6 +66,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-background-index-moved-head"),
         )
@@ -161,6 +164,7 @@ async fn background_index_prunes_scopes_beyond_active_and_recent_budget() {
                     mode: CodeIndexMode::Full,
                     workspace_detection: Default::default(),
                     freshness_policy: FreshnessPolicy::AllowStale,
+                    reuse_historical: false,
                 },
                 context("start-retention"),
             )
@@ -217,6 +221,7 @@ async fn managed_watcher_reconciles_a_new_commit_without_an_explicit_update() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-commit-loop-base"),
         )
@@ -396,6 +401,7 @@ async fn repository_status_reports_checkpoint_without_active_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-orphan-checkpoint-baseline"),
         )
@@ -478,6 +484,7 @@ async fn repository_status_recovers_expired_code_index_task_lease() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-expired-lease"),
         )
@@ -532,6 +539,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-shared-store-running"),
         )
@@ -557,6 +565,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-shared-store-duplicate"),
         )
@@ -580,6 +589,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-shared-store-moved-head"),
         )
@@ -631,6 +641,7 @@ async fn code_index_health_isolation_cases_health_and_query_respond_during_full_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-health-isolation-initial"),
         )
@@ -666,6 +677,7 @@ async fn code_index_health_isolation_cases_health_and_query_respond_during_full_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-health-isolation-large"),
         )
@@ -734,6 +746,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-filtered-a"),
         )
@@ -749,6 +762,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-filtered-b"),
         )
@@ -764,6 +778,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-stale-filtered-a"),
         )
@@ -834,6 +849,7 @@ async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-unmatched-a"),
         )
@@ -849,6 +865,7 @@ async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-stale-unmatched-a"),
         )
@@ -898,6 +915,7 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-feature-flag-a"),
         )
@@ -916,6 +934,7 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-feature-flag-b"),
         )
@@ -934,6 +953,7 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-stale-feature-flag-a"),
         )

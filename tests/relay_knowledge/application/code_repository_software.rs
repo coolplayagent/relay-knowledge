@@ -47,6 +47,7 @@ serde = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-ref"),
         )
@@ -102,6 +103,7 @@ serde = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-fast-first"),
         )
@@ -116,6 +118,7 @@ serde = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-fast-second"),
         )
@@ -181,6 +184,7 @@ tokio = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-old"),
         )
@@ -193,6 +197,7 @@ tokio = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-head"),
         )
@@ -252,6 +257,7 @@ serde = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-filter"),
         )
@@ -308,6 +314,7 @@ serde = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-active-old"),
         )
@@ -336,6 +343,7 @@ tokio = "1"
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("queue-software-active-new"),
         )
@@ -394,6 +402,7 @@ async fn software_projection_links_document_topics_config_and_code_files() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-software-doc-config"),
         )
@@ -447,6 +456,7 @@ async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-old-topic"),
         )
@@ -476,6 +486,7 @@ async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-new-topic"),
         )

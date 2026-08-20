@@ -143,6 +143,7 @@ async fn register_and_index_with_options(
                 mode: CodeIndexMode::Full,
                 workspace_detection,
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context(&format!("index-{alias}")),
         )
@@ -759,6 +760,7 @@ func Consume() int {
                 mode: CodeIndexMode::Full,
                 workspace_detection: CodeWorkspaceDetectionConfig::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("auto-workspace-disabled-reindex"),
         )

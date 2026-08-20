@@ -134,6 +134,7 @@ async fn register_and_index_fixture(service: &RelayKnowledgeService, repo: &Fixt
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-index", "trace-index"),
         )

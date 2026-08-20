@@ -93,6 +93,7 @@ pub(super) async fn run_remote(
             alias,
             ref_selector,
             dry_run,
+            reuse_historical: _,
         } => {
             let selected_mode = mode_for_index_ref(ref_selector);
             let mode = if *dry_run {
@@ -112,6 +113,7 @@ pub(super) async fn run_remote(
                 mode,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             };
             if *dry_run {
                 let response = client
@@ -158,6 +160,7 @@ pub(super) async fn run_remote(
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             };
             let response = client
                 .post_repository::<_, CodeRepositoryScopePreviewResponse>(

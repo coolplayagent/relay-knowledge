@@ -329,7 +329,11 @@ impl RelayKnowledgeService {
                 .index_start_response_from_task(&store, status, task, requested_ref, &context)
                 .await;
         }
-        match plan_full_index_reuse(&store, &status, &request).await? {
+        match if request.reuse_historical {
+            plan_full_index_reuse(&store, &status, &request).await?
+        } else {
+            FullIndexReusePlan::Full
+        } {
             FullIndexReusePlan::ActiveTask(task) => {
                 return self
                     .index_start_response_from_task(

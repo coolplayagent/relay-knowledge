@@ -81,6 +81,7 @@ async fn git_fresh_filtered_full_index_uses_scope_generated_symbol_counts() {
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::WaitUntilFresh,
+        reuse_historical: false,
     };
 
     register_fixture_repo(&service, &repo, "register-git-filtered-counts").await;
@@ -132,6 +133,7 @@ async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical: false,
     };
 
     register_fixture_repo(&service, &repo, "register-git-active-duplicate-fast-path").await;
@@ -185,6 +187,7 @@ async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical: false,
     };
     reset_tracked_entries_call_count_for_root(observed_root.clone());
     service
@@ -207,6 +210,7 @@ async fn duplicate_active_filesystem_full_index_resolves_live_snapshot_before_re
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical: false,
     };
 
     register_fixture_source(&service, &source, "register-filesystem-active-current-ref").await;
@@ -262,6 +266,7 @@ async fn queued_worktree_overlay_task_pins_payload_to_queued_base() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("start-queued-overlay-pinned-base"),
         )
@@ -300,6 +305,7 @@ async fn worktree_overlay_requires_indexed_head_base_scope() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-worktree-without-base"),
         )
@@ -339,6 +345,7 @@ async fn clean_worktree_overlay_query_uses_persisted_worktree_scope() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-clean-worktree-overlay"),
         )
@@ -393,6 +400,7 @@ async fn start_worktree_overlay_queues_task_and_query_revalidates_worktree() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-worktree-overlay-task"),
         )
@@ -492,6 +500,7 @@ async fn worktree_overlay_freshness_uses_persisted_scope_filters() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-filtered-worktree-base"),
         )
@@ -508,6 +517,7 @@ async fn worktree_overlay_freshness_uses_persisted_scope_filters() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-filtered-worktree-overlay"),
         )
@@ -633,6 +643,7 @@ async fn allow_stale_query_reports_pending_freshness_and_source_read_requirement
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-code-query-pending-refresh"),
         )
@@ -719,6 +730,7 @@ async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-unmatched-active-head"),
         )

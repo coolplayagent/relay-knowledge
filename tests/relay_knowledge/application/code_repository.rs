@@ -68,6 +68,7 @@ fn run_worker() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index"),
         )
@@ -162,6 +163,7 @@ pub fn retry_policy_v2() -> u32 {
                     .expect("incremental mode should validate"),
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("update"),
         )
@@ -239,6 +241,7 @@ SELECT id FROM users;
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-sql-schema"),
         )
@@ -330,6 +333,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-incremental-base"),
         )
@@ -347,6 +351,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
                     .expect("incremental mode should validate"),
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-current-base"),
         )
@@ -364,6 +369,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
                     .expect("incremental mode should validate"),
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-persisted-base"),
         )
@@ -401,6 +407,7 @@ async fn full_index_automatically_reuses_nearest_indexed_first_parent() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-full-history-base"),
         )
@@ -421,6 +428,7 @@ async fn full_index_automatically_reuses_nearest_indexed_first_parent() {
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::WaitUntilFresh,
+        reuse_historical: false,
     };
     let first_start = service
         .start_code_repository_index(request.clone(), context("start-full-history-reuse"))
@@ -478,6 +486,7 @@ async fn full_index_falls_back_when_ancestor_delta_exceeds_budget() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-full-history-budget-base"),
         )
@@ -496,6 +505,7 @@ async fn full_index_falls_back_when_ancestor_delta_exceeds_budget() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("start-full-history-budget"),
         )
@@ -527,6 +537,7 @@ async fn duplicate_root_registration_preserves_existing_aliases() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-primary-alias"),
         )
@@ -620,6 +631,7 @@ async fn health_graph_code_counters_include_repository_totals() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-health-totals"),
         )
@@ -659,6 +671,7 @@ async fn full_index_reuses_fresh_matching_scope_without_rebuilding() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-full-noop-first"),
         )
@@ -671,6 +684,7 @@ async fn full_index_reuses_fresh_matching_scope_without_rebuilding() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-full-noop-second"),
         )
@@ -701,6 +715,7 @@ async fn repository_report_does_not_run_latency_samples_by_default() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-report-fast"),
         )
@@ -755,6 +770,7 @@ pub fn caller_missing() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-unresolved-callee"),
         )
@@ -810,6 +826,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-overlay"),
         )
@@ -827,6 +844,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("overlay"),
         )
@@ -893,6 +911,7 @@ async fn git_snapshot_queries_remain_isolated_after_indexing_another_branch() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-branch-a"),
         )
@@ -905,6 +924,7 @@ async fn git_snapshot_queries_remain_isolated_after_indexing_another_branch() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-branch-b"),
         )
@@ -979,6 +999,7 @@ async fn same_tree_hash_branches_reuse_scope_but_preserve_requested_ref_audit() 
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-same-tree-a"),
         )

@@ -23,6 +23,7 @@ pub(in crate::interfaces::web) fn code_index_request(
         mode,
         workspace_detection: workspace_detection_config(payload)?,
         freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical: false,
     })
 }
 

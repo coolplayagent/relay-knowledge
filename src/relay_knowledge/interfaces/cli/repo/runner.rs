@@ -80,6 +80,7 @@ pub async fn run_repo(
             alias,
             ref_selector,
             dry_run,
+            reuse_historical,
         } => {
             let selected_mode = mode_for_index_ref(&ref_selector);
             let mode = if dry_run {
@@ -93,6 +94,7 @@ pub async fn run_repo(
                 mode,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical,
             };
             if dry_run {
                 let response = service
@@ -164,6 +166,7 @@ pub async fn run_repo(
                         mode: CodeIndexMode::Full,
                         workspace_detection: Default::default(),
                         freshness_policy: FreshnessPolicy::AllowStale,
+                        reuse_historical: false,
                     },
                     context,
                 )

@@ -49,6 +49,7 @@ async fn default_src_registration_indexes_discovered_external_source_roots() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index"),
         )

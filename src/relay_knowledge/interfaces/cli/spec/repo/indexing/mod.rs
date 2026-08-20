@@ -5,7 +5,7 @@ use super::super::{CliCommandSpec, CommandEffect, arg, command_syntax, opt};
 pub(in crate::interfaces::cli::spec) fn repo_index() -> CliCommandSpec {
     command!(
         &["repo", "index"],
-        "relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset]",
+        "relay-knowledge repo index <alias> [--ref <ref>] [--dry-run|--reset] [--reuse-historical]",
         "Index a registered repository ref.",
         "code.repo.index",
         CommandEffect::WritesIndexes,
@@ -45,10 +45,20 @@ pub(in crate::interfaces::cli::spec) fn repo_index() -> CliCommandSpec {
                 None,
                 &[],
             ),
+            opt(
+                "--reuse-historical",
+                None,
+                false,
+                false,
+                "Search historical indexed commits for incremental reuse; omit for a full index.",
+                None,
+                &[],
+            ),
         ],
         &[
             "relay-knowledge repo index core --ref HEAD --format json",
             "relay-knowledge repo index core --ref worktree --format json",
+            "relay-knowledge repo index core --reuse-historical --format json",
             "relay-knowledge repo index core --reset --format json",
         ],
         &[
@@ -57,6 +67,7 @@ pub(in crate::interfaces::cli::spec) fn repo_index() -> CliCommandSpec {
             "`--ref worktree` requires a matching checked-out HEAD base index; run `repo index <alias> --ref HEAD` before the first worktree overlay.",
             "`--ref worktree --dry-run` previews the checked-out HEAD scope used as the overlay base and does not write overlay index state.",
             "`--reset` clears stale task leases and retry state for unfinished repository tasks without deleting completed indexed scopes or reviving terminal dead-letter history.",
+            "`--reuse-historical` searches up to 10 first-parent ancestors for a published scope whose diff fits within the incremental changed-path budget; without this flag `repo index` always performs a full index.",
             "Cold full indexes return a durable task handle and the CLI runs one bounded worker attempt before returning; service mode continues unfinished background tasks and `repo status` reports checkpoints.",
         ],
     )
