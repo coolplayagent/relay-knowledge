@@ -392,7 +392,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
 }
 
 #[tokio::test]
-async fn full_index_automatically_reuses_nearest_indexed_first_parent() {
+async fn full_index_with_historical_reuse_uses_nearest_indexed_first_parent() {
     let repo = FixtureRepo::create("code-full-history-reuse");
     repo.write("src/lib.rs", "pub fn historical_value() -> u32 { 1 }\n");
     repo.git(["add", "."]);
@@ -428,7 +428,7 @@ async fn full_index_automatically_reuses_nearest_indexed_first_parent() {
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::WaitUntilFresh,
-        reuse_historical: false,
+        reuse_historical: true,
     };
     let first_start = service
         .start_code_repository_index(request.clone(), context("start-full-history-reuse"))
@@ -452,7 +452,7 @@ async fn full_index_automatically_reuses_nearest_indexed_first_parent() {
     let completed = service
         .index_code_repository(request, context("run-full-history-reuse"))
         .await
-        .expect("automatic incremental task should run");
+        .expect("opt-in incremental task should run");
 
     assert_eq!(
         completed.summary.base_resolved_commit_sha.as_deref(),
@@ -492,7 +492,7 @@ async fn full_index_falls_back_when_ancestor_delta_exceeds_budget() {
         )
         .await
         .expect("base index should succeed");
-    for index in 0..513 {
+    for index in 0..101 {
         repo.write(&format!("noise/file-{index:04}.txt"), "noise\n");
     }
     repo.git(["add", "."]);
@@ -505,12 +505,12 @@ async fn full_index_falls_back_when_ancestor_delta_exceeds_budget() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
-                reuse_historical: false,
+                reuse_historical: true,
             },
             context("start-full-history-budget"),
         )
         .await
-        .expect("oversized automatic delta should fall back to full indexing");
+        .expect("oversized historical delta should fall back to full indexing");
 
     assert_eq!(
         started
