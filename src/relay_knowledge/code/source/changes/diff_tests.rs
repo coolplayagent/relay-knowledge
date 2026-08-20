@@ -4,6 +4,11 @@ use super::{MAX_GIT_DIFF_CHANGED_PATHS, diff_changes};
 use crate::code::{CodeIndexError, source::change_status::GitChange, test_fixtures::TempGitRepo};
 
 #[test]
+fn explicit_incremental_diff_limit_remains_512_paths() {
+    assert_eq!(MAX_GIT_DIFF_CHANGED_PATHS, 512);
+}
+
+#[test]
 fn diff_changes_reports_detected_renames() {
     let repo = TempGitRepo::create("changes-diff-rename");
     repo.write("src/alpha.rs", "pub fn alpha() {}\n");

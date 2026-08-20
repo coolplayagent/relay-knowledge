@@ -231,16 +231,7 @@ pub(in crate::evaluator) fn evaluate_repository(
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let incremental_command = if incremental_via_full_index {
-            vec![
-                runtime.binary.display().to_string(),
-                "repo".to_owned(),
-                "index".to_owned(),
-                alias.to_owned(),
-                "--ref".to_owned(),
-                incremental.head_ref.clone(),
-                "--format".to_owned(),
-                "json".to_owned(),
-            ]
+            historical_reuse_index_command(&runtime.binary, alias, &incremental.head_ref)
         } else {
             incremental_update_command(
                 &runtime.binary,
@@ -385,6 +376,20 @@ pub(in crate::evaluator) fn evaluate_repository(
     let mut report = repo_report(repo_name, scope, commands, cases, metrics, index_json);
     report.gates = guardrail_gates;
     Ok(report)
+}
+
+fn historical_reuse_index_command(binary: &Path, alias: &str, head_ref: &str) -> Vec<String> {
+    vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "index".to_owned(),
+        alias.to_owned(),
+        "--ref".to_owned(),
+        head_ref.to_owned(),
+        "--reuse-historical".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+    ]
 }
 
 fn isolated_repository_runtime(

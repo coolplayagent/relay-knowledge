@@ -24,3 +24,12 @@ fn repository_update_is_remote_and_never_falls_back_to_local_state() {
     assert!(supports(&action));
     assert!(blocks_local_fallback(&action));
 }
+
+#[test]
+fn repository_index_forwards_historical_reuse_to_remote_request() {
+    let request = remote_index_request("core", "HEAD", false, true, OutputFormat::Json)
+        .expect("remote index request should map");
+
+    assert!(request.reuse_historical);
+    assert_eq!(request.mode, CodeIndexMode::Full);
+}

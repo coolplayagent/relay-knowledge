@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::{
     api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse},
     code::{
-        first_parent_ancestors_bounded, incremental_diff_fits_budget, prepare_full_index_plan,
+        first_parent_ancestors_bounded, historical_reuse_diff_fits_budget, prepare_full_index_plan,
         repository_uses_filesystem_source, resolve_repository_snapshot_with_filters,
     },
     domain::{
@@ -286,7 +286,7 @@ pub(super) async fn plan_full_index_reuse(
             let root = root.clone();
             let ancestor = ancestor.clone();
             let target_commit = target_commit.clone();
-            move || incremental_diff_fits_budget(root, &ancestor, &target_commit)
+            move || historical_reuse_diff_fits_budget(root, &ancestor, &target_commit)
         })
         .await?;
         if !fits_budget {

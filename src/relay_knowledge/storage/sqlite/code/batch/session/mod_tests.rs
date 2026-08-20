@@ -265,6 +265,140 @@ async fn checkpointed_finalize_preserves_reference_resolution_rules() {
 }
 
 #[tokio::test]
+async fn incremental_symbol_cardinality_change_refinalizes_unchanged_calls() {
+    let store = registered_store().await;
+    let base_scope = "git_snapshot:cardinality-base";
+    let base_session = session_for_scope(base_scope, 5);
+    let base_files = vec![
+        file(
+            base_scope,
+            "target-a-file",
+            "src/target-a.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "consumer-file",
+            "src/consumer.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "extra-1-file",
+            "src/extra-1.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "extra-2-file",
+            "src/extra-2.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "extra-3-file",
+            "src/extra-3.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+    ];
+    store
+        .begin_code_index_session(base_session.clone())
+        .await
+        .expect("base session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: base_files,
+            symbols: vec![symbol(
+                base_scope,
+                "shared-a",
+                "target-a-file",
+                "src/target-a.rs",
+                "shared",
+                "rust",
+            )],
+            references: vec![reference(
+                base_scope,
+                "shared-call",
+                "consumer-file",
+                "src/consumer.rs",
+                "shared",
+            )],
+            ..batch(base_scope, 1)
+        })
+        .await
+        .expect("base batch should persist");
+    store
+        .finalize_code_index_session(base_session)
+        .await
+        .expect("base session should finalize");
+
+    let target_scope = "git_snapshot:cardinality-target";
+    let mut incremental = session_for_scope(target_scope, 6);
+    incremental.base_resolved_commit_sha = Some("commit".to_owned());
+    incremental.resolved_commit_sha = "commit-2".to_owned();
+    incremental.tree_hash = "tree-2".to_owned();
+    incremental.full_replace = false;
+    incremental.changed_path_count = 1;
+    incremental.skipped_unchanged_count = 5;
+    incremental.changed_paths = vec!["src/target-b.rs".to_owned()];
+    store
+        .begin_code_index_session(incremental.clone())
+        .await
+        .expect("incremental session should clone its base");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                target_scope,
+                "target-b-file",
+                "src/target-b.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+            )],
+            symbols: vec![symbol(
+                target_scope,
+                "shared-b",
+                "target-b-file",
+                "src/target-b.rs",
+                "shared",
+                "rust",
+            )],
+            ..batch(target_scope, 1)
+        })
+        .await
+        .expect("incremental batch should persist");
+    store
+        .finalize_code_index_session(incremental)
+        .await
+        .expect("incremental session should finalize");
+
+    let references = reference_resolution_rows(&store, target_scope).await;
+    assert_eq!(
+        references.get("shared-call"),
+        Some(&("ambiguous".to_owned(), None, 5_000, "ambiguous".to_owned()))
+    );
+    let call_resolution = store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "SELECT resolution_state, callee_symbol_snapshot_id
+                     FROM code_repository_calls
+                     WHERE source_scope = ?1 AND path = 'src/consumer.rs'",
+                    [target_scope],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("call resolution should load");
+    assert_eq!(call_resolution, ("ambiguous".to_owned(), None));
+}
+
+#[tokio::test]
 async fn checkpointed_batches_finalize_python_import_edges() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:python-imports";

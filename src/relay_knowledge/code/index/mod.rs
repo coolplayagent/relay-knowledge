@@ -50,6 +50,7 @@ pub(in crate::code) const MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS: usize =
     CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
 pub(in crate::code) const MAX_INCREMENTAL_CHANGED_PATHS: usize =
     changes::MAX_GIT_DIFF_CHANGED_PATHS;
+const MAX_HISTORICAL_REUSE_CHANGED_PATHS: usize = 100;
 
 /// Builds a code index snapshot from a clean Git commit or incremental diff.
 pub fn build_index_snapshot(
@@ -250,14 +251,14 @@ pub(crate) fn repository_uses_filesystem_source(
     Ok(source_kind(root_path.as_ref())?.is_filesystem())
 }
 
-/// Checks whether a Git delta fits the atomic incremental publication budget.
-pub(crate) fn incremental_diff_fits_budget(
+/// Checks whether a Git delta fits the stricter full-initialization reuse budget.
+pub(crate) fn historical_reuse_diff_fits_budget(
     root_path: impl AsRef<Path>,
     base_ref: &str,
     head_ref: &str,
 ) -> Result<bool, CodeIndexError> {
     match diff_changes(root_path.as_ref(), base_ref, head_ref) {
-        Ok(_) => Ok(true),
+        Ok(changes) => Ok(changes.len() <= MAX_HISTORICAL_REUSE_CHANGED_PATHS),
         Err(error) if error.is_incremental_changed_path_limit() => Ok(false),
         Err(error) => Err(error),
     }

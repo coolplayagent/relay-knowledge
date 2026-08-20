@@ -6,7 +6,7 @@ use super::super::{
     cleanup::{count_code_rows, delete_scope_index},
     lifecycle::commit_scope,
     report,
-    snapshot::clone_active_scope_for_incremental,
+    snapshot::{clone_active_scope_for_incremental, resolve_incremental_base_scope},
     status, workspace,
 };
 use super::{checkpoint, finalize};
@@ -159,9 +159,17 @@ fn finalize_session_once(
 
     let affected_paths = if !session.full_replace && !session.changed_paths.is_empty() {
         let transaction = connection.transaction()?;
+        let base_scope = resolve_incremental_base_scope(
+            &transaction,
+            &session.repository_id,
+            &session.path_filters,
+            &session.language_filters,
+            session.base_resolved_commit_sha.as_deref(),
+        )?;
         let paths = finalize::affected_paths::compute(
             &transaction,
             &session.source_scope,
+            &base_scope,
             &session.changed_paths,
             &session.deleted_paths,
         )?;

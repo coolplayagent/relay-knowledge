@@ -1,9 +1,8 @@
 //! Computes the set of paths whose edge data needs re-finalization after an
-//! incremental clone.  Stale-reference detection uses a single SQL query that
-//! finds references whose `target_symbol_snapshot_id` no longer exists in the
-//! new scope's symbol table — this catches both forward staleness (a changed
-//! file references a removed symbol) and reverse staleness (an unchanged file
-//! referenced a symbol that was renamed/removed in a changed file).
+//! incremental clone. A single SQL query finds references whose target no
+//! longer exists or whose symbol-name cardinality differs from the base scope.
+//! The latter makes unchanged references participate when a name transitions
+//! between unique and ambiguous resolution.
 
 use rusqlite::{Transaction, params};
 
@@ -47,14 +46,14 @@ impl AffectedPaths {
 /// Computes the affected-path set for an incremental session.
 ///
 /// `changed_paths` and `deleted_paths` come from the session.  The function
-/// additionally queries the database for paths containing stale references
-/// (whose `target_symbol_snapshot_id` does not exist in the new scope's
-/// symbol table).  When the affected set is empty (resumable session) or
-/// exceeds half the total paths in the scope, the result signals full-scope
-/// fallback.
+/// additionally queries the database for paths containing stale references or
+/// references to names whose symbol count changed from `base_scope`. When the
+/// affected set is empty (resumable session) or exceeds half the total paths
+/// in the scope, the result signals full-scope fallback.
 pub(crate) fn compute(
     transaction: &Transaction<'_>,
     source_scope: &str,
+    base_scope: &str,
     changed_paths: &[String],
     deleted_paths: &[String],
 ) -> Result<AffectedPaths, StorageError> {
@@ -68,8 +67,8 @@ pub(crate) fn compute(
         .cloned()
         .collect();
 
-    let stale_paths = load_stale_reference_paths(transaction, source_scope)?;
-    paths.extend(stale_paths);
+    let reference_paths = load_reference_affected_paths(transaction, source_scope, base_scope)?;
+    paths.extend(reference_paths);
 
     paths.sort_unstable();
     paths.dedup();
@@ -84,27 +83,55 @@ pub(crate) fn compute(
     })
 }
 
-/// Selects paths that contain at least one reference whose
-/// `target_symbol_snapshot_id` does not exist in the new scope's symbol
-/// table.  This catches both forward and reverse staleness after clone.
-fn load_stale_reference_paths(
+/// Selects paths with a missing target or a name whose symbol cardinality
+/// changed between the persisted base and the new incremental scope.
+fn load_reference_affected_paths(
     transaction: &Transaction<'_>,
     source_scope: &str,
+    base_scope: &str,
 ) -> Result<Vec<String>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT DISTINCT path
-        FROM code_repository_references
-        WHERE source_scope = ?1
-          AND target_symbol_snapshot_id IS NOT NULL
-          AND target_symbol_snapshot_id NOT IN (
-              SELECT symbol_snapshot_id
-              FROM code_repository_symbols
-              WHERE source_scope = ?1
+        WITH base_symbol_counts AS (
+            SELECT name, COUNT(*) AS symbol_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?2
+            GROUP BY name
+        ),
+        current_symbol_counts AS (
+            SELECT name, COUNT(*) AS symbol_count
+            FROM code_repository_symbols
+            WHERE source_scope = ?1
+            GROUP BY name
+        ),
+        changed_symbol_names AS (
+            SELECT base.name
+            FROM base_symbol_counts base
+            LEFT JOIN current_symbol_counts current ON current.name = base.name
+            WHERE current.name IS NULL OR current.symbol_count != base.symbol_count
+            UNION
+            SELECT current.name
+            FROM current_symbol_counts current
+            LEFT JOIN base_symbol_counts base ON base.name = current.name
+            WHERE base.name IS NULL
+        )
+        SELECT DISTINCT reference.path
+        FROM code_repository_references reference
+        LEFT JOIN code_repository_symbols target
+          ON target.source_scope = reference.source_scope
+         AND target.symbol_snapshot_id = reference.target_symbol_snapshot_id
+        LEFT JOIN changed_symbol_names changed_name ON changed_name.name = reference.name
+        WHERE reference.source_scope = ?1
+          AND (
+              (reference.target_symbol_snapshot_id IS NOT NULL
+               AND target.symbol_snapshot_id IS NULL)
+              OR changed_name.name IS NOT NULL
           )
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| row.get::<_, String>(0))?;
+    let rows = statement.query_map(params![source_scope, base_scope], |row| {
+        row.get::<_, String>(0)
+    })?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)

@@ -258,6 +258,38 @@ pub(in crate::storage::sqlite::code) fn clone_active_scope_for_incremental(
     base_resolved_commit_sha: Option<&str>,
     excluded_paths: &[String],
 ) -> Result<bool, StorageError> {
+    let previous_scope = resolve_incremental_base_scope(
+        transaction,
+        repository_id,
+        path_filters,
+        language_filters,
+        base_resolved_commit_sha,
+    )?;
+    if previous_scope == source_scope {
+        return Ok(false);
+    }
+    delete_scope_index(transaction, source_scope)?;
+    for table in CODE_SCOPE_TABLES {
+        clone_code_table(
+            transaction,
+            table,
+            &previous_scope,
+            source_scope,
+            excluded_paths,
+        )?;
+    }
+    backfill_search_metadata_for_scope(transaction, source_scope)?;
+
+    Ok(!excluded_paths.is_empty())
+}
+
+pub(in crate::storage::sqlite::code) fn resolve_incremental_base_scope(
+    transaction: &rusqlite::Transaction<'_>,
+    repository_id: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+    base_resolved_commit_sha: Option<&str>,
+) -> Result<String, StorageError> {
     let path_filters_json = serde_json::to_string(path_filters)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let language_filters_json = serde_json::to_string(language_filters)
@@ -323,27 +355,11 @@ pub(in crate::storage::sqlite::code) fn clone_active_scope_for_incremental(
             break;
         }
     }
-    let previous_scope = previous_scope.ok_or_else(|| {
+    previous_scope.ok_or_else(|| {
         StorageError::InvalidInput(format!(
             "code repository '{repository_id}' has no matching indexed scope for incremental filters at the current base commit and code fact version"
         ))
-    })?;
-    if previous_scope == source_scope {
-        return Ok(false);
-    }
-    delete_scope_index(transaction, source_scope)?;
-    for table in CODE_SCOPE_TABLES {
-        clone_code_table(
-            transaction,
-            table,
-            &previous_scope,
-            source_scope,
-            excluded_paths,
-        )?;
-    }
-    backfill_search_metadata_for_scope(transaction, source_scope)?;
-
-    Ok(!excluded_paths.is_empty())
+    })
 }
 
 fn clone_code_table(

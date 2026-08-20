@@ -86,7 +86,7 @@ pub(crate) use index::compute_worktree_overlay_identity;
 use index::impact_paths_from_changes;
 #[cfg(test)]
 pub(crate) use index::mutate_next_filesystem_full_snapshot_read;
-pub(crate) use index::{incremental_diff_fits_budget, repository_uses_filesystem_source};
+pub(crate) use index::{historical_reuse_diff_fits_budget, repository_uses_filesystem_source};
 pub(crate) use registration::REGISTRATION_LANGUAGE_FILTER_ERROR;
 pub(crate) use search::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
