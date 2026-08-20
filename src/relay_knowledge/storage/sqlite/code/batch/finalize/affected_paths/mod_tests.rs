@@ -23,7 +23,9 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
     connection
         .execute_batch(
             "
-            CREATE TABLE code_repository_files (source_scope TEXT, path TEXT);
+            CREATE TABLE code_repository_files (
+                source_scope TEXT, path TEXT, language_id TEXT DEFAULT 'rust'
+            );
             CREATE TABLE code_repository_symbols (
                 source_scope TEXT,
                 symbol_snapshot_id TEXT,
@@ -62,15 +64,21 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
 
             INSERT INTO code_repository_imports VALUES
                 ('target', 'src/aliased_import.ts',
-                 'import { Shared as LocalShared } from ''./shared'';');
+                 'import { Shared as LocalShared } from ''./shared'';'),
+                ('target', 'src/aliased_import.py',
+                 'from shared import Shared as LocalShared'),
+                ('target', 'src/AliasedImport.java',
+                 'import static com.example.Shared.Shared;');
 
-            INSERT INTO code_repository_files VALUES
+            INSERT INTO code_repository_files (source_scope, path) VALUES
                 ('base', 'src/new.rs'),
                 ('base', 'src/unique_to_ambiguous.rs'),
                 ('base', 'src/ambiguous_to_unique.rs'),
                 ('base', 'src/ffi_call.rs'),
                 ('base', 'src/metadata_call.rs'),
                 ('base', 'src/aliased_import.ts'),
+                ('base', 'src/aliased_import.py'),
+                ('base', 'src/AliasedImport.java'),
                 ('base', 'src/extra-1.rs'),
                 ('base', 'src/extra-2.rs'),
                 ('base', 'src/extra-3.rs'),
@@ -79,12 +87,18 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('base', 'src/extra-6.rs'),
                 ('base', 'src/extra-7.rs'),
                 ('base', 'src/extra-8.rs'),
+                ('base', 'src/extra-9.rs'),
+                ('base', 'src/extra-10.rs'),
+                ('base', 'src/extra-11.rs'),
+                ('base', 'src/extra-12.rs'),
                 ('target', 'src/new.rs'),
                 ('target', 'src/unique_to_ambiguous.rs'),
                 ('target', 'src/ambiguous_to_unique.rs'),
                 ('target', 'src/ffi_call.rs'),
                 ('target', 'src/metadata_call.rs'),
                 ('target', 'src/aliased_import.ts'),
+                ('target', 'src/aliased_import.py'),
+                ('target', 'src/AliasedImport.java'),
                 ('target', 'src/extra-1.rs'),
                 ('target', 'src/extra-2.rs'),
                 ('target', 'src/extra-3.rs'),
@@ -92,7 +106,18 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('target', 'src/extra-5.rs'),
                 ('target', 'src/extra-6.rs'),
                 ('target', 'src/extra-7.rs'),
-                ('target', 'src/extra-8.rs');
+                ('target', 'src/extra-8.rs'),
+                ('target', 'src/extra-9.rs'),
+                ('target', 'src/extra-10.rs'),
+                ('target', 'src/extra-11.rs'),
+                ('target', 'src/extra-12.rs');
+
+            UPDATE code_repository_files SET language_id = 'typescript'
+            WHERE path = 'src/aliased_import.ts';
+            UPDATE code_repository_files SET language_id = 'python'
+            WHERE path = 'src/aliased_import.py';
+            UPDATE code_repository_files SET language_id = 'java'
+            WHERE path = 'src/AliasedImport.java';
             ",
         )
         .expect("fixture schema should persist");
@@ -111,6 +136,8 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
     assert_eq!(
         affected.path_refs(),
         vec![
+            "src/AliasedImport.java",
+            "src/aliased_import.py",
             "src/aliased_import.ts",
             "src/ambiguous_to_unique.rs",
             "src/ffi_call.rs",
@@ -127,7 +154,9 @@ fn module_file_set_changes_require_full_import_finalization() {
     connection
         .execute_batch(
             "
-            CREATE TABLE code_repository_files (source_scope TEXT, path TEXT);
+            CREATE TABLE code_repository_files (
+                source_scope TEXT, path TEXT, language_id TEXT DEFAULT 'rust'
+            );
             CREATE TABLE code_repository_symbols (
                 source_scope TEXT, symbol_snapshot_id TEXT, name TEXT,
                 kind TEXT, signature TEXT
@@ -139,7 +168,7 @@ fn module_file_set_changes_require_full_import_finalization() {
             CREATE TABLE code_repository_imports (
                 source_scope TEXT, path TEXT, module TEXT
             );
-            INSERT INTO code_repository_files VALUES
+            INSERT INTO code_repository_files (source_scope, path) VALUES
                 ('base', 'src/importer.rs'),
                 ('target', 'src/importer.rs'),
                 ('target', 'src/new_module.rs'),

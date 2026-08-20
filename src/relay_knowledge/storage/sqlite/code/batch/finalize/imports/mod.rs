@@ -10,7 +10,7 @@ use super::{
 };
 use crate::storage::StorageError;
 
-mod languages;
+pub(super) mod languages;
 mod module_paths;
 mod specifier;
 mod symbol_targets;

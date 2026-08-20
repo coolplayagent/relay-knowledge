@@ -104,3 +104,10 @@ fn directory_has_java_files(
         .take_while(|(path, _)| prefix.is_empty() || path.starts_with(&prefix))
         .any(|(path, _)| path.ends_with(".java"))
 }
+
+pub(super) fn imported_symbol_names(statement: &str) -> Vec<String> {
+    match JavaImportRequest::parse(statement) {
+        Some(JavaImportRequest::StaticMember { member, .. }) => vec![member],
+        _ => Vec::new(),
+    }
+}

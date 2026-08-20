@@ -101,17 +101,26 @@ fn load_named_import_affected_paths(
     source_scope: &str,
     changed_symbol_names: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
-    let mut statement = transaction
-        .prepare("SELECT path, module FROM code_repository_imports WHERE source_scope = ?1")?;
+    let mut statement = transaction.prepare(
+        "SELECT imports.path, files.language_id, imports.module
+         FROM code_repository_imports AS imports
+         JOIN code_repository_files AS files
+           ON files.source_scope = imports.source_scope AND files.path = imports.path
+         WHERE imports.source_scope = ?1",
+    )?;
     let rows = statement.query_map(params![source_scope], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     let mut paths = Vec::new();
     for row in rows {
-        let (path, statement) = row?;
-        if super::imports::typescript::named_import_bindings(&statement)
+        let (path, language, statement) = row?;
+        if super::imports::languages::symbol_dependency_names(language.as_deref(), &statement)
             .iter()
-            .any(|binding| changed_symbol_names.contains(&binding.imported_name))
+            .any(|name| changed_symbol_names.contains(name))
         {
             paths.push(path);
         }

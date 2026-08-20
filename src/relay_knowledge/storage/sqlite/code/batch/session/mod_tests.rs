@@ -402,7 +402,7 @@ async fn incremental_symbol_cardinality_change_refinalizes_unchanged_calls() {
 async fn incremental_symbol_change_refinalizes_unchanged_named_import_aliases() {
     let store = registered_store().await;
     let base_scope = "git_snapshot:named-import-base";
-    let base_session = session_for_scope(base_scope, 6);
+    let base_session = session_for_scope(base_scope, 10);
     let mut base_files = vec![
         file(
             base_scope,
@@ -425,8 +425,22 @@ async fn incremental_symbol_change_refinalizes_unchanged_named_import_aliases() 
             "typescript",
             CodeParseStatus::Parsed,
         ),
+        file(
+            base_scope,
+            "python-consumer-file",
+            "src/consumer.py",
+            "python",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "python-target-file",
+            "src/target_a.py",
+            "python",
+            CodeParseStatus::Parsed,
+        ),
     ];
-    for index in 1..=3 {
+    for index in 1..=5 {
         base_files.push(file(
             base_scope,
             &format!("extra-{index}-file"),
@@ -442,28 +456,56 @@ async fn incremental_symbol_change_refinalizes_unchanged_named_import_aliases() 
     store
         .apply_code_index_batch(CodeIndexBatch {
             files: base_files,
-            symbols: vec![symbol(
-                base_scope,
-                "shared-a",
-                "target-a-file",
-                "src/target-a.ts",
-                "Shared",
-                "typescript",
-            )],
-            imports: vec![import(
-                base_scope,
-                "shared-import",
-                "consumer-file",
-                "src/consumer.ts",
-                "import { Shared as LocalShared } from './target-a';",
-            )],
-            references: vec![reference(
-                base_scope,
-                "shared-alias-call",
-                "consumer-file",
-                "src/consumer.ts",
-                "LocalShared",
-            )],
+            symbols: vec![
+                symbol(
+                    base_scope,
+                    "shared-a",
+                    "target-a-file",
+                    "src/target-a.ts",
+                    "Shared",
+                    "typescript",
+                ),
+                symbol(
+                    base_scope,
+                    "python-shared-a",
+                    "python-target-file",
+                    "src/target_a.py",
+                    "Shared",
+                    "python",
+                ),
+            ],
+            imports: vec![
+                import(
+                    base_scope,
+                    "shared-import",
+                    "consumer-file",
+                    "src/consumer.ts",
+                    "import { Shared as LocalShared } from './target-a';",
+                ),
+                import(
+                    base_scope,
+                    "python-shared-import",
+                    "python-consumer-file",
+                    "src/consumer.py",
+                    "from target_a import Shared as LocalShared",
+                ),
+            ],
+            references: vec![
+                reference(
+                    base_scope,
+                    "shared-alias-call",
+                    "consumer-file",
+                    "src/consumer.ts",
+                    "LocalShared",
+                ),
+                reference(
+                    base_scope,
+                    "python-shared-alias-call",
+                    "python-consumer-file",
+                    "src/consumer.py",
+                    "LocalShared",
+                ),
+            ],
             ..batch(base_scope, 1)
         })
         .await
@@ -474,35 +516,54 @@ async fn incremental_symbol_change_refinalizes_unchanged_named_import_aliases() 
         .expect("base session should finalize");
 
     let target_scope = "git_snapshot:named-import-target";
-    let mut incremental = session_for_scope(target_scope, 6);
+    let mut incremental = session_for_scope(target_scope, 10);
     incremental.base_resolved_commit_sha = Some("commit".to_owned());
     incremental.resolved_commit_sha = "commit-2".to_owned();
     incremental.tree_hash = "tree-2".to_owned();
     incremental.full_replace = false;
-    incremental.changed_path_count = 1;
-    incremental.skipped_unchanged_count = 5;
-    incremental.changed_paths = vec!["src/target-a.ts".to_owned()];
+    incremental.changed_path_count = 2;
+    incremental.skipped_unchanged_count = 8;
+    incremental.changed_paths = vec!["src/target-a.ts".to_owned(), "src/target_a.py".to_owned()];
     store
         .begin_code_index_session(incremental.clone())
         .await
         .expect("incremental session should clone its base");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            files: vec![file(
-                target_scope,
-                "target-a-file",
-                "src/target-a.ts",
-                "typescript",
-                CodeParseStatus::Parsed,
-            )],
-            symbols: vec![symbol(
-                target_scope,
-                "replacement-a",
-                "target-a-file",
-                "src/target-a.ts",
-                "Replacement",
-                "typescript",
-            )],
+            files: vec![
+                file(
+                    target_scope,
+                    "target-a-file",
+                    "src/target-a.ts",
+                    "typescript",
+                    CodeParseStatus::Parsed,
+                ),
+                file(
+                    target_scope,
+                    "python-target-file",
+                    "src/target_a.py",
+                    "python",
+                    CodeParseStatus::Parsed,
+                ),
+            ],
+            symbols: vec![
+                symbol(
+                    target_scope,
+                    "replacement-a",
+                    "target-a-file",
+                    "src/target-a.ts",
+                    "Replacement",
+                    "typescript",
+                ),
+                symbol(
+                    target_scope,
+                    "python-replacement-a",
+                    "python-target-file",
+                    "src/target_a.py",
+                    "Replacement",
+                    "python",
+                ),
+            ],
             ..batch(target_scope, 1)
         })
         .await
@@ -515,6 +576,10 @@ async fn incremental_symbol_change_refinalizes_unchanged_named_import_aliases() 
     let references = reference_resolution_rows(&store, target_scope).await;
     assert_eq!(
         references.get("shared-alias-call"),
+        Some(&("unresolved".to_owned(), None, 2_500, "ambiguous".to_owned()))
+    );
+    assert_eq!(
+        references.get("python-shared-alias-call"),
         Some(&("unresolved".to_owned(), None, 2_500, "ambiguous".to_owned()))
     );
 }
