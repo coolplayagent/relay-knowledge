@@ -92,8 +92,14 @@ pub(crate) fn compute(
         changed_paths,
         deleted_paths,
     )?;
-    let reference_paths =
-        load_reference_affected_paths(transaction, source_scope, &changed_symbol_names)?;
+    let replaced_base_symbol_ids =
+        load_base_symbol_ids_for_paths(transaction, base_scope, changed_paths, deleted_paths)?;
+    let reference_paths = load_reference_affected_paths(
+        transaction,
+        source_scope,
+        &changed_symbol_names,
+        &replaced_base_symbol_ids,
+    )?;
     paths.extend(reference_paths);
     paths.extend(load_named_import_affected_paths(
         transaction,
@@ -113,8 +119,10 @@ pub(crate) fn compute(
         changed_paths,
         deleted_paths,
     )?;
-    let fallback =
-        total == 0 || paths.len() >= total / FALLBACK_FRACTION || module_file_set_changed;
+    let fallback = total == 0
+        || paths.len() >= total / FALLBACK_FRACTION
+        || paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS
+        || module_file_set_changed;
 
     Ok(AffectedPaths {
         paths,
@@ -240,13 +248,43 @@ fn load_symbol_distribution(
         .map_err(StorageError::from)
 }
 
+fn load_base_symbol_ids_for_paths(
+    transaction: &Transaction<'_>,
+    base_scope: &str,
+    changed_paths: &[String],
+    deleted_paths: &[String],
+) -> Result<BTreeSet<String>, StorageError> {
+    let impact_paths = changed_paths
+        .iter()
+        .chain(deleted_paths)
+        .collect::<BTreeSet<_>>();
+    if impact_paths.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let placeholders = std::iter::repeat_n("?", impact_paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT symbol_snapshot_id FROM code_repository_symbols
+         WHERE source_scope = ? AND path IN ({placeholders})"
+    );
+    let values = std::iter::once(Value::Text(base_scope.to_owned()))
+        .chain(impact_paths.iter().map(|path| Value::Text((*path).clone())));
+    let mut statement = transaction.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| row.get(0))?;
+
+    rows.collect::<Result<BTreeSet<_>, _>>()
+        .map_err(StorageError::from)
+}
+
 /// Selects paths whose exact or call-alias candidate name changed between scopes.
 fn load_reference_affected_paths(
     transaction: &Transaction<'_>,
     source_scope: &str,
     changed_symbol_names: &BTreeSet<String>,
+    replaced_base_symbol_ids: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
-    if changed_symbol_names.is_empty() {
+    if changed_symbol_names.is_empty() && replaced_base_symbol_ids.is_empty() {
         return Ok(Vec::new());
     }
     let mut paths = BTreeSet::new();
@@ -288,6 +326,31 @@ fn load_reference_affected_paths(
                 }
             }
         }
+    }
+
+    let replaced_ids = replaced_base_symbol_ids.iter().collect::<Vec<_>>();
+    for id_batch in replaced_ids.chunks(NAME_QUERY_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", id_batch.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT path FROM code_repository_references
+             WHERE source_scope = ? AND target_symbol_snapshot_id IN ({placeholders})"
+        );
+        let values = std::iter::once(Value::Text(source_scope.to_owned()))
+            .chain(id_batch.iter().map(|id| Value::Text((*id).clone())));
+        let mut statement = transaction.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values), |row| row.get(0))?;
+        for row in rows {
+            paths.insert(row?);
+            if paths.len() >= MAX_DISCOVERED_AFFECTED_PATHS {
+                return Ok(paths.into_iter().collect());
+            }
+        }
+    }
+
+    if changed_symbol_names.is_empty() {
+        return Ok(paths.into_iter().collect());
     }
 
     let mut alias_statement = transaction.prepare(

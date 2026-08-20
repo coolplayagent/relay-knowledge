@@ -58,6 +58,16 @@ fn creates_search_read_model_and_defers_fact_indexes_until_requested() {
         )
         .expect("search metadata indexes should be inspectable");
     assert_eq!(metadata_index_count, 1);
+    let reference_target_index_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_schema
+             WHERE type = 'index'
+               AND name = 'code_repository_references_target_lookup'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("reference target lookup index should be inspectable");
+    assert_eq!(reference_target_index_count, 1);
     let redundant_scope_kind_index: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'code_repository_search_metadata_scope_kind'",

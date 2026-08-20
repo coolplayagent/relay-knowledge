@@ -62,15 +62,20 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('base', 'base-solo-b', 'Solo', 'function', 'fn Solo(i: i32) {}'),
                 ('base', 'base-stable', 'Stable', 'function_declaration', 'fn Stable();'),
                 ('base', 'base-moved', 'Moved', 'function', 'fn Moved() {}'),
+                ('base', 'base-body-only', 'BodyOnly', 'function', 'fn BodyOnly() {}'),
                 ('target', 'target-shared-a', 'Shared', 'function', 'fn Shared() {}'),
                 ('target', 'target-shared-b', 'Shared', 'function', 'fn Shared(i: i32) {}'),
                 ('target', 'target-solo', 'Solo', 'function', 'fn Solo() {}'),
                 ('target', 'target-stable', 'Stable', 'function', 'fn Stable() {}'),
                 ('target', 'target-moved', 'Moved', 'function', 'fn Moved() {}');
+            INSERT INTO code_repository_symbols
+                (source_scope, symbol_snapshot_id, name, kind, signature) VALUES
+                ('target', 'target-body-only', 'BodyOnly', 'function', 'fn BodyOnly() {}');
 
             UPDATE code_repository_symbols SET path = 'src/new.rs'
             WHERE symbol_snapshot_id IN (
-                'target-shared-b', 'base-solo-b', 'base-stable', 'target-stable'
+                'target-shared-b', 'base-solo-b', 'base-stable', 'target-stable',
+                'base-body-only', 'target-body-only'
             );
             UPDATE code_repository_symbols SET path = 'src/move-old.rs'
             WHERE symbol_snapshot_id = 'base-moved';
@@ -84,6 +89,8 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('target', 'src/metadata_call.rs', 'Stable', 'call', 'target-stable', 'ref-stable');
             INSERT INTO code_repository_references VALUES
                 ('target', 'src/move-consumer.rs', 'Moved', 'type', 'target-moved', 'ref-moved');
+            INSERT INTO code_repository_references VALUES
+                ('target', 'src/body-consumer.rs', 'BodyOnly', 'type', 'base-body-only', 'ref-body');
 
             INSERT INTO code_repository_imports VALUES
                 ('target', 'src/aliased_import.ts',
@@ -135,6 +142,7 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('base', 'src/move-new.rs'),
                 ('base', 'src/move-consumer.rs'),
                 ('base', 'src/moved_import.ts'),
+                ('base', 'src/body-consumer.rs'),
                 ('target', 'src/new.rs'),
                 ('target', 'src/unique_to_ambiguous.rs'),
                 ('target', 'src/ambiguous_to_unique.rs'),
@@ -166,6 +174,8 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('target', 'src/move-consumer.rs');
             INSERT INTO code_repository_files (source_scope, path) VALUES
                 ('target', 'src/moved_import.ts');
+            INSERT INTO code_repository_files (source_scope, path) VALUES
+                ('target', 'src/body-consumer.rs');
 
             UPDATE code_repository_files SET language_id = 'typescript'
             WHERE path = 'src/aliased_import.ts';
@@ -201,6 +211,7 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
             "src/aliased_import.py",
             "src/aliased_import.ts",
             "src/ambiguous_to_unique.rs",
+            "src/body-consumer.rs",
             "src/ffi_call.rs",
             "src/metadata_call.rs",
             "src/move-consumer.rs",
@@ -253,6 +264,66 @@ fn module_file_set_changes_require_full_import_finalization() {
         &[],
     )
     .expect("affected paths should load");
+
+    assert!(affected.is_full_scope());
+}
+
+#[test]
+fn saturated_affected_path_discovery_falls_back_to_full_scope() {
+    let mut connection = Connection::open_in_memory().expect("connection should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_files (
+                source_scope TEXT, path TEXT, language_id TEXT
+            );
+            CREATE TABLE code_repository_symbols (
+                source_scope TEXT, symbol_snapshot_id TEXT, name TEXT,
+                kind TEXT, signature TEXT, path TEXT
+            );
+            CREATE TABLE code_repository_references (
+                source_scope TEXT, path TEXT, name TEXT, kind TEXT,
+                target_symbol_snapshot_id TEXT, reference_id TEXT
+            );
+            CREATE TABLE code_repository_imports (
+                source_scope TEXT, path TEXT, module TEXT, import_id TEXT
+            );
+            CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                source_scope UNINDEXED, document_kind UNINDEXED,
+                record_id UNINDEXED, path UNINDEXED,
+                language_id UNINDEXED, content
+            );
+            WITH RECURSIVE paths(value) AS (
+                SELECT 0 UNION ALL SELECT value + 1 FROM paths WHERE value < 1099
+            )
+            INSERT INTO code_repository_files
+            SELECT 'base', printf('src/file-%04d.rs', value), 'rust' FROM paths;
+            INSERT INTO code_repository_files
+            SELECT 'target', path, language_id
+            FROM code_repository_files WHERE source_scope = 'base';
+            INSERT INTO code_repository_symbols VALUES
+                ('base', 'base-hot', 'Hot', 'function', 'fn Hot() {}', 'src/file-0000.rs'),
+                ('target', 'target-hot', 'Hot', 'type', 'struct Hot;', 'src/file-0000.rs');
+            WITH RECURSIVE reference_rows(value) AS (
+                SELECT 1 UNION ALL SELECT value + 1 FROM reference_rows WHERE value < 513
+            )
+            INSERT INTO code_repository_references
+            SELECT 'target', printf('src/file-%04d.rs', value), 'Hot', 'type',
+                   'base-hot', printf('reference-%04d', value)
+            FROM reference_rows;
+            ",
+        )
+        .expect("large fixture schema should persist");
+    let transaction = connection.transaction().expect("transaction should start");
+
+    let affected = compute(
+        &transaction,
+        "target",
+        "base",
+        &["src/file-0000.rs".to_owned()],
+        &[],
+    )
+    .expect("saturated discovery should complete");
 
     assert!(affected.is_full_scope());
 }

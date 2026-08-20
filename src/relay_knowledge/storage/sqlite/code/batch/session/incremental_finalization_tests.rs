@@ -193,6 +193,118 @@ async fn incremental_symbol_move_refinalizes_unchanged_module_import() {
 }
 
 #[tokio::test]
+async fn incremental_symbol_identity_change_retargets_unchanged_reference() {
+    let store = registered_store().await;
+    let base_scope = "git_snapshot:identity-base";
+    let base_session = session_for_scope(base_scope, 6);
+    let mut base_files = vec![
+        file(
+            base_scope,
+            "target-file",
+            "src/target.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "consumer-file",
+            "src/consumer.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+        ),
+    ];
+    for index in 1..=4 {
+        base_files.push(file(
+            base_scope,
+            &format!("extra-{index}-file"),
+            &format!("src/extra-{index}.rs"),
+            "rust",
+            CodeParseStatus::Parsed,
+        ));
+    }
+    store
+        .begin_code_index_session(base_session.clone())
+        .await
+        .expect("base session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: base_files,
+            symbols: vec![symbol(
+                base_scope,
+                "base-stable-symbol",
+                "target-file",
+                "src/target.rs",
+                "stable",
+                "rust",
+            )],
+            references: vec![reference(
+                base_scope,
+                "stable-reference",
+                "consumer-file",
+                "src/consumer.rs",
+                "stable",
+            )],
+            ..batch(base_scope, 1)
+        })
+        .await
+        .expect("base batch should persist");
+    store
+        .finalize_code_index_session(base_session)
+        .await
+        .expect("base session should finalize");
+
+    let target_scope = "git_snapshot:identity-target";
+    let mut incremental = session_for_scope(target_scope, 6);
+    incremental.base_resolved_commit_sha = Some("commit".to_owned());
+    incremental.resolved_commit_sha = "commit-2".to_owned();
+    incremental.tree_hash = "tree-2".to_owned();
+    incremental.full_replace = false;
+    incremental.changed_path_count = 1;
+    incremental.skipped_unchanged_count = 5;
+    incremental.changed_paths = vec!["src/target.rs".to_owned()];
+    store
+        .begin_code_index_session(incremental.clone())
+        .await
+        .expect("incremental session should clone its base");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                target_scope,
+                "target-file",
+                "src/target.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+            )],
+            symbols: vec![symbol(
+                target_scope,
+                "target-stable-symbol",
+                "target-file",
+                "src/target.rs",
+                "stable",
+                "rust",
+            )],
+            ..batch(target_scope, 1)
+        })
+        .await
+        .expect("incremental batch should persist");
+    store
+        .finalize_code_index_session(incremental)
+        .await
+        .expect("incremental session should finalize");
+
+    let references = reference_resolution_rows(&store, target_scope).await;
+    assert_eq!(
+        references.get("stable-reference"),
+        Some(&(
+            "resolved".to_owned(),
+            Some("target-stable-symbol".to_owned()),
+            8_000,
+            "inferred".to_owned()
+        ))
+    );
+}
+
+#[tokio::test]
 async fn incremental_symbol_cardinality_change_refinalizes_unchanged_calls() {
     let store = registered_store().await;
     let base_scope = "git_snapshot:cardinality-base";
