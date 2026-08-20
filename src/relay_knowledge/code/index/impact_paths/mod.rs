@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::domain::{CodeRepositoryRegistration, CodeRepositorySelector};
 
 use super::{
-    CodeIndexError, MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS, changes::GitChange, git::resolve_ref,
-    scope, scope::path_is_selected_with_layout, source_gitlink,
+    CodeIndexError, changes::GitChange, git::resolve_ref, scope,
+    scope::path_is_selected_with_layout, source_gitlink,
 };
 
 pub(super) fn paths_from_changes_with_gitlinks(
@@ -16,6 +16,7 @@ pub(super) fn paths_from_changes_with_gitlinks(
     changes: Vec<GitChange>,
     path_filters: &[String],
     language_filters: &[String],
+    max_gitlink_expanded_paths: usize,
 ) -> Result<Vec<String>, CodeIndexError> {
     let base_commit = resolve_ref(root, base_ref)?;
     let head_commit = resolve_ref(root, head_ref)?;
@@ -37,7 +38,7 @@ pub(super) fn paths_from_changes_with_gitlinks(
         root,
         base_commit,
         head_commit,
-        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
+        max_gitlink_expanded_paths,
     );
     let mut paths = Vec::new();
     for change in changes {

@@ -38,6 +38,11 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 kind TEXT,
                 target_symbol_snapshot_id TEXT
             );
+            CREATE TABLE code_repository_imports (
+                source_scope TEXT,
+                path TEXT,
+                module TEXT
+            );
 
             INSERT INTO code_repository_symbols VALUES
                 ('base', 'base-shared', 'Shared', 'function', 'fn Shared() {}'),
@@ -55,12 +60,17 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('target', 'src/ffi_call.rs', 'ffi::Shared', 'call', NULL),
                 ('target', 'src/metadata_call.rs', 'Stable', 'call', 'target-stable');
 
+            INSERT INTO code_repository_imports VALUES
+                ('target', 'src/aliased_import.ts',
+                 'import { Shared as LocalShared } from ''./shared'';');
+
             INSERT INTO code_repository_files VALUES
                 ('base', 'src/new.rs'),
                 ('base', 'src/unique_to_ambiguous.rs'),
                 ('base', 'src/ambiguous_to_unique.rs'),
                 ('base', 'src/ffi_call.rs'),
                 ('base', 'src/metadata_call.rs'),
+                ('base', 'src/aliased_import.ts'),
                 ('base', 'src/extra-1.rs'),
                 ('base', 'src/extra-2.rs'),
                 ('base', 'src/extra-3.rs'),
@@ -68,18 +78,21 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
                 ('base', 'src/extra-5.rs'),
                 ('base', 'src/extra-6.rs'),
                 ('base', 'src/extra-7.rs'),
+                ('base', 'src/extra-8.rs'),
                 ('target', 'src/new.rs'),
                 ('target', 'src/unique_to_ambiguous.rs'),
                 ('target', 'src/ambiguous_to_unique.rs'),
                 ('target', 'src/ffi_call.rs'),
                 ('target', 'src/metadata_call.rs'),
+                ('target', 'src/aliased_import.ts'),
                 ('target', 'src/extra-1.rs'),
                 ('target', 'src/extra-2.rs'),
                 ('target', 'src/extra-3.rs'),
                 ('target', 'src/extra-4.rs'),
                 ('target', 'src/extra-5.rs'),
                 ('target', 'src/extra-6.rs'),
-                ('target', 'src/extra-7.rs');
+                ('target', 'src/extra-7.rs'),
+                ('target', 'src/extra-8.rs');
             ",
         )
         .expect("fixture schema should persist");
@@ -98,6 +111,7 @@ fn symbol_cardinality_changes_include_unchanged_reference_paths() {
     assert_eq!(
         affected.path_refs(),
         vec![
+            "src/aliased_import.ts",
             "src/ambiguous_to_unique.rs",
             "src/ffi_call.rs",
             "src/metadata_call.rs",
@@ -121,6 +135,9 @@ fn module_file_set_changes_require_full_import_finalization() {
             CREATE TABLE code_repository_references (
                 source_scope TEXT, path TEXT, name TEXT, kind TEXT,
                 target_symbol_snapshot_id TEXT
+            );
+            CREATE TABLE code_repository_imports (
+                source_scope TEXT, path TEXT, module TEXT
             );
             INSERT INTO code_repository_files VALUES
                 ('base', 'src/importer.rs'),

@@ -49,7 +49,7 @@ pub(in crate::code) const MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS: usize =
     CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
 pub(in crate::code) const MAX_INCREMENTAL_CHANGED_PATHS: usize =
     changes::MAX_GIT_DIFF_CHANGED_PATHS;
-const MAX_HISTORICAL_REUSE_CHANGED_PATHS: usize = 100;
+pub(in crate::code) const MAX_HISTORICAL_REUSE_CHANGED_PATHS: usize = 100;
 
 /// Builds a code index snapshot from a clean Git commit or incremental diff.
 pub fn build_index_snapshot(
@@ -220,6 +220,7 @@ pub fn changed_paths_for_diff_with_filters(
         changes,
         path_filters,
         language_filters,
+        MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS,
     )
 }
 
@@ -255,12 +256,42 @@ pub(crate) fn historical_reuse_diff_fits_budget(
     root_path: impl AsRef<Path>,
     base_ref: &str,
     head_ref: &str,
+    path_filters: &[String],
+    language_filters: &[String],
 ) -> Result<bool, CodeIndexError> {
-    match diff_changes(root_path.as_ref(), base_ref, head_ref) {
-        Ok(changes) => Ok(impacted_path_count(&changes) <= MAX_HISTORICAL_REUSE_CHANGED_PATHS),
-        Err(error) if error.is_incremental_changed_path_limit() => Ok(false),
-        Err(error) => Err(error),
+    let changes = match diff_changes(root_path.as_ref(), base_ref, head_ref) {
+        Ok(changes) => changes,
+        Err(error) if error.is_incremental_changed_path_limit() => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if impacted_path_count(&changes) > MAX_HISTORICAL_REUSE_CHANGED_PATHS {
+        return Ok(false);
     }
+    let copied_sources = changes
+        .iter()
+        .filter_map(|change| match change {
+            GitChange::Copied { old_path, .. } => Some(old_path.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut paths = match impact_paths::paths_from_changes_with_gitlinks(
+        root_path.as_ref(),
+        base_ref,
+        head_ref,
+        changes,
+        path_filters,
+        language_filters,
+        MAX_HISTORICAL_REUSE_CHANGED_PATHS,
+    ) {
+        Ok(paths) => paths,
+        Err(error) if error.is_gitlink_expansion_limit() => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    paths.extend(copied_sources);
+    paths.sort();
+    paths.dedup();
+
+    Ok(paths.len() <= MAX_HISTORICAL_REUSE_CHANGED_PATHS)
 }
 
 pub(in crate::code) fn impacted_path_count(changes: &[GitChange]) -> usize {

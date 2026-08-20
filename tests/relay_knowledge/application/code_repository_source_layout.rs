@@ -119,6 +119,89 @@ async fn default_src_registration_indexes_discovered_external_source_roots() {
     assert!(tests_filtered.is_err());
 }
 
+#[tokio::test]
+async fn historical_reuse_matches_discovered_effective_source_roots() {
+    let repo = FixtureRepo::create("code-source-layout-history");
+    repo.write("src/lib.rs", "pub fn local_entry() -> u32 { 1 }\n");
+    repo.write(
+        "external_deps/rust_sdk/lib.rs",
+        "pub fn external_session_client() {}\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+    let service = service_with_memory_store().await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: Vec::new(),
+            },
+            context("register-history"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD", Vec::new()),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-history-base"),
+        )
+        .await
+        .expect("base should index with its discovered source root");
+
+    repo.write("src/lib.rs", "pub fn local_entry() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "head"]);
+    let head = repo.git_text(["rev-parse", "HEAD"]);
+    let request = CodeIndexRequest {
+        repository: selector("fixture", "HEAD", Vec::new()),
+        mode: CodeIndexMode::Full,
+        workspace_detection: Default::default(),
+        freshness_policy: FreshnessPolicy::WaitUntilFresh,
+        reuse_historical: true,
+    };
+    let started = service
+        .start_code_repository_index(request.clone(), context("start-history-head"))
+        .await
+        .expect("historical reuse should accept effective discovered filters");
+    let task = started.task.expect("new head should queue a task");
+    assert_eq!(
+        task.mode,
+        CodeIndexMode::incremental(base.clone(), head)
+            .expect("resolved commits should form an incremental mode")
+    );
+    assert!(
+        task.path_filters
+            .contains(&"external_deps/rust_sdk".to_owned())
+    );
+    let duplicate = service
+        .start_code_repository_index(request.clone(), context("repeat-history-head"))
+        .await
+        .expect("same effective discovered scope should reuse its task");
+    assert_eq!(
+        duplicate.task.as_ref().map(|queued| &queued.task_id),
+        Some(&task.task_id)
+    );
+
+    let completed = service
+        .index_code_repository(request, context("index-history-head"))
+        .await
+        .expect("historical incremental task should complete");
+    assert_eq!(
+        completed.summary.base_resolved_commit_sha.as_deref(),
+        Some(base.as_str())
+    );
+    assert_eq!(completed.summary.progress.parsed_file_count, 1);
+}
+
 fn selector(alias: &str, ref_selector: &str, path_filters: Vec<String>) -> CodeRepositorySelector {
     CodeRepositorySelector::new(alias, ref_selector, path_filters, Vec::new())
         .expect("selector should validate")
@@ -133,7 +216,33 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
-    let environment = EnvironmentConfig::from_pairs(
+    let environment = test_environment();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+
+    RelayKnowledgeService::with_store(runtime, store)
+}
+
+#[cfg(windows)]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [
+            ("USERPROFILE", "C:\\Users\\alice"),
+            ("APPDATA", "C:\\Users\\alice\\AppData\\Roaming"),
+            ("LOCALAPPDATA", "C:\\Users\\alice\\AppData\\Local"),
+            ("TEMP", "C:\\Users\\alice\\AppData\\Local\\Temp"),
+            ("RELAY_KNOWLEDGE_HOME", "C:\\relay"),
+        ],
+    )
+    .expect("environment should parse")
+}
+
+#[cfg(not(windows))]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
             ("HOME", "/home/alice"),
@@ -141,13 +250,7 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
             ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
         ],
     )
-    .expect("environment should parse");
-    let runtime = RuntimeConfiguration::from_environment(&environment)
-        .await
-        .expect("runtime should compose");
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-
-    RelayKnowledgeService::with_store(runtime, store)
+    .expect("environment should parse")
 }
 
 struct FixtureRepo {
@@ -186,6 +289,21 @@ impl FixtureRepo {
             "git failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
+        let output = git_command(&self.path, args)
+            .output()
+            .expect("git should run");
+        assert!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git output should be UTF-8")
+            .trim()
+            .to_owned()
     }
 }
 

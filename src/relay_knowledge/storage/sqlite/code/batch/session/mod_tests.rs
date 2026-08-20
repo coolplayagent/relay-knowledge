@@ -399,6 +399,127 @@ async fn incremental_symbol_cardinality_change_refinalizes_unchanged_calls() {
 }
 
 #[tokio::test]
+async fn incremental_symbol_change_refinalizes_unchanged_named_import_aliases() {
+    let store = registered_store().await;
+    let base_scope = "git_snapshot:named-import-base";
+    let base_session = session_for_scope(base_scope, 6);
+    let mut base_files = vec![
+        file(
+            base_scope,
+            "target-a-file",
+            "src/target-a.ts",
+            "typescript",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "target-b-file",
+            "src/target-b.ts",
+            "typescript",
+            CodeParseStatus::Parsed,
+        ),
+        file(
+            base_scope,
+            "consumer-file",
+            "src/consumer.ts",
+            "typescript",
+            CodeParseStatus::Parsed,
+        ),
+    ];
+    for index in 1..=3 {
+        base_files.push(file(
+            base_scope,
+            &format!("extra-{index}-file"),
+            &format!("src/extra-{index}.ts"),
+            "typescript",
+            CodeParseStatus::Parsed,
+        ));
+    }
+    store
+        .begin_code_index_session(base_session.clone())
+        .await
+        .expect("base session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: base_files,
+            symbols: vec![symbol(
+                base_scope,
+                "shared-a",
+                "target-a-file",
+                "src/target-a.ts",
+                "Shared",
+                "typescript",
+            )],
+            imports: vec![import(
+                base_scope,
+                "shared-import",
+                "consumer-file",
+                "src/consumer.ts",
+                "import { Shared as LocalShared } from './target-a';",
+            )],
+            references: vec![reference(
+                base_scope,
+                "shared-alias-call",
+                "consumer-file",
+                "src/consumer.ts",
+                "LocalShared",
+            )],
+            ..batch(base_scope, 1)
+        })
+        .await
+        .expect("base batch should persist");
+    store
+        .finalize_code_index_session(base_session)
+        .await
+        .expect("base session should finalize");
+
+    let target_scope = "git_snapshot:named-import-target";
+    let mut incremental = session_for_scope(target_scope, 6);
+    incremental.base_resolved_commit_sha = Some("commit".to_owned());
+    incremental.resolved_commit_sha = "commit-2".to_owned();
+    incremental.tree_hash = "tree-2".to_owned();
+    incremental.full_replace = false;
+    incremental.changed_path_count = 1;
+    incremental.skipped_unchanged_count = 5;
+    incremental.changed_paths = vec!["src/target-a.ts".to_owned()];
+    store
+        .begin_code_index_session(incremental.clone())
+        .await
+        .expect("incremental session should clone its base");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                target_scope,
+                "target-a-file",
+                "src/target-a.ts",
+                "typescript",
+                CodeParseStatus::Parsed,
+            )],
+            symbols: vec![symbol(
+                target_scope,
+                "replacement-a",
+                "target-a-file",
+                "src/target-a.ts",
+                "Replacement",
+                "typescript",
+            )],
+            ..batch(target_scope, 1)
+        })
+        .await
+        .expect("incremental batch should persist");
+    store
+        .finalize_code_index_session(incremental)
+        .await
+        .expect("incremental session should finalize");
+
+    let references = reference_resolution_rows(&store, target_scope).await;
+    assert_eq!(
+        references.get("shared-alias-call"),
+        Some(&("unresolved".to_owned(), None, 2_500, "ambiguous".to_owned()))
+    );
+}
+
+#[tokio::test]
 async fn incremental_callable_metadata_change_refinalizes_unchanged_calls() {
     let store = registered_store().await;
     let base_scope = "git_snapshot:callable-metadata-base";

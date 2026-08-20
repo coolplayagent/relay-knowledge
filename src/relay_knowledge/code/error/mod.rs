@@ -4,6 +4,7 @@ use std::{error::Error, fmt};
 
 const INCREMENTAL_CHANGED_PATH_LIMIT_PREFIX: &str =
     "incremental Git diff changed-path budget exceeded:";
+const GITLINK_EXPANSION_LIMIT_PREFIX: &str = "gitlink path ";
 
 /// Blocking code index failure.
 #[derive(Debug)]
@@ -38,6 +39,12 @@ impl CodeIndexError {
 
     pub(in crate::code) fn is_incremental_changed_path_limit(&self) -> bool {
         matches!(self, Self::InvalidInput(message) if message.starts_with(INCREMENTAL_CHANGED_PATH_LIMIT_PREFIX))
+    }
+
+    pub(in crate::code) fn is_gitlink_expansion_limit(&self) -> bool {
+        matches!(self, Self::InvalidInput(message)
+            if message.starts_with(GITLINK_EXPANSION_LIMIT_PREFIX)
+                && message.contains(" expands to "))
     }
 }
 

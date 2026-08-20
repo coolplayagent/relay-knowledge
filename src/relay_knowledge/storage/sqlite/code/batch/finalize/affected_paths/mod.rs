@@ -75,6 +75,11 @@ pub(crate) fn compute(
     let reference_paths =
         load_reference_affected_paths(transaction, source_scope, &changed_symbol_names)?;
     paths.extend(reference_paths);
+    paths.extend(load_named_import_affected_paths(
+        transaction,
+        source_scope,
+        &changed_symbol_names,
+    )?);
 
     paths.sort_unstable();
     paths.dedup();
@@ -89,6 +94,30 @@ pub(crate) fn compute(
         paths,
         fallback_to_full_scope: fallback,
     })
+}
+
+fn load_named_import_affected_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    changed_symbol_names: &BTreeSet<String>,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement = transaction
+        .prepare("SELECT path, module FROM code_repository_imports WHERE source_scope = ?1")?;
+    let rows = statement.query_map(params![source_scope], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut paths = Vec::new();
+    for row in rows {
+        let (path, statement) = row?;
+        if super::imports::typescript::named_import_bindings(&statement)
+            .iter()
+            .any(|binding| changed_symbol_names.contains(&binding.imported_name))
+        {
+            paths.push(path);
+        }
+    }
+
+    Ok(paths)
 }
 
 fn load_changed_symbol_names(

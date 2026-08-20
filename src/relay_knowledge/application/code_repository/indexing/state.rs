@@ -255,11 +255,30 @@ pub(super) async fn plan_full_index_reuse(
         return Ok(FullIndexReusePlan::Full);
     }
 
-    let target = fresh_full_index_probe(status, &request.repository).await?;
+    let mut target = fresh_full_index_probe(status, &request.repository).await?;
+    let target_commit = target.resolved_commit_sha.clone();
+    let target_session =
+        run_blocking_code({
+            let registration = registration_from_status(status);
+            let mut selector = request.repository.clone();
+            selector.ref_selector = target_commit.clone();
+            move || {
+                Ok(prepare_full_index_plan(
+                    registration,
+                    selector,
+                    CodeIndexResourceBudget::default(),
+                )?
+                .session())
+            }
+        })
+        .await?;
+    target.path_filters.clone_from(&target_session.path_filters);
+    target
+        .language_filters
+        .clone_from(&target_session.language_filters);
     if let Some(task) = active_index_task_for_target(store, status, request, &target).await? {
         return Ok(FullIndexReusePlan::ActiveTask(task));
     }
-    let target_commit = target.resolved_commit_sha;
     let ancestors = run_blocking_code({
         let root = root.clone();
         let target_commit = target_commit.clone();
@@ -268,11 +287,8 @@ pub(super) async fn plan_full_index_reuse(
         }
     })
     .await?;
-    let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
-    let language_filters = merged_filters(
-        &status.language_filters,
-        &request.repository.language_filters,
-    );
+    let path_filters = target_session.path_filters;
+    let language_filters = target_session.language_filters;
     for ancestor in ancestors {
         let Some(base_scope) = store
             .code_repository_scope_status(
@@ -296,7 +312,17 @@ pub(super) async fn plan_full_index_reuse(
             let root = root.clone();
             let ancestor = ancestor.clone();
             let target_commit = target_commit.clone();
-            move || historical_reuse_diff_fits_budget(root, &ancestor, &target_commit)
+            let path_filters = path_filters.clone();
+            let language_filters = language_filters.clone();
+            move || {
+                historical_reuse_diff_fits_budget(
+                    root,
+                    &ancestor,
+                    &target_commit,
+                    &path_filters,
+                    &language_filters,
+                )
+            }
         })
         .await?;
         if !fits_budget {
@@ -305,6 +331,8 @@ pub(super) async fn plan_full_index_reuse(
 
         let mut incremental = request.clone();
         incremental.repository.ref_selector = target_commit.clone();
+        incremental.repository.path_filters = path_filters.clone();
+        incremental.repository.language_filters = language_filters.clone();
         incremental.mode = CodeIndexMode::incremental(ancestor, target_commit.clone())
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         return Ok(FullIndexReusePlan::Incremental(incremental));
@@ -371,8 +399,10 @@ async fn active_index_task_for_target(
         return Ok(None);
     };
     let same_scope_request = active_request.repository.repository == request.repository.repository
-        && active_request.repository.path_filters == request.repository.path_filters
-        && active_request.repository.language_filters == request.repository.language_filters
+        && canonical_path_filters(&active_task.path_filters)
+            == canonical_path_filters(&target.path_filters)
+        && canonical_filter_values(&active_task.language_filters)
+            == canonical_filter_values(&target.language_filters)
         && active_request.workspace_detection == request.workspace_detection;
 
     Ok(same_scope_request.then_some(active_task))
