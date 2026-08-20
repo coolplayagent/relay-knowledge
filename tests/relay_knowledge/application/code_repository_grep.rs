@@ -63,6 +63,7 @@ async fn reference_query_uses_internal_text_fallback_for_comment_reference() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-source-fallback-reference"),
         )
@@ -143,6 +144,7 @@ async fn source_fallback_uses_query_candidates_before_scope_file_budget() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-source-fallback-query-candidates"),
         )
@@ -208,6 +210,7 @@ async fn definition_query_line_scans_long_definition_lines() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-long-line-definition"),
         )
@@ -360,6 +363,7 @@ export function Panel({ value }: { value: string }) {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-external-import"),
         )

@@ -434,6 +434,7 @@ pub fn retry_policy() -> u32 {
                     .expect("incremental refs should validate"),
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-update", "trace-update"),
         )
@@ -690,6 +691,7 @@ async fn register_and_index_fixture(
                 mode,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-index", "trace-index"),
         )

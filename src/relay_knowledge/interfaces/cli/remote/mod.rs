@@ -93,26 +93,15 @@ pub(super) async fn run_remote(
             alias,
             ref_selector,
             dry_run,
+            reuse_historical,
         } => {
-            let selected_mode = mode_for_index_ref(ref_selector);
-            let mode = if *dry_run {
-                CodeIndexMode::Full
-            } else {
-                selected_mode.clone()
-            };
-            let selector = repo::selector(
-                alias.clone(),
-                ref_selector.clone(),
-                Vec::new(),
-                Vec::new(),
+            let request = remote_index_request(
+                alias,
+                ref_selector,
+                *dry_run,
+                *reuse_historical,
                 format,
             )?;
-            let request = CodeIndexRequest {
-                repository: selector_for_index_request(selector, &selected_mode),
-                mode,
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::AllowStale,
-            };
             if *dry_run {
                 let response = client
                     .post_repository::<_, CodeRepositoryScopePreviewResponse>(
@@ -158,6 +147,7 @@ pub(super) async fn run_remote(
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             };
             let response = client
                 .post_repository::<_, CodeRepositoryScopePreviewResponse>(
@@ -460,6 +450,36 @@ pub(super) async fn run_remote(
         }
         _ => Ok(None),
     }
+}
+
+fn remote_index_request(
+    alias: &str,
+    ref_selector: &str,
+    dry_run: bool,
+    reuse_historical: bool,
+    format: OutputFormat,
+) -> Result<CodeIndexRequest, CliError> {
+    let selected_mode = mode_for_index_ref(ref_selector);
+    let mode = if dry_run {
+        CodeIndexMode::Full
+    } else {
+        selected_mode.clone()
+    };
+    let selector = repo::selector(
+        alias.to_owned(),
+        ref_selector.to_owned(),
+        Vec::new(),
+        Vec::new(),
+        format,
+    )?;
+
+    Ok(CodeIndexRequest {
+        repository: selector_for_index_request(selector, &selected_mode),
+        mode,
+        workspace_detection: Default::default(),
+        freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical,
+    })
 }
 
 struct RemoteCliClient {

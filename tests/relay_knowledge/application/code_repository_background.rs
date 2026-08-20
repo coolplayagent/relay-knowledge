@@ -26,6 +26,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-background-index"),
         )
@@ -38,6 +39,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-background-index-duplicate"),
         )
@@ -64,6 +66,7 @@ async fn cold_full_index_start_queues_task_and_worker_completes_it() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-background-index-moved-head"),
         )
@@ -161,6 +164,7 @@ async fn background_index_prunes_scopes_beyond_active_and_recent_budget() {
                     mode: CodeIndexMode::Full,
                     workspace_detection: Default::default(),
                     freshness_policy: FreshnessPolicy::AllowStale,
+                    reuse_historical: false,
                 },
                 context("start-retention"),
             )
@@ -217,6 +221,7 @@ async fn managed_watcher_reconciles_a_new_commit_without_an_explicit_update() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-commit-loop-base"),
         )
@@ -396,6 +401,7 @@ async fn repository_status_reports_checkpoint_without_active_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-orphan-checkpoint-baseline"),
         )
@@ -427,6 +433,7 @@ async fn repository_status_reports_checkpoint_without_active_task() {
         changed_path_count: 8,
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
+        changed_paths: Vec::new(),
         tombstones: Vec::new(),
         workspaces: Vec::new(),
         resource_budget: CodeIndexResourceBudget::default(),
@@ -477,6 +484,7 @@ async fn repository_status_recovers_expired_code_index_task_lease() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-expired-lease"),
         )
@@ -531,6 +539,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-shared-store-running"),
         )
@@ -556,6 +565,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-shared-store-duplicate"),
         )
@@ -579,6 +589,7 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-shared-store-moved-head"),
         )
@@ -630,6 +641,7 @@ async fn code_index_health_isolation_cases_health_and_query_respond_during_full_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-health-isolation-initial"),
         )
@@ -665,6 +677,7 @@ async fn code_index_health_isolation_cases_health_and_query_respond_during_full_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-health-isolation-large"),
         )
@@ -733,6 +746,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-filtered-a"),
         )
@@ -748,6 +762,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-filtered-b"),
         )
@@ -763,6 +778,7 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-stale-filtered-a"),
         )
@@ -833,6 +849,7 @@ async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-stale-unmatched-a"),
         )
@@ -848,6 +865,7 @@ async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-stale-unmatched-a"),
         )
@@ -874,109 +892,8 @@ async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_
     assert!(error.message.contains("requested filters"));
 }
 
-#[tokio::test]
-async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_active_index() {
-    let repo = FixtureRepo::create("code-stale-feature-flag-scope");
-    repo.write(
-        "src/a.rs",
-        "pub fn stable_a_policy() -> bool { std::env::var(\"STALE_A_FLAG\").is_ok() }\n",
-    );
-    repo.write(
-        "src/b.rs",
-        "pub fn stable_b_policy() -> bool { std::env::var(\"STALE_B_FLAG\").is_ok() }\n",
-    );
-    repo.git(["add", "."]);
-    repo.git(["commit", "-m", "initial"]);
-    let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-stale-feature-flag-scope").await;
-
-    service
-        .index_code_repository(
-            CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
-                mode: CodeIndexMode::Full,
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::WaitUntilFresh,
-            },
-            context("index-stale-feature-flag-a"),
-        )
-        .await
-        .expect("a scope should index");
-    repo.write(
-        "src/b.rs",
-        "pub fn stable_b_policy() -> bool { std::env::var(\"STALE_B_FLAG_V2\").is_ok() }\n",
-    );
-    repo.git(["add", "."]);
-    repo.git(["commit", "-m", "update-b"]);
-    service
-        .index_code_repository(
-            CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src/b.rs"),
-                mode: CodeIndexMode::Full,
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::WaitUntilFresh,
-            },
-            context("index-stale-feature-flag-b"),
-        )
-        .await
-        .expect("b scope should index");
-    repo.write(
-        "src/a.rs",
-        "pub fn stable_a_policy() -> bool { std::env::var(\"STALE_A_FLAG_V2\").is_ok() }\n",
-    );
-    repo.git(["add", "."]);
-    repo.git(["commit", "-m", "update-a"]);
-    let started = service
-        .start_code_repository_index(
-            CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
-                mode: CodeIndexMode::Full,
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::AllowStale,
-            },
-            context("start-stale-feature-flag-a"),
-        )
-        .await
-        .expect("a refresh should queue");
-    assert!(started.task.is_some());
-
-    let flags = service
-        .query_code_repository_feature_flags(
-            CodeFeatureFlagRequest::new(
-                Some("STALE_A_FLAG".to_owned()),
-                filtered_selector("fixture", "HEAD", "src/a.rs"),
-                10,
-                FreshnessPolicy::AllowStale,
-            )
-            .expect("feature flag request should validate"),
-            context("query-stale-feature-flag-a"),
-        )
-        .await
-        .expect("allow-stale feature flags should use the latest compatible a scope");
-
-    assert!(flags.metadata.stale);
-    assert!(flags.scope.stale);
-    assert_eq!(flags.freshness.state, CodeRepositoryFreshnessState::Pending);
-    assert!(flags.freshness.direct_source_read_required);
-    assert_eq!(flags.freshness.direct_source_read_paths, ["src/a.rs"]);
-    assert_eq!(
-        flags.freshness.pending.active_task_id.as_deref(),
-        started.task.as_ref().map(|task| task.task_id.as_str())
-    );
-    assert!(
-        flags
-            .flags
-            .iter()
-            .any(|flag| flag.source_key == "STALE_A_FLAG")
-    );
-    assert!(
-        flags
-            .flags
-            .iter()
-            .flat_map(|flag| flag.usages.iter())
-            .all(|usage| usage.path == "src/a.rs")
-    );
-}
+#[path = "code_repository_background_feature_flag_tests.rs"]
+mod feature_flag_tests;
 
 #[path = "code_repository_background_support.rs"]
 mod support;

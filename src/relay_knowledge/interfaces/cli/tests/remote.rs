@@ -267,6 +267,7 @@ async fn remote_repo_index_worktree_ref_posts_overlay_request() {
         alias: "fixture".to_owned(),
         ref_selector: "worktree".to_owned(),
         dry_run: false,
+        reuse_historical: false,
     });
 
     let output = remote::run_remote(

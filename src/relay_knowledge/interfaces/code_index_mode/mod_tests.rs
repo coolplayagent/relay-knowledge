@@ -44,6 +44,7 @@ fn request_normalization_changes_only_worktree_selectors() {
         mode: CodeIndexMode::WorktreeOverlay,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical: false,
     };
 
     let normalized = normalize_index_request(request);

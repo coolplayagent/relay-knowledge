@@ -1,4 +1,4 @@
-use super::{JavaImportRequest, resolve};
+use super::{JavaImportRequest, imported_symbol_names, resolve};
 use crate::storage::sqlite::code::batch::finalize::imports::ImportResolution;
 
 #[test]
@@ -16,6 +16,15 @@ fn java_import_parser_separates_class_and_static_member_requests() {
             member: "create".to_owned(),
         })
     );
+}
+
+#[test]
+fn java_symbol_dependencies_only_include_static_members() {
+    assert_eq!(
+        imported_symbol_names("import static com.example.Widget.create;"),
+        vec!["create"]
+    );
+    assert!(imported_symbol_names("import com.example.Widget;").is_empty());
 }
 
 #[test]

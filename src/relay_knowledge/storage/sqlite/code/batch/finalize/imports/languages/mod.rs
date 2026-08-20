@@ -26,3 +26,18 @@ pub(super) fn resolve(
         _ => ImportResolution::Unresolved,
     }
 }
+
+pub(in super::super) fn symbol_dependency_names(
+    language: Option<&str>,
+    statement: &str,
+) -> Vec<String> {
+    match language {
+        Some("python") => python::imported_symbol_names(statement),
+        Some("java") => java::imported_symbol_names(statement),
+        Some("typescript" | "tsx") => typescript::named_dependency_bindings(statement)
+            .into_iter()
+            .map(|binding| binding.imported_name)
+            .collect(),
+        _ => Vec::new(),
+    }
+}

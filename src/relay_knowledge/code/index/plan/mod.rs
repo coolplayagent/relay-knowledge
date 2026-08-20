@@ -1,16 +1,16 @@
 //! Plans bounded index batches, row budgets, and workspace metadata.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
     thread,
 };
 
 use crate::domain::{
-    CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession, CodeMonorepoWorkspace,
-    CodeRepositoryRegistration, CodeRepositorySelector, CodeWorkspaceDetectionConfig,
-    code_snapshot_scope_id,
+    CodeFileFingerprint, CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSession,
+    CodeIndexSnapshot, CodeMonorepoWorkspace, CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeWorkspaceDetectionConfig, code_snapshot_scope_id,
 };
 
 use super::{
@@ -49,25 +49,76 @@ pub struct CodeIndexPlan {
     cursor: usize,
     next_batch_index: usize,
     resource_budget: CodeIndexResourceBudget,
+    /// When set, the plan yields pre-parsed incremental snapshot data
+    /// instead of fetching and parsing git blobs.
+    incremental: Option<IncrementalPlanData>,
+}
+
+/// Pre-parsed incremental snapshot data split into bounded batches.
+#[derive(Debug, Clone)]
+struct IncrementalPlanData {
+    snapshot: CodeIndexSnapshot,
+    rows_by_path: BTreeMap<String, usize>,
+    cursor: usize,
 }
 
 impl CodeIndexPlan {
     /// Returns the durable session metadata that storage checkpoints.
     pub fn session(&self) -> CodeIndexSession {
+        let (
+            full_replace,
+            base_resolved_commit_sha,
+            total_path_count,
+            changed_path_count,
+            skipped_unchanged_count,
+            deleted_paths,
+            changed_paths,
+            tombstones,
+        ) = match &self.incremental {
+            Some(data) => {
+                let snapshot = &data.snapshot;
+                let changed_paths = snapshot
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<Vec<_>>();
+                (
+                    false,
+                    snapshot.base_resolved_commit_sha.clone(),
+                    snapshot.changed_path_count,
+                    snapshot.changed_path_count,
+                    snapshot.skipped_unchanged_count,
+                    snapshot.deleted_paths.clone(),
+                    changed_paths,
+                    snapshot.tombstones.clone(),
+                )
+            }
+            None => (
+                true,
+                None,
+                self.paths.len(),
+                self.paths.len(),
+                0,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+        };
         CodeIndexSession {
             repository_id: self.registration.repository_id.clone(),
             source_scope: self.source_scope.clone(),
-            base_resolved_commit_sha: None,
+            base_resolved_commit_sha,
             resolved_commit_sha: self.commit.clone(),
             tree_hash: self.tree_hash.clone(),
             path_filters: self.path_filters.clone(),
             language_filters: self.language_filters.clone(),
-            full_replace: true,
-            total_path_count: self.paths.len(),
-            changed_path_count: self.paths.len(),
-            skipped_unchanged_count: 0,
-            deleted_paths: Vec::new(),
-            tombstones: Vec::new(),
+            full_replace,
+            total_path_count,
+            changed_path_count,
+            skipped_unchanged_count,
+            deleted_paths,
+            changed_paths,
+            tombstones,
             workspaces: self.workspaces.clone(),
             resource_budget: self.resource_budget,
         }
@@ -75,6 +126,85 @@ impl CodeIndexPlan {
 
     /// Parses the next bounded file batch without retaining prior batches.
     pub fn parse_next_batch(mut self) -> Result<(Self, Option<CodeIndexBatch>), CodeIndexError> {
+        if let Some(incremental) = &mut self.incremental {
+            let snapshot = &incremental.snapshot;
+            if incremental.cursor >= snapshot.files.len() {
+                return Ok((self, None));
+            }
+            let batch_end = next_incremental_batch_end(
+                &snapshot.files,
+                &incremental.rows_by_path,
+                incremental.cursor,
+                self.resource_budget,
+            );
+            let batch_paths: BTreeSet<&str> = snapshot.files[incremental.cursor..batch_end]
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect();
+            let parsed_byte_count: usize = snapshot.files[incremental.cursor..batch_end]
+                .iter()
+                .map(|file| file.byte_len)
+                .sum();
+            let batch = CodeIndexBatch {
+                repository_id: snapshot.repository_id.clone(),
+                source_scope: snapshot.source_scope.clone(),
+                batch_index: self.next_batch_index,
+                parsed_byte_count,
+                files: snapshot.files[incremental.cursor..batch_end].to_vec(),
+                symbols: snapshot
+                    .symbols
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+                references: snapshot
+                    .references
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+                imports: snapshot
+                    .imports
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+                dependencies: snapshot
+                    .dependencies
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+                feature_flags: snapshot
+                    .feature_flags
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+                routes: snapshot
+                    .routes
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+                chunks: snapshot
+                    .chunks
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+                diagnostics: snapshot
+                    .diagnostics
+                    .iter()
+                    .filter(|record| batch_paths.contains(record.path.as_str()))
+                    .cloned()
+                    .collect(),
+            };
+            incremental.cursor = batch_end;
+            self.next_batch_index += 1;
+            return Ok((self, Some(batch)));
+        }
+
         if self.cursor >= self.paths.len() {
             return Ok((self, None));
         }
@@ -323,6 +453,55 @@ pub fn prepare_full_index_plan_with_workspace_detection(
         cursor: 0,
         next_batch_index: 1,
         resource_budget,
+        incremental: None,
+    })
+}
+
+/// Prepares an incremental index plan from a pre-parsed diff snapshot.
+///
+/// The plan yields bounded batches from the snapshot's already-parsed records
+/// instead of fetching and parsing git blobs. The session carries
+/// `full_replace: false` and `changed_paths` so `begin_session_once` can
+/// clone the historical scope while excluding changed paths.
+pub fn prepare_incremental_index_plan_with_workspace_detection(
+    registration: CodeRepositoryRegistration,
+    selector: CodeRepositorySelector,
+    mode: CodeIndexMode,
+    previous_hashes: Vec<CodeFileFingerprint>,
+    base_resolved_commit_sha: Option<String>,
+    workspace_detection: &CodeWorkspaceDetectionConfig,
+    resource_budget: CodeIndexResourceBudget,
+) -> Result<CodeIndexPlan, CodeIndexError> {
+    let snapshot = super::build_index_snapshot_with_workspace_detection(
+        &registration,
+        &selector,
+        mode,
+        previous_hashes,
+        base_resolved_commit_sha,
+        workspace_detection,
+    )?;
+    let root = PathBuf::from(&registration.root_path);
+    let workspaces = snapshot.workspaces.clone();
+    Ok(CodeIndexPlan {
+        registration,
+        root,
+        commit: snapshot.resolved_commit_sha.clone(),
+        tree_hash: snapshot.tree_hash.clone(),
+        source_scope: snapshot.source_scope.clone(),
+        path_filters: snapshot.path_filters.clone(),
+        language_filters: snapshot.language_filters.clone(),
+        source_kind: RepositorySourceKind::Git,
+        filesystem_path_hashes: BTreeMap::new(),
+        paths: Vec::new(),
+        workspaces,
+        cursor: 0,
+        next_batch_index: 1,
+        resource_budget,
+        incremental: Some(IncrementalPlanData {
+            rows_by_path: incremental_rows_by_path(&snapshot),
+            snapshot,
+            cursor: 0,
+        }),
     })
 }
 
@@ -393,6 +572,70 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
         .saturating_add(build.routes.len())
         .saturating_add(build.chunks.len())
         .saturating_add(build.diagnostics.len())
+}
+
+fn incremental_rows_by_path(snapshot: &CodeIndexSnapshot) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for path in snapshot.files.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.symbols.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.references.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.imports.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.dependencies.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.feature_flags.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.routes.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.chunks.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    for path in snapshot.diagnostics.iter().map(|record| &record.path) {
+        increment_path_count(&mut counts, path);
+    }
+    counts
+}
+
+fn increment_path_count(counts: &mut BTreeMap<String, usize>, path: &str) {
+    let count = counts.entry(path.to_owned()).or_default();
+    *count = count.saturating_add(1);
+}
+
+fn next_incremental_batch_end(
+    files: &[crate::domain::RepositoryCodeFileRecord],
+    rows_by_path: &BTreeMap<String, usize>,
+    cursor: usize,
+    budget: CodeIndexResourceBudget,
+) -> usize {
+    let mut end = cursor;
+    let mut bytes = 0usize;
+    let mut rows = 0usize;
+    while end < files.len() {
+        let file = &files[end];
+        let next_bytes = bytes.saturating_add(file.byte_len);
+        let next_rows = rows.saturating_add(rows_by_path.get(&file.path).copied().unwrap_or(1));
+        if end > cursor
+            && (end - cursor >= budget.max_files_per_batch
+                || next_bytes > budget.max_bytes_per_batch
+                || next_rows > budget.max_rows_per_batch)
+        {
+            break;
+        }
+        bytes = next_bytes;
+        rows = next_rows;
+        end += 1;
+    }
+    end
 }
 
 #[cfg(test)]

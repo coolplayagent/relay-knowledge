@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 
 use crate::{
-    api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse},
+    api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse, ErrorKind},
     code::{
-        prepare_full_index_plan, repository_uses_filesystem_source,
-        resolve_repository_snapshot_with_filters,
+        first_parent_ancestors_bounded, historical_reuse_diff_fits_budget, prepare_full_index_plan,
+        repository_uses_filesystem_source, resolve_repository_snapshot_with_filters,
     },
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget, CodeIndexTaskRecord,
@@ -24,6 +24,22 @@ use super::super::{
 };
 
 pub(super) const RETAIN_RECENT_CODE_SCOPES: usize = 2;
+const FULL_INDEX_ANCESTOR_PROBE_LIMIT: usize = 10;
+
+pub(super) enum FullIndexReusePlan {
+    ActiveTask(Box<CodeIndexTaskRecord>),
+    Incremental(CodeIndexRequest),
+    Full,
+}
+
+pub(super) fn historical_reuse_base_became_unavailable(error: &ApiError) -> bool {
+    (error.error_kind == ErrorKind::StorageUnavailable
+        && error
+            .message
+            .contains("has no compatible non-retiring scope"))
+        || (error.error_kind == ErrorKind::InvalidArgument
+            && error.message.contains("has no matching indexed base scope"))
+}
 
 pub(super) struct PreviousIndexState {
     pub(super) fingerprints: Vec<crate::domain::CodeFileFingerprint>,
@@ -221,6 +237,176 @@ pub(super) async fn previous_index_state_for_index(
         fingerprints,
         base_resolved_commit_sha: Some(base_commit),
     })
+}
+
+pub(super) async fn plan_full_index_reuse(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    status: &CodeRepositoryStatus,
+    request: &CodeIndexRequest,
+) -> Result<FullIndexReusePlan, ApiError> {
+    if request.mode != CodeIndexMode::Full {
+        return Ok(FullIndexReusePlan::Full);
+    }
+    let root = PathBuf::from(&status.root_path);
+    if run_blocking_code({
+        let root = root.clone();
+        move || repository_uses_filesystem_source(root)
+    })
+    .await?
+    {
+        return Ok(FullIndexReusePlan::Full);
+    }
+
+    let mut target = fresh_full_index_probe(status, &request.repository).await?;
+    let target_commit = target.resolved_commit_sha.clone();
+    let target_session =
+        run_blocking_code({
+            let registration = registration_from_status(status);
+            let mut selector = request.repository.clone();
+            selector.ref_selector = target_commit.clone();
+            move || {
+                Ok(prepare_full_index_plan(
+                    registration,
+                    selector,
+                    CodeIndexResourceBudget::default(),
+                )?
+                .session())
+            }
+        })
+        .await?;
+    target.path_filters.clone_from(&target_session.path_filters);
+    target
+        .language_filters
+        .clone_from(&target_session.language_filters);
+    if let Some(task) = active_index_task_for_target(store, status, request, &target).await? {
+        return Ok(FullIndexReusePlan::ActiveTask(Box::new(task)));
+    }
+    let ancestors = run_blocking_code({
+        let root = root.clone();
+        let target_commit = target_commit.clone();
+        move || {
+            first_parent_ancestors_bounded(&root, &target_commit, FULL_INDEX_ANCESTOR_PROBE_LIMIT)
+        }
+    })
+    .await?;
+    let path_filters = target_session.path_filters;
+    let language_filters = target_session.language_filters;
+    for ancestor in ancestors {
+        let Some(base_scope) = store
+            .code_repository_scope_status(
+                request.repository.repository.clone(),
+                ancestor.clone(),
+                path_filters.clone(),
+                language_filters.clone(),
+            )
+            .await
+            .map_err(storage_api_error)?
+        else {
+            continue;
+        };
+        if base_scope.stale || !code_scope_matches_current_fact_version(&base_scope) {
+            continue;
+        }
+        if !scope_filters_match_incremental_clone(&base_scope, &path_filters, &language_filters) {
+            continue;
+        }
+        let fits_budget = run_blocking_code({
+            let root = root.clone();
+            let ancestor = ancestor.clone();
+            let target_commit = target_commit.clone();
+            let path_filters = path_filters.clone();
+            let language_filters = language_filters.clone();
+            move || {
+                historical_reuse_diff_fits_budget(
+                    root,
+                    &ancestor,
+                    &target_commit,
+                    &path_filters,
+                    &language_filters,
+                )
+            }
+        })
+        .await?;
+        if !fits_budget {
+            return Ok(FullIndexReusePlan::Full);
+        }
+
+        let mut incremental = request.clone();
+        incremental.repository.path_filters = path_filters.clone();
+        incremental.repository.language_filters = language_filters.clone();
+        incremental.mode = CodeIndexMode::incremental(ancestor, target_commit.clone())
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        return Ok(FullIndexReusePlan::Incremental(incremental));
+    }
+
+    Ok(FullIndexReusePlan::Full)
+}
+
+fn scope_filters_match_incremental_clone(
+    scope: &CodeRepositoryStatus,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> bool {
+    canonical_path_filters(&scope.path_filters) == canonical_path_filters(path_filters)
+        && canonical_filter_values(&scope.language_filters)
+            == canonical_filter_values(language_filters)
+}
+
+fn canonical_path_filters(filters: &[String]) -> Vec<String> {
+    let normalized = filters.iter().map(|filter| {
+        let mut value = filter.trim_end_matches(['/', '\\']);
+        while let Some(stripped) = value.strip_prefix("./") {
+            value = stripped;
+        }
+        value.to_owned()
+    });
+    canonical_filter_values_from_iter(normalized)
+}
+
+fn canonical_filter_values(filters: &[String]) -> Vec<String> {
+    canonical_filter_values_from_iter(filters.iter().cloned())
+}
+
+fn canonical_filter_values_from_iter(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut canonical = Vec::new();
+    for value in values {
+        if !canonical.contains(&value) {
+            canonical.push(value);
+        }
+    }
+    canonical
+}
+
+async fn active_index_task_for_target(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    status: &CodeRepositoryStatus,
+    request: &CodeIndexRequest,
+    target: &FreshFullIndexProbe,
+) -> Result<Option<CodeIndexTaskRecord>, ApiError> {
+    let Some(active_task) = store
+        .active_code_index_task(status.repository_id.clone())
+        .await
+        .map_err(storage_api_error)?
+    else {
+        return Ok(None);
+    };
+    if !active_task.state.is_unfinished()
+        || active_task.resolved_commit_sha != target.resolved_commit_sha
+    {
+        return Ok(None);
+    }
+    let Ok(active_request) = serde_json::from_str::<CodeIndexRequest>(&active_task.payload_json)
+    else {
+        return Ok(None);
+    };
+    let same_scope_request = active_request.repository.repository == request.repository.repository
+        && canonical_path_filters(&active_task.path_filters)
+            == canonical_path_filters(&target.path_filters)
+        && canonical_filter_values(&active_task.language_filters)
+            == canonical_filter_values(&target.language_filters)
+        && active_request.workspace_detection == request.workspace_detection;
+
+    Ok(same_scope_request.then_some(active_task))
 }
 
 pub(super) async fn active_full_index_task_for_request(

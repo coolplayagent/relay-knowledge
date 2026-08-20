@@ -34,6 +34,7 @@ pub enum RepoCommand {
         alias: String,
         ref_selector: String,
         dry_run: bool,
+        reuse_historical: bool,
     },
     IndexReset {
         alias: String,

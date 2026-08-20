@@ -1,4 +1,4 @@
-use super::{module_path_candidates, parse_imported_names};
+use super::{imported_symbol_names, module_path_candidates, parse_imported_names};
 
 #[test]
 fn relative_python_modules_respect_package_depth() {
@@ -15,4 +15,13 @@ fn imported_python_names_drop_aliases_wildcards_and_wrapping() {
         parse_imported_names("(Widget as Local, Helper, *)"),
         vec!["Widget".to_owned(), "Helper".to_owned()]
     );
+}
+
+#[test]
+fn python_symbol_dependencies_preserve_imported_names_across_aliases() {
+    assert_eq!(
+        imported_symbol_names("from pkg.module import Foo as Bar, Helper"),
+        vec!["Foo", "Helper"]
+    );
+    assert!(imported_symbol_names("import pkg.module as local").is_empty());
 }

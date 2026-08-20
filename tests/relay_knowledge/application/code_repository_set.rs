@@ -368,6 +368,7 @@ pub fn hidden_target() -> u32 {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-non-git-broad-member"),
         )
@@ -628,6 +629,7 @@ async fn register_with_filters_and_index(
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context(&format!("index-{alias}")),
         )

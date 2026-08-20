@@ -33,6 +33,7 @@ const GIT_WORKTREE_STATUS_STDERR_LIMIT: usize = 64 * 1024;
 const GIT_WORKTREE_STATUS_STDOUT_LIMIT: usize = 8 * 1024 * 1024;
 const GIT_WORKTREE_OBSERVATION_BYTE_LIMIT: usize =
     crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH;
+const GIT_ANCESTOR_STDOUT_LIMIT: usize = 8 * 1024;
 
 #[cfg(test)]
 static GIT_SHOW_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
@@ -138,6 +139,60 @@ pub(crate) fn resolve_git_tree_bounded(
         &["rev-parse", "--verify", "--end-of-options", &tree_selector],
         "Git tree resolution",
     )
+}
+
+/// Returns the nearest first-parent ancestors of one pinned commit under a fixed limit.
+pub(crate) fn first_parent_ancestors_bounded(
+    root: &Path,
+    commit: &str,
+    limit: usize,
+) -> Result<Vec<String>, CodeIndexError> {
+    validate_full_git_object_id("commit", commit)?;
+    if limit == 0 {
+        return Err(CodeIndexError::InvalidInput(
+            "Git ancestor limit must be greater than zero".to_owned(),
+        ));
+    }
+    let max_count = limit.saturating_add(1).to_string();
+    let bytes = git_small_output_bounded(
+        root,
+        &[
+            "rev-list",
+            "--first-parent",
+            "--max-count",
+            &max_count,
+            commit,
+            "--",
+        ],
+        GitSmallOutputBudget {
+            max_stdout_bytes: GIT_ANCESTOR_STDOUT_LIMIT,
+            max_stderr_bytes: GIT_IDENTITY_STDERR_LIMIT,
+            timeout: GIT_IDENTITY_TIMEOUT,
+        },
+        "Git first-parent ancestor resolution",
+    )?;
+    let commits = String::from_utf8_lossy(&bytes)
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if commits.first().map(String::as_str) != Some(commit) {
+        return Err(CodeIndexError::InvalidInput(
+            "Git first-parent history did not start with the requested commit".to_owned(),
+        ));
+    }
+    let ancestors = commits.into_iter().skip(1).take(limit).collect::<Vec<_>>();
+    if ancestors
+        .iter()
+        .any(|ancestor| validate_full_git_object_id("Git ancestor", ancestor).is_err())
+    {
+        return Err(CodeIndexError::InvalidInput(
+            "Git first-parent history returned an invalid object ID".to_owned(),
+        ));
+    }
+
+    Ok(ancestors)
 }
 
 /// Derives a stable, bounded identity for tracked and untracked worktree changes.

@@ -236,9 +236,9 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 ```
 
-`full` 和 `exhaustive` 额外运行 `index_performance_wide_mixed_files`，生成 2048 个 Rust 目标文件和跨 shard bridge 查询。两个生成式性能仓库都使用隔离 runtime home，要求冷索引完成证据（`task.state=succeeded` 或非零 parsed-file summary），随后创建包含修改、新增和删除文件的第二个 Git 提交，并针对已持久化 base 执行 `repo update`。报告记录 `*_cold_index_ms`、`*_cold_register_index_ms`、`*_incremental_index_ms` 和 query p50/p95/max；完成性 guard 会拒绝缓存 no-op 冷索引，以及读取或解析文件数超过有界 delta 的增量索引。
+`full` 和 `exhaustive` 额外运行 `index_performance_wide_mixed_files`，生成 2048 个 Rust 目标文件和跨 shard bridge 查询。两个生成式性能仓库都使用隔离 runtime home，要求冷索引完成证据（`task.state=succeeded` 或非零 parsed-file summary），随后创建包含修改、新增和删除文件的第二个 Git 提交。默认 fast 的 `index_performance_many_files` 在配置的 `src` filter 下生成 1024 个文件，并由布局发现额外纳入一个 `external_deps/rust_sdk` 源文件，然后再次执行 `repo index`，保护 full 初始化使用有效发现过滤器自动复用历史 commit 的路径；wide case 继续针对已持久化 base 执行 `repo update`。报告记录 `*_cold_index_ms`、`*_cold_register_index_ms`、`*_initialization_incremental_index_ms` 或 `*_incremental_index_ms` 和 query p50/p95/max；完成性 guard 会拒绝缓存 no-op 冷索引，以及读取或解析文件数超过有界 delta 的增量索引。
 
-`.github/workflows/benchmark-checks.yml` 会在 pull request 上运行 1024 文件性能 fixture，并从 JSON 报告直接验证冷任务/checkpoint 已完成、三路径增量 delta、两文件 blob/parse 预算、完成性命令和三项延迟预算。
+`.github/workflows/benchmark-checks.yml` 会先验证一个子仓库展开后超过历史复用 path 预算的真实 gitlink，再在 pull request 上运行 1025 文件性能 fixture，并从 JSON 报告直接验证冷任务/checkpoint 已完成、三路径增量 delta、两文件 blob/parse 预算、完成性命令和三项延迟预算。
 
 ### coding-agent 工作流门禁
 
@@ -348,7 +348,7 @@ and (
 | 跨语言语法 fixture | 覆盖 C 调 C++、C++ 调 C、Go cgo 调 C、Rust FFI 调 C，让默认 fast 不依赖额外大仓也能验证多语言调用图。 |
 | 额外多语言 fixture | 覆盖 Python、JavaScript、TypeScript/TSX、Go、Java、Rust、Bash、C#、Kotlin、PHP、Ruby、Scala 和 Swift；矩阵见 `docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md`。 |
 | repository-set targets | 注册每个成员为 `scope=all` 仓库，创建显式 `repo-set`，刷新跨仓 overlay，再运行 `repo-set query`；case 可要求具体 member、source_scope、路径、行号和 excerpt 证据。 |
-| 冷索引与增量索引性能 targets | `repository_index_performance_targets.json` 配置冷索引 `index_budget_ms`/`register_index_budget_ms`、增量 `incremental_index_budget_ms`、完成性证据和 delta 读/解析上限；默认 fast 包含 1024 文件 fixture，`full`/`exhaustive` 还包含 2048 文件 wide fixture。 |
+| 冷索引与增量索引性能 targets | `repository_index_performance_targets.json` 配置冷索引 `index_budget_ms`/`register_index_budget_ms`、显式增量 `incremental_index_budget_ms`、初始化历史复用 `initialization_incremental_index_budget_ms`、完成性证据和 delta 读/解析上限；默认 fast 包含 1025 文件 fixture，其中配置的 `src` scope 会发现一个依赖源根，`full`/`exhaustive` 还包含 2048 文件 wide fixture。 |
 | Hierarchical BM25 算法 gate | `bm25_hierarchy_suite` 是 `fast`、`full`、`exhaustive` 的具名产品测试 gate；固定 SQLite fixture 校验 v4 fingerprint/scope partition、同 schema flat parity、synthetic production-write/query-path Recall@10 >= 0.9 floor、planned-MATCH result-domain reduction、hard SQL authorization、single-FTS hidden-rank/rowid-hydrate shape、persisted-DF 与 65,536-posting admission bound、route-document `fts_rowid`/version/label-state invariant、version-leading global fallback index、可观察 oversized-label degradation 与 8,192-posting exhaustion、durable checkpoint takeover、全部四类 rebuild work budget、oversize-document isolation 与 bounded warning identity、当前 writer fence、companion-read pause、complete-reader activation 与 swap rollback。报告保留 whole-suite gate duration 与捕获的 `BM25_WORK`；二者都不是 query latency 或 FTS posting/VM-step work，equal-score cutoff membership、自然语料和整个 pipeline 的结论不属于该 synthetic gate。 |
 | 软件全域投影 targets | `repository_software_global_targets.json` 运行 `repo software`，覆盖 dependencies、sdks、files、topics、relationships、build、iac、design 和 all 投影 kind，且事实只能来自已索引证据。 |
 | CLI contract cases | 直接运行产品 CLI，不需要大仓；默认 fast 覆盖 `repo index-worker` help、idle JSON 和 streaming JSON。 |

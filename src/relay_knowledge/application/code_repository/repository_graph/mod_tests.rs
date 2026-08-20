@@ -39,6 +39,7 @@ async fn repository_graph_neighborhood_is_bound_to_the_indexed_okf_snapshot() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-okf-neighborhood"),
         )

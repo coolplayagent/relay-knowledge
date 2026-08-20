@@ -29,6 +29,7 @@ async fn filesystem_worktree_index_is_queryable_with_worktree_ref() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-filesystem-worktree-overlay"),
         )
@@ -84,6 +85,7 @@ async fn worktree_overlay_freshness_accepts_query_subset_of_indexed_scope() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-worktree-query-subset-overlay"),
         )

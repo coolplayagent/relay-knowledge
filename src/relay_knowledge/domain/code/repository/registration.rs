@@ -113,6 +113,8 @@ pub struct CodeIndexRequest {
     #[serde(default)]
     pub workspace_detection: CodeWorkspaceDetectionConfig,
     pub freshness_policy: FreshnessPolicy,
+    #[serde(default)]
+    pub reuse_historical: bool,
 }
 
 #[cfg(test)]

@@ -54,6 +54,7 @@ async fn serves_snapshot_scoped_okf_repository_graph_api() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             RequestContext::for_interface(InterfaceKind::Api),
         )
@@ -138,6 +139,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical: false,
     };
 
     let preview = request_json(
@@ -155,6 +157,7 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
         mode: CodeIndexMode::incremental("HEAD~1", "HEAD").expect("refs should validate"),
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::AllowStale,
+        reuse_historical: false,
     };
     let rejected_incremental = request_json(
         router.clone(),

@@ -7,8 +7,32 @@ use std::{
 
 use super::{
     cold_index_completion_validation, elastic_timeout_seconds, evaluate_repository,
-    incremental_index_completion_validation,
+    historical_reuse_index_command, incremental_index_completion_validation,
 };
+
+#[test]
+fn initialization_incremental_command_opts_into_historical_reuse() {
+    let command = historical_reuse_index_command(
+        std::path::Path::new("relay-knowledge"),
+        "fixture",
+        "head-sha",
+    );
+
+    assert_eq!(
+        command,
+        vec![
+            "relay-knowledge",
+            "repo",
+            "index",
+            "fixture",
+            "--ref",
+            "head-sha",
+            "--reuse-historical",
+            "--format",
+            "json",
+        ]
+    );
+}
 use crate::evaluator::runtime::contracts::{EvalRuntime, Limiter};
 
 #[test]

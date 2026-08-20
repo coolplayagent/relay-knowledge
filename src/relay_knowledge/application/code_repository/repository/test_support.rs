@@ -59,6 +59,7 @@ pub(super) fn request(alias: &str, ref_selector: &str) -> CodeIndexRequest {
         mode: CodeIndexMode::Full,
         workspace_detection: Default::default(),
         freshness_policy: FreshnessPolicy::WaitUntilFresh,
+        reuse_historical: false,
     }
 }
 

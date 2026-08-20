@@ -68,6 +68,7 @@ fn run_worker() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index"),
         )
@@ -162,6 +163,7 @@ pub fn retry_policy_v2() -> u32 {
                     .expect("incremental mode should validate"),
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("update"),
         )
@@ -239,6 +241,7 @@ SELECT id FROM users;
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-sql-schema"),
         )
@@ -303,89 +306,6 @@ async fn register_rejects_language_filters_to_preserve_full_language_surface() {
 }
 
 #[tokio::test]
-async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
-    let repo = FixtureRepo::create("code-incremental-base");
-    repo.write("src/lib.rs", "pub fn value() -> u32 { 2 }\n");
-    repo.git(["add", "."]);
-    repo.git(["commit", "-m", "initial"]);
-    let initial = repo.git_text(["rev-parse", "HEAD"]);
-    let service = service_with_memory_store().await;
-
-    service
-        .register_code_repository(
-            CodeRepositoryRegisterRequest {
-                root_path: repo.path.display().to_string(),
-                alias: "fixture".to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: Vec::new(),
-            },
-            context("register-incremental-base"),
-        )
-        .await
-        .expect("repository should register");
-    service
-        .index_code_repository(
-            CodeIndexRequest {
-                repository: selector("fixture", "HEAD"),
-                mode: CodeIndexMode::Full,
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::WaitUntilFresh,
-            },
-            context("index-incremental-base"),
-        )
-        .await
-        .expect("initial index should succeed");
-
-    repo.write("src/lib.rs", "pub fn value() -> u32 { 1 }\n");
-    repo.git(["add", "."]);
-    repo.git(["commit", "-m", "update to one"]);
-    service
-        .index_code_repository(
-            CodeIndexRequest {
-                repository: selector("fixture", "HEAD"),
-                mode: CodeIndexMode::incremental(initial.clone(), "HEAD")
-                    .expect("incremental mode should validate"),
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::WaitUntilFresh,
-            },
-            context("index-current-base"),
-        )
-        .await
-        .expect("first incremental index should succeed");
-
-    repo.write("src/lib.rs", "pub fn value() -> u32 { 0 }\n");
-    repo.git(["add", "."]);
-    repo.git(["commit", "-m", "return to zero"]);
-    let updated = service
-        .index_code_repository(
-            CodeIndexRequest {
-                repository: selector("fixture", "HEAD"),
-                mode: CodeIndexMode::incremental(initial.clone(), "HEAD")
-                    .expect("incremental mode should validate"),
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::WaitUntilFresh,
-            },
-            context("index-persisted-base"),
-        )
-        .await
-        .expect("persisted base scope should seed incremental update");
-
-    assert_eq!(
-        updated.summary.base_resolved_commit_sha.as_deref(),
-        Some(initial.as_str())
-    );
-    assert_eq!(updated.summary.changed_path_count, 1);
-    assert_eq!(updated.summary.progress.blob_read_count, 1);
-    assert!(
-        query(&service, "value", CodeQueryKind::Definition)
-            .await
-            .results
-            .iter()
-            .any(|hit| hit.path == "src/lib.rs")
-    );
-}
-
-#[tokio::test]
 async fn duplicate_root_registration_preserves_existing_aliases() {
     let repo = FixtureRepo::create("code-aliases");
     repo.write("src/lib.rs", "pub fn aliased() -> u32 { 1 }\n");
@@ -401,6 +321,7 @@ async fn duplicate_root_registration_preserves_existing_aliases() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-primary-alias"),
         )
@@ -494,6 +415,7 @@ async fn health_graph_code_counters_include_repository_totals() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-health-totals"),
         )
@@ -533,6 +455,7 @@ async fn full_index_reuses_fresh_matching_scope_without_rebuilding() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-full-noop-first"),
         )
@@ -545,6 +468,7 @@ async fn full_index_reuses_fresh_matching_scope_without_rebuilding() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-full-noop-second"),
         )
@@ -575,6 +499,7 @@ async fn repository_report_does_not_run_latency_samples_by_default() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-report-fast"),
         )
@@ -629,6 +554,7 @@ pub fn caller_missing() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-unresolved-callee"),
         )
@@ -684,6 +610,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-overlay"),
         )
@@ -701,6 +628,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
                 mode: CodeIndexMode::WorktreeOverlay,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("overlay"),
         )
@@ -767,6 +695,7 @@ async fn git_snapshot_queries_remain_isolated_after_indexing_another_branch() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-branch-a"),
         )
@@ -779,6 +708,7 @@ async fn git_snapshot_queries_remain_isolated_after_indexing_another_branch() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-branch-b"),
         )
@@ -853,6 +783,7 @@ async fn same_tree_hash_branches_reuse_scope_but_preserve_requested_ref_audit() 
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-same-tree-a"),
         )
@@ -928,7 +859,33 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
-    let environment = EnvironmentConfig::from_pairs(
+    let environment = test_environment();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+
+    RelayKnowledgeService::with_store(runtime, store)
+}
+
+#[cfg(windows)]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [
+            ("USERPROFILE", "C:\\Users\\alice"),
+            ("APPDATA", "C:\\Users\\alice\\AppData\\Roaming"),
+            ("LOCALAPPDATA", "C:\\Users\\alice\\AppData\\Local"),
+            ("TEMP", "C:\\Users\\alice\\AppData\\Local\\Temp"),
+            ("RELAY_KNOWLEDGE_HOME", "C:\\relay"),
+        ],
+    )
+    .expect("environment should parse")
+}
+
+#[cfg(not(windows))]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
             ("HOME", "/home/alice"),
@@ -936,13 +893,7 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
             ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
         ],
     )
-    .expect("environment should parse");
-    let runtime = RuntimeConfiguration::from_environment(&environment)
-        .await
-        .expect("runtime should compose");
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-
-    RelayKnowledgeService::with_store(runtime, store)
+    .expect("environment should parse")
 }
 
 struct FixtureRepo {
@@ -997,3 +948,6 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
     command.current_dir(path).args(args);
     command
 }
+
+#[path = "code_repository_historical_reuse_tests.rs"]
+mod historical_reuse_tests;

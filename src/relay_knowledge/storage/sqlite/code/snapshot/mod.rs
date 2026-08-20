@@ -15,7 +15,7 @@ use super::{
     cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index},
     lifecycle::commit_scope,
     report,
-    search::{backfill_search_metadata_for_scope, insert_search_document},
+    search::{SearchDocumentInserter, backfill_search_metadata_for_scope},
     status::{canonical_filter_values, canonical_path_filters, parse_json_list},
 };
 
@@ -66,40 +66,62 @@ pub(super) fn apply_snapshot_with_fence(
     if snapshot.full_replace {
         delete_scope_index(&transaction, &snapshot.source_scope)?;
     } else {
-        clone_active_scope_for_incremental(&transaction, &snapshot)?;
-        for path in &snapshot.deleted_paths {
-            delete_path_index(&transaction, &snapshot.source_scope, path)?;
+        let mut excluded_paths = snapshot.deleted_paths.clone();
+        for file in &snapshot.files {
+            if !excluded_paths.contains(&file.path) {
+                excluded_paths.push(file.path.clone());
+            }
         }
-        delete_path_indexes(
+        excluded_paths.sort_unstable();
+        excluded_paths.dedup();
+        let cloned_with_exclusion = clone_active_scope_for_incremental(
             &transaction,
+            &snapshot.repository_id,
             &snapshot.source_scope,
-            snapshot.files.iter().map(|file| file.path.as_str()),
+            &snapshot.path_filters,
+            &snapshot.language_filters,
+            snapshot.base_resolved_commit_sha.as_deref(),
+            &excluded_paths,
         )?;
+        // When the clone excluded changed paths, those old rows are already
+        // absent from the new scope and the delete steps would be no-ops.
+        // When the clone was skipped (same scope) or ran without exclusion,
+        // the old rows are still present and must be deleted before reinsert.
+        if !cloned_with_exclusion {
+            for path in &snapshot.deleted_paths {
+                delete_path_index(&transaction, &snapshot.source_scope, path)?;
+            }
+            delete_path_indexes(
+                &transaction,
+                &snapshot.source_scope,
+                snapshot.files.iter().map(|file| file.path.as_str()),
+            )?;
+        }
     }
 
+    let mut file_statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_files (
+            repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
+            line_count, parse_status, is_generated, degraded_reason
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        ",
+    )?;
     for file in &snapshot.files {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_files (
-                repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
-                line_count, parse_status, is_generated, degraded_reason
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            ",
-            params![
-                file.repository_id,
-                file.source_scope,
-                file.file_id,
-                file.path,
-                file.language_id,
-                file.blob_hash,
-                file.byte_len,
-                file.line_count,
-                file.parse_status.as_str(),
-                file.is_generated,
-                file.degraded_reason,
-            ],
-        )?;
+        file_statement.execute(params![
+            file.repository_id,
+            file.source_scope,
+            file.file_id,
+            file.path,
+            file.language_id,
+            file.blob_hash,
+            file.byte_len,
+            file.line_count,
+            file.parse_status.as_str(),
+            file.is_generated,
+            file.degraded_reason,
+        ])?;
     }
     let file_languages_by_path = snapshot
         .files
@@ -107,38 +129,38 @@ pub(super) fn apply_snapshot_with_fence(
         .map(|file| (file.path.as_str(), file.language_id.as_str()))
         .collect::<BTreeMap<_, _>>();
     super::symbols::insert_records(&transaction, &snapshot.symbols)?;
+    let mut search_inserter = SearchDocumentInserter::new(&transaction)?;
+    let mut reference_statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_references (
+            repository_id, source_scope, reference_id, file_id, path, name, kind,
+            target_symbol_snapshot_id, target_hint, resolution_state,
+            confidence_basis_points, confidence_tier,
+            byte_start, byte_end, line_start, line_end
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ",
+    )?;
     for reference in &snapshot.references {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_references (
-                repository_id, source_scope, reference_id, file_id, path, name, kind,
-                target_symbol_snapshot_id, target_hint, resolution_state,
-                confidence_basis_points, confidence_tier,
-                byte_start, byte_end, line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-            ",
-            params![
-                reference.repository_id,
-                reference.source_scope,
-                reference.reference_id,
-                reference.file_id,
-                reference.path,
-                reference.name,
-                reference.kind,
-                reference.target_symbol_snapshot_id,
-                reference.target_hint,
-                reference.resolution_state,
-                reference.confidence_basis_points,
-                reference.confidence_tier,
-                reference.byte_range.start,
-                reference.byte_range.end,
-                reference.line_range.start,
-                reference.line_range.end,
-            ],
-        )?;
-        insert_search_document(
-            &transaction,
+        reference_statement.execute(params![
+            reference.repository_id,
+            reference.source_scope,
+            reference.reference_id,
+            reference.file_id,
+            reference.path,
+            reference.name,
+            reference.kind,
+            reference.target_symbol_snapshot_id,
+            reference.target_hint,
+            reference.resolution_state,
+            reference.confidence_basis_points,
+            reference.confidence_tier,
+            reference.byte_range.start,
+            reference.byte_range.end,
+            reference.line_range.start,
+            reference.line_range.end,
+        ])?;
+        search_inserter.insert(
             &reference.source_scope,
             "reference",
             &reference.reference_id,
@@ -155,7 +177,10 @@ pub(super) fn apply_snapshot_with_fence(
             ],
         )?;
     }
-    insert_imports_calls_chunks_diagnostics(&transaction, &snapshot)?;
+    drop(file_statement);
+    drop(reference_statement);
+    insert_imports_calls_chunks_diagnostics(&transaction, &snapshot, &mut search_inserter)?;
+    search_inserter.finish()?;
     super::schema::ensure_code_query_indexes(&transaction)?;
     update_repository_after_snapshot(&transaction, &snapshot)?;
     // Resolve workspace-level cross-repo imports when monorepo workspaces
@@ -224,16 +249,53 @@ pub(super) fn apply_snapshot_with_fence(
     })
 }
 
-fn clone_active_scope_for_incremental(
+pub(in crate::storage::sqlite::code) fn clone_active_scope_for_incremental(
     transaction: &rusqlite::Transaction<'_>,
-    snapshot: &CodeIndexSnapshot,
-) -> Result<(), StorageError> {
-    let path_filters_json = serde_json::to_string(&snapshot.path_filters)
+    repository_id: &str,
+    source_scope: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+    base_resolved_commit_sha: Option<&str>,
+    excluded_paths: &[String],
+) -> Result<bool, StorageError> {
+    let previous_scope = resolve_incremental_base_scope(
+        transaction,
+        repository_id,
+        path_filters,
+        language_filters,
+        base_resolved_commit_sha,
+    )?;
+    if previous_scope == source_scope {
+        return Ok(false);
+    }
+    delete_scope_index(transaction, source_scope)?;
+    for table in CODE_SCOPE_TABLES {
+        clone_code_table(
+            transaction,
+            table,
+            &previous_scope,
+            source_scope,
+            excluded_paths,
+        )?;
+    }
+    backfill_search_metadata_for_scope(transaction, source_scope)?;
+
+    Ok(!excluded_paths.is_empty())
+}
+
+pub(in crate::storage::sqlite::code) fn resolve_incremental_base_scope(
+    transaction: &rusqlite::Transaction<'_>,
+    repository_id: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+    base_resolved_commit_sha: Option<&str>,
+) -> Result<String, StorageError> {
+    let path_filters_json = serde_json::to_string(path_filters)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let language_filters_json = serde_json::to_string(&snapshot.language_filters)
+    let language_filters_json = serde_json::to_string(language_filters)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let requested_path_filters = canonical_path_filters(&snapshot.path_filters);
-    let requested_language_filters = canonical_filter_values(&snapshot.language_filters);
+    let requested_path_filters = canonical_path_filters(path_filters);
+    let requested_language_filters = canonical_filter_values(language_filters);
     let mut statement = transaction.prepare(
         "
         SELECT source_scope, tree_hash, path_filters_json, language_filters_json
@@ -254,18 +316,14 @@ fn clone_active_scope_for_incremental(
           rowid DESC
         ",
     )?;
-    let base_commit = snapshot
-        .base_resolved_commit_sha
-        .as_deref()
-        .ok_or_else(|| {
-            StorageError::InvalidInput(format!(
-                "code repository '{}' incremental snapshot is missing its resolved base commit",
-                snapshot.repository_id
-            ))
-        })?;
+    let base_commit = base_resolved_commit_sha.ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "code repository '{repository_id}' incremental snapshot is missing its resolved base commit"
+        ))
+    })?;
     let rows = statement.query_map(
         params![
-            snapshot.repository_id,
+            repository_id,
             path_filters_json,
             language_filters_json,
             base_commit
@@ -281,38 +339,27 @@ fn clone_active_scope_for_incremental(
     )?;
     let mut previous_scope = None;
     for row in rows {
-        let (source_scope, tree_hash, stored_path_filters, stored_language_filters) = row?;
+        let (scope_id, tree_hash, stored_path_filters, stored_language_filters) = row?;
         if canonical_path_filters(&stored_path_filters) == requested_path_filters
             && canonical_filter_values(&stored_language_filters) == requested_language_filters
-            && (!code_snapshot_scope_is_fact_versioned(&source_scope)
+            && (!code_snapshot_scope_is_fact_versioned(&scope_id)
                 || code_snapshot_expected_scope_id(
-                    &snapshot.repository_id,
+                    repository_id,
                     &tree_hash,
                     &stored_path_filters,
                     &stored_language_filters,
                 )
-                .is_some_and(|expected| expected == source_scope))
+                .is_some_and(|expected| expected == scope_id))
         {
-            previous_scope = Some(source_scope);
+            previous_scope = Some(scope_id);
             break;
         }
     }
-    let previous_scope = previous_scope.ok_or_else(|| {
+    previous_scope.ok_or_else(|| {
         StorageError::InvalidInput(format!(
-            "code repository '{}' has no matching indexed scope for incremental filters at the current base commit and code fact version",
-            snapshot.repository_id
+            "code repository '{repository_id}' has no matching indexed scope for incremental filters at the current base commit and code fact version"
         ))
-    })?;
-    if previous_scope == snapshot.source_scope {
-        return Ok(());
-    }
-    delete_scope_index(transaction, &snapshot.source_scope)?;
-    for table in CODE_SCOPE_TABLES {
-        clone_code_table(transaction, table, &previous_scope, &snapshot.source_scope)?;
-    }
-    backfill_search_metadata_for_scope(transaction, &snapshot.source_scope)?;
-
-    Ok(())
+    })
 }
 
 fn clone_code_table(
@@ -320,23 +367,43 @@ fn clone_code_table(
     table: &CodeScopeTable,
     previous_scope: &str,
     next_scope: &str,
+    excluded_paths: &[String],
 ) -> Result<(), StorageError> {
     let selected_columns = table.columns.replacen("source_scope", "?2", 1);
-    transaction.execute(
-        &format!(
-            "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1",
-            table = table.table,
-            columns = table.columns,
-        ),
-        params![previous_scope, next_scope],
-    )?;
+    if excluded_paths.is_empty() {
+        transaction.execute(
+            &format!(
+                "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1",
+                table = table.table,
+                columns = table.columns,
+            ),
+            params![previous_scope, next_scope],
+        )?;
+    } else {
+        let placeholders = std::iter::repeat_n("?", excluded_paths.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values: Vec<Value> = Vec::with_capacity(2 + excluded_paths.len());
+        values.push(Value::Text(previous_scope.to_owned()));
+        values.push(Value::Text(next_scope.to_owned()));
+        values.extend(excluded_paths.iter().map(|path| Value::Text(path.clone())));
+        transaction.execute(
+            &format!(
+                "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1 AND path NOT IN ({placeholders})",
+                table = table.table,
+                columns = table.columns,
+            ),
+            params_from_iter(values),
+        )?;
+    }
 
     Ok(())
 }
 
-fn insert_imports_calls_chunks_diagnostics(
-    transaction: &rusqlite::Transaction<'_>,
+fn insert_imports_calls_chunks_diagnostics<'t>(
+    transaction: &rusqlite::Transaction<'t>,
     snapshot: &CodeIndexSnapshot,
+    search_inserter: &mut SearchDocumentInserter<'t>,
 ) -> Result<(), StorageError> {
     let file_languages_by_path = snapshot
         .files
@@ -345,32 +412,31 @@ fn insert_imports_calls_chunks_diagnostics(
         .collect::<BTreeMap<_, _>>();
     let symbol_signatures_by_snapshot_id =
         call_symbol_signatures_by_snapshot_id(transaction, snapshot)?;
+    let mut import_statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_imports (
+            repository_id, source_scope, import_id, file_id, path, module, target_hint,
+            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ",
+    )?;
     for import in &snapshot.imports {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_imports (
-                repository_id, source_scope, import_id, file_id, path, module, target_hint,
-                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            ",
-            params![
-                import.repository_id,
-                import.source_scope,
-                import.import_id,
-                import.file_id,
-                import.path,
-                import.module,
-                import.target_hint,
-                import.resolution_state,
-                import.confidence_basis_points,
-                import.confidence_tier,
-                import.line_range.start,
-                import.line_range.end,
-            ],
-        )?;
-        insert_search_document(
-            transaction,
+        import_statement.execute(params![
+            import.repository_id,
+            import.source_scope,
+            import.import_id,
+            import.file_id,
+            import.path,
+            import.module,
+            import.target_hint,
+            import.resolution_state,
+            import.confidence_basis_points,
+            import.confidence_tier,
+            import.line_range.start,
+            import.line_range.end,
+        ])?;
+        search_inserter.insert(
             &import.source_scope,
             "import",
             &import.import_id,
@@ -386,6 +452,16 @@ fn insert_imports_calls_chunks_diagnostics(
             ],
         )?;
     }
+    let mut call_statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_calls (
+            repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
+            caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
+            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        ",
+    )?;
     for call in &snapshot.calls {
         let caller_symbol =
             call.caller_symbol_snapshot_id
@@ -399,35 +475,24 @@ fn insert_imports_calls_chunks_diagnostics(
                 .and_then(|symbol_snapshot_id| {
                     symbol_signatures_by_snapshot_id.get(symbol_snapshot_id)
                 });
-        transaction.execute(
-            "
-            INSERT INTO code_repository_calls (
-                repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
-                caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
-                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-            ",
-            params![
-                call.repository_id,
-                call.source_scope,
-                call.call_id,
-                call.file_id,
-                call.path,
-                call.caller_symbol_snapshot_id,
-                call.caller_name,
-                call.callee_symbol_snapshot_id,
-                call.callee_name,
-                call.target_hint,
-                call.resolution_state,
-                call.confidence_basis_points,
-                call.confidence_tier,
-                call.line_range.start,
-                call.line_range.end,
-            ],
-        )?;
-        insert_search_document(
-            transaction,
+        call_statement.execute(params![
+            call.repository_id,
+            call.source_scope,
+            call.call_id,
+            call.file_id,
+            call.path,
+            call.caller_symbol_snapshot_id,
+            call.caller_name,
+            call.callee_symbol_snapshot_id,
+            call.callee_name,
+            call.target_hint,
+            call.resolution_state,
+            call.confidence_basis_points,
+            call.confidence_tier,
+            call.line_range.start,
+            call.line_range.end,
+        ])?;
+        search_inserter.insert(
             &call.source_scope,
             "call",
             &call.call_id,
@@ -448,32 +513,31 @@ fn insert_imports_calls_chunks_diagnostics(
     }
     super::batch::dependencies::insert_dependency_records(transaction, &snapshot.dependencies)?;
     super::routes::insert_records(transaction, &snapshot.routes)?;
+    let mut chunk_statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_chunks (
+            repository_id, source_scope, chunk_id, file_id, path, language_id, content,
+            byte_start, byte_end, line_start, line_end, symbol_snapshot_id
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ",
+    )?;
     for chunk in &snapshot.chunks {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_chunks (
-                repository_id, source_scope, chunk_id, file_id, path, language_id, content,
-                byte_start, byte_end, line_start, line_end, symbol_snapshot_id
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            ",
-            params![
-                chunk.repository_id,
-                chunk.source_scope,
-                chunk.chunk_id,
-                chunk.file_id,
-                chunk.path,
-                chunk.language_id,
-                chunk.content,
-                chunk.byte_range.start,
-                chunk.byte_range.end,
-                chunk.line_range.start,
-                chunk.line_range.end,
-                chunk.symbol_snapshot_id,
-            ],
-        )?;
-        insert_search_document(
-            transaction,
+        chunk_statement.execute(params![
+            chunk.repository_id,
+            chunk.source_scope,
+            chunk.chunk_id,
+            chunk.file_id,
+            chunk.path,
+            chunk.language_id,
+            chunk.content,
+            chunk.byte_range.start,
+            chunk.byte_range.end,
+            chunk.line_range.start,
+            chunk.line_range.end,
+            chunk.symbol_snapshot_id,
+        ])?;
+        search_inserter.insert(
             &chunk.source_scope,
             "chunk",
             &chunk.chunk_id,
@@ -487,38 +551,38 @@ fn insert_imports_calls_chunks_diagnostics(
         )?;
     }
     super::feature_flags::insert_records(transaction, &snapshot.feature_flags)?;
+    let mut diagnostic_statement = transaction.prepare(
+        "
+        INSERT OR REPLACE INTO code_repository_file_diagnostics
+            (repository_id, source_scope, path, parse_status, message)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ",
+    )?;
     for diagnostic in &snapshot.diagnostics {
-        transaction.execute(
-            "
-            INSERT OR REPLACE INTO code_repository_file_diagnostics
-                (repository_id, source_scope, path, parse_status, message)
-            VALUES (?1, ?2, ?3, ?4, ?5)
-            ",
-            params![
-                diagnostic.repository_id,
-                diagnostic.source_scope,
-                diagnostic.path,
-                diagnostic.parse_status.as_str(),
-                diagnostic.message,
-            ],
-        )?;
+        diagnostic_statement.execute(params![
+            diagnostic.repository_id,
+            diagnostic.source_scope,
+            diagnostic.path,
+            diagnostic.parse_status.as_str(),
+            diagnostic.message,
+        ])?;
     }
+    let mut tombstone_statement = transaction.prepare(
+        "
+        INSERT OR REPLACE INTO code_repository_path_tombstones
+            (repository_id, source_scope, old_path, new_path, base_ref, head_ref)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ",
+    )?;
     for tombstone in &snapshot.tombstones {
-        transaction.execute(
-            "
-            INSERT OR REPLACE INTO code_repository_path_tombstones
-                (repository_id, source_scope, old_path, new_path, base_ref, head_ref)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ",
-            params![
-                tombstone.repository_id,
-                tombstone.source_scope,
-                tombstone.old_path,
-                tombstone.new_path,
-                tombstone.base_ref,
-                tombstone.head_ref,
-            ],
-        )?;
+        tombstone_statement.execute(params![
+            tombstone.repository_id,
+            tombstone.source_scope,
+            tombstone.old_path,
+            tombstone.new_path,
+            tombstone.base_ref,
+            tombstone.head_ref,
+        ])?;
     }
 
     Ok(())

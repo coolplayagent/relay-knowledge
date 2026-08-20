@@ -160,6 +160,7 @@ pub(super) fn session_for_snapshot(snapshot: &CodeIndexSnapshot) -> CodeIndexSes
         changed_path_count: snapshot.changed_path_count,
         skipped_unchanged_count: snapshot.skipped_unchanged_count,
         deleted_paths: snapshot.deleted_paths.clone(),
+        changed_paths: Vec::new(),
         tombstones: snapshot.tombstones.clone(),
         workspaces: snapshot.workspaces.clone(),
         resource_budget: CodeIndexResourceBudget::default(),

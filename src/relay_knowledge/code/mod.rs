@@ -50,6 +50,7 @@ mod worktree_overlay_tests;
 pub use error::CodeIndexError;
 pub use index::{
     CodeIndexPlan, prepare_full_index_plan, prepare_full_index_plan_with_workspace_detection,
+    prepare_incremental_index_plan_with_workspace_detection,
 };
 pub use index::{
     build_index_snapshot, changed_paths_for_diff, changed_paths_for_diff_with_filters,
@@ -58,7 +59,8 @@ pub use index::{
 pub use registration::register_repository;
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
 pub(crate) use source::git::{
-    repository_worktree_observation_bounded, resolve_git_ref_bounded, resolve_git_tree_bounded,
+    first_parent_ancestors_bounded, repository_worktree_observation_bounded,
+    resolve_git_ref_bounded, resolve_git_tree_bounded,
 };
 pub use source::resolution::{
     resolve_repository_ref, resolve_repository_ref_with_filters,
@@ -84,9 +86,7 @@ pub(crate) use index::compute_worktree_overlay_identity;
 use index::impact_paths_from_changes;
 #[cfg(test)]
 pub(crate) use index::mutate_next_filesystem_full_snapshot_read;
-pub(crate) use index::{
-    build_index_snapshot_with_workspace_detection, repository_uses_filesystem_source,
-};
+pub(crate) use index::{historical_reuse_diff_fits_budget, repository_uses_filesystem_source};
 pub(crate) use registration::REGISTRATION_LANGUAGE_FILTER_ERROR;
 pub(crate) use search::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,

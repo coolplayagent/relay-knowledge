@@ -34,3 +34,50 @@ fn status_for_scope() -> CodeRepositoryStatus {
         degraded_reason: None,
     }
 }
+
+#[test]
+fn historical_scope_filters_must_match_incremental_clone() {
+    let canonical = CodeRepositoryStatus {
+        path_filters: vec!["./src/".to_owned(), "src".to_owned()],
+        language_filters: vec!["rust".to_owned(), "rust".to_owned()],
+        ..status_for_scope()
+    };
+    let broader = CodeRepositoryStatus {
+        path_filters: Vec::new(),
+        language_filters: vec!["rust".to_owned()],
+        ..status_for_scope()
+    };
+
+    assert!(scope_filters_match_incremental_clone(
+        &canonical,
+        &["src".to_owned()],
+        &["rust".to_owned()],
+    ));
+    assert!(!scope_filters_match_incremental_clone(
+        &broader,
+        &["src".to_owned()],
+        &["rust".to_owned()],
+    ));
+    assert!(!scope_filters_match_incremental_clone(
+        &canonical,
+        &["src".to_owned()],
+        &["go".to_owned()],
+    ));
+}
+
+#[test]
+fn historical_reuse_recognizes_retired_base_admission_race() {
+    let unavailable = ApiError::storage_unavailable(
+        "invalid storage input: code index task base commit 'base' has no compatible non-retiring scope for repository 'fixture'",
+    );
+    let retired_before_preflight = ApiError::invalid_argument(
+        "incremental base ref 'base' resolves to base, but code repository 'fixture' has no matching indexed base scope; run repo index --ref base before repo update",
+    );
+    let unrelated = ApiError::storage_unavailable("sqlite operation failed");
+
+    assert!(historical_reuse_base_became_unavailable(&unavailable));
+    assert!(historical_reuse_base_became_unavailable(
+        &retired_before_preflight
+    ));
+    assert!(!historical_reuse_base_became_unavailable(&unrelated));
+}

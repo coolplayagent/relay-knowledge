@@ -582,10 +582,14 @@ fn stdout_read_error(error: StdoutReadError, purpose: GitCommandPurpose) -> Code
     match error {
         StdoutReadError::Io(error) => CodeIndexError::Io(error),
         StdoutReadError::ChangedPathLimit { observed, limit } => {
-            CodeIndexError::InvalidInput(format!(
-                "{} reached {observed} changed paths, exceeding the bounded limit of {limit}{}",
-                purpose.operation, purpose.recovery_guidance
-            ))
+            if purpose.operation == "incremental Git diff" {
+                CodeIndexError::incremental_changed_path_limit(observed, limit)
+            } else {
+                CodeIndexError::InvalidInput(format!(
+                    "{} reached {observed} changed paths, exceeding the bounded limit of {limit}{}",
+                    purpose.operation, purpose.recovery_guidance
+                ))
+            }
         }
         StdoutReadError::ByteLimit { limit } => CodeIndexError::InvalidInput(format!(
             "{} output exceeds the bounded limit of {limit} bytes{}",

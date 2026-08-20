@@ -226,16 +226,35 @@ pub(in crate::evaluator) fn evaluate_repository(
                 repo_name, scope, commands, cases, metrics, index_json,
             ));
         }
+        let incremental_via_full_index = repo_config
+            .get("incremental_via_full_index")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let incremental_command = if incremental_via_full_index {
+            historical_reuse_index_command(&runtime.binary, alias, &incremental.head_ref)
+        } else {
+            incremental_update_command(
+                &runtime.binary,
+                alias,
+                &incremental.base_ref,
+                &incremental.head_ref,
+            )
+        };
+        let metric_suffix = if incremental_via_full_index {
+            "initialization_incremental_index_ms"
+        } else {
+            "incremental_index_ms"
+        };
+        let budget_name = if incremental_via_full_index {
+            "initialization_incremental_index_budget_ms"
+        } else {
+            "incremental_index_budget_ms"
+        };
         let update = run_writer_limited(
             runtime,
             CommandSpec::new(
                 format!("{repo_name}_incremental_index"),
-                incremental_update_command(
-                    &runtime.binary,
-                    alias,
-                    &incremental.base_ref,
-                    &incremental.head_ref,
-                ),
+                incremental_command,
                 &runtime.workspace,
                 Some(runtime.env.clone()),
                 runtime.timeout,
@@ -243,9 +262,9 @@ pub(in crate::evaluator) fn evaluate_repository(
         );
         let update_json = parse_json_output(&update.stdout);
         metrics.push(MetricObservation {
-            name: format!("{repo_name}_incremental_index_ms"),
+            name: format!("{repo_name}_{metric_suffix}"),
             value: update.duration_ms as f64,
-            budget: budget(&elastic_repo_config, "incremental_index_budget_ms"),
+            budget: budget(&elastic_repo_config, budget_name),
             lower_is_better: true,
             key: true,
         });
@@ -357,6 +376,20 @@ pub(in crate::evaluator) fn evaluate_repository(
     let mut report = repo_report(repo_name, scope, commands, cases, metrics, index_json);
     report.gates = guardrail_gates;
     Ok(report)
+}
+
+fn historical_reuse_index_command(binary: &Path, alias: &str, head_ref: &str) -> Vec<String> {
+    vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "index".to_owned(),
+        alias.to_owned(),
+        "--ref".to_owned(),
+        head_ref.to_owned(),
+        "--reuse-historical".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+    ]
 }
 
 fn isolated_repository_runtime(

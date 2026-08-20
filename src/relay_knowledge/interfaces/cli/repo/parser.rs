@@ -155,6 +155,7 @@ fn parse_index(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut ref_was_set = false;
     let mut dry_run = false;
     let mut reset = false;
+    let mut reuse_historical = false;
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
@@ -171,6 +172,10 @@ fn parse_index(tokens: &[String]) -> Result<RepoCommand, CliError> {
                 reset = true;
                 index += 1;
             }
+            "--reuse-historical" => {
+                reuse_historical = true;
+                index += 1;
+            }
             other => return Err(CliError::UnexpectedArgument(other.to_owned())),
         }
     }
@@ -181,6 +186,11 @@ fn parse_index(tokens: &[String]) -> Result<RepoCommand, CliError> {
         if ref_was_set {
             return Err(CliError::UnexpectedArgument("--ref".to_owned()));
         }
+        if reuse_historical {
+            return Err(CliError::UnexpectedArgument(
+                "--reuse-historical".to_owned(),
+            ));
+        }
 
         return Ok(RepoCommand::IndexReset { alias });
     }
@@ -189,6 +199,7 @@ fn parse_index(tokens: &[String]) -> Result<RepoCommand, CliError> {
         alias,
         ref_selector,
         dry_run,
+        reuse_historical,
     })
 }
 

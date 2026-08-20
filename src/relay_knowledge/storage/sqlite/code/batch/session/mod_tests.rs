@@ -764,6 +764,28 @@ async fn reference_resolution_rows(
         .expect("reference rows should load")
 }
 
+async fn import_resolution_state(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+    import_id: &str,
+) -> String {
+    let source_scope = source_scope.to_owned();
+    let import_id = import_id.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "SELECT resolution_state FROM code_repository_imports
+                     WHERE source_scope = ?1 AND import_id = ?2",
+                    rusqlite::params![source_scope, import_id],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("import resolution should load")
+}
+
 pub(super) fn file(
     source_scope: &str,
     file_id: &str,
@@ -901,6 +923,7 @@ pub(super) fn session_for_scope(source_scope: &str, total_path_count: usize) -> 
         changed_path_count: total_path_count,
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
+        changed_paths: Vec::new(),
         tombstones: Vec::new(),
         workspaces: Vec::new(),
         resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),
@@ -963,3 +986,6 @@ async fn query_index_exists(store: &SqliteGraphStore, name: &str) -> bool {
         .await
         .expect("query-index state should load")
 }
+
+#[path = "incremental_finalization_tests.rs"]
+mod incremental_finalization_tests;

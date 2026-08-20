@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{Transaction, params};
+use rusqlite::{Transaction, params, params_from_iter, types::Value};
 
 use super::{
     search_documents,
@@ -10,7 +10,7 @@ use super::{
 };
 use crate::storage::StorageError;
 
-mod languages;
+pub(super) mod languages;
 mod module_paths;
 mod specifier;
 mod symbol_targets;
@@ -72,6 +72,70 @@ pub(super) fn resolve(
     search_documents::rebuild_import_search_documents(transaction, source_scope)
 }
 
+/// Path-scoped variant of [`resolve`]: only re-resolves imports whose `path`
+/// is in `affected_paths`.  The symbol index still loads ALL symbols in the
+/// scope because an import in an affected path may resolve to a symbol in an
+/// unchanged path.
+pub(super) fn resolve_for_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    files: &BTreeMap<String, String>,
+    affected_paths: &[&str],
+    symbol_cache: &mut Option<Vec<SymbolKey>>,
+) -> Result<(), StorageError> {
+    let module_paths = module_paths::index(files);
+    let imports = load_import_keys_for_paths(transaction, source_scope, affected_paths)?;
+    let symbols_by_name = if imports
+        .iter()
+        .any(|import| requires_symbol_index(import, files))
+    {
+        let mut symbols_by_name = BTreeMap::<String, Vec<SymbolKey>>::new();
+        for symbol in symbols::load_once(transaction, source_scope, symbol_cache)? {
+            symbols_by_name
+                .entry(symbol.name.clone())
+                .or_default()
+                .push(symbol.clone());
+        }
+        symbols_by_name
+    } else {
+        BTreeMap::new()
+    };
+    let mut update_import = transaction.prepare(
+        "
+        UPDATE code_repository_imports
+        SET target_hint = ?3,
+            resolution_state = ?4,
+            confidence_basis_points = ?5,
+            confidence_tier = ?6
+        WHERE source_scope = ?1 AND import_id = ?2
+        ",
+    )?;
+    for import in imports {
+        let resolution = languages::resolve(
+            files.get(&import.path).map(String::as_str),
+            &import.path,
+            &import.module,
+            &module_paths,
+            &symbols_by_name,
+        );
+        let (state, confidence, tier, target_hint) = resolution_fields(resolution, &import.module);
+        update_import.execute(params![
+            source_scope,
+            import.import_id,
+            target_hint,
+            state,
+            confidence,
+            tier
+        ])?;
+    }
+
+    search_documents::rebuild_import_search_documents_for_paths(
+        transaction,
+        source_scope,
+        affected_paths,
+    )
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum ImportResolution {
     Resolved(String),
@@ -122,6 +186,45 @@ fn load_import_keys(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn load_import_keys_for_paths(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    affected_paths: &[&str],
+) -> Result<Vec<ImportKey>, StorageError> {
+    let mut paths = affected_paths.to_vec();
+    paths.sort_unstable();
+    paths.dedup();
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut all_imports = Vec::new();
+    for path_chunk in paths.chunks(500) {
+        let placeholders = std::iter::repeat_n("?", path_chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values = Vec::with_capacity(path_chunk.len() + 1);
+        values.push(Value::Text(source_scope.to_owned()));
+        values.extend(path_chunk.iter().map(|p| Value::Text((*p).to_owned())));
+        let mut statement = transaction.prepare(&format!(
+            "
+                SELECT import_id, path, module
+                FROM code_repository_imports
+                WHERE source_scope = ? AND path IN ({placeholders})
+                "
+        ))?;
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            Ok(ImportKey {
+                import_id: row.get(0)?,
+                path: row.get(1)?,
+                module: row.get(2)?,
+            })
+        })?;
+        all_imports.extend(rows.collect::<Result<Vec<_>, _>>()?);
+    }
+
+    Ok(all_imports)
 }
 
 fn resolution_fields(

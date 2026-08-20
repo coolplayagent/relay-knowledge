@@ -49,6 +49,8 @@ pub(super) fn ensure_search_query_indexes(connection: &Connection) -> Result<(),
             ON code_repository_symbols(source_scope, path, line_end, line_start);
         CREATE INDEX IF NOT EXISTS code_repository_references_lookup
             ON code_repository_references(source_scope, name, kind, path);
+        CREATE INDEX IF NOT EXISTS code_repository_references_target_lookup
+            ON code_repository_references(source_scope, target_symbol_snapshot_id, path);
         CREATE INDEX IF NOT EXISTS code_repository_calls_lookup
             ON code_repository_calls(source_scope, callee_name, caller_name, path);
         CREATE INDEX IF NOT EXISTS code_repository_feature_flags_lookup

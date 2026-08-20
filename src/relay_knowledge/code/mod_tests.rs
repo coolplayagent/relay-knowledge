@@ -1,4 +1,63 @@
 use super::*;
+
+#[test]
+fn historical_reuse_budget_counts_both_rename_and_copy_paths() {
+    let changes = vec![
+        source::change_status::GitChange::Renamed {
+            old_path: "src/old.rs".to_owned(),
+            new_path: "src/new.rs".to_owned(),
+        },
+        source::change_status::GitChange::Copied {
+            old_path: "src/source.rs".to_owned(),
+            new_path: "src/copy.rs".to_owned(),
+        },
+        source::change_status::GitChange::Deleted {
+            path: "src/deleted.rs".to_owned(),
+        },
+    ];
+
+    assert_eq!(index::impacted_path_count(&changes), 5);
+}
+
+#[test]
+fn historical_reuse_budget_counts_files_expanded_from_gitlinks() {
+    let child = test_fixtures::TempGitRepo::create("historical-reuse-gitlink-child");
+    for index in 0..=index::MAX_HISTORICAL_REUSE_CHANGED_PATHS {
+        child.write(
+            &format!("src/file_{index:03}.rs"),
+            &format!("pub fn value_{index:03}() -> usize {{ {index} }}\n"),
+        );
+    }
+    child.git(["add", "."]);
+    child.git(["commit", "-m", "child files"]);
+
+    let parent = test_fixtures::TempGitRepo::create("historical-reuse-gitlink-parent");
+    parent.write("src/lib.rs", "pub fn parent() {}\n");
+    parent.git(["add", "."]);
+    parent.git(["commit", "-m", "base"]);
+    let base = parent.git_text(["rev-parse", "HEAD"]);
+    let child_path = child.path.to_str().expect("child path should be unicode");
+    parent.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        child_path,
+        "external_deps/rust_sdk",
+    ]);
+    parent.git(["commit", "-m", "add large submodule"]);
+
+    let fits = index::historical_reuse_diff_fits_budget(
+        &parent.path,
+        &base,
+        "HEAD",
+        &[],
+        &["rust".to_owned()],
+    )
+    .expect("gitlink expansion should be measured");
+
+    assert!(!fits);
+}
 use crate::domain::CodeIndexResourceBudget;
 use std::fs;
 

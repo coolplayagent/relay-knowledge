@@ -115,6 +115,12 @@ pub struct CodeIndexSession {
     pub changed_path_count: usize,
     pub skipped_unchanged_count: usize,
     pub deleted_paths: Vec<String>,
+    /// Paths that will be re-inserted during an incremental session.
+    /// Used by `begin_session_once` to exclude them from the historical
+    /// scope clone so stale rows are never copied into the new scope.
+    /// Empty for full-replace sessions.
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
     pub tombstones: Vec<CodePathTombstone>,
     #[serde(default)]
     pub workspaces: Vec<CodeMonorepoWorkspace>,

@@ -90,6 +90,10 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
     let performance_tail =
         std::fs::read_to_string(root.join("index_performance/src/shard_015/file_1023.rs"))
             .expect("index performance tail source");
+    let performance_discovered_dependency = std::fs::read_to_string(
+        root.join("index_performance/external_deps/rust_sdk/lib.rs"),
+    )
+    .expect("index performance discovered dependency source");
     let wide_performance_tail = std::fs::read_to_string(
         root.join("wide_index_performance/crates/perf_core/src/shard_031/file_2047.rs"),
     )
@@ -127,6 +131,7 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
     assert_eq!(c_fragment.lines().count(), 256);
     assert!(c_fragment.contains(".flags = RK_PERF_ENTRY_VALID"));
     assert!(performance_tail.contains("rk_perf_target_1023"));
+    assert!(performance_discovered_dependency.contains("rk_perf_discovered_dependency"));
     assert!(wide_performance_tail.contains("rk_wide_target_2047"));
     assert!(wide_performance_bridge.contains("rk_wide_bridge_dispatch"));
     assert!(agent_context.contains("AgentContextPackBuilder"));

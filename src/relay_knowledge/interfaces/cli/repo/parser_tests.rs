@@ -252,6 +252,7 @@ fn parses_repo_command_forms_and_validation_errors() {
             alias: "core".to_owned(),
             ref_selector: "HEAD".to_owned(),
             dry_run: false,
+            reuse_historical: false,
         }
     );
     assert_eq!(
@@ -317,7 +318,32 @@ fn parses_repo_command_forms_and_validation_errors() {
             alias: "core".to_owned(),
             ref_selector: "main".to_owned(),
             dry_run: true,
+            reuse_historical: false,
         }
+    );
+    assert_eq!(
+        parse_repo(&[
+            "index".to_owned(),
+            "core".to_owned(),
+            "--reuse-historical".to_owned(),
+        ])
+        .expect("reuse-historical flag should parse"),
+        RepoCommand::Index {
+            alias: "core".to_owned(),
+            ref_selector: "HEAD".to_owned(),
+            dry_run: false,
+            reuse_historical: true,
+        }
+    );
+    assert_eq!(
+        parse_repo(&[
+            "index".to_owned(),
+            "core".to_owned(),
+            "--reuse-historical".to_owned(),
+            "--reset".to_owned(),
+        ])
+        .expect_err("reset should reject reuse-historical"),
+        CliError::UnexpectedArgument("--reuse-historical".to_owned())
     );
     assert_eq!(
         parse_repo(&[

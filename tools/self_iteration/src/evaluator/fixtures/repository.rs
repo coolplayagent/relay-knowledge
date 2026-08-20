@@ -328,6 +328,11 @@ fn write_index_performance_many_files_fixture(root: &Path) -> Result<(), String>
         )?;
     }
 
+    write_fixture_file(
+        &root.join("external_deps/rust_sdk/lib.rs"),
+        "pub fn rk_perf_discovered_dependency(input: u64) -> u64 { input + 1 }\n",
+    )?;
+
     Ok(())
 }
 

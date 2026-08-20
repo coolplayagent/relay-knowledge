@@ -59,6 +59,7 @@ pub fn test_retry_policy() -> u32 {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-filter-narrowing"),
         )
@@ -177,6 +178,7 @@ async fn non_git_language_query_can_narrow_full_filesystem_index() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-non-git-language-narrowing"),
         )
@@ -232,6 +234,7 @@ async fn non_git_active_broad_index_allows_narrow_stale_query() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-non-git-narrow-stale"),
         )
@@ -254,6 +257,7 @@ async fn non_git_active_broad_index_allows_narrow_stale_query() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::AllowStale,
+                reuse_historical: false,
             },
             context("start-non-git-narrow-stale"),
         )
@@ -305,6 +309,7 @@ async fn non_git_incremental_uses_explicit_filesystem_base_scope() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-non-git-explicit-base-v1"),
         )
@@ -335,6 +340,7 @@ async fn non_git_incremental_uses_explicit_filesystem_base_scope() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-non-git-explicit-base-v2"),
         )
@@ -350,6 +356,7 @@ async fn non_git_incremental_uses_explicit_filesystem_base_scope() {
                     .expect("incremental mode should validate"),
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("update-non-git-explicit-base"),
         )
@@ -388,6 +395,7 @@ async fn query_language_filter_includes_dependency_manifests() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-language-sbom"),
         )
@@ -511,6 +519,7 @@ async fn query_configuration_languages_returns_nested_keys() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-config-languages"),
         )
@@ -601,6 +610,7 @@ pub fn test_retry_policy() -> u32 {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-restricted"),
         )
@@ -683,6 +693,7 @@ async fn query_field_qualifiers_narrow_code_results() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("index-field-tags"),
         )
@@ -789,6 +800,7 @@ async fn assert_language_scoped_sbom(fixture: LanguageScopedSbomFixture<'_>) {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context(&format!("index-{}", fixture.repo_name)),
         )

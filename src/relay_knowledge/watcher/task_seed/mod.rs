@@ -32,6 +32,7 @@ pub fn build_commit_task_seed(
         mode: mode.clone(),
         workspace_detection: Default::default(),
         freshness_policy: crate::domain::FreshnessPolicy::WaitUntilFresh,
+        reuse_historical: false,
     };
     let mut payload = serde_json::to_value(&request).ok()?;
     if let Some(object) = payload.as_object_mut() {
@@ -118,6 +119,7 @@ pub fn build_incremental_task_seed(
         mode: crate::domain::CodeIndexMode::WorktreeOverlay,
         workspace_detection: Default::default(),
         freshness_policy: crate::domain::FreshnessPolicy::WaitUntilFresh,
+        reuse_historical: false,
     };
     let mut payload = serde_json::to_value(&request).ok()?;
     if let Some(object) = payload.as_object_mut() {
@@ -174,6 +176,7 @@ pub fn build_worktree_reconcile_task_seed(
         mode: crate::domain::CodeIndexMode::WorktreeOverlay,
         workspace_detection: Default::default(),
         freshness_policy: crate::domain::FreshnessPolicy::WaitUntilFresh,
+        reuse_historical: false,
     };
     let mut payload = serde_json::to_value(&request).ok()?;
     if let Some(object) = payload.as_object_mut() {

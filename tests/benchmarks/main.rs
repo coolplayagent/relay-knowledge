@@ -47,6 +47,7 @@ async fn benchmark_code_repository_fast_paths() {
                     mode: CodeIndexMode::Full,
                     workspace_detection: Default::default(),
                     freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                    reuse_historical: false,
                 },
                 context("benchmark-full-index"),
             )
@@ -72,6 +73,7 @@ async fn benchmark_code_repository_fast_paths() {
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
             },
             context("benchmark-active-head"),
         )
@@ -90,6 +92,7 @@ async fn benchmark_code_repository_fast_paths() {
                             .expect("incremental mode should validate"),
                         workspace_detection: Default::default(),
                         freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                        reuse_historical: false,
                     },
                     context("benchmark-incremental"),
                 )
@@ -110,6 +113,7 @@ async fn benchmark_code_repository_fast_paths() {
                     mode: CodeIndexMode::Full,
                     workspace_detection: Default::default(),
                     freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                    reuse_historical: false,
                 },
                 context("benchmark-noop"),
             )

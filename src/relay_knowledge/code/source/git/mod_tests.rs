@@ -36,6 +36,58 @@ fn bounded_identity_resolution_returns_pinned_commit_and_tree_ids() {
 }
 
 #[test]
+fn bounded_first_parent_history_excludes_target_and_honors_limit() {
+    let repo = TestRepo::create("bounded-first-parent-history");
+    let mut commits = Vec::new();
+    for index in 0..12 {
+        repo.write(
+            "src/lib.rs",
+            &format!("pub fn value() -> u32 {{ {index} }}\n"),
+        );
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", &format!("commit-{index}")]);
+        commits.push(repo.git_text(["rev-parse", "HEAD"]));
+    }
+
+    let ancestors = first_parent_ancestors_bounded(&repo.root, &commits[11], 10)
+        .expect("bounded ancestor history should load");
+
+    assert_eq!(ancestors.len(), 10);
+    assert_eq!(ancestors[0], commits[10]);
+    assert_eq!(ancestors[9], commits[1]);
+    assert!(!ancestors.contains(&commits[0]));
+    assert!(!ancestors.contains(&commits[11]));
+}
+
+#[test]
+fn bounded_first_parent_history_ignores_merged_side_branch() {
+    let repo = TestRepo::create("bounded-first-parent-merge");
+    repo.write("src/lib.rs", "pub fn base() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+    let main_branch = repo.git_text(["branch", "--show-current"]);
+    repo.git(["checkout", "-b", "side"]);
+    repo.write("src/side.rs", "pub fn side() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "side"]);
+    let side = repo.git_text(["rev-parse", "HEAD"]);
+    repo.git(["checkout", &main_branch]);
+    repo.write("src/main.rs", "pub fn main_line() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "main"]);
+    let main = repo.git_text(["rev-parse", "HEAD"]);
+    repo.git(["merge", "--no-ff", "side", "-m", "merge"]);
+    let merge = repo.git_text(["rev-parse", "HEAD"]);
+
+    let ancestors = first_parent_ancestors_bounded(&repo.root, &merge, 10)
+        .expect("first-parent history should load");
+
+    assert_eq!(ancestors, vec![main, base]);
+    assert!(!ancestors.contains(&side));
+}
+
+#[test]
 fn bounded_ref_resolution_peels_annotated_tags_to_commits() {
     let repo = TestRepo::create("bounded-annotated-tag");
     repo.write("src/lib.rs", "pub fn tagged() {}\n");
