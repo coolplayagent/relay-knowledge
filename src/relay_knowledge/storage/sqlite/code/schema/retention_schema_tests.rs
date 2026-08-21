@@ -190,6 +190,7 @@ fn retention_activity_dirty_enqueue_survives_outer_upsert_conflict_policy() {
                  symbol_count, reference_count, chunk_count, stale
              ) VALUES ('scope', 'repo', 'commit-b', 'tree', '[]', '[]', 0, 0, 0, 0, 0)
              ON CONFLICT(source_scope) DO UPDATE SET
+                 repository_id = excluded.repository_id,
                  resolved_commit_sha = excluded.resolved_commit_sha;",
         )
         .expect("same-scope upserts should idempotently enqueue retention activity");
