@@ -1,6 +1,8 @@
 use rusqlite::Connection;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::super::initialize_code_schema;
+use crate::storage::SqliteGraphStore;
 
 #[test]
 fn retention_schema_adds_logical_retirement_and_durable_jobs() {
@@ -161,4 +163,186 @@ fn retention_schema_upgrades_candidate_scans_with_a_catalog_revision() {
         )
         .expect("upgraded candidate catalog revision column should query");
     assert_eq!(catalog_revision_column, 1);
+}
+
+#[test]
+fn retention_activity_dirty_enqueue_survives_outer_upsert_conflict_policy() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("schema should initialize");
+    connection
+        .execute_batch(
+            "INSERT INTO code_repositories (
+                 repository_id, alias, root_path, path_filters_json, language_filters_json,
+                 state, indexed_file_count, symbol_count, reference_count, chunk_count, stale
+             ) VALUES ('repo', 'fixture', '/repo', '[]', '[]', 'registered', 0, 0, 0, 0, 1);
+
+             INSERT INTO code_repository_scopes (
+                 source_scope, repository_id, resolved_commit_sha, tree_hash,
+                 path_filters_json, language_filters_json, indexed_file_count,
+                 symbol_count, reference_count, chunk_count, stale
+             ) VALUES ('scope', 'repo', 'commit-a', 'tree', '[]', '[]', 0, 0, 0, 0, 0)
+             ON CONFLICT(source_scope) DO UPDATE SET
+                 resolved_commit_sha = excluded.resolved_commit_sha;
+
+             INSERT INTO code_repository_scopes (
+                 source_scope, repository_id, resolved_commit_sha, tree_hash,
+                 path_filters_json, language_filters_json, indexed_file_count,
+                 symbol_count, reference_count, chunk_count, stale
+             ) VALUES ('scope', 'repo', 'commit-b', 'tree', '[]', '[]', 0, 0, 0, 0, 0)
+             ON CONFLICT(source_scope) DO UPDATE SET
+                 repository_id = excluded.repository_id,
+                 resolved_commit_sha = excluded.resolved_commit_sha;",
+        )
+        .expect("same-scope upserts should idempotently enqueue retention activity");
+
+    let dirty_count: usize = connection
+        .query_row(
+            "SELECT COUNT(*) FROM code_repository_retention_activity_dirty
+             WHERE repository_id = 'repo'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("dirty activity should query");
+    assert_eq!(dirty_count, 1);
+}
+
+#[test]
+fn retention_schema_replaces_legacy_conflict_policy_trigger() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("schema should initialize");
+    connection
+        .execute_batch(
+            "DROP TRIGGER code_repository_retention_activity_scope_insert;
+             CREATE TRIGGER code_repository_retention_activity_scope_insert
+             AFTER INSERT ON code_repository_scopes BEGIN
+                 INSERT OR IGNORE INTO code_repository_retention_activity_dirty (repository_id)
+                 VALUES (NEW.repository_id);
+             END;",
+        )
+        .expect("legacy trigger should install");
+
+    initialize_code_schema(&connection).expect("legacy trigger should upgrade");
+
+    let trigger_sql: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'trigger'
+               AND name = 'code_repository_retention_activity_scope_insert'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("upgraded trigger should query");
+    assert!(trigger_sql.contains("WHERE NOT EXISTS"));
+    assert!(!trigger_sql.contains("INSERT OR IGNORE"));
+}
+
+#[test]
+fn reopening_current_schema_version_replaces_legacy_retention_trigger() {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    let path = std::env::temp_dir()
+        .join("relay-knowledge-tests")
+        .join(format!(
+            "legacy-retention-trigger-{}-{suffix}.sqlite",
+            std::process::id()
+        ));
+    let (marker_version, route_state) = {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        let connection = store.connection.lock().expect("connection should lock");
+        let marker_version: i64 = connection
+            .query_row(
+                "SELECT version FROM relay_storage_schema_state
+                 WHERE key = 'sqlite_graph_store'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema marker should query");
+        let route_state: (String, i64, i64) = connection
+            .query_row(
+                "SELECT state, indexed_graph_version, document_count
+                 FROM graph_bm25_route_state WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("retrieval route state should query");
+        connection
+            .execute_batch(
+                "DROP TRIGGER code_repository_retention_activity_scope_insert;
+                 CREATE TRIGGER code_repository_retention_activity_scope_insert
+                 AFTER INSERT ON code_repository_scopes BEGIN
+                     INSERT OR IGNORE INTO code_repository_retention_activity_dirty (repository_id)
+                     VALUES (NEW.repository_id);
+                 END;",
+            )
+            .expect("legacy trigger should install");
+        (marker_version, route_state)
+    };
+
+    let reopened = SqliteGraphStore::open(&path).expect("current schema should upgrade on open");
+    let connection = reopened.connection.lock().expect("connection should lock");
+    let reopened_marker_version: i64 = connection
+        .query_row(
+            "SELECT version FROM relay_storage_schema_state
+             WHERE key = 'sqlite_graph_store'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("reopened schema marker should query");
+    assert_eq!(reopened_marker_version, marker_version);
+    let reopened_route_state: (String, i64, i64) = connection
+        .query_row(
+            "SELECT state, indexed_graph_version, document_count
+             FROM graph_bm25_route_state WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("reopened retrieval route state should query");
+    assert_eq!(reopened_route_state, route_state);
+    let trigger_sql: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'trigger'
+               AND name = 'code_repository_retention_activity_scope_insert'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("upgraded trigger should query");
+    assert!(trigger_sql.contains("WHERE NOT EXISTS"));
+    assert!(!trigger_sql.contains("INSERT OR IGNORE"));
+    drop(connection);
+    drop(reopened);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn failed_retention_trigger_upgrade_restores_legacy_definitions() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("schema should initialize");
+    connection
+        .execute_batch(
+            "DROP TRIGGER code_repository_retention_activity_scope_insert;
+             CREATE TRIGGER code_repository_retention_activity_scope_insert
+             AFTER INSERT ON code_repository_scopes BEGIN
+                 INSERT OR IGNORE INTO code_repository_retention_activity_dirty (repository_id)
+                 VALUES (NEW.repository_id);
+             END;
+             DROP TABLE code_repository_index_checkpoints;",
+        )
+        .expect("failing migration fixture should install");
+
+    super::upgrade_legacy_retention_activity_triggers(&connection)
+        .expect_err("missing checkpoint table should fail the trigger upgrade");
+
+    let trigger_sql: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'trigger'
+               AND name = 'code_repository_retention_activity_scope_insert'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("rolled-back legacy trigger should query");
+    assert!(trigger_sql.contains("INSERT OR IGNORE"));
 }
