@@ -6,7 +6,7 @@ mod index_task_schema;
 mod migrations;
 mod repository_schema;
 mod repository_set_schema;
-mod retention_schema;
+pub(in crate::storage::sqlite) mod retention_schema;
 mod route_schema;
 mod search_backfill;
 mod search_schema;
@@ -17,7 +17,9 @@ use self::migrations::{
 };
 use self::repository_schema::initialize_repository_schema;
 use self::repository_set_schema::initialize_repository_set_schema;
-use self::retention_schema::initialize_retention_schema;
+use self::retention_schema::{
+    initialize_retention_schema, upgrade_legacy_retention_activity_triggers,
+};
 #[cfg(test)]
 pub(super) use self::route_schema::ROUTE_EXTRACTION_REINDEX_MIGRATION;
 use self::route_schema::mark_legacy_route_extraction_scopes_stale_once;
@@ -39,6 +41,7 @@ const SEARCH_BACKFILL_MIGRATION: &str = "code-search-backfill-v1";
 const SEARCH_METADATA_BACKFILL_MIGRATION: &str = "code-search-metadata-backfill-v1";
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
+    upgrade_legacy_retention_activity_triggers(connection)?;
     initialize_repository_schema(connection)?;
     initialize_index_task_schema(connection)?;
     initialize_repository_set_schema(connection)?;

@@ -2,6 +2,9 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
+#[path = "retention_activity_trigger_schema.rs"]
+mod retention_activity_trigger_schema;
+
 pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(), StorageError> {
     super::super::super::schema::columns::ensure_column(
         connection,
@@ -9,7 +12,6 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
         "retiring",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    replace_legacy_retention_activity_triggers(connection)?;
     connection.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS code_repository_scope_gc_jobs (
@@ -160,149 +162,6 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
             WHERE catalog_id = 1;
         END;
 
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_repository_insert
-        AFTER INSERT ON code_repositories BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_repository_scope_update
-        AFTER UPDATE OF last_indexed_scope_id ON code_repositories BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_scope_insert
-        AFTER INSERT ON code_repository_scopes BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_scope_delete
-        AFTER DELETE ON code_repository_scopes BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT OLD.repository_id
-            WHERE EXISTS (
-                SELECT 1 FROM code_repositories
-                WHERE repository_id = OLD.repository_id
-            ) AND NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = OLD.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_scope_update
-        AFTER UPDATE OF repository_id, source_scope, retiring ON code_repository_scopes BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT OLD.repository_id
-            WHERE EXISTS (
-                SELECT 1 FROM code_repositories
-                WHERE repository_id = OLD.repository_id
-            ) AND NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = OLD.repository_id
-            );
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_task_insert
-        AFTER INSERT ON code_repository_index_tasks WHEN NEW.state = 'succeeded' BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_task_delete
-        AFTER DELETE ON code_repository_index_tasks WHEN OLD.state = 'succeeded' BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT OLD.repository_id
-            WHERE EXISTS (
-                SELECT 1 FROM code_repositories
-                WHERE repository_id = OLD.repository_id
-            ) AND NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = OLD.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_task_update
-        AFTER UPDATE OF repository_id, source_scope, state, updated_at_ms
-        ON code_repository_index_tasks
-        WHEN OLD.state = 'succeeded' OR NEW.state = 'succeeded' BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT OLD.repository_id
-            WHERE EXISTS (
-                SELECT 1 FROM code_repositories
-                WHERE repository_id = OLD.repository_id
-            ) AND NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = OLD.repository_id
-            );
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_checkpoint_insert
-        AFTER INSERT ON code_repository_index_checkpoints
-        WHEN NEW.state IN ('complete', 'completed') BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_checkpoint_delete
-        AFTER DELETE ON code_repository_index_checkpoints
-        WHEN OLD.state IN ('complete', 'completed') BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT OLD.repository_id
-            WHERE EXISTS (
-                SELECT 1 FROM code_repositories
-                WHERE repository_id = OLD.repository_id
-            ) AND NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = OLD.repository_id
-            );
-        END;
-        CREATE TRIGGER IF NOT EXISTS code_repository_retention_activity_checkpoint_update
-        AFTER UPDATE OF repository_id, source_scope, state, updated_at_ms
-        ON code_repository_index_checkpoints
-        WHEN OLD.state IN ('complete', 'completed')
-          OR NEW.state IN ('complete', 'completed') BEGIN
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT OLD.repository_id
-            WHERE EXISTS (
-                SELECT 1 FROM code_repositories
-                WHERE repository_id = OLD.repository_id
-            ) AND NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = OLD.repository_id
-            );
-            INSERT INTO code_repository_retention_activity_dirty (repository_id)
-            SELECT NEW.repository_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM code_repository_retention_activity_dirty
-                WHERE repository_id = NEW.repository_id
-            );
-        END;
-
         CREATE INDEX IF NOT EXISTS code_repository_scope_gc_jobs_repository
             ON code_repository_scope_gc_jobs(repository_id, updated_at_ms, source_scope);
         CREATE INDEX IF NOT EXISTS code_repository_retention_jobs_updated
@@ -327,6 +186,7 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
             ON code_repository_cross_edges(to_source_scope);
         ",
     )?;
+    connection.execute_batch(retention_activity_trigger_schema::SCHEMA)?;
     connection.execute_batch(
         "
         INSERT INTO code_repository_retention_activity (
@@ -376,7 +236,9 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
     Ok(())
 }
 
-fn replace_legacy_retention_activity_triggers(connection: &Connection) -> Result<(), StorageError> {
+pub(in crate::storage::sqlite) fn upgrade_legacy_retention_activity_triggers(
+    connection: &Connection,
+) -> Result<(), StorageError> {
     let legacy_exists = connection.query_row(
         "SELECT EXISTS (
              SELECT 1 FROM sqlite_master
@@ -390,20 +252,10 @@ fn replace_legacy_retention_activity_triggers(connection: &Connection) -> Result
     if !legacy_exists {
         return Ok(());
     }
-    connection.execute_batch(
-        "DROP TRIGGER IF EXISTS code_repository_retention_activity_repository_insert;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_repository_scope_update;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_scope_insert;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_scope_delete;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_scope_update;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_task_insert;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_task_delete;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_task_update;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_checkpoint_insert;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_checkpoint_delete;
-         DROP TRIGGER IF EXISTS code_repository_retention_activity_checkpoint_update;",
-    )?;
-    Ok(())
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute_batch(retention_activity_trigger_schema::DROP_SCHEMA)?;
+    transaction.execute_batch(retention_activity_trigger_schema::SCHEMA)?;
+    transaction.commit().map_err(StorageError::from)
 }
 
 #[cfg(test)]

@@ -42,6 +42,7 @@ impl SqliteGraphStore {
 
         let connection = Connection::open(&path)?;
         configure_writer_connection(&connection)?;
+        code::schema::retention_schema::upgrade_legacy_retention_activity_triggers(&connection)?;
         if !marker::schema_initialization_is_current(&connection)? {
             migration::prepare_existing_database(&connection)?;
             initialization::initialize_schema_for_open(&connection)?;

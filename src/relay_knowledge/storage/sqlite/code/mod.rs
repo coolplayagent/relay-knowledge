@@ -12,7 +12,7 @@ mod impact;
 pub(in crate::storage) mod lifecycle;
 mod query;
 mod routes;
-mod schema;
+pub(super) mod schema;
 mod search;
 mod set;
 mod snapshot;

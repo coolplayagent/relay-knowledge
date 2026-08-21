@@ -237,7 +237,7 @@ fn retention_schema_replaces_legacy_conflict_policy_trigger() {
 }
 
 #[test]
-fn reopening_previous_schema_version_replaces_legacy_retention_trigger() {
+fn reopening_current_schema_version_replaces_legacy_retention_trigger() {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time should be monotonic")
@@ -248,9 +248,25 @@ fn reopening_previous_schema_version_replaces_legacy_retention_trigger() {
             "legacy-retention-trigger-{}-{suffix}.sqlite",
             std::process::id()
         ));
-    {
+    let (marker_version, route_state) = {
         let store = SqliteGraphStore::open(&path).expect("store should open");
         let connection = store.connection.lock().expect("connection should lock");
+        let marker_version: i64 = connection
+            .query_row(
+                "SELECT version FROM relay_storage_schema_state
+                 WHERE key = 'sqlite_graph_store'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema marker should query");
+        let route_state: (String, i64, i64) = connection
+            .query_row(
+                "SELECT state, indexed_graph_version, document_count
+                 FROM graph_bm25_route_state WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("retrieval route state should query");
         connection
             .execute_batch(
                 "DROP TRIGGER code_repository_retention_activity_scope_insert;
@@ -261,18 +277,29 @@ fn reopening_previous_schema_version_replaces_legacy_retention_trigger() {
                  END;",
             )
             .expect("legacy trigger should install");
-        connection
-            .execute(
-                "UPDATE relay_storage_schema_state
-                 SET version = version - 1
-                 WHERE key = 'sqlite_graph_store'",
-                [],
-            )
-            .expect("previous schema version should install");
-    }
+        (marker_version, route_state)
+    };
 
-    let reopened = SqliteGraphStore::open(&path).expect("previous schema should upgrade on open");
+    let reopened = SqliteGraphStore::open(&path).expect("current schema should upgrade on open");
     let connection = reopened.connection.lock().expect("connection should lock");
+    let reopened_marker_version: i64 = connection
+        .query_row(
+            "SELECT version FROM relay_storage_schema_state
+             WHERE key = 'sqlite_graph_store'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("reopened schema marker should query");
+    assert_eq!(reopened_marker_version, marker_version);
+    let reopened_route_state: (String, i64, i64) = connection
+        .query_row(
+            "SELECT state, indexed_graph_version, document_count
+             FROM graph_bm25_route_state WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("reopened retrieval route state should query");
+    assert_eq!(reopened_route_state, route_state);
     let trigger_sql: String = connection
         .query_row(
             "SELECT sql FROM sqlite_master
@@ -287,4 +314,35 @@ fn reopening_previous_schema_version_replaces_legacy_retention_trigger() {
     drop(connection);
     drop(reopened);
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn failed_retention_trigger_upgrade_restores_legacy_definitions() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("schema should initialize");
+    connection
+        .execute_batch(
+            "DROP TRIGGER code_repository_retention_activity_scope_insert;
+             CREATE TRIGGER code_repository_retention_activity_scope_insert
+             AFTER INSERT ON code_repository_scopes BEGIN
+                 INSERT OR IGNORE INTO code_repository_retention_activity_dirty (repository_id)
+                 VALUES (NEW.repository_id);
+             END;
+             DROP TABLE code_repository_index_checkpoints;",
+        )
+        .expect("failing migration fixture should install");
+
+    super::upgrade_legacy_retention_activity_triggers(&connection)
+        .expect_err("missing checkpoint table should fail the trigger upgrade");
+
+    let trigger_sql: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'trigger'
+               AND name = 'code_repository_retention_activity_scope_insert'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("rolled-back legacy trigger should query");
+    assert!(trigger_sql.contains("INSERT OR IGNORE"));
 }
