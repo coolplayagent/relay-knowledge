@@ -3,10 +3,9 @@
 use super::super::*;
 use super::*;
 use crate::env::{EnvironmentConfig, PlatformKind};
-use std::{
-    path::{Path, PathBuf},
-    time::{Duration, Instant},
-};
+use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 #[test]
 fn uninstall_rollback_restores_removed_definition_from_checkpoint() {

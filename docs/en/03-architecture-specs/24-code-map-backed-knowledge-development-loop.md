@@ -22,7 +22,7 @@ This specification does not introduce a second copy of code facts, persist LLM n
 | Surface | Authoritative content | Owner | Consistency identity |
 | --- | --- | --- | --- |
 | Git repository | Source, documents, manifests, CI, deployment configuration | Git | Immutable commit or explicit worktree overlay |
-| Knowledge map | Topics, sources, routes, history, and stable software-model entry point | `.knowledge/knowledge-map.yaml` | `schema_version`, `map_version` |
+| Knowledge map | Topics, sources, routes, bounded recent history, and stable software-model entry point | `.knowledge/knowledge-map.yaml` root manifest, `.knowledge/topics/` shards, `.knowledge/history/` archive | `schema_version`, `map_version`, SHA-256 digest |
 | Code map | Files, symbols, references, calls, imports, chunks, and change facts | Code repository index | Repository id, resolved commit, tree hash, source scope |
 | Software model | Dependency, SDK, file, topic, relationship, build, IaC, and design projections | Software global projection | Same source scope and graph version as the code map |
 | Agent context | Bounded map-route, software/view, context, and impact evidence | Skill workflow | Pinned base/head, freshness, evidence ids |
@@ -36,6 +36,10 @@ The default stable entry in `.knowledge/knowledge-map.yaml` is:
 - source scope: `repo`
 
 This source denotes the current repository's code-map-backed software-model entry point; it is not a generated-result cache. `map init` must idempotently ensure the entry for both new and existing maps. If the reserved id is already attached to an incompatible topic, kind, URI, or scope, initialization must report a conflict instead of overwriting the user's contract.
+
+Knowledge Map v2 keeps only topic summaries, content-addressed shard refs, map version, and at most 16 recent history entries in the root manifest. Topic sources/routes live under `.knowledge/topics/`; complete history beyond that window lives in a content-addressed archive under `.knowledge/history/`. `map route <topic>` may load only the root and requested shard; full `map show`/`map validate` loads every shard, and validation verifies digests, history continuity, and the archive checkpoint. V1 single-file maps remain readable and migrate losslessly during `map init` or the next controlled mutation.
+
+All shard/archive refs are restricted to their designated `.knowledge/` subdirectory; absolute paths, `..`, and symlink escape are rejected. Multi-file mutations share one repository writer lock, publish immutable content-addressed artifacts first, and publish the root manifest last; failure restores the previous valid root. The map remains stable navigation only and must never contain snapshot-bound code, build, IaC, framework-scan, or design projection facts.
 
 ## 3. Why YAML Does Not Copy the Derived Model
 

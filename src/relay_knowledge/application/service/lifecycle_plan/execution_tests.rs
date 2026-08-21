@@ -3,6 +3,7 @@
 use super::super::*;
 use super::*;
 use crate::env::{EnvironmentConfig, PathEnvOverrides, PlatformEnvironment, PlatformKind};
+#[cfg(unix)]
 use std::time::Duration;
 
 #[test]

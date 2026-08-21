@@ -26,7 +26,7 @@ pub struct KnowledgeMap {
 }
 
 impl KnowledgeMap {
-    pub const SCHEMA_VERSION: u16 = 1;
+    pub const SCHEMA_VERSION: u16 = 2;
 
     /// Creates the default shared contract with a code-map-backed software-model route.
     pub fn initial(updated_at: String) -> Self {

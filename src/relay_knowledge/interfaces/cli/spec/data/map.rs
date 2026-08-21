@@ -26,7 +26,7 @@ fn map_init() -> CliCommandSpec {
         &[],
         &["relay-knowledge map init --format json"],
         &[
-            "Creates the default knowledge map and idempotently ensures the repository code-map-backed software-model route on existing maps.",
+            "Creates the v2 root manifest and topic shard, or losslessly migrates a valid v1 single-file map while ensuring the repository code-map-backed software-model route.",
             "A conflicting reserved repository-software-model source is rejected rather than overwritten.",
             "The repository root is discovered from the process start directory by walking up to .git or .knowledge, with AGENTS.md as a compatibility fallback.",
         ],
@@ -52,7 +52,8 @@ fn map_show() -> CliCommandSpec {
         )],
         &["relay-knowledge map show --topic build --format json"],
         &[
-            "The repository root is discovered from the process start directory before reading .knowledge/knowledge-map.yaml."
+            "The repository root is discovered from the process start directory before reading .knowledge/knowledge-map.yaml.",
+            "The compatibility view assembles all v2 topic shards; use map route for progressive one-topic loading."
         ],
     )
 }
@@ -67,7 +68,7 @@ fn map_route() -> CliCommandSpec {
         &[arg("topic", true, false, "Knowledge topic id.", None, &[],)],
         &[],
         &["relay-knowledge map route build --format json"],
-        &[],
+        &["For a v2 map, reads only the root manifest and the requested topic shard."],
     )
 }
 
@@ -145,7 +146,7 @@ fn map_validate() -> CliCommandSpec {
         &[],
         &["relay-knowledge map validate --format json"],
         &[
-            "Checks the default knowledge map and the AGENTS.md reference.",
+            "Checks the root manifest, topic-shard and history-archive digests, history continuity, path confinement, and the AGENTS.md reference.",
             "The repository root is discovered from the process start directory before reading .knowledge/knowledge-map.yaml.",
         ],
     )
