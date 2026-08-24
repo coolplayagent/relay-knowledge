@@ -148,3 +148,21 @@ fn flow_style_v2_topics_emit_authorization_facts() {
             && fact.name == format!(".knowledge/{relative}")
     }));
 }
+
+#[test]
+fn quoted_ref_keys_emit_manifest_authorization_facts() {
+    let shard = "schema_version: 2\ntopic: {id: build, title: Build}\nsources: []\nroute: null\n";
+    let digest = content_digest(shard.as_bytes());
+    let relative = format!("topics/topic-{}-{digest}.yaml", stable_id("build"));
+    let root = format!(
+        "schema_version: 2\nmap_version: 1\nupdated_at: now\ntopics:\n  - id: build\n    \"ref\": {relative}\n    digest: {digest}\nhistory: {{archived_through: 0, recent: []}}\n"
+    );
+    let mut definitions = Vec::new();
+
+    facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut definitions);
+
+    assert!(definitions.iter().any(|fact| {
+        fact.kind == "knowledge_map_topic_shard_ref"
+            && fact.name == format!(".knowledge/{relative}")
+    }));
+}

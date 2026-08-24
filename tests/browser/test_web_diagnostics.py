@@ -212,6 +212,17 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         page.get_by_test_id("stage-operation").click()
         expect(page.locator(".staged-list").get_by_text("Ingest evidence")).to_be_visible()
 
+        page.get_by_role("tab", name="Map").click()
+        page.get_by_label("From version").fill("2")
+        page.get_by_label("Limit").fill("4")
+        expect(page.locator(".command-preview")).to_contain_text(
+            "map history --from 2 --limit 4"
+        )
+        expect(page.get_by_label("Limit")).to_have_attribute("max", "256")
+        page.get_by_test_id("run-operation").click()
+        expect(page.locator(".operation-result")).to_contain_text("Knowledge Map history")
+        expect(page.locator(".result-preview")).to_contain_text("knowledge.map.history")
+
         page.get_by_role("tab", name="Code").click()
         page.get_by_label("Action").select_option("impact")
         expect(page.get_by_label("Base")).to_be_visible()

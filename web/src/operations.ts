@@ -4,6 +4,7 @@ export type OperationId =
   | "retrieve"
   | "ingest"
   | "graph"
+  | "map"
   | "code"
   | "indexes"
   | "provider"
@@ -51,6 +52,10 @@ export type AppState = {
   graph: {
     sourceScope: string;
   };
+  map: {
+    fromVersion: number;
+    limit: number;
+  };
   code: {
     action: CodeAction;
     alias: string;
@@ -97,6 +102,7 @@ export const OPERATIONS: Array<{ id: OperationId; label: string }> = [
   { id: "retrieve", label: "Retrieve" },
   { id: "ingest", label: "Ingest" },
   { id: "graph", label: "Graph" },
+  { id: "map", label: "Map" },
   { id: "code", label: "Code" },
   { id: "indexes", label: "Indexes" },
   { id: "provider", label: "Provider" },
@@ -124,6 +130,10 @@ export const appState: AppState = {
   },
   graph: {
     sourceScope: "docs"
+  },
+  map: {
+    fromVersion: 1,
+    limit: 16
   },
   code: {
     action: "query",
@@ -271,6 +281,8 @@ function operationCommandAndPayload(metadata: Record<string, unknown>): {
       return ingestSnapshot(metadata);
     case "graph":
       return graphSnapshot(metadata);
+    case "map":
+      return mapHistorySnapshot(metadata);
     case "code":
       return codeSnapshot(metadata);
     case "indexes":
@@ -351,6 +363,30 @@ function graphSnapshot(metadata: Record<string, unknown>) {
     payload: {
       operation: "graph.inspect",
       source_scope: appState.graph.sourceScope || null,
+      metadata
+    }
+  };
+}
+
+function mapHistorySnapshot(metadata: Record<string, unknown>) {
+  const state = appState.map;
+  return {
+    name: "Knowledge Map history",
+    command: shellCommand([
+      "relay-knowledge",
+      "map",
+      "history",
+      "--from",
+      String(state.fromVersion),
+      "--limit",
+      String(state.limit),
+      "--format",
+      "json"
+    ]),
+    payload: {
+      operation: "knowledge.map.history",
+      from_version: state.fromVersion,
+      limit: state.limit,
       metadata
     }
   };

@@ -55,6 +55,7 @@ Web Operations 面板覆盖这些 typed command/request preview 和同源执行:
 
 - 检索上下文和摄取 evidence。
 - 图检查和索引刷新。
+- 通过 Map 页签有界读取 Knowledge Map 历史分页。
 - 代码仓库注册、索引、查询、更新、影响分析和状态。
 - provider 探测。
 - worker 状态和 run-once。

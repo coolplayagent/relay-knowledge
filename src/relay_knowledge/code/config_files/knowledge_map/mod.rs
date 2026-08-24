@@ -269,7 +269,20 @@ fn content_digest(content: &[u8]) -> String {
 
 fn yaml_scalar<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let code = yaml_code_prefix(line).trim();
-    let value = code.strip_prefix(key)?.strip_prefix(':')?.trim();
+    let value = code
+        .strip_prefix(key)
+        .and_then(|value| value.strip_prefix(':'))
+        .or_else(|| {
+            code.strip_prefix('"')
+                .and_then(|value| value.strip_prefix(key))
+                .and_then(|value| value.strip_prefix("\":"))
+        })
+        .or_else(|| {
+            code.strip_prefix('\'')
+                .and_then(|value| value.strip_prefix(key))
+                .and_then(|value| value.strip_prefix("':"))
+        })?
+        .trim();
     (!value.is_empty()).then(|| unquote(value))
 }
 

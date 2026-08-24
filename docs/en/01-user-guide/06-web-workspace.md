@@ -55,6 +55,7 @@ The Web Operations panel covers typed command/request preview and same-origin ex
 
 - Context retrieval and evidence ingest.
 - Graph inspection and index refresh.
+- Bounded Knowledge Map history pages through the Map tab.
 - Code repository registration, indexing, query, update, impact analysis, and status.
 - Provider probe.
 - Worker status and run-once.
