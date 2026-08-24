@@ -811,6 +811,32 @@ async fn rejects_a_topic_directory_symlink_to_the_contract_root() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn reads_reject_a_symlinked_topic_artifact_directory() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root("unsafe-topic-read-symlink");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    let topics = contract.join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    let relocated = contract.join("relocated-topics");
+    fs::rename(&topics, &relocated)
+        .await
+        .expect("topics should relocate");
+    symlink(&relocated, &topics).expect("topics symlink should create");
+
+    let error = service
+        .route(&context, "software-model".to_owned())
+        .await
+        .expect_err("read must reject a symlinked artifact directory");
+    assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn rejects_an_existing_artifact_symlink_that_escapes_the_repository() {
     use std::os::unix::fs::symlink;
 

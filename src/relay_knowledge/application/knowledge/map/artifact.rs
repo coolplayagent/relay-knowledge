@@ -246,6 +246,10 @@ pub(super) async fn reject_symlink(path: &Path) -> Result<(), KnowledgeMapServic
     Ok(())
 }
 
+pub(super) fn unsafe_path(path: &Path) -> KnowledgeMapServiceError {
+    KnowledgeMapServiceError::UnsafePath(path.display().to_string())
+}
+
 pub(super) fn is_generated_topic_shard_name(file_name: &std::ffi::OsStr) -> bool {
     let Some(stem) = file_name
         .to_str()
@@ -274,11 +278,26 @@ pub(super) async fn read_verified_ref(
 ) -> Result<String, KnowledgeMapServiceError> {
     let path = resolve_contract_ref(repository_root, relative)?;
     let canonical_repository = fs::canonicalize(repository_root).await?;
-    let canonical_dir =
+    let canonical_contract =
         fs::canonicalize(repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME)).await?;
+    let artifact_dir = if relative.starts_with(&format!(
+        "{}/",
+        crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME
+    )) {
+        repository_root
+            .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+            .join(crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME)
+    } else {
+        repository_root
+            .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+            .join(crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME)
+    };
+    reject_symlink(&artifact_dir).await?;
+    let canonical_artifact_dir = fs::canonicalize(artifact_dir).await?;
     let canonical_path = fs::canonicalize(&path).await?;
-    if !canonical_dir.starts_with(canonical_repository)
-        || !canonical_path.starts_with(&canonical_dir)
+    if !canonical_contract.starts_with(canonical_repository)
+        || !canonical_artifact_dir.starts_with(&canonical_contract)
+        || !canonical_path.starts_with(&canonical_artifact_dir)
     {
         return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
     }

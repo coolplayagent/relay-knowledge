@@ -696,8 +696,7 @@ impl KnowledgeMapService {
 fn temporary_path(path: &Path) -> PathBuf {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |duration| duration.as_nanos());
     path.with_extension(format!("{}.{}.tmp", std::process::id(), suffix))
 }
 
@@ -711,17 +710,13 @@ async fn ensure_owned_directory(
     let repository = fs::canonicalize(repository_root).await?;
     let contract = fs::canonicalize(contract).await?;
     if !contract.starts_with(&repository) {
-        return Err(KnowledgeMapServiceError::UnsafePath(
-            contract.display().to_string(),
-        ));
+        return Err(unsafe_path(&contract));
     }
     fs::create_dir_all(directory).await?;
     reject_symlink(directory).await?;
     let directory = fs::canonicalize(directory).await?;
     if !directory.starts_with(&contract) {
-        return Err(KnowledgeMapServiceError::UnsafePath(
-            directory.display().to_string(),
-        ));
+        return Err(unsafe_path(&directory));
     }
     Ok(directory)
 }
@@ -750,8 +745,14 @@ async fn publish_immutable(
         };
     }
     let temp = temporary_path(&path);
-    fs::write(&temp, content).await?;
-    fs::rename(temp, path).await?;
+    if let Err(error) = fs::write(&temp, content).await {
+        let _ = fs::remove_file(&temp).await;
+        return Err(error.into());
+    }
+    if let Err(error) = fs::rename(&temp, path).await {
+        let _ = fs::remove_file(temp).await;
+        return Err(error.into());
+    }
     Ok(())
 }
 
