@@ -270,7 +270,7 @@ impl KnowledgeMapService {
     }
 
     async fn load_for_mutation(&self) -> Result<MutableKnowledgeMap, KnowledgeMapServiceError> {
-        let content = read_root_content(&self.map_path(), &self.backup_path()).await?;
+        let content = self.read_root_content().await?;
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == 1 {
@@ -324,7 +324,7 @@ impl KnowledgeMapService {
     }
 
     async fn load_map(&self) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
-        let content = read_root_content(&self.map_path(), &self.backup_path()).await?;
+        let content = self.read_root_content().await?;
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         match probe.schema_version {
@@ -468,7 +468,7 @@ impl KnowledgeMapService {
         topic: &str,
     ) -> Result<(Option<KnowledgeMapRoute>, Vec<KnowledgeMapSource>), KnowledgeMapServiceError>
     {
-        let content = read_root_content(&self.map_path(), &self.backup_path()).await?;
+        let content = self.read_root_content().await?;
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == 1 {
@@ -670,6 +670,27 @@ impl KnowledgeMapService {
     fn backup_path(&self) -> PathBuf {
         self.map_path().with_extension("yaml.previous")
     }
+
+    async fn read_root_content(&self) -> Result<String, KnowledgeMapServiceError> {
+        let path = self.map_path();
+        match read_root_file(&self.repository_root, &path).await {
+            Ok(content) => Ok(content),
+            Err(KnowledgeMapServiceError::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                match read_root_file(&self.repository_root, &self.backup_path()).await {
+                    Ok(content) => Ok(content),
+                    Err(KnowledgeMapServiceError::Io(error))
+                        if error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        read_root_file(&self.repository_root, &path).await
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
@@ -678,26 +699,6 @@ fn temporary_path(path: &Path) -> PathBuf {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     path.with_extension(format!("{}.{}.tmp", std::process::id(), suffix))
-}
-
-async fn read_root_content(path: &Path, backup: &Path) -> Result<String, KnowledgeMapServiceError> {
-    match read_root_file(path).await {
-        Ok(content) => Ok(content),
-        Err(KnowledgeMapServiceError::Io(error))
-            if error.kind() == std::io::ErrorKind::NotFound =>
-        {
-            match read_root_file(backup).await {
-                Ok(content) => Ok(content),
-                Err(KnowledgeMapServiceError::Io(error))
-                    if error.kind() == std::io::ErrorKind::NotFound =>
-                {
-                    read_root_file(path).await
-                }
-                Err(error) => Err(error),
-            }
-        }
-        Err(error) => Err(error),
-    }
 }
 
 async fn ensure_owned_directory(

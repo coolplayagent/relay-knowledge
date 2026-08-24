@@ -216,8 +216,23 @@ pub(super) fn stable_id(value: &str) -> String {
     content_digest(value.as_bytes())[..16].to_owned()
 }
 
-pub(super) async fn read_root_file(path: &Path) -> Result<String, KnowledgeMapServiceError> {
+pub(super) async fn read_root_file(
+    repository_root: &Path,
+    path: &Path,
+) -> Result<String, KnowledgeMapServiceError> {
+    let contract = path
+        .parent()
+        .ok_or_else(|| KnowledgeMapServiceError::UnsafePath(path.display().to_string()))?;
+    reject_symlink(contract).await?;
     reject_symlink(path).await?;
+    let repository = fs::canonicalize(repository_root).await?;
+    let contract = fs::canonicalize(contract).await?;
+    let root = fs::canonicalize(path).await?;
+    if !contract.starts_with(repository) || !root.starts_with(contract) {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            path.display().to_string(),
+        ));
+    }
     Ok(fs::read_to_string(path).await?)
 }
 
