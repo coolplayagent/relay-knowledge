@@ -21,11 +21,15 @@ mod error;
 
 use artifact::*;
 pub use contracts::{
-    KnowledgeMapAgentSnippetResponse, KnowledgeMapMutationResponse, KnowledgeMapRouteResponse,
-    KnowledgeMapShowResponse, KnowledgeMapSourceAddRequest, KnowledgeMapValidationResponse,
+    KnowledgeMapAgentSnippetResponse, KnowledgeMapHistoryResponse, KnowledgeMapHistoryWindow,
+    KnowledgeMapMutationResponse, KnowledgeMapRouteResponse, KnowledgeMapShowResponse,
+    KnowledgeMapSourceAddRequest, KnowledgeMapValidationResponse, KnowledgeMapView,
 };
 use contracts::{MutableKnowledgeMap, metadata, now_stamp};
 pub use error::KnowledgeMapServiceError;
+
+const MAX_HISTORY_PAGE_SIZE: usize = 256;
+const WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// File-backed service for the shared YAML knowledge navigation contract.
 pub struct KnowledgeMapService {
@@ -41,7 +45,7 @@ impl KnowledgeMapService {
         &self,
         context: &RequestContext,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock().await?;
+        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
         self.recover_manifest_backup().await?;
         let path = self.map_path();
         if fs::try_exists(&path).await? {
@@ -96,7 +100,7 @@ impl KnowledgeMapService {
         context: &RequestContext,
         topic: Option<String>,
     ) -> Result<KnowledgeMapShowResponse, KnowledgeMapServiceError> {
-        let mut map = self.load_map().await?;
+        let mut map = self.load_show_view().await?;
         if let Some(topic) = topic {
             map.sources.retain(|source| source.topic == topic);
             map.routes.retain(|route| route.topic == topic);
@@ -106,6 +110,41 @@ impl KnowledgeMapService {
             metadata: metadata(context),
             path: KNOWLEDGE_MAP_RELATIVE_PATH.to_owned(),
             map,
+        })
+    }
+
+    pub async fn history(
+        &self,
+        context: &RequestContext,
+        from_version: u64,
+        limit: usize,
+    ) -> Result<KnowledgeMapHistoryResponse, KnowledgeMapServiceError> {
+        if from_version == 0 || limit == 0 || limit > MAX_HISTORY_PAGE_SIZE {
+            return Err(KnowledgeMapServiceError::InvalidRequest(format!(
+                "history from_version must be positive and limit must be within 1..={MAX_HISTORY_PAGE_SIZE}"
+            )));
+        }
+        let (map_version, history) = self.load_history_entries().await?;
+        let entries = history
+            .iter()
+            .filter(|entry| entry.version >= from_version)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let through_version = entries
+            .last()
+            .map_or(from_version.saturating_sub(1), |entry| entry.version);
+        let next_from_version = (through_version < map_version)
+            .then(|| through_version.checked_add(1))
+            .flatten();
+        Ok(KnowledgeMapHistoryResponse {
+            metadata: metadata(context),
+            path: KNOWLEDGE_MAP_RELATIVE_PATH.to_owned(),
+            map_version,
+            from_version,
+            through_version,
+            next_from_version,
+            entries,
         })
     }
 
@@ -143,7 +182,7 @@ impl KnowledgeMapService {
         context: &RequestContext,
         request: KnowledgeMapSourceAddRequest,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock().await?;
+        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
         self.recover_manifest_backup().await?;
         let mut snapshot = self.load_or_initial().await?;
         let id = request.id.clone();
@@ -177,7 +216,7 @@ impl KnowledgeMapService {
         context: &RequestContext,
         change: KnowledgeMapChange,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock().await?;
+        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
         self.recover_manifest_backup().await?;
         let mut snapshot = self.load_for_mutation().await?;
         let id = change.id.clone();
@@ -202,7 +241,7 @@ impl KnowledgeMapService {
         context: &RequestContext,
         id: String,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock().await?;
+        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
         self.recover_manifest_backup().await?;
         let mut snapshot = self.load_for_mutation().await?;
         snapshot
@@ -339,6 +378,84 @@ impl KnowledgeMapService {
                 "unsupported schema_version {version}"
             ))),
         }
+    }
+
+    async fn load_history_entries(
+        &self,
+    ) -> Result<(u64, Vec<crate::domain::KnowledgeMapHistoryEntry>), KnowledgeMapServiceError> {
+        let content = self.read_root_content().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        match probe.schema_version {
+            1 => {
+                let map = serde_norway::from_str::<KnowledgeMap>(&content)
+                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+                map.validate()?;
+                Ok((map.map_version, map.history))
+            }
+            ARTIFACT_SCHEMA_VERSION => {
+                let manifest = parse_manifest(&content)?;
+                let mut history = self.load_archived_history(&manifest.history).await?;
+                history.extend(manifest.history.recent);
+                Ok((manifest.map_version, history))
+            }
+            version => Err(KnowledgeMapServiceError::Yaml(format!(
+                "unsupported schema_version {version}"
+            ))),
+        }
+    }
+
+    async fn load_show_view(&self) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
+        let content = self.read_root_content().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
+            let map = serde_norway::from_str::<KnowledgeMap>(&content)
+                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+            map.validate()?;
+            return Ok(KnowledgeMapView {
+                artifact_schema_version: KnowledgeMap::SCHEMA_VERSION,
+                map_version: map.map_version,
+                updated_at: map.updated_at,
+                topics: map.topics,
+                sources: map.sources,
+                routes: map.routes,
+                history: KnowledgeMapHistoryWindow {
+                    archived_through: 0,
+                    complete: true,
+                    recent: map.history,
+                },
+            });
+        }
+        if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+            return Err(KnowledgeMapServiceError::Yaml(format!(
+                "unsupported schema_version {}",
+                probe.schema_version
+            )));
+        }
+        let manifest = parse_manifest(&content)?;
+        let mut topics = Vec::with_capacity(manifest.topics.len());
+        let mut sources = Vec::new();
+        let mut routes = Vec::new();
+        for topic_ref in &manifest.topics {
+            let shard = self.load_topic_shard(topic_ref).await?;
+            topics.push(shard.topic);
+            sources.extend(shard.sources);
+            routes.extend(shard.route);
+        }
+        Ok(KnowledgeMapView {
+            artifact_schema_version: ARTIFACT_SCHEMA_VERSION,
+            map_version: manifest.map_version,
+            updated_at: manifest.updated_at,
+            topics,
+            sources,
+            routes,
+            history: KnowledgeMapHistoryWindow {
+                archived_through: manifest.history.archived_through,
+                complete: manifest.history.archived_through == 0,
+                recent: manifest.history.recent,
+            },
+        })
     }
 
     async fn write_map(
@@ -626,20 +743,33 @@ impl KnowledgeMapService {
         Ok(())
     }
 
-    async fn acquire_write_lock(&self) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
+    async fn acquire_write_lock(
+        &self,
+        timeout: Duration,
+    ) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
         let dir = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
         ensure_owned_directory(&self.repository_root, &dir).await?;
         let path = dir.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match fs::OpenOptions::new()
+        let open_path = path.clone();
+        let file = tokio::task::spawn_blocking(move || {
+            std::fs::OpenOptions::new()
+                .read(true)
                 .write(true)
-                .create_new(true)
-                .open(&path)
-                .await
-            {
-                Ok(_) => return Ok(KnowledgeMapWriteLock { path }),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                .create(true)
+                .truncate(false)
+                .open(open_path)
+        })
+        .await
+        .map_err(|error| {
+            KnowledgeMapServiceError::Io(std::io::Error::other(format!(
+                "knowledge map lock worker failed: {error}"
+            )))
+        })??;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match fs2::FileExt::try_lock_exclusive(&file) {
+                Ok(()) => return Ok(KnowledgeMapWriteLock { file }),
+                Err(error) if lock_is_contended(&error) => {
                     if Instant::now() >= deadline {
                         return Err(KnowledgeMapServiceError::LockTimeout(path));
                     }
@@ -694,6 +824,11 @@ impl KnowledgeMapService {
             Err(error) => Err(error),
         }
     }
+}
+
+fn lock_is_contended(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::WouldBlock
+        || cfg!(windows) && error.raw_os_error() == Some(33)
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
@@ -824,13 +959,14 @@ async fn cleanup_superseded_topic_shards(
     }
 }
 
+#[derive(Debug)]
 struct KnowledgeMapWriteLock {
-    path: PathBuf,
+    file: std::fs::File,
 }
 
 impl Drop for KnowledgeMapWriteLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        let _ = fs2::FileExt::unlock(&self.file);
     }
 }
 

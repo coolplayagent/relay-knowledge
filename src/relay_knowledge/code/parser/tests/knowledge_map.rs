@@ -1,4 +1,5 @@
 use crate::domain::{CodeIndexSnapshot, CodeRepositoryRegistration};
+use sha2::{Digest, Sha256};
 
 use super::*;
 
@@ -108,6 +109,37 @@ topics:
             symbol.kind == "knowledge_map_topic" && symbol.name == "spaced-topic"
         }),
         "valid YAML sequence spacing should not hide topic ids"
+    );
+}
+
+#[test]
+fn v2_manifest_and_verified_shard_emit_joinable_authorization_symbols() {
+    let shard =
+        "schema_version: 2\ntopic:\n  id: build\n  title: Build\nsources: []\nroute: null\n";
+    let digest = format!("{:x}", Sha256::digest(shard.as_bytes()));
+    let topic_key = format!("{:x}", Sha256::digest(b"build"));
+    let path = format!(".knowledge/topics/topic-{}-{digest}.yaml", &topic_key[..16]);
+    let root = format!(
+        "schema_version: 2\nmap_version: 1\nupdated_at: now\ntopics:\n  - id: build\n    ref: {}\n    digest: {digest}\nhistory:\n  archived_through: 0\n  recent: []\n",
+        path.strip_prefix(".knowledge/").expect("owned path")
+    );
+
+    let root_snapshot = parse_source_snapshot(".knowledge/knowledge-map.yaml", root.as_bytes());
+    let shard_snapshot = parse_source_snapshot(&path, shard.as_bytes());
+
+    assert!(
+        root_snapshot.symbols.iter().any(|symbol| {
+            symbol.kind == "knowledge_map_topic_shard_ref" && symbol.name == path
+        })
+    );
+    assert!(root_snapshot.symbols.iter().any(|symbol| {
+        symbol.kind == "knowledge_map_topic_shard_topic" && symbol.name == "build"
+    }));
+    assert!(
+        shard_snapshot
+            .symbols
+            .iter()
+            .any(|symbol| { symbol.kind == "knowledge_map_topic_shard" && symbol.name == "build" })
     );
 }
 

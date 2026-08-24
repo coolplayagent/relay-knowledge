@@ -47,20 +47,43 @@ fn software_file_page(
 ) -> Result<Vec<SoftwareFile>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT repository_id, source_scope, path, language_id, parse_status
-        FROM code_repository_files
-        WHERE source_scope = ?1
-        ORDER BY path ASC
+        SELECT files.repository_id, files.source_scope, files.path, files.language_id,
+               files.parse_status,
+               EXISTS (
+                   SELECT 1
+                   FROM code_repository_symbols refs
+                   JOIN code_repository_symbols topics
+                     ON topics.repository_id = refs.repository_id
+                    AND topics.source_scope = refs.source_scope
+                    AND topics.path = refs.path
+                    AND topics.line_start = refs.line_start
+                    AND topics.kind = 'knowledge_map_topic_shard_topic'
+                   JOIN code_repository_symbols shards
+                     ON shards.repository_id = refs.repository_id
+                    AND shards.source_scope = refs.source_scope
+                    AND shards.path = refs.name
+                    AND shards.name = topics.name
+                    AND shards.kind = 'knowledge_map_topic_shard'
+                   WHERE refs.source_scope = files.source_scope
+                     AND refs.repository_id = files.repository_id
+                     AND refs.path = '.knowledge/knowledge-map.yaml'
+                     AND refs.kind = 'knowledge_map_topic_shard_ref'
+                     AND refs.name = files.path
+               ) AS authorized_topic_shard
+        FROM code_repository_files files
+        WHERE files.source_scope = ?1
+        ORDER BY files.path ASC
         LIMIT ?2 OFFSET ?3
         ",
     )?;
     let rows = statement.query_map(params![source_scope, limit as i64, offset as i64], |row| {
         let path = row.get::<_, String>(2)?;
         let language_id = row.get::<_, String>(3)?;
+        let authorized_topic_shard = row.get::<_, bool>(5)?;
         Ok(SoftwareFileInput {
             repository_id: row.get(0)?,
             source_scope: row.get(1)?,
-            file_role: file_role(&path, &language_id).to_owned(),
+            file_role: file_role(&path, &language_id, authorized_topic_shard).to_owned(),
             path,
             language_id,
             parse_status: row.get(4)?,
@@ -130,7 +153,8 @@ pub(in crate::storage::sqlite::software) fn files_for_scope(
                 WHEN 'deployment' THEN 5
                 WHEN 'test' THEN 6
                 WHEN 'template' THEN 7
-                WHEN 'knowledge_map' THEN 8
+                WHEN 'knowledge_map_manifest' THEN 8
+                WHEN 'knowledge_map_topic_shard' THEN 9
                 ELSE 9
             END ASC,
             CASE

@@ -8,6 +8,10 @@ fn agent_snippet_is_the_only_map_command_without_a_repository_root() {
     for command in [
         MapCommand::Init,
         MapCommand::Show { topic: None },
+        MapCommand::History {
+            from_version: 1,
+            limit: 64,
+        },
         MapCommand::Route {
             topic: "build".to_owned(),
         },

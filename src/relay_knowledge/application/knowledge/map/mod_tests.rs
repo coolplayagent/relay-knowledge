@@ -64,21 +64,13 @@ async fn writes_and_reads_yaml_contract() {
         .show(&context, None)
         .await
         .expect("assembled map should load");
-    let inline = serialize_yaml(&shown.map).expect("assembled map should serialize");
-    assert_eq!(
-        serde_norway::from_str::<KnowledgeMapSchemaProbe>(&inline)
-            .expect("inline schema should parse")
-            .schema_version,
-        KnowledgeMap::SCHEMA_VERSION
-    );
-    fs::write(service.map_path(), inline)
-        .await
-        .expect("inline map should replace the root");
+    assert_eq!(shown.map.artifact_schema_version, ARTIFACT_SCHEMA_VERSION);
+    assert!(shown.map.history.complete);
     assert_eq!(
         service
             .show(&context, None)
             .await
-            .expect("serialized public map must remain readable")
+            .expect("public view must remain readable")
             .map,
         shown.map
     );
@@ -225,7 +217,7 @@ async fn init_upgrades_legacy_map_once() {
     assert_eq!(repeated.map_version, upgraded.map_version);
     assert_eq!(shown.map.sources.len(), 1);
     assert_eq!(shown.map.sources[0].id, "repository-software-model");
-    assert_eq!(shown.map.history.last().expect("history").version, 2);
+    assert_eq!(shown.map.history.recent.last().expect("history").version, 2);
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -744,13 +736,48 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
         archive_count += 1;
     }
     assert_eq!(archive_count, 2);
-    fs::write(
-        root.join(AGENT_CONTRACT_DIR_NAME).join(archive_ref.r#ref),
-        "tampered",
-    )
-    .await
-    .expect("archive should tamper");
-    assert!(!service.validate(&context).await.expect("validate").valid);
+    let first_page = service
+        .history(&context, 1, RECENT_HISTORY_LIMIT)
+        .await
+        .expect("first history page should load");
+    let second_page = service
+        .history(
+            &context,
+            first_page.next_from_version.expect("next page"),
+            RECENT_HISTORY_LIMIT,
+        )
+        .await
+        .expect("second history page should load");
+    assert_eq!(first_page.entries.len(), RECENT_HISTORY_LIMIT);
+    assert_eq!(first_page.through_version + 1, second_page.from_version);
+    assert!(
+        service
+            .history(&context, 1, MAX_HISTORY_PAGE_SIZE + 1)
+            .await
+            .is_err()
+    );
+
+    let archive_path = root.join(AGENT_CONTRACT_DIR_NAME).join(&archive_ref.r#ref);
+    fs::remove_file(&archive_path)
+        .await
+        .expect("archive should be removed");
+    let shown = service
+        .show(&context, None)
+        .await
+        .expect("default show must not load old archives");
+    assert!(!shown.map.history.complete);
+    assert_eq!(
+        shown.map.history.archived_through,
+        (RECENT_HISTORY_LIMIT * 2) as u64
+    );
+    service
+        .route(&context, "build".to_owned())
+        .await
+        .expect("route must not load old archives");
+    let validation = service.validate(&context).await.expect("validate");
+    assert!(!validation.valid);
+    assert!(validation.diagnostics[0].contains(&archive_ref.r#ref));
+    assert!(validation.diagnostics[0].contains(&archive_ref.digest));
     let mutation = service
         .add_source(
             &context,
@@ -765,6 +792,52 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
         )
         .await;
     assert!(mutation.is_err(), "mutation must verify archived history");
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn an_unlocked_persistent_lock_inode_does_not_block_a_writer() {
+    let root = temp_root("stale-lock-inode");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    fs::write(&lock_path, "previous owner exited")
+        .await
+        .expect("persistent lock inode should seed");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+
+    service
+        .init(&context)
+        .await
+        .expect("OS-released lock must be reusable after an owner exits");
+    assert!(fs::try_exists(lock_path).await.expect("lock path check"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn an_active_writer_cannot_be_stolen_and_wait_is_bounded() {
+    let root = temp_root("active-lock");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let active = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect("first writer should acquire ownership");
+
+    let error = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect_err("a live writer must retain ownership");
+    assert!(matches!(error, KnowledgeMapServiceError::LockTimeout(_)));
+
+    drop(active);
+    service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect("released ownership should be immediately reusable");
     let _ = fs::remove_dir_all(root).await;
 }
 

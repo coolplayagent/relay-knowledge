@@ -14,6 +14,10 @@ pub enum MapCommand {
     Show {
         topic: Option<String>,
     },
+    History {
+        from_version: u64,
+        limit: usize,
+    },
     Route {
         topic: String,
     },
@@ -40,6 +44,7 @@ pub(super) fn parse_map(tokens: &[String]) -> Result<CliAction, CliError> {
     match tokens.first().map(String::as_str) {
         Some("init") if tokens.len() == 1 => Ok(CliAction::Map(MapCommand::Init)),
         Some("show") => parse_show(&tokens[1..]),
+        Some("history") => parse_history(&tokens[1..]),
         Some("route") => parse_route(&tokens[1..]),
         Some("source") => parse_source(&tokens[1..]),
         Some("validate") if tokens.len() == 1 => Ok(CliAction::Map(MapCommand::Validate)),
@@ -78,6 +83,22 @@ pub(crate) async fn run_map(
                 .map_err(|error| map_error("knowledge map show failed", error, format))?;
             super::render_response(
                 "knowledge.map.show",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        MapCommand::History {
+            from_version,
+            limit,
+        } => {
+            let service = map_service(service, format)?;
+            let response = service
+                .history(&context, from_version, limit)
+                .await
+                .map_err(|error| map_error("knowledge map history failed", error, format))?;
+            super::render_response(
+                "knowledge.map.history",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -206,6 +227,37 @@ fn parse_route(tokens: &[String]) -> Result<CliAction, CliError> {
         }));
     }
     Err(CliError::MissingValue("topic"))
+}
+
+fn parse_history(tokens: &[String]) -> Result<CliAction, CliError> {
+    const DEFAULT_HISTORY_PAGE_SIZE: usize = 64;
+
+    let mut from_version = 1;
+    let mut limit = DEFAULT_HISTORY_PAGE_SIZE;
+    let mut index = 0;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--from" => {
+                let value = value_after(tokens, index, "--from")?;
+                from_version = value
+                    .parse::<u64>()
+                    .map_err(|_| CliError::UnexpectedArgument(value))?;
+                index += 2;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value))?;
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+    Ok(CliAction::Map(MapCommand::History {
+        from_version,
+        limit,
+    }))
 }
 
 fn parse_source(tokens: &[String]) -> Result<CliAction, CliError> {

@@ -1,4 +1,4 @@
-use super::{accept_topic_item_indent, facts, top_level_yaml_section};
+use super::{accept_topic_item_indent, content_digest, facts, stable_id, top_level_yaml_section};
 use crate::project::KNOWLEDGE_MAP_RELATIVE_PATH;
 
 #[test]
@@ -29,4 +29,45 @@ fn fixes_the_topic_list_indent_after_the_first_item() {
     assert!(!accept_topic_item_indent(&mut indent, 4));
     assert_eq!(top_level_yaml_section("topics:"), Some("topics"));
     assert_eq!(top_level_yaml_section("  nested:"), None);
+}
+
+#[test]
+fn emits_manifest_authorization_and_digest_verified_shard_facts() {
+    let shard =
+        "schema_version: 2\ntopic:\n  id: build\n  title: Build\nsources: []\nroute: null\n";
+    let digest = content_digest(shard.as_bytes());
+    let relative = format!("topics/topic-{}-{digest}.yaml", stable_id("build"));
+    let root = format!(
+        "schema_version: 2\nmap_version: 1\nupdated_at: now\ntopics:\n  - id: build\n    ref: {relative}\n    digest: {digest}\nhistory:\n  archived_through: 0\n  recent: []\n"
+    );
+    let mut root_facts = Vec::new();
+    facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut root_facts);
+    let shard_path = format!(".knowledge/{relative}");
+    assert!(
+        root_facts.iter().any(|fact| {
+            fact.kind == "knowledge_map_topic_shard_ref" && fact.name == shard_path
+        })
+    );
+    assert!(
+        root_facts
+            .iter()
+            .any(|fact| { fact.kind == "knowledge_map_topic_shard_topic" && fact.name == "build" })
+    );
+
+    let mut shard_facts = Vec::new();
+    facts(&shard_path, "yaml", shard, &mut shard_facts);
+    assert!(
+        shard_facts
+            .iter()
+            .any(|fact| { fact.kind == "knowledge_map_topic_shard" && fact.name == "build" })
+    );
+
+    let mut tampered_facts = Vec::new();
+    facts(
+        &shard_path,
+        "yaml",
+        &shard.replace("Build", "Tampered"),
+        &mut tampered_facts,
+    );
+    assert!(tampered_facts.is_empty());
 }

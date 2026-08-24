@@ -8,8 +8,10 @@ The shared entry point is `.knowledge/knowledge-map.yaml`. In schema v2 it is a
 small root manifest: topic sources/routes live in content-addressed
 `.knowledge/topics/` shards, and history older than the bounded recent window
 lives in a verified `.knowledge/history/` archive. `map route <topic>` loads one
-shard; `map show` assembles the full compatibility view. Never edit shard refs
-or archive files directly. Mutations append only newly completed history chunks and
+shard; `map show` loads current shards and returns only the bounded recent-history
+window. Use `map history --from <version> --limit <count>` for explicit pages of
+at most 256 entries. Never edit shard refs or archive files directly. Mutations
+append only newly completed history chunks and
 clean superseded topic shards after committing the root while protecting any
 recovery-manifest refs. The code map is the primary source of truth for
 repository facts. The map stores stable navigation and repository-model entry
@@ -38,6 +40,9 @@ conflict. Do not overwrite it.
   valid v1 map is migrated and receives the default software-model route.
 - Use `map show` before adding a source. One topic can contain multiple sources,
   each with a distinct stable id.
+- Treat `map show.history.complete=false` as an explicit archive omission, not
+  data loss; use bounded `map history` pages or `map validate` when old history
+  is relevant.
 - Use only `map source add`, `map source update`, or `map source remove` for
   normal mutations, then validate again.
 - Do not copy the YAML into `AGENTS.md`; keep only

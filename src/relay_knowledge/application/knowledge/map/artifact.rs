@@ -331,6 +331,19 @@ pub(super) async fn read_verified_ref(
     expected_digest: &str,
 ) -> Result<String, KnowledgeMapServiceError> {
     let path = resolve_contract_ref(repository_root, relative)?;
+    match fs::symlink_metadata(&path).await {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(KnowledgeMapServiceError::MissingArtifact {
+                path: relative.to_owned(),
+                expected_digest: expected_digest.to_owned(),
+            });
+        }
+        Err(error) => return Err(error.into()),
+    }
     let canonical_repository = fs::canonicalize(repository_root).await?;
     let canonical_contract =
         fs::canonicalize(repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME)).await?;
@@ -356,9 +369,10 @@ pub(super) async fn read_verified_ref(
         return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
     }
     let content = fs::read_to_string(path).await?;
-    if content_digest(content.as_bytes()) != expected_digest {
+    let actual_digest = content_digest(content.as_bytes());
+    if actual_digest != expected_digest {
         return Err(KnowledgeMapServiceError::Integrity(format!(
-            "digest mismatch for '{relative}'"
+            "digest mismatch for '{relative}': expected {expected_digest}, found {actual_digest}"
         )));
     }
     Ok(content)

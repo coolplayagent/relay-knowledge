@@ -19,6 +19,8 @@ fn parses_knowledge_map_source_commands() {
     ])
     .expect("map source add should parse");
     let route = CliCommand::parse(["map", "route", "build"]).expect("map route should parse");
+    let history = CliCommand::parse(["map", "history", "--from", "17", "--limit", "32"])
+        .expect("map history should parse");
     let validate = CliCommand::parse(["map", "validate"]).expect("map validate should parse");
 
     assert!(matches!(
@@ -32,6 +34,13 @@ fn parses_knowledge_map_source_commands() {
         })
     );
     assert_eq!(validate.action, CliAction::Map(map::MapCommand::Validate));
+    assert_eq!(
+        history.action,
+        CliAction::Map(map::MapCommand::History {
+            from_version: 17,
+            limit: 32,
+        })
+    );
     assert!(
         CliCommand::parse([
             "map",
