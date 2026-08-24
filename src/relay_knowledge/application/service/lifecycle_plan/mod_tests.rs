@@ -3,6 +3,7 @@
 use super::*;
 use crate::domain::{ServiceLifecycleStep, ServiceLifecycleStepResult};
 use crate::env::{EnvironmentConfig, PlatformKind};
+#[cfg(unix)]
 use std::time::Duration;
 
 #[test]

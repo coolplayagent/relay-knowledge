@@ -182,7 +182,9 @@ Kind 取值按命令家族隔离：
 
 面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_software_query` 覆盖软件全域模型 kind，`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
 
-`map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。`map init` 会创建新 map，或为旧的有效 map 幂等补齐保留的 `software-model` route 与 `repository-software-model` repository source；保留 source 不兼容时会拒绝覆盖。该 YAML 文件只保存 topic、source、route、history 和稳定模型入口元数据，不复制文档、代码、配置、CI、运行态系统、外部知识源中的真实知识，也不复制与 snapshot 绑定的架构/构建/部署 projection row。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
+`map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。`map init` 会创建 Knowledge Map v2 根 manifest，或把有效的 v1 单文件 map 幂等迁移为 v2，同时确保保留的 `software-model` route 与 `repository-software-model` repository source；保留 source 不兼容时会拒绝覆盖。V2 把各 topic 的 source 与 route 写入 `.knowledge/topics/` 下的内容寻址分片；`map route <topic>` 只读取根文件和目标分片，`map show` 则组装兼容的完整视图。根文件最多保留 16 条最近 map 变更，更早历史位于 `.knowledge/history/` 下的 SHA-256 校验不可变归档；`map validate` 会完整校验归档和全部分片。
+
+该契约只保存稳定导航和模型入口元数据，不复制文档、代码、配置、CI、运行态系统、外部知识源中的真实知识，也不复制与 snapshot 绑定的架构/构建/部署 projection row。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。所有 ref 必须是仓库受控相对路径；绝对路径、父目录穿越和符号链接逃逸会被拒绝。mutation 共用一个 writer lock，先发布不可变 artifact，最后替换根 manifest，因此中断写入仍保留上一个可用根版本。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
 
 ## 3.5 读写影响
 

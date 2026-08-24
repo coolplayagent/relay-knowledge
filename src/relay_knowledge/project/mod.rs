@@ -36,6 +36,12 @@ pub const KNOWLEDGE_MAP_FILE_NAME: &str = "knowledge-map.yaml";
 /// Repository-relative knowledge navigation contract path referenced by agents.
 pub const KNOWLEDGE_MAP_RELATIVE_PATH: &str = ".knowledge/knowledge-map.yaml";
 
+/// Repository-local directory containing Knowledge Map v2 topic shards.
+pub const KNOWLEDGE_MAP_TOPICS_DIR_NAME: &str = "topics";
+
+/// Repository-local directory containing immutable Knowledge Map history archives.
+pub const KNOWLEDGE_MAP_HISTORY_DIR_NAME: &str = "history";
+
 /// Version-check cache filename stored under the cache directory.
 pub const VERSION_CHECK_CACHE_FILE_NAME: &str = "version-check-cache.json";
 

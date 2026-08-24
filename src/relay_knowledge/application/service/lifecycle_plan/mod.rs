@@ -39,7 +39,7 @@ use rollback_steps::rollback_steps;
 
 #[cfg(test)]
 use execution::StepRunner;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use process_runner::run_command_with_timeout;
 
 impl RelayKnowledgeService {

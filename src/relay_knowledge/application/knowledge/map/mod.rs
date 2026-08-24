@@ -1,76 +1,31 @@
 use std::{
-    error::Error,
-    fmt,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
 use tokio::fs;
 use tokio::time::{Duration, Instant, sleep};
 
 use crate::{
-    api::{ApiMetadata, RequestContext},
-    domain::{
-        KnowledgeMap, KnowledgeMapChange, KnowledgeMapRoute, KnowledgeMapSource,
-        KnowledgeMapSourceKind,
+    api::RequestContext,
+    domain::{KnowledgeMap, KnowledgeMapChange, KnowledgeMapRoute, KnowledgeMapSource},
+    project::{
+        AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME,
+        KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
     },
-    project::{AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_RELATIVE_PATH},
 };
 
-/// Request to register a source in the repository knowledge map.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KnowledgeMapSourceAddRequest {
-    pub id: String,
-    pub topic: String,
-    pub kind: KnowledgeMapSourceKind,
-    pub uri: String,
-    pub source_scope: Option<String>,
-    pub description: Option<String>,
-}
+mod artifact;
+mod contracts;
+mod error;
 
-/// Response shared by map mutation commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapMutationResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub map_version: u64,
-    pub summary: String,
-}
-
-/// Response returned by read-only map commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapShowResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub map: KnowledgeMap,
-}
-
-/// Response returned by topic routing commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapRouteResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub topic: String,
-    pub route: Option<KnowledgeMapRoute>,
-    pub sources: Vec<KnowledgeMapSource>,
-}
-
-/// Response returned by validation commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapValidationResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub valid: bool,
-    pub diagnostics: Vec<String>,
-}
-
-/// Response that contains the AGENTS.md reference snippet.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapAgentSnippetResponse {
-    pub metadata: ApiMetadata,
-    pub snippet: String,
-}
+use artifact::*;
+pub use contracts::{
+    KnowledgeMapAgentSnippetResponse, KnowledgeMapMutationResponse, KnowledgeMapRouteResponse,
+    KnowledgeMapShowResponse, KnowledgeMapSourceAddRequest, KnowledgeMapValidationResponse,
+};
+use contracts::{MutableKnowledgeMap, metadata, now_stamp};
+pub use error::KnowledgeMapServiceError;
 
 /// File-backed service for the shared YAML knowledge navigation contract.
 pub struct KnowledgeMapService {
@@ -87,34 +42,51 @@ impl KnowledgeMapService {
         context: &RequestContext,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
         let _lock = self.acquire_write_lock().await?;
+        self.recover_manifest_backup().await?;
         let path = self.map_path();
         if fs::try_exists(&path).await? {
-            let mut map = self.load_map().await?;
-            if map.ensure_software_model_route()? {
-                map.record_change(
+            let existing = fs::read_to_string(&path).await?;
+            let legacy = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&existing)
+                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?
+                .schema_version
+                == 1;
+            let mut snapshot = self.load_for_mutation().await?;
+            if snapshot
+                .map
+                .ensure_software_model_route_snapshot(snapshot.archived_through)?
+            {
+                snapshot.map.record_change(
                     "software-model.ensure",
                     "Added the repository code-map-backed software-model route.".to_owned(),
                     now_stamp(),
                 );
-                self.write_map(&map).await?;
+                self.write_map(&mut snapshot).await?;
                 return Ok(self.mutation_response(
                     context,
-                    map.map_version,
+                    snapshot.map.map_version,
                     "initialized repository software-model route".to_owned(),
+                ));
+            }
+            if legacy {
+                self.write_map(&mut snapshot).await?;
+                return Ok(self.mutation_response(
+                    context,
+                    snapshot.map.map_version,
+                    "migrated knowledge map schema v1 to v2".to_owned(),
                 ));
             }
             return Ok(self.mutation_response(
                 context,
-                map.map_version,
+                snapshot.map.map_version,
                 "knowledge map and repository software-model route already exist".to_owned(),
             ));
         }
 
-        let map = KnowledgeMap::initial(now_stamp());
-        self.write_map(&map).await?;
+        let mut snapshot = MutableKnowledgeMap::initial(now_stamp());
+        self.write_map(&mut snapshot).await?;
         Ok(self.mutation_response(
             context,
-            map.map_version,
+            snapshot.map.map_version,
             "created knowledge map with repository software-model route".to_owned(),
         ))
     }
@@ -142,19 +114,19 @@ impl KnowledgeMapService {
         context: &RequestContext,
         topic: String,
     ) -> Result<KnowledgeMapRouteResponse, KnowledgeMapServiceError> {
-        let map = self.load_map().await?;
-        let route = map
-            .routes
-            .iter()
-            .find(|route| route.topic == topic)
-            .cloned();
+        let (route, available_sources) = self.load_topic_route(&topic).await?;
         let source_order = route
             .as_ref()
             .map(|route| route.source_order.as_slice())
             .unwrap_or(&[]);
         let sources = source_order
             .iter()
-            .filter_map(|id| map.sources.iter().find(|source| &source.id == id).cloned())
+            .filter_map(|id| {
+                available_sources
+                    .iter()
+                    .find(|source| &source.id == id)
+                    .cloned()
+            })
             .collect();
 
         Ok(KnowledgeMapRouteResponse {
@@ -172,7 +144,8 @@ impl KnowledgeMapService {
         request: KnowledgeMapSourceAddRequest,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
         let _lock = self.acquire_write_lock().await?;
-        let mut map = self.load_or_initial().await?;
+        self.recover_manifest_backup().await?;
+        let mut snapshot = self.load_or_initial().await?;
         let id = request.id.clone();
         let topic = request.topic.clone();
         let source = KnowledgeMapSource::new(
@@ -183,14 +156,20 @@ impl KnowledgeMapService {
             request.source_scope,
             request.description,
         )?;
-        map.add_source(source)?;
-        map.record_change(
+        snapshot
+            .map
+            .add_source_snapshot(source, snapshot.archived_through)?;
+        snapshot.map.record_change(
             "source.add",
             format!("Added source '{id}' to topic '{topic}'."),
             now_stamp(),
         );
-        self.write_map(&map).await?;
-        Ok(self.mutation_response(context, map.map_version, format!("added source {id}")))
+        self.write_map(&mut snapshot).await?;
+        Ok(self.mutation_response(
+            context,
+            snapshot.map.map_version,
+            format!("added source {id}"),
+        ))
     }
 
     pub async fn update_source(
@@ -199,16 +178,23 @@ impl KnowledgeMapService {
         change: KnowledgeMapChange,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
         let _lock = self.acquire_write_lock().await?;
-        let mut map = self.load_map().await?;
+        self.recover_manifest_backup().await?;
+        let mut snapshot = self.load_for_mutation().await?;
         let id = change.id.clone();
-        map.update_source(change)?;
-        map.record_change(
+        snapshot
+            .map
+            .update_source_snapshot(change, snapshot.archived_through)?;
+        snapshot.map.record_change(
             "source.update",
             format!("Updated source '{id}'."),
             now_stamp(),
         );
-        self.write_map(&map).await?;
-        Ok(self.mutation_response(context, map.map_version, format!("updated source {id}")))
+        self.write_map(&mut snapshot).await?;
+        Ok(self.mutation_response(
+            context,
+            snapshot.map.map_version,
+            format!("updated source {id}"),
+        ))
     }
 
     pub async fn remove_source(
@@ -217,15 +203,22 @@ impl KnowledgeMapService {
         id: String,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
         let _lock = self.acquire_write_lock().await?;
-        let mut map = self.load_map().await?;
-        map.remove_source(&id)?;
-        map.record_change(
+        self.recover_manifest_backup().await?;
+        let mut snapshot = self.load_for_mutation().await?;
+        snapshot
+            .map
+            .remove_source_snapshot(&id, snapshot.archived_through)?;
+        snapshot.map.record_change(
             "source.remove",
             format!("Removed source '{id}'."),
             now_stamp(),
         );
-        self.write_map(&map).await?;
-        Ok(self.mutation_response(context, map.map_version, format!("removed source {id}")))
+        self.write_map(&mut snapshot).await?;
+        Ok(self.mutation_response(
+            context,
+            snapshot.map.map_version,
+            format!("removed source {id}"),
+        ))
     }
 
     pub async fn validate(
@@ -266,49 +259,376 @@ impl KnowledgeMapService {
         }
     }
 
-    async fn load_or_initial(&self) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
+    async fn load_or_initial(&self) -> Result<MutableKnowledgeMap, KnowledgeMapServiceError> {
         let path = self.map_path();
-        if fs::try_exists(&path).await? {
-            self.load_map().await
+        if fs::try_exists(&path).await? || fs::try_exists(self.backup_path()).await? {
+            self.load_for_mutation().await
         } else {
-            Ok(KnowledgeMap::initial(now_stamp()))
+            Ok(MutableKnowledgeMap::initial(now_stamp()))
         }
     }
 
-    async fn load_map(&self) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
-        let content = fs::read_to_string(self.map_path()).await?;
-        let map = serde_norway::from_str::<KnowledgeMap>(&content)
+    async fn load_for_mutation(&self) -> Result<MutableKnowledgeMap, KnowledgeMapServiceError> {
+        let content = self.read_root_content().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        if probe.schema_version == 1 {
+            let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
+                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+            map.schema_version = KnowledgeMap::SCHEMA_VERSION;
+            map.validate()?;
+            return Ok(MutableKnowledgeMap {
+                map,
+                archived_through: 0,
+                archive: None,
+            });
+        }
+        if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+            return Err(KnowledgeMapServiceError::Yaml(format!(
+                "unsupported schema_version {}",
+                probe.schema_version
+            )));
+        }
+        let manifest = parse_manifest(&content)?;
+        let archived_history = self.load_archived_history(&manifest.history).await?;
+        let mut topics = Vec::with_capacity(manifest.topics.len());
+        let mut sources = Vec::new();
+        let mut routes = Vec::new();
+        for topic_ref in &manifest.topics {
+            let shard = self.load_topic_shard(topic_ref).await?;
+            topics.push(shard.topic);
+            sources.extend(shard.sources);
+            routes.extend(shard.route);
+        }
+        let map = KnowledgeMap {
+            schema_version: KnowledgeMap::SCHEMA_VERSION,
+            map_version: manifest.map_version,
+            updated_at: manifest.updated_at,
+            topics,
+            sources,
+            routes,
+            history: manifest.history.recent,
+        };
+        map.validate_snapshot(manifest.history.archived_through)?;
+        let mut validation_map = map.clone();
+        let mut complete_history = archived_history;
+        complete_history.extend(validation_map.history.clone());
+        validation_map.history = complete_history;
+        validation_map.validate()?;
+        Ok(MutableKnowledgeMap {
+            map,
+            archived_through: manifest.history.archived_through,
+            archive: manifest.history.archive,
+        })
+    }
+
+    async fn load_map(&self) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
+        let content = self.read_root_content().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        match probe.schema_version {
+            1 => {
+                let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
+                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+                map.schema_version = KnowledgeMap::SCHEMA_VERSION;
+                map.validate()?;
+                Ok(map)
+            }
+            ARTIFACT_SCHEMA_VERSION => self.load_v2_map(&content).await,
+            version => Err(KnowledgeMapServiceError::Yaml(format!(
+                "unsupported schema_version {version}"
+            ))),
+        }
+    }
+
+    async fn write_map(
+        &self,
+        snapshot: &mut MutableKnowledgeMap,
+    ) -> Result<(), KnowledgeMapServiceError> {
+        snapshot.map.validate_snapshot(snapshot.archived_through)?;
+        let dir = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
+        fs::create_dir_all(&dir).await?;
+        let mut topic_refs = Vec::with_capacity(snapshot.map.topics.len());
+        for topic in &snapshot.map.topics {
+            let shard = KnowledgeMapTopicShard {
+                schema_version: ARTIFACT_SCHEMA_VERSION,
+                topic: topic.clone(),
+                sources: snapshot
+                    .map
+                    .sources
+                    .iter()
+                    .filter(|source| source.topic == topic.id)
+                    .cloned()
+                    .collect(),
+                route: snapshot
+                    .map
+                    .routes
+                    .iter()
+                    .find(|route| route.topic == topic.id)
+                    .cloned(),
+            };
+            let yaml = serialize_yaml(&shard)?;
+            let digest = content_digest(yaml.as_bytes());
+            let relative = format!(
+                "{KNOWLEDGE_MAP_TOPICS_DIR_NAME}/topic-{}-{digest}.yaml",
+                stable_id(&topic.id)
+            );
+            publish_immutable(&self.repository_root, &relative, yaml.as_bytes()).await?;
+            topic_refs.push(KnowledgeMapTopicRef {
+                id: topic.id.clone(),
+                title: topic.title.clone(),
+                description: topic.description.clone(),
+                source_ids: shard
+                    .sources
+                    .iter()
+                    .map(|source| source.id.clone())
+                    .collect(),
+                r#ref: relative,
+                digest,
+            });
+        }
+
+        while snapshot.map.history.len() > RECENT_HISTORY_LIMIT {
+            let chunk: Vec<_> = snapshot.map.history.drain(..RECENT_HISTORY_LIMIT).collect();
+            let archive = KnowledgeMapHistoryArchive {
+                schema_version: ARTIFACT_SCHEMA_VERSION,
+                from_version: chunk.first().expect("non-empty archive chunk").version,
+                through_version: chunk.last().expect("non-empty archive chunk").version,
+                previous: snapshot.archive.clone(),
+                entries: chunk,
+            };
+            let yaml = serialize_yaml(&archive)?;
+            let digest = content_digest(yaml.as_bytes());
+            let relative = format!(
+                "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{digest}.yaml",
+                archive.from_version, archive.through_version
+            );
+            publish_immutable(&self.repository_root, &relative, yaml.as_bytes()).await?;
+            snapshot.archived_through = archive.through_version;
+            snapshot.archive = Some(KnowledgeMapArchiveRef {
+                r#ref: relative,
+                digest,
+            });
+        }
+        snapshot.map.validate_snapshot(snapshot.archived_through)?;
+        let manifest = KnowledgeMapManifest {
+            schema_version: ARTIFACT_SCHEMA_VERSION,
+            map_version: snapshot.map.map_version,
+            updated_at: snapshot.map.updated_at.clone(),
+            topics: topic_refs,
+            history: KnowledgeMapHistoryManifest {
+                archived_through: snapshot.archived_through,
+                archive: snapshot.archive.clone(),
+                recent: snapshot.map.history.clone(),
+            },
+        };
+        self.publish_manifest(serialize_yaml(&manifest)?.as_bytes())
+            .await?;
+        cleanup_superseded_topic_shards(
+            &self.repository_root,
+            &self.backup_path(),
+            &manifest,
+            Duration::from_secs(60),
+        )
+        .await;
+        Ok(())
+    }
+
+    async fn load_v2_map(&self, content: &str) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
+        let manifest = parse_manifest(content)?;
+        let mut topics = Vec::with_capacity(manifest.topics.len());
+        let mut sources = Vec::new();
+        let mut routes = Vec::new();
+        for topic_ref in &manifest.topics {
+            let shard = self.load_topic_shard(topic_ref).await?;
+            topics.push(shard.topic);
+            sources.extend(shard.sources);
+            if let Some(route) = shard.route {
+                routes.push(route);
+            }
+        }
+        let mut history = self.load_archived_history(&manifest.history).await?;
+        history.extend(manifest.history.recent);
+        let map = KnowledgeMap {
+            schema_version: KnowledgeMap::SCHEMA_VERSION,
+            map_version: manifest.map_version,
+            updated_at: manifest.updated_at,
+            topics,
+            sources,
+            routes,
+            history,
+        };
         map.validate()?;
         Ok(map)
     }
 
-    async fn write_map(&self, map: &KnowledgeMap) -> Result<(), KnowledgeMapServiceError> {
-        map.validate()?;
-        let dir = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
-        fs::create_dir_all(&dir).await?;
-        let path = self.map_path();
-        let temp_path = dir.join(format!(
-            "{KNOWLEDGE_MAP_FILE_NAME}.{}.{}.tmp",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
-        ));
-        let yaml = serde_norway::to_string(map)
+    async fn load_topic_route(
+        &self,
+        topic: &str,
+    ) -> Result<(Option<KnowledgeMapRoute>, Vec<KnowledgeMapSource>), KnowledgeMapServiceError>
+    {
+        let content = self.read_root_content().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        fs::write(&temp_path, yaml).await?;
-        if cfg!(target_os = "windows") && fs::try_exists(&path).await? {
-            fs::remove_file(&path).await?;
+        if probe.schema_version == 1 {
+            let map = self.load_map().await?;
+            return Ok((
+                map.routes
+                    .iter()
+                    .find(|route| route.topic == topic)
+                    .cloned(),
+                map.sources
+                    .into_iter()
+                    .filter(|source| source.topic == topic)
+                    .collect(),
+            ));
         }
-        fs::rename(&temp_path, &path).await?;
+        let manifest = parse_manifest(&content)?;
+        validate_recent_history(&manifest)?;
+        let Some(topic_ref) = manifest.topics.iter().find(|entry| entry.id == topic) else {
+            return Ok((None, Vec::new()));
+        };
+        let shard = self.load_topic_shard(topic_ref).await?;
+        Ok((shard.route, shard.sources))
+    }
+
+    async fn load_topic_shard(
+        &self,
+        topic_ref: &KnowledgeMapTopicRef,
+    ) -> Result<KnowledgeMapTopicShard, KnowledgeMapServiceError> {
+        let content =
+            read_verified_ref(&self.repository_root, &topic_ref.r#ref, &topic_ref.digest).await?;
+        let shard = serde_norway::from_str::<KnowledgeMapTopicShard>(&content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        let expected_ref = format!(
+            "{KNOWLEDGE_MAP_TOPICS_DIR_NAME}/topic-{}-{}.yaml",
+            stable_id(&topic_ref.id),
+            topic_ref.digest
+        );
+        if topic_ref.r#ref != expected_ref
+            || shard.schema_version != ARTIFACT_SCHEMA_VERSION
+            || shard.topic.id != topic_ref.id
+            || shard.topic.title != topic_ref.title
+            || shard.topic.description != topic_ref.description
+            || !shard
+                .sources
+                .iter()
+                .map(|source| source.id.as_str())
+                .eq(topic_ref.source_ids.iter().map(String::as_str))
+        {
+            return Err(KnowledgeMapServiceError::Integrity(format!(
+                "topic shard '{}' identity, metadata, or schema does not match the manifest",
+                topic_ref.r#ref
+            )));
+        }
+        validate_topic_shard(&shard)?;
+        Ok(shard)
+    }
+
+    async fn load_archived_history(
+        &self,
+        history: &KnowledgeMapHistoryManifest,
+    ) -> Result<Vec<crate::domain::KnowledgeMapHistoryEntry>, KnowledgeMapServiceError> {
+        let Some(mut archive_ref) = history.archive.clone() else {
+            if history.archived_through != 0 {
+                return Err(KnowledgeMapServiceError::Integrity(
+                    "history archive is missing for a non-zero checkpoint".to_owned(),
+                ));
+            }
+            return Ok(Vec::new());
+        };
+        let mut expected_through = history.archived_through;
+        let mut chunks = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        loop {
+            if !archive_ref
+                .r#ref
+                .starts_with(&format!("{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/"))
+                || !visited.insert(archive_ref.r#ref.clone())
+            {
+                return Err(KnowledgeMapServiceError::Integrity(
+                    "history archive chain has an unsafe ref or cycle".to_owned(),
+                ));
+            }
+            let content = read_verified_ref(
+                &self.repository_root,
+                &archive_ref.r#ref,
+                &archive_ref.digest,
+            )
+            .await?;
+            let archive = serde_norway::from_str::<KnowledgeMapHistoryArchive>(&content)
+                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+            let expected_ref = format!(
+                "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{}.yaml",
+                archive.from_version, archive.through_version, archive_ref.digest
+            );
+            if archive.schema_version != ARTIFACT_SCHEMA_VERSION
+                || archive_ref.r#ref != expected_ref
+                || archive.through_version != expected_through
+                || archive.entries.is_empty()
+                || archive.entries.len() > RECENT_HISTORY_LIMIT
+                || archive.entries.first().map(|entry| entry.version) != Some(archive.from_version)
+                || archive.entries.last().map(|entry| entry.version)
+                    != Some(archive.through_version)
+            {
+                return Err(KnowledgeMapServiceError::Integrity(format!(
+                    "history archive '{}' does not match its checkpoint",
+                    archive_ref.r#ref
+                )));
+            }
+            expected_through = archive.from_version.saturating_sub(1);
+            chunks.push(archive.entries);
+            match archive.previous {
+                Some(previous) => archive_ref = previous,
+                None if expected_through == 0 => break,
+                None => {
+                    return Err(KnowledgeMapServiceError::Integrity(
+                        "history archive chain ends before version 1".to_owned(),
+                    ));
+                }
+            }
+        }
+        chunks.reverse();
+        Ok(chunks.into_iter().flatten().collect())
+    }
+
+    async fn publish_manifest(&self, content: &[u8]) -> Result<(), KnowledgeMapServiceError> {
+        let path = self.map_path();
+        let temp = temporary_path(&path);
+        let backup = self.backup_path();
+        if let Err(error) = fs::write(&temp, content).await {
+            let _ = fs::remove_file(&temp).await;
+            return Err(error.into());
+        }
+        let existed = fs::try_exists(&path).await?;
+        if existed {
+            if fs::try_exists(&backup).await? {
+                fs::remove_file(&backup).await?;
+            }
+            fs::rename(&path, &backup).await?;
+        }
+        if let Err(error) = fs::rename(&temp, &path).await {
+            if existed {
+                let _ = fs::rename(&backup, &path).await;
+            }
+            let _ = fs::remove_file(temp).await;
+            return Err(KnowledgeMapServiceError::Io(error));
+        }
+        Ok(())
+    }
+
+    async fn recover_manifest_backup(&self) -> Result<(), KnowledgeMapServiceError> {
+        let path = self.map_path();
+        let backup = self.backup_path();
+        if !fs::try_exists(&path).await? && fs::try_exists(&backup).await? {
+            fs::rename(backup, path).await?;
+        }
         Ok(())
     }
 
     async fn acquire_write_lock(&self) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
         let dir = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
-        fs::create_dir_all(&dir).await?;
+        ensure_owned_directory(&self.repository_root, &dir).await?;
         let path = dir.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -349,48 +669,159 @@ impl KnowledgeMapService {
             .join(Path::new(AGENT_CONTRACT_DIR_NAME))
             .join(KNOWLEDGE_MAP_FILE_NAME)
     }
-}
 
-/// Error surfaced by the file-backed knowledge map service.
-#[derive(Debug)]
-pub enum KnowledgeMapServiceError {
-    Io(std::io::Error),
-    Yaml(String),
-    Domain(crate::domain::DomainError),
-    LockTimeout(PathBuf),
-}
+    fn backup_path(&self) -> PathBuf {
+        self.map_path().with_extension("yaml.previous")
+    }
 
-impl fmt::Display for KnowledgeMapServiceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(error) => write!(formatter, "{error}"),
-            Self::Yaml(error) => write!(formatter, "invalid knowledge map YAML: {error}"),
-            Self::Domain(error) => write!(formatter, "{error}"),
-            Self::LockTimeout(path) => write!(
-                formatter,
-                "timed out waiting for knowledge map write lock '{}'",
-                path.display()
-            ),
+    async fn read_root_content(&self) -> Result<String, KnowledgeMapServiceError> {
+        let path = self.map_path();
+        match read_root_file(&self.repository_root, &path).await {
+            Ok(content) => Ok(content),
+            Err(KnowledgeMapServiceError::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                match read_root_file(&self.repository_root, &self.backup_path()).await {
+                    Ok(content) => Ok(content),
+                    Err(KnowledgeMapServiceError::Io(error))
+                        if error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        read_root_file(&self.repository_root, &path).await
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
         }
     }
 }
 
-impl Error for KnowledgeMapServiceError {}
-
-impl From<std::io::Error> for KnowledgeMapServiceError {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error)
-    }
+fn temporary_path(path: &Path) -> PathBuf {
+    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH);
+    let suffix = elapsed.map_or(0, |duration| duration.as_nanos());
+    path.with_extension(format!("{}.{}.tmp", std::process::id(), suffix))
 }
 
-impl From<crate::domain::DomainError> for KnowledgeMapServiceError {
-    fn from(error: crate::domain::DomainError) -> Self {
-        Self::Domain(error)
+async fn ensure_owned_directory(
+    repository_root: &Path,
+    directory: &Path,
+) -> Result<PathBuf, KnowledgeMapServiceError> {
+    let contract = repository_root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract).await?;
+    reject_symlink(&contract).await?;
+    let repository = fs::canonicalize(repository_root).await?;
+    let contract = fs::canonicalize(contract).await?;
+    if !contract.starts_with(&repository) {
+        return Err(unsafe_path(&contract));
     }
+    fs::create_dir_all(directory).await?;
+    reject_symlink(directory).await?;
+    let directory = fs::canonicalize(directory).await?;
+    if !directory.starts_with(&contract) {
+        return Err(unsafe_path(&directory));
+    }
+    Ok(directory)
 }
 
-fn metadata(context: &RequestContext) -> ApiMetadata {
-    ApiMetadata::graph_only(context, crate::domain::GraphVersion::ZERO)
+async fn publish_immutable(
+    repository_root: &Path,
+    relative: &str,
+    content: &[u8],
+) -> Result<(), KnowledgeMapServiceError> {
+    let path = resolve_contract_ref(repository_root, relative)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| KnowledgeMapServiceError::UnsafePath(relative.to_owned()))?;
+    let owned_parent = ensure_owned_directory(repository_root, parent).await?;
+    if fs::try_exists(&path).await? {
+        ensure_regular_file_within(&path, &owned_parent).await?;
+        return if fs::read(&path).await? == content {
+            Ok(())
+        } else {
+            Err(KnowledgeMapServiceError::Integrity(format!(
+                "immutable map artifact '{}' has different content",
+                path.display()
+            )))
+        };
+    }
+    let temp = temporary_path(&path);
+    if let Err(error) = fs::write(&temp, content).await {
+        let _ = fs::remove_file(&temp).await;
+        return Err(error.into());
+    }
+    if let Err(error) = fs::rename(&temp, path).await {
+        let _ = fs::remove_file(temp).await;
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+async fn cleanup_superseded_topic_shards(
+    repository_root: &Path,
+    backup: &Path,
+    manifest: &KnowledgeMapManifest,
+    grace: Duration,
+) {
+    let mut retained = manifest.referenced_topic_files();
+    if let Ok(content) = fs::read_to_string(backup).await {
+        let Ok(recovery) = parse_manifest(&content) else {
+            return;
+        };
+        retained.extend(recovery.referenced_topic_files());
+    }
+    let directory = repository_root
+        .join(AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    if ensure_owned_directory(repository_root, &directory)
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok(mut entries) = fs::read_dir(directory).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let file_name = entry.file_name();
+        if !is_generated_topic_shard_name(&file_name) {
+            continue;
+        }
+        let mut marker_name = file_name.clone();
+        marker_name.push(".retired");
+        let marker = entry.path().with_file_name(marker_name);
+        if retained.contains(&file_name) {
+            let _ = fs::remove_file(marker).await;
+            continue;
+        }
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&marker)
+            .await
+        {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => continue,
+        }
+        let old_enough = fs::symlink_metadata(&marker)
+            .await
+            .and_then(|metadata| {
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(std::io::Error::other("invalid shard retirement marker"));
+                }
+                metadata.modified()
+            })
+            .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+            .is_ok_and(|age| age >= grace);
+        if old_enough
+            && match fs::remove_file(entry.path()).await {
+                Ok(()) => true,
+                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            }
+        {
+            let _ = fs::remove_file(marker).await;
+        }
+    }
 }
 
 struct KnowledgeMapWriteLock {
@@ -401,14 +832,6 @@ impl Drop for KnowledgeMapWriteLock {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }
-}
-
-fn now_stamp() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    format!("unix:{seconds}")
 }
 
 #[cfg(test)]

@@ -4,12 +4,18 @@ Use this reference when an agent initializes repository knowledge, plans a
 specification, starts a coding task, reacts to a Git commit, or changes an
 authoritative document/configuration source.
 
-The shared YAML contract is `.knowledge/knowledge-map.yaml`. The code map is
-the primary source of truth for repository facts. The YAML stores stable topic,
-source, route, history, and repository-model entry metadata; it must not copy
-derived architecture narratives, build targets, deployment resources, or
-resolved commit ids. Read those snapshot-bound facts through `repo software`
-and `repo view`.
+The shared entry point is `.knowledge/knowledge-map.yaml`. In schema v2 it is a
+small root manifest: topic sources/routes live in content-addressed
+`.knowledge/topics/` shards, and history older than the bounded recent window
+lives in a verified `.knowledge/history/` archive. `map route <topic>` loads one
+shard; `map show` assembles the full compatibility view. Never edit shard refs
+or archive files directly. Mutations append only newly completed history chunks and
+clean superseded topic shards after committing the root while protecting any
+recovery-manifest refs. The code map is the primary source of truth for
+repository facts. The map stores stable navigation and repository-model entry
+metadata; it must not copy derived architecture narratives, build targets,
+deployment resources, framework scan results, or resolved commit ids. Read
+those snapshot-bound facts through `repo software` and `repo view`.
 
 `map init` creates a new contract or idempotently ensures this default model
 entry on an existing contract:
@@ -28,8 +34,8 @@ conflict. Do not overwrite it.
 - Run `map validate --format json` before reading or changing the contract.
 - A missing map may be created with `map init`; an existing invalid map must
   not be replaced automatically.
-- Run `map init` during repository bootstrap even when the file exists so an
-  older valid map receives the default software-model route.
+- Run `map init` during repository bootstrap even when the file exists so a
+  valid v1 map is migrated and receives the default software-model route.
 - Use `map show` before adding a source. One topic can contain multiple sources,
   each with a distinct stable id.
 - Use only `map source add`, `map source update`, or `map source remove` for

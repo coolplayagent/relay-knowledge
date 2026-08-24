@@ -22,7 +22,7 @@
 | 状态面 | 权威内容 | 所有者 | 一致性身份 |
 | --- | --- | --- | --- |
 | Git repository | 源码、文档、manifest、CI、部署配置 | Git | immutable commit 或显式 worktree overlay |
-| Knowledge map | topic、source、route、history 和稳定软件模型入口 | `.knowledge/knowledge-map.yaml` | `schema_version`、`map_version` |
+| Knowledge map | topic、source、route、有限 recent history 和稳定软件模型入口 | `.knowledge/knowledge-map.yaml` 根 manifest、`.knowledge/topics/` 分片、`.knowledge/history/` 归档 | `schema_version`、`map_version`、SHA-256 digest |
 | Code map | file、symbol、reference、call、import、chunk 和变更事实 | code repository index | repository id、resolved commit、tree hash、source scope |
 | Software model | dependency、SDK、file、topic、relationship、build、IaC、design 投影 | software global projection | 与 code map 相同的 source scope 和 graph version |
 | Agent context | map route、software/view/context/impact 的有界组合 | skill workflow | 固定 base/head、freshness、evidence id |
@@ -36,6 +36,10 @@
 - source scope: `repo`
 
 该 source 表示“当前仓库的 code-map-backed 软件模型入口”，而不是一份生成结果缓存。`map init` 对新旧 map 都必须幂等确保该入口存在；如果保留 id 已被用于不兼容的 topic、kind、URI 或 scope，命令必须报告冲突，不能静默覆盖用户契约。
+
+Knowledge Map v2 的根 manifest 只保存 topic 摘要、每个 topic 的有序 source-id 摘要、内容寻址分片 ref、map version 与最多 16 条 recent history。持久 artifact schema v2 与 API/domain 使用的 assembled inline map schema v1 是不同的类型身份；公开 `KnowledgeMap` 序列化后仍是服务可回读并迁移的 v1 单文件 contract，不得生成结构不兼容却同样标记为 v2 的 root。根摘要必须在加载任一分片前拒绝跨 topic 的重复 source id、history 版本溢出，以及非法 topic/archive ref 或 digest。各 topic 的 source/route 位于 `.knowledge/topics/`；超出窗口的完整历史位于 `.knowledge/history/` 的内容寻址归档。`map route <topic>` 只能读取并验证根 manifest 与目标分片；完整 `map show`/`map validate` 和所有 mutation 才加载全部分片并校验 digest、history 连续性和 archive checkpoint，mutation 不得信任未经读取的归档头。v1 单文件 map 保持可读，并在 `map init` 或下一次受控 mutation 时无损迁移。
+
+所有分片与归档 ref 必须限制在 `.knowledge/` 的指定真实目录，拒绝绝对路径、`..`、root/backup 或 artifact 叶子符号链接、指定 artifact 目录符号链接和逃逸仓库的符号链接。多文件 mutation 使用同一个仓库级 writer lock，只追加刚完成的 history chunk，先发布不可变内容寻址 artifact，最后发布根 manifest；artifact 临时文件在 write 或 rename 失败时必须删除，root 发布失败则恢复到上一个有效 root。成功发布后保留上一代 recovery manifest 及其引用；更旧 shard 第一次失去引用时创建 retirement marker，并从该时刻计算至少 60 秒宽限期，再做 best-effort 清理，使已读取旧 root 的并发 reader 能完成分片读取。清理只接纳严格符合内容寻址 shard 命名的文件，必须保留 `.knowledge/topics/` 中的 README、`.gitkeep` 和其他用户文件。Map 仍只保存稳定导航，不得写入 snapshot-bound code、build、IaC、framework scan 或 design projection facts。
 
 ## 3. 为什么 YAML 不复制派生模型
 
