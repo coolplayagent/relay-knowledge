@@ -4,6 +4,21 @@ use super::render_text;
 fn render_text_covers_operational_and_code_repository_summaries() {
     let cases = [
         (
+            "knowledge.map.history",
+            serde_json::json!({
+                "path": ".knowledge/knowledge-map.yaml",
+                "map_version": 9,
+                "from_version": 5,
+                "through_version": 6,
+                "next_from_version": 7,
+                "entries": [
+                    {"version": 5, "action": "add", "actor": "cli", "summary": "Added source"},
+                    {"version": 6, "action": "update", "actor": "cli", "summary": "Updated source"},
+                ],
+            }),
+            "knowledge_map=.knowledge/knowledge-map.yaml map_version=9 from=5 through=6 next=7\nversion=5 action=add actor=cli summary=Added source\nversion=6 action=update actor=cli summary=Updated source\n",
+        ),
+        (
             "files.content",
             serde_json::json!({
                 "results": [

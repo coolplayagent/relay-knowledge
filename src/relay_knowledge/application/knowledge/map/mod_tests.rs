@@ -757,7 +757,14 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
             .is_err()
     );
 
-    let archive_path = root.join(AGENT_CONTRACT_DIR_NAME).join(&archive_ref.r#ref);
+    let head_archive_text =
+        fs::read_to_string(root.join(AGENT_CONTRACT_DIR_NAME).join(&archive_ref.r#ref))
+            .await
+            .expect("head archive should read");
+    let head_archive = serde_norway::from_str::<KnowledgeMapHistoryArchive>(&head_archive_text)
+        .expect("head archive should parse");
+    let older_ref = head_archive.previous.expect("older archive should exist");
+    let archive_path = root.join(AGENT_CONTRACT_DIR_NAME).join(&older_ref.r#ref);
     fs::remove_file(&archive_path)
         .await
         .expect("archive should be removed");
@@ -774,10 +781,16 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
         .route(&context, "build".to_owned())
         .await
         .expect("route must not load old archives");
+    let head_page = service
+        .history(&context, head_archive.from_version, RECENT_HISTORY_LIMIT)
+        .await
+        .expect("a page in the head archive must not load older chunks");
+    assert_eq!(head_page.entries[0].version, head_archive.from_version);
+    assert!(service.history(&context, 1, 1).await.is_err());
     let validation = service.validate(&context).await.expect("validate");
     assert!(!validation.valid);
-    assert!(validation.diagnostics[0].contains(&archive_ref.r#ref));
-    assert!(validation.diagnostics[0].contains(&archive_ref.digest));
+    assert!(validation.diagnostics[0].contains(&older_ref.r#ref));
+    assert!(validation.diagnostics[0].contains(&older_ref.digest));
     let mutation = service
         .add_source(
             &context,
@@ -792,6 +805,73 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
         )
         .await;
     assert!(mutation.is_err(), "mutation must verify archived history");
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn history_pages_reject_digest_valid_noncontiguous_archive_entries() {
+    let root = temp_root("invalid-history-page");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    let manifest_text = fs::read_to_string(service.map_path())
+        .await
+        .expect("manifest should read");
+    let mut manifest = parse_manifest(&manifest_text).expect("manifest should parse");
+    let mut entries = (1..=RECENT_HISTORY_LIMIT as u64)
+        .map(|version| crate::domain::KnowledgeMapHistoryEntry {
+            version,
+            action: "fixture".to_owned(),
+            actor: "test".to_owned(),
+            summary: format!("History entry {version}"),
+        })
+        .collect::<Vec<_>>();
+    entries[5].version = 5;
+    let archive = KnowledgeMapHistoryArchive {
+        schema_version: ARTIFACT_SCHEMA_VERSION,
+        from_version: 1,
+        through_version: RECENT_HISTORY_LIMIT as u64,
+        previous: None,
+        entries,
+    };
+    let archive_yaml = serialize_yaml(&archive).expect("archive should serialize");
+    let digest = content_digest(archive_yaml.as_bytes());
+    let relative = format!(
+        "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{digest}.yaml",
+        archive.from_version, archive.through_version
+    );
+    fs::create_dir_all(
+        root.join(AGENT_CONTRACT_DIR_NAME)
+            .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME),
+    )
+    .await
+    .expect("history directory should create");
+    fs::write(
+        root.join(AGENT_CONTRACT_DIR_NAME).join(&relative),
+        archive_yaml,
+    )
+    .await
+    .expect("archive should write");
+    manifest.map_version = RECENT_HISTORY_LIMIT as u64 + 1;
+    manifest.history.archived_through = RECENT_HISTORY_LIMIT as u64;
+    manifest.history.archive = Some(KnowledgeMapArchiveRef {
+        r#ref: relative,
+        digest,
+    });
+    manifest.history.recent[0].version = manifest.map_version;
+    fs::write(
+        service.map_path(),
+        serialize_yaml(&manifest).expect("manifest should serialize"),
+    )
+    .await
+    .expect("manifest should write");
+
+    let error = service
+        .history(&context, 1, RECENT_HISTORY_LIMIT)
+        .await
+        .expect_err("noncontiguous archive entries must fail");
+    assert!(error.to_string().contains("not contiguous"));
     let _ = fs::remove_dir_all(root).await;
 }
 

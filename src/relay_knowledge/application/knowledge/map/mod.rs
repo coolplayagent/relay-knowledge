@@ -124,13 +124,7 @@ impl KnowledgeMapService {
                 "history from_version must be positive and limit must be within 1..={MAX_HISTORY_PAGE_SIZE}"
             )));
         }
-        let (map_version, history) = self.load_history_entries().await?;
-        let entries = history
-            .iter()
-            .filter(|entry| entry.version >= from_version)
-            .take(limit)
-            .cloned()
-            .collect::<Vec<_>>();
+        let (map_version, entries) = self.load_history_page(from_version, limit).await?;
         let through_version = entries
             .last()
             .map_or(from_version.saturating_sub(1), |entry| entry.version);
@@ -380,8 +374,10 @@ impl KnowledgeMapService {
         }
     }
 
-    async fn load_history_entries(
+    async fn load_history_page(
         &self,
+        from_version: u64,
+        limit: usize,
     ) -> Result<(u64, Vec<crate::domain::KnowledgeMapHistoryEntry>), KnowledgeMapServiceError> {
         let content = self.read_root_content().await?;
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
@@ -391,18 +387,100 @@ impl KnowledgeMapService {
                 let map = serde_norway::from_str::<KnowledgeMap>(&content)
                     .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
                 map.validate()?;
-                Ok((map.map_version, map.history))
+                let entries = map
+                    .history
+                    .into_iter()
+                    .filter(|entry| entry.version >= from_version)
+                    .take(limit)
+                    .collect();
+                Ok((map.map_version, entries))
             }
             ARTIFACT_SCHEMA_VERSION => {
                 let manifest = parse_manifest(&content)?;
-                let mut history = self.load_archived_history(&manifest.history).await?;
-                history.extend(manifest.history.recent);
-                Ok((manifest.map_version, history))
+                let entries = self
+                    .load_v2_history_page(&manifest, from_version, limit)
+                    .await?;
+                Ok((manifest.map_version, entries))
             }
             version => Err(KnowledgeMapServiceError::Yaml(format!(
                 "unsupported schema_version {version}"
             ))),
         }
+    }
+
+    async fn load_v2_history_page(
+        &self,
+        manifest: &KnowledgeMapManifest,
+        from_version: u64,
+        limit: usize,
+    ) -> Result<Vec<crate::domain::KnowledgeMapHistoryEntry>, KnowledgeMapServiceError> {
+        validate_recent_history(manifest)?;
+        if from_version > manifest.map_version {
+            return Ok(Vec::new());
+        }
+        let through_version = from_version
+            .saturating_add(limit as u64 - 1)
+            .min(manifest.map_version);
+        let mut entries = manifest
+            .history
+            .recent
+            .iter()
+            .filter(|entry| (from_version..=through_version).contains(&entry.version))
+            .cloned()
+            .collect::<Vec<_>>();
+        if from_version <= manifest.history.archived_through {
+            let mut archive_ref = manifest.history.archive.clone().ok_or_else(|| {
+                KnowledgeMapServiceError::Integrity(
+                    "history archive is missing for a non-zero checkpoint".to_owned(),
+                )
+            })?;
+            let mut expected_through = manifest.history.archived_through;
+            let mut visited = std::collections::HashSet::new();
+            loop {
+                if !visited.insert(archive_ref.r#ref.clone()) {
+                    return Err(KnowledgeMapServiceError::Integrity(
+                        "history archive chain has a cycle".to_owned(),
+                    ));
+                }
+                let archive = self
+                    .load_history_archive(&archive_ref, expected_through)
+                    .await?;
+                entries.extend(
+                    archive
+                        .entries
+                        .iter()
+                        .filter(|entry| (from_version..=through_version).contains(&entry.version))
+                        .cloned(),
+                );
+                if archive.from_version <= from_version {
+                    break;
+                }
+                expected_through = archive.from_version - 1;
+                archive_ref = archive.previous.ok_or_else(|| {
+                    KnowledgeMapServiceError::Integrity(
+                        "history archive chain ends before the requested version".to_owned(),
+                    )
+                })?;
+            }
+        }
+        entries.sort_by_key(|entry| entry.version);
+        let mut expected = from_version;
+        for entry in &entries {
+            if entry.version != expected {
+                return Err(KnowledgeMapServiceError::Integrity(
+                    "requested history page is not contiguous".to_owned(),
+                ));
+            }
+            expected = expected.checked_add(1).ok_or_else(|| {
+                KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
+            })?;
+        }
+        if entries.len() != (through_version - from_version + 1) as usize {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "requested history page is incomplete".to_owned(),
+            ));
+        }
+        Ok(entries)
     }
 
     async fn load_show_view(&self) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
@@ -667,32 +745,9 @@ impl KnowledgeMapService {
                     "history archive chain has an unsafe ref or cycle".to_owned(),
                 ));
             }
-            let content = read_verified_ref(
-                &self.repository_root,
-                &archive_ref.r#ref,
-                &archive_ref.digest,
-            )
-            .await?;
-            let archive = serde_norway::from_str::<KnowledgeMapHistoryArchive>(&content)
-                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-            let expected_ref = format!(
-                "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{}.yaml",
-                archive.from_version, archive.through_version, archive_ref.digest
-            );
-            if archive.schema_version != ARTIFACT_SCHEMA_VERSION
-                || archive_ref.r#ref != expected_ref
-                || archive.through_version != expected_through
-                || archive.entries.is_empty()
-                || archive.entries.len() > RECENT_HISTORY_LIMIT
-                || archive.entries.first().map(|entry| entry.version) != Some(archive.from_version)
-                || archive.entries.last().map(|entry| entry.version)
-                    != Some(archive.through_version)
-            {
-                return Err(KnowledgeMapServiceError::Integrity(format!(
-                    "history archive '{}' does not match its checkpoint",
-                    archive_ref.r#ref
-                )));
-            }
+            let archive = self
+                .load_history_archive(&archive_ref, expected_through)
+                .await?;
             expected_through = archive.from_version.saturating_sub(1);
             chunks.push(archive.entries);
             match archive.previous {
@@ -707,6 +762,62 @@ impl KnowledgeMapService {
         }
         chunks.reverse();
         Ok(chunks.into_iter().flatten().collect())
+    }
+
+    async fn load_history_archive(
+        &self,
+        archive_ref: &KnowledgeMapArchiveRef,
+        expected_through: u64,
+    ) -> Result<KnowledgeMapHistoryArchive, KnowledgeMapServiceError> {
+        if !archive_ref
+            .r#ref
+            .starts_with(&format!("{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/"))
+        {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "history archive chain has an unsafe ref".to_owned(),
+            ));
+        }
+        let content = read_verified_ref(
+            &self.repository_root,
+            &archive_ref.r#ref,
+            &archive_ref.digest,
+        )
+        .await?;
+        let archive = serde_norway::from_str::<KnowledgeMapHistoryArchive>(&content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        let expected_ref = format!(
+            "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{}.yaml",
+            archive.from_version, archive.through_version, archive_ref.digest
+        );
+        if archive.schema_version != ARTIFACT_SCHEMA_VERSION
+            || archive_ref.r#ref != expected_ref
+            || archive.through_version != expected_through
+            || archive.entries.is_empty()
+            || archive.entries.len() > RECENT_HISTORY_LIMIT
+            || archive.entries.first().map(|entry| entry.version) != Some(archive.from_version)
+            || archive.entries.last().map(|entry| entry.version) != Some(archive.through_version)
+        {
+            return Err(KnowledgeMapServiceError::Integrity(format!(
+                "history archive '{}' does not match its checkpoint",
+                archive_ref.r#ref
+            )));
+        }
+        let mut expected = archive.from_version;
+        for entry in &archive.entries {
+            entry
+                .validate()
+                .map_err(|error| KnowledgeMapServiceError::Integrity(error.to_string()))?;
+            if entry.version != expected {
+                return Err(KnowledgeMapServiceError::Integrity(format!(
+                    "history archive '{}' is not contiguous",
+                    archive_ref.r#ref
+                )));
+            }
+            expected = expected.checked_add(1).ok_or_else(|| {
+                KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
+            })?;
+        }
+        Ok(archive)
     }
 
     async fn publish_manifest(&self, content: &[u8]) -> Result<(), KnowledgeMapServiceError> {

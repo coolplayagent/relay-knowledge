@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn knowledge_map_topics_are_extracted_from_full_source_content() {
     let padding = "x".repeat(8_500);
-    let source = format!("topics:\n  # {padding}\n  - id: late-topic\n");
+    let source = format!("schema_version: 1\ntopics:\n  # {padding}\n  - id: late-topic\n");
     let snapshot = parse_source_snapshot(".knowledge/knowledge-map.yaml", source.as_bytes());
 
     assert!(
@@ -28,6 +28,7 @@ fn knowledge_map_topics_are_extracted_from_full_source_content() {
 #[test]
 fn knowledge_map_topics_tolerate_section_header_comments() {
     let source = "\
+schema_version: 1
 topics: # routing buckets
   - id: route-topic
 sources: # authoritative docs
@@ -52,6 +53,7 @@ sources: # authoritative docs
 #[test]
 fn knowledge_map_topics_ignore_nested_block_scalar_ids() {
     let source = "\
+schema_version: 1
 topics:
   - id: real-topic
     description: |
@@ -76,6 +78,7 @@ topics:
 #[test]
 fn knowledge_map_topics_ignore_nested_sequence_ids() {
     let source = "\
+schema_version: 1
 topics:
   - id: real-topic
     related:
@@ -99,6 +102,7 @@ topics:
 #[test]
 fn knowledge_map_topics_accept_sequence_spacing_before_id() {
     let source = "\
+schema_version: 1
 topics:
   -   id: spaced-topic
 ";

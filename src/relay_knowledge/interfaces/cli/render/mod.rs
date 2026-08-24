@@ -116,6 +116,7 @@ where
             value["map"]["sources"].as_array().map_or(0, Vec::len),
             value["map"]["routes"].as_array().map_or(0, Vec::len)
         ),
+        "knowledge.map.history" => render_knowledge_map_history(&value),
         "knowledge.map.route" => format!(
             "topic={} sources={}",
             value["topic"].as_str().unwrap_or("unknown"),
@@ -336,6 +337,36 @@ where
     };
 
     Ok(format!("{line}\n"))
+}
+
+fn render_knowledge_map_history(value: &serde_json::Value) -> String {
+    let mut lines = vec![format!(
+        "knowledge_map={} map_version={} from={} through={} next={}",
+        value["path"]
+            .as_str()
+            .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
+        value["map_version"].as_u64().unwrap_or(0),
+        value["from_version"].as_u64().unwrap_or(0),
+        value["through_version"].as_u64().unwrap_or(0),
+        value["next_from_version"]
+            .as_u64()
+            .map_or_else(|| "none".to_owned(), |version| version.to_string())
+    )];
+    if let Some(entries) = value["entries"].as_array() {
+        lines.extend(entries.iter().map(|entry| {
+            format!(
+                "version={} action={} actor={} summary={}",
+                entry["version"].as_u64().unwrap_or(0),
+                entry["action"].as_str().unwrap_or("unknown"),
+                entry["actor"].as_str().unwrap_or("unknown"),
+                entry["summary"]
+                    .as_str()
+                    .unwrap_or("")
+                    .replace(['\r', '\n'], " ")
+            )
+        }));
+    }
+    lines.join("\n")
 }
 
 fn render_code_repository_list(value: &serde_json::Value) -> String {

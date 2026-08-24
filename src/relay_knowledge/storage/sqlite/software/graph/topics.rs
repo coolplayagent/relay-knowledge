@@ -192,14 +192,6 @@ fn knowledge_map_topic_page(
             WHERE legacy.source_scope = ?1
               AND legacy.path = ?2
               AND legacy.kind = 'knowledge_map_topic'
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM code_repository_symbols refs
-                  WHERE refs.source_scope = legacy.source_scope
-                    AND refs.repository_id = legacy.repository_id
-                    AND refs.path = legacy.path
-                    AND refs.kind = 'knowledge_map_topic_shard_ref'
-              )
             UNION ALL
             SELECT shards.repository_id, shards.source_scope, shards.path, shards.name,
                    shards.line_start, shards.line_end

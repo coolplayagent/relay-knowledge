@@ -87,10 +87,8 @@ fn record_knowledge_map_facts(
     output: &mut FileParseOutput,
     bytes: &[u8],
 ) -> Result<(), CodeIndexError> {
-    let Ok(content) = std::str::from_utf8(bytes) else {
-        return Ok(());
-    };
-    let (definitions, _) = config_files::structured_facts(context.path, "yaml", content);
+    let content = byte_stable_lossy_text(bytes);
+    let (definitions, _) = config_files::structured_facts(context.path, "yaml", &content);
     for definition in definitions
         .into_iter()
         .filter(|definition| definition.kind.starts_with("knowledge_map_"))
@@ -104,6 +102,29 @@ fn record_knowledge_map_facts(
         record_symbol(context, output, &definition.name, definition.kind, &line)?;
     }
     Ok(())
+}
+
+fn byte_stable_lossy_text(bytes: &[u8]) -> String {
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut remaining = bytes;
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                output.extend_from_slice(valid.as_bytes());
+                break;
+            }
+            Err(error) => {
+                let valid_up_to = error.valid_up_to();
+                output.extend_from_slice(&remaining[..valid_up_to]);
+                let invalid_length = error
+                    .error_len()
+                    .unwrap_or(remaining.len().saturating_sub(valid_up_to));
+                output.extend(std::iter::repeat_n(b' ', invalid_length));
+                remaining = &remaining[valid_up_to + invalid_length..];
+            }
+        }
+    }
+    String::from_utf8(output).expect("invalid UTF-8 bytes are replaced with ASCII spaces")
 }
 
 fn record_symbol(

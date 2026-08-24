@@ -65,10 +65,13 @@ pub(super) fn facts(
 }
 
 fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
-    record_root_topic_ids(content, definitions);
     let Ok(probe) = serde_norway::from_str::<SchemaProbe>(content) else {
         return;
     };
+    if probe.schema_version == 1 {
+        record_root_topic_ids(content, definitions);
+        return;
+    }
     if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
         return;
     }
@@ -163,7 +166,7 @@ fn record_topic_shard_fact(path: &str, content: &str, definitions: &mut Vec<Conf
     {
         return;
     }
-    let Some(range) = topic_id_range(content) else {
+    let Some(range) = topic_id_range(content, &shard.topic.id) else {
         return;
     };
     push_definition(
@@ -174,7 +177,7 @@ fn record_topic_shard_fact(path: &str, content: &str, definitions: &mut Vec<Conf
     );
 }
 
-fn topic_id_range(content: &str) -> Option<super::model::ConfigRange> {
+fn topic_id_range(content: &str, expected_id: &str) -> Option<super::model::ConfigRange> {
     let mut in_topic = false;
     for line in source_lines(content) {
         let code = yaml_code_prefix(line.text);
@@ -182,7 +185,7 @@ fn topic_id_range(content: &str) -> Option<super::model::ConfigRange> {
             in_topic = section == "topic";
             continue;
         }
-        if in_topic && leading_spaces(code) == 2 && yaml_scalar(code, "id").is_some() {
+        if in_topic && leading_spaces(code) > 0 && yaml_scalar(code, "id") == Some(expected_id) {
             return Some(line.range());
         }
     }

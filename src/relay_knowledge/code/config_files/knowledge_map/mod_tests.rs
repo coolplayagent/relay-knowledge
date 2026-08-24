@@ -4,7 +4,7 @@ use crate::project::KNOWLEDGE_MAP_RELATIVE_PATH;
 #[test]
 fn extracts_only_topics_from_the_authoritative_knowledge_map() {
     let mut definitions = Vec::new();
-    let content = "topics:\n  - id: parsing\n  - id: indexing\nignored:\n  - id: storage\n";
+    let content = "schema_version: 1\ntopics:\n  - id: parsing\n  - id: indexing\nignored:\n  - id: storage\n";
 
     facts(
         KNOWLEDGE_MAP_RELATIVE_PATH,
@@ -70,4 +70,43 @@ fn emits_manifest_authorization_and_digest_verified_shard_facts() {
         &mut tampered_facts,
     );
     assert!(tampered_facts.is_empty());
+}
+
+#[test]
+fn accepts_valid_noncanonical_topic_indentation() {
+    let shard =
+        "schema_version: 2\ntopic:\n    id: build\n    title: Build\nsources: []\nroute: null\n";
+    let digest = content_digest(shard.as_bytes());
+    let path = format!(
+        ".knowledge/topics/topic-{}-{digest}.yaml",
+        stable_id("build")
+    );
+    let mut definitions = Vec::new();
+
+    facts(&path, "yaml", shard, &mut definitions);
+
+    assert!(
+        definitions
+            .iter()
+            .any(|fact| { fact.kind == "knowledge_map_topic_shard" && fact.name == "build" })
+    );
+}
+
+#[test]
+fn malformed_v2_refs_do_not_fall_back_to_legacy_root_topics() {
+    let content = "schema_version: 2\ntopics:\n  - id: unauthorized\n    ref: ../escape.yaml\n    digest: invalid\n";
+    let mut definitions = Vec::new();
+
+    facts(
+        KNOWLEDGE_MAP_RELATIVE_PATH,
+        "yaml",
+        content,
+        &mut definitions,
+    );
+
+    assert!(
+        !definitions
+            .iter()
+            .any(|fact| { fact.kind == "knowledge_map_topic" && fact.name == "unauthorized" })
+    );
 }
