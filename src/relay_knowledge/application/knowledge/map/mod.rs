@@ -27,8 +27,6 @@ pub use contracts::{
 use contracts::{MutableKnowledgeMap, metadata, now_stamp};
 pub use error::KnowledgeMapServiceError;
 
-const SUPERSEDED_SHARD_GRACE: Duration = Duration::from_secs(60);
-
 /// File-backed service for the shared YAML knowledge navigation contract.
 pub struct KnowledgeMapService {
     repository_root: PathBuf,
@@ -430,7 +428,7 @@ impl KnowledgeMapService {
             &self.repository_root,
             &self.backup_path(),
             &manifest,
-            SUPERSEDED_SHARD_GRACE,
+            Duration::from_secs(60),
         )
         .await;
         Ok(())
@@ -598,7 +596,10 @@ impl KnowledgeMapService {
         let path = self.map_path();
         let temp = temporary_path(&path);
         let backup = self.backup_path();
-        fs::write(&temp, content).await?;
+        if let Err(error) = fs::write(&temp, content).await {
+            let _ = fs::remove_file(&temp).await;
+            return Err(error.into());
+        }
         let existed = fs::try_exists(&path).await?;
         if existed {
             if fs::try_exists(&backup).await? {
@@ -610,6 +611,7 @@ impl KnowledgeMapService {
             if existed {
                 let _ = fs::rename(&backup, &path).await;
             }
+            let _ = fs::remove_file(temp).await;
             return Err(KnowledgeMapServiceError::Io(error));
         }
         Ok(())
@@ -695,9 +697,8 @@ impl KnowledgeMapService {
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
-    let suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
+    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH);
+    let suffix = elapsed.map_or(0, |duration| duration.as_nanos());
     path.with_extension(format!("{}.{}.tmp", std::process::id(), suffix))
 }
 
