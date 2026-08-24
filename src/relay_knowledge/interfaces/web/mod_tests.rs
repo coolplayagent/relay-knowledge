@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 
 use crate::{
-    api::{IngestEvidence, IngestEvidenceExtraction, IngestRequest},
+    api::{CodeRepositoryRegisterRequest, IngestEvidence, IngestEvidenceExtraction, IngestRequest},
     application::{KnowledgeMapService, KnowledgeMapSourceAddRequest, RelayKnowledgeService},
     domain::{EvidenceModality, KnowledgeMapSourceKind},
     env::{EnvironmentConfig, PlatformKind},
@@ -232,9 +232,21 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     )
     .await
     .expect("source should add");
-    let router = router_with_assets_and_map(
-        test_service("map-history").await,
-        Some(map),
+    let service = test_service("map-history").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: root.display().to_string(),
+                alias: "map-history".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context.clone(),
+        )
+        .await
+        .expect("repository should register");
+    let router = router_with_assets(
+        service,
         root.clone(),
         crate::net::http::DEFAULT_MAX_BODY_BYTES,
     );
@@ -246,6 +258,7 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
                 "command": "relay-knowledge map history --from 1 --limit 1",
                 "payload": {
                     "operation": "knowledge.map.history",
+                    "repository": "map-history",
                     "from_version": 1,
                     "limit": 1
                 }
@@ -256,14 +269,36 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     .await;
     assert_eq!(payload["result"]["from_version"], 1);
     assert_eq!(payload["result"]["entries"].as_array().unwrap().len(), 1);
+    let unregistered = execute_json_with_router(
+        router.clone(),
+        json!({
+            "snapshot": {
+                "name": "Unknown repository map history",
+                "command": "relay-knowledge map history --from 1 --limit 1",
+                "payload": {
+                    "operation": "knowledge.map.history",
+                    "repository": "missing",
+                    "from_version": 1,
+                    "limit": 1
+                }
+            }
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        unregistered["error"],
+        "code repository 'missing' is not registered"
+    );
     let invalid = execute_json_with_router(
-        router,
+        router.clone(),
         json!({
             "snapshot": {
                 "name": "Invalid map history",
                 "command": "relay-knowledge map history --from 0 --limit 1",
                 "payload": {
                     "operation": "knowledge.map.history",
+                    "repository": "map-history",
                     "from_version": 0,
                     "limit": 1
                 }
@@ -274,18 +309,14 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     .await;
     assert_eq!(invalid["error"], "from_version must be a positive integer");
     let oversized = execute_json_with_router(
-        router_with_assets_and_map(
-            test_service("map-history-limit").await,
-            Some(KnowledgeMapService::new(root)),
-            unique_temp_dir("map-history-assets"),
-            crate::net::http::DEFAULT_MAX_BODY_BYTES,
-        ),
+        router,
         json!({
             "snapshot": {
                 "name": "Oversized map history",
                 "command": "relay-knowledge map history --from 1 --limit 257",
                 "payload": {
                     "operation": "knowledge.map.history",
+                    "repository": "map-history",
                     "from_version": 1,
                     "limit": 257
                 }

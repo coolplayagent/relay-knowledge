@@ -117,6 +117,9 @@ function operationForm(callbacks: OperationsCallbacks): HTMLElement {
       break;
     case "map":
       form.append(
+        inputControl("Repository alias", appState.map.repository, (value) => {
+          appState.map.repository = value;
+        }),
         numberControl("From version", appState.map.fromVersion, (value) => {
           appState.map.fromVersion = positiveInt(value, 1);
         }),

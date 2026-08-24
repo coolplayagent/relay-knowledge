@@ -58,12 +58,25 @@ fn software_file_page(
                     AND topics.path = refs.path
                     AND topics.line_start = refs.line_start
                     AND topics.kind = 'knowledge_map_topic_shard_topic'
+                   JOIN code_repository_symbols root_identity
+                     ON root_identity.repository_id = refs.repository_id
+                    AND root_identity.source_scope = refs.source_scope
+                    AND root_identity.path = refs.path
+                    AND root_identity.line_start = refs.line_start
+                    AND root_identity.kind = 'knowledge_map_topic_shard_identity'
                    JOIN code_repository_symbols shards
                      ON shards.repository_id = refs.repository_id
                     AND shards.source_scope = refs.source_scope
                     AND shards.path = refs.name
                     AND shards.name = topics.name
                     AND shards.kind = 'knowledge_map_topic_shard'
+                   JOIN code_repository_symbols shard_identity
+                     ON shard_identity.repository_id = shards.repository_id
+                    AND shard_identity.source_scope = shards.source_scope
+                    AND shard_identity.path = shards.path
+                    AND shard_identity.line_start = shards.line_start
+                    AND shard_identity.kind = 'knowledge_map_topic_shard_identity'
+                    AND shard_identity.name = root_identity.name
                    WHERE refs.source_scope = files.source_scope
                      AND refs.repository_id = files.repository_id
                      AND refs.path = '.knowledge/knowledge-map.yaml'

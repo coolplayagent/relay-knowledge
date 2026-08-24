@@ -357,16 +357,17 @@ fn render_knowledge_map_history(value: &serde_json::Value) -> String {
             format!(
                 "version={} action={} actor={} summary={}",
                 entry["version"].as_u64().unwrap_or(0),
-                entry["action"].as_str().unwrap_or("unknown"),
-                entry["actor"].as_str().unwrap_or("unknown"),
-                entry["summary"]
-                    .as_str()
-                    .unwrap_or("")
-                    .replace(['\r', '\n'], " ")
+                single_line(entry["action"].as_str().unwrap_or("unknown")),
+                single_line(entry["actor"].as_str().unwrap_or("unknown")),
+                single_line(entry["summary"].as_str().unwrap_or(""))
             )
         }));
     }
     lines.join("\n")
+}
+
+fn single_line(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
 }
 
 fn render_code_repository_list(value: &serde_json::Value) -> String {

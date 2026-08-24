@@ -4,7 +4,9 @@ use std::{
 };
 
 use tokio::fs;
-use tokio::time::{Duration, Instant, sleep};
+use tokio::time::Duration;
+#[cfg(test)]
+use tokio::time::sleep;
 
 use crate::{
     api::RequestContext,
@@ -19,9 +21,12 @@ mod artifact;
 mod contracts;
 mod error;
 mod history;
+mod lock;
 
 #[cfg(test)]
 use history::MAX_HISTORY_PAGE_SIZE;
+#[cfg(test)]
+use lock::{ADVISORY_LOCK_MARKER, cleanup_transition_locks, transition_lock_prepared_path};
 
 use artifact::*;
 pub use contracts::{
@@ -33,7 +38,6 @@ use contracts::{MutableKnowledgeMap, metadata, now_stamp};
 pub use error::KnowledgeMapServiceError;
 
 const WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
-const ADVISORY_LOCK_MARKER: &[u8] = b"relay-knowledge advisory writer lock v2\n";
 
 /// File-backed service for the shared YAML knowledge navigation contract.
 pub struct KnowledgeMapService {
@@ -625,54 +629,6 @@ impl KnowledgeMapService {
         Ok(())
     }
 
-    async fn acquire_write_lock(
-        &self,
-        timeout: Duration,
-    ) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
-        let dir = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
-        ensure_owned_directory(&self.repository_root, &dir).await?;
-        let path = dir.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
-        let deadline = Instant::now() + timeout;
-        loop {
-            let open_path = path.clone();
-            let candidate = tokio::task::spawn_blocking(move || open_transition_lock(&open_path))
-                .await
-                .map_err(|error| {
-                    KnowledgeMapServiceError::Io(std::io::Error::other(format!(
-                        "knowledge map lock worker failed: {error}"
-                    )))
-                })?;
-            let candidate = match candidate {
-                Ok(candidate) => candidate,
-                Err(error) if lock_is_contended(&error) => {
-                    if Instant::now() >= deadline {
-                        return Err(KnowledgeMapServiceError::LockTimeout(path));
-                    }
-                    sleep(Duration::from_millis(25)).await;
-                    continue;
-                }
-                Err(error) => return Err(KnowledgeMapServiceError::Io(error)),
-            };
-            let TransitionLock::Advisory(file) = candidate else {
-                if Instant::now() >= deadline {
-                    return Err(KnowledgeMapServiceError::LockTimeout(path));
-                }
-                sleep(Duration::from_millis(25)).await;
-                continue;
-            };
-            match fs2::FileExt::try_lock_exclusive(&file) {
-                Ok(()) => return Ok(KnowledgeMapWriteLock { file }),
-                Err(error) if lock_is_contended(&error) => {
-                    if Instant::now() >= deadline {
-                        return Err(KnowledgeMapServiceError::LockTimeout(path));
-                    }
-                    sleep(Duration::from_millis(25)).await;
-                }
-                Err(error) => return Err(KnowledgeMapServiceError::Io(error)),
-            }
-        }
-    }
-
     fn mutation_response(
         &self,
         context: &RequestContext,
@@ -717,97 +673,6 @@ impl KnowledgeMapService {
             Err(error) => Err(error),
         }
     }
-}
-
-enum TransitionLock {
-    Advisory(std::fs::File),
-    Legacy,
-}
-
-fn open_transition_lock(path: &Path) -> std::io::Result<TransitionLock> {
-    use std::io::{Read, Write};
-
-    match std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(mut file) => {
-            if let Err(error) = file
-                .write_all(ADVISORY_LOCK_MARKER)
-                .and_then(|()| file.sync_data())
-            {
-                drop(file);
-                let _ = std::fs::remove_file(path);
-                return Err(error);
-            }
-            Ok(TransitionLock::Advisory(file))
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let mut file = open_existing_transition_lock(path)?;
-            let mut marker = Vec::with_capacity(ADVISORY_LOCK_MARKER.len() + 1);
-            std::io::Read::by_ref(&mut file)
-                .take((ADVISORY_LOCK_MARKER.len() + 1) as u64)
-                .read_to_end(&mut marker)?;
-            if marker == ADVISORY_LOCK_MARKER {
-                Ok(TransitionLock::Advisory(file))
-            } else {
-                Ok(TransitionLock::Legacy)
-            }
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn open_existing_transition_lock(path: &Path) -> std::io::Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-
-    let file = options.open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || lock_metadata_is_reparse_point(&metadata) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "knowledge map writer lock must be a regular file, got {}",
-                path.display()
-            ),
-        ));
-    }
-    Ok(file)
-}
-
-#[cfg(windows)]
-fn lock_metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn lock_metadata_is_reparse_point(_metadata: &std::fs::Metadata) -> bool {
-    false
-}
-
-fn lock_is_contended(error: &std::io::Error) -> bool {
-    error.kind() == std::io::ErrorKind::WouldBlock
-        || cfg!(windows) && error.raw_os_error() == Some(33)
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
@@ -935,17 +800,6 @@ async fn cleanup_superseded_topic_shards(
         {
             let _ = fs::remove_file(marker).await;
         }
-    }
-}
-
-#[derive(Debug)]
-struct KnowledgeMapWriteLock {
-    file: std::fs::File,
-}
-
-impl Drop for KnowledgeMapWriteLock {
-    fn drop(&mut self) {
-        let _ = fs2::FileExt::unlock(&self.file);
     }
 }
 

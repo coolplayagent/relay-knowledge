@@ -118,8 +118,7 @@ topics:
 
 #[test]
 fn v2_manifest_and_verified_shard_emit_joinable_authorization_symbols() {
-    let shard =
-        "schema_version: 2\ntopic:\n  id: build\n  title: Build\nsources: []\nroute: null\n";
+    let shard = "schema_version: 2\ntopic:\n  id: build\n  title: Build\n  description: Build knowledge\nsources: []\nroute: null\n";
     let digest = format!("{:x}", Sha256::digest(shard.as_bytes()));
     let topic_key = format!("{:x}", Sha256::digest(b"build"));
     let path = format!(".knowledge/topics/topic-{}-{digest}.yaml", &topic_key[..16]);

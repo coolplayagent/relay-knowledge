@@ -8,6 +8,10 @@ use super::{
     model::ConfigFact,
     source::{push_definition, source_lines, unquote},
 };
+use crate::domain::{
+    KnowledgeMap, KnowledgeMapHistoryEntry, KnowledgeMapRoute, KnowledgeMapSource,
+    KnowledgeMapTopic,
+};
 use crate::project::{
     AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
     KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
@@ -68,7 +72,10 @@ struct RootHistoryEntry {
 #[derive(Deserialize)]
 struct TopicShard {
     schema_version: u16,
-    topic: TopicIdentity,
+    topic: KnowledgeMapTopic,
+    sources: Vec<KnowledgeMapSource>,
+    #[serde(default)]
+    route: Option<KnowledgeMapRoute>,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +137,17 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
             definitions,
             &topic.id,
             "knowledge_map_topic_shard_topic",
+            range,
+        );
+        push_definition(
+            definitions,
+            topic_identity_digest(
+                &topic.id,
+                &topic.title,
+                &topic.description,
+                topic.source_ids.iter().map(String::as_str),
+            ),
+            "knowledge_map_topic_shard_identity",
             range,
         );
     }
@@ -307,6 +325,7 @@ fn record_topic_shard_fact(path: &str, content: &str, definitions: &mut Vec<Conf
     };
     if shard.schema_version != ARTIFACT_SCHEMA_VERSION
         || stable_id(&shard.topic.id) != path_topic_id
+        || !valid_topic_shard(&shard)
     {
         return;
     }
@@ -315,10 +334,55 @@ fn record_topic_shard_fact(path: &str, content: &str, definitions: &mut Vec<Conf
     };
     push_definition(
         definitions,
-        shard.topic.id,
+        &shard.topic.id,
         "knowledge_map_topic_shard",
         range,
     );
+    push_definition(
+        definitions,
+        topic_identity_digest(
+            &shard.topic.id,
+            &shard.topic.title,
+            &shard.topic.description,
+            shard.sources.iter().map(|source| source.id.as_str()),
+        ),
+        "knowledge_map_topic_shard_identity",
+        range,
+    );
+}
+
+fn valid_topic_shard(shard: &TopicShard) -> bool {
+    KnowledgeMap {
+        schema_version: KnowledgeMap::SCHEMA_VERSION,
+        map_version: 1,
+        updated_at: "shard-validation".to_owned(),
+        topics: vec![shard.topic.clone()],
+        sources: shard.sources.clone(),
+        routes: shard.route.clone().into_iter().collect(),
+        history: vec![KnowledgeMapHistoryEntry {
+            version: 1,
+            action: "validate".to_owned(),
+            actor: "system".to_owned(),
+            summary: "Validate an isolated topic shard.".to_owned(),
+        }],
+    }
+    .validate()
+    .is_ok()
+}
+
+fn topic_identity_digest<'a>(
+    id: &'a str,
+    title: &'a str,
+    description: &'a str,
+    source_ids: impl IntoIterator<Item = &'a str>,
+) -> String {
+    let mut digest = Sha256::new();
+    for value in [id, title, description].into_iter().chain(source_ids) {
+        let length = u64::try_from(value.len()).unwrap_or(u64::MAX);
+        digest.update(length.to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    format!("{:x}", digest.finalize())
 }
 
 fn topic_id_range(content: &str, expected_id: &str) -> Option<super::model::ConfigRange> {

@@ -83,14 +83,29 @@ fn file_page_marks_only_root_authorized_topic_shards() {
             INSERT INTO code_repository_files VALUES
                 ('repository', 'scope', '.knowledge/knowledge-map.yaml', 'yaml', 'parsed'),
                 ('repository', 'scope', '.knowledge/topics/current.yaml', 'yaml', 'parsed'),
+                ('repository', 'scope', '.knowledge/topics/mismatch.yaml', 'yaml', 'parsed'),
                 ('repository', 'scope', '.knowledge/topics/orphan.yaml', 'yaml', 'parsed');
             INSERT INTO code_repository_symbols VALUES
                 ('repository', 'scope', '.knowledge/knowledge-map.yaml',
                  '.knowledge/topics/current.yaml', 'knowledge_map_topic_shard_ref', 5, 5),
                 ('repository', 'scope', '.knowledge/knowledge-map.yaml',
                  'Build', 'knowledge_map_topic_shard_topic', 5, 5),
+                ('repository', 'scope', '.knowledge/knowledge-map.yaml',
+                 'matching-identity', 'knowledge_map_topic_shard_identity', 5, 5),
                 ('repository', 'scope', '.knowledge/topics/current.yaml',
                  'Build', 'knowledge_map_topic_shard', 3, 3),
+                ('repository', 'scope', '.knowledge/topics/current.yaml',
+                 'matching-identity', 'knowledge_map_topic_shard_identity', 3, 3),
+                ('repository', 'scope', '.knowledge/knowledge-map.yaml',
+                 '.knowledge/topics/mismatch.yaml', 'knowledge_map_topic_shard_ref', 6, 6),
+                ('repository', 'scope', '.knowledge/knowledge-map.yaml',
+                 'Mismatch', 'knowledge_map_topic_shard_topic', 6, 6),
+                ('repository', 'scope', '.knowledge/knowledge-map.yaml',
+                 'root-identity', 'knowledge_map_topic_shard_identity', 6, 6),
+                ('repository', 'scope', '.knowledge/topics/mismatch.yaml',
+                 'Mismatch', 'knowledge_map_topic_shard', 3, 3),
+                ('repository', 'scope', '.knowledge/topics/mismatch.yaml',
+                 'different-shard-identity', 'knowledge_map_topic_shard_identity', 3, 3),
                 ('repository', 'scope', '.knowledge/topics/orphan.yaml',
                  'Orphan', 'knowledge_map_topic_shard', 3, 3);
             ",
@@ -103,4 +118,5 @@ fn file_page_marks_only_root_authorized_topic_shards() {
     assert_eq!(files[0].file_role, "knowledge_map_manifest");
     assert_eq!(files[1].file_role, "knowledge_map_topic_shard");
     assert_eq!(files[2].file_role, "configuration");
+    assert_eq!(files[3].file_role, "configuration");
 }

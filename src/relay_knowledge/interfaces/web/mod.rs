@@ -41,40 +41,16 @@ use operation_request::{
 
 /// Builds the Web router without opening sockets.
 pub fn router(service: RelayKnowledgeService, max_request_body_bytes: u64) -> Router {
-    router_with_assets_and_map(service, None, default_web_dist(), max_request_body_bytes)
+    router_with_assets(service, default_web_dist(), max_request_body_bytes)
 }
 
-pub(crate) fn router_with_knowledge_map(
-    service: RelayKnowledgeService,
-    knowledge_map: Option<KnowledgeMapService>,
-    max_request_body_bytes: u64,
-) -> Router {
-    router_with_assets_and_map(
-        service,
-        knowledge_map,
-        default_web_dist(),
-        max_request_body_bytes,
-    )
-}
-
-#[cfg(test)]
 fn router_with_assets(
     service: RelayKnowledgeService,
     asset_root: PathBuf,
     max_request_body_bytes: u64,
 ) -> Router {
-    router_with_assets_and_map(service, None, asset_root, max_request_body_bytes)
-}
-
-fn router_with_assets_and_map(
-    service: RelayKnowledgeService,
-    knowledge_map: Option<KnowledgeMapService>,
-    asset_root: PathBuf,
-    max_request_body_bytes: u64,
-) -> Router {
     let state = WebState {
         service,
-        knowledge_map: Arc::new(knowledge_map),
         asset_root: Arc::new(asset_root),
     };
     let body_limit = usize::try_from(max_request_body_bytes).unwrap_or(usize::MAX);
@@ -212,7 +188,6 @@ async fn execute_operation(
     let context = RequestContext::for_interface(InterfaceKind::Web);
     let (metadata, result) = dispatch_operation(
         &state.service,
-        state.knowledge_map.as_ref().as_ref(),
         operation,
         &request.snapshot.payload,
         context,
@@ -231,19 +206,19 @@ async fn execute_operation(
 
 async fn dispatch_operation(
     service: &RelayKnowledgeService,
-    knowledge_map: Option<&KnowledgeMapService>,
     operation: &str,
     payload: &Value,
     context: RequestContext,
 ) -> Result<(crate::api::ApiMetadata, Value), WebError> {
     match operation {
         "knowledge.map.history" => {
-            let map = knowledge_map.ok_or_else(|| {
-                WebError::bad_request("knowledge map repository root was not resolved".to_owned())
-            })?;
-            let (from_version, limit) = knowledge_map_history_page(payload)?;
+            let request = knowledge_map_history_page(payload)?;
+            let root = service
+                .registered_code_repository_root(&request.repository)
+                .await?;
+            let map = KnowledgeMapService::new(root);
             let response = map
-                .history(&context, from_version, limit)
+                .history(&context, request.from_version, request.limit)
                 .await
                 .map_err(|error| WebError::bad_request(error.to_string()))?;
             Ok((response.metadata.clone(), json!(response)))
@@ -579,7 +554,6 @@ impl IntoResponse for WebError {
 #[derive(Clone)]
 pub(super) struct WebState {
     pub(super) service: RelayKnowledgeService,
-    knowledge_map: Arc<Option<KnowledgeMapService>>,
     asset_root: Arc<PathBuf>,
 }
 

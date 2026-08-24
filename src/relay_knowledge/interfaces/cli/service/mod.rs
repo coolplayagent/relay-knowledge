@@ -2,9 +2,8 @@
 
 use crate::{
     api::{InterfaceKind, RequestContext},
-    application::{KnowledgeMapService, RelayKnowledgeService, RuntimeConfiguration},
+    application::{RelayKnowledgeService, RuntimeConfiguration},
     interfaces::{agent::mcp::McpServer, web},
-    paths::discover_repository_root,
 };
 
 use super::{CliError, ServiceMcpTransport, files};
@@ -69,11 +68,7 @@ pub(super) async fn run_service(
             &network_config.http,
             runtime.agent.access_policy.allow_remote_clients,
         )?;
-        let web_router = web::router_with_knowledge_map(
-            service.clone(),
-            current_repository_knowledge_map()?,
-            network_config.http.max_request_body_bytes,
-        );
+        let web_router = web::router(service.clone(), network_config.http.max_request_body_bytes);
         let mut router = crate::net::http::router_with_qos_request_admission(
             web_router,
             qos.clone(),
@@ -126,14 +121,6 @@ pub(super) async fn run_service(
     runtime.observability.shutdown();
 
     Ok(String::new())
-}
-
-fn current_repository_knowledge_map() -> Result<Option<KnowledgeMapService>, CliError> {
-    let current = std::env::current_dir()
-        .map_err(|error| CliError::ServiceRunFailed(format!("failed to read cwd: {error}")))?;
-    let root = discover_repository_root(&current)
-        .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
-    Ok(root.map(KnowledgeMapService::new))
 }
 
 pub(super) fn run_code_index_worker_pool(

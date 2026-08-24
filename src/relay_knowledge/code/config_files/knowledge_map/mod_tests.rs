@@ -39,8 +39,7 @@ fn fixes_the_topic_list_indent_after_the_first_item() {
 
 #[test]
 fn emits_manifest_authorization_and_digest_verified_shard_facts() {
-    let shard =
-        "schema_version: 2\ntopic:\n  id: build\n  title: Build\nsources: []\nroute: null\n";
+    let shard = "schema_version: 2\ntopic:\n  id: build\n  title: Build\n  description: Build knowledge\nsources: []\nroute: null\n";
     let digest = content_digest(shard.as_bytes());
     let relative = format!("topics/topic-{}-{digest}.yaml", stable_id("build"));
     let root = valid_root(&relative, &digest);
@@ -57,6 +56,10 @@ fn emits_manifest_authorization_and_digest_verified_shard_facts() {
             .iter()
             .any(|fact| { fact.kind == "knowledge_map_topic_shard_topic" && fact.name == "build" })
     );
+    let root_identity = root_facts
+        .iter()
+        .find(|fact| fact.kind == "knowledge_map_topic_shard_identity")
+        .expect("root identity should exist");
 
     let mut shard_facts = Vec::new();
     facts(&shard_path, "yaml", shard, &mut shard_facts);
@@ -65,6 +68,9 @@ fn emits_manifest_authorization_and_digest_verified_shard_facts() {
             .iter()
             .any(|fact| { fact.kind == "knowledge_map_topic_shard" && fact.name == "build" })
     );
+    assert!(shard_facts.iter().any(|fact| {
+        fact.kind == "knowledge_map_topic_shard_identity" && fact.name == root_identity.name
+    }));
 
     let mut tampered_facts = Vec::new();
     facts(
@@ -78,8 +84,7 @@ fn emits_manifest_authorization_and_digest_verified_shard_facts() {
 
 #[test]
 fn accepts_valid_noncanonical_topic_indentation() {
-    let shard =
-        "schema_version: 2\ntopic:\n    id: build\n    title: Build\nsources: []\nroute: null\n";
+    let shard = "schema_version: 2\ntopic:\n    id: build\n    title: Build\n    description: Build knowledge\nsources: []\nroute: null\n";
     let digest = content_digest(shard.as_bytes());
     let path = format!(
         ".knowledge/topics/topic-{}-{digest}.yaml",
@@ -98,8 +103,7 @@ fn accepts_valid_noncanonical_topic_indentation() {
 
 #[test]
 fn accepts_a_flow_mapping_on_the_line_after_the_topic_key() {
-    let shard =
-        "schema_version: 2\ntopic:\n  {id: build, title: Build}\nsources: []\nroute: null\n";
+    let shard = "schema_version: 2\ntopic:\n  {id: build, title: Build, description: Build knowledge}\nsources: []\nroute: null\n";
     let digest = content_digest(shard.as_bytes());
     let path = format!(
         ".knowledge/topics/topic-{}-{digest}.yaml",
@@ -114,6 +118,65 @@ fn accepts_a_flow_mapping_on_the_line_after_the_topic_key() {
             .iter()
             .any(|fact| { fact.kind == "knowledge_map_topic_shard" && fact.name == "build" })
     );
+}
+
+#[test]
+fn rejects_shards_that_violate_source_and_route_invariants() {
+    let invalid_shards = [
+        "schema_version: 2\ntopic: {id: build, title: Build}\nsources: []\nroute: null\n",
+        "schema_version: 2\ntopic: {id: build, title: Build, description: Build knowledge}\nsources:\n  - id: cargo\n    topic: other\n    kind: config\n    uri: Cargo.toml\n    read_policy: direct\n    write_policy: manual-review\n    status: active\n    version: 1\nroute: {topic: build, source_order: [cargo]}\n",
+        "schema_version: 2\ntopic: {id: build, title: Build, description: Build knowledge}\nsources:\n  - id: cargo\n    topic: build\n    kind: config\n    uri: Cargo.toml\n    read_policy: direct\n    write_policy: manual-review\n    status: active\n    version: 1\nroute: null\n",
+        "schema_version: 2\ntopic: {id: build, title: Build, description: Build knowledge}\nsources:\n  - id: cargo\n    topic: build\n    kind: config\n    uri: Cargo.toml\n    read_policy: direct\n    write_policy: manual-review\n    status: active\n    version: 1\nroute: {topic: build, source_order: [foreign]}\n",
+    ];
+
+    for shard in invalid_shards {
+        let digest = content_digest(shard.as_bytes());
+        let path = format!(
+            ".knowledge/topics/topic-{}-{digest}.yaml",
+            stable_id("build")
+        );
+        let mut definitions = Vec::new();
+        facts(&path, "yaml", shard, &mut definitions);
+        assert!(
+            !definitions
+                .iter()
+                .any(|fact| fact.kind == "knowledge_map_topic_shard"),
+            "invalid shard emitted an authorization fact: {shard}"
+        );
+    }
+}
+
+#[test]
+fn root_and_shard_identity_facts_detect_metadata_disagreement() {
+    let inconsistent_shards = [
+        "schema_version: 2\ntopic: {id: build, title: Different, description: Build knowledge}\nsources: []\nroute: null\n",
+        "schema_version: 2\ntopic: {id: build, title: Build, description: Build knowledge}\nsources:\n  - id: cargo\n    topic: build\n    kind: config\n    uri: Cargo.toml\n    read_policy: direct\n    write_policy: manual-review\n    status: active\n    version: 1\nroute: {topic: build, source_order: [cargo]}\n",
+    ];
+
+    for shard in inconsistent_shards {
+        let digest = content_digest(shard.as_bytes());
+        let relative = format!("topics/topic-{}-{digest}.yaml", stable_id("build"));
+        let root = valid_root(&relative, &digest);
+        let mut root_facts = Vec::new();
+        let mut shard_facts = Vec::new();
+        facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut root_facts);
+        facts(
+            &format!(".knowledge/{relative}"),
+            "yaml",
+            shard,
+            &mut shard_facts,
+        );
+
+        let root_identity = root_facts
+            .iter()
+            .find(|fact| fact.kind == "knowledge_map_topic_shard_identity")
+            .expect("root identity should exist");
+        let shard_identity = shard_facts
+            .iter()
+            .find(|fact| fact.kind == "knowledge_map_topic_shard_identity")
+            .expect("locally valid shard identity should exist");
+        assert_ne!(root_identity.name, shard_identity.name);
+    }
 }
 
 #[test]
@@ -171,7 +234,7 @@ fn incomplete_or_globally_inconsistent_v2_manifests_authorize_no_shards() {
 
 #[test]
 fn flow_style_v2_topics_emit_authorization_facts() {
-    let shard = "schema_version: 2\ntopic: {id: build, title: Build}\nsources: []\nroute: null\n";
+    let shard = "schema_version: 2\ntopic: {id: build, title: Build, description: Build knowledge}\nsources: []\nroute: null\n";
     let digest = content_digest(shard.as_bytes());
     let relative = format!("topics/topic-{}-{digest}.yaml", stable_id("build"));
     let root = format!(
@@ -189,7 +252,7 @@ fn flow_style_v2_topics_emit_authorization_facts() {
 
 #[test]
 fn quoted_ref_keys_emit_manifest_authorization_facts() {
-    let shard = "schema_version: 2\ntopic: {id: build, title: Build}\nsources: []\nroute: null\n";
+    let shard = "schema_version: 2\ntopic: {id: build, title: Build, description: Build knowledge}\nsources: []\nroute: null\n";
     let digest = content_digest(shard.as_bytes());
     let relative = format!("topics/topic-{}-{digest}.yaml", stable_id("build"));
     let root = format!(

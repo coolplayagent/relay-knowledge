@@ -6,16 +6,18 @@ use super::*;
 
 #[test]
 fn knowledge_map_history_page_requires_positive_bounded_inputs() {
-    assert_eq!(
-        knowledge_map_history_page(&serde_json::json!({
-            "from_version": 2,
-            "limit": 16
-        }))
-        .expect("valid page"),
-        (2, 16)
-    );
+    let page = knowledge_map_history_page(&serde_json::json!({
+        "repository": " relay ",
+        "from_version": 2,
+        "limit": 16
+    }))
+    .expect("valid page");
+    assert_eq!(page.repository, "relay");
+    assert_eq!(page.from_version, 2);
+    assert_eq!(page.limit, 16);
     assert!(
         knowledge_map_history_page(&serde_json::json!({
+            "repository": "relay",
             "from_version": 0,
             "limit": 16
         }))
@@ -23,8 +25,16 @@ fn knowledge_map_history_page_requires_positive_bounded_inputs() {
     );
     assert!(
         knowledge_map_history_page(&serde_json::json!({
+            "repository": "relay",
             "from_version": 2,
             "limit": 0
+        }))
+        .is_err()
+    );
+    assert!(
+        knowledge_map_history_page(&serde_json::json!({
+            "from_version": 2,
+            "limit": 16
         }))
         .is_err()
     );

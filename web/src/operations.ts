@@ -53,6 +53,7 @@ export type AppState = {
     sourceScope: string;
   };
   map: {
+    repository: string;
     fromVersion: number;
     limit: number;
   };
@@ -132,6 +133,7 @@ export const appState: AppState = {
     sourceScope: "docs"
   },
   map: {
+    repository: "core",
     fromVersion: 1,
     limit: 16
   },
@@ -385,6 +387,7 @@ function mapHistorySnapshot(metadata: Record<string, unknown>) {
     ]),
     payload: {
       operation: "knowledge.map.history",
+      repository: state.repository,
       from_version: state.fromVersion,
       limit: state.limit,
       metadata

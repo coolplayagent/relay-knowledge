@@ -35,3 +35,4 @@ tmp/
 
 # Persistent inode used by the cross-process Knowledge Map advisory lock
 .knowledge/knowledge-map.yaml.lock
+.knowledge/knowledge-map.yaml.lock.prepared.*

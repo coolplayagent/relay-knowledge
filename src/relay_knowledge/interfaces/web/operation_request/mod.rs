@@ -62,7 +62,16 @@ pub(super) fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebE
     })
 }
 
-pub(super) fn knowledge_map_history_page(payload: &Value) -> Result<(u64, usize), WebError> {
+pub(super) struct KnowledgeMapHistoryPage {
+    pub(super) repository: String,
+    pub(super) from_version: u64,
+    pub(super) limit: usize,
+}
+
+pub(super) fn knowledge_map_history_page(
+    payload: &Value,
+) -> Result<KnowledgeMapHistoryPage, WebError> {
+    let repository = string_field(payload, "repository")?.trim().to_owned();
     let from_version = payload
         .get("from_version")
         .and_then(Value::as_u64)
@@ -70,7 +79,11 @@ pub(super) fn knowledge_map_history_page(payload: &Value) -> Result<(u64, usize)
         .ok_or_else(|| {
             WebError::bad_request("from_version must be a positive integer".to_owned())
         })?;
-    Ok((from_version, usize_field(payload, "limit")?))
+    Ok(KnowledgeMapHistoryPage {
+        repository,
+        from_version,
+        limit: usize_field(payload, "limit")?,
+    })
 }
 
 pub(super) fn code_register_request(

@@ -288,6 +288,134 @@ async fn an_unmarked_legacy_lock_is_not_stolen_during_upgrade() {
     let _ = fs::remove_dir_all(root).await;
 }
 
+#[tokio::test]
+async fn an_incomplete_staging_lock_does_not_block_atomic_publication() {
+    let root = temp_root("incomplete-prepared-lock");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    let prepared_path = transition_lock_prepared_path(&lock_path);
+    fs::write(&prepared_path, &ADVISORY_LOCK_MARKER[..7])
+        .await
+        .expect("interrupted prepared lock should seed");
+    let service = KnowledgeMapService::new(root.clone());
+
+    let owned = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect("an abandoned staging inode must not block publication");
+    drop(owned);
+
+    assert_eq!(
+        fs::read(&lock_path)
+            .await
+            .expect("published lock should read"),
+        ADVISORY_LOCK_MARKER
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn an_active_unique_staging_lock_does_not_share_the_canonical_inode() {
+    let root = temp_root("active-prepared-lock");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    let prepared_path = transition_lock_prepared_path(&lock_path);
+    let prepared = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&prepared_path)
+        .expect("prepared lock should create");
+    fs2::FileExt::try_lock_exclusive(&prepared).expect("initializer should own prepared lock");
+    let service = KnowledgeMapService::new(root.clone());
+
+    let owned = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect("another unique staging inode should publish safely");
+    drop(owned);
+
+    assert_eq!(
+        fs::read(&lock_path)
+            .await
+            .expect("published lock should read"),
+        ADVISORY_LOCK_MARKER
+    );
+    drop(prepared);
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn cleanup_preserves_an_old_staging_inode_while_its_initializer_is_active() {
+    let root = temp_root("active-staging-cleanup");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    let prepared_path = transition_lock_prepared_path(&lock_path);
+    let prepared = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&prepared_path)
+        .expect("prepared lock should create");
+    fs2::FileExt::try_lock_exclusive(&prepared).expect("initializer should own prepared lock");
+
+    cleanup_transition_locks(&lock_path, Duration::ZERO);
+
+    assert!(
+        fs::try_exists(&prepared_path)
+            .await
+            .expect("active staging path check")
+    );
+    drop(prepared);
+    cleanup_transition_locks(&lock_path, Duration::ZERO);
+    assert!(
+        !fs::try_exists(&prepared_path)
+            .await
+            .expect("retired staging path check")
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn a_hard_linked_staging_name_is_never_opened_or_overwritten() {
+    let root = temp_root("hard-linked-prepared-lock");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let outside = root.join("outside-prepared-target");
+    fs::write(&outside, b"outside")
+        .await
+        .expect("outside file should seed");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    let prepared_path = transition_lock_prepared_path(&lock_path);
+    fs::hard_link(&outside, &prepared_path)
+        .await
+        .expect("prepared hard link should create");
+    let service = KnowledgeMapService::new(root.clone());
+
+    let owned = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect("an unrelated staging name must not block publication");
+
+    drop(owned);
+    assert_eq!(
+        fs::read(outside).await.expect("outside file should read"),
+        b"outside"
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn an_existing_writer_lock_symlink_is_rejected_without_following_it() {

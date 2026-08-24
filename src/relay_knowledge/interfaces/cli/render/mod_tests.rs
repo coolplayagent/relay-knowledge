@@ -12,11 +12,11 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                 "through_version": 6,
                 "next_from_version": 7,
                 "entries": [
-                    {"version": 5, "action": "add", "actor": "cli", "summary": "Added source"},
+                    {"version": 5, "action": "add\ninjected", "actor": "cli\rspoofed", "summary": "Added\r\nsource"},
                     {"version": 6, "action": "update", "actor": "cli", "summary": "Updated source"},
                 ],
             }),
-            "knowledge_map=.knowledge/knowledge-map.yaml map_version=9 from=5 through=6 next=7\nversion=5 action=add actor=cli summary=Added source\nversion=6 action=update actor=cli summary=Updated source\n",
+            "knowledge_map=.knowledge/knowledge-map.yaml map_version=9 from=5 through=6 next=7\nversion=5 action=add injected actor=cli spoofed summary=Added  source\nversion=6 action=update actor=cli summary=Updated source\n",
         ),
         (
             "files.content",
