@@ -33,6 +33,7 @@ use contracts::{MutableKnowledgeMap, metadata, now_stamp};
 pub use error::KnowledgeMapServiceError;
 
 const WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
+const ADVISORY_LOCK_MARKER: &[u8] = b"relay-knowledge advisory writer lock v2\n";
 
 /// File-backed service for the shared YAML knowledge navigation contract.
 pub struct KnowledgeMapService {
@@ -353,9 +354,14 @@ impl KnowledgeMapService {
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
-            let map = serde_norway::from_str::<KnowledgeMap>(&content)
+            let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
                 .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
             map.validate()?;
+            let omitted = map.history.len().saturating_sub(RECENT_HISTORY_LIMIT);
+            let recent = map.history.split_off(omitted);
+            let archived_through = recent
+                .first()
+                .map_or(0, |entry| entry.version.saturating_sub(1));
             return Ok(KnowledgeMapView {
                 artifact_schema_version: KnowledgeMap::SCHEMA_VERSION,
                 map_version: map.map_version,
@@ -364,9 +370,9 @@ impl KnowledgeMapService {
                 sources: map.sources,
                 routes: map.routes,
                 history: KnowledgeMapHistoryWindow {
-                    archived_through: 0,
-                    complete: true,
-                    recent: map.history,
+                    archived_through,
+                    complete: omitted == 0,
+                    recent,
                 },
             });
         }
@@ -626,23 +632,34 @@ impl KnowledgeMapService {
         let dir = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
         ensure_owned_directory(&self.repository_root, &dir).await?;
         let path = dir.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
-        let open_path = path.clone();
-        let file = tokio::task::spawn_blocking(move || {
-            std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(open_path)
-        })
-        .await
-        .map_err(|error| {
-            KnowledgeMapServiceError::Io(std::io::Error::other(format!(
-                "knowledge map lock worker failed: {error}"
-            )))
-        })??;
         let deadline = Instant::now() + timeout;
         loop {
+            let open_path = path.clone();
+            let candidate = tokio::task::spawn_blocking(move || open_transition_lock(&open_path))
+                .await
+                .map_err(|error| {
+                    KnowledgeMapServiceError::Io(std::io::Error::other(format!(
+                        "knowledge map lock worker failed: {error}"
+                    )))
+                })?;
+            let candidate = match candidate {
+                Ok(candidate) => candidate,
+                Err(error) if lock_is_contended(&error) => {
+                    if Instant::now() >= deadline {
+                        return Err(KnowledgeMapServiceError::LockTimeout(path));
+                    }
+                    sleep(Duration::from_millis(25)).await;
+                    continue;
+                }
+                Err(error) => return Err(KnowledgeMapServiceError::Io(error)),
+            };
+            let TransitionLock::Advisory(file) = candidate else {
+                if Instant::now() >= deadline {
+                    return Err(KnowledgeMapServiceError::LockTimeout(path));
+                }
+                sleep(Duration::from_millis(25)).await;
+                continue;
+            };
             match fs2::FileExt::try_lock_exclusive(&file) {
                 Ok(()) => return Ok(KnowledgeMapWriteLock { file }),
                 Err(error) if lock_is_contended(&error) => {
@@ -699,6 +716,50 @@ impl KnowledgeMapService {
             }
             Err(error) => Err(error),
         }
+    }
+}
+
+enum TransitionLock {
+    Advisory(std::fs::File),
+    Legacy,
+}
+
+fn open_transition_lock(path: &Path) -> std::io::Result<TransitionLock> {
+    use std::io::{Read, Write};
+
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => {
+            if let Err(error) = file
+                .write_all(ADVISORY_LOCK_MARKER)
+                .and_then(|()| file.sync_data())
+            {
+                drop(file);
+                let _ = std::fs::remove_file(path);
+                return Err(error);
+            }
+            Ok(TransitionLock::Advisory(file))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let mut file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path)?;
+            let mut marker = Vec::with_capacity(ADVISORY_LOCK_MARKER.len() + 1);
+            std::io::Read::by_ref(&mut file)
+                .take((ADVISORY_LOCK_MARKER.len() + 1) as u64)
+                .read_to_end(&mut marker)?;
+            if marker == ADVISORY_LOCK_MARKER {
+                Ok(TransitionLock::Advisory(file))
+            } else {
+                Ok(TransitionLock::Legacy)
+            }
+        }
+        Err(error) => Err(error),
     }
 }
 

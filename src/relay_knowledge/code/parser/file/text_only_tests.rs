@@ -99,6 +99,20 @@ fn knowledge_map_scan_preserves_facts_after_an_invalid_utf8_line() {
     );
 }
 
+#[test]
+fn knowledge_map_scan_isolates_a_syntactically_significant_invalid_utf8_line() {
+    let snapshot = parse_source_snapshot(
+        ".knowledge/knowledge-map.yaml",
+        b"schema_version: 1\n\xFF: [\ntopics:\n  - id: retained-topic\n",
+    );
+
+    assert!(
+        snapshot.symbols.iter().any(|symbol| {
+            symbol.kind == "knowledge_map_topic" && symbol.name == "retained-topic"
+        })
+    );
+}
+
 fn parse_source_snapshot(path: &str, source: &[u8]) -> CodeIndexSnapshot {
     let registration =
         CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())

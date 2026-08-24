@@ -9,8 +9,8 @@ use tower::ServiceExt;
 
 use crate::{
     api::{IngestEvidence, IngestEvidenceExtraction, IngestRequest},
-    application::RelayKnowledgeService,
-    domain::EvidenceModality,
+    application::{KnowledgeMapService, KnowledgeMapSourceAddRequest, RelayKnowledgeService},
+    domain::{EvidenceModality, KnowledgeMapSourceKind},
     env::{EnvironmentConfig, PlatformKind},
 };
 
@@ -210,6 +210,91 @@ async fn executes_ingest_through_web_operation_endpoint() {
     assert_eq!(payload["operation"], "graph.ingest");
     assert_eq!(payload["name"], "Ingest evidence");
     assert_eq!(payload["result"]["receipt"]["evidence_count"], 1);
+}
+
+#[tokio::test]
+async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
+    let root = unique_temp_dir("map-history");
+    std::fs::create_dir_all(&root).expect("repository root should create");
+    let map = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(InterfaceKind::Web);
+    map.init(&context).await.expect("map should initialize");
+    map.add_source(
+        &context,
+        KnowledgeMapSourceAddRequest {
+            id: "web-source".to_owned(),
+            topic: "web".to_owned(),
+            kind: KnowledgeMapSourceKind::Doc,
+            uri: "docs/web.md".to_owned(),
+            source_scope: Some("repo".to_owned()),
+            description: None,
+        },
+    )
+    .await
+    .expect("source should add");
+    let router = router_with_assets_and_map(
+        test_service("map-history").await,
+        Some(map),
+        root.clone(),
+        crate::net::http::DEFAULT_MAX_BODY_BYTES,
+    );
+    let payload = execute_json_with_router(
+        router.clone(),
+        json!({
+            "snapshot": {
+                "name": "Map history",
+                "command": "relay-knowledge map history --from 1 --limit 1",
+                "payload": {
+                    "operation": "knowledge.map.history",
+                    "from_version": 1,
+                    "limit": 1
+                }
+            }
+        }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(payload["result"]["from_version"], 1);
+    assert_eq!(payload["result"]["entries"].as_array().unwrap().len(), 1);
+    let invalid = execute_json_with_router(
+        router,
+        json!({
+            "snapshot": {
+                "name": "Invalid map history",
+                "command": "relay-knowledge map history --from 0 --limit 1",
+                "payload": {
+                    "operation": "knowledge.map.history",
+                    "from_version": 0,
+                    "limit": 1
+                }
+            }
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(invalid["error"], "from_version must be a positive integer");
+    let oversized = execute_json_with_router(
+        router_with_assets_and_map(
+            test_service("map-history-limit").await,
+            Some(KnowledgeMapService::new(root)),
+            unique_temp_dir("map-history-assets"),
+            crate::net::http::DEFAULT_MAX_BODY_BYTES,
+        ),
+        json!({
+            "snapshot": {
+                "name": "Oversized map history",
+                "command": "relay-knowledge map history --from 1 --limit 257",
+                "payload": {
+                    "operation": "knowledge.map.history",
+                    "from_version": 1,
+                    "limit": 257
+                }
+            }
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(oversized["error"].as_str().unwrap().contains("1..=256"));
 }
 
 #[tokio::test]
@@ -712,7 +797,7 @@ async fn test_service(label: &str) -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
-            ("HOME", "/tmp"),
+            ("HOME", home.as_path().to_str().expect("utf8 home path")),
             (
                 "RELAY_KNOWLEDGE_HOME",
                 home.as_path().to_str().expect("utf8 path"),
@@ -732,6 +817,14 @@ async fn execute_json(
     expected_status: StatusCode,
 ) -> Value {
     let router = router(service, crate::net::http::DEFAULT_MAX_BODY_BYTES);
+    execute_json_with_router(router, body, expected_status).await
+}
+
+async fn execute_json_with_router(
+    router: Router,
+    body: Value,
+    expected_status: StatusCode,
+) -> Value {
     let response = router
         .oneshot(
             Request::builder()

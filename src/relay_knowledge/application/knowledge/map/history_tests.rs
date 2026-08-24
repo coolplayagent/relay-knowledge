@@ -128,6 +128,52 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
 }
 
 #[tokio::test]
+async fn legacy_show_returns_only_the_recent_history_window() {
+    let root = temp_root("legacy-bounded-show");
+    fs::create_dir_all(root.join(AGENT_CONTRACT_DIR_NAME))
+        .await
+        .expect("contract directory should create");
+    let mut map = KnowledgeMap::initial("initial".to_owned());
+    for index in 0..RECENT_HISTORY_LIMIT + 4 {
+        map.record_change(
+            "fixture",
+            format!("Legacy history {index}"),
+            format!("time-{index}"),
+        );
+    }
+    let service = KnowledgeMapService::new(root.clone());
+    fs::write(
+        service.map_path(),
+        serialize_yaml(&map).expect("legacy map should serialize"),
+    )
+    .await
+    .expect("legacy map should write");
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+
+    let shown = service
+        .show(&context, None)
+        .await
+        .expect("show should work");
+
+    assert_eq!(shown.map.history.recent.len(), RECENT_HISTORY_LIMIT);
+    assert_eq!(shown.map.history.archived_through, 5);
+    assert!(!shown.map.history.complete);
+    let first_page = service
+        .history(&context, 1, 3)
+        .await
+        .expect("legacy history should remain pageable");
+    assert_eq!(
+        first_page
+            .entries
+            .iter()
+            .map(|entry| entry.version)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn history_pages_reject_digest_valid_noncontiguous_archive_entries() {
     let root = temp_root("invalid-history-page");
     fs::create_dir_all(&root).await.expect("root should create");
@@ -195,14 +241,14 @@ async fn history_pages_reject_digest_valid_noncontiguous_archive_entries() {
 }
 
 #[tokio::test]
-async fn an_unlocked_persistent_lock_inode_does_not_block_a_writer() {
+async fn an_unlocked_marked_lock_inode_does_not_block_a_writer() {
     let root = temp_root("stale-lock-inode");
     let contract = root.join(AGENT_CONTRACT_DIR_NAME);
     fs::create_dir_all(&contract)
         .await
         .expect("contract directory should create");
     let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
-    fs::write(&lock_path, "previous owner exited")
+    fs::write(&lock_path, ADVISORY_LOCK_MARKER)
         .await
         .expect("persistent lock inode should seed");
     let service = KnowledgeMapService::new(root.clone());
@@ -213,6 +259,32 @@ async fn an_unlocked_persistent_lock_inode_does_not_block_a_writer() {
         .await
         .expect("OS-released lock must be reusable after an owner exits");
     assert!(fs::try_exists(lock_path).await.expect("lock path check"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn an_unmarked_legacy_lock_is_not_stolen_during_upgrade() {
+    let root = temp_root("legacy-lock");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    fs::write(&lock_path, b"")
+        .await
+        .expect("legacy lock should seed");
+    let service = KnowledgeMapService::new(root.clone());
+
+    let error = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect_err("an old-version writer lock must not be stolen");
+
+    assert!(matches!(error, KnowledgeMapServiceError::LockTimeout(_)));
+    assert_eq!(
+        fs::read(lock_path).await.expect("legacy lock should read"),
+        b""
+    );
     let _ = fs::remove_dir_all(root).await;
 }
 

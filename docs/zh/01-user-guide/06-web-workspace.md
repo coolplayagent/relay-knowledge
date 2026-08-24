@@ -64,7 +64,7 @@ Web Operations 面板覆盖这些 typed command/request preview 和同源执行:
 
 `Run` 会发送当前 snapshot 并在页面内显示 pending、success 或 error 状态。执行请求不使用诊断请求的 10 秒客户端超时，避免长时间索引或维护操作被前端提前 abort。
 
-操作面板展示的 command 是 CLI 等价预览，不是前端模拟结果。真正执行结果来自 `/api/web/operations/execute` 返回的统一 API 响应。发生错误时，先复制 result JSON 中的 operation、command、error kind 和 metadata，再回到 CLI 用同样参数复现。
+操作面板展示的 command 是 CLI 等价预览，不是前端模拟结果。真正执行结果来自 `/api/web/operations/execute` 返回的统一 API 响应。`knowledge.map.history` 操作与 CLI `map history` 使用相同的正数 `from_version` 和有界 `limit`（1-256）；`service run --web` 从可发现的仓库内启动时会启用该操作。发生错误时，先复制 result JSON 中的 operation、command、error kind 和 metadata，再回到 CLI 用同样参数复现。
 
 操作 payload 校验遵循共享 API 契约。例如 `code.repo_set.add` 在缺少 `priority` 时默认使用 `0`，但只要传入了格式错误或越界的 `priority`，就会返回 bad request，不会静默改成默认值并影响成员排序。`code.repo_set.refresh` 在缺少 `async` 时默认同步执行，但只要传入了非布尔值，就会拒绝请求，不会在请求路径中意外运行昂贵的 overlay rebuild。
 

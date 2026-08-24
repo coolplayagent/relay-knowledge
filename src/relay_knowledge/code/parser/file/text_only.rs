@@ -88,7 +88,15 @@ fn record_knowledge_map_facts(
     bytes: &[u8],
 ) -> Result<(), CodeIndexError> {
     let content = byte_stable_lossy_text(bytes);
-    let (definitions, _) = config_files::structured_facts(context.path, "yaml", &content);
+    let (mut definitions, _) = config_files::structured_facts(context.path, "yaml", &content);
+    if definitions
+        .iter()
+        .all(|definition| !definition.kind.starts_with("knowledge_map_"))
+        && std::str::from_utf8(bytes).is_err()
+    {
+        let isolated = isolate_invalid_utf8_lines(bytes);
+        definitions = config_files::structured_facts(context.path, "yaml", &isolated).0;
+    }
     for definition in definitions
         .into_iter()
         .filter(|definition| definition.kind.starts_with("knowledge_map_"))
@@ -102,6 +110,21 @@ fn record_knowledge_map_facts(
         record_symbol(context, output, &definition.name, definition.kind, &line)?;
     }
     Ok(())
+}
+
+fn isolate_invalid_utf8_lines(bytes: &[u8]) -> String {
+    let mut output = Vec::with_capacity(bytes.len());
+    for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+        if std::str::from_utf8(line).is_ok() {
+            output.extend_from_slice(line);
+            continue;
+        }
+        output.extend(line.iter().map(|byte| match byte {
+            b'\r' | b'\n' => *byte,
+            _ => b' ',
+        }));
+    }
+    String::from_utf8(output).expect("invalid UTF-8 lines are replaced with ASCII spaces")
 }
 
 fn byte_stable_lossy_text(bytes: &[u8]) -> String {

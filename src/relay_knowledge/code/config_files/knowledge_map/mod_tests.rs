@@ -93,6 +93,26 @@ fn accepts_valid_noncanonical_topic_indentation() {
 }
 
 #[test]
+fn accepts_a_flow_mapping_on_the_line_after_the_topic_key() {
+    let shard =
+        "schema_version: 2\ntopic:\n  {id: build, title: Build}\nsources: []\nroute: null\n";
+    let digest = content_digest(shard.as_bytes());
+    let path = format!(
+        ".knowledge/topics/topic-{}-{digest}.yaml",
+        stable_id("build")
+    );
+    let mut definitions = Vec::new();
+
+    facts(&path, "yaml", shard, &mut definitions);
+
+    assert!(
+        definitions
+            .iter()
+            .any(|fact| { fact.kind == "knowledge_map_topic_shard" && fact.name == "build" })
+    );
+}
+
+#[test]
 fn malformed_v2_refs_do_not_fall_back_to_legacy_root_topics() {
     let content = "schema_version: 2\ntopics:\n  - id: unauthorized\n    ref: ../escape.yaml\n    digest: invalid\n";
     let mut definitions = Vec::new();

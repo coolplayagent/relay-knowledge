@@ -197,6 +197,13 @@ fn topic_id_range(content: &str, expected_id: &str) -> Option<super::model::Conf
     let lines = source_lines(content);
     for line in &lines {
         let code = yaml_code_prefix(line.text);
+        let trimmed = code.trim();
+        if !code.starts_with([' ', '\t'])
+            && let Some(mapping) = trimmed.strip_prefix("topic:").map(str::trim)
+            && flow_topic_id_matches(mapping, expected_id)
+        {
+            return Some(line.range());
+        }
         if let Some(section) = top_level_yaml_section(code) {
             in_topic = section == "topic";
             continue;
@@ -204,10 +211,20 @@ fn topic_id_range(content: &str, expected_id: &str) -> Option<super::model::Conf
         if in_topic && leading_spaces(code) > 0 && yaml_scalar(code, "id") == Some(expected_id) {
             return Some(line.range());
         }
+        if in_topic && leading_spaces(code) > 0 && flow_topic_id_matches(trimmed, expected_id) {
+            return Some(line.range());
+        }
     }
     lines.into_iter().find_map(|line| {
         (line.text.contains("topic") && line.text.contains(expected_id)).then(|| line.range())
     })
+}
+
+fn flow_topic_id_matches(content: &str, expected_id: &str) -> bool {
+    if !content.starts_with('{') {
+        return false;
+    }
+    serde_norway::from_str::<TopicIdentity>(content).is_ok_and(|topic| topic.id == expected_id)
 }
 
 fn valid_topic_ref(topic: &RootTopicRef) -> bool {

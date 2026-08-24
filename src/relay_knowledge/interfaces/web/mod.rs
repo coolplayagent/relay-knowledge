@@ -24,7 +24,7 @@ use crate::{
         GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, InterfaceKind,
         ProposalListApiRequest, RequestContext, WorkerRunRequest, WorkerStatusRequest,
     },
-    application::RelayKnowledgeService,
+    application::{KnowledgeMapService, RelayKnowledgeService},
     domain::{CodeIndexMode, ProposalState},
 };
 use assets::{asset_or_index, default_web_dist, index};
@@ -41,16 +41,40 @@ use operation_request::{
 
 /// Builds the Web router without opening sockets.
 pub fn router(service: RelayKnowledgeService, max_request_body_bytes: u64) -> Router {
-    router_with_assets(service, default_web_dist(), max_request_body_bytes)
+    router_with_assets_and_map(service, None, default_web_dist(), max_request_body_bytes)
 }
 
+pub(crate) fn router_with_knowledge_map(
+    service: RelayKnowledgeService,
+    knowledge_map: Option<KnowledgeMapService>,
+    max_request_body_bytes: u64,
+) -> Router {
+    router_with_assets_and_map(
+        service,
+        knowledge_map,
+        default_web_dist(),
+        max_request_body_bytes,
+    )
+}
+
+#[cfg(test)]
 fn router_with_assets(
     service: RelayKnowledgeService,
     asset_root: PathBuf,
     max_request_body_bytes: u64,
 ) -> Router {
+    router_with_assets_and_map(service, None, asset_root, max_request_body_bytes)
+}
+
+fn router_with_assets_and_map(
+    service: RelayKnowledgeService,
+    knowledge_map: Option<KnowledgeMapService>,
+    asset_root: PathBuf,
+    max_request_body_bytes: u64,
+) -> Router {
     let state = WebState {
         service,
+        knowledge_map: Arc::new(knowledge_map),
         asset_root: Arc::new(asset_root),
     };
     let body_limit = usize::try_from(max_request_body_bytes).unwrap_or(usize::MAX);
@@ -188,6 +212,7 @@ async fn execute_operation(
     let context = RequestContext::for_interface(InterfaceKind::Web);
     let (metadata, result) = dispatch_operation(
         &state.service,
+        state.knowledge_map.as_ref().as_ref(),
         operation,
         &request.snapshot.payload,
         context,
@@ -206,11 +231,29 @@ async fn execute_operation(
 
 async fn dispatch_operation(
     service: &RelayKnowledgeService,
+    knowledge_map: Option<&KnowledgeMapService>,
     operation: &str,
     payload: &Value,
     context: RequestContext,
 ) -> Result<(crate::api::ApiMetadata, Value), WebError> {
     match operation {
+        "knowledge.map.history" => {
+            let map = knowledge_map.ok_or_else(|| {
+                WebError::bad_request("knowledge map repository root was not resolved".to_owned())
+            })?;
+            let from_version = payload
+                .get("from_version")
+                .and_then(Value::as_u64)
+                .filter(|value| *value > 0)
+                .ok_or_else(|| {
+                    WebError::bad_request("from_version must be a positive integer".to_owned())
+                })?;
+            let response = map
+                .history(&context, from_version, usize_field(payload, "limit")?)
+                .await
+                .map_err(|error| WebError::bad_request(error.to_string()))?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
         "retrieve.context" => {
             let response = service
                 .retrieve_context(retrieve_request(payload)?, context)
@@ -542,6 +585,7 @@ impl IntoResponse for WebError {
 #[derive(Clone)]
 pub(super) struct WebState {
     pub(super) service: RelayKnowledgeService,
+    knowledge_map: Arc<Option<KnowledgeMapService>>,
     asset_root: Arc<PathBuf>,
 }
 
