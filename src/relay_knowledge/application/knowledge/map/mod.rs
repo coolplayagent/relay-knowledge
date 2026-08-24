@@ -17,14 +17,15 @@ use crate::{
 
 mod artifact;
 mod contracts;
+mod error;
 
 use artifact::*;
 pub use contracts::{
     KnowledgeMapAgentSnippetResponse, KnowledgeMapMutationResponse, KnowledgeMapRouteResponse,
-    KnowledgeMapServiceError, KnowledgeMapShowResponse, KnowledgeMapSourceAddRequest,
-    KnowledgeMapValidationResponse,
+    KnowledgeMapShowResponse, KnowledgeMapSourceAddRequest, KnowledgeMapValidationResponse,
 };
 use contracts::{MutableKnowledgeMap, metadata, now_stamp};
+pub use error::KnowledgeMapServiceError;
 
 const SUPERSEDED_SHARD_GRACE: Duration = Duration::from_secs(60);
 

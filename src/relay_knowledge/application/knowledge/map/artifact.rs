@@ -10,7 +10,7 @@ use crate::domain::{
     KnowledgeMapTopic,
 };
 
-use super::KnowledgeMapServiceError;
+use super::error::KnowledgeMapServiceError;
 
 pub(super) const RECENT_HISTORY_LIMIT: usize = 16;
 pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 2;
