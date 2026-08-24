@@ -745,10 +745,7 @@ fn open_transition_lock(path: &Path) -> std::io::Result<TransitionLock> {
             Ok(TransitionLock::Advisory(file))
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let mut file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(path)?;
+            let mut file = open_existing_transition_lock(path)?;
             let mut marker = Vec::with_capacity(ADVISORY_LOCK_MARKER.len() + 1);
             std::io::Read::by_ref(&mut file)
                 .take((ADVISORY_LOCK_MARKER.len() + 1) as u64)
@@ -761,6 +758,51 @@ fn open_transition_lock(path: &Path) -> std::io::Result<TransitionLock> {
         }
         Err(error) => Err(error),
     }
+}
+
+fn open_existing_transition_lock(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || lock_metadata_is_reparse_point(&metadata) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "knowledge map writer lock must be a regular file, got {}",
+                path.display()
+            ),
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn lock_metadata_is_reparse_point(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn lock_metadata_is_reparse_point(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 fn lock_is_contended(error: &std::io::Error) -> bool {

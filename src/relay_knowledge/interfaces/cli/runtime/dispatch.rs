@@ -3,7 +3,7 @@ use crate::{
         GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
         IngestRequest, InterfaceKind, RequestContext,
     },
-    application::RelayKnowledgeService,
+    application::{KnowledgeMapService, RelayKnowledgeService},
     env::{EnvironmentConfig, RemoteCliEnvironmentConfig},
 };
 
@@ -20,7 +20,10 @@ use super::{
 #[path = "dispatch_tests.rs"]
 mod tests;
 
-pub(crate) async fn run_command(command: CliCommand) -> Result<String, CliError> {
+pub(crate) async fn run_command(
+    command: CliCommand,
+    knowledge_map_service: Option<&KnowledgeMapService>,
+) -> Result<String, CliError> {
     if let CliAction::Help { path } = &command.action {
         return spec::render_help(path, command.format);
     }
@@ -32,7 +35,7 @@ pub(crate) async fn run_command(command: CliCommand) -> Result<String, CliError>
     }
     if let CliAction::Map(map_command) = command.action.clone() {
         let context = RequestContext::for_interface(InterfaceKind::Cli);
-        return map::run_map(map_command, None, context, command.format).await;
+        return map::run_map(map_command, knowledge_map_service, context, command.format).await;
     }
 
     let context = RequestContext::for_interface(InterfaceKind::Cli);

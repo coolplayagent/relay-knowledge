@@ -288,6 +288,95 @@ async fn an_unmarked_legacy_lock_is_not_stolen_during_upgrade() {
     let _ = fs::remove_dir_all(root).await;
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn an_existing_writer_lock_symlink_is_rejected_without_following_it() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root("writer-lock-symlink");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let outside = root.join("outside-lock-target");
+    fs::write(&outside, ADVISORY_LOCK_MARKER)
+        .await
+        .expect("outside target should seed");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    symlink(&outside, &lock_path).expect("lock symlink should create");
+    let service = KnowledgeMapService::new(root.clone());
+
+    let error = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect_err("writer lock symlink must not be followed");
+
+    assert!(matches!(error, KnowledgeMapServiceError::Io(_)));
+    assert_eq!(
+        fs::read(&outside)
+            .await
+            .expect("outside target should read"),
+        ADVISORY_LOCK_MARKER
+    );
+    assert!(
+        fs::symlink_metadata(lock_path)
+            .await
+            .expect("lock symlink metadata should read")
+            .file_type()
+            .is_symlink()
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn an_existing_writer_lock_reparse_point_is_rejected_without_following_it() {
+    use std::os::windows::fs::symlink_file;
+
+    let root = temp_root("writer-lock-reparse-point");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    let outside = root.join("outside-lock-target");
+    fs::write(&outside, ADVISORY_LOCK_MARKER)
+        .await
+        .expect("outside target should seed");
+    let lock_path = contract.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+    if let Err(error) = symlink_file(&outside, &lock_path) {
+        const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+        if error.kind() == std::io::ErrorKind::PermissionDenied
+            || error.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD)
+        {
+            let _ = fs::remove_dir_all(root).await;
+            return;
+        }
+        panic!("lock reparse point should create: {error}");
+    }
+    let service = KnowledgeMapService::new(root.clone());
+
+    let error = service
+        .acquire_write_lock(Duration::from_millis(50))
+        .await
+        .expect_err("writer lock reparse point must not be followed");
+
+    assert!(matches!(error, KnowledgeMapServiceError::Io(_)));
+    assert_eq!(
+        fs::read(&outside)
+            .await
+            .expect("outside target should read"),
+        ADVISORY_LOCK_MARKER
+    );
+    assert!(
+        fs::symlink_metadata(lock_path)
+            .await
+            .expect("lock reparse metadata should read")
+            .file_type()
+            .is_symlink()
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
 #[tokio::test]
 async fn an_active_writer_cannot_be_stolen_and_wait_is_bounded() {
     let root = temp_root("active-lock");

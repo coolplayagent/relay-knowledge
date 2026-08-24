@@ -2,17 +2,19 @@
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::{collections::HashSet, path::Path};
 
 use super::{
     model::ConfigFact,
     source::{push_definition, source_lines, unquote},
 };
 use crate::project::{
-    AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
-    KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+    AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
+    KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
 };
 
 const ARTIFACT_SCHEMA_VERSION: u16 = 2;
+const RECENT_HISTORY_LIMIT: usize = 16;
 
 #[derive(Deserialize)]
 struct SchemaProbe {
@@ -22,15 +24,45 @@ struct SchemaProbe {
 #[derive(Deserialize)]
 struct RootManifest {
     schema_version: u16,
+    map_version: u64,
+    #[serde(rename = "updated_at")]
+    _updated_at: String,
     topics: Vec<RootTopicRef>,
+    history: RootHistory,
 }
 
 #[derive(Deserialize)]
 struct RootTopicRef {
     id: String,
+    title: String,
+    description: String,
+    source_ids: Vec<String>,
     #[serde(rename = "ref")]
     shard_ref: String,
     digest: String,
+}
+
+#[derive(Deserialize)]
+struct RootHistory {
+    archived_through: u64,
+    #[serde(default)]
+    archive: Option<RootArchiveRef>,
+    recent: Vec<RootHistoryEntry>,
+}
+
+#[derive(Deserialize)]
+struct RootArchiveRef {
+    #[serde(rename = "ref")]
+    archive_ref: String,
+    digest: String,
+}
+
+#[derive(Deserialize)]
+struct RootHistoryEntry {
+    version: u64,
+    action: String,
+    actor: String,
+    summary: String,
 }
 
 #[derive(Deserialize)]
@@ -78,7 +110,7 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
     let Ok(manifest) = serde_norway::from_str::<RootManifest>(content) else {
         return;
     };
-    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION {
+    if !valid_manifest(&manifest) {
         return;
     }
     for topic in manifest.topics {
@@ -101,6 +133,103 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
             range,
         );
     }
+}
+
+fn valid_manifest(manifest: &RootManifest) -> bool {
+    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION || manifest.map_version == 0 {
+        return false;
+    }
+    let mut topic_ids = HashSet::new();
+    let mut folded_topic_ids = HashSet::new();
+    let mut refs = HashSet::new();
+    let mut folded_refs = HashSet::new();
+    let mut source_ids = HashSet::new();
+    if manifest.topics.iter().any(|topic| {
+        let mut topic_source_ids = HashSet::new();
+        topic.id.trim().is_empty()
+            || topic.title.trim().is_empty()
+            || topic.description.trim().is_empty()
+            || !valid_topic_ref(topic)
+            || !topic_ids.insert(topic.id.as_str())
+            || !folded_topic_ids.insert(topic.id.to_lowercase())
+            || !refs.insert(topic.shard_ref.as_str())
+            || !folded_refs.insert(topic.shard_ref.to_lowercase())
+            || topic.source_ids.iter().any(|source_id| {
+                source_id.trim().is_empty()
+                    || !topic_source_ids.insert(source_id.as_str())
+                    || !source_ids.insert(source_id.as_str())
+            })
+    }) {
+        return false;
+    }
+    valid_recent_history(manifest)
+        && manifest.history.archive.as_ref().is_none_or(|archive| {
+            scoped_contract_ref(&archive.archive_ref, KNOWLEDGE_MAP_HISTORY_DIR_NAME)
+                && lower_hex(&archive.digest, 64)
+        })
+}
+
+fn valid_recent_history(manifest: &RootManifest) -> bool {
+    if manifest.history.recent.is_empty() || manifest.history.recent.len() > RECENT_HISTORY_LIMIT {
+        return false;
+    }
+    let Some(mut expected) = manifest.history.archived_through.checked_add(1) else {
+        return false;
+    };
+    for entry in &manifest.history.recent {
+        if entry.version != expected
+            || entry.action.trim().is_empty()
+            || entry.actor.trim().is_empty()
+            || entry.summary.trim().is_empty()
+        {
+            return false;
+        }
+        let Some(next) = expected.checked_add(1) else {
+            return false;
+        };
+        expected = next;
+    }
+    if expected.saturating_sub(1) != manifest.map_version
+        || (manifest.history.archived_through == 0) != manifest.history.archive.is_none()
+    {
+        return false;
+    }
+    manifest
+        .history
+        .archive
+        .as_ref()
+        .is_none_or(|archive| valid_archive_ref_shape(archive, manifest.history.archived_through))
+}
+
+fn valid_archive_ref_shape(archive: &RootArchiveRef, archived_through: u64) -> bool {
+    let name = archive
+        .archive_ref
+        .strip_prefix(&format!("{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/"))
+        .and_then(|value| value.strip_suffix(".yaml"));
+    let Some(name) = name else {
+        return false;
+    };
+    let mut parts = name.split('-');
+    let from_text = parts.next();
+    let through_text = parts.next();
+    let from = from_text.and_then(|value| value.parse::<u64>().ok());
+    let through = through_text.and_then(|value| value.parse::<u64>().ok());
+    let digest = parts.next();
+    parts.next().is_none()
+        && from.is_some_and(|value| value > 0 && value <= archived_through)
+        && from_text.is_some_and(|value| value.len() == 20)
+        && through_text.is_some_and(|value| value.len() == 20)
+        && through == Some(archived_through)
+        && digest == Some(archive.digest.as_str())
+}
+
+fn scoped_contract_ref(relative: &str, directory: &str) -> bool {
+    let path = Path::new(relative);
+    let mut components = path.components();
+    !path.is_absolute()
+        && matches!(components.next(), Some(std::path::Component::Normal(value)) if value == directory)
+        && matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }
 
 fn topic_ref_range(content: &str, topic: &RootTopicRef) -> Option<super::model::ConfigRange> {
