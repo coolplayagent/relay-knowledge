@@ -98,9 +98,17 @@ pub(super) fn parse_manifest(
     let mut source_ids = std::collections::HashSet::new();
     for topic in &manifest.topics {
         let mut topic_source_ids = std::collections::HashSet::new();
+        let expected_ref = format!(
+            "{}/topic-{}-{}.yaml",
+            crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME,
+            stable_id(&topic.id),
+            topic.digest
+        );
         if topic.id.trim().is_empty()
             || topic.title.trim().is_empty()
             || topic.description.trim().is_empty()
+            || !is_lower_hex_digest(&topic.digest)
+            || topic.r#ref != expected_ref
             || !topic_ids.insert(topic.id.as_str())
             || !refs.insert(topic.r#ref.as_str())
             || !folded_topic_ids.insert(topic.id.to_lowercase())
@@ -112,12 +120,23 @@ pub(super) fn parse_manifest(
             })
         {
             return Err(KnowledgeMapServiceError::Integrity(
-                "topic ids, shard refs, and source ids must be non-empty and globally unique"
+                "topic metadata, content refs, and source ids must be valid and globally unique"
                     .to_owned(),
             ));
         }
     }
     validate_recent_history(&manifest)?;
+    if let Some(archive) = &manifest.history.archive {
+        if !is_scoped_contract_ref(
+            &archive.r#ref,
+            crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME,
+        ) || !is_lower_hex_digest(&archive.digest)
+        {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "history archive ref or digest is invalid".to_owned(),
+            ));
+        }
+    }
     Ok(manifest)
 }
 
@@ -179,7 +198,13 @@ pub(super) fn validate_recent_history(
             "recent history must contain 1..={RECENT_HISTORY_LIMIT} entries"
         )));
     }
-    let mut expected = manifest.history.archived_through.saturating_add(1);
+    let mut expected = manifest
+        .history
+        .archived_through
+        .checked_add(1)
+        .ok_or_else(|| {
+            KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
+        })?;
     for entry in &manifest.history.recent {
         entry
             .validate()
@@ -189,7 +214,9 @@ pub(super) fn validate_recent_history(
                 "recent history is not contiguous with its archive checkpoint".to_owned(),
             ));
         }
-        expected = expected.saturating_add(1);
+        expected = expected.checked_add(1).ok_or_else(|| {
+            KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
+        })?;
     }
     if expected.saturating_sub(1) != manifest.map_version {
         return Err(KnowledgeMapServiceError::Integrity(
@@ -246,6 +273,23 @@ pub(super) async fn reject_symlink(path: &Path) -> Result<(), KnowledgeMapServic
     Ok(())
 }
 
+pub(super) async fn canonical_regular_file(
+    path: &Path,
+) -> Result<PathBuf, KnowledgeMapServiceError> {
+    reject_symlink(path).await?;
+    Ok(fs::canonicalize(path).await?)
+}
+
+pub(super) async fn ensure_regular_file_within(
+    path: &Path,
+    directory: &Path,
+) -> Result<(), KnowledgeMapServiceError> {
+    if !canonical_regular_file(path).await?.starts_with(directory) {
+        return Err(unsafe_path(path));
+    }
+    Ok(())
+}
+
 pub(super) fn unsafe_path(path: &Path) -> KnowledgeMapServiceError {
     KnowledgeMapServiceError::UnsafePath(path.display().to_string())
 }
@@ -261,14 +305,24 @@ pub(super) fn is_generated_topic_shard_name(file_name: &std::ffi::OsStr) -> bool
     let Some((topic_id, digest)) = stem.split_once('-') else {
         return false;
     };
-    topic_id.len() == 16
-        && digest.len() == 64
-        && topic_id
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        && digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    topic_id.len() == 16 && topic_id.bytes().all(is_lower_hex_byte) && is_lower_hex_digest(digest)
+}
+
+fn is_lower_hex_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(is_lower_hex_byte)
+}
+
+fn is_lower_hex_byte(byte: u8) -> bool {
+    byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+}
+
+fn is_scoped_contract_ref(relative: &str, directory: &str) -> bool {
+    let path = Path::new(relative);
+    let mut components = path.components();
+    !path.is_absolute()
+        && matches!(components.next(), Some(std::path::Component::Normal(value)) if value == directory)
+        && matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }
 
 pub(super) async fn read_verified_ref(
@@ -294,7 +348,7 @@ pub(super) async fn read_verified_ref(
     };
     reject_symlink(&artifact_dir).await?;
     let canonical_artifact_dir = fs::canonicalize(artifact_dir).await?;
-    let canonical_path = fs::canonicalize(&path).await?;
+    let canonical_path = canonical_regular_file(&path).await?;
     if !canonical_contract.starts_with(canonical_repository)
         || !canonical_artifact_dir.starts_with(&canonical_contract)
         || !canonical_path.starts_with(&canonical_artifact_dir)

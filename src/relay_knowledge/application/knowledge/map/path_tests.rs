@@ -77,3 +77,42 @@ async fn rejects_a_symlinked_contract_directory_on_legacy_reads() {
     let _ = fs::remove_dir_all(root).await;
     let _ = fs::remove_dir_all(outside).await;
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn publication_rejects_an_in_tree_artifact_leaf_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root("unsafe-in-tree-artifact-symlink");
+    let topics = root
+        .join(AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    fs::create_dir_all(&topics)
+        .await
+        .expect("topics directory should create");
+    let map = KnowledgeMap::initial("fixture".to_owned());
+    let topic = map.topics[0].clone();
+    let shard = KnowledgeMapTopicShard {
+        schema_version: ARTIFACT_SCHEMA_VERSION,
+        sources: map.sources.clone(),
+        route: map.routes.first().cloned(),
+        topic: topic.clone(),
+    };
+    let yaml = serialize_yaml(&shard).expect("shard should serialize");
+    let digest = content_digest(yaml.as_bytes());
+    let target = topics.join(format!("topic-0000000000000000-{digest}.yaml"));
+    fs::write(&target, yaml)
+        .await
+        .expect("in-tree target should write");
+    let published = topics.join(format!("topic-{}-{digest}.yaml", stable_id(&topic.id)));
+    symlink(target, published).expect("artifact leaf symlink should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+
+    let error = service
+        .init(&context)
+        .await
+        .expect_err("publication must reject an in-tree leaf symlink");
+    assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
+    let _ = fs::remove_dir_all(root).await;
+}

@@ -435,6 +435,60 @@ async fn route_rejects_blank_recent_history_fields() {
 }
 
 #[tokio::test]
+async fn route_rejects_overflow_and_unsafe_archive_metadata() {
+    let root = temp_root("invalid-archive-metadata");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    let baseline = parse_manifest(
+        &fs::read_to_string(service.map_path())
+            .await
+            .expect("manifest should read"),
+    )
+    .expect("manifest should parse");
+
+    let mut overflow = baseline.clone();
+    overflow.map_version = u64::MAX;
+    overflow.history.archived_through = u64::MAX;
+    overflow.history.archive = Some(KnowledgeMapArchiveRef {
+        r#ref: "history/archive.yaml".to_owned(),
+        digest: "0".repeat(64),
+    });
+    overflow.history.recent[0].version = u64::MAX;
+    fs::write(
+        service.map_path(),
+        serialize_yaml(&overflow).expect("overflow manifest should serialize"),
+    )
+    .await
+    .expect("overflow manifest should write");
+    assert!(matches!(
+        service.route(&context, "software-model".to_owned()).await,
+        Err(KnowledgeMapServiceError::Integrity(_))
+    ));
+
+    let mut unsafe_archive = baseline;
+    unsafe_archive.map_version = 2;
+    unsafe_archive.history.archived_through = 1;
+    unsafe_archive.history.archive = Some(KnowledgeMapArchiveRef {
+        r#ref: "../archive.yaml".to_owned(),
+        digest: "0".repeat(64),
+    });
+    unsafe_archive.history.recent[0].version = 2;
+    fs::write(
+        service.map_path(),
+        serialize_yaml(&unsafe_archive).expect("unsafe manifest should serialize"),
+    )
+    .await
+    .expect("unsafe manifest should write");
+    assert!(matches!(
+        service.route(&context, "software-model".to_owned()).await,
+        Err(KnowledgeMapServiceError::Integrity(_))
+    ));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn mutations_reject_case_colliding_topics_before_publication() {
     let root = temp_root("case-collision");
     fs::create_dir_all(&root).await.expect("root should create");
@@ -737,7 +791,7 @@ async fn rejects_topic_refs_that_escape_the_contract_directory() {
         .route(&context, "software-model".to_owned())
         .await
         .expect_err("unsafe ref must fail");
-    assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
+    assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
     let _ = fs::remove_dir_all(root).await;
 }
 

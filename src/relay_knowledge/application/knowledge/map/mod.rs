@@ -734,9 +734,7 @@ async fn publish_immutable(
         .ok_or_else(|| KnowledgeMapServiceError::UnsafePath(relative.to_owned()))?;
     let owned_parent = ensure_owned_directory(repository_root, parent).await?;
     if fs::try_exists(&path).await? {
-        if !fs::canonicalize(&path).await?.starts_with(owned_parent) {
-            return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
-        }
+        ensure_regular_file_within(&path, &owned_parent).await?;
         return if fs::read(&path).await? == content {
             Ok(())
         } else {
