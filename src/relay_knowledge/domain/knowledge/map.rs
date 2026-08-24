@@ -575,7 +575,7 @@ pub struct KnowledgeMapHistoryEntry {
 }
 
 impl KnowledgeMapHistoryEntry {
-    fn validate(&self) -> Result<(), DomainError> {
+    pub(crate) fn validate(&self) -> Result<(), DomainError> {
         if self.version == 0 {
             return Err(DomainError::invalid(
                 "history",

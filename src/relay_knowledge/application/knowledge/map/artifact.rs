@@ -180,6 +180,9 @@ pub(super) fn validate_recent_history(
     }
     let mut expected = manifest.history.archived_through.saturating_add(1);
     for entry in &manifest.history.recent {
+        entry
+            .validate()
+            .map_err(|error| KnowledgeMapServiceError::Integrity(error.to_string()))?;
         if entry.version != expected {
             return Err(KnowledgeMapServiceError::Integrity(
                 "recent history is not contiguous with its archive checkpoint".to_owned(),
@@ -211,6 +214,41 @@ pub(super) fn content_digest(content: &[u8]) -> String {
 
 pub(super) fn stable_id(value: &str) -> String {
     content_digest(value.as_bytes())[..16].to_owned()
+}
+
+pub(super) async fn read_root_file(path: &Path) -> Result<String, KnowledgeMapServiceError> {
+    reject_symlink(path).await?;
+    Ok(fs::read_to_string(path).await?)
+}
+
+pub(super) async fn reject_symlink(path: &Path) -> Result<(), KnowledgeMapServiceError> {
+    if fs::symlink_metadata(path).await?.file_type().is_symlink() {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            path.display().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn is_generated_topic_shard_name(file_name: &std::ffi::OsStr) -> bool {
+    let Some(stem) = file_name
+        .to_str()
+        .and_then(|name| name.strip_prefix("topic-"))
+        .and_then(|name| name.strip_suffix(".yaml"))
+    else {
+        return false;
+    };
+    let Some((topic_id, digest)) = stem.split_once('-') else {
+        return false;
+    };
+    topic_id.len() == 16
+        && digest.len() == 64
+        && topic_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub(super) async fn read_verified_ref(

@@ -681,18 +681,22 @@ fn temporary_path(path: &Path) -> PathBuf {
 }
 
 async fn read_root_content(path: &Path, backup: &Path) -> Result<String, KnowledgeMapServiceError> {
-    match fs::read_to_string(path).await {
+    match read_root_file(path).await {
         Ok(content) => Ok(content),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match fs::read_to_string(backup).await {
+        Err(KnowledgeMapServiceError::Io(error))
+            if error.kind() == std::io::ErrorKind::NotFound =>
+        {
+            match read_root_file(backup).await {
                 Ok(content) => Ok(content),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    Ok(fs::read_to_string(path).await?)
+                Err(KnowledgeMapServiceError::Io(error))
+                    if error.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    read_root_file(path).await
                 }
-                Err(error) => Err(error.into()),
+                Err(error) => Err(error),
             }
         }
-        Err(error) => Err(error.into()),
+        Err(error) => Err(error),
     }
 }
 
@@ -702,15 +706,7 @@ async fn ensure_owned_directory(
 ) -> Result<PathBuf, KnowledgeMapServiceError> {
     let contract = repository_root.join(AGENT_CONTRACT_DIR_NAME);
     fs::create_dir_all(&contract).await?;
-    if fs::symlink_metadata(&contract)
-        .await?
-        .file_type()
-        .is_symlink()
-    {
-        return Err(KnowledgeMapServiceError::UnsafePath(
-            contract.display().to_string(),
-        ));
-    }
+    reject_symlink(&contract).await?;
     let repository = fs::canonicalize(repository_root).await?;
     let contract = fs::canonicalize(contract).await?;
     if !contract.starts_with(&repository) {
@@ -719,15 +715,7 @@ async fn ensure_owned_directory(
         ));
     }
     fs::create_dir_all(directory).await?;
-    if fs::symlink_metadata(directory)
-        .await?
-        .file_type()
-        .is_symlink()
-    {
-        return Err(KnowledgeMapServiceError::UnsafePath(
-            directory.display().to_string(),
-        ));
-    }
+    reject_symlink(directory).await?;
     let directory = fs::canonicalize(directory).await?;
     if !directory.starts_with(&contract) {
         return Err(KnowledgeMapServiceError::UnsafePath(
@@ -792,14 +780,44 @@ async fn cleanup_superseded_topic_shards(
         return;
     };
     while let Ok(Some(entry)) = entries.next_entry().await {
-        let old_enough = entry
-            .metadata()
+        let file_name = entry.file_name();
+        if !is_generated_topic_shard_name(&file_name) {
+            continue;
+        }
+        let mut marker_name = file_name.clone();
+        marker_name.push(".retired");
+        let marker = entry.path().with_file_name(marker_name);
+        if retained.contains(&file_name) {
+            let _ = fs::remove_file(marker).await;
+            continue;
+        }
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&marker)
             .await
-            .and_then(|metadata| metadata.modified())
+        {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => continue,
+        }
+        let old_enough = fs::symlink_metadata(&marker)
+            .await
+            .and_then(|metadata| {
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(std::io::Error::other("invalid shard retirement marker"));
+                }
+                metadata.modified()
+            })
             .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
             .is_ok_and(|age| age >= grace);
-        if old_enough && !retained.contains(&entry.file_name()) {
-            let _ = fs::remove_file(entry.path()).await;
+        if old_enough
+            && match fs::remove_file(entry.path()).await {
+                Ok(()) => true,
+                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            }
+        {
+            let _ = fs::remove_file(marker).await;
         }
     }
 }

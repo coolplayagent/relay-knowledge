@@ -384,6 +384,35 @@ async fn route_rejects_source_ids_duplicated_across_topic_shards() {
 }
 
 #[tokio::test]
+async fn route_rejects_blank_recent_history_fields() {
+    let root = temp_root("blank-recent-history");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    let mut manifest = parse_manifest(
+        &fs::read_to_string(service.map_path())
+            .await
+            .expect("manifest should read"),
+    )
+    .expect("manifest should parse");
+    manifest.history.recent[0].action.clear();
+    fs::write(
+        service.map_path(),
+        serialize_yaml(&manifest).expect("manifest should serialize"),
+    )
+    .await
+    .expect("manifest should write");
+
+    let error = service
+        .route(&context, "software-model".to_owned())
+        .await
+        .expect_err("progressive route must validate recent entry contents");
+    assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn mutations_reject_case_colliding_topics_before_publication() {
     let root = temp_root("case-collision");
     fs::create_dir_all(&root).await.expect("root should create");
@@ -461,6 +490,14 @@ async fn successful_publication_cleans_superseded_topic_shards() {
             .expect("manifest should read"),
     )
     .expect("manifest should parse");
+    let topics = root
+        .join(AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    for name in ["README.md", ".gitkeep", "manual.yaml"] {
+        fs::write(topics.join(name), "user-managed")
+            .await
+            .expect("user-managed file should write");
+    }
     fs::remove_file(service.backup_path())
         .await
         .expect("expired recovery manifest should remove");
@@ -480,7 +517,99 @@ async fn successful_publication_cleans_superseded_topic_shards() {
     {
         shard_count += 1;
     }
-    assert_eq!(shard_count, manifest.topics.len());
+    assert_eq!(shard_count, manifest.topics.len() + 3);
+    for name in ["README.md", ".gitkeep", "manual.yaml"] {
+        assert!(
+            fs::try_exists(topics.join(name))
+                .await
+                .expect("user-managed file check should work"),
+            "cleanup must preserve {name}"
+        );
+    }
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn shard_grace_starts_when_the_shard_becomes_unreferenced() {
+    let root = temp_root("shard-retirement-time");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    service
+        .add_source(
+            &context,
+            KnowledgeMapSourceAddRequest {
+                id: "build".to_owned(),
+                topic: "build".to_owned(),
+                kind: KnowledgeMapSourceKind::Config,
+                uri: "Cargo.toml".to_owned(),
+                source_scope: Some("repo".to_owned()),
+                description: None,
+            },
+        )
+        .await
+        .expect("source should add");
+    let original = parse_manifest(
+        &fs::read_to_string(service.map_path())
+            .await
+            .expect("manifest should read"),
+    )
+    .expect("manifest should parse")
+    .topics
+    .into_iter()
+    .find(|topic| topic.id == "build")
+    .expect("build topic should exist");
+    let shard = root.join(AGENT_CONTRACT_DIR_NAME).join(original.r#ref);
+    sleep(Duration::from_millis(20)).await;
+    for description in ["revision one", "revision two"] {
+        service
+            .update_source(
+                &context,
+                KnowledgeMapChange {
+                    id: "build".to_owned(),
+                    topic: None,
+                    kind: None,
+                    uri: None,
+                    source_scope: None,
+                    description: Some(description.to_owned()),
+                },
+            )
+            .await
+            .expect("source should update");
+    }
+    let mut marker_name = shard.file_name().expect("shard name").to_os_string();
+    marker_name.push(".retired");
+    let marker = shard.with_file_name(marker_name);
+    let shard_age = fs::metadata(&shard)
+        .await
+        .expect("shard metadata")
+        .modified()
+        .expect("shard modified time")
+        .elapsed()
+        .expect("shard age");
+    let marker_age = fs::metadata(&marker)
+        .await
+        .expect("retirement marker metadata")
+        .modified()
+        .expect("marker modified time")
+        .elapsed()
+        .expect("marker age");
+    assert!(shard_age > marker_age);
+    let grace = marker_age + (shard_age - marker_age) / 2;
+    let manifest = parse_manifest(
+        &fs::read_to_string(service.map_path())
+            .await
+            .expect("current manifest should read"),
+    )
+    .expect("current manifest should parse");
+    cleanup_superseded_topic_shards(&root, &service.backup_path(), &manifest, grace).await;
+    assert!(
+        fs::try_exists(&shard).await.expect("shard check"),
+        "old artifact age must not bypass its fresh retirement marker"
+    );
+    cleanup_superseded_topic_shards(&root, &service.backup_path(), &manifest, Duration::ZERO).await;
+    assert!(!fs::try_exists(&shard).await.expect("shard check"));
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -707,6 +836,48 @@ async fn rejects_an_existing_artifact_symlink_that_escapes_the_repository() {
     assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
     let _ = fs::remove_dir_all(root).await;
     let _ = fs::remove_dir_all(outside).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rejects_root_and_recovery_manifest_leaf_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    for (label, use_backup) in [("root", false), ("backup", true)] {
+        let root = temp_root(&format!("unsafe-{label}-leaf-symlink"));
+        let outside = temp_root(&format!("unsafe-{label}-leaf-target"));
+        fs::create_dir_all(root.join(AGENT_CONTRACT_DIR_NAME))
+            .await
+            .expect("contract directory should create");
+        fs::create_dir_all(&outside)
+            .await
+            .expect("outside directory should create");
+        let mut map = KnowledgeMap::initial("fixture".to_owned());
+        map.schema_version = 1;
+        let outside_file = outside.join("knowledge-map.yaml");
+        fs::write(
+            &outside_file,
+            serialize_yaml(&map).expect("legacy map should serialize"),
+        )
+        .await
+        .expect("outside map should write");
+        let service = KnowledgeMapService::new(root.clone());
+        let target = if use_backup {
+            service.backup_path()
+        } else {
+            service.map_path()
+        };
+        symlink(outside_file, target).expect("root leaf symlink should create");
+        let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+
+        let error = service
+            .show(&context, None)
+            .await
+            .expect_err("root leaf symlink must be rejected");
+        assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
+        let _ = fs::remove_dir_all(root).await;
+        let _ = fs::remove_dir_all(outside).await;
+    }
 }
 
 #[tokio::test]
