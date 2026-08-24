@@ -284,7 +284,7 @@ impl KnowledgeMapService {
                 archive: None,
             });
         }
-        if probe.schema_version != KnowledgeMap::SCHEMA_VERSION {
+        if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
             return Err(KnowledgeMapServiceError::Yaml(format!(
                 "unsupported schema_version {}",
                 probe.schema_version
@@ -335,7 +335,7 @@ impl KnowledgeMapService {
                 map.validate()?;
                 Ok(map)
             }
-            KnowledgeMap::SCHEMA_VERSION => self.load_v2_map(&content).await,
+            ARTIFACT_SCHEMA_VERSION => self.load_v2_map(&content).await,
             version => Err(KnowledgeMapServiceError::Yaml(format!(
                 "unsupported schema_version {version}"
             ))),
@@ -352,7 +352,7 @@ impl KnowledgeMapService {
         let mut topic_refs = Vec::with_capacity(snapshot.map.topics.len());
         for topic in &snapshot.map.topics {
             let shard = KnowledgeMapTopicShard {
-                schema_version: KnowledgeMap::SCHEMA_VERSION,
+                schema_version: ARTIFACT_SCHEMA_VERSION,
                 topic: topic.clone(),
                 sources: snapshot
                     .map
@@ -392,7 +392,7 @@ impl KnowledgeMapService {
         while snapshot.map.history.len() > RECENT_HISTORY_LIMIT {
             let chunk: Vec<_> = snapshot.map.history.drain(..RECENT_HISTORY_LIMIT).collect();
             let archive = KnowledgeMapHistoryArchive {
-                schema_version: KnowledgeMap::SCHEMA_VERSION,
+                schema_version: ARTIFACT_SCHEMA_VERSION,
                 from_version: chunk.first().expect("non-empty archive chunk").version,
                 through_version: chunk.last().expect("non-empty archive chunk").version,
                 previous: snapshot.archive.clone(),
@@ -413,7 +413,7 @@ impl KnowledgeMapService {
         }
         snapshot.map.validate_snapshot(snapshot.archived_through)?;
         let manifest = KnowledgeMapManifest {
-            schema_version: KnowledgeMap::SCHEMA_VERSION,
+            schema_version: ARTIFACT_SCHEMA_VERSION,
             map_version: snapshot.map.map_version,
             updated_at: snapshot.map.updated_at.clone(),
             topics: topic_refs,
@@ -507,7 +507,7 @@ impl KnowledgeMapService {
             topic_ref.digest
         );
         if topic_ref.r#ref != expected_ref
-            || shard.schema_version != KnowledgeMap::SCHEMA_VERSION
+            || shard.schema_version != ARTIFACT_SCHEMA_VERSION
             || shard.topic.id != topic_ref.id
             || shard.topic.title != topic_ref.title
             || shard.topic.description != topic_ref.description
@@ -563,7 +563,7 @@ impl KnowledgeMapService {
                 "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{}.yaml",
                 archive.from_version, archive.through_version, archive_ref.digest
             );
-            if archive.schema_version != KnowledgeMap::SCHEMA_VERSION
+            if archive.schema_version != ARTIFACT_SCHEMA_VERSION
                 || archive_ref.r#ref != expected_ref
                 || archive.through_version != expected_through
                 || archive.entries.is_empty()

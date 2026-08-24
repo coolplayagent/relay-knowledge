@@ -13,6 +13,7 @@ use crate::domain::{
 use super::KnowledgeMapServiceError;
 
 pub(super) const RECENT_HISTORY_LIMIT: usize = 16;
+pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct KnowledgeMapSchemaProbe {
@@ -85,7 +86,7 @@ pub(super) fn parse_manifest(
 ) -> Result<KnowledgeMapManifest, KnowledgeMapServiceError> {
     let manifest = serde_norway::from_str::<KnowledgeMapManifest>(content)
         .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-    if manifest.schema_version != KnowledgeMap::SCHEMA_VERSION || manifest.map_version == 0 {
+    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION || manifest.map_version == 0 {
         return Err(KnowledgeMapServiceError::Integrity(
             "manifest schema_version or map_version is invalid".to_owned(),
         ));

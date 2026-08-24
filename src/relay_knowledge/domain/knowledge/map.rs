@@ -9,7 +9,7 @@ const SOFTWARE_MODEL_SOURCE_ID: &str = "repository-software-model";
 const SOFTWARE_MODEL_SOURCE_URI: &str = ".";
 const SOFTWARE_MODEL_SOURCE_SCOPE: &str = "repo";
 
-/// Versioned repository contract that tells agents where project knowledge lives.
+/// Assembled inline map used by domain workflows and API responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KnowledgeMap {
     pub schema_version: u16,
@@ -26,7 +26,8 @@ pub struct KnowledgeMap {
 }
 
 impl KnowledgeMap {
-    pub const SCHEMA_VERSION: u16 = 2;
+    /// Schema identity for the assembled, inline map representation.
+    pub const SCHEMA_VERSION: u16 = 1;
 
     /// Creates the default shared contract with a code-map-backed software-model route.
     pub fn initial(updated_at: String) -> Self {

@@ -60,6 +60,28 @@ async fn writes_and_reads_yaml_contract() {
 
     assert_eq!(route.sources[0].id, "build-cargo");
     assert!(validation.valid);
+    let shown = service
+        .show(&context, None)
+        .await
+        .expect("assembled map should load");
+    let inline = serialize_yaml(&shown.map).expect("assembled map should serialize");
+    assert_eq!(
+        serde_norway::from_str::<KnowledgeMapSchemaProbe>(&inline)
+            .expect("inline schema should parse")
+            .schema_version,
+        KnowledgeMap::SCHEMA_VERSION
+    );
+    fs::write(service.map_path(), inline)
+        .await
+        .expect("inline map should replace the root");
+    assert_eq!(
+        service
+            .show(&context, None)
+            .await
+            .expect("serialized public map must remain readable")
+            .map,
+        shown.map
+    );
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -797,7 +819,7 @@ async fn rejects_an_existing_artifact_symlink_that_escapes_the_repository() {
     let map = KnowledgeMap::initial("fixture".to_owned());
     let topic = map.topics[0].clone();
     let shard = KnowledgeMapTopicShard {
-        schema_version: KnowledgeMap::SCHEMA_VERSION,
+        schema_version: ARTIFACT_SCHEMA_VERSION,
         sources: map.sources.clone(),
         route: map.routes.first().cloned(),
         topic: topic.clone(),
