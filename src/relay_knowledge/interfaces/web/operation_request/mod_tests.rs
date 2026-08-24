@@ -5,6 +5,32 @@ use serde_json::json;
 use super::*;
 
 #[test]
+fn knowledge_map_history_page_requires_positive_bounded_inputs() {
+    assert_eq!(
+        knowledge_map_history_page(&serde_json::json!({
+            "from_version": 2,
+            "limit": 16
+        }))
+        .expect("valid page"),
+        (2, 16)
+    );
+    assert!(
+        knowledge_map_history_page(&serde_json::json!({
+            "from_version": 0,
+            "limit": 16
+        }))
+        .is_err()
+    );
+    assert!(
+        knowledge_map_history_page(&serde_json::json!({
+            "from_version": 2,
+            "limit": 0
+        }))
+        .is_err()
+    );
+}
+
+#[test]
 fn scalar_fields_enforce_type_and_range_contracts() {
     let payload = json!({
         "name": "value",

@@ -33,10 +33,10 @@ use operation_request::{
     code_context_request, code_feature_flag_request, code_impact_request, code_query_request,
     code_register_request, code_repository_set_add_request, code_repository_set_create_request,
     code_repository_set_query_request, code_repository_set_remove_request, code_selector,
-    code_software_request, graph_request, index_request, ingest_request, optional_bool_field,
-    optional_proposal_state, optional_string_array_field, optional_string_field,
-    optional_worker_kind, parse_freshness, proposal_decision_request, retrieve_request,
-    string_field, usize_field,
+    code_software_request, graph_request, index_request, ingest_request,
+    knowledge_map_history_page, optional_bool_field, optional_proposal_state,
+    optional_string_array_field, optional_string_field, optional_worker_kind, parse_freshness,
+    proposal_decision_request, retrieve_request, string_field, usize_field,
 };
 
 /// Builds the Web router without opening sockets.
@@ -241,15 +241,9 @@ async fn dispatch_operation(
             let map = knowledge_map.ok_or_else(|| {
                 WebError::bad_request("knowledge map repository root was not resolved".to_owned())
             })?;
-            let from_version = payload
-                .get("from_version")
-                .and_then(Value::as_u64)
-                .filter(|value| *value > 0)
-                .ok_or_else(|| {
-                    WebError::bad_request("from_version must be a positive integer".to_owned())
-                })?;
+            let (from_version, limit) = knowledge_map_history_page(payload)?;
             let response = map
-                .history(&context, from_version, usize_field(payload, "limit")?)
+                .history(&context, from_version, limit)
                 .await
                 .map_err(|error| WebError::bad_request(error.to_string()))?;
             Ok((response.metadata.clone(), json!(response)))

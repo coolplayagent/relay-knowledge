@@ -62,6 +62,17 @@ pub(super) fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebE
     })
 }
 
+pub(super) fn knowledge_map_history_page(payload: &Value) -> Result<(u64, usize), WebError> {
+    let from_version = payload
+        .get("from_version")
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            WebError::bad_request("from_version must be a positive integer".to_owned())
+        })?;
+    Ok((from_version, usize_field(payload, "limit")?))
+}
+
 pub(super) fn code_register_request(
     payload: &Value,
 ) -> Result<CodeRepositoryRegisterRequest, WebError> {
