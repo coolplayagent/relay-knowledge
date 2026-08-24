@@ -39,7 +39,7 @@
 
 Knowledge Map v2 的根 manifest 只保存 topic 摘要、内容寻址分片 ref、map version 与最多 16 条 recent history。各 topic 的 source/route 位于 `.knowledge/topics/`；超出窗口的完整历史位于 `.knowledge/history/` 的内容寻址归档。`map route <topic>` 只能读取根 manifest 与目标分片，完整 `map show`/`map validate` 才加载全部分片，且 validation 必须校验 digest、history 连续性和 checkpoint。v1 单文件 map 保持可读，并在 `map init` 或下一次受控 mutation 时无损迁移。
 
-所有分片与归档 ref 必须限制在 `.knowledge/` 的指定子目录，拒绝绝对路径、`..` 和符号链接逃逸。多文件 mutation 使用同一个仓库级 writer lock，先发布不可变内容寻址 artifact，最后发布根 manifest；失败恢复到上一个有效 root。Map 仍只保存稳定导航，不得写入 snapshot-bound code、build、IaC、framework scan 或 design projection facts。
+所有分片与归档 ref 必须限制在 `.knowledge/` 的指定子目录，拒绝绝对路径、`..` 和符号链接逃逸。多文件 mutation 使用同一个仓库级 writer lock，只追加刚完成的 history chunk，先发布不可变内容寻址 artifact，最后发布根 manifest；失败恢复到上一个有效 root。根发布成功后以 best-effort 清理已被替代的 topic shard，同时保留 recovery manifest 仍引用的文件。Map 仍只保存稳定导航，不得写入 snapshot-bound code、build、IaC、framework scan 或 design projection facts。
 
 ## 3. 为什么 YAML 不复制派生模型
 

@@ -19,7 +19,7 @@ pub(super) struct KnowledgeMapSchemaProbe {
     pub(super) schema_version: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapManifest {
     pub(super) schema_version: u16,
     pub(super) map_version: u64,
@@ -28,7 +28,7 @@ pub(super) struct KnowledgeMapManifest {
     pub(super) history: KnowledgeMapHistoryManifest,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapTopicRef {
     pub(super) id: String,
     pub(super) title: String,
@@ -46,7 +46,7 @@ pub(super) struct KnowledgeMapTopicShard {
     pub(super) route: Option<KnowledgeMapRoute>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapHistoryManifest {
     pub(super) archived_through: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,28 +114,41 @@ pub(super) fn validate_topic_shard(
             )));
         }
     }
-    let Some(route) = &shard.route else {
-        if shard.sources.is_empty() {
-            return Ok(());
+    if let Some(route) = &shard.route {
+        let mut routed = std::collections::HashSet::new();
+        if route.topic != shard.topic.id
+            || route
+                .source_order
+                .iter()
+                .any(|id| !source_ids.contains(id.as_str()) || !routed.insert(id.as_str()))
+            || routed.len() != source_ids.len()
+        {
+            return Err(KnowledgeMapServiceError::Integrity(format!(
+                "topic shard '{}' has an invalid route",
+                shard.topic.id
+            )));
         }
+    } else if !shard.sources.is_empty() {
         return Err(KnowledgeMapServiceError::Integrity(format!(
             "topic shard '{}' has sources without a route",
             shard.topic.id
         )));
-    };
-    let mut routed = std::collections::HashSet::new();
-    if route.topic != shard.topic.id
-        || route
-            .source_order
-            .iter()
-            .any(|id| !source_ids.contains(id.as_str()) || !routed.insert(id.as_str()))
-        || routed.len() != source_ids.len()
-    {
-        return Err(KnowledgeMapServiceError::Integrity(format!(
-            "topic shard '{}' has an invalid route",
-            shard.topic.id
-        )));
     }
+    KnowledgeMap {
+        schema_version: KnowledgeMap::SCHEMA_VERSION,
+        map_version: 1,
+        updated_at: "shard-validation".to_owned(),
+        topics: vec![shard.topic.clone()],
+        sources: shard.sources.clone(),
+        routes: shard.route.clone().into_iter().collect(),
+        history: vec![KnowledgeMapHistoryEntry {
+            version: 1,
+            action: "validate".to_owned(),
+            actor: "system".to_owned(),
+            summary: "Validate an isolated topic shard.".to_owned(),
+        }],
+    }
+    .validate()?;
     Ok(())
 }
 
@@ -214,4 +227,160 @@ pub(super) async fn ensure_artifact_parent_is_scoped(
         ));
     }
     Ok(())
+}
+
+pub(super) async fn read_root_content(
+    path: &Path,
+    backup: &Path,
+) -> Result<String, KnowledgeMapServiceError> {
+    match fs::read_to_string(path).await {
+        Ok(content) => Ok(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match fs::read_to_string(backup).await {
+                Ok(content) => Ok(content),
+                Err(backup_error) if backup_error.kind() == std::io::ErrorKind::NotFound => {
+                    Ok(fs::read_to_string(path).await?)
+                }
+                Err(backup_error) => Err(KnowledgeMapServiceError::Io(backup_error)),
+            }
+        }
+        Err(error) => Err(KnowledgeMapServiceError::Io(error)),
+    }
+}
+
+pub(super) async fn read_verified_ref(
+    repository_root: &Path,
+    relative: &str,
+    expected_digest: &str,
+) -> Result<String, KnowledgeMapServiceError> {
+    let path = resolve_contract_ref(repository_root, relative)?;
+    let canonical_dir = ensure_contract_dir_is_scoped(
+        repository_root,
+        &repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME),
+    )
+    .await?;
+    let canonical_path = fs::canonicalize(&path).await?;
+    if !canonical_path.starts_with(&canonical_dir) {
+        return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+    }
+    let content = fs::read_to_string(path).await?;
+    if content_digest(content.as_bytes()) != expected_digest {
+        return Err(KnowledgeMapServiceError::Integrity(format!(
+            "digest mismatch for '{relative}'"
+        )));
+    }
+    Ok(content)
+}
+
+pub(super) async fn publish_immutable(
+    repository_root: &Path,
+    relative: &str,
+    content: &[u8],
+) -> Result<(), KnowledgeMapServiceError> {
+    let contract_dir = repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME);
+    let path = resolve_contract_ref(repository_root, relative)?;
+    ensure_artifact_parent_is_scoped(repository_root, &contract_dir, &path).await?;
+    if fs::try_exists(&path).await? {
+        let canonical_contract =
+            ensure_contract_dir_is_scoped(repository_root, &contract_dir).await?;
+        let canonical_path = fs::canonicalize(&path).await?;
+        if !canonical_path.starts_with(canonical_contract) {
+            return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+        }
+        let existing = fs::read(&path).await?;
+        if existing == content {
+            return Ok(());
+        }
+        return Err(KnowledgeMapServiceError::Integrity(format!(
+            "immutable map artifact '{}' already exists with different content",
+            path.display()
+        )));
+    }
+    let temp = super::temporary_path(&path);
+    fs::write(&temp, content).await?;
+    match fs::rename(&temp, &path).await {
+        Ok(()) => Ok(()),
+        Err(error) if fs::try_exists(&path).await? => {
+            let _ = fs::remove_file(&temp).await;
+            let existing = fs::read(&path).await?;
+            if existing == content {
+                Ok(())
+            } else {
+                Err(KnowledgeMapServiceError::Io(error))
+            }
+        }
+        Err(error) => Err(KnowledgeMapServiceError::Io(error)),
+    }
+}
+
+pub(super) async fn cleanup_superseded_topic_shards(
+    repository_root: &Path,
+    backup: &Path,
+    manifest: &KnowledgeMapManifest,
+) {
+    let mut retained: std::collections::HashSet<_> = manifest
+        .topics
+        .iter()
+        .filter_map(|topic| Path::new(&topic.r#ref).file_name().map(ToOwned::to_owned))
+        .collect();
+    if fs::try_exists(backup).await.unwrap_or(true) {
+        let Ok(content) = fs::read_to_string(backup).await else {
+            return;
+        };
+        let Ok(probe) = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content) else {
+            return;
+        };
+        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
+            let Ok(recovery) = parse_manifest(&content) else {
+                return;
+            };
+            retained.extend(
+                recovery
+                    .topics
+                    .iter()
+                    .filter_map(|topic| Path::new(&topic.r#ref).file_name().map(ToOwned::to_owned)),
+            );
+        }
+    }
+    let topic_dir = repository_root
+        .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+        .join(crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    if ensure_contract_dir_is_scoped(repository_root, &topic_dir)
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok(mut entries) = fs::read_dir(topic_dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if !retained.contains(&entry.file_name()) {
+            let _ = fs::remove_file(entry.path()).await;
+        }
+    }
+}
+
+fn resolve_contract_ref(
+    repository_root: &Path,
+    relative: &str,
+) -> Result<PathBuf, KnowledgeMapServiceError> {
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        || !(relative.starts_with(&format!(
+            "{}/",
+            crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME
+        )) || relative.starts_with(&format!(
+            "{}/",
+            crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME
+        )))
+    {
+        return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+    }
+    Ok(repository_root
+        .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+        .join(relative_path))
 }

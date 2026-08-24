@@ -9,7 +9,9 @@ small root manifest: topic sources/routes live in content-addressed
 `.knowledge/topics/` shards, and history older than the bounded recent window
 lives in a verified `.knowledge/history/` archive. `map route <topic>` loads one
 shard; `map show` assembles the full compatibility view. Never edit shard refs
-or archive files directly. The code map is the primary source of truth for
+or archive files directly. Mutations append only newly completed history chunks and
+clean superseded topic shards after committing the root while protecting any
+recovery-manifest refs. The code map is the primary source of truth for
 repository facts. The map stores stable navigation and repository-model entry
 metadata; it must not copy derived architecture narratives, build targets,
 deployment resources, framework scan results, or resolved commit ids. Read

@@ -52,6 +52,22 @@ impl KnowledgeMap {
     /// Ensures the stable repository entry used to discover code-derived software models.
     pub fn ensure_software_model_route(&mut self) -> Result<bool, DomainError> {
         self.validate()?;
+        let changed = self.ensure_software_model_route_state()?;
+        self.validate()?;
+        Ok(changed)
+    }
+
+    pub(crate) fn ensure_software_model_route_snapshot(
+        &mut self,
+        archived_through: u64,
+    ) -> Result<bool, DomainError> {
+        self.validate_snapshot(archived_through)?;
+        let changed = self.ensure_software_model_route_state()?;
+        self.validate_snapshot(archived_through)?;
+        Ok(changed)
+    }
+
+    fn ensure_software_model_route_state(&mut self) -> Result<bool, DomainError> {
         if let Some(source) = self
             .sources
             .iter()
@@ -73,7 +89,7 @@ impl KnowledgeMap {
                     .to_owned(),
             )?);
         }
-        self.add_source(KnowledgeMapSource::new(
+        self.add_source_state(KnowledgeMapSource::new(
             SOFTWARE_MODEL_SOURCE_ID.to_owned(),
             SOFTWARE_MODEL_TOPIC_ID.to_owned(),
             KnowledgeMapSourceKind::Repo,
@@ -89,6 +105,17 @@ impl KnowledgeMap {
 
     /// Validates the cross-reference invariants that keep the map navigable.
     pub fn validate(&self) -> Result<(), DomainError> {
+        self.validate_state()?;
+        self.validate_history(0)
+    }
+
+    /// Validates a v2 snapshot whose older history is represented by an archive checkpoint.
+    pub(crate) fn validate_snapshot(&self, archived_through: u64) -> Result<(), DomainError> {
+        self.validate_state()?;
+        self.validate_history(archived_through)
+    }
+
+    fn validate_state(&self) -> Result<(), DomainError> {
         if self.schema_version != Self::SCHEMA_VERSION {
             return Err(DomainError::invalid(
                 "schema_version",
@@ -103,10 +130,16 @@ impl KnowledgeMap {
         }
 
         let mut topic_ids = HashSet::new();
+        let mut folded_topic_ids = HashSet::new();
         for topic in &self.topics {
             topic.validate()?;
-            if !topic_ids.insert(topic.id.as_str()) {
-                return Err(DomainError::invalid("topics", "topic ids must be unique"));
+            if !topic_ids.insert(topic.id.as_str())
+                || !folded_topic_ids.insert(topic.id.to_lowercase())
+            {
+                return Err(DomainError::invalid(
+                    "topics",
+                    "topic ids must be unique without case collisions",
+                ));
             }
         }
 
@@ -187,12 +220,10 @@ impl KnowledgeMap {
             }
         }
 
-        self.validate_history()?;
-
         Ok(())
     }
 
-    fn validate_history(&self) -> Result<(), DomainError> {
+    fn validate_history(&self, archived_through: u64) -> Result<(), DomainError> {
         if self.history.is_empty() {
             return Err(DomainError::invalid("history", "must not be empty"));
         }
@@ -200,6 +231,7 @@ impl KnowledgeMap {
             entry.validate()?;
             let expected_version = u64::try_from(index)
                 .ok()
+                .and_then(|value| value.checked_add(archived_through))
                 .and_then(|value| value.checked_add(1))
                 .ok_or_else(|| DomainError::invalid("history", "too many entries"))?;
             if entry.version != expected_version {
@@ -228,6 +260,22 @@ impl KnowledgeMap {
 
     /// Adds a source to the map and creates a simple route for its topic when missing.
     pub fn add_source(&mut self, source: KnowledgeMapSource) -> Result<(), DomainError> {
+        self.validate()?;
+        self.add_source_state(source)?;
+        self.validate()
+    }
+
+    pub(crate) fn add_source_snapshot(
+        &mut self,
+        source: KnowledgeMapSource,
+        archived_through: u64,
+    ) -> Result<(), DomainError> {
+        self.validate_snapshot(archived_through)?;
+        self.add_source_state(source)?;
+        self.validate_snapshot(archived_through)
+    }
+
+    fn add_source_state(&mut self, source: KnowledgeMapSource) -> Result<(), DomainError> {
         source.validate()?;
         if self.sources.iter().any(|entry| entry.id == source.id) {
             return Err(DomainError::invalid("id", "source already exists"));
@@ -244,11 +292,27 @@ impl KnowledgeMap {
         self.sources.push(source);
         self.ensure_route_contains(&topic_id, &source_id)?;
         self.sort_entries();
-        self.validate()
+        Ok(())
     }
 
     /// Applies supported source field updates without changing its identity.
     pub fn update_source(&mut self, change: KnowledgeMapChange) -> Result<(), DomainError> {
+        self.validate()?;
+        self.update_source_state(change)?;
+        self.validate()
+    }
+
+    pub(crate) fn update_source_snapshot(
+        &mut self,
+        change: KnowledgeMapChange,
+        archived_through: u64,
+    ) -> Result<(), DomainError> {
+        self.validate_snapshot(archived_through)?;
+        self.update_source_state(change)?;
+        self.validate_snapshot(archived_through)
+    }
+
+    fn update_source_state(&mut self, change: KnowledgeMapChange) -> Result<(), DomainError> {
         let Some(source) = self.sources.iter_mut().find(|entry| entry.id == change.id) else {
             return Err(DomainError::invalid("id", "source does not exist"));
         };
@@ -285,11 +349,27 @@ impl KnowledgeMap {
         }
         self.ensure_route_contains(&topic_id, &source_id)?;
         self.sort_entries();
-        self.validate()
+        Ok(())
     }
 
     /// Removes a source and prunes routes that referenced it.
     pub fn remove_source(&mut self, id: &str) -> Result<(), DomainError> {
+        self.validate()?;
+        self.remove_source_state(id)?;
+        self.validate()
+    }
+
+    pub(crate) fn remove_source_snapshot(
+        &mut self,
+        id: &str,
+        archived_through: u64,
+    ) -> Result<(), DomainError> {
+        self.validate_snapshot(archived_through)?;
+        self.remove_source_state(id)?;
+        self.validate_snapshot(archived_through)
+    }
+
+    fn remove_source_state(&mut self, id: &str) -> Result<(), DomainError> {
         let before = self.sources.len();
         self.sources.retain(|source| source.id != id);
         if self.sources.len() == before {
@@ -299,7 +379,7 @@ impl KnowledgeMap {
             route.source_order.retain(|source_id| source_id != id);
         }
         self.sort_entries();
-        self.validate()
+        Ok(())
     }
 
     /// Advances the map version and records the mutation in history.

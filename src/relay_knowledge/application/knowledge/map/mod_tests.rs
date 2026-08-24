@@ -112,6 +112,59 @@ async fn concurrent_source_adds_preserve_both_changes() {
 }
 
 #[tokio::test]
+async fn readers_retry_across_concurrent_manifest_publications() {
+    let root = temp_root("concurrent-readers");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    service
+        .add_source(
+            &context,
+            KnowledgeMapSourceAddRequest {
+                id: "build".to_owned(),
+                topic: "build".to_owned(),
+                kind: KnowledgeMapSourceKind::Config,
+                uri: "Cargo.toml".to_owned(),
+                source_scope: Some("repo".to_owned()),
+                description: None,
+            },
+        )
+        .await
+        .expect("source should add");
+    let writer = async {
+        for index in 0..20 {
+            service
+                .update_source(
+                    &context,
+                    KnowledgeMapChange {
+                        id: "build".to_owned(),
+                        topic: None,
+                        kind: None,
+                        uri: None,
+                        source_scope: None,
+                        description: Some(format!("revision {index}")),
+                    },
+                )
+                .await
+                .expect("publication should succeed");
+        }
+    };
+    let reader = async {
+        for _ in 0..100 {
+            let route = service
+                .route(&context, "build".to_owned())
+                .await
+                .expect("reader should survive the rename window");
+            assert_eq!(route.sources.len(), 1);
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::join!(writer, reader);
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn init_upgrades_legacy_map_once() {
     let root = std::env::temp_dir().join(format!(
         "relay-knowledge-map-upgrade-{}",
@@ -202,6 +255,156 @@ async fn route_loads_only_the_requested_topic_shard() {
 }
 
 #[tokio::test]
+async fn route_rejects_a_digest_consistent_but_semantically_invalid_shard() {
+    let root = temp_root("invalid-shard");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    let mut manifest = parse_manifest(
+        &fs::read_to_string(root.join(KNOWLEDGE_MAP_RELATIVE_PATH))
+            .await
+            .expect("manifest should read"),
+    )
+    .expect("manifest should parse");
+    let topic_ref = manifest
+        .topics
+        .iter_mut()
+        .find(|topic| topic.id == "software-model")
+        .expect("software topic should exist");
+    let mut shard: KnowledgeMapTopicShard = serde_norway::from_str(
+        &fs::read_to_string(root.join(AGENT_CONTRACT_DIR_NAME).join(&topic_ref.r#ref))
+            .await
+            .expect("shard should read"),
+    )
+    .expect("shard should parse");
+    shard.sources[0].version = 0;
+    let yaml = serialize_yaml(&shard).expect("invalid shard should serialize");
+    topic_ref.digest = content_digest(yaml.as_bytes());
+    topic_ref.r#ref = format!(
+        "{KNOWLEDGE_MAP_TOPICS_DIR_NAME}/topic-{}-{}.yaml",
+        stable_id(&topic_ref.id),
+        topic_ref.digest
+    );
+    fs::write(
+        root.join(AGENT_CONTRACT_DIR_NAME).join(&topic_ref.r#ref),
+        yaml,
+    )
+    .await
+    .expect("invalid shard should write");
+    fs::write(
+        root.join(KNOWLEDGE_MAP_RELATIVE_PATH),
+        serialize_yaml(&manifest).expect("manifest should serialize"),
+    )
+    .await
+    .expect("manifest should write");
+
+    let error = service
+        .route(&context, "software-model".to_owned())
+        .await
+        .expect_err("route must apply domain source validation");
+    assert!(matches!(error, KnowledgeMapServiceError::Domain(_)));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn mutations_reject_case_colliding_topics_before_publication() {
+    let root = temp_root("case-collision");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    for (id, topic) in [("lower", "build"), ("upper", "Build")] {
+        let result = service
+            .add_source(
+                &context,
+                KnowledgeMapSourceAddRequest {
+                    id: id.to_owned(),
+                    topic: topic.to_owned(),
+                    kind: KnowledgeMapSourceKind::Doc,
+                    uri: format!("docs/{id}.md"),
+                    source_scope: Some("repo".to_owned()),
+                    description: None,
+                },
+            )
+            .await;
+        if id == "lower" {
+            result.expect("first spelling should publish");
+        } else {
+            assert!(matches!(result, Err(KnowledgeMapServiceError::Domain(_))));
+        }
+    }
+    let shown = service
+        .show(&context, None)
+        .await
+        .expect("published map should remain readable");
+    assert!(!shown.map.topics.iter().any(|topic| topic.id == "Build"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn successful_publication_cleans_superseded_topic_shards() {
+    let root = temp_root("shard-cleanup");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    service
+        .add_source(
+            &context,
+            KnowledgeMapSourceAddRequest {
+                id: "build".to_owned(),
+                topic: "build".to_owned(),
+                kind: KnowledgeMapSourceKind::Config,
+                uri: "Cargo.toml".to_owned(),
+                source_scope: Some("repo".to_owned()),
+                description: None,
+            },
+        )
+        .await
+        .expect("source should add");
+    for index in 0..4 {
+        service
+            .update_source(
+                &context,
+                KnowledgeMapChange {
+                    id: "build".to_owned(),
+                    topic: None,
+                    kind: None,
+                    uri: None,
+                    source_scope: None,
+                    description: Some(format!("revision {index}")),
+                },
+            )
+            .await
+            .expect("source should update");
+    }
+    let manifest = parse_manifest(
+        &fs::read_to_string(root.join(KNOWLEDGE_MAP_RELATIVE_PATH))
+            .await
+            .expect("manifest should read"),
+    )
+    .expect("manifest should parse");
+    let mut entries = fs::read_dir(
+        root.join(AGENT_CONTRACT_DIR_NAME)
+            .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME),
+    )
+    .await
+    .expect("topic directory should read");
+    let mut shard_count = 0;
+    while entries
+        .next_entry()
+        .await
+        .expect("topic entry should read")
+        .is_some()
+    {
+        shard_count += 1;
+    }
+    assert_eq!(shard_count, manifest.topics.len());
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn bounds_recent_history_and_detects_archive_tampering() {
     let root = temp_root("history");
     fs::create_dir_all(&root).await.expect("root should create");
@@ -240,6 +443,22 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
         (RECENT_HISTORY_LIMIT * 2) as u64
     );
     let archive_ref = manifest.history.archive.expect("archive should exist");
+    let mut archive_entries = fs::read_dir(
+        root.join(AGENT_CONTRACT_DIR_NAME)
+            .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME),
+    )
+    .await
+    .expect("history directory should read");
+    let mut archive_count = 0;
+    while archive_entries
+        .next_entry()
+        .await
+        .expect("archive entry should read")
+        .is_some()
+    {
+        archive_count += 1;
+    }
+    assert_eq!(archive_count, 2);
     fs::write(
         root.join(AGENT_CONTRACT_DIR_NAME).join(archive_ref.r#ref),
         "tampered",
@@ -313,6 +532,57 @@ async fn rejects_topic_directory_symlink_that_escapes_the_repository() {
             .expect("outside directory listing should work")
             .is_none()
     );
+    let _ = fs::remove_dir_all(root).await;
+    let _ = fs::remove_dir_all(outside).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rejects_an_existing_artifact_symlink_that_escapes_the_repository() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root("unsafe-leaf-symlink");
+    let outside = temp_root("unsafe-leaf-target");
+    let map = KnowledgeMap::initial("fixture".to_owned());
+    let topic = map.topics[0].clone();
+    let shard = KnowledgeMapTopicShard {
+        schema_version: KnowledgeMap::SCHEMA_VERSION,
+        sources: map.sources.clone(),
+        route: map.routes.first().cloned(),
+        topic: topic.clone(),
+    };
+    let yaml = serialize_yaml(&shard).expect("shard should serialize");
+    let digest = content_digest(yaml.as_bytes());
+    let relative = format!(
+        "{KNOWLEDGE_MAP_TOPICS_DIR_NAME}/topic-{}-{digest}.yaml",
+        stable_id(&topic.id)
+    );
+    fs::create_dir_all(
+        root.join(AGENT_CONTRACT_DIR_NAME)
+            .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME),
+    )
+    .await
+    .expect("topic directory should create");
+    fs::create_dir_all(&outside)
+        .await
+        .expect("outside directory should create");
+    let outside_file = outside.join("shard.yaml");
+    fs::write(&outside_file, yaml)
+        .await
+        .expect("outside artifact should write");
+    symlink(
+        outside_file,
+        root.join(AGENT_CONTRACT_DIR_NAME).join(relative),
+    )
+    .expect("artifact symlink should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+
+    let error = service
+        .init(&context)
+        .await
+        .expect_err("existing artifact symlink must be rejected");
+    assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
     let _ = fs::remove_dir_all(root).await;
     let _ = fs::remove_dir_all(outside).await;
 }
