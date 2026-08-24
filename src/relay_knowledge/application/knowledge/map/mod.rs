@@ -1,20 +1,14 @@
 use std::{
-    error::Error,
-    fmt,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
 use tokio::fs;
 use tokio::time::{Duration, Instant, sleep};
 
 use crate::{
-    api::{ApiMetadata, RequestContext},
-    domain::{
-        KnowledgeMap, KnowledgeMapChange, KnowledgeMapRoute, KnowledgeMapSource,
-        KnowledgeMapSourceKind,
-    },
+    api::RequestContext,
+    domain::{KnowledgeMap, KnowledgeMapChange, KnowledgeMapRoute, KnowledgeMapSource},
     project::{
         AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME,
         KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
@@ -22,82 +16,21 @@ use crate::{
 };
 
 mod artifact;
+mod contracts;
 
 use artifact::*;
+pub use contracts::{
+    KnowledgeMapAgentSnippetResponse, KnowledgeMapMutationResponse, KnowledgeMapRouteResponse,
+    KnowledgeMapServiceError, KnowledgeMapShowResponse, KnowledgeMapSourceAddRequest,
+    KnowledgeMapValidationResponse,
+};
+use contracts::{MutableKnowledgeMap, metadata, now_stamp};
 
-/// Request to register a source in the repository knowledge map.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KnowledgeMapSourceAddRequest {
-    pub id: String,
-    pub topic: String,
-    pub kind: KnowledgeMapSourceKind,
-    pub uri: String,
-    pub source_scope: Option<String>,
-    pub description: Option<String>,
-}
-
-/// Response shared by map mutation commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapMutationResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub map_version: u64,
-    pub summary: String,
-}
-
-/// Response returned by read-only map commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapShowResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub map: KnowledgeMap,
-}
-
-/// Response returned by topic routing commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapRouteResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub topic: String,
-    pub route: Option<KnowledgeMapRoute>,
-    pub sources: Vec<KnowledgeMapSource>,
-}
-
-/// Response returned by validation commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapValidationResponse {
-    pub metadata: ApiMetadata,
-    pub path: String,
-    pub valid: bool,
-    pub diagnostics: Vec<String>,
-}
-
-/// Response that contains the AGENTS.md reference snippet.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KnowledgeMapAgentSnippetResponse {
-    pub metadata: ApiMetadata,
-    pub snippet: String,
-}
+const SUPERSEDED_SHARD_GRACE: Duration = Duration::from_secs(60);
 
 /// File-backed service for the shared YAML knowledge navigation contract.
 pub struct KnowledgeMapService {
     repository_root: PathBuf,
-}
-
-struct MutableKnowledgeMap {
-    map: KnowledgeMap,
-    archived_through: u64,
-    archive: Option<KnowledgeMapArchiveRef>,
-}
-
-impl MutableKnowledgeMap {
-    fn initial(updated_at: String) -> Self {
-        Self {
-            map: KnowledgeMap::initial(updated_at),
-            archived_through: 0,
-            archive: None,
-        }
-    }
 }
 
 impl KnowledgeMapService {
@@ -358,6 +291,7 @@ impl KnowledgeMapService {
             )));
         }
         let manifest = parse_manifest(&content)?;
+        let archived_history = self.load_archived_history(&manifest.history).await?;
         let mut topics = Vec::with_capacity(manifest.topics.len());
         let mut sources = Vec::new();
         let mut routes = Vec::new();
@@ -377,6 +311,11 @@ impl KnowledgeMapService {
             history: manifest.history.recent,
         };
         map.validate_snapshot(manifest.history.archived_through)?;
+        let mut validation_map = map.clone();
+        let mut complete_history = archived_history;
+        complete_history.extend(validation_map.history.clone());
+        validation_map.history = complete_history;
+        validation_map.validate()?;
         Ok(MutableKnowledgeMap {
             map,
             archived_through: manifest.history.archived_through,
@@ -440,6 +379,11 @@ impl KnowledgeMapService {
                 id: topic.id.clone(),
                 title: topic.title.clone(),
                 description: topic.description.clone(),
+                source_ids: shard
+                    .sources
+                    .iter()
+                    .map(|source| source.id.clone())
+                    .collect(),
                 r#ref: relative,
                 digest,
             });
@@ -481,8 +425,13 @@ impl KnowledgeMapService {
         };
         self.publish_manifest(serialize_yaml(&manifest)?.as_bytes())
             .await?;
-        cleanup_superseded_topic_shards(&self.repository_root, &self.backup_path(), &manifest)
-            .await;
+        cleanup_superseded_topic_shards(
+            &self.repository_root,
+            &self.backup_path(),
+            &manifest,
+            SUPERSEDED_SHARD_GRACE,
+        )
+        .await;
         Ok(())
     }
 
@@ -562,6 +511,11 @@ impl KnowledgeMapService {
             || shard.topic.id != topic_ref.id
             || shard.topic.title != topic_ref.title
             || shard.topic.description != topic_ref.description
+            || !shard
+                .sources
+                .iter()
+                .map(|source| source.id.as_str())
+                .eq(topic_ref.source_ids.iter().map(String::as_str))
         {
             return Err(KnowledgeMapServiceError::Integrity(format!(
                 "topic shard '{}' identity, metadata, or schema does not match the manifest",
@@ -657,9 +611,6 @@ impl KnowledgeMapService {
             }
             return Err(KnowledgeMapServiceError::Io(error));
         }
-        if existed {
-            let _ = fs::remove_file(backup).await;
-        }
         Ok(())
     }
 
@@ -674,7 +625,7 @@ impl KnowledgeMapService {
 
     async fn acquire_write_lock(&self) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
         let dir = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
-        ensure_contract_dir_is_scoped(&self.repository_root, &dir).await?;
+        ensure_owned_directory(&self.repository_root, &dir).await?;
         let path = dir.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -721,60 +672,136 @@ impl KnowledgeMapService {
     }
 }
 
-/// Error surfaced by the file-backed knowledge map service.
-#[derive(Debug)]
-pub enum KnowledgeMapServiceError {
-    Io(std::io::Error),
-    Yaml(String),
-    Domain(crate::domain::DomainError),
-    LockTimeout(PathBuf),
-    Integrity(String),
-    UnsafePath(String),
-}
-
-impl fmt::Display for KnowledgeMapServiceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(error) => write!(formatter, "{error}"),
-            Self::Yaml(error) => write!(formatter, "invalid knowledge map YAML: {error}"),
-            Self::Domain(error) => write!(formatter, "{error}"),
-            Self::LockTimeout(path) => write!(
-                formatter,
-                "timed out waiting for knowledge map write lock '{}'",
-                path.display()
-            ),
-            Self::Integrity(message) => write!(formatter, "invalid knowledge map: {message}"),
-            Self::UnsafePath(path) => {
-                write!(formatter, "unsafe knowledge map artifact path '{path}'")
-            }
-        }
-    }
-}
-
-impl Error for KnowledgeMapServiceError {}
-
-impl From<std::io::Error> for KnowledgeMapServiceError {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-impl From<crate::domain::DomainError> for KnowledgeMapServiceError {
-    fn from(error: crate::domain::DomainError) -> Self {
-        Self::Domain(error)
-    }
-}
-
-fn metadata(context: &RequestContext) -> ApiMetadata {
-    ApiMetadata::graph_only(context, crate::domain::GraphVersion::ZERO)
-}
-
 fn temporary_path(path: &Path) -> PathBuf {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     path.with_extension(format!("{}.{}.tmp", std::process::id(), suffix))
+}
+
+async fn read_root_content(path: &Path, backup: &Path) -> Result<String, KnowledgeMapServiceError> {
+    match fs::read_to_string(path).await {
+        Ok(content) => Ok(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match fs::read_to_string(backup).await {
+                Ok(content) => Ok(content),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    Ok(fs::read_to_string(path).await?)
+                }
+                Err(error) => Err(error.into()),
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn ensure_owned_directory(
+    repository_root: &Path,
+    directory: &Path,
+) -> Result<PathBuf, KnowledgeMapServiceError> {
+    let contract = repository_root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract).await?;
+    if fs::symlink_metadata(&contract)
+        .await?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            contract.display().to_string(),
+        ));
+    }
+    let repository = fs::canonicalize(repository_root).await?;
+    let contract = fs::canonicalize(contract).await?;
+    if !contract.starts_with(&repository) {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            contract.display().to_string(),
+        ));
+    }
+    fs::create_dir_all(directory).await?;
+    if fs::symlink_metadata(directory)
+        .await?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            directory.display().to_string(),
+        ));
+    }
+    let directory = fs::canonicalize(directory).await?;
+    if !directory.starts_with(&contract) {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            directory.display().to_string(),
+        ));
+    }
+    Ok(directory)
+}
+
+async fn publish_immutable(
+    repository_root: &Path,
+    relative: &str,
+    content: &[u8],
+) -> Result<(), KnowledgeMapServiceError> {
+    let path = resolve_contract_ref(repository_root, relative)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| KnowledgeMapServiceError::UnsafePath(relative.to_owned()))?;
+    let owned_parent = ensure_owned_directory(repository_root, parent).await?;
+    if fs::try_exists(&path).await? {
+        if !fs::canonicalize(&path).await?.starts_with(owned_parent) {
+            return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+        }
+        return if fs::read(&path).await? == content {
+            Ok(())
+        } else {
+            Err(KnowledgeMapServiceError::Integrity(format!(
+                "immutable map artifact '{}' has different content",
+                path.display()
+            )))
+        };
+    }
+    let temp = temporary_path(&path);
+    fs::write(&temp, content).await?;
+    fs::rename(temp, path).await?;
+    Ok(())
+}
+
+async fn cleanup_superseded_topic_shards(
+    repository_root: &Path,
+    backup: &Path,
+    manifest: &KnowledgeMapManifest,
+    grace: Duration,
+) {
+    let mut retained = manifest.referenced_topic_files();
+    if let Ok(content) = fs::read_to_string(backup).await {
+        let Ok(recovery) = parse_manifest(&content) else {
+            return;
+        };
+        retained.extend(recovery.referenced_topic_files());
+    }
+    let directory = repository_root
+        .join(AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    if ensure_owned_directory(repository_root, &directory)
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok(mut entries) = fs::read_dir(directory).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let old_enough = entry
+            .metadata()
+            .await
+            .and_then(|metadata| metadata.modified())
+            .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+            .is_ok_and(|age| age >= grace);
+        if old_enough && !retained.contains(&entry.file_name()) {
+            let _ = fs::remove_file(entry.path()).await;
+        }
+    }
 }
 
 struct KnowledgeMapWriteLock {
@@ -785,14 +812,6 @@ impl Drop for KnowledgeMapWriteLock {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }
-}
-
-fn now_stamp() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    format!("unix:{seconds}")
 }
 
 #[cfg(test)]

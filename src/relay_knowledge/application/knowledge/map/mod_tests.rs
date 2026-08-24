@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::KnowledgeMapSourceKind;
 
 #[tokio::test]
 async fn writes_and_reads_yaml_contract() {
@@ -308,6 +309,81 @@ async fn route_rejects_a_digest_consistent_but_semantically_invalid_shard() {
 }
 
 #[tokio::test]
+async fn route_rejects_source_ids_duplicated_across_topic_shards() {
+    let root = temp_root("duplicate-cross-shard-source");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    for (id, topic) in [("cargo", "build"), ("adr", "architecture")] {
+        service
+            .add_source(
+                &context,
+                KnowledgeMapSourceAddRequest {
+                    id: id.to_owned(),
+                    topic: topic.to_owned(),
+                    kind: KnowledgeMapSourceKind::Doc,
+                    uri: format!("docs/{id}.md"),
+                    source_scope: Some("repo".to_owned()),
+                    description: None,
+                },
+            )
+            .await
+            .expect("source should add");
+    }
+    let mut manifest = parse_manifest(
+        &fs::read_to_string(root.join(KNOWLEDGE_MAP_RELATIVE_PATH))
+            .await
+            .expect("manifest should read"),
+    )
+    .expect("manifest should parse");
+    let topic_ref = manifest
+        .topics
+        .iter_mut()
+        .find(|topic| topic.id == "architecture")
+        .expect("architecture topic should exist");
+    let mut shard: KnowledgeMapTopicShard = serde_norway::from_str(
+        &fs::read_to_string(root.join(AGENT_CONTRACT_DIR_NAME).join(&topic_ref.r#ref))
+            .await
+            .expect("architecture shard should read"),
+    )
+    .expect("architecture shard should parse");
+    shard.sources[0].id = "cargo".to_owned();
+    shard
+        .route
+        .as_mut()
+        .expect("architecture route should exist")
+        .source_order[0] = "cargo".to_owned();
+    let yaml = serialize_yaml(&shard).expect("duplicate shard should serialize");
+    topic_ref.source_ids = vec!["cargo".to_owned()];
+    topic_ref.digest = content_digest(yaml.as_bytes());
+    topic_ref.r#ref = format!(
+        "{KNOWLEDGE_MAP_TOPICS_DIR_NAME}/topic-{}-{}.yaml",
+        stable_id(&topic_ref.id),
+        topic_ref.digest
+    );
+    fs::write(
+        root.join(AGENT_CONTRACT_DIR_NAME).join(&topic_ref.r#ref),
+        yaml,
+    )
+    .await
+    .expect("duplicate shard should write");
+    fs::write(
+        root.join(KNOWLEDGE_MAP_RELATIVE_PATH),
+        serialize_yaml(&manifest).expect("manifest should serialize"),
+    )
+    .await
+    .expect("manifest should write");
+
+    let error = service
+        .route(&context, "build".to_owned())
+        .await
+        .expect_err("root summary must reject cross-shard duplicate ids");
+    assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn mutations_reject_case_colliding_topics_before_publication() {
     let root = temp_root("case-collision");
     fs::create_dir_all(&root).await.expect("root should create");
@@ -385,6 +461,10 @@ async fn successful_publication_cleans_superseded_topic_shards() {
             .expect("manifest should read"),
     )
     .expect("manifest should parse");
+    fs::remove_file(service.backup_path())
+        .await
+        .expect("expired recovery manifest should remove");
+    cleanup_superseded_topic_shards(&root, &service.backup_path(), &manifest, Duration::ZERO).await;
     let mut entries = fs::read_dir(
         root.join(AGENT_CONTRACT_DIR_NAME)
             .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME),
@@ -466,6 +546,20 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
     .await
     .expect("archive should tamper");
     assert!(!service.validate(&context).await.expect("validate").valid);
+    let mutation = service
+        .add_source(
+            &context,
+            KnowledgeMapSourceAddRequest {
+                id: "after-tamper".to_owned(),
+                topic: "build".to_owned(),
+                kind: KnowledgeMapSourceKind::Doc,
+                uri: "docs/tamper.md".to_owned(),
+                source_scope: Some("repo".to_owned()),
+                description: None,
+            },
+        )
+        .await;
+    assert!(mutation.is_err(), "mutation must verify archived history");
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -534,6 +628,34 @@ async fn rejects_topic_directory_symlink_that_escapes_the_repository() {
     );
     let _ = fs::remove_dir_all(root).await;
     let _ = fs::remove_dir_all(outside).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rejects_a_topic_directory_symlink_to_the_contract_root() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root("unsafe-internal-topic-symlink");
+    let contract = root.join(AGENT_CONTRACT_DIR_NAME);
+    fs::create_dir_all(&contract)
+        .await
+        .expect("contract directory should create");
+    symlink(&contract, contract.join(KNOWLEDGE_MAP_TOPICS_DIR_NAME))
+        .expect("topic directory symlink should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+
+    let error = service
+        .init(&context)
+        .await
+        .expect_err("owned topic directory must not be a symlink");
+    assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
+    assert!(
+        !fs::try_exists(service.map_path())
+            .await
+            .expect("root check should work")
+    );
+    let _ = fs::remove_dir_all(root).await;
 }
 
 #[cfg(unix)]
@@ -622,9 +744,10 @@ async fn recovers_a_root_manifest_left_in_the_publish_backup() {
             .expect("root check")
     );
     assert!(
-        !fs::try_exists(service.backup_path())
+        fs::try_exists(service.backup_path())
             .await
-            .expect("backup check")
+            .expect("backup check"),
+        "successful publication retains the recovered root for readers"
     );
     let _ = fs::remove_dir_all(root).await;
 }

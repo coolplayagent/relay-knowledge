@@ -28,11 +28,21 @@ pub(super) struct KnowledgeMapManifest {
     pub(super) history: KnowledgeMapHistoryManifest,
 }
 
+impl KnowledgeMapManifest {
+    pub(super) fn referenced_topic_files(&self) -> std::collections::HashSet<std::ffi::OsString> {
+        self.topics
+            .iter()
+            .filter_map(|topic| Path::new(&topic.r#ref).file_name().map(ToOwned::to_owned))
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapTopicRef {
     pub(super) id: String,
     pub(super) title: String,
     pub(super) description: String,
+    pub(super) source_ids: Vec<String>,
     pub(super) r#ref: String,
     pub(super) digest: String,
 }
@@ -84,7 +94,9 @@ pub(super) fn parse_manifest(
     let mut folded_topic_ids = std::collections::HashSet::new();
     let mut refs = std::collections::HashSet::new();
     let mut folded_refs = std::collections::HashSet::new();
+    let mut source_ids = std::collections::HashSet::new();
     for topic in &manifest.topics {
+        let mut topic_source_ids = std::collections::HashSet::new();
         if topic.id.trim().is_empty()
             || topic.title.trim().is_empty()
             || topic.description.trim().is_empty()
@@ -92,9 +104,15 @@ pub(super) fn parse_manifest(
             || !refs.insert(topic.r#ref.as_str())
             || !folded_topic_ids.insert(topic.id.to_lowercase())
             || !folded_refs.insert(topic.r#ref.to_lowercase())
+            || topic.source_ids.iter().any(|source_id| {
+                source_id.trim().is_empty()
+                    || !topic_source_ids.insert(source_id.as_str())
+                    || !source_ids.insert(source_id.as_str())
+            })
         {
             return Err(KnowledgeMapServiceError::Integrity(
-                "topic ids and shard refs must be non-empty and unique".to_owned(),
+                "topic ids, shard refs, and source ids must be non-empty and globally unique"
+                    .to_owned(),
             ));
         }
     }
@@ -195,72 +213,19 @@ pub(super) fn stable_id(value: &str) -> String {
     content_digest(value.as_bytes())[..16].to_owned()
 }
 
-pub(super) async fn ensure_contract_dir_is_scoped(
-    repository_root: &Path,
-    contract_dir: &Path,
-) -> Result<PathBuf, KnowledgeMapServiceError> {
-    fs::create_dir_all(contract_dir).await?;
-    let canonical_repository = fs::canonicalize(repository_root).await?;
-    let canonical_contract = fs::canonicalize(contract_dir).await?;
-    if !canonical_contract.starts_with(&canonical_repository) {
-        return Err(KnowledgeMapServiceError::UnsafePath(
-            contract_dir.display().to_string(),
-        ));
-    }
-    Ok(canonical_contract)
-}
-
-pub(super) async fn ensure_artifact_parent_is_scoped(
-    repository_root: &Path,
-    contract_dir: &Path,
-    artifact_path: &Path,
-) -> Result<(), KnowledgeMapServiceError> {
-    let canonical_contract = ensure_contract_dir_is_scoped(repository_root, contract_dir).await?;
-    let parent = artifact_path
-        .parent()
-        .ok_or_else(|| KnowledgeMapServiceError::UnsafePath(artifact_path.display().to_string()))?;
-    fs::create_dir_all(parent).await?;
-    let canonical_parent = fs::canonicalize(parent).await?;
-    if !canonical_parent.starts_with(canonical_contract) {
-        return Err(KnowledgeMapServiceError::UnsafePath(
-            artifact_path.display().to_string(),
-        ));
-    }
-    Ok(())
-}
-
-pub(super) async fn read_root_content(
-    path: &Path,
-    backup: &Path,
-) -> Result<String, KnowledgeMapServiceError> {
-    match fs::read_to_string(path).await {
-        Ok(content) => Ok(content),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match fs::read_to_string(backup).await {
-                Ok(content) => Ok(content),
-                Err(backup_error) if backup_error.kind() == std::io::ErrorKind::NotFound => {
-                    Ok(fs::read_to_string(path).await?)
-                }
-                Err(backup_error) => Err(KnowledgeMapServiceError::Io(backup_error)),
-            }
-        }
-        Err(error) => Err(KnowledgeMapServiceError::Io(error)),
-    }
-}
-
 pub(super) async fn read_verified_ref(
     repository_root: &Path,
     relative: &str,
     expected_digest: &str,
 ) -> Result<String, KnowledgeMapServiceError> {
     let path = resolve_contract_ref(repository_root, relative)?;
-    let canonical_dir = ensure_contract_dir_is_scoped(
-        repository_root,
-        &repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME),
-    )
-    .await?;
+    let canonical_repository = fs::canonicalize(repository_root).await?;
+    let canonical_dir =
+        fs::canonicalize(repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME)).await?;
     let canonical_path = fs::canonicalize(&path).await?;
-    if !canonical_path.starts_with(&canonical_dir) {
+    if !canonical_dir.starts_with(canonical_repository)
+        || !canonical_path.starts_with(&canonical_dir)
+    {
         return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
     }
     let content = fs::read_to_string(path).await?;
@@ -272,96 +237,7 @@ pub(super) async fn read_verified_ref(
     Ok(content)
 }
 
-pub(super) async fn publish_immutable(
-    repository_root: &Path,
-    relative: &str,
-    content: &[u8],
-) -> Result<(), KnowledgeMapServiceError> {
-    let contract_dir = repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME);
-    let path = resolve_contract_ref(repository_root, relative)?;
-    ensure_artifact_parent_is_scoped(repository_root, &contract_dir, &path).await?;
-    if fs::try_exists(&path).await? {
-        let canonical_contract =
-            ensure_contract_dir_is_scoped(repository_root, &contract_dir).await?;
-        let canonical_path = fs::canonicalize(&path).await?;
-        if !canonical_path.starts_with(canonical_contract) {
-            return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
-        }
-        let existing = fs::read(&path).await?;
-        if existing == content {
-            return Ok(());
-        }
-        return Err(KnowledgeMapServiceError::Integrity(format!(
-            "immutable map artifact '{}' already exists with different content",
-            path.display()
-        )));
-    }
-    let temp = super::temporary_path(&path);
-    fs::write(&temp, content).await?;
-    match fs::rename(&temp, &path).await {
-        Ok(()) => Ok(()),
-        Err(error) if fs::try_exists(&path).await? => {
-            let _ = fs::remove_file(&temp).await;
-            let existing = fs::read(&path).await?;
-            if existing == content {
-                Ok(())
-            } else {
-                Err(KnowledgeMapServiceError::Io(error))
-            }
-        }
-        Err(error) => Err(KnowledgeMapServiceError::Io(error)),
-    }
-}
-
-pub(super) async fn cleanup_superseded_topic_shards(
-    repository_root: &Path,
-    backup: &Path,
-    manifest: &KnowledgeMapManifest,
-) {
-    let mut retained: std::collections::HashSet<_> = manifest
-        .topics
-        .iter()
-        .filter_map(|topic| Path::new(&topic.r#ref).file_name().map(ToOwned::to_owned))
-        .collect();
-    if fs::try_exists(backup).await.unwrap_or(true) {
-        let Ok(content) = fs::read_to_string(backup).await else {
-            return;
-        };
-        let Ok(probe) = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content) else {
-            return;
-        };
-        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
-            let Ok(recovery) = parse_manifest(&content) else {
-                return;
-            };
-            retained.extend(
-                recovery
-                    .topics
-                    .iter()
-                    .filter_map(|topic| Path::new(&topic.r#ref).file_name().map(ToOwned::to_owned)),
-            );
-        }
-    }
-    let topic_dir = repository_root
-        .join(crate::project::AGENT_CONTRACT_DIR_NAME)
-        .join(crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME);
-    if ensure_contract_dir_is_scoped(repository_root, &topic_dir)
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let Ok(mut entries) = fs::read_dir(topic_dir).await else {
-        return;
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        if !retained.contains(&entry.file_name()) {
-            let _ = fs::remove_file(entry.path()).await;
-        }
-    }
-}
-
-fn resolve_contract_ref(
+pub(super) fn resolve_contract_ref(
     repository_root: &Path,
     relative: &str,
 ) -> Result<PathBuf, KnowledgeMapServiceError> {
