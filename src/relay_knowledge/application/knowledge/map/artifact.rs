@@ -228,6 +228,46 @@ pub(super) fn validate_recent_history(
             "history archive reference and checkpoint disagree".to_owned(),
         ));
     }
+    if let Some(archive) = &manifest.history.archive {
+        validate_archive_ref_shape(archive, manifest.history.archived_through)?;
+    }
+    Ok(())
+}
+
+fn validate_archive_ref_shape(
+    archive: &KnowledgeMapArchiveRef,
+    archived_through: u64,
+) -> Result<(), KnowledgeMapServiceError> {
+    let name = archive
+        .r#ref
+        .strip_prefix(&format!(
+            "{}/",
+            crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME
+        ))
+        .and_then(|value| value.strip_suffix(".yaml"));
+    let Some(name) = name else {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history archive ref is not content addressed".to_owned(),
+        ));
+    };
+    let mut parts = name.split('-');
+    let from_text = parts.next();
+    let through_text = parts.next();
+    let from = from_text.and_then(|value| value.parse::<u64>().ok());
+    let through = through_text.and_then(|value| value.parse::<u64>().ok());
+    let digest = parts.next();
+    if parts.next().is_some()
+        || from.is_none_or(|value| value == 0)
+        || from_text.is_none_or(|value| value.len() != 20)
+        || through_text.is_none_or(|value| value.len() != 20)
+        || through != Some(archived_through)
+        || from.is_some_and(|value| value > archived_through)
+        || digest != Some(archive.digest.as_str())
+    {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history archive ref is not content addressed for its checkpoint".to_owned(),
+        ));
+    }
     Ok(())
 }
 

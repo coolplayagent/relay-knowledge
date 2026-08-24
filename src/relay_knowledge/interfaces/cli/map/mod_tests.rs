@@ -43,3 +43,15 @@ fn map_source_kind_parser_covers_supported_contract_values() {
         CliError::InvalidMapSourceKind("spreadsheet".to_owned())
     );
 }
+
+#[test]
+fn writer_lock_expiry_is_reported_as_a_timeout() {
+    let error = map_error(
+        "knowledge map mutation failed",
+        KnowledgeMapServiceError::LockTimeout("map.lock".into()),
+        OutputFormat::Json,
+    );
+    let rendered = error.render_stderr();
+
+    assert!(rendered.contains("\"error_kind\":\"timeout\""));
+}

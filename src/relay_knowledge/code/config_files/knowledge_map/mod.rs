@@ -85,10 +85,7 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
         if !valid_topic_ref(&topic) {
             continue;
         }
-        let Some(range) = source_lines(content).into_iter().find_map(|line| {
-            let value = yaml_scalar(line.text, "ref")?;
-            (value == topic.shard_ref).then(|| line.range())
-        }) else {
+        let Some(range) = topic_ref_range(content, &topic) else {
             continue;
         };
         push_definition(
@@ -104,6 +101,24 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
             range,
         );
     }
+}
+
+fn topic_ref_range(content: &str, topic: &RootTopicRef) -> Option<super::model::ConfigRange> {
+    let lines = source_lines(content);
+    lines
+        .iter()
+        .find_map(|line| {
+            let value = yaml_scalar(line.text, "ref")?;
+            (value == topic.shard_ref).then(|| line.range())
+        })
+        .or_else(|| {
+            lines.into_iter().find_map(|line| {
+                (line.text.contains(&topic.shard_ref)
+                    && line.text.contains(&topic.digest)
+                    && line.text.contains(&topic.id))
+                .then(|| line.range())
+            })
+        })
 }
 
 fn record_root_topic_ids(content: &str, definitions: &mut Vec<ConfigFact>) {
@@ -179,7 +194,8 @@ fn record_topic_shard_fact(path: &str, content: &str, definitions: &mut Vec<Conf
 
 fn topic_id_range(content: &str, expected_id: &str) -> Option<super::model::ConfigRange> {
     let mut in_topic = false;
-    for line in source_lines(content) {
+    let lines = source_lines(content);
+    for line in &lines {
         let code = yaml_code_prefix(line.text);
         if let Some(section) = top_level_yaml_section(code) {
             in_topic = section == "topic";
@@ -189,7 +205,9 @@ fn topic_id_range(content: &str, expected_id: &str) -> Option<super::model::Conf
             return Some(line.range());
         }
     }
-    None
+    lines.into_iter().find_map(|line| {
+        (line.text.contains("topic") && line.text.contains(expected_id)).then(|| line.range())
+    })
 }
 
 fn valid_topic_ref(topic: &RootTopicRef) -> bool {

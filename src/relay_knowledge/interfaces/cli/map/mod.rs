@@ -199,10 +199,13 @@ fn map_error(
     error: KnowledgeMapServiceError,
     format: OutputFormat,
 ) -> CliError {
-    CliError::api_failed(
-        ApiError::invalid_argument(format!("{prefix}: {error}")),
-        format,
-    )
+    let message = format!("{prefix}: {error}");
+    let api_error = if matches!(error, KnowledgeMapServiceError::LockTimeout(_)) {
+        ApiError::timeout(message)
+    } else {
+        ApiError::invalid_argument(message)
+    };
+    CliError::api_failed(api_error, format)
 }
 
 fn parse_show(tokens: &[String]) -> Result<CliAction, CliError> {

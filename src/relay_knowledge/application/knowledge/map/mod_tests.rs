@@ -481,6 +481,39 @@ async fn route_rejects_overflow_and_unsafe_archive_metadata() {
 }
 
 #[tokio::test]
+async fn show_rejects_a_non_content_addressed_archive_head() {
+    let root = temp_root("invalid-show-archive-ref");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    let content = fs::read_to_string(service.map_path())
+        .await
+        .expect("manifest should read");
+    let mut manifest = parse_manifest(&content).expect("manifest should parse");
+    manifest.map_version = 2;
+    manifest.history.archived_through = 1;
+    manifest.history.archive = Some(KnowledgeMapArchiveRef {
+        r#ref: "history/archive.yaml".to_owned(),
+        digest: "a".repeat(64),
+    });
+    manifest.history.recent[0].version = 2;
+    fs::write(
+        service.map_path(),
+        serialize_yaml(&manifest).expect("manifest should serialize"),
+    )
+    .await
+    .expect("manifest should write");
+
+    let error = service
+        .show(&context, None)
+        .await
+        .expect_err("show must reject a structurally invalid archive head");
+    assert!(error.to_string().contains("not content addressed"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn mutations_reject_case_colliding_topics_before_publication() {
     let root = temp_root("case-collision");
     fs::create_dir_all(&root).await.expect("root should create");
