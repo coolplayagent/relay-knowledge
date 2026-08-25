@@ -24,7 +24,7 @@ use crate::{
         GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, InterfaceKind,
         ProposalListApiRequest, RequestContext, WorkerRunRequest, WorkerStatusRequest,
     },
-    application::RelayKnowledgeService,
+    application::{KnowledgeMapService, KnowledgeMapServiceError, RelayKnowledgeService},
     domain::{CodeIndexMode, ProposalState},
 };
 use assets::{asset_or_index, default_web_dist, index};
@@ -33,10 +33,10 @@ use operation_request::{
     code_context_request, code_feature_flag_request, code_impact_request, code_query_request,
     code_register_request, code_repository_set_add_request, code_repository_set_create_request,
     code_repository_set_query_request, code_repository_set_remove_request, code_selector,
-    code_software_request, graph_request, index_request, ingest_request, optional_bool_field,
-    optional_proposal_state, optional_string_array_field, optional_string_field,
-    optional_worker_kind, parse_freshness, proposal_decision_request, retrieve_request,
-    string_field, usize_field,
+    code_software_request, graph_request, index_request, ingest_request,
+    knowledge_map_history_page, optional_bool_field, optional_proposal_state,
+    optional_string_array_field, optional_string_field, optional_worker_kind, parse_freshness,
+    proposal_decision_request, retrieve_request, string_field, usize_field,
 };
 
 /// Builds the Web router without opening sockets.
@@ -211,6 +211,18 @@ async fn dispatch_operation(
     context: RequestContext,
 ) -> Result<(crate::api::ApiMetadata, Value), WebError> {
     match operation {
+        "knowledge.map.history" => {
+            let request = knowledge_map_history_page(payload)?;
+            let root = service
+                .registered_code_repository_root(&request.repository)
+                .await?;
+            let map = KnowledgeMapService::new(root);
+            let response = map
+                .history(&context, request.from_version, request.limit)
+                .await
+                .map_err(knowledge_map_web_error)?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
         "retrieve.context" => {
             let response = service
                 .retrieve_context(retrieve_request(payload)?, context)
@@ -452,6 +464,22 @@ async fn dispatch_operation(
             "unsupported web operation '{other}'"
         ))),
     }
+}
+
+fn knowledge_map_web_error(error: KnowledgeMapServiceError) -> WebError {
+    let message = format!("knowledge map history failed: {error}");
+    let error = match error {
+        KnowledgeMapServiceError::Io(_) => ApiError::storage_unavailable(message),
+        KnowledgeMapServiceError::LockTimeout(_) => ApiError::timeout(message),
+        KnowledgeMapServiceError::Yaml(_)
+        | KnowledgeMapServiceError::Domain(_)
+        | KnowledgeMapServiceError::InvalidRequest(_)
+        | KnowledgeMapServiceError::MissingArtifact { .. }
+        | KnowledgeMapServiceError::Integrity(_)
+        | KnowledgeMapServiceError::UnsafePath(_) => ApiError::invalid_argument(message),
+    };
+
+    error.into()
 }
 
 pub(super) fn api_error_response(error: ApiError) -> Response {

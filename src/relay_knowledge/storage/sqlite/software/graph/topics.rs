@@ -185,11 +185,47 @@ fn knowledge_map_topic_page(
     let mut statement = connection.prepare(
         "
         SELECT repository_id, source_scope, path, name, line_start, line_end
-        FROM code_repository_symbols
-        WHERE source_scope = ?1
-          AND path = ?2
-          AND kind = 'knowledge_map_topic'
-        ORDER BY line_start ASC
+        FROM (
+            SELECT legacy.repository_id, legacy.source_scope, legacy.path, legacy.name,
+                   legacy.line_start, legacy.line_end
+            FROM code_repository_symbols legacy
+            WHERE legacy.source_scope = ?1
+              AND legacy.path = ?2
+              AND legacy.kind = 'knowledge_map_topic'
+            UNION ALL
+            SELECT shards.repository_id, shards.source_scope, shards.path, shards.name,
+                   shards.line_start, shards.line_end
+            FROM code_repository_symbols refs
+            JOIN code_repository_symbols topics
+              ON topics.repository_id = refs.repository_id
+             AND topics.source_scope = refs.source_scope
+             AND topics.path = refs.path
+             AND topics.line_start = refs.line_start
+             AND topics.kind = 'knowledge_map_topic_shard_topic'
+            JOIN code_repository_symbols root_identity
+              ON root_identity.repository_id = refs.repository_id
+             AND root_identity.source_scope = refs.source_scope
+             AND root_identity.path = refs.path
+             AND root_identity.line_start = refs.line_start
+             AND root_identity.kind = 'knowledge_map_topic_shard_identity'
+            JOIN code_repository_symbols shards
+              ON shards.repository_id = refs.repository_id
+             AND shards.source_scope = refs.source_scope
+             AND shards.path = refs.name
+             AND shards.name = topics.name
+             AND shards.kind = 'knowledge_map_topic_shard'
+            JOIN code_repository_symbols shard_identity
+              ON shard_identity.repository_id = shards.repository_id
+             AND shard_identity.source_scope = shards.source_scope
+             AND shard_identity.path = shards.path
+             AND shard_identity.line_start = shards.line_start
+             AND shard_identity.kind = 'knowledge_map_topic_shard_identity'
+             AND shard_identity.name = root_identity.name
+            WHERE refs.source_scope = ?1
+              AND refs.path = ?2
+              AND refs.kind = 'knowledge_map_topic_shard_ref'
+        ) current_topics
+        ORDER BY path ASC, line_start ASC
         LIMIT ?3 OFFSET ?4
         ",
     )?;

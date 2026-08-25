@@ -64,21 +64,13 @@ async fn writes_and_reads_yaml_contract() {
         .show(&context, None)
         .await
         .expect("assembled map should load");
-    let inline = serialize_yaml(&shown.map).expect("assembled map should serialize");
-    assert_eq!(
-        serde_norway::from_str::<KnowledgeMapSchemaProbe>(&inline)
-            .expect("inline schema should parse")
-            .schema_version,
-        KnowledgeMap::SCHEMA_VERSION
-    );
-    fs::write(service.map_path(), inline)
-        .await
-        .expect("inline map should replace the root");
+    assert_eq!(shown.map.artifact_schema_version, ARTIFACT_SCHEMA_VERSION);
+    assert!(shown.map.history.complete);
     assert_eq!(
         service
             .show(&context, None)
             .await
-            .expect("serialized public map must remain readable")
+            .expect("public view must remain readable")
             .map,
         shown.map
     );
@@ -225,7 +217,7 @@ async fn init_upgrades_legacy_map_once() {
     assert_eq!(repeated.map_version, upgraded.map_version);
     assert_eq!(shown.map.sources.len(), 1);
     assert_eq!(shown.map.sources[0].id, "repository-software-model");
-    assert_eq!(shown.map.history.last().expect("history").version, 2);
+    assert_eq!(shown.map.history.recent.last().expect("history").version, 2);
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -489,6 +481,39 @@ async fn route_rejects_overflow_and_unsafe_archive_metadata() {
 }
 
 #[tokio::test]
+async fn show_rejects_a_non_content_addressed_archive_head() {
+    let root = temp_root("invalid-show-archive-ref");
+    fs::create_dir_all(&root).await.expect("root should create");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+    service.init(&context).await.expect("init should work");
+    let content = fs::read_to_string(service.map_path())
+        .await
+        .expect("manifest should read");
+    let mut manifest = parse_manifest(&content).expect("manifest should parse");
+    manifest.map_version = 2;
+    manifest.history.archived_through = 1;
+    manifest.history.archive = Some(KnowledgeMapArchiveRef {
+        r#ref: "history/archive.yaml".to_owned(),
+        digest: "a".repeat(64),
+    });
+    manifest.history.recent[0].version = 2;
+    fs::write(
+        service.map_path(),
+        serialize_yaml(&manifest).expect("manifest should serialize"),
+    )
+    .await
+    .expect("manifest should write");
+
+    let error = service
+        .show(&context, None)
+        .await
+        .expect_err("show must reject a structurally invalid archive head");
+    assert!(error.to_string().contains("not content addressed"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn mutations_reject_case_colliding_topics_before_publication() {
     let root = temp_root("case-collision");
     fs::create_dir_all(&root).await.expect("root should create");
@@ -686,85 +711,6 @@ async fn shard_grace_starts_when_the_shard_becomes_unreferenced() {
     );
     cleanup_superseded_topic_shards(&root, &service.backup_path(), &manifest, Duration::ZERO).await;
     assert!(!fs::try_exists(&shard).await.expect("shard check"));
-    let _ = fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn bounds_recent_history_and_detects_archive_tampering() {
-    let root = temp_root("history");
-    fs::create_dir_all(&root).await.expect("root should create");
-    fs::write(
-        root.join("AGENTS.md"),
-        format!("Knowledge map: {KNOWLEDGE_MAP_RELATIVE_PATH}"),
-    )
-    .await
-    .expect("agents should write");
-    let service = KnowledgeMapService::new(root.clone());
-    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
-    service.init(&context).await.expect("init should work");
-    for index in 0..RECENT_HISTORY_LIMIT * 2 + 2 {
-        service
-            .add_source(
-                &context,
-                KnowledgeMapSourceAddRequest {
-                    id: format!("source-{index}"),
-                    topic: "build".to_owned(),
-                    kind: KnowledgeMapSourceKind::Config,
-                    uri: format!("build/{index}.toml"),
-                    source_scope: Some("repo".to_owned()),
-                    description: None,
-                },
-            )
-            .await
-            .expect("source should add");
-    }
-    let manifest_text = fs::read_to_string(root.join(KNOWLEDGE_MAP_RELATIVE_PATH))
-        .await
-        .expect("manifest should read");
-    let manifest = parse_manifest(&manifest_text).expect("manifest should parse");
-    assert_eq!(manifest.history.recent.len(), 3);
-    assert_eq!(
-        manifest.history.archived_through,
-        (RECENT_HISTORY_LIMIT * 2) as u64
-    );
-    let archive_ref = manifest.history.archive.expect("archive should exist");
-    let mut archive_entries = fs::read_dir(
-        root.join(AGENT_CONTRACT_DIR_NAME)
-            .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME),
-    )
-    .await
-    .expect("history directory should read");
-    let mut archive_count = 0;
-    while archive_entries
-        .next_entry()
-        .await
-        .expect("archive entry should read")
-        .is_some()
-    {
-        archive_count += 1;
-    }
-    assert_eq!(archive_count, 2);
-    fs::write(
-        root.join(AGENT_CONTRACT_DIR_NAME).join(archive_ref.r#ref),
-        "tampered",
-    )
-    .await
-    .expect("archive should tamper");
-    assert!(!service.validate(&context).await.expect("validate").valid);
-    let mutation = service
-        .add_source(
-            &context,
-            KnowledgeMapSourceAddRequest {
-                id: "after-tamper".to_owned(),
-                topic: "build".to_owned(),
-                kind: KnowledgeMapSourceKind::Doc,
-                uri: "docs/tamper.md".to_owned(),
-                source_scope: Some("repo".to_owned()),
-                description: None,
-            },
-        )
-        .await;
-    assert!(mutation.is_err(), "mutation must verify archived history");
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -992,6 +938,9 @@ fn temp_root(label: &str) -> PathBuf {
             .as_nanos()
     ))
 }
+
+#[path = "history_tests.rs"]
+mod history_tests;
 
 #[path = "path_tests.rs"]
 mod path_tests;

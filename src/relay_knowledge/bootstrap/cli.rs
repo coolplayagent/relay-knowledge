@@ -5,7 +5,6 @@
 //! interface layer after process-local contracts are resolved.
 
 use crate::{
-    api::{InterfaceKind, RequestContext},
     application::KnowledgeMapService,
     interfaces::cli::{CliAction, CliCommand, OutputFormat},
     paths::discover_repository_root,
@@ -54,23 +53,13 @@ async fn run_command(
     command: CliCommand,
     _interactive_text_output: bool,
 ) -> Result<String, CliError> {
-    if let CliAction::Map(map_command) = command.action.clone() {
-        let context = RequestContext::for_interface(InterfaceKind::Cli);
-        let service = if map_command.needs_repository_root() {
+    let service = match &command.action {
+        CliAction::Map(map_command) if map_command.needs_repository_root() => {
             Some(knowledge_map_service(command.format)?)
-        } else {
-            None
-        };
-        return crate::interfaces::cli::map::run_map(
-            map_command,
-            service.as_ref(),
-            context,
-            command.format,
-        )
-        .await;
-    }
-
-    crate::interfaces::cli::run_command(command).await
+        }
+        _ => None,
+    };
+    crate::interfaces::cli::run_command(command, service.as_ref()).await
 }
 
 fn knowledge_map_service(format: OutputFormat) -> Result<KnowledgeMapService, CliError> {

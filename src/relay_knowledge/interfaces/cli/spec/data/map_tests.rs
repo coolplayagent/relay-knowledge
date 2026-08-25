@@ -11,6 +11,7 @@ fn map_specs_keep_source_requirements_specific_to_add() {
         [
             "map init",
             "map show",
+            "map history",
             "map route",
             "map source add",
             "map source update",

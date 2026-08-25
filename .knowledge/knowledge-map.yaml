@@ -1,183 +1,83 @@
-schema_version: 1
+schema_version: 2
 map_version: 9
 updated_at: unix:1786936776
 topics:
 - id: architecture
   title: Architecture knowledge
   description: Architecture specs and hard constraints that guide implementation.
+  source_ids:
+  - architecture-hard-constraints
+  - code-map-knowledge-development-loop
+  - commit-driven-code-index-loop
+  - code-index-retention
+  ref: topics/topic-4ca303a3bf7ddf7b-48311eeec60e24e5206cea9eab0e10bd8c88a60ee87cab03cc2de9c209aa2a2a.yaml
+  digest: 48311eeec60e24e5206cea9eab0e10bd8c88a60ee87cab03cc2de9c209aa2a2a
 - id: benchmarks
   title: Benchmark knowledge
   description: Self-iteration and benchmark guardrail documentation.
+  source_ids:
+  - code-index-fact-versioning
+  - profile-all-performance-source-surface-2026-06-04
+  ref: topics/topic-cb1d2fdcc86ce72a-21c19ebbdd15797cdaabdfba8d9ba266c701bfb508003d157c0590f68cc1bbf4.yaml
+  digest: 21c19ebbdd15797cdaabdfba8d9ba266c701bfb508003d157c0590f68cc1bbf4
 - id: cli
   title: CLI knowledge
   description: CLI command reference and agent workflow guidance.
+  source_ids:
+  - cli-command-reference
+  - cli-skill-workflows
+  ref: topics/topic-99bb88401742848e-ee13bee8d5981abfdaf78c2cb5d9e92b2493282e7c68037113752e801d17c92e.yaml
+  digest: ee13bee8d5981abfdaf78c2cb5d9e92b2493282e7c68037113752e801d17c92e
 - id: release-documentation
   title: Release documentation knowledge
   description: Release-readiness documentation, navigation, and validation records.
+  source_ids:
+  - documentation-release-readiness-2026-06-05
+  ref: topics/topic-06be3638d1633e1a-228081731caa968cd90c11063c9b8bb3f4960b69e8c2ce97e68c2bb0269bae2a.yaml
+  digest: 228081731caa968cd90c11063c9b8bb3f4960b69e8c2ce97e68c2bb0269bae2a
 - id: software-model
   title: Whole-software model
   description: Code-map-backed architecture, build, deployment, dependency, configuration, and design knowledge.
-sources:
-- id: architecture-hard-constraints
-  topic: architecture
-  kind: doc
-  uri: docs/zh/03-architecture-specs/02-engineering-hard-constraints.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Hard architecture constraints for relay-knowledge changes.
-- id: cli-command-reference
-  topic: cli
-  kind: doc
-  uri: docs/zh/01-user-guide/03-cli-command-reference.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: User-facing CLI command reference.
-- id: cli-skill-workflows
-  topic: cli
-  kind: doc
-  uri: skills/relay-knowledge-cli/references/knowledge-map-workflows.md
-  source_scope: skill
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 2
-  description: Agent workflow for joint knowledge-map/code-map bootstrap, source reconciliation, and spec-grounded incremental development.
-- id: code-index-fact-versioning
-  topic: benchmarks
-  kind: doc
-  uri: docs/zh/05-benchmarks/08-code-index-fact-versioning.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Code index fact-version policy for parser and retrieval benchmark changes.
-- id: code-map-knowledge-development-loop
-  topic: architecture
-  kind: doc
-  uri: docs/zh/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Code-map-backed bootstrap, software modeling, spec context, and incremental consistency contract.
-- id: commit-driven-code-index-loop
-  topic: architecture
-  kind: doc
-  uri: docs/zh/03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Managed Git commit reconciliation, durable incremental publication, and bounded scope retention.
-- id: code-index-retention
-  topic: architecture
-  kind: doc
-  uri: docs/zh/03-architecture-specs/25-code-index-retention.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Scope retention, indexed-repository limits, durable parent jobs, and phased code-index garbage collection.
-- id: documentation-release-readiness-2026-06-05
-  topic: release-documentation
-  kind: doc
-  uri: docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Release-readiness documentation refresh audit and validation record.
-- id: profile-all-performance-source-surface-2026-06-04
-  topic: benchmarks
-  kind: doc
-  uri: docs/zh/05-benchmarks/10-profile-all-performance-source-surface-2026-06-04.md
-  source_scope: docs
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Profile full performance and bounded hybrid source-surface validation notes.
-- id: repository-software-model
-  topic: software-model
-  kind: repo
-  uri: .
-  source_scope: repo
-  read_policy: direct
-  write_policy: manual-review
-  status: active
-  version: 1
-  description: Primary repository code map; consume snapshot-bound repo software and repo view projections with freshness and evidence.
-routes:
-- topic: architecture
-  source_order:
-  - code-index-retention
-  - commit-driven-code-index-loop
-  - architecture-hard-constraints
-  - code-map-knowledge-development-loop
-  fallback: bounded-search
-- topic: benchmarks
-  source_order:
-  - profile-all-performance-source-surface-2026-06-04
-  - code-index-fact-versioning
-  fallback: bounded-search
-- topic: cli
-  source_order:
-  - cli-command-reference
-  - cli-skill-workflows
-  fallback: bounded-search
-- topic: release-documentation
-  source_order:
-  - documentation-release-readiness-2026-06-05
-  fallback: bounded-search
-- topic: software-model
-  source_order:
+  source_ids:
   - repository-software-model
-  fallback: bounded-search
+  ref: topics/topic-247e2a0d6f43d185-19e16637bb8918d0668123fbd97e947e311f338c765bea1511ff649bfb7ce17c.yaml
+  digest: 19e16637bb8918d0668123fbd97e947e311f338c765bea1511ff649bfb7ce17c
 history:
-- version: 1
-  action: init
-  actor: cli
-  summary: Created repository knowledge map contract.
-- version: 2
-  action: update
-  actor: codex
-  summary: Added benchmark fact-versioning documentation route.
-- version: 3
-  action: update
-  actor: codex
-  summary: Added profile full performance and source-surface validation documentation.
-- version: 4
-  action: update
-  actor: codex
-  summary: Added release-readiness documentation audit route.
-- version: 5
-  action: update
-  actor: codex
-  summary: Added the managed Git commit loop and bounded retention architecture route.
-- version: 6
-  action: software-model.ensure
-  actor: cli
-  summary: Added the repository code-map-backed software-model route.
-- version: 7
-  action: source.add
-  actor: cli
-  summary: Added source 'code-map-knowledge-development-loop' to topic 'architecture'.
-- version: 8
-  action: source.update
-  actor: cli
-  summary: Updated source 'cli-skill-workflows'.
-- version: 9
-  action: source.add
-  actor: codex
-  summary: Added durable code-index retention architecture.
+  archived_through: 0
+  recent:
+  - version: 1
+    action: init
+    actor: cli
+    summary: Created repository knowledge map contract.
+  - version: 2
+    action: update
+    actor: codex
+    summary: Added benchmark fact-versioning documentation route.
+  - version: 3
+    action: update
+    actor: codex
+    summary: Added profile full performance and source-surface validation documentation.
+  - version: 4
+    action: update
+    actor: codex
+    summary: Added release-readiness documentation audit route.
+  - version: 5
+    action: update
+    actor: codex
+    summary: Added the managed Git commit loop and bounded retention architecture route.
+  - version: 6
+    action: software-model.ensure
+    actor: cli
+    summary: Added the repository code-map-backed software-model route.
+  - version: 7
+    action: source.add
+    actor: cli
+    summary: Added source 'code-map-knowledge-development-loop' to topic 'architecture'.
+  - version: 8
+    action: source.update
+    actor: cli
+    summary: Updated source 'cli-skill-workflows'.
+  - version: 9
+    action: source.add
+    actor: codex
+    summary: Added durable code-index retention architecture.

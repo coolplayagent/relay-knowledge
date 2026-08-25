@@ -20,6 +20,7 @@ use crate::{
     code::{REGISTRATION_LANGUAGE_FILTER_ERROR, register_repository},
     domain::CodeRepositorySelector,
 };
+use std::path::PathBuf;
 
 use crate::application::service::RelayKnowledgeService;
 
@@ -35,6 +36,17 @@ pub(super) use status::{
 pub(super) use worktree::ensure_worktree_overlay_matches_current_worktree;
 
 impl RelayKnowledgeService {
+    /// Resolves a repository root only through persisted managed-repository identity.
+    pub(crate) async fn registered_code_repository_root(
+        &self,
+        repository: &str,
+    ) -> Result<PathBuf, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let status = required_code_repository(&store, repository).await?;
+
+        Ok(PathBuf::from(status.root_path))
+    }
+
     /// Lists repositories that have at least one completed indexed scope.
     pub async fn list_indexed_code_repositories(
         &self,

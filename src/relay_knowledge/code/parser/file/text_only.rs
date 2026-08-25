@@ -1,9 +1,9 @@
 //! Text-only Markdown and knowledge-map topic symbol extraction.
 
 use crate::{
-    code::{CodeIndexError, SnapshotBuild, stable_id},
+    code::{CodeIndexError, SnapshotBuild, config_files, stable_id},
     domain::{RepositoryCodeRange, RepositoryCodeSymbolRecord},
-    project::KNOWLEDGE_MAP_RELATIVE_PATH,
+    project::{KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX},
 };
 
 use super::contracts::{FileParseContext, FileParseOutput};
@@ -29,8 +29,8 @@ pub(super) fn record_topic_symbols(
     let mut output = FileParseOutput::new();
     match language_id {
         "markdown" => record_markdown_headings(&context, &mut output, bytes)?,
-        "yaml" if path == KNOWLEDGE_MAP_RELATIVE_PATH => {
-            record_knowledge_map_topics(&context, &mut output, bytes)?;
+        "yaml" if knowledge_map_path(path) => {
+            record_knowledge_map_facts(&context, &mut output, bytes)?;
         }
         _ => {}
     }
@@ -40,7 +40,11 @@ pub(super) fn record_topic_symbols(
 }
 
 fn topic_source(path: &str, language_id: &str) -> bool {
-    language_id == "markdown" || (language_id == "yaml" && path == KNOWLEDGE_MAP_RELATIVE_PATH)
+    language_id == "markdown" || (language_id == "yaml" && knowledge_map_path(path))
+}
+
+fn knowledge_map_path(path: &str) -> bool {
+    path == KNOWLEDGE_MAP_RELATIVE_PATH || path.starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)
 }
 
 fn record_markdown_headings(
@@ -78,75 +82,72 @@ fn record_markdown_headings(
     })
 }
 
-fn record_knowledge_map_topics(
+fn record_knowledge_map_facts(
     context: &FileParseContext<'_>,
     output: &mut FileParseOutput,
     bytes: &[u8],
 ) -> Result<(), CodeIndexError> {
-    let mut in_topics = false;
-    let mut topic_list_indent = None;
-    let mut topic_item_indent = None;
-    scan_lines(bytes, |line| {
-        let code = yaml_code_prefix(line.text);
-        let trimmed = code.trim();
-        if let Some(section) = top_level_yaml_section(code) {
-            in_topics = section == "topics";
-            topic_list_indent = None;
-            topic_item_indent = None;
-            return Ok(());
-        }
-        if !in_topics || trimmed.is_empty() {
-            return Ok(());
-        }
-
-        let indent = leading_spaces(code);
-        if let Some(item) = trimmed.strip_prefix("- ") {
-            if !accept_topic_item_indent(&mut topic_list_indent, indent) {
-                return Ok(());
-            }
-            topic_item_indent = Some(indent);
-            let item = item.trim_start();
-            if let Some(id) = item.strip_prefix("id:") {
-                record_knowledge_map_topic(context, output, id, &line)?;
-            }
-            return Ok(());
-        }
-        if trimmed == "-" {
-            if !accept_topic_item_indent(&mut topic_list_indent, indent) {
-                return Ok(());
-            }
-            topic_item_indent = Some(indent);
-            return Ok(());
-        }
-        if topic_item_indent.is_some_and(|item_indent| indent == item_indent + 2) {
-            let Some(id) = trimmed.strip_prefix("id:") else {
-                return Ok(());
-            };
-            record_knowledge_map_topic(context, output, id, &line)?;
-        }
-
-        Ok(())
-    })
+    let content = byte_stable_lossy_text(bytes);
+    let (mut definitions, _) = config_files::structured_facts(context.path, "yaml", &content);
+    if definitions
+        .iter()
+        .all(|definition| !definition.kind.starts_with("knowledge_map_"))
+        && std::str::from_utf8(bytes).is_err()
+    {
+        let isolated = isolate_invalid_utf8_lines(bytes);
+        definitions = config_files::structured_facts(context.path, "yaml", &isolated).0;
+    }
+    for definition in definitions
+        .into_iter()
+        .filter(|definition| definition.kind.starts_with("knowledge_map_"))
+    {
+        let line = TextOnlyLine {
+            number: definition.range.line_start,
+            byte_start: definition.range.byte_start,
+            byte_end: definition.range.byte_end,
+            text: &definition.name,
+        };
+        record_symbol(context, output, &definition.name, definition.kind, &line)?;
+    }
+    Ok(())
 }
 
-fn record_knowledge_map_topic(
-    context: &FileParseContext<'_>,
-    output: &mut FileParseOutput,
-    value: &str,
-    line: &TextOnlyLine<'_>,
-) -> Result<(), CodeIndexError> {
-    let name = value.trim().trim_matches('"').trim_matches('\'');
-    record_symbol(context, output, name, "knowledge_map_topic", line)
+fn isolate_invalid_utf8_lines(bytes: &[u8]) -> String {
+    let mut output = Vec::with_capacity(bytes.len());
+    for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+        if std::str::from_utf8(line).is_ok() {
+            output.extend_from_slice(line);
+            continue;
+        }
+        output.extend(line.iter().map(|byte| match byte {
+            b'\r' | b'\n' => *byte,
+            _ => b' ',
+        }));
+    }
+    String::from_utf8(output).expect("invalid UTF-8 lines are replaced with ASCII spaces")
 }
 
-fn accept_topic_item_indent(topic_list_indent: &mut Option<usize>, indent: usize) -> bool {
-    match *topic_list_indent {
-        Some(list_indent) => indent == list_indent,
-        None => {
-            *topic_list_indent = Some(indent);
-            true
+fn byte_stable_lossy_text(bytes: &[u8]) -> String {
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut remaining = bytes;
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                output.extend_from_slice(valid.as_bytes());
+                break;
+            }
+            Err(error) => {
+                let valid_up_to = error.valid_up_to();
+                output.extend_from_slice(&remaining[..valid_up_to]);
+                let invalid_length = error
+                    .error_len()
+                    .unwrap_or(remaining.len().saturating_sub(valid_up_to));
+                output.extend(std::iter::repeat_n(b' ', invalid_length));
+                remaining = &remaining[valid_up_to + invalid_length..];
+            }
         }
     }
+    String::from_utf8(output).expect("invalid UTF-8 bytes are replaced with ASCII spaces")
 }
 
 fn record_symbol(
@@ -284,44 +285,6 @@ fn closes_markdown_fence(trimmed: &str, active: (char, usize)) -> bool {
         .take_while(|character| *character == marker)
         .count()
         >= count
-}
-
-fn leading_spaces(line: &str) -> usize {
-    line.chars()
-        .take_while(|character| *character == ' ')
-        .count()
-}
-
-fn yaml_code_prefix(line: &str) -> &str {
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut escaped = false;
-    for (index, character) in line.char_indices() {
-        match character {
-            '\\' if in_double && !escaped => escaped = true,
-            '"' if !in_single && !escaped => in_double = !in_double,
-            '\'' if !in_double => in_single = !in_single,
-            '#' if !in_single && !in_double => return &line[..index],
-            _ => escaped = false,
-        }
-        if character != '\\' {
-            escaped = false;
-        }
-    }
-
-    line
-}
-
-fn top_level_yaml_section(line: &str) -> Option<&str> {
-    if line.starts_with(' ') || line.starts_with('\t') {
-        return None;
-    }
-    let key = line.trim().strip_suffix(':')?;
-    if key.is_empty() || key.contains(' ') {
-        return None;
-    }
-
-    Some(key)
 }
 
 #[cfg(test)]

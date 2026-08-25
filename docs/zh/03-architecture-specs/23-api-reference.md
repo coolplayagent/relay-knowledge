@@ -338,6 +338,7 @@ curl -s http://localhost:8080/api/v1/code/repositories/unknown/status | jq .
 | `code.repo.feature_flags` | 特性标志查询 | `alias`, `freshness`, `limit`；可选 `query` |
 | `code.repo.impact` | 变更影响分析 | `alias`, `base_ref`, `head_ref`, `limit` |
 | `code.repo.software` | 软件全局投影 | `alias`, `kind`, `freshness`, `limit` |
+| `knowledge.map.history` | 通过托管仓库身份有界读取 Knowledge Map 历史分页 | `repository`（已注册别名）、`from_version`、`limit`（1-256） |
 | `code.repo.status` | 仓库索引状态 | `alias` |
 | `code.repo_set.create` | 创建仓库集 | `set_alias`；可选 `description`, `default_ref_policy_json` |
 | `code.repo_set.add` | 添加仓库成员 | `set_alias`, `repository_alias`, `ref`；可选 `path_filters`, `language_filters`, `priority` |

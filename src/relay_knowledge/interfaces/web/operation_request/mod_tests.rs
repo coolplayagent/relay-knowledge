@@ -5,6 +5,52 @@ use serde_json::json;
 use super::*;
 
 #[test]
+fn knowledge_map_history_page_requires_positive_bounded_inputs() {
+    let page = knowledge_map_history_page(&serde_json::json!({
+        "repository": " relay ",
+        "from_version": 2,
+        "limit": 16
+    }))
+    .expect("valid page");
+    assert_eq!(page.repository, "relay");
+    assert_eq!(page.from_version, 2);
+    assert_eq!(page.limit, 16);
+    assert!(
+        knowledge_map_history_page(&serde_json::json!({
+            "repository": "relay",
+            "from_version": 0,
+            "limit": 16
+        }))
+        .is_err()
+    );
+    assert!(
+        knowledge_map_history_page(&serde_json::json!({
+            "repository": "relay",
+            "from_version": 2,
+            "limit": 0
+        }))
+        .is_err()
+    );
+    assert!(
+        knowledge_map_history_page(&serde_json::json!({
+            "from_version": 2,
+            "limit": 16
+        }))
+        .is_err()
+    );
+    let oversized = knowledge_map_history_page(&serde_json::json!({
+        "repository": " ",
+        "from_version": 2,
+        "limit": MAX_HISTORY_PAGE_SIZE + 1
+    }))
+    .expect_err("range validation should precede repository validation");
+    assert_eq!(
+        oversized.message,
+        format!("limit must be within 1..={MAX_HISTORY_PAGE_SIZE}")
+    );
+}
+
+#[test]
 fn scalar_fields_enforce_type_and_range_contracts() {
     let payload = json!({
         "name": "value",

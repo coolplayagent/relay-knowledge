@@ -115,6 +115,19 @@ function operationForm(callbacks: OperationsCallbacks): HTMLElement {
         })
       );
       break;
+    case "map":
+      form.append(
+        inputControl("Repository alias", appState.map.repository, (value) => {
+          appState.map.repository = value;
+        }),
+        numberControl("From version", appState.map.fromVersion, (value) => {
+          appState.map.fromVersion = positiveInt(value, 1);
+        }),
+        numberControl("Limit", appState.map.limit, (value) => {
+          appState.map.limit = Math.min(256, positiveInt(value, 16));
+        }, 256)
+      );
+      break;
     case "code":
       form.append(codeActionControls(callbacks));
       break;
@@ -519,6 +532,7 @@ function isExecutableWebOperation(operation: unknown): boolean {
     operation === "retrieve.context" ||
     operation === "graph.ingest" ||
     operation === "graph.inspect" ||
+    operation === "knowledge.map.history" ||
     operation === "index.refresh" ||
     operation === "provider.embedding.probe" ||
     operation === "worker.status" ||
@@ -578,12 +592,16 @@ function inputControl(
 function numberControl(
   label: string,
   value: number,
-  onInput: (value: string) => void
+  onInput: (value: string) => void,
+  max?: number
 ): HTMLElement {
   const control = fieldShell(label);
   const input = document.createElement("input");
   input.type = "number";
   input.min = "1";
+  if (max !== undefined) {
+    input.max = String(max);
+  }
   input.name = fieldName(label);
   input.value = String(value);
   input.addEventListener("input", () => {

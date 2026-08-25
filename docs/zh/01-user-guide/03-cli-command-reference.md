@@ -88,6 +88,7 @@ relay-knowledge files query <text> [--source <scope>] [--root <root-id>] [--fres
 relay-knowledge files content <text> [--source <scope>] [--root <root-id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge map init
 relay-knowledge map show [--topic <id>]
+relay-knowledge map history [--from <version>] [--limit <count>]
 relay-knowledge map route <topic>
 relay-knowledge map source add --id <id> --topic <id> --kind repo|file|doc|config|db|ci|runtime|wiki|monitoring --uri <uri> [--scope <source_scope>] [--description <text>]
 relay-knowledge map source update --id <id> [--topic <id>] [--kind repo|file|doc|config|db|ci|runtime|wiki|monitoring] [--uri <uri>] [--scope <source_scope>] [--description <text>]
@@ -182,13 +183,13 @@ Kind 取值按命令家族隔离：
 
 面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_software_query` 覆盖软件全域模型 kind，`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
 
-`map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。`map init` 会创建 Knowledge Map v2 根 manifest，或把有效的 v1 单文件 map 幂等迁移为 v2，同时确保保留的 `software-model` route 与 `repository-software-model` repository source；保留 source 不兼容时会拒绝覆盖。V2 把各 topic 的 source 与 route 写入 `.knowledge/topics/` 下的内容寻址分片；`map route <topic>` 只读取根文件和目标分片，`map show` 则组装兼容的完整视图。根文件最多保留 16 条最近 map 变更，更早历史位于 `.knowledge/history/` 下的 SHA-256 校验不可变归档；`map validate` 会完整校验归档和全部分片。
+`map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。`map init` 会创建 Knowledge Map v2 根 manifest，或把有效的 v1 单文件 map 幂等迁移为 v2，同时确保保留的 `software-model` route 与 `repository-software-model` repository source；保留 source 不兼容时会拒绝覆盖。V2 把各 topic 的 source 与 route 写入 `.knowledge/topics/` 下的内容寻址分片；`map route <topic>` 只读取根文件和目标分片。`map show` 读取全部当前分片，但只返回根文件内有界的 recent history，并通过 `archived_through` 与 `complete` 明确说明被省略的历史。Text 与 Markdown 输出会显示 `history_complete`、`history_archived_through` 和 recent 条目数；窗口不完整时还会明确提示使用 `map history` 开始分页读取归档历史。根文件最多保留 16 条最近变更，更早历史位于 `.knowledge/history/` 下的 SHA-256 校验不可变归档。内容寻址的有界深度 B+ tree index 让 `map history --from <version> --limit <count>` 直接定位旧归档：每个归档最多读取 11 个 index node 和一个 archive，单页上限为 256。早期 v2 归档链缺少 `history.index` 时，分页会提示先运行 `relay-knowledge map init`；该命令在 writer lock 下原子发布 index root，不会让读取请求回退为线性链扫描。`map validate` 会完整校验归档、index 和全部分片。
 
-该契约只保存稳定导航和模型入口元数据，不复制文档、代码、配置、CI、运行态系统、外部知识源中的真实知识，也不复制与 snapshot 绑定的架构/构建/部署 projection row。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。所有 ref 必须是仓库受控相对路径；绝对路径、父目录穿越和符号链接逃逸会被拒绝。mutation 共用一个 writer lock，先发布不可变 artifact，最后替换根 manifest，因此中断写入仍保留上一个可用根版本。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
+该契约只保存稳定导航和模型入口元数据，不复制文档、代码、配置、CI、运行态系统、外部知识源中的真实知识，也不复制与 snapshot 绑定的架构/构建/部署 projection row。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。所有 ref 必须是仓库受控相对路径；绝对路径、父目录穿越和符号链接逃逸会被拒绝。mutation 共用跨平台 OS advisory writer lock，先发布不可变 artifact，最后替换根 manifest；活跃 writer 保持独占，进程异常退出后 owner 自动释放，无需删除持久 `.lock` inode。首次 mutation 还会创建或扩展 target repository 的 `.knowledge/.gitignore`；应把这个 nested contract 与 map 一起提交，使普通 Git repository 与 linked worktree 都能排除 canonical/prepared lock inode，而不依赖本项目根 `.gitignore`。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
 
 ## 3.5 读写影响
 
-状态、健康、帮助、setup doctor/profile、provider probe、version check、`repo list`、report、map show/route/validate/agent-snippet 和 audit query 是诊断入口，不应修改图谱事实。`health` 是 liveness 快路径，不会排队 index refresh，也不会等待 code-index writer 完成；存储繁忙时它可以返回 stale/degraded `storage_busy`。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`map init`、`map source add/update/remove`、`repo remove`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit、知识导航契约或 service definition。
+状态、健康、帮助、setup doctor/profile、provider probe、version check、`repo list`、report、map show/history/route/validate/agent-snippet 和 audit query 是诊断入口，不应修改图谱事实。`health` 是 liveness 快路径，不会排队 index refresh，也不会等待 code-index writer 完成；存储繁忙时它可以返回 stale/degraded `storage_busy`。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`map init`、`map source add/update/remove`、`repo remove`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit、知识导航契约或 service definition。
 
 自动化调用方应优先读取 `help --format json` 中的 operation 和 read/write 说明，再决定是否在 CI、agent 或 Web 操作面中开放命令。
 

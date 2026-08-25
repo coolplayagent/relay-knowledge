@@ -55,6 +55,7 @@ The Web Operations panel covers typed command/request preview and same-origin ex
 
 - Context retrieval and evidence ingest.
 - Graph inspection and index refresh.
+- Bounded Knowledge Map history pages through the Map tab.
 - Code repository registration, indexing, query, update, impact analysis, and status.
 - Provider probe.
 - Worker status and run-once.
@@ -64,7 +65,9 @@ The Web Operations panel covers typed command/request preview and same-origin ex
 
 `Run` sends the current snapshot and shows pending, success, or error state. Execution requests do not use the 10-second diagnostic client timeout, so long indexing or maintenance operations are not aborted by the frontend.
 
-The displayed command is a CLI-equivalent preview, not a simulated frontend result. The real result comes from the unified API response returned by `/api/web/operations/execute`. On error, copy operation, command, error kind, and metadata from result JSON, then reproduce with the same CLI arguments.
+The displayed command is a CLI-equivalent preview, not a simulated frontend result. The real result comes from the unified API response returned by `/api/web/operations/execute`. The `knowledge.map.history` operation requires a managed repository alias plus the same positive `from_version` and bounded `limit` (1-256) as CLI `map history`. The service resolves the alias through persisted repository registration state, so installed Web services never infer a repository from their process working directory. Register the repository first, then reproduce a Web result by running the displayed CLI command from that repository root. On error, copy operation, repository alias, command, error kind, and metadata from result JSON.
+
+Malformed Knowledge Map request parameters and invalid repository contracts return HTTP 400. Repository filesystem or storage failures remain service failures and return HTTP 503 rather than being reported as bad user input.
 
 Operation payload validation follows the shared API contract. For example, `code.repo_set.add` defaults a missing `priority` to `0`, but a present malformed or out-of-range `priority` is rejected as a bad request instead of silently changing member ranking. `code.repo_set.refresh` defaults a missing `async` flag to synchronous execution, but a present non-boolean value is rejected instead of running an expensive overlay rebuild in the request path.
 

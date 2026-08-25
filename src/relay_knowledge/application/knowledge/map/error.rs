@@ -8,6 +8,11 @@ pub enum KnowledgeMapServiceError {
     Io(std::io::Error),
     Yaml(String),
     Domain(crate::domain::DomainError),
+    InvalidRequest(String),
+    MissingArtifact {
+        path: String,
+        expected_digest: String,
+    },
     LockTimeout(PathBuf),
     Integrity(String),
     UnsafePath(String),
@@ -19,6 +24,14 @@ impl fmt::Display for KnowledgeMapServiceError {
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Yaml(error) => write!(formatter, "invalid knowledge map YAML: {error}"),
             Self::Domain(error) => write!(formatter, "{error}"),
+            Self::InvalidRequest(message) => write!(formatter, "{message}"),
+            Self::MissingArtifact {
+                path,
+                expected_digest,
+            } => write!(
+                formatter,
+                "knowledge map artifact '{path}' is missing (expected digest {expected_digest})"
+            ),
             Self::LockTimeout(path) => write!(
                 formatter,
                 "timed out waiting for knowledge map write lock '{}'",

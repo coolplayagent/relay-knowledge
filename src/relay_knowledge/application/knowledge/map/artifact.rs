@@ -14,6 +14,8 @@ use super::error::KnowledgeMapServiceError;
 
 pub(super) const RECENT_HISTORY_LIMIT: usize = 16;
 pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 2;
+pub(super) const HISTORY_INDEX_FANOUT: usize = 64;
+pub(super) const HISTORY_INDEX_MAX_HEIGHT: u8 = 10;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct KnowledgeMapSchemaProbe {
@@ -62,13 +64,55 @@ pub(super) struct KnowledgeMapHistoryManifest {
     pub(super) archived_through: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) index: Option<KnowledgeMapHistoryIndexRef>,
     pub(super) recent: Vec<KnowledgeMapHistoryEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapArchiveRef {
     pub(super) r#ref: String,
     pub(super) digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct KnowledgeMapHistoryIndexRef {
+    pub(super) from_version: u64,
+    pub(super) through_version: u64,
+    pub(super) height: u8,
+    pub(super) r#ref: String,
+    pub(super) digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct KnowledgeMapHistoryIndexNode {
+    pub(super) schema_version: u16,
+    pub(super) from_version: u64,
+    pub(super) through_version: u64,
+    pub(super) height: u8,
+    pub(super) entries: Vec<KnowledgeMapHistoryIndexEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct KnowledgeMapHistoryIndexEntry {
+    pub(super) from_version: u64,
+    pub(super) through_version: u64,
+    #[serde(flatten)]
+    pub(super) target: KnowledgeMapHistoryIndexTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(super) enum KnowledgeMapHistoryIndexTarget {
+    Archive {
+        r#ref: String,
+        digest: String,
+    },
+    Node {
+        height: u8,
+        r#ref: String,
+        digest: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -137,7 +181,46 @@ pub(super) fn parse_manifest(
             ));
         }
     }
+    if manifest.history.archived_through == 0 && manifest.history.index.is_some() {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history index must be absent when no history is archived".to_owned(),
+        ));
+    }
+    if let Some(index) = &manifest.history.index {
+        validate_history_index_ref_shape(index, manifest.history.archived_through)?;
+        if index.from_version != 1 {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "history index root must begin at version 1".to_owned(),
+            ));
+        }
+    }
     Ok(manifest)
+}
+
+pub(super) fn validate_history_index_ref_shape(
+    index: &KnowledgeMapHistoryIndexRef,
+    archived_through: u64,
+) -> Result<(), KnowledgeMapServiceError> {
+    let expected_ref = format!(
+        "{}/index-{:02}-{:020}-{:020}-{}.yaml",
+        crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME,
+        index.height,
+        index.from_version,
+        index.through_version,
+        index.digest
+    );
+    if index.from_version == 0
+        || index.from_version > index.through_version
+        || index.through_version != archived_through
+        || index.height > HISTORY_INDEX_MAX_HEIGHT
+        || !is_lower_hex_digest(&index.digest)
+        || index.r#ref != expected_ref
+    {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history index root ref is invalid".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_topic_shard(
@@ -226,6 +309,46 @@ pub(super) fn validate_recent_history(
     if (manifest.history.archived_through == 0) != manifest.history.archive.is_none() {
         return Err(KnowledgeMapServiceError::Integrity(
             "history archive reference and checkpoint disagree".to_owned(),
+        ));
+    }
+    if let Some(archive) = &manifest.history.archive {
+        validate_archive_ref_shape(archive, manifest.history.archived_through)?;
+    }
+    Ok(())
+}
+
+fn validate_archive_ref_shape(
+    archive: &KnowledgeMapArchiveRef,
+    archived_through: u64,
+) -> Result<(), KnowledgeMapServiceError> {
+    let name = archive
+        .r#ref
+        .strip_prefix(&format!(
+            "{}/",
+            crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME
+        ))
+        .and_then(|value| value.strip_suffix(".yaml"));
+    let Some(name) = name else {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history archive ref is not content addressed".to_owned(),
+        ));
+    };
+    let mut parts = name.split('-');
+    let from_text = parts.next();
+    let through_text = parts.next();
+    let from = from_text.and_then(|value| value.parse::<u64>().ok());
+    let through = through_text.and_then(|value| value.parse::<u64>().ok());
+    let digest = parts.next();
+    if parts.next().is_some()
+        || from.is_none_or(|value| value == 0)
+        || from_text.is_none_or(|value| value.len() != 20)
+        || through_text.is_none_or(|value| value.len() != 20)
+        || through != Some(archived_through)
+        || from.is_some_and(|value| value > archived_through)
+        || digest != Some(archive.digest.as_str())
+    {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history archive ref is not content addressed for its checkpoint".to_owned(),
         ));
     }
     Ok(())
@@ -331,6 +454,19 @@ pub(super) async fn read_verified_ref(
     expected_digest: &str,
 ) -> Result<String, KnowledgeMapServiceError> {
     let path = resolve_contract_ref(repository_root, relative)?;
+    match fs::symlink_metadata(&path).await {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(KnowledgeMapServiceError::MissingArtifact {
+                path: relative.to_owned(),
+                expected_digest: expected_digest.to_owned(),
+            });
+        }
+        Err(error) => return Err(error.into()),
+    }
     let canonical_repository = fs::canonicalize(repository_root).await?;
     let canonical_contract =
         fs::canonicalize(repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME)).await?;
@@ -356,9 +492,10 @@ pub(super) async fn read_verified_ref(
         return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
     }
     let content = fs::read_to_string(path).await?;
-    if content_digest(content.as_bytes()) != expected_digest {
+    let actual_digest = content_digest(content.as_bytes());
+    if actual_digest != expected_digest {
         return Err(KnowledgeMapServiceError::Integrity(format!(
-            "digest mismatch for '{relative}'"
+            "digest mismatch for '{relative}': expected {expected_digest}, found {actual_digest}"
         )));
     }
     Ok(content)

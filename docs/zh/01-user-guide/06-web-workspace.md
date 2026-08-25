@@ -55,6 +55,7 @@ Web Operations 面板覆盖这些 typed command/request preview 和同源执行:
 
 - 检索上下文和摄取 evidence。
 - 图检查和索引刷新。
+- 通过 Map 页签有界读取 Knowledge Map 历史分页。
 - 代码仓库注册、索引、查询、更新、影响分析和状态。
 - provider 探测。
 - worker 状态和 run-once。
@@ -64,7 +65,9 @@ Web Operations 面板覆盖这些 typed command/request preview 和同源执行:
 
 `Run` 会发送当前 snapshot 并在页面内显示 pending、success 或 error 状态。执行请求不使用诊断请求的 10 秒客户端超时，避免长时间索引或维护操作被前端提前 abort。
 
-操作面板展示的 command 是 CLI 等价预览，不是前端模拟结果。真正执行结果来自 `/api/web/operations/execute` 返回的统一 API 响应。发生错误时，先复制 result JSON 中的 operation、command、error kind 和 metadata，再回到 CLI 用同样参数复现。
+操作面板展示的 command 是 CLI 等价预览，不是前端模拟结果。真正执行结果来自 `/api/web/operations/execute` 返回的统一 API 响应。`knowledge.map.history` 操作必须提供已托管的仓库别名，并与 CLI `map history` 使用相同的正数 `from_version` 和有界 `limit`（1-256）。服务通过持久化的仓库注册状态解析别名，因此安装后的 Web 服务不会从进程工作目录猜测仓库。请先注册仓库；复现 Web 结果时进入该仓库根目录再运行展示的 CLI 命令。发生错误时，复制 result JSON 中的 operation、仓库别名、command、error kind 和 metadata。
+
+Knowledge Map 请求参数错误和无效仓库契约返回 HTTP 400；仓库文件系统或存储故障保留为服务端故障并返回 HTTP 503，不会被误报为用户输入错误。
 
 操作 payload 校验遵循共享 API 契约。例如 `code.repo_set.add` 在缺少 `priority` 时默认使用 `0`，但只要传入了格式错误或越界的 `priority`，就会返回 bad request，不会静默改成默认值并影响成员排序。`code.repo_set.refresh` 在缺少 `async` 时默认同步执行，但只要传入了非布尔值，就会拒绝请求，不会在请求路径中意外运行昂贵的 overlay rebuild。
 

@@ -6,15 +6,20 @@ use serde::Serialize;
 
 use crate::{
     api::{ApiMetadata, RequestContext},
-    domain::{KnowledgeMap, KnowledgeMapRoute, KnowledgeMapSource, KnowledgeMapSourceKind},
+    domain::{
+        KnowledgeMap, KnowledgeMapHistoryEntry, KnowledgeMapRoute, KnowledgeMapSource,
+        KnowledgeMapSourceKind, KnowledgeMapTopic,
+    },
 };
 
-use super::artifact::KnowledgeMapArchiveRef;
+use super::artifact::{KnowledgeMapArchiveRef, KnowledgeMapHistoryIndexRef};
 
 pub(super) struct MutableKnowledgeMap {
     pub(super) map: KnowledgeMap,
     pub(super) archived_through: u64,
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
+    pub(super) history_index: Option<KnowledgeMapHistoryIndexRef>,
+    pub(super) requires_publish: bool,
 }
 
 impl MutableKnowledgeMap {
@@ -23,6 +28,8 @@ impl MutableKnowledgeMap {
             map: KnowledgeMap::initial(updated_at),
             archived_through: 0,
             archive: None,
+            history_index: None,
+            requires_publish: false,
         }
     }
 }
@@ -64,7 +71,40 @@ pub struct KnowledgeMapMutationResponse {
 pub struct KnowledgeMapShowResponse {
     pub metadata: ApiMetadata,
     pub path: String,
-    pub map: KnowledgeMap,
+    pub map: KnowledgeMapView,
+}
+
+/// Bounded assembled view returned by `map show`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KnowledgeMapView {
+    pub artifact_schema_version: u16,
+    pub map_version: u64,
+    pub updated_at: String,
+    pub topics: Vec<KnowledgeMapTopic>,
+    pub sources: Vec<KnowledgeMapSource>,
+    pub routes: Vec<KnowledgeMapRoute>,
+    pub history: KnowledgeMapHistoryWindow,
+}
+
+/// Recent history and the checkpoint for history intentionally omitted from a show response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KnowledgeMapHistoryWindow {
+    pub archived_through: u64,
+    pub complete: bool,
+    pub recent: Vec<KnowledgeMapHistoryEntry>,
+}
+
+/// One explicitly bounded page of complete Knowledge Map history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KnowledgeMapHistoryResponse {
+    pub metadata: ApiMetadata,
+    pub path: String,
+    pub map_version: u64,
+    pub from_version: u64,
+    pub through_version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_from_version: Option<u64>,
+    pub entries: Vec<KnowledgeMapHistoryEntry>,
 }
 
 /// Response returned by topic routing commands.

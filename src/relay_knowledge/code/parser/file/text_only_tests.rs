@@ -33,7 +33,7 @@ fn oversized_markdown_text_only_files_keep_late_heading_symbols() {
 #[test]
 fn oversized_knowledge_map_text_only_files_keep_late_topic_symbols() {
     let padding = "x".repeat(MAX_TEXT_FILE_BYTES + 128);
-    let source = format!("topics:\n  # {padding}\n  - id: oversized-topic\n");
+    let source = format!("schema_version: 1\ntopics:\n  # {padding}\n  - id: oversized-topic\n");
     let snapshot = parse_source_snapshot(".knowledge/knowledge-map.yaml", source.as_bytes());
 
     assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::TextOnly);
@@ -53,7 +53,7 @@ fn oversized_knowledge_map_text_only_files_keep_late_topic_symbols() {
 fn oversized_knowledge_map_text_only_files_ignore_nested_sequence_ids() {
     let padding = "x".repeat(MAX_TEXT_FILE_BYTES + 128);
     let source = format!(
-        "topics:\n  - id: real-topic\n    related:\n      # {padding}\n      - id: nested-topic\n"
+        "schema_version: 1\ntopics:\n  - id: real-topic\n    related:\n      # {padding}\n      - id: nested-topic\n"
     );
     let snapshot = parse_source_snapshot(".knowledge/knowledge-map.yaml", source.as_bytes());
 
@@ -82,6 +82,34 @@ fn text_only_topic_scan_preserves_valid_lines_after_invalid_utf8() {
             .symbols
             .iter()
             .any(|symbol| symbol.kind == "heading" && symbol.name == "Late Heading")
+    );
+}
+
+#[test]
+fn knowledge_map_scan_preserves_facts_after_an_invalid_utf8_line() {
+    let snapshot = parse_source_snapshot(
+        ".knowledge/knowledge-map.yaml",
+        b"schema_version: 1\n# \xFF\ntopics:\n  - id: retained-topic\n",
+    );
+
+    assert!(
+        snapshot.symbols.iter().any(|symbol| {
+            symbol.kind == "knowledge_map_topic" && symbol.name == "retained-topic"
+        })
+    );
+}
+
+#[test]
+fn knowledge_map_scan_isolates_a_syntactically_significant_invalid_utf8_line() {
+    let snapshot = parse_source_snapshot(
+        ".knowledge/knowledge-map.yaml",
+        b"schema_version: 1\n\xFF: [\ntopics:\n  - id: retained-topic\n",
+    );
+
+    assert!(
+        snapshot.symbols.iter().any(|symbol| {
+            symbol.kind == "knowledge_map_topic" && symbol.name == "retained-topic"
+        })
     );
 }
 

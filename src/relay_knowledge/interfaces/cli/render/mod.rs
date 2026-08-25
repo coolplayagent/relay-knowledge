@@ -107,15 +107,8 @@ where
                 .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
             value["map_version"].as_u64().unwrap_or(0)
         ),
-        "knowledge.map.show" => format!(
-            "knowledge_map={} topics={} sources={} routes={}",
-            value["path"]
-                .as_str()
-                .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
-            value["map"]["topics"].as_array().map_or(0, Vec::len),
-            value["map"]["sources"].as_array().map_or(0, Vec::len),
-            value["map"]["routes"].as_array().map_or(0, Vec::len)
-        ),
+        "knowledge.map.show" => render_knowledge_map_show(&value),
+        "knowledge.map.history" => render_knowledge_map_history(&value),
         "knowledge.map.route" => format!(
             "topic={} sources={}",
             value["topic"].as_str().unwrap_or("unknown"),
@@ -336,6 +329,62 @@ where
     };
 
     Ok(format!("{line}\n"))
+}
+
+fn render_knowledge_map_history(value: &serde_json::Value) -> String {
+    let mut lines = vec![format!(
+        "knowledge_map={} map_version={} from={} through={} next={}",
+        value["path"]
+            .as_str()
+            .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
+        value["map_version"].as_u64().unwrap_or(0),
+        value["from_version"].as_u64().unwrap_or(0),
+        value["through_version"].as_u64().unwrap_or(0),
+        value["next_from_version"]
+            .as_u64()
+            .map_or_else(|| "none".to_owned(), |version| version.to_string())
+    )];
+    if let Some(entries) = value["entries"].as_array() {
+        lines.extend(entries.iter().map(|entry| {
+            format!(
+                "version={} action={} actor={} summary={}",
+                entry["version"].as_u64().unwrap_or(0),
+                single_line(entry["action"].as_str().unwrap_or("unknown")),
+                single_line(entry["actor"].as_str().unwrap_or("unknown")),
+                single_line(entry["summary"].as_str().unwrap_or(""))
+            )
+        }));
+    }
+    lines.join("\n")
+}
+
+fn render_knowledge_map_show(value: &serde_json::Value) -> String {
+    let history = &value["map"]["history"];
+    let complete = history["complete"].as_bool().unwrap_or(true);
+    let archived_through = history["archived_through"].as_u64().unwrap_or(0);
+    let mut output = format!(
+        "knowledge_map={} topics={} sources={} routes={} history_complete={} history_archived_through={} history_recent={}",
+        value["path"]
+            .as_str()
+            .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
+        value["map"]["topics"].as_array().map_or(0, Vec::len),
+        value["map"]["sources"].as_array().map_or(0, Vec::len),
+        value["map"]["routes"].as_array().map_or(0, Vec::len),
+        complete,
+        archived_through,
+        history["recent"].as_array().map_or(0, Vec::len)
+    );
+    if !complete {
+        output.push_str(&format!(
+            "\nhistory_notice=entries through version {archived_through} are archived; use relay-knowledge map history --from 1 --limit 256 to start paging archived history"
+        ));
+    }
+
+    output
+}
+
+fn single_line(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
 }
 
 fn render_code_repository_list(value: &serde_json::Value) -> String {

@@ -49,6 +49,15 @@ impl ApiError {
             metadata: None,
         }
     }
+
+    /// Creates a bounded-operation timeout error.
+    pub fn timeout(message: impl Into<String>) -> Self {
+        Self {
+            error_kind: ErrorKind::Timeout,
+            message: message.into(),
+            metadata: None,
+        }
+    }
 }
 
 #[cfg(test)]

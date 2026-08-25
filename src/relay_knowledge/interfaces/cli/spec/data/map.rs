@@ -6,6 +6,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
     vec![
         map_init(),
         map_show(),
+        map_history(),
         map_route(),
         map_source_add(),
         map_source_update(),
@@ -53,8 +54,41 @@ fn map_show() -> CliCommandSpec {
         &["relay-knowledge map show --topic build --format json"],
         &[
             "The repository root is discovered from the process start directory before reading .knowledge/knowledge-map.yaml.",
-            "The compatibility view assembles all v2 topic shards; use map route for progressive one-topic loading."
+            "The assembled view reads all current topic shards but returns only the bounded recent-history window; use map history for explicit history pages and map route for progressive one-topic loading."
         ],
+    )
+}
+
+fn map_history() -> CliCommandSpec {
+    command!(
+        &["map", "history"],
+        "relay-knowledge map history [--from <version>] [--limit <count>]",
+        "Read one explicitly bounded page of Knowledge Map history.",
+        "knowledge.map.history",
+        CommandEffect::ReadOnly,
+        &[],
+        &[
+            opt(
+                "--from",
+                Some("version"),
+                false,
+                false,
+                "First history version to return. Defaults to 1.",
+                None,
+                &[],
+            ),
+            opt(
+                "--limit",
+                Some("count"),
+                false,
+                false,
+                "Maximum entries to return. Defaults to 64 and cannot exceed 256.",
+                None,
+                &[],
+            ),
+        ],
+        &["relay-knowledge map history --from 17 --limit 32 --format json"],
+        &["History pages verify the referenced archive chain before returning entries."],
     )
 }
 
