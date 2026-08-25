@@ -1,3 +1,5 @@
+//! Cross-process Knowledge Map writer-lock publication and recovery protocol.
+
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},

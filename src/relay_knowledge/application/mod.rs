@@ -10,7 +10,9 @@ mod worker;
 
 pub use knowledge::DEFAULT_FILE_QUERY_LIMIT;
 pub use knowledge::map::KnowledgeMapSourceAddRequest;
-pub(crate) use knowledge::map::{KnowledgeMapService, KnowledgeMapServiceError};
+pub(crate) use knowledge::map::{
+    KnowledgeMapService, KnowledgeMapServiceError, MAX_HISTORY_PAGE_SIZE,
+};
 pub use runtime::{
     AgentRuntimeConfig, FileIndexRootConfig, FileIndexRuntimeConfig, RetrievalRuntimeConfigError,
     RuntimeConfiguration, RuntimeConfigurationError, WorkerRuntimeConfig,

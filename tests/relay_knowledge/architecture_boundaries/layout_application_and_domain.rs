@@ -101,6 +101,35 @@ fn knowledge_application_root_contains_only_the_facade_and_named_subdomains() {
 }
 
 #[test]
+fn knowledge_map_root_keeps_locking_history_and_path_owners_separate() {
+    let map_root = source_root().join("application/knowledge/map");
+    let owners = [
+        "artifact.rs",
+        "contracts.rs",
+        "error.rs",
+        "history.rs",
+        "history_tests.rs",
+        "lock.rs",
+        "mod.rs",
+        "mod_tests.rs",
+        "path_tests.rs",
+    ];
+    assert_eq!(directory_entry_names(&map_root), owners);
+    for owner in owners {
+        let path = map_root.join(owner);
+        let line_count = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{} should read: {error}", path.display()))
+            .lines()
+            .count();
+        assert!(
+            line_count <= 1_000,
+            "{} has {line_count} lines and exceeds the 1,000-line owner cap",
+            path.display()
+        );
+    }
+}
+
+#[test]
 fn update_application_root_contains_only_the_facade_and_named_subdomains() {
     let update_root = source_root().join("application/update");
     assert_eq!(

@@ -23,8 +23,7 @@ mod error;
 mod history;
 mod lock;
 
-#[cfg(test)]
-use history::MAX_HISTORY_PAGE_SIZE;
+pub(crate) use history::MAX_HISTORY_PAGE_SIZE;
 #[cfg(test)]
 use lock::{ADVISORY_LOCK_MARKER, cleanup_transition_locks, transition_lock_prepared_path};
 

@@ -38,6 +38,16 @@ fn knowledge_map_history_page_requires_positive_bounded_inputs() {
         }))
         .is_err()
     );
+    let oversized = knowledge_map_history_page(&serde_json::json!({
+        "repository": " ",
+        "from_version": 2,
+        "limit": MAX_HISTORY_PAGE_SIZE + 1
+    }))
+    .expect_err("range validation should precede repository validation");
+    assert_eq!(
+        oversized.message,
+        format!("limit must be within 1..={MAX_HISTORY_PAGE_SIZE}")
+    );
 }
 
 #[test]

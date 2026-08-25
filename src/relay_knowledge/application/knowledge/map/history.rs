@@ -16,7 +16,7 @@ use super::{
     contracts::metadata,
 };
 
-pub(super) const MAX_HISTORY_PAGE_SIZE: usize = 256;
+pub(crate) const MAX_HISTORY_PAGE_SIZE: usize = 256;
 
 impl KnowledgeMapService {
     pub async fn history(

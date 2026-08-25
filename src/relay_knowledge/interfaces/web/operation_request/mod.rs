@@ -5,6 +5,7 @@ use crate::{
         CodeRepositoryRegisterRequest, GraphInspectionRequest, HybridRetrievalRequest,
         IndexRefreshRequest, IngestEvidence, IngestRequest, ProposalDecisionApiRequest,
     },
+    application::MAX_HISTORY_PAGE_SIZE,
     domain::{
         CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeQueryKind,
         CodeRepositorySelector, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
@@ -62,6 +63,7 @@ pub(super) fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebE
     })
 }
 
+#[derive(Debug)]
 pub(super) struct KnowledgeMapHistoryPage {
     pub(super) repository: String,
     pub(super) from_version: u64,
@@ -71,7 +73,6 @@ pub(super) struct KnowledgeMapHistoryPage {
 pub(super) fn knowledge_map_history_page(
     payload: &Value,
 ) -> Result<KnowledgeMapHistoryPage, WebError> {
-    let repository = string_field(payload, "repository")?.trim().to_owned();
     let from_version = payload
         .get("from_version")
         .and_then(Value::as_u64)
@@ -79,10 +80,17 @@ pub(super) fn knowledge_map_history_page(
         .ok_or_else(|| {
             WebError::bad_request("from_version must be a positive integer".to_owned())
         })?;
+    let limit = usize_field(payload, "limit")?;
+    if limit > MAX_HISTORY_PAGE_SIZE {
+        return Err(WebError::bad_request(format!(
+            "limit must be within 1..={MAX_HISTORY_PAGE_SIZE}"
+        )));
+    }
+    let repository = string_field(payload, "repository")?.trim().to_owned();
     Ok(KnowledgeMapHistoryPage {
         repository,
         from_version,
-        limit: usize_field(payload, "limit")?,
+        limit,
     })
 }
 

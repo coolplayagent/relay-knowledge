@@ -316,7 +316,7 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
                 "command": "relay-knowledge map history --from 1 --limit 257",
                 "payload": {
                     "operation": "knowledge.map.history",
-                    "repository": "map-history",
+                    "repository": "missing",
                     "from_version": 1,
                     "limit": 257
                 }
@@ -325,7 +325,7 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert!(oversized["error"].as_str().unwrap().contains("1..=256"));
+    assert_eq!(oversized["error"], "limit must be within 1..=256");
 }
 
 #[tokio::test]
