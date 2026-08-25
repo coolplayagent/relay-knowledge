@@ -1,0 +1,21 @@
+schema_version: 2
+topic:
+  id: release-documentation
+  title: Release documentation knowledge
+  description: Release-readiness documentation, navigation, and validation records.
+sources:
+- id: documentation-release-readiness-2026-06-05
+  topic: release-documentation
+  kind: doc
+  uri: docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Release-readiness documentation refresh audit and validation record.
+route:
+  topic: release-documentation
+  source_order:
+  - documentation-release-readiness-2026-06-05
+  fallback: bounded-search
