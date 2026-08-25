@@ -1,6 +1,59 @@
 use super::render_text;
 
 #[test]
+fn map_show_reports_complete_v1_history_window() {
+    let rendered = render_text(
+        "knowledge.map.show",
+        &serde_json::json!({
+            "path": ".knowledge/knowledge-map.yaml",
+            "map": {
+                "topics": [{"id": "software-model"}],
+                "sources": [{"id": "repository-software-model"}],
+                "routes": [{"topic": "software-model"}],
+                "history": {
+                    "archived_through": 0,
+                    "complete": true,
+                    "recent": [{"version": 1}]
+                }
+            }
+        }),
+    )
+    .expect("v1 show should render");
+
+    assert_eq!(
+        rendered,
+        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=true history_archived_through=0 history_recent=1\n"
+    );
+    assert!(!rendered.contains("map history"));
+}
+
+#[test]
+fn map_show_reports_truncated_v2_history_window() {
+    let rendered = render_text(
+        "knowledge.map.show",
+        &serde_json::json!({
+            "path": ".knowledge/knowledge-map.yaml",
+            "map": {
+                "topics": [{"id": "software-model"}],
+                "sources": [{"id": "repository-software-model"}],
+                "routes": [{"topic": "software-model"}],
+                "history": {
+                    "archived_through": 24,
+                    "complete": false,
+                    "recent": [{"version": 25}, {"version": 26}]
+                }
+            }
+        }),
+    )
+    .expect("v2 show should render");
+
+    assert_eq!(
+        rendered,
+        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=false history_archived_through=24 history_recent=2\nhistory_notice=entries through version 24 are archived; use relay-knowledge map history --from 1 --limit 256 to start paging archived history\n"
+    );
+}
+
+#[test]
 fn render_text_covers_operational_and_code_repository_summaries() {
     let cases = [
         (

@@ -344,6 +344,8 @@ Network entry points support connection budgets, request budgets, body limits, t
 - New background or network behavior states budgets, failure modes, cancellation, and observability metrics.
 - New retrieval or performance work explains a general mechanism, not only why one example passes.
 
+Knowledge Map v2 archived-history lookup must use a root-manifest-authorized, SHA-256-content-addressed range index with hard fanout and depth limits. Public history-page I/O, memory, and node-read budgets must not grow linearly with the total archive count. Index ranges must be contiguous, non-overlapping, and cover the complete archived checkpoint. An early v2 map without an index may acquire one only through an explicit writer-locked representation migration; reads must never fall back to a reverse-chain scan. Migration and append publish immutable nodes before atomically publishing the root, so the preceding root remains readable across crashes and retrying identical content is idempotent.
+
 ---
 
 Navigation: Previous: [1. Architecture Vision and Algorithm Map](01-architecture-vision-and-algorithm-map.md) | Next: [3. Foundational Runtime](03-foundational-runtime.md)

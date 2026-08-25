@@ -1,8 +1,13 @@
 //! Cross-process Knowledge Map writer-lock publication and recovery protocol.
 
 use std::{
+    fmt::Write as _,
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, SystemTime},
 };
 
@@ -14,17 +19,42 @@ use crate::project::{AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME};
 pub(super) const ADVISORY_LOCK_MARKER: &[u8] = b"relay-knowledge advisory writer lock v2\n";
 const PREPARED_LOCK_CLEANUP_LIMIT: usize = 64;
 const PREPARED_LOCK_RETIREMENT_AGE: Duration = Duration::from_secs(60);
+const PREPARED_LOCK_STARTUP_ID_BYTES: usize = 16;
+const LOCK_IGNORE_MAX_BYTES: u64 = 64 * 1024;
+const LOCK_IGNORE_COMMENT: &[u8] = b"# relay-knowledge transient writer locks\n";
+const LOCK_IGNORE_CANONICAL: &[u8] = b"/knowledge-map.yaml.lock";
+const LOCK_IGNORE_PREPARED: &[u8] = b"/knowledge-map.yaml.lock.prepared.*";
 static PREPARED_LOCK_NONCE: AtomicU64 = AtomicU64::new(0);
+static PREPARED_LOCK_STARTUP_ID: OnceLock<[u8; PREPARED_LOCK_STARTUP_ID_BYTES]> = OnceLock::new();
 
 impl KnowledgeMapService {
     pub(super) async fn acquire_write_lock(
         &self,
         timeout: Duration,
     ) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
+        let deadline = Instant::now() + timeout;
         let directory = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
         ensure_owned_directory(&self.repository_root, &directory).await?;
+        let ignore_path = directory.join(".gitignore");
+        let ignore_worker_path = ignore_path.clone();
+        let ignore_timeout = deadline.saturating_duration_since(Instant::now());
+        let ignore_result = tokio::task::spawn_blocking(move || {
+            ensure_lock_ignore_contract(&ignore_worker_path, ignore_timeout)
+        })
+        .await
+        .map_err(|error| {
+            KnowledgeMapServiceError::Io(std::io::Error::other(format!(
+                "knowledge map ignore-contract worker failed: {error}"
+            )))
+        })?;
+        match ignore_result {
+            Ok(()) => {}
+            Err(error) if lock_is_contended(&error) => {
+                return Err(KnowledgeMapServiceError::LockTimeout(ignore_path));
+            }
+            Err(error) => return Err(KnowledgeMapServiceError::Io(error)),
+        }
         let path = directory.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
-        let deadline = Instant::now() + timeout;
         loop {
             let open_path = path.clone();
             let candidate = tokio::task::spawn_blocking(move || open_transition_lock(&open_path))
@@ -104,8 +134,6 @@ fn classify_transition_lock(mut file: std::fs::File) -> std::io::Result<Transiti
 }
 
 fn publish_marked_transition_lock(path: &Path) -> std::io::Result<TransitionLock> {
-    use std::io::Write;
-
     let (prepared_path, mut file) = create_transition_lock_staging(path)?;
     fs2::FileExt::try_lock_exclusive(&file)?;
     if let Err(error) = file
@@ -146,7 +174,7 @@ fn publish_marked_transition_lock(path: &Path) -> std::io::Result<TransitionLock
 
 fn create_transition_lock_staging(path: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
     for _ in 0..16 {
-        let prepared_path = transition_lock_prepared_path(path);
+        let prepared_path = transition_lock_prepared_path(path)?;
         match std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -164,10 +192,44 @@ fn create_transition_lock_staging(path: &Path) -> std::io::Result<(PathBuf, std:
     ))
 }
 
-pub(super) fn transition_lock_prepared_path(path: &Path) -> PathBuf {
+pub(super) fn transition_lock_prepared_path(path: &Path) -> std::io::Result<PathBuf> {
     let nonce = PREPARED_LOCK_NONCE.fetch_add(1, Ordering::Relaxed);
+    let startup_id = prepared_lock_startup_id()?;
+    Ok(transition_lock_prepared_path_with_identity(
+        path,
+        std::process::id(),
+        &startup_id,
+        nonce,
+    ))
+}
+
+fn prepared_lock_startup_id() -> std::io::Result<String> {
+    if PREPARED_LOCK_STARTUP_ID.get().is_none() {
+        let mut candidate = [0_u8; PREPARED_LOCK_STARTUP_ID_BYTES];
+        getrandom::getrandom(&mut candidate).map_err(|error| {
+            std::io::Error::other(format!("prepared lock startup randomness failed: {error}"))
+        })?;
+        let _ = PREPARED_LOCK_STARTUP_ID.set(candidate);
+    }
+    let bytes = PREPARED_LOCK_STARTUP_ID
+        .get()
+        .ok_or_else(|| std::io::Error::other("prepared lock startup id was not initialized"))?;
+    let mut encoded = String::with_capacity(PREPARED_LOCK_STARTUP_ID_BYTES * 2);
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}")
+            .expect("writing hexadecimal bytes to a String cannot fail");
+    }
+    Ok(encoded)
+}
+
+pub(super) fn transition_lock_prepared_path_with_identity(
+    path: &Path,
+    process_id: u32,
+    startup_id: &str,
+    nonce: u64,
+) -> PathBuf {
     let mut prepared = path.as_os_str().to_owned();
-    prepared.push(format!(".prepared.{}.{nonce}", std::process::id()));
+    prepared.push(format!(".prepared.{process_id}.{startup_id}.{nonce}"));
     PathBuf::from(prepared)
 }
 
@@ -211,32 +273,98 @@ pub(super) fn cleanup_transition_locks(path: &Path, retirement_age: Duration) {
 }
 
 fn valid_prepared_lock_suffix(suffix: &str) -> bool {
-    let Some((process, nonce)) = suffix.split_once('.') else {
+    let mut parts = suffix.split('.');
+    let (Some(process), Some(second)) = (parts.next(), parts.next()) else {
         return false;
     };
-    !process.is_empty()
-        && !nonce.is_empty()
-        && process.bytes().all(|byte| byte.is_ascii_digit())
-        && nonce.bytes().all(|byte| byte.is_ascii_digit())
+    if process.is_empty() || !process.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    match (parts.next(), parts.next()) {
+        (None, None) => !second.is_empty() && second.bytes().all(|byte| byte.is_ascii_digit()),
+        (Some(nonce), None) => {
+            second.len() == PREPARED_LOCK_STARTUP_ID_BYTES * 2
+                && second
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                && !nonce.is_empty()
+                && nonce.bytes().all(|byte| byte.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
+fn ensure_lock_ignore_contract(path: &Path, timeout: Duration) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).append(true).create(true);
+    configure_no_follow(&mut options);
+    let mut file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || lock_metadata_is_reparse_point(&metadata) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "knowledge map lock ignore contract must be a regular file, got {}",
+                path.display()
+            ),
+        ));
+    }
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => break,
+            Err(error) if lock_is_contended(&error) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    file.seek(std::io::SeekFrom::Start(0))?;
+    let mut content = Vec::new();
+    std::io::Read::by_ref(&mut file)
+        .take(LOCK_IGNORE_MAX_BYTES + 1)
+        .read_to_end(&mut content)?;
+    if content.len() as u64 > LOCK_IGNORE_MAX_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "knowledge map lock ignore contract exceeds {LOCK_IGNORE_MAX_BYTES} bytes: {}",
+                path.display()
+            ),
+        ));
+    }
+    let has_canonical = ignore_contract_has_line(&content, LOCK_IGNORE_CANONICAL);
+    let has_prepared = ignore_contract_has_line(&content, LOCK_IGNORE_PREPARED);
+    if has_canonical && has_prepared {
+        return Ok(());
+    }
+    let mut addition = Vec::new();
+    if content.last().is_some_and(|byte| *byte != b'\n') {
+        addition.push(b'\n');
+    }
+    addition.extend_from_slice(LOCK_IGNORE_COMMENT);
+    if !has_canonical {
+        addition.extend_from_slice(LOCK_IGNORE_CANONICAL);
+        addition.push(b'\n');
+    }
+    if !has_prepared {
+        addition.extend_from_slice(LOCK_IGNORE_PREPARED);
+        addition.push(b'\n');
+    }
+    file.write_all(&addition)?;
+    file.sync_all()
+}
+
+fn ignore_contract_has_line(content: &[u8], expected: &[u8]) -> bool {
+    content
+        .split(|byte| *byte == b'\n')
+        .any(|line| line.strip_suffix(b"\r").unwrap_or(line) == expected)
 }
 
 fn open_existing_transition_lock(path: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
+    configure_no_follow(&mut options);
 
     let file = options.open(path)?;
     let metadata = file.metadata()?;
@@ -250,6 +378,22 @@ fn open_existing_transition_lock(path: &Path) -> std::io::Result<std::fs::File> 
         ));
     }
     Ok(file)
+}
+
+fn configure_no_follow(options: &mut std::fs::OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
 }
 
 #[cfg(windows)]

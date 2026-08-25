@@ -25,7 +25,10 @@ mod lock;
 
 pub(crate) use history::MAX_HISTORY_PAGE_SIZE;
 #[cfg(test)]
-use lock::{ADVISORY_LOCK_MARKER, cleanup_transition_locks, transition_lock_prepared_path};
+use lock::{
+    ADVISORY_LOCK_MARKER, cleanup_transition_locks, transition_lock_prepared_path,
+    transition_lock_prepared_path_with_identity,
+};
 
 use artifact::*;
 pub use contracts::{
@@ -78,12 +81,16 @@ impl KnowledgeMapService {
                     "initialized repository software-model route".to_owned(),
                 ));
             }
-            if legacy {
+            if legacy || snapshot.requires_publish {
                 self.write_map(&mut snapshot).await?;
                 return Ok(self.mutation_response(
                     context,
                     snapshot.map.map_version,
-                    "migrated knowledge map schema v1 to v2".to_owned(),
+                    if legacy {
+                        "migrated knowledge map schema v1 to v2".to_owned()
+                    } else {
+                        "migrated Knowledge Map v2 history archive index".to_owned()
+                    },
                 ));
             }
             return Ok(self.mutation_response(
@@ -237,12 +244,8 @@ impl KnowledgeMapService {
         context: &RequestContext,
     ) -> Result<KnowledgeMapValidationResponse, KnowledgeMapServiceError> {
         let mut diagnostics = Vec::new();
-        match self.load_map().await {
-            Ok(map) => {
-                if let Err(error) = map.validate() {
-                    diagnostics.push(error.to_string());
-                }
-            }
+        match self.validate_map_contract().await {
+            Ok(()) => {}
             Err(error) => diagnostics.push(error.to_string()),
         }
 
@@ -292,6 +295,8 @@ impl KnowledgeMapService {
                 map,
                 archived_through: 0,
                 archive: None,
+                history_index: None,
+                requires_publish: true,
             });
         }
         if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
@@ -301,7 +306,10 @@ impl KnowledgeMapService {
             )));
         }
         let manifest = parse_manifest(&content)?;
-        let archived_history = self.load_archived_history(&manifest.history).await?;
+        self.validate_archived_history(&manifest.history).await?;
+        let history_index = self.ensure_history_index(&manifest.history).await?;
+        let requires_publish =
+            manifest.history.archive.is_some() && manifest.history.index.is_none();
         let mut topics = Vec::with_capacity(manifest.topics.len());
         let mut sources = Vec::new();
         let mut routes = Vec::new();
@@ -321,35 +329,51 @@ impl KnowledgeMapService {
             history: manifest.history.recent,
         };
         map.validate_snapshot(manifest.history.archived_through)?;
-        let mut validation_map = map.clone();
-        let mut complete_history = archived_history;
-        complete_history.extend(validation_map.history.clone());
-        validation_map.history = complete_history;
-        validation_map.validate()?;
         Ok(MutableKnowledgeMap {
             map,
             archived_through: manifest.history.archived_through,
             archive: manifest.history.archive,
+            history_index,
+            requires_publish,
         })
     }
 
-    async fn load_map(&self) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
+    async fn validate_map_contract(&self) -> Result<(), KnowledgeMapServiceError> {
         let content = self.read_root_content().await?;
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        match probe.schema_version {
-            1 => {
-                let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
-                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-                map.schema_version = KnowledgeMap::SCHEMA_VERSION;
-                map.validate()?;
-                Ok(map)
-            }
-            ARTIFACT_SCHEMA_VERSION => self.load_v2_map(&content).await,
-            version => Err(KnowledgeMapServiceError::Yaml(format!(
-                "unsupported schema_version {version}"
-            ))),
+        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
+            parse_v1_map(&content)?;
+            return Ok(());
         }
+        if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+            return Err(KnowledgeMapServiceError::Yaml(format!(
+                "unsupported schema_version {}",
+                probe.schema_version
+            )));
+        }
+        let manifest = parse_manifest(&content)?;
+        self.validate_archived_history(&manifest.history).await?;
+        let mut topics = Vec::with_capacity(manifest.topics.len());
+        let mut sources = Vec::new();
+        let mut routes = Vec::new();
+        for topic_ref in &manifest.topics {
+            let shard = self.load_topic_shard(topic_ref).await?;
+            topics.push(shard.topic);
+            sources.extend(shard.sources);
+            routes.extend(shard.route);
+        }
+        KnowledgeMap {
+            schema_version: KnowledgeMap::SCHEMA_VERSION,
+            map_version: manifest.map_version,
+            updated_at: manifest.updated_at,
+            topics,
+            sources,
+            routes,
+            history: manifest.history.recent,
+        }
+        .validate_snapshot(manifest.history.archived_through)?;
+        Ok(())
     }
 
     async fn load_show_view(&self) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
@@ -473,11 +497,20 @@ impl KnowledgeMapService {
                 archive.from_version, archive.through_version
             );
             publish_immutable(&self.repository_root, &relative, yaml.as_bytes()).await?;
-            snapshot.archived_through = archive.through_version;
-            snapshot.archive = Some(KnowledgeMapArchiveRef {
+            let archive_ref = KnowledgeMapArchiveRef {
                 r#ref: relative,
                 digest,
-            });
+            };
+            snapshot.history_index = Some(
+                self.append_history_index(
+                    snapshot.history_index.take(),
+                    archive_ref.clone(),
+                    &archive,
+                )
+                .await?,
+            );
+            snapshot.archived_through = archive.through_version;
+            snapshot.archive = Some(archive_ref);
         }
         snapshot.map.validate_snapshot(snapshot.archived_through)?;
         let manifest = KnowledgeMapManifest {
@@ -488,6 +521,7 @@ impl KnowledgeMapService {
             history: KnowledgeMapHistoryManifest {
                 archived_through: snapshot.archived_through,
                 archive: snapshot.archive.clone(),
+                index: snapshot.history_index.clone(),
                 recent: snapshot.map.history.clone(),
             },
         };
@@ -500,35 +534,8 @@ impl KnowledgeMapService {
             Duration::from_secs(60),
         )
         .await;
+        snapshot.requires_publish = false;
         Ok(())
-    }
-
-    async fn load_v2_map(&self, content: &str) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
-        let manifest = parse_manifest(content)?;
-        let mut topics = Vec::with_capacity(manifest.topics.len());
-        let mut sources = Vec::new();
-        let mut routes = Vec::new();
-        for topic_ref in &manifest.topics {
-            let shard = self.load_topic_shard(topic_ref).await?;
-            topics.push(shard.topic);
-            sources.extend(shard.sources);
-            if let Some(route) = shard.route {
-                routes.push(route);
-            }
-        }
-        let mut history = self.load_archived_history(&manifest.history).await?;
-        history.extend(manifest.history.recent);
-        let map = KnowledgeMap {
-            schema_version: KnowledgeMap::SCHEMA_VERSION,
-            map_version: manifest.map_version,
-            updated_at: manifest.updated_at,
-            topics,
-            sources,
-            routes,
-            history,
-        };
-        map.validate()?;
-        Ok(map)
     }
 
     async fn load_topic_route(
@@ -540,7 +547,7 @@ impl KnowledgeMapService {
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == 1 {
-            let map = self.load_map().await?;
+            let map = parse_v1_map(&content)?;
             return Ok((
                 map.routes
                     .iter()
@@ -672,6 +679,14 @@ impl KnowledgeMapService {
             Err(error) => Err(error),
         }
     }
+}
+
+fn parse_v1_map(content: &str) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
+    let mut map = serde_norway::from_str::<KnowledgeMap>(content)
+        .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+    map.schema_version = KnowledgeMap::SCHEMA_VERSION;
+    map.validate()?;
+    Ok(map)
 }
 
 fn temporary_path(path: &Path) -> PathBuf {

@@ -51,6 +51,8 @@ struct RootHistory {
     archived_through: u64,
     #[serde(default)]
     archive: Option<RootArchiveRef>,
+    #[serde(default)]
+    index: Option<RootHistoryIndexRef>,
     recent: Vec<RootHistoryEntry>,
 }
 
@@ -58,6 +60,16 @@ struct RootHistory {
 struct RootArchiveRef {
     #[serde(rename = "ref")]
     archive_ref: String,
+    digest: String,
+}
+
+#[derive(Deserialize)]
+struct RootHistoryIndexRef {
+    from_version: u64,
+    through_version: u64,
+    height: u8,
+    #[serde(rename = "ref")]
+    index_ref: String,
     digest: String,
 }
 
@@ -185,6 +197,17 @@ fn valid_manifest(manifest: &RootManifest) -> bool {
             scoped_contract_ref(&archive.archive_ref, KNOWLEDGE_MAP_HISTORY_DIR_NAME)
                 && lower_hex(&archive.digest, 64)
         })
+        && manifest.history.index.as_ref().is_none_or(|index| {
+            index.from_version == 1
+                && index.through_version == manifest.history.archived_through
+                && index.height <= 10
+                && lower_hex(&index.digest, 64)
+                && index.index_ref
+                    == format!(
+                        "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/index-{:02}-{:020}-{:020}-{}.yaml",
+                        index.height, index.from_version, index.through_version, index.digest
+                    )
+        })
 }
 
 fn valid_recent_history(manifest: &RootManifest) -> bool {
@@ -209,6 +232,7 @@ fn valid_recent_history(manifest: &RootManifest) -> bool {
     }
     if expected.saturating_sub(1) != manifest.map_version
         || (manifest.history.archived_through == 0) != manifest.history.archive.is_none()
+        || (manifest.history.archived_through == 0 && manifest.history.index.is_some())
     {
         return false;
     }

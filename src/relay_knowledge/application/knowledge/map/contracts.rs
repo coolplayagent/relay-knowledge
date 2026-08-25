@@ -12,12 +12,14 @@ use crate::{
     },
 };
 
-use super::artifact::KnowledgeMapArchiveRef;
+use super::artifact::{KnowledgeMapArchiveRef, KnowledgeMapHistoryIndexRef};
 
 pub(super) struct MutableKnowledgeMap {
     pub(super) map: KnowledgeMap,
     pub(super) archived_through: u64,
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
+    pub(super) history_index: Option<KnowledgeMapHistoryIndexRef>,
+    pub(super) requires_publish: bool,
 }
 
 impl MutableKnowledgeMap {
@@ -26,6 +28,8 @@ impl MutableKnowledgeMap {
             map: KnowledgeMap::initial(updated_at),
             archived_through: 0,
             archive: None,
+            history_index: None,
+            requires_publish: false,
         }
     }
 }

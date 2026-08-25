@@ -359,6 +359,8 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 - 新 background 或 network 行为能说明资源预算、失败模式、取消和观测指标。
 - 新检索或性能优化能说明泛化机制，而不是只解释某个样例为什么通过。
 
+Knowledge Map v2 的 archived history lookup 必须使用根 manifest 授权、SHA-256 内容寻址、fanout 与深度均有硬上限的 range index；任何公开 history page 的 I/O、内存和节点读取预算不得随总 archive 数线性增长。Index range 必须连续、无重叠并覆盖完整 archived checkpoint；缺 index 的早期 v2 只能通过受 writer lock 保护的显式表示层迁移补齐，读取路径不得回退 reverse-chain scan。迁移和 append 必须先发布 immutable nodes，再原子发布 root；崩溃前的 root 始终可读且重试对同一内容幂等。
+
 ---
 
 导航: 上一章: [1. 架构愿景与算法版图](01-architecture-vision-and-algorithm-map.md) | 下一章: [3. 基础运行时层](03-foundational-runtime.md)

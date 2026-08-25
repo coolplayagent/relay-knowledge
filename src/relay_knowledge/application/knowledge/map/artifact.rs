@@ -14,6 +14,8 @@ use super::error::KnowledgeMapServiceError;
 
 pub(super) const RECENT_HISTORY_LIMIT: usize = 16;
 pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 2;
+pub(super) const HISTORY_INDEX_FANOUT: usize = 64;
+pub(super) const HISTORY_INDEX_MAX_HEIGHT: u8 = 10;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct KnowledgeMapSchemaProbe {
@@ -62,13 +64,55 @@ pub(super) struct KnowledgeMapHistoryManifest {
     pub(super) archived_through: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) index: Option<KnowledgeMapHistoryIndexRef>,
     pub(super) recent: Vec<KnowledgeMapHistoryEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapArchiveRef {
     pub(super) r#ref: String,
     pub(super) digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct KnowledgeMapHistoryIndexRef {
+    pub(super) from_version: u64,
+    pub(super) through_version: u64,
+    pub(super) height: u8,
+    pub(super) r#ref: String,
+    pub(super) digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct KnowledgeMapHistoryIndexNode {
+    pub(super) schema_version: u16,
+    pub(super) from_version: u64,
+    pub(super) through_version: u64,
+    pub(super) height: u8,
+    pub(super) entries: Vec<KnowledgeMapHistoryIndexEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct KnowledgeMapHistoryIndexEntry {
+    pub(super) from_version: u64,
+    pub(super) through_version: u64,
+    #[serde(flatten)]
+    pub(super) target: KnowledgeMapHistoryIndexTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(super) enum KnowledgeMapHistoryIndexTarget {
+    Archive {
+        r#ref: String,
+        digest: String,
+    },
+    Node {
+        height: u8,
+        r#ref: String,
+        digest: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -137,7 +181,46 @@ pub(super) fn parse_manifest(
             ));
         }
     }
+    if manifest.history.archived_through == 0 && manifest.history.index.is_some() {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history index must be absent when no history is archived".to_owned(),
+        ));
+    }
+    if let Some(index) = &manifest.history.index {
+        validate_history_index_ref_shape(index, manifest.history.archived_through)?;
+        if index.from_version != 1 {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "history index root must begin at version 1".to_owned(),
+            ));
+        }
+    }
     Ok(manifest)
+}
+
+pub(super) fn validate_history_index_ref_shape(
+    index: &KnowledgeMapHistoryIndexRef,
+    archived_through: u64,
+) -> Result<(), KnowledgeMapServiceError> {
+    let expected_ref = format!(
+        "{}/index-{:02}-{:020}-{:020}-{}.yaml",
+        crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME,
+        index.height,
+        index.from_version,
+        index.through_version,
+        index.digest
+    );
+    if index.from_version == 0
+        || index.from_version > index.through_version
+        || index.through_version != archived_through
+        || index.height > HISTORY_INDEX_MAX_HEIGHT
+        || !is_lower_hex_digest(&index.digest)
+        || index.r#ref != expected_ref
+    {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "history index root ref is invalid".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_topic_shard(
