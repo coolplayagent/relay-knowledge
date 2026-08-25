@@ -24,7 +24,7 @@ use crate::{
         GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, InterfaceKind,
         ProposalListApiRequest, RequestContext, WorkerRunRequest, WorkerStatusRequest,
     },
-    application::{KnowledgeMapService, RelayKnowledgeService},
+    application::{KnowledgeMapService, KnowledgeMapServiceError, RelayKnowledgeService},
     domain::{CodeIndexMode, ProposalState},
 };
 use assets::{asset_or_index, default_web_dist, index};
@@ -220,7 +220,7 @@ async fn dispatch_operation(
             let response = map
                 .history(&context, request.from_version, request.limit)
                 .await
-                .map_err(|error| WebError::bad_request(error.to_string()))?;
+                .map_err(knowledge_map_web_error)?;
             Ok((response.metadata.clone(), json!(response)))
         }
         "retrieve.context" => {
@@ -464,6 +464,22 @@ async fn dispatch_operation(
             "unsupported web operation '{other}'"
         ))),
     }
+}
+
+fn knowledge_map_web_error(error: KnowledgeMapServiceError) -> WebError {
+    let message = format!("knowledge map history failed: {error}");
+    let error = match error {
+        KnowledgeMapServiceError::Io(_) => ApiError::storage_unavailable(message),
+        KnowledgeMapServiceError::LockTimeout(_) => ApiError::timeout(message),
+        KnowledgeMapServiceError::Yaml(_)
+        | KnowledgeMapServiceError::Domain(_)
+        | KnowledgeMapServiceError::InvalidRequest(_)
+        | KnowledgeMapServiceError::MissingArtifact { .. }
+        | KnowledgeMapServiceError::Integrity(_)
+        | KnowledgeMapServiceError::UnsafePath(_) => ApiError::invalid_argument(message),
+    };
+
+    error.into()
 }
 
 pub(super) fn api_error_response(error: ApiError) -> Response {

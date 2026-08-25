@@ -44,6 +44,22 @@ async fn api_error_response_maps_stable_status_codes() {
     assert_eq!(internal.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
+#[test]
+fn knowledge_map_errors_preserve_contract_and_storage_statuses() {
+    let invalid = knowledge_map_web_error(KnowledgeMapServiceError::InvalidRequest(
+        "limit must be within 1..=256".to_owned(),
+    ));
+    let denied = knowledge_map_web_error(KnowledgeMapServiceError::Io(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "permission denied",
+    )));
+
+    assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+    assert_eq!(denied.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(invalid.message.contains("limit must be within 1..=256"));
+    assert!(denied.message.contains("permission denied"));
+}
+
 #[tokio::test]
 async fn serves_project_health_and_service_status_apis() {
     let router = test_router("api").await;
@@ -309,7 +325,7 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     .await;
     assert_eq!(invalid["error"], "from_version must be a positive integer");
     let oversized = execute_json_with_router(
-        router,
+        router.clone(),
         json!({
             "snapshot": {
                 "name": "Oversized map history",
@@ -326,6 +342,33 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     )
     .await;
     assert_eq!(oversized["error"], "limit must be within 1..=256");
+    let map_path = root.join(crate::project::KNOWLEDGE_MAP_RELATIVE_PATH);
+    std::fs::rename(&map_path, root.join("map-history-test-backup.yaml"))
+        .expect("map root should move for I/O failure fixture");
+    std::fs::create_dir(&map_path).expect("directory should replace map root");
+    let unavailable = execute_json_with_router(
+        router,
+        json!({
+            "snapshot": {
+                "name": "Unavailable map history",
+                "command": "relay-knowledge map history --from 1 --limit 1",
+                "payload": {
+                    "operation": "knowledge.map.history",
+                    "repository": "map-history",
+                    "from_version": 1,
+                    "limit": 1
+                }
+            }
+        }),
+        StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+    assert!(
+        unavailable["error"]
+            .as_str()
+            .expect("error should be text")
+            .starts_with("knowledge map history failed:")
+    );
 }
 
 #[tokio::test]
