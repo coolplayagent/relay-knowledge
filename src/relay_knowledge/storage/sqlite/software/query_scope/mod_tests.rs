@@ -149,6 +149,7 @@ fn scope_connection() -> Connection {
                 source_scope TEXT PRIMARY KEY,
                 path_filters_json TEXT NOT NULL,
                 language_filters_json TEXT NOT NULL,
+                stale INTEGER NOT NULL DEFAULT 0,
                 retiring INTEGER NOT NULL DEFAULT 0
             );
             ",

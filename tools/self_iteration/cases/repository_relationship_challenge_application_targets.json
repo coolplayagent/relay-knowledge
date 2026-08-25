@@ -36,7 +36,7 @@
       "id": "spring_java_dependency_object_utils_challenge",
       "repository": "spring_framework_java",
       "kind": "imports",
-      "query": "org.springframework.util.ObjectUtils",
+      "query": "ExtendedBeanInfo org.springframework.util.ObjectUtils",
       "objective": "competitive_capability",
       "limit": 5,
       "max_rank": 3,
@@ -46,6 +46,10 @@
       "expected": [
         {
           "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "edge_kind": "import",
+          "edge_resolution_state": "resolved",
+          "edge_target_hint": "ObjectUtils.java",
+          "retrieval_layer": "import_graph",
           "excerpt_contains": "org.springframework.util.ObjectUtils"
         }
       ],
@@ -56,11 +60,15 @@
       "forbidden_rank_penalty": 0.08,
       "expected_all": [
         {
-          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java"
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "edge_kind": "import",
+          "edge_resolution_state": "resolved",
+          "retrieval_layer": "import_graph"
         },
         {
           "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
-          "excerpt_contains": "ObjectUtils"
+          "edge_target_hint": "ObjectUtils.java",
+          "excerpt_contains": "org.springframework.util.ObjectUtils"
         }
       ]
     },

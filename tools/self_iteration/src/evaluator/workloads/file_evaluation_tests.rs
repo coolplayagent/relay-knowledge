@@ -22,6 +22,7 @@ fn empty_fixture_configuration_creates_bounded_workspace_without_commands() {
         limiter: Limiter::new(1),
         writer_lock: Arc::new(Mutex::new(())),
         query_jobs: 1,
+        keep_workdirs: false,
     };
 
     let report = evaluate_file_fixtures(&runtime, &run_home, &serde_json::json!({}))

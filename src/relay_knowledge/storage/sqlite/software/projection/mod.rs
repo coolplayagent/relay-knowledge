@@ -21,6 +21,9 @@ use super::{
     schema::SOFTWARE_PROJECTION_SCHEMA_VERSION,
 };
 
+const MAX_DEPENDENCY_COMPONENTS_PER_SCOPE: usize = 65_536;
+const MAX_SDK_USAGES_PER_SCOPE: usize = 131_072;
+
 #[derive(Default)]
 struct ProjectionSlices {
     components: Vec<SoftwareComponent>,
@@ -71,9 +74,7 @@ pub(in super::super) fn refresh_projection_with_fence(
     lifecycle::delete_scope(&transaction, source_scope)?;
 
     let components = dependency_components(&transaction, source_scope, graph_version)?;
-    for component in &components {
-        insert_component(&transaction, component)?;
-    }
+    insert_components(&transaction, &components)?;
 
     let dependency_usages = dependency_usage::derive_dependency_usages(
         &transaction,
@@ -81,14 +82,10 @@ pub(in super::super) fn refresh_projection_with_fence(
         graph_version,
         &components,
     )?;
-    for usage in &dependency_usages {
-        dependency_usage::insert_usage(&transaction, usage)?;
-    }
+    dependency_usage::insert_usages(&transaction, &dependency_usages)?;
 
     let sdk_usages = unresolved_sdk_usages(&transaction, source_scope, graph_version)?;
-    for usage in &sdk_usages {
-        insert_sdk_usage(&transaction, usage)?;
-    }
+    insert_sdk_usages(&transaction, &sdk_usages)?;
     let lifecycle_projection =
         lifecycle::refresh_projection(&transaction, source_scope, graph_version)?;
 
@@ -101,11 +98,13 @@ pub(in super::super) fn refresh_projection_with_fence(
 
     let repository_id = repository_id_for_scope(&transaction, source_scope)?
         .unwrap_or_else(|| "unknown".to_owned());
-    let status = SoftwareGlobalStatus {
+    let mut status = SoftwareGlobalStatus {
         repository_id,
         source_scope: source_scope.to_owned(),
         projected_graph_version: graph_version,
-        stale: false,
+        // A fenced projection is fully built here but intentionally withheld
+        // until the code scope and checkpoint can publish in this transaction.
+        stale: fence.is_some(),
         component_count: components.len(),
         sdk_usage_count: sdk_usages.len(),
         file_count,
@@ -121,6 +120,14 @@ pub(in super::super) fn refresh_projection_with_fence(
         fence.validate_scope_repository(&transaction, source_scope)?;
         fence.validate_target_scope(&transaction, source_scope)?;
         fence.validate(&transaction)?;
+        super::super::code::publication::complete_after_software_projection(
+            &transaction,
+            source_scope,
+            fence,
+        )?;
+        fence.validate_target_scope(&transaction, source_scope)?;
+        fence.validate(&transaction)?;
+        status.stale = false;
     }
     transaction.commit()?;
 
@@ -320,52 +327,108 @@ fn dependency_components(
     source_scope: &str,
     graph_version: GraphVersion,
 ) -> Result<Vec<SoftwareComponent>, StorageError> {
+    dependency_components_with_limit(
+        connection,
+        source_scope,
+        graph_version,
+        MAX_DEPENDENCY_COMPONENTS_PER_SCOPE,
+    )
+}
+
+fn dependency_components_with_limit(
+    connection: &Connection,
+    source_scope: &str,
+    graph_version: GraphVersion,
+    limit: usize,
+) -> Result<Vec<SoftwareComponent>, StorageError> {
     let mut statement = connection.prepare(
         "
+        WITH ranked_dependencies AS (
+            SELECT repository_id, source_scope, ecosystem, package_name, requirement,
+                   resolved_version, dependency_group, source_kind, is_lockfile,
+                   language_id, path, line_start, line_end,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY
+                           CASE WHEN is_lockfile = 0 THEN 0 ELSE 1 END,
+                           repository_id, source_scope, ecosystem, package_name,
+                           requirement, resolved_version, dependency_group,
+                           source_kind, language_id
+                       ORDER BY path ASC, line_start ASC, line_end ASC
+                   ) AS evidence_rank
+            FROM code_repository_dependencies
+            WHERE source_scope = ?1
+        )
         SELECT repository_id, source_scope, ecosystem, package_name, requirement,
                resolved_version, dependency_group, source_kind, is_lockfile,
                language_id, path, line_start, line_end
-        FROM code_repository_dependencies
-        WHERE source_scope = ?1
-        ORDER BY ecosystem ASC, package_name ASC, is_lockfile DESC, path ASC, line_start ASC
+        FROM ranked_dependencies
+        WHERE is_lockfile = 0 OR evidence_rank = 1
+        ORDER BY ecosystem ASC, package_name ASC, is_lockfile DESC, path ASC,
+                 line_start ASC, line_end ASC, resolved_version ASC, requirement ASC,
+                 dependency_group ASC, source_kind ASC, language_id ASC
+        LIMIT ?2
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        let is_lockfile = row.get::<_, i64>(8)? != 0;
-        Ok(SoftwareComponentInput {
-            repository_id: row.get(0)?,
-            source_scope: row.get(1)?,
-            ecosystem: row.get(2)?,
-            name: row.get(3)?,
-            requirement: row.get(4)?,
-            resolved_version: row.get(5)?,
-            dependency_group: row.get(6)?,
-            source_kind: row.get(7)?,
-            relationship_state: if is_lockfile { "locked" } else { "declared" }.to_owned(),
-            language_id: row.get(9)?,
-            evidence_path: row.get(10)?,
-            evidence_line_range: RepositoryCodeRange {
-                start: row.get(11)?,
-                end: row.get(12)?,
-            },
-            confidence_basis_points: 10_000,
-            created_graph_version: graph_version,
-        })
-    })?;
+    let rows = statement.query_map(
+        params![source_scope, limit.saturating_add(1) as i64],
+        |row| {
+            let is_lockfile = row.get::<_, i64>(8)? != 0;
+            Ok(SoftwareComponentInput {
+                repository_id: row.get(0)?,
+                source_scope: row.get(1)?,
+                ecosystem: row.get(2)?,
+                name: row.get(3)?,
+                requirement: row.get(4)?,
+                resolved_version: row.get(5)?,
+                dependency_group: row.get(6)?,
+                source_kind: row.get(7)?,
+                relationship_state: if is_lockfile { "locked" } else { "declared" }.to_owned(),
+                language_id: row.get(9)?,
+                evidence_path: row.get(10)?,
+                evidence_line_range: RepositoryCodeRange {
+                    start: row.get(11)?,
+                    end: row.get(12)?,
+                },
+                confidence_basis_points: 10_000,
+                created_graph_version: graph_version,
+            })
+        },
+    )?;
 
-    rows.map(|row| {
-        row.map_err(StorageError::from).and_then(|input| {
-            SoftwareComponent::new(input)
-                .map_err(|error| StorageError::InvalidInput(error.to_string()))
+    let components = rows
+        .map(|row| {
+            row.map_err(StorageError::from).and_then(|input| {
+                SoftwareComponent::new(input)
+                    .map_err(|error| StorageError::InvalidInput(error.to_string()))
+            })
         })
-    })
-    .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    if components.len() > limit {
+        return Err(StorageError::CapacityExceeded(format!(
+            "software dependency components exceed the bounded limit {limit}"
+        )));
+    }
+    Ok(components)
 }
 
 fn unresolved_sdk_usages(
     connection: &Connection,
     source_scope: &str,
     graph_version: GraphVersion,
+) -> Result<Vec<SoftwareSdkUsage>, StorageError> {
+    unresolved_sdk_usages_with_limit(
+        connection,
+        source_scope,
+        graph_version,
+        MAX_SDK_USAGES_PER_SCOPE,
+    )
+}
+
+fn unresolved_sdk_usages_with_limit(
+    connection: &Connection,
+    source_scope: &str,
+    graph_version: GraphVersion,
+    limit: usize,
 ) -> Result<Vec<SoftwareSdkUsage>, StorageError> {
     let mut statement = connection.prepare(
         "
@@ -380,40 +443,51 @@ fn unresolved_sdk_usages(
         WHERE imports.source_scope = ?1
           AND imports.resolution_state IN ('unresolved', 'ambiguous', 'external')
         ORDER BY files.language_id ASC, imports.module ASC, imports.path ASC
+        LIMIT ?2
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok(SoftwareSdkUsageInput {
-            repository_id: row.get(0)?,
-            source_scope: row.get(1)?,
-            language_id: row.get(2)?,
-            module: row.get(3)?,
-            target_hint: row.get(4)?,
-            resolution_state: row.get(5)?,
-            evidence_path: row.get(6)?,
-            evidence_line_range: RepositoryCodeRange {
-                start: row.get(7)?,
-                end: row.get(8)?,
-            },
-            confidence_basis_points: row.get(9)?,
-            created_graph_version: graph_version,
-        })
-    })?;
+    let rows = statement.query_map(
+        params![source_scope, limit.saturating_add(1) as i64],
+        |row| {
+            Ok(SoftwareSdkUsageInput {
+                repository_id: row.get(0)?,
+                source_scope: row.get(1)?,
+                language_id: row.get(2)?,
+                module: row.get(3)?,
+                target_hint: row.get(4)?,
+                resolution_state: row.get(5)?,
+                evidence_path: row.get(6)?,
+                evidence_line_range: RepositoryCodeRange {
+                    start: row.get(7)?,
+                    end: row.get(8)?,
+                },
+                confidence_basis_points: row.get(9)?,
+                created_graph_version: graph_version,
+            })
+        },
+    )?;
 
-    rows.map(|row| {
-        row.map_err(StorageError::from).and_then(|input| {
-            SoftwareSdkUsage::new(input)
-                .map_err(|error| StorageError::InvalidInput(error.to_string()))
+    let usages = rows
+        .map(|row| {
+            row.map_err(StorageError::from).and_then(|input| {
+                SoftwareSdkUsage::new(input)
+                    .map_err(|error| StorageError::InvalidInput(error.to_string()))
+            })
         })
-    })
-    .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    if usages.len() > limit {
+        return Err(StorageError::CapacityExceeded(format!(
+            "software SDK usages exceed the bounded limit {limit}"
+        )));
+    }
+    Ok(usages)
 }
 
-fn insert_component(
+fn insert_components(
     connection: &Connection,
-    component: &SoftwareComponent,
+    components: &[SoftwareComponent],
 ) -> Result<(), StorageError> {
-    connection.execute(
+    let mut statement = connection.prepare(
         "
         INSERT OR REPLACE INTO software_components (
             component_id, repository_id, source_scope, ecosystem, name, requirement,
@@ -423,7 +497,9 @@ fn insert_component(
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
         ",
-        params![
+    )?;
+    for component in components {
+        statement.execute(params![
             component.component_id,
             component.repository_id,
             component.source_scope,
@@ -440,14 +516,17 @@ fn insert_component(
             component.evidence_line_range.end,
             component.confidence_basis_points,
             component.created_graph_version.get(),
-        ],
-    )?;
+        ])?;
+    }
 
     Ok(())
 }
 
-fn insert_sdk_usage(connection: &Connection, usage: &SoftwareSdkUsage) -> Result<(), StorageError> {
-    connection.execute(
+fn insert_sdk_usages(
+    connection: &Connection,
+    usages: &[SoftwareSdkUsage],
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
         "
         INSERT OR REPLACE INTO software_sdk_usages (
             usage_id, repository_id, source_scope, language_id, module, target_hint,
@@ -456,7 +535,9 @@ fn insert_sdk_usage(connection: &Connection, usage: &SoftwareSdkUsage) -> Result
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         ",
-        params![
+    )?;
+    for usage in usages {
+        statement.execute(params![
             usage.usage_id,
             usage.repository_id,
             usage.source_scope,
@@ -469,8 +550,8 @@ fn insert_sdk_usage(connection: &Connection, usage: &SoftwareSdkUsage) -> Result
             usage.evidence_line_range.end,
             usage.confidence_basis_points,
             usage.created_graph_version.get(),
-        ],
-    )?;
+        ])?;
+    }
 
     Ok(())
 }
@@ -673,6 +754,14 @@ fn sdk_usage_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareSdkUs
 #[cfg(test)]
 #[path = "filter_tests.rs"]
 mod filter_tests;
+
+#[cfg(test)]
+#[path = "dependency_projection_tests.rs"]
+mod dependency_projection_tests;
+
+#[cfg(test)]
+#[path = "test_support.rs"]
+mod test_support;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

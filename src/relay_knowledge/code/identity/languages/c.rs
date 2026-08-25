@@ -13,6 +13,7 @@ pub(in crate::code::identity) fn resolve_import(
     let IncludeRequest {
         candidates,
         allow_source_root_match,
+        target_hint,
     } = parse_include(&import.path, statement)?;
 
     Some(
@@ -20,8 +21,8 @@ pub(in crate::code::identity) fn resolve_import(
             ModuleFileResolution::Resolved(target_hint) => {
                 (ImportResolution::Resolved, Some(target_hint))
             }
-            ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, None),
-            ModuleFileResolution::Unresolved => (ImportResolution::Unresolved, None),
+            ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, Some(target_hint)),
+            ModuleFileResolution::Unresolved => (ImportResolution::Unresolved, Some(target_hint)),
         },
     )
 }
@@ -29,6 +30,7 @@ pub(in crate::code::identity) fn resolve_import(
 struct IncludeRequest {
     candidates: Vec<String>,
     allow_source_root_match: bool,
+    target_hint: String,
 }
 
 fn parse_include(import_path: &str, statement: &str) -> Option<IncludeRequest> {
@@ -54,6 +56,7 @@ fn parse_include(import_path: &str, statement: &str) -> Option<IncludeRequest> {
     Some(IncludeRequest {
         candidates,
         allow_source_root_match: quoted,
+        target_hint: target.to_owned(),
     })
 }
 

@@ -62,14 +62,8 @@ async fn code_index_task_partitioned_retention_removes_retired_scope_catalog_rou
         .upsert_code_repository(registration())
         .await
         .expect("repository should register");
-    store
-        .apply_code_index_snapshot(snapshot("scope-old"))
-        .await
-        .expect("old snapshot should apply");
-    store
-        .apply_code_index_snapshot(snapshot("scope-active"))
-        .await
-        .expect("active snapshot should apply");
+    publish_snapshot(&store, "scope-old").await;
+    publish_snapshot(&store, "scope-active").await;
     assert_eq!(
         store
             .catalog
@@ -121,19 +115,17 @@ async fn partitioned_repository_retention_drains_control_and_shard_before_comple
         .upsert_code_repository(registration())
         .await
         .expect("repository should register");
-    store
-        .apply_code_index_snapshot(snapshot("scope-active"))
-        .await
-        .expect("active snapshot should apply");
+    publish_snapshot(&store, "scope-active").await;
+    let cutoff_ms = now_millis().saturating_add(1);
     store
         .control
-        .run(|connection| {
+        .run(move |connection| {
             connection.execute(
                 "INSERT INTO code_repository_retention_jobs (
                      repository_id, initial_scope, cutoff_ms, phase,
                      created_at_ms, updated_at_ms, last_error
-                 ) VALUES ('repo', 'scope-active', 100, 'retiring_scopes', 100, 100, NULL)",
-                [],
+                 ) VALUES ('repo', 'scope-active', ?1, 'retiring_scopes', ?1, ?1, NULL)",
+                [cutoff_ms],
             )?;
             Ok(())
         })
@@ -190,10 +182,7 @@ async fn partitioned_repository_retention_preserves_same_millisecond_republicati
         .upsert_code_repository(registration())
         .await
         .expect("repository should register");
-    store
-        .apply_code_index_snapshot(snapshot("scope-active"))
-        .await
-        .expect("active snapshot should apply");
+    publish_snapshot(&store, "scope-active").await;
     store
         .control
         .run(|connection| {
@@ -270,10 +259,7 @@ async fn partitioned_repository_retention_stops_after_repository_joins_user_set(
         .await
         .expect("repository should register");
     for scope in ["scope-old", "scope-recent", "scope-active"] {
-        store
-            .apply_code_index_snapshot(snapshot(scope))
-            .await
-            .expect("snapshot should apply");
+        publish_snapshot(&store, scope).await;
     }
     let shard = store
         .catalog
@@ -392,4 +378,59 @@ async fn partitioned_repository_retention_stops_after_repository_joins_user_set(
             .repository_retention_job
             .is_none()
     );
+}
+
+async fn publish_snapshot(store: &PartitionedSqliteKnowledgeStore, source_scope: &str) {
+    let resolved_commit_sha = format!("commit-{source_scope}");
+    let tree_hash = format!("tree-{source_scope}");
+    let mut publication = snapshot(source_scope);
+    publication.resolved_commit_sha = resolved_commit_sha.clone();
+    publication.tree_hash = tree_hash.clone();
+    let mut seed = task_seed(source_scope);
+    seed.ref_selector = resolved_commit_sha.clone();
+    seed.resolved_commit_sha = resolved_commit_sha;
+    seed.tree_hash = tree_hash;
+    seed.input_fingerprint = format!("partitioned-retention-{source_scope}");
+    seed.now_ms = now_millis();
+    let queued = store
+        .queue_code_index_task(seed)
+        .await
+        .expect("partitioned retention fixture task should queue");
+    let lease_owner = format!("retention-worker-{source_scope}");
+    let running = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: lease_owner.clone(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("partitioned retention fixture task should claim")
+        .expect("partitioned retention fixture task should be runnable");
+    let fence = CodeIndexPublicationFence {
+        repository_id: running.repository_id.clone(),
+        task_id: running.task_id.clone(),
+        lease_owner: lease_owner.clone(),
+        attempt_count: running.attempt_count,
+        generation: running.publication_generation,
+    };
+    let summary = store
+        .apply_code_index_snapshot_with_fence(publication, fence.clone())
+        .await
+        .expect("partitioned retention fixture snapshot should publish");
+    store
+        .refresh_software_global_projection_with_fence(summary.source_scope, fence)
+        .await
+        .expect("partitioned retention fixture projection should publish");
+    store
+        .complete_code_index_task(CodeIndexTaskCompletion {
+            task_id: running.task_id,
+            lease_owner,
+            attempt_count: running.attempt_count,
+            publication_generation: running.publication_generation,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("partitioned retention fixture task should complete");
 }

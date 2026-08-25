@@ -2,9 +2,13 @@
 
 [English](../../en/01-user-guide/README.md) | [中文](../../zh/01-user-guide/README.md)
 
-> Document version: 1.3
-> Date: 2026-05-17
+> Edition version: 1.4
+> Last verified: 2026-08-18
 > Scope: Executable user guidance for local development, CLI operations, knowledge graph retrieval, code repository graphs, the Web workspace, MCP/ACP access, resident service operation, background workers, observability, troubleshooting, and advanced configuration.
+
+The version above identifies this English edition. The Chinese edition also
+contains Chapters 15–17 as explicit deployment, SRE, and security deep dives;
+their absence here is an indexed edition difference, not an implied translation.
 
 This book only covers paths that users can run, verify, and troubleshoot directly. Architecture constraints, interface boundaries, and forward-looking requirements remain in `docs/en/03-architecture-specs/`; this book turns implemented capabilities into commands, configuration, runtime state, and diagnostic steps.
 
@@ -32,11 +36,20 @@ This book only covers paths that users can run, verify, and troubleshoot directl
 - [Chapter 6: Web Workspace](06-web-workspace.md): static assets, same-origin APIs, operation execution, browser integration tests, and safety boundaries.
 - [Chapter 7: MCP Agent Access](07-mcp-agent-access.md): MCP policy, sessions, tools/resources/prompts, and access boundaries.
 - [Chapter 8: ACP Local Adapter](08-acp-local-adapter.md): local ACP sessions, progress, cancellation, and context artifacts.
-- [Chapter 9: Resident Service](09-resident-service.md): foreground service mode, same-port Web/API/MCP, service manager support, and the silent-update operator.
+- [Chapter 9: Service Deployment and Resident Operation](09-resident-service.md): foreground service mode, same-port Web/API/MCP, service manager support, and the silent-update operator.
 - [Chapter 10: Workers, Proposals, and Audit](10-workers-proposals-audit.md): worker endpoints, manual review, proposal lifecycle, and audit.
 - [Chapter 11: Observability and Telemetry](11-observability-and-telemetry.md): Prometheus metrics, OTLP traces/metrics, and diagnostic state.
 - [Chapter 12: Advanced Configuration](12-advanced-configuration.md): runtime directories, storage topology, retrieval backends, network/QoS, MCP, workers, audit, and setup variables.
 - [Chapter 13: Operations and Troubleshooting](13-operations-and-troubleshooting.md): health checks, index freshness, common errors, isolated reproduction, and PR verification.
+
+The Chinese edition also provides three deeper operational addenda:
+[Chapter 15: Full Service Deployment](../../zh/01-user-guide/15-service-deployment-full-guide.md),
+[Chapter 16: SRE Operations Runbook](../../zh/01-user-guide/16-sre-operations-runbook.md),
+and [Chapter 17: Security Configuration](../../zh/01-user-guide/17-security-configuration.md).
+The executable English service lifecycle is consolidated in
+[Chapter 9](09-resident-service.md), with general diagnostics in Chapter 13 and
+configuration/security boundaries in Chapter 12. These addenda are not
+presented as one-to-one English chapters.
 
 ## Recommended Reading Path
 

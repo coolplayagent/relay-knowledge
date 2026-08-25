@@ -2,17 +2,23 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use super::super::{
-    cleanup::{count_code_rows, delete_scope_index},
-    lifecycle::commit_scope,
-    report,
-    snapshot::{clone_active_scope_for_incremental, resolve_incremental_base_scope},
-    status, workspace,
-};
+use super::super::{cleanup::delete_scope_index, lifecycle::commit_scope};
 use super::{checkpoint, finalize};
 use crate::{
-    domain::{CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexSession, CodeIndexSummary},
+    domain::{
+        CodeIndexCheckpoint, CodeIndexSession, code_query_index_repair, code_query_index_subphase,
+        code_reference_resolution, code_reference_resolution_query_index_repair,
+        code_reference_search_query_index_repair, code_reference_search_rebuild,
+    },
     storage::StorageError,
+};
+
+mod finalization;
+
+#[cfg(test)]
+use finalization::finalization_phase_pending;
+pub(in crate::storage::sqlite::code) use finalization::{
+    CodeIndexFinalizationAdvance, advance_session, advance_session_with_fence,
 };
 
 #[cfg(test)]
@@ -23,11 +29,27 @@ mod tests;
 #[path = "checkpoint_batch_tests.rs"]
 mod checkpoint_batch_tests;
 
+#[cfg(test)]
+#[path = "publication_barrier_tests.rs"]
+mod publication_barrier_tests;
+
+#[cfg(test)]
+#[path = "phase_resume_tests.rs"]
+mod phase_resume_tests;
+
+#[cfg(test)]
+#[path = "query_index_policy_tests.rs"]
+mod query_index_policy_tests;
+
+#[cfg(test)]
+#[path = "reference_resolution_page_tests.rs"]
+mod reference_resolution_page_tests;
+
 pub(in super::super) fn begin_session(
     connection: &mut Connection,
     session: CodeIndexSession,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
-    begin_session_with_fence(connection, session, None)
+    begin_session_with_policy(connection, session, CheckpointExpectation::Unchecked, None)
 }
 
 pub(in super::super) fn begin_session_with_fence(
@@ -35,74 +57,208 @@ pub(in super::super) fn begin_session_with_fence(
     session: CodeIndexSession,
     fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
+    begin_session_with_policy(connection, session, CheckpointExpectation::Unchecked, fence)
+}
+
+pub(in super::super) fn begin_session_at_checkpoint(
+    connection: &mut Connection,
+    session: CodeIndexSession,
+    expected_checkpoint: Option<CodeIndexCheckpoint>,
+) -> Result<CodeIndexCheckpoint, StorageError> {
+    begin_session_with_policy(
+        connection,
+        session,
+        CheckpointExpectation::Exact(Box::new(expected_checkpoint)),
+        None,
+    )
+}
+
+pub(in super::super) fn begin_session_at_checkpoint_with_fence(
+    connection: &mut Connection,
+    session: CodeIndexSession,
+    expected_checkpoint: Option<CodeIndexCheckpoint>,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<CodeIndexCheckpoint, StorageError> {
+    begin_session_with_policy(
+        connection,
+        session,
+        CheckpointExpectation::Exact(Box::new(expected_checkpoint)),
+        fence,
+    )
+}
+
+pub(in crate::storage::sqlite::code) fn materialize_partitioned_completed_checkpoint(
+    connection: &mut Connection,
+    expected: CodeIndexCheckpoint,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<CodeIndexCheckpoint, StorageError> {
+    if expected.state != finalize::phases::PARTITIONED_PUBLISH {
+        return Err(StorageError::Invariant(format!(
+            "partitioned checkpoint '{}' is not awaiting catalog publication",
+            expected.source_scope
+        )));
+    }
     if let Some(fence) = fence {
-        fence.validate_repository(&session.repository_id)?;
+        fence.validate_repository(&expected.repository_id)?;
     }
     super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        begin_session_once(connection, &session, fence)
+        materialize_partitioned_completed_checkpoint_once(connection, &expected, fence)
     })
 }
 
-pub(in super::super) fn finalize_session(
+pub(in crate::storage::sqlite::code) fn reopen_completed_checkpoint_for_partitioned_repair(
     connection: &mut Connection,
-    session: CodeIndexSession,
-) -> Result<CodeIndexSummary, StorageError> {
-    finalize_session_with_fence(connection, session, None)
+    expected: CodeIndexCheckpoint,
+    fence: &super::super::lifecycle::publication_fence::PublicationFenceGuard,
+) -> Result<CodeIndexCheckpoint, StorageError> {
+    if expected.state != "completed" {
+        return Err(StorageError::Invariant(format!(
+            "partitioned checkpoint '{}' is not a completed repair candidate",
+            expected.source_scope
+        )));
+    }
+    fence.validate_repository(&expected.repository_id)?;
+    super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
+        let transaction = connection.transaction()?;
+        let actual = checkpoint::load_optional(&transaction, &expected.source_scope)?;
+        if actual.as_ref() != Some(&expected) {
+            return Err(StorageError::Invariant(format!(
+                "partitioned checkpoint for scope '{}' changed before repair reopening",
+                expected.source_scope
+            )));
+        }
+        fence.validate_target_scope(&transaction, &expected.source_scope)?;
+        fence.validate(&transaction)?;
+        fence.validate_partitioned_staged_scope(
+            &transaction,
+            &expected.repository_id,
+            &expected.source_scope,
+        )?;
+        let retain_incremental_receipt = expected
+            .incremental_summary
+            .as_ref()
+            .is_some_and(|receipt| receipt.task_id == fence.task_id());
+        let changed = transaction.execute(
+            "UPDATE code_repository_index_checkpoints
+             SET state = ?2,
+                 incremental_summary_json = CASE
+                     WHEN ?3 THEN incremental_summary_json ELSE NULL
+                 END
+             WHERE source_scope = ?1 AND state = 'completed'",
+            params![
+                expected.source_scope,
+                finalize::phases::PARTITIONED_PUBLISH,
+                retain_incremental_receipt,
+            ],
+        )?;
+        if changed != 1 {
+            return Err(StorageError::Invariant(format!(
+                "partitioned checkpoint for scope '{}' was not reopened exactly once",
+                expected.source_scope
+            )));
+        }
+        fence.validate_target_scope(&transaction, &expected.source_scope)?;
+        fence.validate(&transaction)?;
+        transaction.commit()?;
+        checkpoint::load(connection, &expected.source_scope)
+    })
 }
 
-pub(in super::super) fn finalize_session_with_fence(
+fn materialize_partitioned_completed_checkpoint_once(
+    connection: &mut Connection,
+    expected: &CodeIndexCheckpoint,
+    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
+) -> Result<CodeIndexCheckpoint, StorageError> {
+    let transaction = connection.transaction()?;
+    let actual = checkpoint::load_optional(&transaction, &expected.source_scope)?;
+    if actual.as_ref() != Some(expected) {
+        return Err(StorageError::Invariant(format!(
+            "partitioned checkpoint for scope '{}' changed before completed-state materialization",
+            expected.source_scope
+        )));
+    }
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &expected.source_scope)?;
+        fence.validate(&transaction)?;
+    }
+    let changed = transaction.execute(
+        "UPDATE code_repository_index_checkpoints
+         SET state = 'completed'
+         WHERE source_scope = ?1 AND state = ?2",
+        params![expected.source_scope, finalize::phases::PARTITIONED_PUBLISH],
+    )?;
+    if changed != 1 {
+        return Err(StorageError::Invariant(format!(
+            "partitioned checkpoint for scope '{}' was not materialized exactly once",
+            expected.source_scope
+        )));
+    }
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &expected.source_scope)?;
+        fence.validate(&transaction)?;
+    }
+    transaction.commit()?;
+
+    checkpoint::load(connection, &expected.source_scope)
+}
+
+enum CheckpointExpectation {
+    Unchecked,
+    Exact(Box<Option<CodeIndexCheckpoint>>),
+}
+
+fn begin_session_with_policy(
     connection: &mut Connection,
     session: CodeIndexSession,
+    checkpoint_expectation: CheckpointExpectation,
     fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
-) -> Result<CodeIndexSummary, StorageError> {
+) -> Result<CodeIndexCheckpoint, StorageError> {
     if let Some(fence) = fence {
         fence.validate_repository(&session.repository_id)?;
     }
     super::super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        finalize_session_once(connection, &session, fence)
+        begin_session_once(connection, &session, &checkpoint_expectation, fence)
     })
 }
 
 fn begin_session_once(
     connection: &mut Connection,
     session: &CodeIndexSession,
+    checkpoint_expectation: &CheckpointExpectation,
     fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
+    if !session.full_replace {
+        return Err(StorageError::InvalidInput(
+            "checkpointed code indexing currently requires a full-replace session".to_owned(),
+        ));
+    }
+
     let transaction = connection.transaction()?;
     super::super::tasks::retention_gc::reject_retiring_scope(&transaction, &session.source_scope)?;
-    if fence.is_none() {
+    validate_checkpoint_expectation(&transaction, session, checkpoint_expectation)?;
+    let resume = checkpoint_resume(&transaction, session)?;
+    if let Some(fence) = fence {
+        fence.validate_target_scope(&transaction, &session.source_scope)?;
+        fence.validate(&transaction)?;
+        if matches!(
+            resume,
+            CheckpointResume::Restart | CheckpointResume::Batches
+        ) {
+            super::super::publication::reject_fenced_active_scope_rebuild(
+                &transaction,
+                &session.repository_id,
+                &session.source_scope,
+            )?;
+        }
+    } else {
         super::super::tasks::enforce_unfenced_target(
             &transaction,
             &session.repository_id,
             &session.source_scope,
         )?;
     }
-    let resumable = resumable_session_matches(&transaction, session, fence)?;
-    if session.total_path_count <= session.resource_budget.max_files_per_batch {
-        super::super::schema::ensure_code_query_indexes(&transaction)?;
-    }
-    if !resumable {
-        if session.full_replace {
-            delete_scope_index(&transaction, &session.source_scope)?;
-        } else {
-            let mut excluded_paths = session.changed_paths.clone();
-            for deleted_path in &session.deleted_paths {
-                if !excluded_paths.contains(deleted_path) {
-                    excluded_paths.push(deleted_path.clone());
-                }
-            }
-            excluded_paths.sort_unstable();
-            excluded_paths.dedup();
-            clone_active_scope_for_incremental(
-                &transaction,
-                &session.repository_id,
-                &session.source_scope,
-                &session.path_filters,
-                &session.language_filters,
-                session.base_resolved_commit_sha.as_deref(),
-                &excluded_paths,
-            )?;
-        }
+    if resume == CheckpointResume::Restart {
+        delete_scope_index(&transaction, &session.source_scope)?;
         transaction.execute(
             "DELETE FROM code_repository_index_batch_staging WHERE source_scope = ?1",
             params![session.source_scope],
@@ -111,23 +267,30 @@ fn begin_session_once(
             "DELETE FROM code_repository_index_checkpoints WHERE source_scope = ?1",
             params![session.source_scope],
         )?;
+        super::super::schema::prepare_restart_query_indexes(&transaction)?;
     }
-    commit_scope::preserve_existing_scope_commit(
-        &transaction,
-        &session.repository_id,
-        &session.source_scope,
-    )?;
-    transaction.execute(
-        "
-        UPDATE code_repositories
-        SET state = 'indexing', stale = 1, degraded_reason = NULL
-        WHERE repository_id = ?1
-        ",
-        params![session.repository_id],
-    )?;
-    if !resumable {
+    if resume == CheckpointResume::Restart {
+        commit_scope::preserve_existing_scope_commit(
+            &transaction,
+            &session.repository_id,
+            &session.source_scope,
+        )?;
+    }
+    if matches!(
+        resume,
+        CheckpointResume::Restart | CheckpointResume::Batches
+    ) {
+        transaction.execute(
+            "
+            UPDATE code_repositories
+            SET state = 'indexing', stale = 1, degraded_reason = NULL
+            WHERE repository_id = ?1
+            ",
+            params![session.repository_id],
+        )?;
+    }
+    if resume == CheckpointResume::Restart {
         checkpoint::insert(&transaction, session, "indexing", None)?;
-        insert_session_identity(&transaction, session, fence)?;
     }
     if let Some(fence) = fence {
         fence.validate_target_scope(&transaction, &session.source_scope)?;
@@ -138,477 +301,257 @@ fn begin_session_once(
     checkpoint::load(connection, &session.source_scope)
 }
 
-fn resumable_session_matches(
+fn validate_checkpoint_expectation(
     transaction: &Transaction<'_>,
     session: &CodeIndexSession,
-    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
-) -> Result<bool, StorageError> {
-    let expected_identity = checkpoint_identity(session, fence);
-    let checkpoint = transaction
+    expectation: &CheckpointExpectation,
+) -> Result<(), StorageError> {
+    let CheckpointExpectation::Exact(expected) = expectation else {
+        return Ok(());
+    };
+    let actual = checkpoint::load_optional(transaction, &session.source_scope)?;
+    if actual.as_ref() == expected.as_ref().as_ref() {
+        return Ok(());
+    }
+
+    Err(StorageError::Invariant(format!(
+        "checkpoint for scope '{}' changed after read-only plan validation",
+        session.source_scope
+    )))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CheckpointResume {
+    Restart,
+    Batches,
+    Finalization,
+    Publication,
+}
+
+struct CheckpointResumeRecord {
+    state: String,
+    total_path_count: usize,
+    parsed_file_count: usize,
+    committed_file_count: usize,
+    committed_reference_count: usize,
+    batch_count: usize,
+    last_path: Option<String>,
+    resource_budget: crate::domain::CodeIndexResourceBudget,
+    incremental_summary: Option<crate::domain::CodeIncrementalSummaryReceipt>,
+    content_identity_matches: bool,
+    identity_matches: bool,
+}
+
+fn checkpoint_resume(
+    connection: &Connection,
+    session: &CodeIndexSession,
+) -> Result<CheckpointResume, StorageError> {
+    let Some(persisted) = load_checkpoint_resume_record(connection, session)? else {
+        return Ok(CheckpointResume::Restart);
+    };
+    let completed_commit_alias_restart = persisted.state == "completed"
+        && persisted.content_identity_matches
+        && !persisted.identity_matches;
+    if !persisted.identity_matches && !completed_commit_alias_restart {
+        return Err(checkpoint_identity_error(session));
+    }
+    validate_checkpoint_resume_record(&persisted, session)?;
+    if completed_commit_alias_restart {
+        return Ok(CheckpointResume::Restart);
+    }
+    if matches!(
+        persisted.state.as_str(),
+        finalize::phases::SOFTWARE_PROJECTION | finalize::phases::PARTITIONED_PUBLISH | "completed"
+    ) {
+        return Ok(CheckpointResume::Publication);
+    }
+    if persisted.state == "indexing" {
+        return Ok(CheckpointResume::Batches);
+    }
+    if finalize::phases::position(&persisted.state).is_some()
+        || code_query_index_repair(&persisted.state).is_some()
+        || code_query_index_subphase(&persisted.state).is_some()
+        || code_reference_resolution_query_index_repair(&persisted.state).is_some()
+        || code_reference_resolution(&persisted.state).is_some()
+        || code_reference_search_query_index_repair(&persisted.state).is_some()
+        || code_reference_search_rebuild(&persisted.state).is_some()
+    {
+        return Ok(CheckpointResume::Finalization);
+    }
+
+    Err(checkpoint_invariant_error(
+        session,
+        "checkpoint state is not resumable",
+    ))
+}
+
+fn load_checkpoint_resume_record(
+    connection: &Connection,
+    session: &CodeIndexSession,
+) -> Result<Option<CheckpointResumeRecord>, StorageError> {
+    let persisted = connection
         .query_row(
-            "SELECT checkpoint.committed_file_count,
-                    checkpoint.resolved_commit_sha, checkpoint.tree_hash,
-                    checkpoint.path_filters_json, checkpoint.language_filters_json,
-                    checkpoint.total_path_count, marker.state
-             FROM code_repository_index_checkpoints AS checkpoint
-             LEFT JOIN code_repository_index_batch_staging AS marker
-               ON marker.source_scope = checkpoint.source_scope
-              AND marker.batch_index = 0
-             WHERE checkpoint.source_scope = ?1 AND checkpoint.state = 'indexing'",
+            "
+            SELECT repository_id, state, resolved_commit_sha, tree_hash,
+                   path_filters_json, language_filters_json, total_path_count,
+                   parsed_file_count, committed_file_count, committed_reference_count,
+                   batch_count, last_path,
+                   resource_budget_json, incremental_summary_json
+            FROM code_repository_index_checkpoints
+            WHERE source_scope = ?1
+            ",
             params![session.source_scope],
             |row| {
                 Ok((
-                    row.get::<_, usize>(0)?,
+                    row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, usize>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, usize>(6)?,
+                    row.get::<_, usize>(7)?,
+                    row.get::<_, usize>(8)?,
+                    row.get::<_, usize>(9)?,
+                    row.get::<_, usize>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             },
         )
         .optional()?;
-    let Some((committed, commit, tree, paths, languages, total, identity)) = checkpoint else {
-        return Ok(false);
+    let Some((
+        repository_id,
+        state,
+        commit,
+        tree,
+        paths,
+        languages,
+        total,
+        parsed,
+        committed,
+        committed_references,
+        batches,
+        last_path,
+        resource_budget_json,
+        incremental_summary_json,
+    )) = persisted
+    else {
+        return Ok(None);
     };
-
-    Ok(committed > 0
-        && commit == session.resolved_commit_sha
+    let resource_budget = serde_json::from_str(&resource_budget_json).map_err(|error| {
+        StorageError::Invariant(format!(
+            "code index checkpoint '{}' has an invalid resource budget: {error}",
+            session.source_scope
+        ))
+    })?;
+    let incremental_summary =
+        super::super::checkpoint_receipt::decode(incremental_summary_json, 13, resource_budget)
+            .map_err(|error| {
+                StorageError::Invariant(format!(
+                    "code index checkpoint '{}' has an invalid incremental receipt: {error}",
+                    session.source_scope
+                ))
+            })?;
+    let content_identity_matches = repository_id == session.repository_id
         && tree == session.tree_hash
         && paths == checkpoint::serialize_json(&session.path_filters)?
         && languages == checkpoint::serialize_json(&session.language_filters)?
-        && total == session.total_path_count
-        && identity.as_deref() == Some(expected_identity.as_str()))
+        && total == session.total_path_count;
+    let identity_matches = content_identity_matches && commit == session.resolved_commit_sha;
+    Ok(Some(CheckpointResumeRecord {
+        state,
+        total_path_count: total,
+        parsed_file_count: parsed,
+        committed_file_count: committed,
+        committed_reference_count: committed_references,
+        batch_count: batches,
+        last_path,
+        resource_budget,
+        incremental_summary,
+        content_identity_matches,
+        identity_matches,
+    }))
 }
 
-fn insert_session_identity(
-    transaction: &Transaction<'_>,
+fn validate_checkpoint_resume_record(
+    checkpoint: &CheckpointResumeRecord,
     session: &CodeIndexSession,
-    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<(), StorageError> {
-    let now = checkpoint::now_millis();
-    transaction.execute(
-        "INSERT INTO code_repository_index_batch_staging (
-            source_scope, batch_index, state, file_count, fact_row_count,
-            created_at_ms, updated_at_ms
-         ) VALUES (?1, 0, ?2, 0, 0, ?3, ?3)",
-        params![
-            session.source_scope,
-            checkpoint_identity(session, fence),
-            now
-        ],
-    )?;
-    Ok(())
-}
-
-fn checkpoint_identity(
-    session: &CodeIndexSession,
-    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
-) -> String {
-    fence.map_or_else(
-        || {
-            session.base_resolved_commit_sha.as_ref().map_or_else(
-                || format!("session:full:{}", session.resolved_commit_sha),
-                |base| format!("session:incremental:{base}:{}", session.resolved_commit_sha),
-            )
-        },
-        |fence| fence.checkpoint_identity(),
-    )
-}
-
-fn finalize_session_once(
-    connection: &mut Connection,
-    session: &CodeIndexSession,
-    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
-) -> Result<CodeIndexSummary, StorageError> {
-    run_finalize_phase(
-        connection,
-        &session.source_scope,
-        finalize::phases::BUILD_QUERY_INDEXES,
-        fence,
-        |transaction| super::super::schema::ensure_code_query_indexes(transaction),
-    )?;
-
-    let affected_paths = if !session.full_replace
-        && (!session.changed_paths.is_empty() || !session.deleted_paths.is_empty())
+    let state_is_known = checkpoint.state == "indexing"
+        || checkpoint.state == "completed"
+        || finalize::phases::position(&checkpoint.state).is_some()
+        || code_query_index_repair(&checkpoint.state).is_some()
+        || code_query_index_subphase(&checkpoint.state).is_some()
+        || code_reference_resolution_query_index_repair(&checkpoint.state).is_some()
+        || code_reference_resolution(&checkpoint.state).is_some()
+        || code_reference_search_query_index_repair(&checkpoint.state).is_some()
+        || code_reference_search_rebuild(&checkpoint.state).is_some();
+    if !state_is_known {
+        return Err(checkpoint_invariant_error(
+            session,
+            "checkpoint state is not recognized",
+        ));
+    }
+    if checkpoint.resource_budget != session.resource_budget {
+        return Err(checkpoint_invariant_error(
+            session,
+            "resource budget does not match the durable task",
+        ));
+    }
+    if checkpoint.parsed_file_count != checkpoint.committed_file_count {
+        return Err(checkpoint_invariant_error(
+            session,
+            "parsed and committed file counts differ",
+        ));
+    }
+    let committed = checkpoint.committed_file_count;
+    if committed > checkpoint.total_path_count {
+        return Err(checkpoint_invariant_error(
+            session,
+            "committed file count exceeds total path count",
+        ));
+    }
+    if checkpoint.state != "indexing" && committed != checkpoint.total_path_count {
+        return Err(checkpoint_invariant_error(
+            session,
+            "finalizing or completed checkpoint has an incomplete file prefix",
+        ));
+    }
+    if committed == 0 {
+        if checkpoint.batch_count != 0 || checkpoint.last_path.is_some() {
+            return Err(checkpoint_invariant_error(
+                session,
+                "empty committed prefix has batch or last-path progress",
+            ));
+        }
+    } else if checkpoint.batch_count == 0
+        || checkpoint.batch_count > committed
+        || checkpoint
+            .last_path
+            .as_deref()
+            .is_none_or(|path| path.trim().is_empty())
     {
-        let transaction = connection.transaction()?;
-        let base_scope = resolve_incremental_base_scope(
-            &transaction,
-            &session.repository_id,
-            &session.path_filters,
-            &session.language_filters,
-            session.base_resolved_commit_sha.as_deref(),
-        )?;
-        let paths = finalize::affected_paths::compute(
-            &transaction,
-            &session.source_scope,
-            &base_scope,
-            &session.changed_paths,
-            &session.deleted_paths,
-        )?;
-        transaction.commit()?;
-        paths
-    } else if session.full_replace {
-        finalize::affected_paths::AffectedPaths::full_scope()
-    } else {
-        finalize::affected_paths::AffectedPaths::empty()
-    };
-
-    if affected_paths.is_full_scope() {
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::RESOLVE_REFERENCES,
-            fence,
-            |transaction| finalize::phases::resolve_references(transaction, &session.source_scope),
-        )?;
-        let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::RESOLVE_IMPORTS,
-            fence,
-            |transaction| {
-                finalize::phases::resolve_imports(
-                    transaction,
-                    &session.source_scope,
-                    &mut symbol_cache,
-                )
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::RESOLVE_CALL_TARGETS,
-            fence,
-            |transaction| {
-                finalize::phases::resolve_call_targets(transaction, &session.source_scope)
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::REFRESH_DEPENDENCIES,
-            fence,
-            |transaction| {
-                finalize::phases::refresh_dependencies(
-                    transaction,
-                    &session.source_scope,
-                    &session.language_filters,
-                )
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::REBUILD_REFERENCE_SEARCH,
-            fence,
-            |transaction| {
-                finalize::phases::rebuild_reference_search(transaction, &session.source_scope)
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::REBUILD_CALLS,
-            fence,
-            |transaction| {
-                finalize::phases::rebuild_calls(
-                    transaction,
-                    &session.source_scope,
-                    &session.repository_id,
-                    &mut symbol_cache,
-                )
-            },
-        )?;
-    } else if !affected_paths.is_empty() {
-        let path_refs = affected_paths.path_refs();
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::RESOLVE_REFERENCES,
-            fence,
-            |transaction| {
-                finalize::phases::resolve_references_for_paths(
-                    transaction,
-                    &session.source_scope,
-                    &path_refs,
-                )
-            },
-        )?;
-        let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::RESOLVE_IMPORTS,
-            fence,
-            |transaction| {
-                finalize::phases::resolve_imports_for_paths(
-                    transaction,
-                    &session.source_scope,
-                    &path_refs,
-                    &mut symbol_cache,
-                )
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::RESOLVE_CALL_TARGETS,
-            fence,
-            |transaction| {
-                finalize::phases::resolve_call_targets_for_paths(
-                    transaction,
-                    &session.source_scope,
-                    &path_refs,
-                )
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::REFRESH_DEPENDENCIES,
-            fence,
-            |transaction| {
-                finalize::phases::refresh_dependencies(
-                    transaction,
-                    &session.source_scope,
-                    &session.language_filters,
-                )
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::REBUILD_REFERENCE_SEARCH,
-            fence,
-            |transaction| {
-                finalize::phases::rebuild_reference_search_for_paths(
-                    transaction,
-                    &session.source_scope,
-                    &path_refs,
-                )
-            },
-        )?;
-        run_finalize_phase(
-            connection,
-            &session.source_scope,
-            finalize::phases::REBUILD_CALLS,
-            fence,
-            |transaction| {
-                finalize::phases::rebuild_calls_for_paths(
-                    transaction,
-                    &session.source_scope,
-                    &session.repository_id,
-                    &path_refs,
-                    &mut symbol_cache,
-                )
-            },
-        )?;
+        return Err(checkpoint_invariant_error(
+            session,
+            "committed prefix has invalid batch or last-path progress",
+        ));
     }
-    let transaction = connection.transaction()?;
-    checkpoint::mark_state_in_transaction(
-        &transaction,
-        &session.source_scope,
-        finalize::phases::PUBLISH_SCOPE,
-    )?;
-    publish_repository_scope(&transaction, session)?;
-    checkpoint::mark_state_in_transaction(
-        &transaction,
-        &session.source_scope,
-        finalize::phases::RESOLVE_WORKSPACE_IMPORTS,
-    )?;
-    workspace::resolve_workspace_imports(
-        &transaction,
-        &session.workspaces,
-        &session.repository_id,
-        &session.source_scope,
-    )?;
-    checkpoint::mark_completed(&transaction, &session.source_scope)?;
-    if let Some(fence) = fence {
-        fence.validate_target_scope(&transaction, &session.source_scope)?;
-        fence.validate(&transaction)?;
-    }
-    transaction.commit()?;
-
-    build_summary(connection, session)
-}
-
-fn run_finalize_phase(
-    connection: &mut Connection,
-    source_scope: &str,
-    state: &str,
-    fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
-    operation: impl FnOnce(&Transaction<'_>) -> Result<(), StorageError>,
-) -> Result<(), StorageError> {
-    let transaction = connection.transaction()?;
-    checkpoint::mark_state_in_transaction(&transaction, source_scope, state)?;
-    operation(&transaction)?;
-    if let Some(fence) = fence {
-        fence.validate_target_scope(&transaction, source_scope)?;
-        fence.validate(&transaction)?;
-    }
-    transaction.commit()?;
 
     Ok(())
 }
 
-fn publish_repository_scope(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-) -> Result<(), StorageError> {
-    for tombstone in &session.tombstones {
-        transaction.execute(
-            "
-            INSERT OR REPLACE INTO code_repository_path_tombstones
-                (repository_id, source_scope, old_path, new_path, base_ref, head_ref)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ",
-            params![
-                tombstone.repository_id,
-                tombstone.source_scope,
-                tombstone.old_path,
-                tombstone.new_path,
-                tombstone.base_ref,
-                tombstone.head_ref,
-            ],
-        )?;
-    }
-    let file_count = count_code_rows(transaction, "code_repository_files", &session.source_scope)?;
-    let symbol_count = count_code_rows(
-        transaction,
-        "code_repository_symbols",
-        &session.source_scope,
-    )?;
-    let reference_count = count_code_rows(
-        transaction,
-        "code_repository_references",
-        &session.source_scope,
-    )?;
-    let chunk_count =
-        count_code_rows(transaction, "code_repository_chunks", &session.source_scope)?;
-    let degraded_file_count = count_code_rows(
-        transaction,
-        "code_repository_file_diagnostics",
-        &session.source_scope,
-    )?;
-    let degraded_reason = (degraded_file_count > 0)
-        .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
-    transaction.execute(
-        "
-        INSERT INTO code_repository_scopes (
-            source_scope, repository_id, resolved_commit_sha, tree_hash,
-            path_filters_json, language_filters_json, indexed_file_count,
-            symbol_count, reference_count, chunk_count, stale, degraded_reason
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11)
-        ON CONFLICT(source_scope) DO UPDATE SET
-            repository_id = excluded.repository_id,
-            resolved_commit_sha = excluded.resolved_commit_sha,
-            tree_hash = excluded.tree_hash,
-            path_filters_json = excluded.path_filters_json,
-            language_filters_json = excluded.language_filters_json,
-            indexed_file_count = excluded.indexed_file_count,
-            symbol_count = excluded.symbol_count,
-            reference_count = excluded.reference_count,
-            chunk_count = excluded.chunk_count,
-            stale = 0,
-            degraded_reason = excluded.degraded_reason
-        ",
-        params![
-            session.source_scope,
-            session.repository_id,
-            session.resolved_commit_sha,
-            session.tree_hash,
-            checkpoint::serialize_json(&session.path_filters)?,
-            checkpoint::serialize_json(&session.language_filters)?,
-            file_count,
-            symbol_count,
-            reference_count,
-            chunk_count,
-            degraded_reason,
-        ],
-    )?;
-    commit_scope::record(
-        transaction,
-        &session.repository_id,
-        &session.resolved_commit_sha,
-        &session.source_scope,
-    )?;
-    transaction.execute(
-        "
-        UPDATE code_repositories
-        SET last_indexed_scope_id = ?2,
-            last_indexed_commit = ?3,
-            tree_hash = ?4,
-            state = 'fresh',
-            indexed_file_count = ?5,
-            symbol_count = ?6,
-            reference_count = ?7,
-            chunk_count = ?8,
-            stale = 0,
-            degraded_reason = ?9
-        WHERE repository_id = ?1
-        ",
-        params![
-            session.repository_id,
-            session.source_scope,
-            session.resolved_commit_sha,
-            session.tree_hash,
-            file_count,
-            symbol_count,
-            reference_count,
-            chunk_count,
-            degraded_reason,
-        ],
-    )?;
-
-    Ok(())
+fn checkpoint_identity_error(session: &CodeIndexSession) -> StorageError {
+    StorageError::Invariant(format!(
+        "checkpoint identity for scope '{}' does not match the requested index session",
+        session.source_scope
+    ))
 }
 
-fn build_summary(
-    connection: &mut Connection,
-    session: &CodeIndexSession,
-) -> Result<CodeIndexSummary, StorageError> {
-    let status =
-        status::repository_status(connection, &session.repository_id)?.ok_or_else(|| {
-            StorageError::InvalidInput("code repository status is missing after index".to_owned())
-        })?;
-    let checkpoint = checkpoint::load(connection, &session.source_scope)?;
-    let sqlite_write_count = checkpoint::count_scope_rows(connection, &session.source_scope)?;
-    let symbol_generation_counts =
-        report::scope_symbol_generation_counts(connection, &session.source_scope)?;
-    let degraded_file_count =
-        checkpoint::count_scope_diagnostics(connection, status.last_indexed_scope_id.as_deref())?;
-
-    Ok(CodeIndexSummary {
-        repository_id: session.repository_id.clone(),
-        source_scope: session.source_scope.clone(),
-        base_resolved_commit_sha: session.base_resolved_commit_sha.clone(),
-        resolved_commit_sha: session.resolved_commit_sha.clone(),
-        tree_hash: session.tree_hash.clone(),
-        indexed_file_count: status.indexed_file_count,
-        changed_path_count: session.changed_path_count,
-        skipped_unchanged_count: session.skipped_unchanged_count,
-        deleted_path_count: session.deleted_paths.len(),
-        symbol_count: status.symbol_count,
-        handwritten_symbol_count: symbol_generation_counts.handwritten,
-        generated_symbol_count: symbol_generation_counts.generated,
-        reference_count: status.reference_count,
-        chunk_count: status.chunk_count,
-        degraded_file_count,
-        progress: CodeIndexProgressSummary {
-            git_file_count: session.total_path_count,
-            blob_read_count: checkpoint.committed_file_count,
-            parsed_file_count: checkpoint.parsed_file_count,
-            sqlite_write_count,
-            skipped_file_count: session.skipped_unchanged_count,
-            degraded_file_count,
-            batch_count: checkpoint.batch_count,
-            checkpoint_file_count: checkpoint.committed_file_count,
-            resource_budget: session.resource_budget,
-        },
-    })
+fn checkpoint_invariant_error(session: &CodeIndexSession, message: &str) -> StorageError {
+    StorageError::Invariant(format!(
+        "checkpoint invariant for scope '{}': {message}",
+        session.source_scope
+    ))
 }

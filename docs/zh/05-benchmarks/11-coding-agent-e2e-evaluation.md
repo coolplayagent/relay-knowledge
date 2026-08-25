@@ -1,5 +1,7 @@
 # Coding-Agent 端到端评测门禁
 
+[中文](11-coding-agent-e2e-evaluation.md) | [English](../../en/05-benchmarks/11-coding-agent-e2e-evaluation.md)
+
 Issue #300 在 Rust self-iteration harness 中新增可复现的 coding-agent 工作流门禁。
 
 ## 范围

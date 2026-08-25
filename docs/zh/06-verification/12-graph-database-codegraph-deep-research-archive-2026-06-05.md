@@ -122,3 +122,5 @@ git diff --check
 
 导航: 上一条:
 [11. 文档发版准备审计](11-documentation-release-readiness-2026-06-05.md)
+| 下一条:
+[13. 文档与自迭代准备度验证记录](13-documentation-self-iteration-readiness-2026-08-18.md)

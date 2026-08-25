@@ -70,28 +70,39 @@ pub(super) fn task_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexTaskReco
 
 pub(super) fn checkpoint_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexCheckpoint> {
     let resource_budget =
-        serde_json::from_str::<CodeIndexResourceBudget>(row.get::<_, String>(11)?.as_str())
+        serde_json::from_str::<CodeIndexResourceBudget>(row.get::<_, String>(17)?.as_str())
             .map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
-                    11,
+                    17,
                     rusqlite::types::Type::Text,
                     Box::new(error),
                 )
             })?;
+    let incremental_summary = super::super::checkpoint_receipt::decode(
+        row.get::<_, Option<String>>(14)?,
+        14,
+        resource_budget,
+    )?;
     Ok(CodeIndexCheckpoint {
         repository_id: row.get(0)?,
         source_scope: row.get(1)?,
-        state: row.get(2)?,
-        total_path_count: row.get(3)?,
-        parsed_file_count: row.get(4)?,
-        committed_file_count: row.get(5)?,
-        committed_symbol_count: row.get(6)?,
-        committed_reference_count: row.get(7)?,
-        committed_chunk_count: row.get(8)?,
-        batch_count: row.get(9)?,
-        last_path: row.get(10)?,
+        resolved_commit_sha: row.get(2)?,
+        tree_hash: row.get(3)?,
+        path_filters: parse_json_list(row.get(4)?)?,
+        language_filters: parse_json_list(row.get(5)?)?,
+        state: row.get(6)?,
+        total_path_count: row.get(7)?,
+        parsed_file_count: row.get(8)?,
+        committed_file_count: row.get(9)?,
+        committed_symbol_count: row.get(10)?,
+        committed_reference_count: row.get(11)?,
+        committed_chunk_count: row.get(12)?,
+        committed_fact_row_count: row.get(13)?,
+        incremental_summary,
+        batch_count: row.get(15)?,
+        last_path: row.get(16)?,
         resource_budget,
-        updated_at_ms: row.get(12)?,
+        updated_at_ms: row.get(18)?,
     })
 }
 

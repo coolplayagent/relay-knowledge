@@ -1,13 +1,44 @@
 use std::sync::Arc;
 
 use crate::{
-    api::ApiError,
+    api::{ApiError, ApiMetadata, CodeRepositoryIndexStartResponse, RequestContext},
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget, CodeRepositoryStatus,
-        clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
+        clean_git_commit_from_snapshot_identity,
     },
     storage::{CodeIndexTaskSeed, KnowledgeStore},
 };
+
+pub(super) async fn index_start_response_from_task(
+    store: &Arc<dyn KnowledgeStore>,
+    fallback_status: CodeRepositoryStatus,
+    task: crate::domain::CodeIndexTaskRecord,
+    requested_ref: String,
+    context: &RequestContext,
+) -> Result<CodeRepositoryIndexStartResponse, ApiError> {
+    let checkpoint = store
+        .code_index_checkpoint(task.source_scope.clone())
+        .await
+        .map_err(storage_api_error)?;
+    let graph_version = store
+        .current_graph_version()
+        .await
+        .map_err(storage_api_error)?;
+    let status = store
+        .code_repository_status(task.repository_id.clone())
+        .await
+        .map_err(storage_api_error)?
+        .unwrap_or(fallback_status);
+
+    Ok(CodeRepositoryIndexStartResponse {
+        metadata: ApiMetadata::graph_only(context, graph_version),
+        scope: crate::api::CodeRepositoryScopeMetadata::from_index_task(&task, requested_ref),
+        summary: None,
+        status,
+        task: Some(task),
+        checkpoint,
+    })
+}
 
 use super::state::{fresh_full_index_probe, previous_index_state_for_index};
 use crate::application::code_repository::{
@@ -36,11 +67,12 @@ pub(super) async fn queue_worktree_overlay_index_task(
     let payload_json = pinned_worktree_overlay_payload(request, &base_commit)
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
     let tree_hash = format!("worktree:pending:{base_commit}");
-    let source_scope = code_snapshot_scope_id(
+    let source_scope = crate::domain::code_snapshot_scope_id_with_workspace_detection(
         &status.repository_id,
         &tree_hash,
         &path_filters,
         &language_filters,
+        &request.workspace_detection,
     );
     let queued_at_ms = now_millis();
     let input_fingerprint = worktree_overlay_input_fingerprint(
@@ -114,11 +146,12 @@ pub(super) async fn queue_incremental_index_task(
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
     let workspace_detection_json = serde_json::to_string(&request.workspace_detection)
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
-    let source_scope = code_snapshot_scope_id(
+    let source_scope = crate::domain::code_snapshot_scope_id_with_workspace_detection(
         &status.repository_id,
         &head.tree_hash,
         &head.path_filters,
         &head.language_filters,
+        &request.workspace_detection,
     );
     let input_fingerprint = format!(
         "incremental:{}:{}:{}:{}:{}",

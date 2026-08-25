@@ -18,6 +18,7 @@ fn workload_baseline_matches_category_focus() {
             "run_id": "run-default",
             "timestamp": "1",
             "profile": "fast",
+            "product_binary_profile": "release",
             "accepted": true,
             "score": 0.8
         }),
@@ -25,6 +26,7 @@ fn workload_baseline_matches_category_focus() {
             "run_id": "run-semantic",
             "timestamp": "2",
             "profile": "fast",
+            "product_binary_profile": "release",
             "category_focus": "semantic_vector",
             "selected_categories": ["semantic_vector"],
             "accepted": true,
@@ -36,6 +38,7 @@ fn workload_baseline_matches_category_focus() {
             "run_id": "run-competitive",
             "timestamp": "3",
             "profile": "fast",
+            "product_binary_profile": "release",
             "category_focus": "competitive",
             "selected_categories": ["competitive"],
             "accepted": true,
@@ -47,6 +50,7 @@ fn workload_baseline_matches_category_focus() {
             "run_id": "manual-evaluate-semantic",
             "timestamp": "4",
             "profile": "fast",
+            "product_binary_profile": "release",
             "category_focus": "semantic_vector",
             "selected_categories": ["semantic_vector"],
             "accepted": false,
@@ -78,6 +82,53 @@ fn workload_baseline_matches_category_focus() {
         semantic_previous.get("run_id").and_then(Value::as_str),
         Some("run-semantic")
     );
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn fast_workload_history_excludes_legacy_debug_product_measurements() {
+    let workspace = temp_workspace("history-product-profile");
+    let paths = HistoryPaths::new(&workspace);
+    paths.ensure().expect("history paths");
+    let runs = [
+        json!({
+            "run_id": "legacy-fast-debug",
+            "timestamp": "3",
+            "profile": "fast",
+            "accepted": true,
+            "committed": true,
+            "commit": "debug123",
+            "score": 0.99
+        }),
+        json!({
+            "run_id": "current-fast-release",
+            "timestamp": "2",
+            "profile": "fast",
+            "product_binary_profile": "release",
+            "accepted": true,
+            "committed": true,
+            "commit": "release123",
+            "score": 0.90
+        }),
+    ];
+    fs::write(
+        &paths.runs_jsonl,
+        runs.iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("runs");
+
+    let previous = previous_scored_run_for_workload(&paths, "fast", None)
+        .expect("history")
+        .expect("release previous run");
+    let best = best_accepted_run_for_workload(&paths, "fast", None)
+        .expect("history")
+        .expect("release best run");
+
+    assert_eq!(previous["run_id"], "current-fast-release");
+    assert_eq!(best["run_id"], "current-fast-release");
     fs::remove_dir_all(workspace).expect("remove workspace");
 }
 

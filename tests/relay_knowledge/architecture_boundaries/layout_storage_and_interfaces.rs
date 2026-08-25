@@ -87,16 +87,20 @@ fn sqlite_code_root_contains_only_the_facade_tests_and_named_subdomains() {
         directory_entry_names(&sqlite_code_root),
         [
             "batch",
+            "checkpoint_receipt.rs",
+            "checkpoint_receipt_tests.rs",
             "documents",
             "feature_flags",
             "generated",
             "impact",
             "lifecycle",
             "mod.rs",
+            "publication",
             "query",
             "routes",
             "schema",
             "search",
+            "session_finalization",
             "set",
             "snapshot",
             "symbols",
@@ -104,6 +108,78 @@ fn sqlite_code_root_contains_only_the_facade_tests_and_named_subdomains() {
             "tests",
             "views",
             "workspace",
+        ]
+    );
+}
+
+#[test]
+fn sqlite_code_snapshot_root_contains_only_named_owners_and_direct_tests() {
+    let snapshot_root = source_root().join("storage/sqlite/code/snapshot");
+    assert_eq!(
+        directory_entry_names(&snapshot_root),
+        [
+            "admission.rs",
+            "admission_tests.rs",
+            "candidate_paths.rs",
+            "candidate_paths_tests.rs",
+            "durable_clone",
+            "durable_handoff.rs",
+            "fingerprints.rs",
+            "import_compat.rs",
+            "import_tests.rs",
+            "mod.rs",
+            "progress_tests.rs",
+            "reference_projection.rs",
+            "reference_projection_tests.rs",
+            "repository_import.rs",
+            "scope_tables.rs",
+            "search_copy.rs",
+            "search_copy_tests.rs",
+            "snapshot_import.rs",
+        ]
+    );
+}
+
+#[test]
+fn sqlite_code_session_finalization_root_contains_only_the_owner_and_its_direct_tests() {
+    let session_finalization_root = source_root().join("storage/sqlite/code/session_finalization");
+    assert_eq!(
+        directory_entry_names(&session_finalization_root),
+        ["mod.rs", "mod_tests.rs"]
+    );
+}
+
+#[test]
+fn sqlite_code_batch_session_root_contains_only_named_direct_contract_tests() {
+    let session_root = source_root().join("storage/sqlite/code/batch/session");
+    assert_eq!(
+        directory_entry_names(&session_root),
+        [
+            "checkpoint_batch_tests.rs",
+            "finalization.rs",
+            "mod.rs",
+            "mod_tests.rs",
+            "phase_resume_tests.rs",
+            "publication_barrier_tests.rs",
+            "query_index_policy_tests.rs",
+            "reference_resolution.rs",
+            "reference_resolution_page_tests.rs",
+        ]
+    );
+}
+
+#[test]
+fn partitioned_index_lifecycle_root_contains_only_the_owner_and_direct_contract_tests() {
+    let lifecycle_root = source_root().join("storage/partitioned/indexing/lifecycle");
+    assert_eq!(
+        directory_entry_names(&lifecycle_root),
+        [
+            "mod.rs",
+            "mod_tests.rs",
+            "publication_barrier_tests.rs",
+            "query_index_repair_tests.rs",
+            "reference_search_page_tests.rs",
+            "unfenced_authority_tests.rs",
         ]
     );
 }
@@ -258,6 +334,7 @@ fn sqlite_code_query_relevance_root_contains_only_named_scoring_and_fts_owners()
             "conversion_scoring.rs",
             "declaration_scoring.rs",
             "filters.rs",
+            "filters_tests.rs",
             "fts_compound.rs",
             "fts_compound_tests.rs",
             "fts_plan.rs",
@@ -296,7 +373,9 @@ fn sqlite_code_query_imports_root_contains_only_paired_retrieval_owners() {
             "generated_tests.rs",
             "hit_projection.rs",
             "hit_projection_tests.rs",
+            "importer_significance_tests.rs",
             "mod.rs",
+            "outage_tests.rs",
             "path_context.rs",
             "path_context_tests.rs",
             "ranking_tests.rs",
@@ -307,6 +386,7 @@ fn sqlite_code_query_imports_root_contains_only_paired_retrieval_owners() {
             "target_tests.rs",
             "targets.rs",
             "targets_tests.rs",
+            "usage_ranking_tests.rs",
         ]
     );
 }
@@ -365,6 +445,20 @@ fn sqlite_code_batch_root_contains_only_the_facade_and_named_subdomains() {
 }
 
 #[test]
+fn sqlite_code_batch_persistence_root_contains_only_owner_and_direct_tests() {
+    let persistence_root = source_root().join("storage/sqlite/code/batch/persistence");
+    assert_eq!(
+        directory_entry_names(&persistence_root),
+        [
+            "chunk_bulk_tests.rs",
+            "mod.rs",
+            "mod_tests.rs",
+            "reference_bulk_tests.rs",
+        ]
+    );
+}
+
+#[test]
 fn sqlite_code_batch_finalize_root_contains_only_the_facade_and_named_subdomains() {
     let finalize_root = source_root().join("storage/sqlite/code/batch/finalize");
     assert_eq!(
@@ -376,6 +470,7 @@ fn sqlite_code_batch_finalize_root_contains_only_the_facade_and_named_subdomains
             "imported_references",
             "imports",
             "mod.rs",
+            "pages.rs",
             "phases",
             "references",
             "search_documents",
@@ -394,6 +489,7 @@ fn sqlite_code_batch_finalize_imports_root_contains_only_named_subdomains() {
             "languages",
             "mod.rs",
             "module_paths",
+            "resolution_tests.rs",
             "specifier",
             "symbol_targets",
         ]

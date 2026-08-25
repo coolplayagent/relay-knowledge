@@ -4,6 +4,7 @@ use super::{
     categories::CategorySet,
     jobs::Jobs,
     mode::{Mode, Strategy},
+    product_binary::ProductBinaryProfile,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,4 +48,15 @@ pub struct Config {
     pub research_topic: String,
     pub research_slug: String,
     pub research_date: String,
+}
+
+impl Config {
+    pub fn product_binary_profile(&self) -> Option<ProductBinaryProfile> {
+        ProductBinaryProfile::for_evaluation_profile(&self.profile)
+    }
+
+    pub fn product_binary_path(&self) -> Option<PathBuf> {
+        self.product_binary_profile()
+            .map(|profile| profile.binary_path(&self.workspace))
+    }
 }

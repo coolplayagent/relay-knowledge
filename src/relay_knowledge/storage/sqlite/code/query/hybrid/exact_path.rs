@@ -1,12 +1,14 @@
 use crate::domain::{CodeQueryKind, CodeRetrievalHit, CodeRetrievalRequest};
 
+use super::super::relevance::query_is_single_symbol_identity;
 use super::planning::{hybrid_query_requires_chunk_first_before_symbols, hybrid_sequence_terms};
 
 pub(in super::super) fn hybrid_exact_path_query_can_defer_to_source_fallback(
     request: &CodeRetrievalRequest,
     hits: &[CodeRetrievalHit],
 ) -> bool {
-    hybrid_query_can_skip_graph_expansion(request, hits)
+    query_is_single_symbol_identity(&request.query)
+        && hybrid_query_can_skip_graph_expansion(request, hits)
         && exact_path_hits_cover_query_identities(&request.query, hits)
         && !hybrid_query_mentions_type_surface(&request.query)
 }
@@ -26,6 +28,7 @@ pub(in super::super) fn hybrid_exact_path_query_should_skip_chunk_first(
 ) -> bool {
     request.code_query_kind == CodeQueryKind::Hybrid
         && request_has_exact_file_filter(request)
+        && query_is_single_symbol_identity(&request.query)
         && !hybrid_query_mentions_graph_expansion(&request.query)
 }
 

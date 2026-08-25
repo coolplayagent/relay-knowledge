@@ -6,7 +6,7 @@ use crate::{
         CodeIndexTaskState, CodeRepositoryRegistration, code_snapshot_scope_id,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore,
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeRepositoryStore,
         CodeScopeRetentionRequest, PartitionedSqliteKnowledgeStore, SqliteGraphStore,
     },
 };
@@ -21,11 +21,21 @@ const LANGUAGE_FILTER: &str = "rust";
 async fn live_worktree_attempt_rebinds_target_before_publication_and_retention() {
     let store = registered_store().await;
     let (base_scope, pending_scope, real_scope, snapshot) = worktree_fixture(&store).await;
+    let real_commit = snapshot.resolved_commit_sha.clone();
+    let real_tree = snapshot.tree_hash.clone();
     let running = claim_worktree_task(&store, &pending_scope, "worker-live", now_millis()).await;
+    let publication_fence = fence(&running, "worker-live");
     let summary = store
-        .apply_code_index_snapshot_with_fence(snapshot, fence(&running, "worker-live"))
+        .apply_code_index_snapshot_with_fence(snapshot, publication_fence.clone())
         .await
-        .expect("live dirty worktree snapshot should publish");
+        .expect("live dirty worktree snapshot should stage");
+    store
+        .refresh_software_global_projection_with_fence(
+            summary.source_scope.clone(),
+            publication_fence,
+        )
+        .await
+        .expect("software projection should publish the staged overlay");
 
     assert_eq!(summary.source_scope, real_scope);
     let active = store
@@ -35,6 +45,8 @@ async fn live_worktree_attempt_rebinds_target_before_publication_and_retention()
         .expect("task should remain active until completion");
     assert_eq!(active.state, CodeIndexTaskState::Running);
     assert_eq!(active.source_scope, real_scope);
+    assert_eq!(active.resolved_commit_sha, real_commit);
+    assert_eq!(active.tree_hash, real_tree);
 
     let retention = store
         .prune_code_repository_scopes(CodeScopeRetentionRequest {
@@ -57,15 +69,17 @@ async fn live_worktree_attempt_rebinds_target_before_publication_and_retention()
 async fn stale_worktree_attempt_cannot_rebind_or_publish_after_takeover() {
     let store = registered_store().await;
     let (_, pending_scope, real_scope, snapshot) = worktree_fixture(&store).await;
-    let now = now_millis();
-    let first = claim_worktree_task_with_lease(&store, &pending_scope, "worker-old", now, 10).await;
+    let first =
+        claim_worktree_task_with_lease(&store, &pending_scope, "worker-old", now_millis(), 60_000)
+            .await;
+    expire_task_lease(&store, &first.task_id).await;
     let second = store
         .claim_code_index_task(CodeIndexTaskClaimRequest {
             task_id: Some(first.task_id.clone()),
             lease_owner: "worker-new".to_owned(),
             lease_duration_ms: 60_000,
             max_attempts: 3,
-            now_ms: now.saturating_add(11),
+            now_ms: now_millis(),
         })
         .await
         .expect("takeover should run")
@@ -76,7 +90,7 @@ async fn stale_worktree_attempt_cannot_rebind_or_publish_after_takeover() {
         .apply_code_index_snapshot_with_fence(snapshot, fence(&first, "worker-old"))
         .await
         .expect_err("stale attempt must not rebind or publish the overlay");
-    assert!(error.to_string().contains("cannot publish scope"));
+    assert!(error.to_string().contains("no longer active"));
 
     let active = store
         .active_code_index_task(REPOSITORY_ID.to_owned())
@@ -108,10 +122,55 @@ async fn partitioned_publication_rebinds_control_target_before_status_mirror() {
         .await
         .expect("repository should register");
     let base = snapshot_identity("base-tree", BASE_COMMIT, None, true);
-    store
-        .apply_code_index_snapshot(base.1)
+    let base_snapshot = base.1;
+    let queued_base = store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: REPOSITORY_ID.to_owned(),
+            alias: ALIAS.to_owned(),
+            ref_selector: BASE_COMMIT.to_owned(),
+            resolved_commit_sha: base_snapshot.resolved_commit_sha.clone(),
+            tree_hash: base_snapshot.tree_hash.clone(),
+            source_scope: base_snapshot.source_scope.clone(),
+            path_filters: base_snapshot.path_filters.clone(),
+            language_filters: base_snapshot.language_filters.clone(),
+            mode: CodeIndexMode::Full,
+            input_fingerprint: "partitioned-worktree-base".to_owned(),
+            resource_budget: CodeIndexResourceBudget::default(),
+            payload_json: "{}".to_owned(),
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("base task should queue");
+    let base_task = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued_base.task_id),
+            lease_owner: "worker-base".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("base task claim should run")
+        .expect("base task should claim");
+    let base_fence = fence(&base_task, "worker-base");
+    let base_summary = store
+        .apply_code_index_snapshot_with_fence(base_snapshot, base_fence.clone())
         .await
         .expect("base scope should publish");
+    store
+        .refresh_software_global_projection_with_fence(base_summary.source_scope, base_fence)
+        .await
+        .expect("base software projection should publish");
+    store
+        .complete_code_index_task(CodeIndexTaskCompletion {
+            task_id: base_task.task_id,
+            lease_owner: "worker-base".to_owned(),
+            attempt_count: base_task.attempt_count,
+            publication_generation: base_task.publication_generation,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("base task should complete");
     let pending_tree = format!("worktree:pending:{BASE_COMMIT}");
     let pending_scope = scope_for_tree(&pending_tree);
     let overlay_hash = "fedcba9876543210";
@@ -139,10 +198,18 @@ async fn partitioned_publication_rebinds_control_target_before_status_mirror() {
         .expect("partitioned claim should run")
         .expect("worktree task should claim");
 
+    let publication_fence = fence(&running, "worker-partitioned");
     let summary = store
-        .apply_code_index_snapshot_with_fence(snapshot, fence(&running, "worker-partitioned"))
+        .apply_code_index_snapshot_with_fence(snapshot, publication_fence.clone())
         .await
-        .expect("partitioned overlay should rebind across shard and control");
+        .expect("partitioned overlay should stage across shard and control");
+    store
+        .refresh_software_global_projection_with_fence(
+            summary.source_scope.clone(),
+            publication_fence,
+        )
+        .await
+        .expect("software projection should activate shard and control status");
 
     assert_eq!(summary.source_scope, real_scope);
     let active = store
@@ -151,6 +218,8 @@ async fn partitioned_publication_rebinds_control_target_before_status_mirror() {
         .expect("control task should load")
         .expect("running task should remain visible");
     assert_eq!(active.source_scope, real_scope);
+    assert_eq!(active.resolved_commit_sha, real_commit);
+    assert_eq!(active.tree_hash, real_tree);
     let status = store
         .code_repository_status(REPOSITORY_ID.to_owned())
         .await
@@ -296,6 +365,12 @@ async fn worktree_fixture(store: &SqliteGraphStore) -> (String, String, String, 
                      tree_hash = ?4, state = 'fresh', stale = 0
                  WHERE repository_id = ?1",
                 rusqlite::params![REPOSITORY_ID, base_scope_for_insert, BASE_COMMIT, base_tree],
+            )?;
+            connection.execute(
+                "INSERT INTO code_repository_reference_search_manifests (
+                     source_scope, projection_version, reference_count, group_count
+                 ) VALUES (?1, 2, 0, 0)",
+                [base_scope_for_insert],
             )?;
             Ok(())
         })
@@ -458,6 +533,22 @@ async fn claim_worktree_task_with_lease(
         .await
         .expect("task claim should run")
         .expect("worktree task should claim")
+}
+
+async fn expire_task_lease(store: &SqliteGraphStore, task_id: &str) {
+    let task_id = task_id.to_owned();
+    let changed = store
+        .run(move |connection| {
+            Ok(connection.execute(
+                "UPDATE code_repository_index_tasks
+                 SET lease_expires_at_ms = 0
+                 WHERE task_id = ?1 AND state = 'running'",
+                [task_id],
+            )?)
+        })
+        .await
+        .expect("task lease fixture should expire");
+    assert_eq!(changed, 1, "one running task lease should expire");
 }
 
 fn fence(task: &crate::domain::CodeIndexTaskRecord, owner: &str) -> CodeIndexPublicationFence {

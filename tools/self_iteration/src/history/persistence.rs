@@ -6,7 +6,10 @@ use std::{
 
 use serde_json::Value;
 
-use crate::scoring::{EvaluationObservation, ScoreBreakdown};
+use crate::{
+    config::ProductBinaryProfile,
+    scoring::{EvaluationObservation, ScoreBreakdown},
+};
 
 use super::{HistoryPaths, run_state::adoption_status};
 
@@ -40,6 +43,7 @@ pub struct RunRecordInput<'a> {
     pub run_id: &'a str,
     pub timestamp: &'a str,
     pub profile: &'a str,
+    pub product_binary_profile: Option<ProductBinaryProfile>,
     pub category_focus: Option<&'a str>,
     pub selected_categories: &'a [&'a str],
     pub report_path: &'a Path,
@@ -59,6 +63,7 @@ pub fn make_run_record(input: RunRecordInput<'_>) -> Value {
         "run_id": input.run_id,
         "timestamp": input.timestamp,
         "profile": input.profile,
+        "product_binary_profile": input.product_binary_profile.map(ProductBinaryProfile::as_str),
         "category_focus": input.category_focus,
         "selected_categories": selected_categories,
         "accepted": committed,

@@ -64,6 +64,15 @@ pub(in crate::storage::sqlite::code) fn required_repository(
         ))
     })?;
 
+    if (status.stale || status.state != "fresh")
+        && scoped_status.last_indexed_scope_id != status.last_indexed_scope_id
+    {
+        return Err(StorageError::InvalidInput(format!(
+            "code repository '{}' has no published index for ref {} and requested filters",
+            selector.repository, selector.ref_selector
+        )));
+    }
+
     Ok(scoped_status)
 }
 

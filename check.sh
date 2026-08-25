@@ -5,6 +5,10 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+echo "Running documentation structure and link check..."
+python3 tools/docs/check_docs.py --self-test
+python3 tools/docs/check_docs.py
+
 echo "Running Rust formatting check..."
 cargo fmt --all -- --check
 

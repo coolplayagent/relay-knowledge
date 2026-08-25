@@ -7,6 +7,8 @@ use crate::{
     storage::StorageError,
 };
 
+use super::code_search_read_model_unavailable_reason;
+
 pub(super) mod binding_terms;
 mod hit_projection;
 pub(super) mod path_context;
@@ -24,6 +26,8 @@ use self::{
     targets::search_imports_by_target_symbols,
 };
 
+const IMPORT_EXACT_EDGE_RESERVE_LIMIT: usize = 700;
+
 pub(super) fn search_imports(
     connection: &Connection,
     status: &CodeRepositoryStatus,
@@ -36,7 +40,11 @@ pub(super) fn search_imports(
     }
 
     let identifier_rows = search_import_identifier_rows(connection, status, request)?;
-    let target_symbol_rows = search_imports_by_target_symbols(connection, status, request)?;
+    let target_symbol_rows = match search_imports_by_target_symbols(connection, status, request) {
+        Ok(rows) => rows,
+        Err(error) if code_search_read_model_unavailable_reason(&error).is_some() => Vec::new(),
+        Err(error) => return Err(error),
+    };
     let target_symbol_rows_can_answer =
         import_target_symbol_rows_can_answer_without_fts(request, &target_symbol_rows);
     if target_symbol_rows_can_answer && identifier_rows.is_empty() {
@@ -49,6 +57,16 @@ pub(super) fn search_imports(
             rows.extend(target_symbol_rows);
             rows.extend(identifier_rows);
             import_rows_to_hits(connection, status, request, rows)
+        }
+        Err(error) if code_search_read_model_unavailable_reason(&error).is_some() => {
+            let mut rows = direct_rows.rows;
+            rows.extend(target_symbol_rows);
+            rows.extend(identifier_rows);
+            if rows.is_empty() {
+                Err(error)
+            } else {
+                import_rows_to_hits(connection, status, request, rows)
+            }
         }
         Err(_) if direct_rows_can_answer => {
             import_rows_to_hits(connection, status, request, direct_rows.rows)
@@ -75,3 +93,15 @@ mod ranking_tests;
 #[cfg(test)]
 #[path = "foundational_ranking_tests.rs"]
 mod foundational_ranking_tests;
+
+#[cfg(test)]
+#[path = "importer_significance_tests.rs"]
+mod importer_significance_tests;
+
+#[cfg(test)]
+#[path = "usage_ranking_tests.rs"]
+mod usage_ranking_tests;
+
+#[cfg(test)]
+#[path = "outage_tests.rs"]
+mod outage_tests;

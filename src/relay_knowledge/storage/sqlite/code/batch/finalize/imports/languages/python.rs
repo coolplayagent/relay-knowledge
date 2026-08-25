@@ -189,11 +189,3 @@ fn parse_imported_names(names: &str) -> Vec<String> {
         })
         .collect()
 }
-
-pub(super) fn imported_symbol_names(statement: &str) -> Vec<String> {
-    let statement = statement.trim().trim_end_matches(';').trim();
-    statement
-        .strip_prefix("from ")
-        .and_then(|body| body.split_once(" import "))
-        .map_or_else(Vec::new, |(_, names)| parse_imported_names(names))
-}

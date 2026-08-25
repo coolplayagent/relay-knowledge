@@ -1,19 +1,16 @@
 # relay-knowledge Implementation Reference
 
-[English](../../en/04-research/07-relay-knowledge-implementation-reference.md) | [中文](../../zh/04-research/07-relay-knowledge-implementation-reference.md)
+[English](07-relay-knowledge-implementation-reference.md) | [中文](../../zh/04-research/07-relay-knowledge-implementation-reference.md)
 
-This is the English documentation page for `04-research/07-relay-knowledge-implementation-reference.md`. It follows the same structure, examples, commands, and implementation contracts as the Chinese edition so readers can switch languages without changing document location.
+[Documentation index](../README.md) | [GitHub repository](https://github.com/coolplayagent/relay-knowledge)
 
-> Translation status: the English edition preserves the current technical source text below while the full prose translation is maintained incrementally. Command examples, API paths, environment variables, filenames, and configuration contracts are authoritative.
-
-[Documentation index](../../en/README.md) | [GitHub repository](https://github.com/coolplayagent/relay-knowledge)
-
-## Source Content
-
-> 编制日期: 2026-05-13
-> 进展刷新: 2026-05-17
-> 范围: 结合 docs 中的知识图谱、GraphRAG、Agentic KG、Tree-sitter 代码图、协议接入和后台服务材料，对照当前 Rust 实现，记录已关闭能力和开放产品化路线。
-> 定位: 工程借鉴文档，不替代 `docs/zh/03-architecture-specs/` 中的硬约束和接口规格。
+> Prepared: 2026-05-13
+> Progress refreshed: 2026-05-17
+> Scope: compare the repository's Rust implementation with the knowledge-graph,
+> GraphRAG, Agentic KG, Tree-sitter code-graph, protocol-access, and background
+> service research, recording closed foundations and open productization work.
+> Position: an engineering reference, not a replacement for the hard constraints
+> and interface specifications in `docs/en/03-architecture-specs/`.
 
 ## Research Positioning
 
@@ -24,157 +21,262 @@ This is the English documentation page for `04-research/07-relay-knowledge-imple
 | Competitive focus | The research path should compete through shared core services, versioned facts, explainable context packs, code graphs, and service operations rather than feature count. |
 | Scenarios and future | Targets v1 productization, later GraphRAG expansion, agent access, silent updates, evaluation loops, and install/deployment governance. |
 
-## 1. 执行结论
+## 1. Executive Conclusion
 
-`relay-knowledge` 当前已经具备一个可继续演进的知识图谱底座: 统一 API、异步 application service、SQLite 图状态、图版本、结构化事实、索引新鲜度元数据、带 source hash/backend cursor/model metadata 的 scoped index cursor、bounded refresh queue、task lease/reconciler 诊断、结构化 stale reasons、FTS5 BM25 read model、local semantic/vector read model、可配置外部 semantic/vector embedding 后端契约、schema path/temporal/community retrieval、RRF context pack、本地确定性 rerank、Tree-sitter 代码仓库索引、多模态 evidence schema、后台/maintenance 多模态抽取提交入口、worker proposal lifecycle、MCP Streamable HTTP、本地 ACP session adapter、MCP resources/prompts、Prometheus metrics exporter、可选 JSONL audit sink、CLI/Web 入口、GraphRAG evaluation fixture gate、`env`/`paths`/`net` 基础边界和 QoS 配置。它还不是完整服务安装产品，当前开放产品化集中在具体外部 embedding/OCR/vision/table/layout provider、特权 service install/rollback/package manifests/watchdog、conflict/valid-time 产品语义、远端 ACP/A2A gateway、query router 和 release-facing 评测报告。
+At the time of this refresh, `relay-knowledge` already had an extensible
+knowledge-graph foundation: a unified API; an async application service; SQLite
+graph state and graph versions; structured facts; index-freshness metadata;
+scoped index cursors carrying source hash, backend cursor, and model metadata;
+bounded refresh queues; task-lease and reconciler diagnostics; structured stale
+reasons; an FTS5 BM25 read model; local semantic/vector read models;
+configurable external semantic/vector backend contracts; schema-path,
+temporal, and community retrieval; an RRF context pack; deterministic local
+reranking; Tree-sitter repository indexing; multimodal evidence schema;
+background and maintenance extraction submission; worker proposal lifecycle;
+MCP Streamable HTTP; a local ACP session adapter; MCP resources/prompts;
+Prometheus metrics; an optional JSONL audit sink; CLI/Web entry points; a
+GraphRAG evaluation fixture; foundational `env`/`paths`/`net` boundaries; and
+QoS configuration.
 
-基于现有材料，后续路线不应追求复制某个 GraphRAG 框架，而应把项目定位为 **knowledge substrate**:
+It was not yet a complete service-installation product. The recorded open work
+included concrete external embedding/OCR/vision/table/layout providers,
+privileged service lifecycle and packaging, conflict and valid-time product
+semantics, remote ACP/A2A access, a query router, and release-facing evaluation
+reports. Later documents may close individual items; this dated research note
+keeps the historical boundary rather than silently rewriting it.
 
-- 核心负责事实、证据、版本、scope、索引、检索、诊断和审计。
-- 外部 agent runtime 负责 planning、tool calling、审批、长任务会话和最终 LLM 生成。
-- LLM 或 agent 输出只能进入 proposal、diagnostic、summary 或 derived index，不能绕过 graph mutation contract 直接覆盖 accepted facts。
-- GraphRAG 的价值落在检索规划和上下文组织上: BM25、semantic、vector 和 graph expansion 需要协同返回可解释 context pack，而不是只返回自然语言答案。
+The product direction is a **knowledge substrate**, not a copy of one GraphRAG
+framework:
 
-## 2. 当前实现基线
+- The core owns facts, evidence, versions, scopes, indexes, retrieval,
+  diagnostics, and audit.
+- An external agent runtime owns planning, tool calls, approvals, long-running
+  sessions, and final LLM generation.
+- LLM or agent output can enter proposals, diagnostics, summaries, or derived
+  indexes, but cannot bypass the graph-mutation contract and overwrite accepted
+  facts.
+- GraphRAG value lies in retrieval planning and context organization: BM25,
+  semantic, vector, and graph expansion cooperate to return an explainable
+  context pack rather than only a natural-language answer.
 
-### 2.1 已经可复用的核心基础
+## 2. Implementation Baseline
 
-当前实现已经完成了几条重要边界:
+### 2.1 Reusable Core Foundations
 
-- `api` 层定义了 CLI、Web、HTTP 和 agent adapter 可共享的 request/response 类型，包括 ingest、hybrid retrieval、context pack、graph inspection、index refresh、health、service status、agent identity 和 code repository API；Web adapter 已通过同源 `/api/web/operations/execute` 将操作 composer 接到 application service。
-- `application` 层通过 `RelayKnowledgeService` 收口业务入口，CLI 和未来 adapter 不需要直接访问 SQLite 或 tree-sitter。
-- `storage` 层通过 trait 隔离图事实、mutation log、index metadata 和 code graph 查询，SQLite 实现把阻塞数据库操作放到 `spawn_blocking` worker 中。
-- `domain` 层已有 `GraphVersion`、`SourceScope`、`FreshnessPolicy`、`IndexStatus`、`GraphMutationBatch`、`EvidenceRecord` 和代码图类型，适合继续扩展成更完整的事实模型。
-- `code` 和 `application::code_service` 已经实现 Git 仓库与非 Git source directory 注册、clean snapshot 与 filesystem synthetic snapshot 索引、增量 diff、worktree overlay、Tree-sitter 多语言解析、代码图检索、query-time 内部 exact-text source fallback 和 diff impact。
-- `net::http` 和 `net::qos` 已经拥有配置校验、事件驱动 HTTP server、超时、请求体预算和 admission policy 基础；MCP Streamable HTTP 已经在这些边界内运行。
-- `interfaces::agent::mcp` 已经实现 MCP Streamable HTTP session、protocol header 校验、tool calls、resources、prompts、Prometheus metrics endpoint、access policy、QoS admission、cancellation registry、index refresh 权限控制、code graph query、code impact、bounded audit log 和可选 JSONL audit sink。
-- `interfaces::agent::acp` 已经实现本地 ACP session adapter，支持 initialize metadata、session/new、session/prompt progress、cancellation、context artifact、runtime identity、QoS admission、bounded audit log 和可选 JSONL audit sink。
+- The `api` layer defines shared request/response types for CLI, Web, HTTP, and
+  agent adapters, including ingest, hybrid retrieval, context packs, graph
+  inspection, index refresh, health, service state, agent identity, and
+  repository APIs. The Web adapter connects its operation composer to the
+  application service through same-origin `/api/web/operations/execute`.
+- The `application` layer converges business entry points in
+  `RelayKnowledgeService`, so CLI and adapters do not access SQLite or
+  Tree-sitter directly.
+- Storage traits isolate graph facts, mutation logs, index metadata, and code
+  queries. The SQLite implementation sends blocking database work to
+  `spawn_blocking` workers.
+- The domain layer includes `GraphVersion`, `SourceScope`, `FreshnessPolicy`,
+  `IndexStatus`, `GraphMutationBatch`, `EvidenceRecord`, and code-graph types.
+- The code and code-service layers support Git repositories and non-Git source
+  directories, clean snapshots, filesystem synthetic snapshots, incremental
+  diffs, worktree overlays, multilingual Tree-sitter parsing, code-graph
+  retrieval, bounded internal exact-text source fallback, and diff impact.
+- `net::http` and `net::qos` own configuration validation, event-driven HTTP,
+  timeouts, request-body budgets, and admission policy. MCP Streamable HTTP runs
+  within those boundaries.
+- The MCP adapter supports sessions, protocol headers, tool calls, resources,
+  prompts, Prometheus metrics, access policy, QoS, cancellation, restricted
+  refresh, code query/impact, bounded audit, and an optional JSONL sink.
+- The local ACP adapter supports initialization metadata, session creation,
+  prompt progress, cancellation, context artifacts, runtime identity, QoS,
+  bounded audit, and an optional JSONL sink.
 
-这些基础与研究材料的主线一致: async-first、统一 API、图存储解耦、索引新鲜度、代码图和 scope 隔离都已经有雏形。
+These foundations align with the research: async-first operation, one API,
+decoupled graph storage, index freshness, code graphs, and scope isolation.
 
-### 2.2 当前能力边界
+### 2.2 Capability Boundary at This Refresh
 
-需要明确的是，当前实现已经关闭本地 GraphRAG 主路径，但还不是完整安装发布产品:
+- `retrieve_context` combined SQLite FTS5 BM25, graph-evidence fallback,
+  code-graph documents, local semantic tokens, local hashed-vector ANN,
+  schema paths, temporal events, community summaries, RRF, and deterministic
+  reranking. Context items carried structured facts, fact-derived one-hop
+  `graph_paths`, source spans, code artifacts, rerank signals, and backend
+  availability metadata. Semantic/vector backend state came from read-model
+  cursors plus runtime configuration and supported `local`, `external`, and
+  `disabled` modes.
+- `index_status` aggregated BM25, semantic, vector, and other family freshness.
+  Scoped cursors recorded kind, scope, modality, graph version, source hash,
+  and backend cursor. Semantic/vector workers could publish model name and
+  dimension. `refresh_indexes` scheduled persistent tasks, acquired leases,
+  replayed the mutation log, and advanced cursors. Refresh completion derived
+  model metadata from indexed documents rather than separating runtime labels
+  from read-model provenance.
+- The generic knowledge graph had expanded beyond evidence/entity rows to typed
+  relations, claims/events, confidence, source spans, status, version-range
+  validation, and worker proposals. Valid time, conflict resolution, and a
+  complete fact-review product experience remained open.
+- Background-service state was exposed through the API. Foreground
+  `service run` executed a minimal startup index reconciler. Refresh had task
+  rows, leases, retry, dead-letter counts, reconciler replay, and attributed
+  stale reasons. Service-definition generation and silent-update state existed;
+  privileged install, rollback, watchdog, and maintenance orchestration were
+  still productization work.
+- MCP Streamable HTTP and the local ACP session adapter were usable with access
+  policy, QoS, bounded audit, optional JSONL output, code query/impact tools,
+  MCP resources/prompts, and metrics.
 
-- `retrieve_context` 已经使用 SQLite FTS5 BM25、graph evidence fallback、code graph documents、local semantic token read model、local hashed-vector ANN read model、schema path、temporal event、community summary、RRF context pack 和本地确定性 rerank；context item 会携带 structured facts、由 facts 派生的一跳 `graph_paths`、source span、code artifact、rerank signal 和 backend availability metadata。semantic/vector backend status 现在由 read model cursor 与 runtime backend 配置生成，支持 `local`、`external` 和 `disabled` 模式。
-- `index_status` 记录了 BM25、semantic、vector 等索引家族的聚合新鲜度；scoped cursor 按 kind/scope/modality 记录 graph version、source hash、backend cursor，并允许 semantic/vector worker 在完成任务时写入 model name/dimension。`refresh_indexes` 会调度持久化 task、获取 lease、replay mutation log 并更新 cursor；semantic/vector refresh completion 会从已索引文档推导模型元数据，避免 runtime label 与实际 read model provenance 分离。BM25 文档随 evidence/code graph 写入更新，并为 entity labels 与 code symbols 记录生成式 lexical alias 字段；semantic/vector read model 随 evidence 写入记录 model、dimension、source hash、scope 和 graph version metadata。
-- 通用知识图谱已经从 evidence/entity 扩展到 typed relation、claim/event、confidence、source span、status、version-range validation 和 worker proposal lifecycle；valid time、conflict resolution 以及更完整的事实审批产品体验仍是开放产品化工作。
-- 后台服务状态已暴露为 API，foreground `service run` 启动时会执行最小 startup index reconciler；foreground refresh 主路径已具备任务表、leases、retry、dead-letter 计数、reconciler 补发、stale diagnostics 和按索引族/scope 归因的 stale reasons。service manager 定义生成和 silent-update operator state 已落地，特权安装、rollback、watchdog 和维护任务编排仍需产品化。
-- MCP Streamable HTTP 和本地 ACP session adapter 已经可用，并已有 access policy、QoS、bounded audit log、可选 JSONL audit sink、code graph query/impact tools、MCP resources/prompts、metrics exporter。
+## 3. Reusable Directions
 
-## 3. 可借鉴方向
+### 3.1 GraphRAG and LightRAG: Explainable Context First
 
-### 3.1 GraphRAG 与 LightRAG: 先做可解释 context pack
+The graph is not a vector-store replacement; it is a layer for retrieval
+planning, relationship expansion, and context organization. The priority is to
+keep `HybridRetrievalResponse` as an auditable context pack:
 
-GraphRAG、LightRAG 和相关材料共同指向一个结论: 图不是向量库替代品，而是检索规划、关系扩展和上下文组织层。对本项目而言，优先级应是继续把 `HybridRetrievalResponse` 作为可审计 context pack 扩展:
+- return matching entities, relationships, chunks, source scope, graph and
+  index versions, retriever source, and score explanation;
+- use entity linking, bounded neighborhoods, and evidence chunks for local
+  questions;
+- use community/summary read models for future global questions;
+- preserve paths for multi-hop questions rather than expanding arbitrary
+  k-hop neighborhoods;
+- report stale, degraded, truncated, and freshness-policy state on every
+  result.
 
-- 返回命中的实体、关系、chunk、source scope、graph version、index versions、retriever source 和 score explanation。
-- 本地问题优先走 entity linking + limited neighborhood + evidence chunk。
-- 全局问题后续走 community/summary read model。
-- 多跳问题保留 path 结构，避免盲目 k-hop 扩展造成噪声膨胀。
-- 所有结果都带 stale、degraded、truncated 和 freshness policy 信息。
+The core need not generate final LLM answers. It organizes grounded context;
+an external runtime or UI decides whether to generate an answer.
 
-近期不需要直接实现 LLM answer generator。core 只负责组织 grounded context，由外部 runtime 或 UI 决定是否生成最终答案。
+### 3.2 Agentic KG: Keep the Core out of Runtime Planning
 
-### 3.2 Agentic KG: core 不做 runtime
+- Adapters perform protocol translation, pre-authorization, identity injection,
+  QoS admission, and error mapping.
+- MCP tools/resources/prompts are the default knowledge-tool surface for other
+  agents.
+- ACP is suitable for conversational retrieval but does not grant file editing,
+  terminal execution, or code modification by default.
+- High-risk operations such as mutation commits, entity merges, or index
+  rebuilds require proposals/approval or explicit permission.
+- Every agent request records trace, runtime identity, source scope, freshness,
+  QoS decision, and result truncation.
 
-Agentic KG 和协议接入材料说明，`relay-knowledge` 应作为常驻知识服务提供图检索和知识维护能力，但不应变成通用 agent runtime。
+The unified API is already downstream of the MCP adapter; MCP and ACP do not
+need independent retrieval implementations.
 
-推荐借鉴点:
+### 3.3 Tree-sitter Code Graph: Productize the Strongest Path
 
-- adapter 只做协议转换、权限前置、identity 注入、QoS admission 和错误映射。
-- MCP 默认暴露 tool/resource/prompt，适合作为其它 agent 的知识工具入口。
-- ACP 适合会话式检索入口，但不默认提供文件编辑、终端执行或代码修改能力。
-- 高风险操作，例如 mutation commit、entity merge、index rebuild，应通过 proposal/approval 或显式 permission。
-- 每次 agent 请求记录 trace、runtime identity、source scope、freshness、QoS decision 和 result truncation。
+Repository retrieval was the closest capability to delivery. It covered Git
+snapshots, incremental diffs, worktree overlays, Tree-sitter parsing for Rust,
+Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C/C++, C#,
+Ruby, PHP, Swift, and Bash, plus symbols, references, imports, calls, chunks,
+and impact.
 
-当前统一 API 已经作为 MCP adapter 下游，后续不需要为 MCP/ACP 复制检索逻辑。
+Priority improvements were:
 
-### 3.3 Tree-sitter 代码图: 优先产品化
+- complete scope metadata: repository, resolved commit, tree hash, path filters,
+  and indexed ref;
+- reliable incremental flow from changed paths through content-hash skips,
+  tombstones, reverse dependents, and scoped refresh;
+- agent-readable context packs across symbols, references, calls, imports,
+  chunks, and impact;
+- explicit limit, path/language filters, timeout, truncation, and degradation;
+- bounded source fallback only when structured definition/reference/hybrid
+  recall is insufficient, with `text_fallback` provenance and no invented
+  resolved edge;
+- syntax-level fact labels and ambiguous/unresolved state when cross-file
+  semantics are uncertain.
 
-代码仓库检索是当前最接近可交付的能力。已有实现覆盖 Git
-snapshot、增量 diff、worktree overlay、Rust/Python/JavaScript/JSX/
-TypeScript/TSX/Go/Java/Kotlin/Scala/C/C++/C#/Ruby/PHP/Swift/Bash
-tree-sitter parsing、symbol/reference/import/call/chunk 和影响分析。
+### 3.4 Temporal Graphs: Separate System Version from Valid Time
 
-后续应优先增强:
+- `graph_version`: committed graph-database state used for mutation replay,
+  index cursors, and stale detection.
+- `valid_from` / `valid_to`: when a fact holds in the modeled domain.
+- `observed_at` / `source_published_at`: when evidence was observed or
+  published.
+- `as_of` / `time_range`: temporal constraints on retrieval.
 
-- scope metadata: 查询响应明确返回 repository、resolved commit、tree hash、path filters 和 indexed ref。
-- 增量可靠性: changed paths -> content hash skip -> tombstones -> reverse dependents -> scoped refresh。
-- 代码图 context pack: 将 symbol、reference、call、import、chunk 和 impact hit 组织为 agent 可读包。
-- 查询预算: limit、path filter、language filter、timeout、truncated reason 和 degraded reason 必须进入 API。
-- source fallback 边界: 只在 definition/reference/hybrid 结构化召回不足时搜索 indexed commit 候选内容，并把命中标记为 `text_fallback`，不生成 resolved edge。
-- 语义边界: tree-sitter 输出标记为 syntax-level facts，跨文件解析不确定时保留 ambiguous/unresolved 状态。
+Vector similarity cannot resolve temporal conflicts. Similar statements about
+one entity can be true at different times, so graph version and fact-validity
+time must constrain them together.
 
-这条路线能最快体现知识图谱对开发者和 coding agent 的价值。
+### 3.5 Multimodal Evidence: One Provenance Model
 
-### 3.4 时间图谱与版本: 区分系统版本和事实时间
+PDF pages, images, OCR, captions, tables, and layout regions should not become
+isolated indexes:
 
-现有 `GraphVersion` 是系统状态版本，适合作为 mutation log 和 index freshness 的基础。研究材料进一步要求区分事实有效时间:
+- Original evidence keeps source URI/hash, media hash, modality, extractor and
+  version, scope, and parent evidence.
+- OCR, captions, and vision descriptions are derived evidence and never replace
+  the source image or page.
+- Extraction failure records diagnostics and degradation without blocking other
+  modalities.
+- Retrieval groups OCR, caption, image, and text hits under their common parent
+  instead of displaying duplicates.
 
-- `graph_version`: 图数据库提交状态，用于 replay、index cursor 和 stale 判断。
-- `valid_from` / `valid_to`: 事实在业务世界中成立的时间范围。
-- `observed_at` / `source_published_at`: evidence 被观察或发布的时间。
-- `as_of` / `time_range`: 检索请求对时间状态的约束。
+The existing fact/evidence API already supported paths, spans, confidence,
+status, relations, claims, events, and version-range validation. Multimodal
+extensions should preserve that provenance while adding modality, extractor,
+parent, and diagnostic fields.
 
-不要用向量相似度解决时间冲突。相同实体或相似文本在不同时间可能对应不同事实，必须由图版本和事实时间共同约束。
+## 4. Gap Analysis at This Refresh
 
-### 3.5 多模态 evidence: 统一来源和派生关系
-
-PDF、图片、OCR、图注、表格和 layout region 不应各自形成孤立索引。可借鉴的最小模型是统一 `Evidence`:
-
-- 原始 evidence 保存 source URI/hash、media hash、modality、extractor、extractor version、scope 和 parent evidence。
-- OCR、caption、vision description 是派生 evidence，不覆盖原始图片或页面。
-- 抽取失败记录 diagnostic 和 degraded reason，不能阻塞其它 modality 的摄取。
-- 检索组织时合并同一父 evidence 的 OCR、caption、image hit 和 text hit，避免重复展示。
-
-当前 evidence/fact API 已支持 source path、span、confidence、status、relation、claim、event 和 version range validation；后续多模态扩展应在兼容现有 evidence provenance 的前提下增加 modality、extractor、parent evidence 和 diagnostic 字段。
-
-## 4. 差距分析
-
-| 方向 | 当前状态 | 主要差距 | 建议优先级 |
+| Area | Baseline | Main gap | Priority |
 | --- | --- | --- | --- |
-| 统一 API | 已有 ingest/query/context pack/status/health/code repo/agent identity/API operations/audit API | 更细的 context artifact 和 release diagnostics 仍可增强 | P1 |
-| 图事实模型 | evidence/entity、typed relation、claim/event、confidence、source span、status、多模态 extraction metadata、proposal lifecycle + graph version | valid-time 产品语义、conflict resolution 和审批 UI 仍需产品化 | P1 |
-| 混合检索 | 有 BM25、graph evidence、code graph documents、local semantic/vector、可配置 external backend metadata、path/temporal/community、RRF、本地 rerank 和 context pack | query router、lite-global/DRIFT-like expansion 和外部模型 rerank provider 仍待产品化 | P1 |
-| 代码图 | 已有 tree-sitter 多语言索引、scope metadata、path/language filter、报告、query/impact、MCP tools 和有界内部 exact-text source fallback | 多仓库联邦调用解析和更大的真实性能报告仍待扩展 | P1 |
-| 后台服务 | 有 status API、foreground service run、startup reconciler、refresh queue、lease/reconciler 诊断、dead-letter、metrics、service definition preview 和 silent-update state | 特权 service install、watchdog、rollback、package manifest 和维护任务编排仍待产品化 | P1 |
-| Agent 接入 | 已有 MCP Streamable HTTP、本地 ACP adapter、resources/prompts、access policy、QoS、audit log、JSONL audit sink、code graph query/impact tools 和 metrics | 远程 ACP host integration、A2A gateway 和更完整 host integration 仍需后续产品化 | P2 |
-| 多模态 | 有 evidence modality/extraction schema、extractor diagnostics、parent grouping、modality read model metadata、worker contract 和 maintenance 提交边界 | 具体 OCR/caption/table/layout provider、image embedding backend 和模型共存策略仍待接入 | P2 |
-| 时间图谱 | 有 graph version、event `occurred_at` 和 `as_of`/年份 temporal retrieval | valid-time range index invalidation 和 hierarchical time graph 仍待实现 | P2 |
+| Unified API | Ingest/query/context pack/status/health/repository/agent identity/API operations/audit | Finer context artifacts and release diagnostics | P1 |
+| Graph facts | Evidence/entity, typed relation, claim/event, confidence, source span, status, extraction metadata, proposals, graph version | Valid-time product semantics, conflict resolution, review UI | P1 |
+| Hybrid retrieval | BM25, graph evidence, code documents, local semantic/vector, external-backend metadata, path/temporal/community, RRF, local rerank, context pack | Query router, lite-global/DRIFT-like expansion, external rerank provider | P1 |
+| Code graph | Multilingual indexing, scope metadata, filters, report, query/impact, MCP tools, bounded exact-text fallback | Federated cross-repository resolution and broader real-world performance evidence | P1 |
+| Background service | Status API, foreground service, startup reconciler, queue, leases, dead letters, metrics, definition preview, silent-update state | Privileged install, watchdog, rollback, package manifests, maintenance orchestration | P1 |
+| Agent access | MCP Streamable HTTP, local ACP, resources/prompts, access policy, QoS, audit, JSONL, code tools, metrics | Remote ACP, A2A gateway, deeper host integration | P2 |
+| Multimodal | Evidence/extraction schema, diagnostics, parent grouping, modality metadata, worker contract | Concrete providers, image embeddings, model-coexistence policy | P2 |
+| Temporal graph | Graph version, event `occurred_at`, `as_of`/year retrieval | Valid-time range invalidation and hierarchical time graph | P2 |
 
-## 5. 阶段关闭和开放工作
+## 5. Closed Foundations and Open Productization
 
-当前本地 GraphRAG 主路径已经从 Phase 1 推进到 Phase 4 并关闭；后续实现应把这些阶段当成回归基线，而不是继续作为待办清单。
+The local GraphRAG path had advanced through the four research phases. They
+became regression baselines rather than an unchanged backlog:
 
-| 阶段 | 关闭状态 | 仍开放的产品化方向 |
+| Phase | Closed foundation | Open productization |
 | --- | --- | --- |
-| Phase 1 真实检索闭环 | Typed facts、source span、confidence、BM25 aliases、context pack、graph paths 和 code artifact 已关闭。 | 只保留回归保护。 |
-| Phase 2 可恢复索引刷新 | Mutation log、scoped cursor、bounded queue、lease/retry/dead-letter、startup reconciler 和 stale reasons 已关闭。 | 只保留容量、故障和恢复测试扩展。 |
-| Phase 3 Agent/服务基础 | MCP Streamable HTTP、本地 ACP、resources/prompts、metrics、audit sink、QoS 和 Web operations 已关闭。 | 远端 ACP、A2A gateway、host integration 和特权服务生命周期仍开放。 |
-| Phase 4 高级 GraphRAG/多模态基础 | Local semantic/vector、schema/temporal/community retrieval、多模态 schema、worker proposal contract 和 evaluation fixture gate 已关闭。 | 具体外部 provider、query router、lite-global/DRIFT、release 评测报告仍开放。 |
+| 1. Real retrieval loop | Typed facts, source spans, confidence, BM25 aliases, context packs, graph paths, code artifacts | Regression protection |
+| 2. Recoverable refresh | Mutation log, scoped cursor, bounded queue, leases/retry/dead letter, startup reconciler, stale reasons | More capacity, failure, and recovery coverage |
+| 3. Agent/service foundation | MCP Streamable HTTP, local ACP, resources/prompts, metrics, audit, QoS, Web operations | Remote ACP, A2A, host integration, privileged service lifecycle |
+| 4. Advanced GraphRAG/multimodal foundation | Local semantic/vector, schema/temporal/community retrieval, multimodal schema, worker proposals, evaluation fixture | Concrete external providers, query router, lite-global/DRIFT, release evaluation |
 
-Web 工作区当前通过 `/api/web/operations/execute` 执行 retrieve、ingest、graph inspect、index refresh、code repository workflow 和 service status/run snapshot，并在成功后刷新诊断状态。`service run` 会挂载 Web endpoints；启用 MCP Streamable HTTP 时，MCP 与 Web routes 合并到同一 `net::http` listener 和 QoS budget。
+The Web workspace executed retrieve, ingest, graph inspection, index refresh,
+repository workflows, and service snapshots through
+`/api/web/operations/execute`, then refreshed diagnostics after success.
+`service run` mounted Web endpoints; when MCP Streamable HTTP was enabled, MCP
+and Web routes shared one `net::http` listener and QoS budget.
 
-## 6. 工程约束
+## 6. Engineering Constraints
 
-后续实现必须继续遵守项目硬约束:
+- `env` owns environment variables, `paths` owns platform paths, and `net` owns
+  networking and HTTP.
+- I/O, databases, Tree-sitter, embeddings, OCR, index rebuilds, and compaction
+  cannot block async-runtime hot paths.
+- Every queue is bounded; retrieval and traversal have limits, timeouts,
+  cancellation, and truncation/degradation state.
+- CLI, Web, HTTP, MCP, and ACP share the application service rather than copying
+  business logic.
+- A new public API needs a production caller or specification and tests.
+- Documentation changes with implementation, especially for configuration,
+  environment, paths, networking, QoS, indexes, services, and installation.
 
-- `env` 只负责环境变量，`paths` 只负责平台路径，`net` 只负责网络和 HTTP 能力。
-- I/O、数据库、tree-sitter、embedding、OCR、索引 rebuild 和 compaction 不得阻塞 async runtime hot path。
-- 所有队列有界，所有检索和图遍历有 limit、timeout、cancellation 和 truncated/degraded 状态。
-- CLI、Web、HTTP、MCP 和 ACP 共享 application service，不复制业务逻辑。
-- 新 public API 必须有生产调用方或规格支撑，并配套测试。
-- 文档与实现同步更新，尤其是配置、环境变量、路径、网络、QoS、索引、后台服务和安装部署行为。
+## 7. Recommended Next Work at This Refresh
 
-## 7. 推荐下一步
+1. Add concrete worker adapters for external embedding, OCR, vision, table, and
+   layout providers, with coexistence strategy, provider limits, and diagnostics.
+2. Complete service-manager install/upgrade/uninstall, rollback, package
+   manifests, watchdog, and maintenance workflows.
+3. Productize valid-time, conflict resolution, and fact-review UI semantics.
+4. Plan a query router, lite-global/DRIFT-like expansion, external reranking,
+   and an A2A gateway while keeping `HybridRetrievalResponse` canonical.
+5. Expand GraphRAG evaluation data, longitudinal reports, and release thresholds
+   across stale indexes, ambiguous entities, multi-hop, time, and code impact.
 
-短期最有价值的实现顺序:
+This sequence maximized reuse of the implementation while converting the most
+important GraphRAG, Agentic KG, Tree-sitter, and freshness research into a
+testable engineering loop.
 
-1. 为外部 embedding/OCR/vision/table/layout provider 增加具体 worker adapter、模型共存刷新策略、provider 级限流和生产诊断。
-2. 建立 service manager install/upgrade/uninstall、rollback、package manifest、watchdog 和维护任务的端到端产品路径。
-3. 为 valid-time、conflict resolution 和事实审批 UI 补齐产品语义；当前 proposal 持久化 provenance、manual-review policy、accept/reject/supersede 和 proposed structured facts 已关闭。
-4. 规划 query router、lite-global/DRIFT-like expansion、外部 rerank provider 和 A2A gateway，但保持 `HybridRetrievalResponse` 作为 canonical context pack。
-5. 扩充 GraphRAG evaluation fixture 数据集规模、长期指标报告和 release-facing 质量阈值，继续覆盖 stale index、ambiguous entity、多跳、时间和 code impact。
+---
 
-这一路线能最大限度复用当前实现，同时把研究材料中最关键的 GraphRAG、Agentic KG、Tree-sitter 代码图和后台新鲜度能力落到可测试的工程闭环。
+Navigation: Previous: [6. Agent Protocol Graph Retrieval Research](06-agent-protocol-graph-retrieval-research.md) | Next: [8. Competitive, High-Performance, and Local File Retrieval Research 2026](08-competitive-performance-research-2026.md)

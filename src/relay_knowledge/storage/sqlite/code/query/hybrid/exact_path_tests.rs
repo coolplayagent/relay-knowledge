@@ -8,9 +8,9 @@ use super::*;
 #[test]
 fn exact_path_hybrid_without_graph_intent_skips_chunk_first() {
     let request = request(
-        "std function compression lambda input output db bench",
+        "NoDestructor",
         CodeQueryKind::Hybrid,
-        vec!["benchmarks/db_bench.cc".to_owned()],
+        vec!["util/no_destructor.h".to_owned()],
     );
 
     assert!(hybrid_exact_path_query_should_skip_chunk_first(&request));
@@ -68,9 +68,9 @@ fn dense_api_hybrid_keeps_layered_chunk_search_before_symbols() {
 }
 
 #[test]
-fn exact_path_hybrid_with_partial_hits_can_defer_to_source_fallback() {
+fn exact_path_hybrid_single_identity_can_defer_to_source_fallback() {
     let request = request(
-        "NoDestructor variadic constructor template instance type",
+        "NoDestructor",
         CodeQueryKind::Hybrid,
         vec!["./util/no_destructor.h".to_owned()],
     );
@@ -102,7 +102,7 @@ fn exact_path_hybrid_with_uncovered_member_identity_runs_chunk_layer() {
 }
 
 #[test]
-fn exact_path_hybrid_with_all_identifier_identities_can_defer() {
+fn exact_path_hybrid_contextual_query_runs_chunk_layer_even_with_symbol_coverage() {
     let request = request(
         "VersionSet Builder SaveTo compact pointers deleted files",
         CodeQueryKind::Hybrid,
@@ -115,7 +115,7 @@ fn exact_path_hybrid_with_all_identifier_identities_can_defer() {
         ..hit()
     };
 
-    assert!(hybrid_exact_path_query_can_defer_to_source_fallback(
+    assert!(!hybrid_exact_path_query_can_defer_to_source_fallback(
         &request,
         &[save_to_hit]
     ));

@@ -141,7 +141,9 @@
       ],
       "expected": [
         {
-          "path": "pkg/apis/storage/util/helpers.go",
+          "language_id": "go",
+          "edge_resolution_state": "resolved",
+          "edge_target_hint": "k8s.io/apimachinery/pkg/apis/meta/v1",
           "excerpt_contains": "import metav1 \"k8s.io/apimachinery/pkg/apis/meta/v1\""
         }
       ],
@@ -152,11 +154,13 @@
       "forbidden_rank_penalty": 0.08,
       "expected_all": [
         {
-          "path": "pkg/apis/storage/util/helpers.go"
+          "language_id": "go",
+          "edge_resolution_state": "resolved",
+          "edge_target_hint": "k8s.io/apimachinery/pkg/apis/meta/v1"
         },
         {
-          "path": "pkg/apis/storage/util/helpers.go",
-          "excerpt_contains": "metav1.ObjectMeta"
+          "language_id": "go",
+          "excerpt_contains": "import metav1 \"k8s.io/apimachinery/pkg/apis/meta/v1\""
         }
       ]
     },

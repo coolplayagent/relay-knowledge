@@ -47,6 +47,22 @@ pub(super) fn list_code_repositories(
                 statuses.push(control_status);
                 continue;
             };
+            let active_route = match shard_status.last_indexed_scope_id.clone() {
+                Some(source_scope) => {
+                    this.catalog
+                        .active_repository_for_scope(source_scope)
+                        .await?
+                        .as_deref()
+                        == Some(shard_status.repository_id.as_str())
+                }
+                None => false,
+            };
+            if shard_status.last_indexed_scope_id != control_status.last_indexed_scope_id
+                || !active_route
+            {
+                statuses.push(control_status);
+                continue;
+            }
             shard_status.alias = control_status.alias;
             statuses.push(shard_status);
         }

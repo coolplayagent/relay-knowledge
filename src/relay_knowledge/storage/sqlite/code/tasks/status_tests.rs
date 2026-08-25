@@ -1,5 +1,9 @@
 use super::super::{
-    claim_task as claim_persisted_task, fail_task as fail_persisted_task, queue_task,
+    queue_task,
+    test_support::{
+        claim_task_at_request_time as claim_persisted_task,
+        fail_task_at_request_time as fail_persisted_task,
+    },
 };
 use super::queue_status;
 use crate::{
@@ -144,6 +148,7 @@ async fn fail_task(
                     task_id: task.task_id,
                     lease_owner: task.lease_owner.expect("task should have lease owner"),
                     attempt_count: task.attempt_count,
+                    publication_generation: task.publication_generation,
                     error_kind,
                     error_message,
                     retry_backoff_ms: 10,

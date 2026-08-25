@@ -560,6 +560,18 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 }
 
 #[test]
+fn bash_escaped_dot_import_resolves_like_plain_dot_builtin() {
+    let snapshot = parse_sources(&[
+        ("lib/runtime.sh", "rk_runtime_dispatch() { :; }\n"),
+        ("bin/install.sh", "\\. ../lib/runtime.sh\n"),
+    ]);
+    let import = import_containing(&snapshot, r"\. ../lib/runtime.sh");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.target_hint.as_deref(), Some("lib/runtime.sh"));
+}
+
+#[test]
 fn cpp_import_resolution_handles_local_includes_and_using_declarations() {
     let snapshot = parse_sources(&[
         (
@@ -587,6 +599,37 @@ void run() {
     assert_import_state(&snapshot, "retry.hpp", "resolved");
     assert_import_state(&snapshot, "<string>", "unresolved");
     assert_import_state(&snapshot, "using app::RetryPolicy", "resolved");
+}
+
+#[test]
+fn c_unresolved_include_preserves_normalized_target_hint() {
+    let snapshot = parse_sources(&[("src/policy.c", "#include \"securec.h\"\n")]);
+    let import = import_containing(&snapshot, "securec.h");
+
+    assert_eq!(import.resolution_state, "unresolved");
+    assert_eq!(import.target_hint.as_deref(), Some("securec.h"));
+}
+
+#[test]
+fn cpp_unresolved_include_preserves_normalized_target_hint() {
+    let snapshot = parse_sources(&[("src/service.cpp", "#include <boost/asio.hpp>\n")]);
+    let import = import_containing(&snapshot, "boost/asio.hpp");
+
+    assert_eq!(import.resolution_state, "unresolved");
+    assert_eq!(import.target_hint.as_deref(), Some("boost/asio.hpp"));
+}
+
+#[test]
+fn cpp_ambiguous_include_preserves_normalized_target_hint() {
+    let snapshot = parse_sources(&[
+        ("lib/session.hpp", "void library_session();\n"),
+        ("src/session.hpp", "void source_session();\n"),
+        ("app.cpp", "#include \"session.hpp\"\n"),
+    ]);
+    let import = import_containing(&snapshot, "session.hpp");
+
+    assert_eq!(import.resolution_state, "ambiguous");
+    assert_eq!(import.target_hint.as_deref(), Some("session.hpp"));
 }
 
 #[test]

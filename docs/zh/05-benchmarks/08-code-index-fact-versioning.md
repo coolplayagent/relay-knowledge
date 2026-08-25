@@ -4,6 +4,12 @@
 
 代码索引的 `source_scope` 不只由仓库、tree hash、路径过滤器和语言过滤器决定，还包含代码事实版本。这个版本用于区分不同的持久化事实语义，例如解析器新增或修正的定义、引用、依赖、边、搜索文档和检索证据。
 
+## Workspace 语义身份与 preview
+
+Workspace detection 会改变持久化的 package mapping 与 cross-repository edge，因此也是 `source_scope` 语义输入。关闭 detection 时继续生成兼容的 `git_snapshot:<16-hex>` identity；启用时生成 `git_snapshot:<16-hex>:workspace-v1:<canonical-bitmask>`。Mask 的低三位依次表示 pnpm、Go module 与 Cargo workspace format，使用规范十进制 `0..7` 编码；配置项顺序和重复项不会改变 identity，启用但 format 为空的 mask `0` 也与关闭 detection 的无后缀 identity 不同。
+
+所有 generated-scope matcher 必须复用中央严格 parser，同时校验 fact-versioned base 和完整 suffix；额外段、非规范数字或超出三位的 mask 不能作为兼容 scope。Scope preview 不写入状态，并根据请求 ref 解析出的 tree、有效 path/language filters 与请求的 workspace detection 配置返回 prospective identity；它不能把当前 active scope 的 identity 当作这次请求将生成的 identity。
+
 ## 必须升级版本的变更
 
 以下变更会改变已经持久化的代码事实，必须同步升级代码事实版本：
@@ -17,7 +23,7 @@
 
 查询、feature flag 查询和 impact 分析必须使用 freshness 解析出的当前事实版本 `source_scope`，不能让底层存储再次只按仓库、ref 和过滤器选择旧 scope。增量索引也只能从当前事实版本的 base scope 克隆未变更文件；如果 base scope 来自旧事实版本，必须要求先全量重建 base，而不是把旧事实复制进新 scope。
 
-每个 checkpointed batch 在事实发布前都有 durable staging manifest，发布事务会原子地推进 manifest、事实计数和 checkpoint。`staged` 不是可查询事实，也不是成功状态；只有 checkpoint 和 scope 发布都完成后，事实才可被 freshness 查询使用。
+每个 checkpointed batch 在事实写入前都有 durable staging manifest，事务会推进 manifest、事实计数和 checkpoint progress。`staged` 不是可查询事实，也不是成功状态；最终可见性必须继续通过 fenced code + software publication barrier。单 SQLite 在同一 publication transaction 中激活 code/software status、freshness、checkpoint 与 receipt；partitioned store 的 shard 先保持 staged route，再由一个 control transaction 激活 route、镜像 status 并写 receipt。Durable task 只能在独立 completion transaction 中凭该 receipt、匹配的 fresh scope，以及目标存在 checkpoint 时的 completed checkpoint 转为 `succeeded`；无 checkpoint 的 mode 不会虚构 checkpoint，crash/reclaim 可以复用同一 task 的 receipt，stale attempt 不能完成任务。
 
 存储层按 ref 或最新 checkpoint 查找生成的 `git_snapshot:<16 hex>` scope 时，必须在扫描候选 scope 的过程中优先选择当前事实版本，而不是先按 checkpoint 或 `source_scope` 排序缩窄到单行后再过滤。这样旧事实版本 scope 即使是当前 active 行或更新时间更晚，也不会遮蔽已经存在的当前事实版本索引；如果没有当前事实版本 scope，存储层不能把旧 `git_snapshot:<16 hex>` scope 作为兼容结果返回。非生成 scope（例如测试或外部调用显式传入的自定义 `source_scope`）不参与这个生成 scope 事实版本判定，仍按普通存储兼容性处理。
 
@@ -26,6 +32,8 @@ Repository-set member 也必须在状态和查询前重新校验事实版本。�
 仓库重新注册到新的 root path、path filters 或 language filters 后，仓库行必须保持 stale/registered，不能因为旧 `code_repository_scopes` 行仍是 fresh 就清除仓库级 stale。Fresh full-index fast path 可以复用当前 fact-version 的代码 scope，但仍必须刷新同 scope 的 software global projection；否则缺失、stale 或失败的 projection 会在代码索引成功响应后继续影响 `repo software` 和 MCP software 查询。
 
 ## 本次约束
+
+相邻 documentation block 现在经过 4,096-byte、64-line 上限和 UTF-8 安全规范化后写入 `symbol.doc_comment`，并随 symbol search document 参与 Hybrid 检索。`/** ... */` 属于 symbol-level block；Rust `/*! ... */` 是 inner doc，在没有 module/crate owner fact 时不绑定下一声明。C/C++ tag capture 另外保存 declaration/template owner anchor，而 symbol range、signature 与 stable identity 仍使用原 target；Java annotation 保持在 declaration owner 内。普通 `/* ... */` 不属于文档，超限 block 不做部分截断，一个 block 只绑定紧随其后的 owner。旧 scope 缺少这些 owner-anchor facts，因此事实版本加入 `doc-block-owner-anchor-v2`，即使 tree hash 未变也必须通过既有 durable task、lease、checkpoint、publication barrier 与 freshness 流程完成 full rebuild；不能在 query-time 回读源码或用已知仓库、类名和 query 补丁伪造该事实。
 
 语法解析被有界预算取消或在进入 grammar 前识别出高复杂度、无声明容器的 C/C++ 指定初始化片段时，文件必须持久化为 `failed` 并保留诊断，同时继续写入文件级 source chunk、FTS 搜索文档、依赖、feature flag 与 route 投影。因为旧索引中的同类失败文件没有 source chunk，本次优化升级代码事实版本，强制 freshness 对这些 scope 执行完整、可恢复的重建。
 

@@ -1,10 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -13,9 +10,10 @@ use std::{
 use super::*;
 use crate::{
     domain::{
-        CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget, CodeParseStatus,
-        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
-        RepositoryCodeFileRecord, RepositoryCodeRange, SoftwareGlobalKind,
+        CodeIndexMode, CodeIndexResourceBudget, CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat,
+        CodeParseStatus, CodeRepositorySelector, CodeWorkspaceMember, FreshnessPolicy,
+        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        SoftwareGlobalKind,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::CodeRepositorySetRefreshPublication,
@@ -25,119 +23,6 @@ use crate::{
 mod repository_retention_tests;
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-#[tokio::test]
-async fn code_index_task_partitioned_takeover_fences_stale_shard_snapshot_publication() {
-    let store = partitioned_store("publication-fence-takeover");
-    let now_ms = u64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock should be after epoch")
-            .as_millis(),
-    )
-    .unwrap_or(u64::MAX);
-    store
-        .upsert_code_repository(registration())
-        .await
-        .expect("repository should register");
-    let queued = store
-        .queue_code_index_task(task_seed("scope-fenced-new"))
-        .await
-        .expect("task should queue");
-    let first = store
-        .claim_code_index_task(CodeIndexTaskClaimRequest {
-            task_id: Some(queued.task_id.clone()),
-            lease_owner: "worker-old".to_owned(),
-            lease_duration_ms: 60_000,
-            max_attempts: 3,
-            now_ms,
-        })
-        .await
-        .expect("first claim should run")
-        .expect("first attempt should claim");
-    let shard = store
-        .catalog
-        .staged_repository_store("repo".to_owned())
-        .await
-        .expect("repository shard should open");
-    store
-        .catalog
-        .import_control_repository(Arc::clone(&shard), "repo".to_owned(), None)
-        .await
-        .expect("control repository should import into the shard");
-    shard
-        .apply_code_index_snapshot_with_fence(
-            snapshot("scope-fenced-new"),
-            publication_fence(&first, "worker-old"),
-        )
-        .await
-        .expect("first attempt should commit its shard while its lease is live");
-    let second = store
-        .claim_code_index_task(CodeIndexTaskClaimRequest {
-            task_id: Some(queued.task_id),
-            lease_owner: "worker-new".to_owned(),
-            lease_duration_ms: 60_000,
-            max_attempts: 3,
-            now_ms: now_ms.saturating_add(60_000),
-        })
-        .await
-        .expect("takeover claim should run")
-        .expect("expired task should be reclaimed");
-
-    let shard_error = shard
-        .apply_code_index_snapshot_with_fence(
-            snapshot("scope-fenced-new"),
-            publication_fence(&first, "worker-old"),
-        )
-        .await
-        .expect_err("stale shard writer must be fenced");
-    assert!(matches!(shard_error, StorageError::InvalidInput(_)));
-    let stage_error = store
-        .catalog
-        .stage_scope_with_fence(
-            "repo".to_owned(),
-            "scope-fenced-new".to_owned(),
-            publication_fence(&first, "worker-old"),
-        )
-        .await
-        .expect_err("stale writer must not stage catalog routing after takeover");
-    assert!(matches!(stage_error, StorageError::InvalidInput(_)));
-    let catalog_error = store
-        .catalog
-        .record_scope_with_fence(
-            "repo".to_owned(),
-            "scope-fenced-new".to_owned(),
-            publication_fence(&first, "worker-old"),
-        )
-        .await
-        .expect_err("stale writer must not advance the catalog after shard commit");
-    assert!(matches!(catalog_error, StorageError::InvalidInput(_)));
-    assert!(
-        store
-            .catalog
-            .repository_for_scope("scope-fenced-new".to_owned())
-            .await
-            .expect("catalog scope should load")
-            .is_none()
-    );
-    store
-        .apply_code_index_snapshot_with_fence(
-            snapshot("scope-fenced-new"),
-            publication_fence(&second, "worker-new"),
-        )
-        .await
-        .expect("current shard writer should publish and mirror control status");
-
-    let status = store
-        .code_repository_status("fixture".to_owned())
-        .await
-        .expect("status should load")
-        .expect("repository should exist");
-    assert_eq!(
-        status.last_indexed_scope_id.as_deref(),
-        Some("scope-fenced-new")
-    );
-}
 
 #[tokio::test]
 async fn empty_partitioned_store_delegates_control_defaults_explicitly() {
@@ -241,7 +126,13 @@ async fn empty_partitioned_store_delegates_control_defaults_explicitly() {
     assert_eq!(
         store
             .recover_code_index_task_leases_by_task(CodeIndexTaskLeaseRecovery {
-                task_ids: vec!["missing".to_owned()],
+                leases: vec![CodeIndexTaskLeaseRecord {
+                    task_id: "missing".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    lease_expires_at_ms: Some(1),
+                    attempt_count: 1,
+                    publication_generation: 1,
+                }],
                 now_ms: 1,
                 max_attempts: 1,
                 error_kind: "lease".to_owned(),
@@ -258,10 +149,17 @@ async fn empty_partitioned_store_delegates_control_defaults_explicitly() {
             .expect("empty reset should succeed")
             .is_empty()
     );
-    store
+    let clear_error = store
         .clear_code_workspace_state("missing".to_owned(), "missing-scope".to_owned())
         .await
-        .expect("empty workspace cleanup should succeed");
+        .expect_err("partitioned workspace cleanup should require a fence");
+    assert!(clear_error.to_string().contains("publication fence"));
+    assert!(
+        !store
+            .code_repository_auto_workspace_state_exists("missing".to_owned())
+            .await
+            .expect("missing partitioned workspace state should be absent")
+    );
 
     assert!(
         store
@@ -307,6 +205,101 @@ async fn empty_partitioned_store_delegates_control_defaults_explicitly() {
 }
 
 #[tokio::test]
+async fn partitioned_workspace_state_probe_reads_the_repository_shard() {
+    let store = partitioned_store("workspace-state-probe");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository should register");
+    let mut indexed = snapshot("scope-workspace-state");
+    indexed.workspaces = vec![CodeMonorepoWorkspace {
+        format: CodeMonorepoWorkspaceFormat::CargoWorkspace,
+        root_path: "/tmp/workspace".to_owned(),
+        workspace_file_path: "/tmp/workspace/Cargo.toml".to_owned(),
+        members: vec![
+            CodeWorkspaceMember {
+                package_name: "core".to_owned(),
+                relative_path: "crates/core".to_owned(),
+            },
+            CodeWorkspaceMember {
+                package_name: "cli".to_owned(),
+                relative_path: "crates/cli".to_owned(),
+            },
+        ],
+    }];
+    let queued = store
+        .queue_code_index_task(task_seed("scope-workspace-state"))
+        .await
+        .expect("workspace task should queue");
+    let running = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: "workspace-worker".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("workspace task claim should run")
+        .expect("workspace task should claim");
+    let fence = CodeIndexPublicationFence {
+        repository_id: running.repository_id.clone(),
+        task_id: running.task_id.clone(),
+        lease_owner: "workspace-worker".to_owned(),
+        attempt_count: running.attempt_count,
+        generation: running.publication_generation,
+    };
+    let mut session = session_from_snapshot(&indexed);
+    session.workspaces = indexed.workspaces.clone();
+    store
+        .begin_code_index_session_with_fence(session.clone(), fence.clone())
+        .await
+        .expect("workspace session should begin");
+    store
+        .apply_code_index_batch_with_fence(batch_from_snapshot(indexed), fence.clone())
+        .await
+        .expect("workspace batch should persist");
+    let summary = store
+        .finalize_code_index_session_with_fence(session, fence.clone())
+        .await
+        .expect("workspace session should finalize");
+    store
+        .refresh_software_global_projection_with_fence(summary.source_scope, fence)
+        .await
+        .expect("workspace publication should activate");
+    store
+        .complete_code_index_task(CodeIndexTaskCompletion {
+            task_id: running.task_id,
+            lease_owner: "workspace-worker".to_owned(),
+            attempt_count: running.attempt_count,
+            publication_generation: running.publication_generation,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("workspace task should complete");
+
+    assert!(
+        store
+            .code_repository_auto_workspace_state_exists("repo".to_owned())
+            .await
+            .expect("partitioned workspace state should route to the shard")
+    );
+    indexing::lifecycle::seed_clear_workspace_for_test(
+        &store,
+        "repo".to_owned(),
+        "scope-workspace-state".to_owned(),
+    )
+    .await
+    .expect("workspace state should clear in shard and control");
+    assert!(
+        !store
+            .code_repository_auto_workspace_state_exists("repo".to_owned())
+            .await
+            .expect("partitioned workspace state should be absent after cleanup")
+    );
+}
+
+#[tokio::test]
 async fn indexed_partition_routes_repository_capabilities_to_its_shard() {
     let store = partitioned_store("indexed-contract");
     let source_scope = "scope-indexed";
@@ -314,8 +307,7 @@ async fn indexed_partition_routes_repository_capabilities_to_its_shard() {
         .upsert_code_repository(registration())
         .await
         .expect("repository should register");
-    store
-        .apply_code_index_snapshot(snapshot(source_scope))
+    indexing::lifecycle::seed_snapshot_for_test(&store, snapshot(source_scope))
         .await
         .expect("snapshot should apply");
 
@@ -425,10 +417,13 @@ async fn indexed_partition_routes_repository_capabilities_to_its_shard() {
             .source_scope,
         source_scope
     );
-    store
-        .clear_code_workspace_state("repo".to_owned(), source_scope.to_owned())
-        .await
-        .expect("workspace state should clear in both stores");
+    indexing::lifecycle::seed_clear_workspace_for_test(
+        &store,
+        "repo".to_owned(),
+        source_scope.to_owned(),
+    )
+    .await
+    .expect("workspace state should clear in both stores");
 }
 
 #[tokio::test]
@@ -439,8 +434,7 @@ async fn partitioned_control_plane_delegates_tasks_and_repository_sets() {
         .upsert_code_repository(registration())
         .await
         .expect("repository should register");
-    store
-        .apply_code_index_snapshot(snapshot(source_scope))
+    indexing::lifecycle::seed_snapshot_for_test(&store, snapshot(source_scope))
         .await
         .expect("snapshot should apply");
 
@@ -466,9 +460,9 @@ async fn partitioned_control_plane_delegates_tasks_and_repository_sets() {
         .claim_code_index_task(CodeIndexTaskClaimRequest {
             task_id: Some(queued.task_id.clone()),
             lease_owner: "worker".to_owned(),
-            lease_duration_ms: 100,
+            lease_duration_ms: 60_000,
             max_attempts: 3,
-            now_ms: 2,
+            now_ms: now_millis(),
         })
         .await
         .expect("claim should run")
@@ -481,21 +475,28 @@ async fn partitioned_control_plane_delegates_tasks_and_repository_sets() {
             .len(),
         1
     );
-    store
+    let renewed = store
         .renew_code_index_task_lease(CodeIndexTaskLeaseRenewal {
             task_id: claimed.task_id.clone(),
             lease_owner: "worker".to_owned(),
             attempt_count: claimed.attempt_count,
-            lease_duration_ms: 100,
-            now_ms: 3,
+            publication_generation: claimed.publication_generation,
+            lease_duration_ms: 60_000,
+            now_ms: now_millis(),
         })
         .await
         .expect("lease should renew");
     assert_eq!(
         store
             .recover_code_index_task_leases_by_task(CodeIndexTaskLeaseRecovery {
-                task_ids: vec![claimed.task_id.clone()],
-                now_ms: 4,
+                leases: vec![CodeIndexTaskLeaseRecord {
+                    task_id: claimed.task_id.clone(),
+                    lease_owner: "worker".to_owned(),
+                    lease_expires_at_ms: renewed.lease_expires_at_ms,
+                    attempt_count: claimed.attempt_count,
+                    publication_generation: claimed.publication_generation,
+                }],
+                now_ms: now_millis(),
                 max_attempts: 3,
                 error_kind: "lease".to_owned(),
                 error_message: "orphaned".to_owned(),
@@ -506,7 +507,7 @@ async fn partitioned_control_plane_delegates_tasks_and_repository_sets() {
     );
     assert_eq!(
         store
-            .reset_code_index_tasks("repo".to_owned(), 5)
+            .reset_code_index_tasks("repo".to_owned(), now_millis())
             .await
             .expect("tasks should reset")
             .len(),
@@ -518,6 +519,7 @@ async fn partitioned_control_plane_delegates_tasks_and_repository_sets() {
                 task_id: "missing".to_owned(),
                 lease_owner: "worker".to_owned(),
                 attempt_count: 1,
+                publication_generation: claimed.publication_generation,
                 now_ms: 6,
             })
             .await
@@ -531,6 +533,7 @@ async fn partitioned_control_plane_delegates_tasks_and_repository_sets() {
                 task_id: "missing".to_owned(),
                 lease_owner: "worker".to_owned(),
                 attempt_count: 1,
+                publication_generation: claimed.publication_generation,
                 error_kind: "worker".to_owned(),
                 error_message: "failed".to_owned(),
                 retry_backoff_ms: 10,
@@ -603,16 +606,13 @@ async fn partitioned_checkpoint_lifecycle_finishes_in_staged_shard() {
     let snapshot = snapshot("scope-checkpoint");
     let session = session_from_snapshot(&snapshot);
 
-    store
-        .begin_code_index_session(session.clone())
+    indexing::lifecycle::seed_session_for_test(&store, session.clone())
         .await
         .expect("session should begin");
-    store
-        .apply_code_index_batch(batch_from_snapshot(snapshot))
+    indexing::lifecycle::seed_batch_for_test(&store, batch_from_snapshot(snapshot))
         .await
         .expect("batch should apply");
-    let summary = store
-        .finalize_code_index_session(session)
+    let summary = indexing::lifecycle::seed_finalize_session_for_test(&store, session)
         .await
         .expect("session should finalize");
 
@@ -627,12 +627,10 @@ async fn code_index_task_partitioned_retention_cleans_staged_partial_scope_route
         .await
         .expect("repository should register");
     let partial = snapshot("scope-partial");
-    store
-        .begin_code_index_session(session_from_snapshot(&partial))
+    indexing::lifecycle::seed_session_for_test(&store, session_from_snapshot(&partial))
         .await
         .expect("partial session should begin");
-    store
-        .apply_code_index_batch(batch_from_snapshot(partial))
+    indexing::lifecycle::seed_batch_for_test(&store, batch_from_snapshot(partial))
         .await
         .expect("partial batch should persist");
     assert_eq!(
@@ -708,6 +706,15 @@ fn unique_temp_dir(name: &str) -> PathBuf {
     path
 }
 
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should follow Unix epoch")
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
 fn registration() -> CodeRepositoryRegistration {
     CodeRepositoryRegistration::new("repo", "fixture", "/tmp/fixture", Vec::new(), Vec::new())
         .expect("registration should validate")
@@ -753,19 +760,6 @@ fn task_seed(source_scope: &str) -> crate::storage::CodeIndexTaskSeed {
         resource_budget: CodeIndexResourceBudget::default(),
         payload_json: "{}".to_owned(),
         now_ms: 1,
-    }
-}
-
-fn publication_fence(
-    task: &crate::domain::CodeIndexTaskRecord,
-    lease_owner: &str,
-) -> CodeIndexPublicationFence {
-    CodeIndexPublicationFence {
-        repository_id: task.repository_id.clone(),
-        task_id: task.task_id.clone(),
-        lease_owner: lease_owner.to_owned(),
-        attempt_count: task.attempt_count,
-        generation: task.publication_generation,
     }
 }
 
@@ -848,7 +842,7 @@ fn batch_from_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexBatch {
     CodeIndexBatch {
         repository_id: snapshot.repository_id,
         source_scope: snapshot.source_scope,
-        batch_index: 0,
+        batch_index: 1,
         parsed_byte_count: snapshot.files.iter().map(|file| file.byte_len).sum(),
         files: snapshot.files,
         symbols: snapshot.symbols,

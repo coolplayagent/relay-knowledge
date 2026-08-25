@@ -12,6 +12,7 @@ use crate::{
 
 const CASE_INTENT_SOURCE_SCOPE: &str = "code:test:case-intent:commit:tree";
 
+#[path = "case_intent_tests.rs"]
 mod case_intent_tests;
 
 #[test]
@@ -268,26 +269,30 @@ async fn chunk_first_hybrid_api_hits_report_read_model_outage_when_fts_unavailab
 }
 
 #[test]
-fn score_text_matches_identifier_parts_inside_snake_case_names() {
-    let score = score_text(
-        "archive output directory",
-        ["def archive_output_dir(output_dir: Path) -> Path:"],
-    );
+fn score_query_matches_identifier_parts_inside_snake_case_names() {
+    let score = ScoreQuery::new("archive output directory")
+        .score(["def archive_output_dir(output_dir: Path) -> Path:"]);
 
     assert!(score >= 4.0);
-    assert_eq!(score_text("service ip range", ["getServiceIPRanges"]), 6.0);
     assert_eq!(
-        score_text("bloom filter policies", ["NewBloomFilterPolicy"]),
+        ScoreQuery::new("service ip range").score(["getServiceIPRanges"]),
         6.0
     );
-    assert_eq!(score_text("status", ["statu"]), 0.0);
+    assert_eq!(
+        ScoreQuery::new("bloom filter policies").score(["NewBloomFilterPolicy"]),
+        6.0
+    );
+    assert_eq!(ScoreQuery::new("status").score(["statu"]), 0.0);
 }
 
 #[test]
-fn score_text_preserves_exact_match_ceiling_after_identifier_match() {
-    assert_eq!(score_text("cache", ["block_cache", "cache"]), 4.0);
-    assert_eq!(score_text("cache", ["block_cache"]), 2.0);
-    assert_eq!(score_text("cach", ["block_cache"]), 0.5);
+fn score_query_preserves_exact_match_ceiling_after_identifier_match() {
+    assert_eq!(
+        ScoreQuery::new("cache").score(["block_cache", "cache"]),
+        4.0
+    );
+    assert_eq!(ScoreQuery::new("cache").score(["block_cache"]), 2.0);
+    assert_eq!(ScoreQuery::new("cach").score(["block_cache"]), 0.5);
 }
 
 #[test]
@@ -467,18 +472,26 @@ fn import_target_symbol_bonus_matches_fully_qualified_class_tail() {
 }
 
 #[test]
-fn target_symbol_import_query_skips_path_like_queries() {
-    assert!(target_symbol_import_query("SharedInformerFactory"));
-    assert!(target_symbol_import_query("DefaultListableBeanFactory"));
-    assert!(target_symbol_import_query(
-        "org.springframework.context.ApplicationContext"
-    ));
-    assert!(!target_symbol_import_query("linux/debugfs.h"));
-    assert!(!target_symbol_import_query("linux.debugfs.h"));
-    assert!(!target_symbol_import_query("src\\debugfs.h"));
-    assert!(!target_symbol_import_query(
-        "DefaultListableBeanFactory.java"
-    ));
+fn target_symbol_import_query_accepts_only_unqualified_symbol_queries() {
+    assert_eq!(
+        import_target_symbol_query("SharedInformerFactory"),
+        Some("SharedInformerFactory")
+    );
+    assert_eq!(
+        import_target_symbol_query("DefaultListableBeanFactory"),
+        Some("DefaultListableBeanFactory")
+    );
+    assert_eq!(
+        import_target_symbol_query("org.springframework.context.ApplicationContext"),
+        None
+    );
+    assert_eq!(import_target_symbol_query("linux/debugfs.h"), None);
+    assert_eq!(import_target_symbol_query("linux.debugfs.h"), None);
+    assert_eq!(import_target_symbol_query("src\\debugfs.h"), None);
+    assert_eq!(
+        import_target_symbol_query("DefaultListableBeanFactory.java"),
+        None
+    );
 }
 
 #[test]

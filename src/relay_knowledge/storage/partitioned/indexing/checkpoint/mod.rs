@@ -18,7 +18,15 @@ pub(in crate::storage::partitioned) fn by_scope(
             .checkpoint_scope_store(source_scope.clone())
             .await?
         {
-            if let Some(checkpoint) = shard.code_index_checkpoint(source_scope.clone()).await? {
+            if let Some(mut checkpoint) = shard.code_index_checkpoint(source_scope.clone()).await? {
+                let active = store
+                    .catalog
+                    .active_repository_for_scope(source_scope.clone())
+                    .await?
+                    .as_deref()
+                    == Some(checkpoint.repository_id.as_str());
+                let query_indexes_ready = shard.code_query_indexes_ready_for_publication().await?;
+                project_publication_state(&mut checkpoint, active, query_indexes_ready);
                 return Ok(Some(checkpoint));
             }
         }
@@ -37,13 +45,38 @@ pub(in crate::storage::partitioned) fn latest(
             .checkpoint_repository_store(repository_id.clone())
             .await?
         {
-            return shard.latest_code_index_checkpoint(repository_id).await;
+            let Some(mut checkpoint) = shard.latest_code_index_checkpoint(repository_id).await?
+            else {
+                return Ok(None);
+            };
+            let active = store
+                .catalog
+                .active_repository_for_scope(checkpoint.source_scope.clone())
+                .await?
+                .as_deref()
+                == Some(checkpoint.repository_id.as_str());
+            let query_indexes_ready = shard.code_query_indexes_ready_for_publication().await?;
+            project_publication_state(&mut checkpoint, active, query_indexes_ready);
+            return Ok(Some(checkpoint));
         }
         store
             .control
             .latest_code_index_checkpoint(repository_id)
             .await
     })
+}
+
+pub(super) fn project_publication_state(
+    checkpoint: &mut CodeIndexCheckpoint,
+    active: bool,
+    query_indexes_ready: bool,
+) {
+    if checkpoint.state == "completed" && !active {
+        checkpoint.state = "finalizing:partitioned_publish".to_owned();
+    } else if checkpoint.state == "finalizing:partitioned_publish" && active && query_indexes_ready
+    {
+        checkpoint.state = "completed".to_owned();
+    }
 }
 
 #[cfg(test)]

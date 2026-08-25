@@ -2,8 +2,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     domain::{
-        CodeRepositoryRegistration, CodeRepositoryStatus, code_snapshot_expected_scope_id,
-        code_snapshot_scope_is_fact_versioned,
+        CodeRepositoryRegistration, CodeRepositoryStatus, code_snapshot_scope_is_fact_versioned,
+        code_snapshot_scope_matches_identity,
     },
     storage::StorageError,
 };
@@ -173,6 +173,7 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status(
         LEFT JOIN code_repository_index_checkpoints checkpoint
           ON checkpoint.source_scope = scope.source_scope
         WHERE scope.repository_id = ?1
+          AND scope.stale = 0
           AND scope.retiring = 0
           AND (
               scope.resolved_commit_sha = ?2
@@ -281,6 +282,7 @@ pub(in crate::storage::sqlite::code) fn latest_repository_scope_status(
         LEFT JOIN code_repository_index_checkpoints checkpoint
           ON checkpoint.source_scope = scope.source_scope
         WHERE scope.repository_id = ?1
+          AND scope.stale = 0
           AND scope.retiring = 0
         ORDER BY coalesce(checkpoint.updated_at_ms, 0) DESC, scope.source_scope DESC
         ",
@@ -342,13 +344,13 @@ fn status_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
     let Some(tree_hash) = status.tree_hash.as_deref() else {
         return false;
     };
-    code_snapshot_expected_scope_id(
+    code_snapshot_scope_matches_identity(
         &status.repository_id,
         tree_hash,
         &status.path_filters,
         &status.language_filters,
+        source_scope,
     )
-    .is_some_and(|expected| expected == source_scope)
 }
 
 pub(in crate::storage::sqlite::code) fn repository_scope_status_by_source_scope(
@@ -507,13 +509,13 @@ fn scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
         return true;
     }
 
-    code_snapshot_expected_scope_id(
+    code_snapshot_scope_matches_identity(
         &status.repository_id,
         tree_hash,
         &status.path_filters,
         &status.language_filters,
+        source_scope,
     )
-    .is_some_and(|expected| expected == source_scope)
 }
 
 pub(in crate::storage::sqlite::code) fn canonical_path_filters(filters: &[String]) -> Vec<String> {

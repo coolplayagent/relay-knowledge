@@ -30,6 +30,114 @@ fn import_candidates_cover_common_package_roots() {
 }
 
 #[test]
+fn component_alias_evidence_rejects_cap_plus_one() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_dependencies (
+                source_scope TEXT NOT NULL,
+                path TEXT NOT NULL,
+                line_start INTEGER NOT NULL,
+                package_name TEXT NOT NULL,
+                dependency_group TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                ecosystem TEXT NOT NULL,
+                is_lockfile INTEGER NOT NULL,
+                excerpt TEXT NOT NULL
+            );
+            INSERT INTO code_repository_dependencies
+            VALUES ('scope', 'Cargo.toml', 1, 'one', 'normal', 'Cargo.toml', 'cargo', 0, 'alias_one = one');
+            INSERT INTO code_repository_dependencies
+            VALUES ('scope', 'Cargo.toml', 2, 'two', 'normal', 'Cargo.toml', 'cargo', 0, 'alias_two = two');
+            ",
+        )
+        .expect("component alias fixture should initialize");
+
+    let error = component_alias_keys(&connection, "scope", 1)
+        .expect_err("two alias rows should exceed a one-row cap");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(message)
+        if message.contains("component alias evidence")));
+}
+
+#[test]
+fn import_candidate_builder_rejects_cap_plus_one() {
+    let modules = (0..129)
+        .map(|index| format!("package_{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let error = import_match_candidates_with_python_locals(
+        "python",
+        &format!("import {modules}"),
+        None,
+        "unresolved",
+        None,
+        128,
+    )
+    .expect_err("candidate cap plus one should fail");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(message)
+        if message.contains("match candidates")));
+}
+
+#[test]
+fn identical_import_target_hint_is_charged_and_scanned_once() {
+    let module = "a".repeat(MAX_IMPORT_MATCH_TEXT_BYTES / 2 + 1);
+
+    let candidates = import_match_candidates_with_python_locals(
+        "javascript",
+        &module,
+        Some(&module),
+        "unresolved",
+        None,
+        1,
+    )
+    .expect("an identical target hint should not duplicate bounded input work");
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].value, module);
+}
+
+#[test]
+fn distinct_import_target_hint_bytes_remain_cumulative() {
+    let module = "a".repeat(MAX_IMPORT_MATCH_TEXT_BYTES / 2 + 1);
+    let target_hint = "b".repeat(MAX_IMPORT_MATCH_TEXT_BYTES / 2 + 1);
+
+    let error = import_match_candidates_with_python_locals(
+        "javascript",
+        &module,
+        Some(&target_hint),
+        "unresolved",
+        None,
+        2,
+    )
+    .expect_err("distinct import inputs over the byte cap should fail");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(message)
+        if message.contains("import match text bytes")));
+}
+
+#[test]
+fn single_import_match_text_over_limit_is_rejected() {
+    let module = "a".repeat(MAX_IMPORT_MATCH_TEXT_BYTES + 1);
+
+    let error = import_match_candidates_with_python_locals(
+        "javascript",
+        &module,
+        None,
+        "unresolved",
+        None,
+        1,
+    )
+    .expect_err("one oversized import input should fail");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(message)
+        if message.contains("import match text bytes")));
+}
+
+#[test]
 fn resolved_import_candidates_ignore_local_target_hints() {
     let candidates = import_match_candidates(
         "typescript",
@@ -62,7 +170,9 @@ fn resolved_python_import_candidates_keep_unresolved_external_parts() {
         Some("import requests, local_module"),
         "resolved",
         Some(&local_modules),
-    );
+        128,
+    )
+    .expect("bounded candidates should build");
 
     assert!(
         candidates
@@ -113,7 +223,9 @@ fn resolved_python_import_candidates_skip_local_modules_without_file_hints() {
         Some("import requests, internal.helpers"),
         "resolved",
         Some(&local_modules),
-    );
+        128,
+    )
+    .expect("bounded candidates should build");
 
     assert!(
         candidates

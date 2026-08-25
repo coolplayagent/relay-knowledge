@@ -61,16 +61,15 @@ async fn symbol_search_preserves_case_for_name_bonus() {
 
 #[tokio::test]
 async fn symbol_search_pushes_language_filters_before_candidate_limit() {
-    let mut files = Vec::new();
+    let noise_file_id = "noise-file";
+    let noise_path = "pkg/noise.py";
+    let mut files = vec![code_query_file(noise_file_id, noise_path, "python")];
     let mut symbols = Vec::new();
     for index in 0..550 {
-        let file_id = format!("noise-file-{index:03}");
-        let path = format!("pkg/noise_{index:03}.py");
-        files.push(code_query_file(&file_id, &path, "python"));
         symbols.push(code_query_symbol(
             &format!("noise-symbol-{index:03}"),
-            &file_id,
-            &path,
+            noise_file_id,
+            noise_path,
             "target",
         ));
     }
@@ -214,8 +213,8 @@ async fn caller_search_preserves_case_for_test_intent() {
         .await
         .expect("lowercase caller query should succeed");
     assert!(
-        lower_hits[0].score > hits[0].score + 0.1,
-        "mixed-case test intent should disable production source-path bonus, got {} vs lowercase {}",
+        hits[0].score > lower_hits[0].score + 0.1,
+        "mixed-case test intent should preserve explicitly requested test caller context, got {} vs lowercase {}",
         hits[0].score,
         lower_hits[0].score
     );
@@ -337,13 +336,16 @@ async fn caller_search_accepts_scoped_target_hint_prefilter() {
 
 #[tokio::test]
 async fn edge_queries_apply_language_filters_before_candidate_limit() {
-    let mut files = Vec::new();
+    let noise_file_id = "python-noise-file";
+    let noise_path = "noise/module.py";
+    let mut files = vec![code_query_file(noise_file_id, noise_path, "python")];
     let mut calls = Vec::new();
     for index in 0..520 {
-        let file_id = format!("python-noise-file-{index}");
-        let path = format!("noise/module_{index}.py");
-        files.push(code_query_file(&file_id, &path, "python"));
-        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path);
+        let mut call = code_query_call(
+            &format!("aa-noise-call-{index:04}"),
+            noise_file_id,
+            noise_path,
+        );
         call.callee_name = "TargetThing".to_owned();
         calls.push(call);
     }
@@ -377,13 +379,16 @@ async fn edge_queries_apply_language_filters_before_candidate_limit() {
 
 #[tokio::test]
 async fn caller_search_applies_direction_before_candidate_limit() {
-    let mut files = Vec::new();
+    let noise_file_id = "noise-file";
+    let noise_path = "noise/caller.py";
+    let mut files = vec![code_query_file(noise_file_id, noise_path, "python")];
     let mut calls = Vec::new();
     for index in 0..520 {
-        let file_id = format!("noise-file-{index}");
-        let path = format!("noise/caller_{index}.py");
-        files.push(code_query_file(&file_id, &path, "python"));
-        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path);
+        let mut call = code_query_call(
+            &format!("aa-noise-call-{index:04}"),
+            noise_file_id,
+            noise_path,
+        );
         call.caller_name = Some("TargetThing".to_owned());
         call.callee_name = "NoiseCallee".to_owned();
         calls.push(call);

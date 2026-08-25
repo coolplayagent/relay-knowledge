@@ -62,23 +62,19 @@ pub(in crate::code::parser) fn re_export(
     {
         return None;
     }
-    let statement = compact_whitespace(&node_text(content, node));
-    if !export_has_module_specifier(&statement) {
+    let source = node.child_by_field_name("source")?;
+    if !matches!(source.kind(), "string" | "string_literal")
+        || quoted_specifier(&node_text(content, source)).is_none()
+    {
         return None;
     }
 
-    Some((statement, syntax_range(node)))
+    Some((
+        compact_whitespace(&node_text(content, node)),
+        syntax_range(node),
+    ))
 }
 
-fn export_has_module_specifier(statement: &str) -> bool {
-    let Some(body) = statement
-        .trim()
-        .trim_end_matches(';')
-        .trim()
-        .strip_prefix("export ")
-    else {
-        return false;
-    };
-    body.rsplit_once(" from ")
-        .is_some_and(|(_, module)| quoted_specifier(module).is_some())
-}
+#[cfg(test)]
+#[path = "imports_tests.rs"]
+mod tests;

@@ -1,5 +1,5 @@
 use crate::{
-    code::{SourceGrepKind, SourceGrepRequest},
+    code::{SourceGrepKind, SourceGrepRequest, bounded_source_grep_candidate_match_limit},
     domain::{
         CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
         CodeRetrievalRequest,
@@ -14,7 +14,10 @@ use super::{
         hybrid_results_cover_identity, normalize_filter_path, reference_grep_query,
         results_define_identity, source_grep_identity,
     },
-    imports::{import_grep_candidate_paths, import_grep_query, relative_path_import_specifier},
+    imports::{
+        import_graph_results_have_complete_source_surface, import_grep_candidate_paths,
+        import_grep_query, import_query_requires_source_search, relative_path_import_specifier,
+    },
     surface::{hybrid_exact_path_source_fallback, hybrid_source_surface_fallback},
     worktree::source_fallback_commit,
 };
@@ -52,7 +55,7 @@ impl CodeGrepFallbackPlan {
             paths: self.paths.clone(),
             path_filters: self.path_filters.clone(),
             language_filters: self.language_filters.clone(),
-            limit: self.limit,
+            limit: bounded_source_grep_candidate_match_limit(self.limit, self.paths.len()),
             kind: self.kind,
             exclude_generated: self.exclude_generated,
         }
@@ -107,10 +110,11 @@ pub(super) fn plan_code_grep_fallback(
         }
         CodeQueryKind::References => {
             let identity = reference_grep_query(&request.query)?;
-            if results.iter().any(|hit| {
+            let has_structured_reference = results.iter().any(|hit| {
                 hit.retrieval_layers
                     .contains(&CodeRetrievalLayer::Reference)
-            }) {
+            });
+            if has_structured_reference && status.degraded_reason.is_none() {
                 return None;
             }
             let paths = path_filters
@@ -136,6 +140,11 @@ pub(super) fn plan_code_grep_fallback(
         CodeQueryKind::Imports => {
             let query = import_grep_query(request, results)?;
             let local_relative_query = relative_path_import_specifier(&query);
+            if !import_query_requires_source_search(&request.query, &query)
+                && import_graph_results_have_complete_source_surface(results, &query)
+            {
+                return None;
+            }
             let paths = if local_relative_query {
                 Vec::new()
             } else {

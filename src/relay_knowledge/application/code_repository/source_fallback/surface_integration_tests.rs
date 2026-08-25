@@ -112,6 +112,97 @@ fn hybrid_source_surface_fallback_skips_complete_exported_value_surfaces() {
     );
 }
 
+#[test]
+fn hybrid_source_surface_keeps_type_declaration_over_longer_nested_mentions() {
+    let request = request(
+        "DecoratedBeanInfo implements BeanInfo property descriptors",
+        CodeQueryKind::Hybrid,
+    );
+    let path = "src/DecoratedBeanInfo.java";
+    let plan = CodeGrepFallbackPlan {
+        commit: "commit".to_owned(),
+        query: "DecoratedBeanInfo".to_owned(),
+        paths: vec![path.to_owned()],
+        path_filters: Vec::new(),
+        language_filters: vec!["java".to_owned()],
+        limit: 5,
+        kind: SourceGrepKind::Hybrid,
+        identity: None,
+        exclude_generated: false,
+        read_worktree_overlay: false,
+        needs_scope_paths: false,
+    };
+    let mut type_result = hit(
+        path,
+        "Decorator metadata for property descriptors.\nclass DecoratedBeanInfo implements BeanInfo {",
+    );
+    type_result.language_id = "java".to_owned();
+    type_result.line_range = RepositoryCodeRange {
+        start: 40,
+        end: 200,
+    };
+    type_result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    type_result.symbol_snapshot_id = Some("decorated-bean-info".to_owned());
+    type_result.canonical_symbol_id = Some("repo://repo/src::DecoratedBeanInfo".to_owned());
+    let mut results = vec![type_result];
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![
+                SourceGrepMatch {
+                    path: path.to_owned(),
+                    language_id: "java".to_owned(),
+                    excerpt: "class DecoratedBeanInfo implements BeanInfo {".to_owned(),
+                    byte_range: RepositoryCodeRange {
+                        start: 400,
+                        end: 447,
+                    },
+                    line_range: RepositoryCodeRange { start: 40, end: 40 },
+                    is_generated: false,
+                },
+                SourceGrepMatch {
+                    path: path.to_owned(),
+                    language_id: "java".to_owned(),
+                    excerpt:
+                        "private static final Log logger = LogFactory.getLog(DecoratedBeanInfo.class);"
+                            .to_owned(),
+                    byte_range: RepositoryCodeRange {
+                        start: 450,
+                        end: 530,
+                    },
+                    line_range: RepositoryCodeRange { start: 42, end: 42 },
+                    is_generated: false,
+                },
+            ],
+            degraded_reason: None,
+        },
+    );
+
+    assert_eq!(
+        results[0].excerpt,
+        "class DecoratedBeanInfo implements BeanInfo {"
+    );
+    assert_eq!(
+        results[0].symbol_snapshot_id.as_deref(),
+        Some("decorated-bean-info")
+    );
+    assert!(
+        results[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::TextFallback)
+    );
+    assert!(
+        results
+            .iter()
+            .skip(1)
+            .any(|hit| hit.excerpt.contains("LogFactory.getLog"))
+    );
+}
+
 fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
     let selector =
         crate::domain::CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())

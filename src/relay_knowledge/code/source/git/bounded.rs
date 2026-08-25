@@ -11,6 +11,8 @@ use std::{
 
 use crate::code::CodeIndexError;
 
+use super::read_only_git_command;
+
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Resource limits for one NUL-framed `git diff --name-status` command.
@@ -68,7 +70,7 @@ pub(in crate::code) fn git_name_status_z_bounded(
         .iter()
         .map(|argument| (*argument).to_owned())
         .collect::<Vec<_>>();
-    let mut command = Command::new("git");
+    let mut command = read_only_git_command();
     command.arg("-C").arg(root).args(args);
 
     run_name_status_command(command, error_args, budget)
@@ -85,7 +87,7 @@ pub(in crate::code) fn git_small_output_bounded(
         .iter()
         .map(|argument| (*argument).to_owned())
         .collect::<Vec<_>>();
-    let mut command = Command::new("git");
+    let mut command = read_only_git_command();
     command.arg("-C").arg(root).args(args);
 
     run_small_output_command(command, error_args, budget, operation)
@@ -104,7 +106,7 @@ pub(in crate::code) fn git_nul_records_match_bounded(
         .iter()
         .map(|argument| (*argument).to_owned())
         .collect::<Vec<_>>();
-    let mut command = Command::new("git");
+    let mut command = read_only_git_command();
     command.arg("-C").arg(root).args(args);
 
     run_nul_record_match_command(command, error_args, budget, record_matches, operation)

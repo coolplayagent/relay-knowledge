@@ -1,8 +1,16 @@
 # 第 17 章 安全配置完整指南
 
-[中文](../../zh/01-user-guide/17-security-configuration.md) | [English](../../en/01-user-guide/17-security-configuration.md)
+[中文](17-security-configuration.md) | 中文深入专题；英文核心流程见 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)
 
-本章是 `relay-knowledge` 安全配置的完整参考，涵盖 QoS 准入控制、远端访问安全、MCP scope/origin 授权、审计日志和网络安全实践。所有配置项均基于代码实际实现，零配置时优先保证本机安全。
+本章是 `relay-knowledge` 安全配置的完整参考，涵盖 QoS 准入控制、远端访问安全、MCP scope/origin 限制、审计日志和网络安全实践。所有配置项均基于代码实际实现，零配置时优先保证本机安全。
+
+> **关键安全边界：** 当前 Web workspace、HTTP API（包括
+> `/api/v1/control/**`）和 MCP Streamable HTTP **不内建入站调用方身份认证**。
+> 服务不校验登录、API key、Bearer/JWT/OIDC token 或客户端证书，也不按调用方
+> 身份执行 ACL。`allow_remote_clients`、Origin、QoS、MCP scope 和 MCP session
+> id 都不能证明调用方身份。没有外部认证网关时，服务必须只绑定 loopback。
+> 远程访问必须先经过外部身份层，由它执行 mTLS（校验客户端证书并映射 ACL）
+> 或 OIDC/token 校验，并以 deny-by-default ACL 授权每条路径和操作。
 
 ## 17.1 安全模型总览
 
@@ -10,10 +18,15 @@
 
 1. **QoS 准入控制** — 连接、请求、排队三层预算，防止资源耗尽。
 2. **绑定地址守卫** — 默认仅监听 loopback（`127.0.0.1:8791`），远端绑定必须显式授权。
-3. **MCP scope/origin 授权** — 限定 agent 可检索的 source scope，校验请求来源。
+3. **MCP scope/origin 限制** — 限定 agent 可检索的 source scope，过滤请求来源；两者都不是调用方认证。
 4. **审计日志** — 内存环形缓冲 + JSONL 持久化，记录所有 agent 操作。
 5. **传输层隔离** — 请求体大小限制、超时、TLS 验证、代理配置。
 6. **Session 管理** — 有界 session 注册表，支持会话终止与驱逐。
+
+这些层负责资源边界、暴露开关、请求过滤和可观测性，不构成入站身份系统。
+远程拓扑还必须在 `relay-knowledge` 前部署外部认证与 ACL 层。仅配置 TLS 只能
+加密传输并验证服务端身份；除非同时校验客户端证书并按身份执行 ACL，否则 TLS
+本身不足以认证调用方。
 
 这些机制由三个基础模块强制执行：
 
@@ -89,7 +102,7 @@ MCP 服务在 QoS 拒绝时通过 `record_mcp_qos_rejection` 记录审计事件�
 默认绑定地址为 `127.0.0.1:8791`（`DEFAULT_HTTP_BIND`）。系统通过 `remote_clients_allowed()` 判断是否允许非本地客户端：
 
 ```rust
-// src/relay_knowledge/net/http.rs
+// src/relay_knowledge/net/http/mod.rs
 pub fn remote_clients_allowed(config: &HttpConfig, allow_remote_clients: bool) -> bool {
     allow_remote_clients || is_local_bind(&config.bind_address.to_string())
 }
@@ -100,36 +113,45 @@ pub fn remote_clients_allowed(config: &HttpConfig, allow_remote_clients: bool) -
 - 主机名为 `localhost`（不区分大小写）。
 - IP 地址满足 `IpAddr::is_loopback()`（即 `127.0.0.0/8` 或 `::1`）。
 
-绑定到 loopback 地址时**始终**允许连接（因为终端只能是本机）；绑定到非 loopback 地址时**必须**显式设置 `allow_remote_clients=true`。
+绑定到 loopback 地址时无需开启远端暴露开关；绑定到非 loopback 地址时必须显式设置
+`allow_remote_clients=true`。该布尔值只决定监听器能否暴露到非 loopback，既不认证
+调用方，也不授予 API 或 control 操作权限。Loopback 限制网络暴露范围，也不等同于
+本机多用户环境中的身份认证。
 
-### 17.3.2 远端监听的前提条件
+### 17.3.2 远端访问的外部认证前提
 
-非 loopback 绑定需要同时满足以下条件：
+安全的远端访问需要同时满足以下条件：
 
-| 条件 | Web 模式 | MCP 模式 |
+| 条件 | 作用 | 是否认证调用方 |
 | --- | --- | --- |
-| `allow_remote_clients=true` | ✅ `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true` | ✅ `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true` |
-| QoS 预算充足 | ✅ 自动生效 | ✅ 自动生效 |
-| 请求超时（`request_timeout`） | ✅ 默认 30s | ✅ 默认 30s |
-| 审计日志 | 可选 | 建议启用 |
-| scope/origin 限制 | N/A（Web 走统一 API） | ✅ 必须配置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` |
+| 外部 OIDC/token 网关，或校验客户端证书并映射 ACL 的 mTLS 网关 | 认证身份，并按 deny-by-default ACL 授权 Web、API、control 和 MCP 路径 | 是 |
+| Relay 后端只绑定 loopback；跨主机 sidecar 例外时只绑定网关专用私网地址并用防火墙仅允许网关 | 避免绕过认证层直连后端 | 否 |
+| `allow_remote_clients=true` | 仅允许 Relay 监听非 loopback；只用于受隔离的跨主机网关后端 | 否 |
+| MCP scope allowlist | 限定 MCP 请求可读取的资源范围 | 否 |
+| Origin 限制 | 过滤声明的请求来源 | 否 |
+| QoS、请求超时和请求体限制 | 限制资源消耗 | 否 |
+| 审计日志 | 记录操作和诊断上下文 | 否；当前不提供已认证主体 |
 
-远端监听配置示例：
+无外部认证网关时只允许本机访问：
 
 ```bash
-RELAY_KNOWLEDGE_HTTP_BIND=0.0.0.0:8791 \
-RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true \
+RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs,src \
 RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true \
 relay-knowledge service run --mcp streamable-http
 ```
 
+需要远端访问时仍让 Relay 绑定 `127.0.0.1:8791`，由同机外部身份网关监听远端
+地址并转发；完整的 deny-by-default 示例见 [17.6.1](#1761-反向代理部署)。
+
 ### 17.3.3 `ensure_web_remote_bind_allowed` 机制
 
-服务启动时，`service_cli::ensure_web_remote_bind_allowed` 和 `http_contract::ensure_remote_bind_allowed` 分别检查 Web 路由和 MCP 路由的远端绑定授权：
+服务启动时，`service_cli::ensure_web_remote_bind_allowed` 和
+`http_contract::ensure_remote_bind_allowed` 分别检查 Web 路由和 MCP 路由能否暴露到
+非 loopback。这是监听暴露守卫，不是调用方认证或操作授权：
 
 ```rust
-// src/relay_knowledge/interfaces/service_cli.rs
+// src/relay_knowledge/interfaces/cli/service/mod.rs
 pub(super) fn ensure_web_remote_bind_allowed(
     config: &HttpConfig,
     allow_remote_clients: bool,
@@ -149,13 +171,20 @@ MCP 端等价的检查返回 `McpServeError::RemoteBindDisabled`，阻止远端�
 - **非 loopback 绑定 + `allow_remote_clients=false`** → 服务启动失败。
 - **loopback 绑定** → 无需额外授权。
 
+通过此检查只代表监听器可以启动。它不会验证谁发起请求；任何能连接该端口的调用方
+都能到达已注册路由。因此不能把 `allow_remote_clients=true` 当作认证开关。
+
 `HttpBindAddress::parse()` 还拒绝端口为 `0` 的临时端口（返回 `HttpConfigError::EphemeralPort`），确保绑定地址始终显式指定端口。
 
 ## 17.4 MCP 安全控制
 
-### 17.4.1 Scope 授权机制
+### 17.4.1 Scope 资源允许列表
 
-MCP scope 授权基于 `AgentAccessPolicy`，由以下环境变量控制：
+MCP scope 策略基于 `AgentAccessPolicy`，由以下环境变量控制：
+
+Scope 只是一层**资源 allowlist**：它约束请求可以读取哪些 source scope，但不识别
+请求者，也不把某个 scope 授予某个用户或服务身份。所有能到达 MCP 端点的调用方共享
+同一进程配置，因此远端 MCP 仍必须经过外部身份认证和按主体执行的 ACL。
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -164,7 +193,7 @@ MCP scope 授权基于 `AgentAccessPolicy`，由以下环境变量控制：
 | `RELAY_KNOWLEDGE_MCP_MAX_LIMIT` | 正整数 | `10` | 单次检索最大返回条数 |
 | `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | 正整数 | `65536` | MCP 上下文输出字节上限；repository graph 按完整 `structuredContent` 计量 |
 
-Scope 授权流程（`scope_authorization.rs`）：
+Scope 过滤流程（`scope_authorization.rs`）：
 
 1. **scope 解析**：`normalize_scope_for_policy` 将用户输入的 scope 解析为 `SourceScope` 格式并去除空白。
 2. **静态白名单匹配**：检查 `scope` 是否在 `allowed_scopes` 列表中。
@@ -191,6 +220,10 @@ Scope 授权流程（`scope_authorization.rs`）：
 
 MCP 服务通过 `validate_origin()` 校验 HTTP `Origin` 请求头：
 
+Origin 是请求来源过滤信号，不是身份凭据。非浏览器客户端可以自行设置或省略该头，
+浏览器中的 Origin 也只能描述页面来源，不能证明最终用户或服务身份。即使严格配置
+Origin allowlist，远端端点仍需外部认证网关和 ACL。
+
 | 配置状态 | Loopback Origin | 非 Loopback Origin | 无 Origin 头 |
 | --- | --- | --- | --- |
 | `mcp_allowed_origins` 为空（默认） | ✅ 允许 | ❌ `403 Forbidden` | ✅ 允许 |
@@ -208,6 +241,9 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=http://localhost:3000,https://my-agent.examp
 ### 17.4.3 Session 管理
 
 MCP Streamable HTTP 的会话由 `SessionRegistry` 管理：
+
+`Mcp-Session-Id` 只关联协议状态和取消请求，不是登录 session、Bearer token 或调用方
+身份。随机 session id 不能替代外部认证，也不应被外部网关当作 ACL 主体。
 
 | 参数 | 值 | 说明 |
 | --- | --- | --- |
@@ -230,7 +266,7 @@ MCP Streamable HTTP 的会话由 `SessionRegistry` 管理：
 | --- | --- | --- | --- |
 | `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED` | bool | `false` | 启用 MCP Streamable HTTP |
 | `RELAY_KNOWLEDGE_MCP_ENDPOINT` | 路径 | `/mcp` | MCP 端点路径（以 `/` 开头） |
-| `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | bool | `false` | 允许远端客户端连接 |
+| `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | bool | `false` | 允许非 loopback 监听；仅为暴露开关，不提供认证 |
 
 MCP 服务通过 `McpServer::checked_router()` 在构建路由器时执行所有安全检查：
 
@@ -283,6 +319,10 @@ HTTP 请求级校验：
 | `elapsed_ms` | `u64` | 耗时（毫秒） |
 | `error_kind` | `Option<String>` | 错误类别（可选） |
 
+这里的 `runtime_identity` 是运行时请求关联信息，不是经过登录、OIDC 或客户端证书
+认证的调用方主体。需要按用户或服务追责时，外部认证网关还必须记录其认证主体、ACL
+决策和对应的 Relay request/trace 标识。
+
 ### 17.5.3 审计场景
 
 审计日志覆盖以下场景：
@@ -302,11 +342,21 @@ JSONL 追加写入，每条事件一行，使用 `serde_json::to_vec` 序列化�
 {"sequence":1,"protocol":"mcp","operation":"retrieve_context","request_id":"session:rk-abc123|string:1","trace_id":"trace-mcp-session:rk-abc123|string:1","runtime_identity":{"protocol":"mcp","request_id":"session:rk-abc123|string:1"},"qos_decision":"admitted","status":"completed","source_scope":"docs","freshness":"allow-stale","limit":10,"result_count":5,"truncated":false,"elapsed_ms":42}
 ```
 
+### 17.5.5 后台索引发布与恢复
+
+Code facts 写完不代表仓库已经 fresh。Full 与 incremental task 必须继续受 fence 保护，直到 software projection 同样成功。单 SQLite 在一个 transaction 中同时发布 scope freshness、software status、checkpoint completion 与 publication receipt。Partitioned 模式则先让新 shard route 保持 `staged`，并用 durable task 的 `staged_task_id` 记录 owner；active-only read 在激活前继续读取旧 active scope。随后一个 control transaction 同时激活 route、镜像 repository status 并记录 receipt。
+
+Task 的 `succeeded` 是后续独立的 fenced transaction，必须验证该 receipt、匹配的 fresh scope，以及目标存在 checkpoint 时的 completed checkpoint；无 checkpoint 的 mode 不会虚构 checkpoint。服务若在 control activation 前 crash，恢复流程从 staged shard 继续；若在 activation 后、task completion 前 crash，reclaim 后的 attempt 复用 task-scoped receipt 收敛，不会重新发布，过期 attempt 仍不能报告成功。运维人员应查看 task、checkpoint 与 repository status，并让 reconciler 回收 lease；不要手工删除 lock file、catalog row 或 shard 数据。
+
 ## 17.6 网络安全建议
 
 ### 17.6.1 反向代理部署
 
-生产环境推荐将 `relay-knowledge` 置于反向代理后，不要在公网直接暴露：
+生产环境必须让 `relay-knowledge` 后端保持 loopback，并在前置网关对所有 Web、API、
+`/api/v1/control/**` 和 MCP 请求执行身份认证及 deny-by-default ACL。普通反向代理或
+TLS 终止器本身不满足这个要求。下面假设 `127.0.0.1:4180` 上已有身份网关，其
+`/verify` 端点只有在调用方通过 OIDC/token 校验且 ACL 允许当前路径和方法时才返回
+2xx；未认证、无权限、超时或网关故障都必须返回非 2xx 并拒绝请求。
 
 **nginx 配置示例**：
 
@@ -316,6 +366,11 @@ upstream relay_knowledge {
     keepalive 32;
 }
 
+upstream relay_identity_gateway {
+    server 127.0.0.1:4180;
+    keepalive 16;
+}
+
 server {
     listen 443 ssl;
     server_name knowledge.example.com;
@@ -323,30 +378,30 @@ server {
     ssl_certificate     /etc/ssl/certs/knowledge.pem;
     ssl_certificate_key /etc/ssl/private/knowledge.key;
 
-    # 限制请求体大小（与服务端 max_request_body_bytes 对齐）
+    # TLS 只加密传输；调用方身份和 ACL 由 auth_request 后端校验。
     client_max_body_size 1m;
 
-    location /mcp {
-        proxy_pass http://relay_knowledge;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 35s;
-        proxy_connect_timeout 5s;
-    }
-
-    location /api {
-        proxy_pass http://relay_knowledge;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    location = /_relay_auth {
+        internal;
+        auth_request off;
+        proxy_pass http://relay_identity_gateway/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
     }
 
     location / {
-        proxy_pass http://relay_knowledge;
+        # 身份网关失败或拒绝时，nginx 不会把请求转给 Relay。
+        auth_request /_relay_auth;
         proxy_http_version 1.1;
+        proxy_pass http://relay_knowledge;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 35s;
+        proxy_connect_timeout 5s;
     }
 }
 ```
@@ -355,25 +410,42 @@ server {
 
 ```caddyfile
 knowledge.example.com {
-    reverse_proxy 127.0.0.1:8791 {
-        header_up Host {host}
-        header_up X-Forwarded-For {remote}
+    route {
+        # /verify 必须执行 OIDC/token 校验和按路径、方法的 ACL；非 2xx 默认拒绝。
+        forward_auth 127.0.0.1:4180 {
+            uri /verify
+            copy_headers X-Authenticated-User X-Authenticated-Groups
+        }
+
+        reverse_proxy 127.0.0.1:8791
     }
 }
 ```
 
-启动 `relay-knowledge` 时必须保持 loopback 绑定 + 远端授权：
+Caddy 自动 TLS 只提供传输保护；安全性仍取决于 `forward_auth` 服务实际校验身份并
+执行 ACL。身份网关也可以改用 mTLS，但必须验证客户端证书、将证书身份映射到主体，
+并按路径/操作执行 deny-by-default ACL，不能只要求一条 TLS 连接。
+
+启动 `relay-knowledge` 时保持 loopback 绑定，不开启远端暴露开关：
 
 ```bash
 RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
-RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true \
 RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=https://knowledge.example.com \
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs,src \
 relay-knowledge service run --web --mcp streamable-http
 ```
+
+不得在网关上放行未经过认证与 ACL 的旁路路径，包括健康检查、Web 静态入口、
+`/api/**`、`/api/v1/control/**` 和 `/mcp`。如监控需要免认证健康探测，应使用本机
+或专用管理网络，而不是在公网虚拟主机上创建匿名例外。
 
 ### 17.6.2 TLS 终止
 
 `relay-knowledge` 本身不提供 TLS 终止能力（`DEFAULT_SSL_VERIFY=true` 仅用于出站请求的 TLS 证书验证），TLS 应由反向代理或外部 load balancer 处理。
+
+TLS 终止只保护传输并通常验证服务端身份，**不等于入站调用方认证**。远端访问还需
+OIDC/token 身份网关加 ACL，或完整 mTLS：验证受信任的客户端证书、处理吊销/轮换、
+把证书身份映射到调用方并执行 ACL。只有服务端证书的 HTTPS 仍不足以保护 Relay API。
 
 出站代理和 TLS 配置：
 
@@ -401,12 +473,14 @@ ufw allow from 127.0.0.1 to any port 8791 proto tcp
 ufw deny 8791
 ```
 
-如果直接监听非 loopback 地址：
+没有外部认证网关时，不得直接监听非 loopback 地址。若认证网关必须部署在另一台
+主机，Relay 只能绑定网关专用私网地址，设置远端暴露开关，并把防火墙来源精确限制
+为该网关地址；网关仍必须完成身份认证和 ACL。以下只是这种受隔离后端链路的示意，
+防火墙规则本身不是调用方认证：
 
 ```bash
-# 仅允许内网和特定可信 IP
-iptables -A INPUT -p tcp --dport 8791 -s 10.0.0.0/8 -j ACCEPT
-iptables -A INPUT -p tcp --dport 8791 -s 192.168.0.0/16 -j ACCEPT
+# 仅允许明确的认证网关地址；不要放行整个内网网段
+iptables -A INPUT -p tcp --dport 8791 -s 10.20.30.40 -j ACCEPT
 iptables -A INPUT -p tcp --dport 8791 -j DROP
 ```
 
@@ -430,12 +504,12 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 | --- | --- | --- | --- |
 | `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED` | bool | `false` | 启用 MCP Streamable HTTP 服务 |
 | `RELAY_KNOWLEDGE_MCP_ENDPOINT` | 路径 | `/mcp` | MCP HTTP 端点路径 |
-| `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS` | CSV | 空（允许无 Origin / loopback） | 允许的 CORS Origin 列表 |
-| `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` | CSV | 空 | 允许的 source scope 白名单 |
+| `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS` | CSV | 空（允许无 Origin / loopback） | 请求 Origin 过滤列表；不是身份认证 |
+| `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` | CSV | 空 | MCP 可访问的 source scope 资源 allowlist；不是身份 ACL |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE` | bool | `false` | 是否允许不指定 scope |
 | `RELAY_KNOWLEDGE_MCP_MAX_LIMIT` | 正整数 | `10` | 单次检索最大返回条数上限 |
 | `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | 正整数 | `65536` | 单次检索上下文最大字节数 |
-| `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | bool | `false` | 允许非 loopback 客户端 |
+| `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | bool | `false` | 允许非 loopback 监听；不是身份认证或访问授权 |
 
 ### 17.7.3 审计日志
 
@@ -475,21 +549,25 @@ relay-knowledge service run --mcp streamable-http
 
 ### 团队内网服务
 
+“在内网”不能证明调用方身份。团队访问仍由同机外部身份网关监听团队地址并执行
+OIDC/token 或 mTLS 身份认证以及 deny-by-default ACL；Relay 后端保持 loopback：
+
 ```bash
-RELAY_KNOWLEDGE_HTTP_BIND=0.0.0.0:8791 \
-RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true \
+RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs,src,config \
-RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=http://localhost:3000,https://internal.example.com \
 RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true \
 RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH=2048 \
 relay-knowledge service run --web --mcp streamable-http
 ```
 
+如果团队浏览器固定从 `https://internal.example.com` 访问，可额外配置
+`RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=https://internal.example.com`，但它只是纵深过滤，
+不能代替网关认证，也可能拒绝没有 Origin 头的 CLI 客户端。
+
 ### 生产部署（反向代理后）
 
 ```bash
 RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
-RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true \
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<逗号分隔的授权 scope> \
 RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=https://your-domain.example.com \
 RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true \
@@ -500,14 +578,21 @@ RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS=60000 \
 relay-knowledge service run --web --mcp streamable-http
 ```
 
+该配置只启动 loopback 后端；前置网关必须按 [17.6.1](#1761-反向代理部署)
+认证每个调用方并授权每条路径。不要给 Relay 端口增加公网或全内网旁路。
+
 ### 安全检查清单
 
-- [ ] `HTTP_BIND` 是否绑定到非 loopback 地址？如是，必须设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
+- [ ] 是否确认 Web、`/api/**`、`/api/v1/control/**` 和 MCP 都没有内建入站调用方认证？
+- [ ] 有远程访问时，是否由外部网关先执行 mTLS（客户端证书校验 + 身份 ACL）或 OIDC/token 身份认证 + deny-by-default ACL？
+- [ ] 网关是否保护所有路径且失败时默认拒绝，没有匿名或直连 Relay 的旁路？
+- [ ] 没有外部认证网关时，`HTTP_BIND` 是否保持 loopback？
+- [ ] 是否避免把 `allow_remote_clients`、Origin、QoS、MCP scope 或 session id 当作身份认证？
 - [ ] 是否配置了 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`？空列表意味着拒绝所有 scope 指定请求（除非设置 `ALLOW_UNSPECIFIED_SCOPE=true` 可使用全局检索）。
 - [ ] 是否配置了 `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS`？配置后无 Origin 的请求将被拒绝。
 - [ ] `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED` 是否已启用？生产环境强烈建议启用。
 - [ ] QoS 预算是否与预期负载匹配？默认值适用于中等负载，高并发场景需调高。
-- [ ] 是否配置了反向代理的 TLS？`relay-knowledge` 不内置 TLS 终止。
+- [ ] 是否配置了反向代理的 TLS，并确认 TLS alone 不足以认证调用方？
 - [ ] 防火墙是否限制了非信任来源访问监听端口？
 - [ ] 出站代理和 `SSL_VERIFY` 是否正确配置？禁用 TLS 验证暴露于中间人攻击。
 - [ ] `max_request_body_bytes` 是否合理？默认 1 MiB，防止请求体过大导致内存压力。

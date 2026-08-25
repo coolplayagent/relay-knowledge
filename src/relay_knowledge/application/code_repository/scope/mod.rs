@@ -7,8 +7,8 @@ use crate::{
     code::{repository_uses_filesystem_source, resolve_repository_ref_with_filters},
     domain::{
         CodeFeatureFlagRequest, CodeIndexTaskRecord, CodeRepositorySelector, CodeRepositoryStatus,
-        CodeRetrievalRequest, code_snapshot_expected_scope_id,
-        code_snapshot_scope_is_fact_versioned,
+        CodeRetrievalRequest, code_snapshot_scope_is_fact_versioned,
+        code_snapshot_scope_matches_identity,
     },
 };
 
@@ -112,13 +112,13 @@ pub(super) fn code_scope_matches_current_fact_version(status: &CodeRepositorySta
         return false;
     };
 
-    code_snapshot_expected_scope_id(
+    code_snapshot_scope_matches_identity(
         &status.repository_id,
         tree_hash,
         &status.path_filters,
         &status.language_filters,
+        source_scope,
     )
-    .is_some_and(|expected| expected == source_scope)
 }
 
 pub(super) fn indexed_source_scope(status: &CodeRepositoryStatus) -> Option<String> {

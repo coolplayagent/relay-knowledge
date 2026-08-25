@@ -1,41 +1,14 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::collections::BTreeSet;
 
 use serde_json::Value;
 
 use crate::{
     cases::{array_field, string_or},
     config::{CategorySet, Config, EvaluationCategory},
-    history::HistoryPaths,
     scoring::{CaseObservation, GateObservation},
 };
 
 use super::{case_scoring::is_guardrail_case, repository_scoring::repository_case_objective};
-
-pub(in crate::evaluator) fn evaluation_home(
-    config: &Config,
-    paths: &HistoryPaths,
-    run_id: &str,
-) -> (PathBuf, bool) {
-    if config.profile == "fast" {
-        return (
-            paths.root.join("cache-v2").join("fast-evaluation-home"),
-            true,
-        );
-    }
-    (paths.work.join(run_id).join("home"), false)
-}
-
-pub(in crate::evaluator) fn relay_knowledge_binary(config: &Config) -> PathBuf {
-    config
-        .workspace
-        .join("target")
-        .join(if config.profile == "fast" {
-            "debug"
-        } else {
-            "release"
-        })
-        .join("relay-knowledge")
-}
 
 #[derive(Debug, Clone)]
 pub(in crate::evaluator) struct WorkloadSelection {

@@ -44,6 +44,7 @@ fn macro_unattended_prompt_requires_bolder_research_mutation() {
             "run_id": "accepted",
             "timestamp": "1",
             "profile": "fast",
+            "product_binary_profile": "release",
             "category_focus": "competitive",
             "accepted": true,
             "score_accepted": true,

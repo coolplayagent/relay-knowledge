@@ -93,3 +93,7 @@ Adding `B(c,Q)` later requires a bounded document-level postings design, explici
 - [Hybrid Retrieval and Context Packing](../03-architecture-specs/09-hybrid-retrieval-and-context-packing.md)
 - [Installation, Release, and Upgrade](../03-architecture-specs/19-installation-release-and-upgrade.md)
 - [Competitive and High-Performance Benchmark Targets](../05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
+
+---
+
+Navigation: Previous: [11. Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](11-software-global-codegraph-search-everything-comparison-2026.md)

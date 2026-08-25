@@ -1,6 +1,8 @@
 use crate::{
     candidate_git::{self, PatchSnapshot},
-    codex, history, scoring,
+    codex,
+    config::ProductBinaryProfile,
+    history, scoring,
 };
 
 pub(super) fn selected_categories_value(selected_categories: &[&str]) -> serde_json::Value {
@@ -46,9 +48,14 @@ pub(super) fn comparison_baseline(
 ) -> Result<serde_json::Value, String> {
     let best_accepted = history::best_accepted_run_for_workload(paths, profile, category_focus)?;
     let profile_best_accepted = history::best_accepted_run_for_profile(paths, profile)?;
+    let cross_product_profile_best_accepted =
+        history::best_accepted_run_for_profile_across_product_binaries(paths, profile)?;
     Ok(serde_json::json!({
         "comparison_kind": "latest_scored_workload_run",
         "profile": profile,
+        "product_binary_profile": ProductBinaryProfile::for_evaluation_profile(profile).map(ProductBinaryProfile::as_str),
+        "profile_best_scope": "evaluation_profile_and_product_binary_profile_acceptance_floor",
+        "cross_product_profile_best_scope": "evaluation_profile_diagnostic_only",
         "category_focus": category_focus,
         "latest_run_id": previous_run.and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
         "latest_score": previous_run.and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
@@ -57,5 +64,11 @@ pub(super) fn comparison_baseline(
         "best_accepted_score": best_accepted.as_ref().and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
         "profile_best_accepted_run_id": profile_best_accepted.as_ref().and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
         "profile_best_accepted_score": profile_best_accepted.as_ref().and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
+        "cross_product_profile_best_accepted_run_id": cross_product_profile_best_accepted.as_ref().and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
+        "cross_product_profile_best_accepted_score": cross_product_profile_best_accepted.as_ref().and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
     }))
 }
+
+#[cfg(test)]
+#[path = "report_metadata_tests.rs"]
+mod tests;

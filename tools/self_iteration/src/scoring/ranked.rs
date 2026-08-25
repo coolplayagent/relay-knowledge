@@ -105,6 +105,7 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
         "dependency_group",
         "requirement",
         "resolved_version",
+        "edge_kind",
         "edge_resolution_state",
         "repository_alias",
         "source_scope",
@@ -126,12 +127,11 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
         }
     }
     if let Some(expected) = pattern.get("edge_target_hint").and_then(Value::as_str) {
-        if !hit
+        let actual = hit
             .get("edge_target_hint")
             .and_then(Value::as_str)
-            .unwrap_or("")
-            .contains(expected)
-        {
+            .unwrap_or("");
+        if !edge_target_hint_matches(actual, expected) {
             return false;
         }
     }
@@ -187,6 +187,13 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
         return false;
     }
     true
+}
+
+fn edge_target_hint_matches(actual: &str, expected: &str) -> bool {
+    actual == expected
+        || actual.strip_suffix(expected).is_some_and(|prefix| {
+            prefix.ends_with('/') || prefix.ends_with('\\') || prefix.ends_with(':')
+        })
 }
 
 fn line_matches_any(hit: &Value, expected: i64, fields: &[&str]) -> bool {

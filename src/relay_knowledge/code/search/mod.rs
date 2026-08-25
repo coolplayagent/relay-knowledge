@@ -14,7 +14,9 @@ use materialization::{
 };
 use scanner::internal_source_grep_matches;
 
-pub(crate) use candidate_scope::SOURCE_GREP_CANDIDATE_FILE_LIMIT;
+pub(crate) use candidate_scope::{
+    SOURCE_GREP_CANDIDATE_FILE_LIMIT, bounded_source_grep_candidate_match_limit,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceGrepKind {
@@ -49,6 +51,13 @@ pub(crate) struct SourceGrepMatch {
     pub(crate) byte_range: RepositoryCodeRange,
     pub(crate) line_range: RepositoryCodeRange,
     pub(crate) is_generated: bool,
+}
+
+pub(crate) fn source_fallback_reference_language_is_code(language_id: &str) -> bool {
+    !matches!(
+        language_id,
+        "gomod" | "ini" | "json" | "markdown" | "properties" | "toml" | "xml" | "yaml"
+    )
 }
 
 pub(crate) fn source_grep_matches(

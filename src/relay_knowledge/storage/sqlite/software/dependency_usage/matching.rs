@@ -7,6 +7,7 @@ use crate::{domain::SoftwareComponent, storage::StorageError};
 const EXACT_MATCH_CONFIDENCE: u16 = 9500;
 const NORMALIZED_MATCH_CONFIDENCE: u16 = 8500;
 const HEURISTIC_MATCH_CONFIDENCE: u16 = 7000;
+const MAX_IMPORT_MATCH_TEXT_BYTES: usize = 32 * 1_024;
 
 pub(super) struct DependencyMatchIndex<'a> {
     components: &'a [SoftwareComponent],
@@ -121,6 +122,7 @@ pub(super) type ComponentAliasKeys = BTreeMap<ComponentEvidenceKey, Vec<MatchKey
 pub(super) fn component_alias_keys(
     connection: &Connection,
     source_scope: &str,
+    limit: usize,
 ) -> Result<ComponentAliasKeys, StorageError> {
     if !dependency_excerpt_column_exists(connection)? {
         return Ok(BTreeMap::new());
@@ -133,23 +135,34 @@ pub(super) fn component_alias_keys(
         WHERE source_scope = ?1
           AND ecosystem = 'cargo'
           AND is_lockfile = 0
+        LIMIT ?2
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok((
-            (
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ),
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(5)?,
-        ))
-    })?;
+    let rows = statement.query_map(
+        params![source_scope, limit.saturating_add(1) as i64],
+        |row| {
+            Ok((
+                (
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ),
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(5)?,
+            ))
+        },
+    )?;
     let mut by_component = BTreeMap::new();
+    let mut evidence_count = 0_usize;
     for row in rows {
+        evidence_count = evidence_count.saturating_add(1);
+        if evidence_count > limit {
+            return Err(StorageError::CapacityExceeded(format!(
+                "software dependency component alias evidence exceeds the bounded limit {limit}"
+            )));
+        }
         let (key, package_name, excerpt) = row?;
         let keys = cargo_alias_match_keys(&package_name, &excerpt);
         if !keys.is_empty() {
@@ -309,7 +322,9 @@ fn import_match_candidates(
         target_hint,
         resolution_state,
         None,
+        128,
     )
+    .expect("unit-test import candidate text should fit bounded inputs")
 }
 
 pub(super) fn import_match_candidates_with_python_locals(
@@ -318,31 +333,309 @@ pub(super) fn import_match_candidates_with_python_locals(
     target_hint: Option<&str>,
     resolution_state: &str,
     python_local_modules: Option<&BTreeSet<String>>,
-) -> Vec<MatchKey> {
-    if import_uses_local_specifier(module, target_hint)
+    limit: usize,
+) -> Result<Vec<MatchKey>, StorageError> {
+    let distinct_target_hint = target_hint.filter(|target_hint| *target_hint != module);
+    let input_bytes = module
+        .len()
+        .saturating_add(distinct_target_hint.map_or(0, str::len));
+    if input_bytes > MAX_IMPORT_MATCH_TEXT_BYTES {
+        return Err(StorageError::CapacityExceeded(format!(
+            "software dependency import match text bytes {input_bytes} exceed the bounded limit {MAX_IMPORT_MATCH_TEXT_BYTES}"
+        )));
+    }
+    if import_uses_local_specifier(module, distinct_target_hint)
         || (resolution_state == "resolved" && language_id != "python")
     {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
-    let mut keys = Vec::new();
+    let mut keys = BoundedMatchKeys::new(limit);
     if language_id == "python" {
-        push_python_import_candidate_keys(
-            &mut keys,
-            module,
-            resolution_state,
-            python_local_modules,
-        );
+        for python_module in python_import_modules_iter(module) {
+            if resolution_state == "resolved"
+                && (python_local_modules.is_none()
+                    || python_local_modules
+                        .is_some_and(|modules| python_module_is_local(modules, python_module)))
+            {
+                continue;
+            }
+            if let Some(root) = python_module_root(python_module) {
+                keys.insert(root, EXACT_MATCH_CONFIDENCE)?;
+                keys.insert(&python_distribution_key(root), NORMALIZED_MATCH_CONFIDENCE)?;
+            }
+        }
     } else {
-        push_language_import_keys(&mut keys, language_id, module);
+        visit_language_import_keys(language_id, module, |value, confidence| {
+            keys.insert(value, confidence)
+        })?;
     }
     if language_id != "python"
         && matches!(resolution_state, "unresolved" | "external")
-        && let Some(target_hint) = target_hint
+        && let Some(target_hint) = distinct_target_hint
     {
-        push_language_import_keys(&mut keys, language_id, target_hint);
+        visit_language_import_keys(language_id, target_hint, |value, confidence| {
+            keys.insert(value, confidence)
+        })?;
     }
-    dedupe_keys_keep_highest_confidence(keys)
+    Ok(keys.into_vec())
+}
+
+struct BoundedMatchKeys {
+    by_value: BTreeMap<String, u16>,
+    limit: usize,
+}
+
+impl BoundedMatchKeys {
+    fn new(limit: usize) -> Self {
+        Self {
+            by_value: BTreeMap::new(),
+            limit,
+        }
+    }
+
+    fn insert(&mut self, value: &str, confidence: u16) -> Result<(), StorageError> {
+        let value = normalize_key(value);
+        if value.is_empty() || value.starts_with('.') || value.starts_with('/') {
+            return Ok(());
+        }
+        if let Some(current) = self.by_value.get_mut(&value) {
+            *current = (*current).max(confidence);
+            return Ok(());
+        }
+        if self.by_value.len() >= self.limit {
+            return Err(StorageError::CapacityExceeded(format!(
+                "software dependency match candidates exceed the per-import bounded limit {}",
+                self.limit
+            )));
+        }
+        self.by_value.insert(value, confidence);
+        Ok(())
+    }
+
+    fn into_vec(self) -> Vec<MatchKey> {
+        self.by_value
+            .into_iter()
+            .map(|(value, confidence_basis_points)| MatchKey {
+                value,
+                confidence_basis_points,
+            })
+            .collect()
+    }
+}
+
+fn visit_language_import_keys(
+    language_id: &str,
+    value: &str,
+    mut visit: impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    match language_id {
+        "python" => visit_python_import_keys(value, &mut visit),
+        "java" | "kotlin" | "scala" => visit_jvm_import_keys(value, &mut visit),
+        "go" => visit_go_import_keys(value, &mut visit),
+        "rust" => visit_rust_import_keys(value, &mut visit),
+        "javascript" | "jsx" | "typescript" | "tsx" => visit_package_import_keys(value, &mut visit),
+        "c" | "cpp" => visit_native_import_keys(value, &mut visit),
+        _ => visit_package_import_keys(value, &mut visit),
+    }
+}
+
+fn visit_rust_import_keys(
+    value: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let mut value = value.trim().trim_end_matches(';').trim();
+    value = value.strip_prefix("pub use ").unwrap_or(value);
+    value = value.strip_prefix("use ").unwrap_or(value);
+    value = value.strip_prefix("extern crate ").unwrap_or(value);
+    let root = value
+        .split([':', '{', ' ', ';'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    if matches!(root, "" | "crate" | "self" | "super") {
+        return Ok(());
+    }
+    visit(root, EXACT_MATCH_CONFIDENCE)
+}
+
+fn visit_package_import_keys(
+    value: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let mut found = false;
+    visit_quoted_specs(value, |spec| {
+        found = true;
+        if let Some(root) = package_root(spec) {
+            visit(&root, EXACT_MATCH_CONFIDENCE)?;
+        }
+        Ok(())
+    })?;
+    if !found && let Some(root) = package_root(value.trim()) {
+        visit(&root, EXACT_MATCH_CONFIDENCE)?;
+    }
+    Ok(())
+}
+
+fn visit_python_import_keys(
+    value: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    for module in python_import_modules_iter(value) {
+        if let Some(root) = python_module_root(module) {
+            visit(root, EXACT_MATCH_CONFIDENCE)?;
+            let distribution = python_distribution_key(root);
+            visit(&distribution, NORMALIZED_MATCH_CONFIDENCE)?;
+        }
+    }
+    Ok(())
+}
+
+fn visit_jvm_import_keys(
+    value: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let value = value
+        .trim()
+        .trim_end_matches(';')
+        .trim_start_matches("import static ")
+        .trim_start_matches("import ")
+        .trim();
+    visit(value, EXACT_MATCH_CONFIDENCE)?;
+    let separator_count = value.bytes().filter(|byte| *byte == b'.').count();
+    if separator_count > 1 {
+        let mut end = value.len();
+        while let Some(dot) = value[..end].rfind('.') {
+            end = dot;
+            if value[..end].contains('.') {
+                visit(&value[..end], NORMALIZED_MATCH_CONFIDENCE)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn visit_go_import_keys(
+    value: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let mut found = false;
+    visit_quoted_specs(value, |spec| {
+        found = true;
+        visit_go_package_keys(spec, visit)
+    })?;
+    if !found {
+        for spec in go_unquoted_import_specs(value) {
+            visit_go_package_keys(spec, visit)?;
+        }
+    }
+    Ok(())
+}
+
+fn visit_native_import_keys(
+    value: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let angle = value
+        .split_once('<')
+        .and_then(|(_, rest)| rest.split_once('>').map(|(header, _)| header));
+    let quoted = value
+        .split_once('"')
+        .and_then(|(_, rest)| rest.split_once('"').map(|(header, _)| header));
+    let mut found = false;
+    for spec in angle.into_iter().chain(quoted) {
+        found = true;
+        visit_native_spec(spec, visit)?;
+    }
+    if !found {
+        visit_native_spec(value, visit)?;
+    }
+    Ok(())
+}
+
+fn visit_native_spec(
+    spec: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    if let Some(root) = spec.split('/').next().filter(|root| !root.is_empty()) {
+        visit(root, NORMALIZED_MATCH_CONFIDENCE)?;
+    }
+    let stem = spec
+        .rsplit('/')
+        .next()
+        .unwrap_or(spec)
+        .trim_end_matches(".hpp")
+        .trim_end_matches(".hxx")
+        .trim_end_matches(".hh")
+        .trim_end_matches(".h");
+    visit(stem, HEURISTIC_MATCH_CONFIDENCE)
+}
+
+fn visit_quoted_specs(
+    value: &str,
+    mut visit: impl FnMut(&str) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let mut start = None::<usize>;
+    let mut quote = '\0';
+    for (index, character) in value.char_indices() {
+        if start.is_none() && matches!(character, '"' | '\'' | '`') {
+            start = Some(index + character.len_utf8());
+            quote = character;
+        } else if start.is_some() && character == quote {
+            let spec_start = start.take().unwrap_or_default();
+            visit(&value[spec_start..index])?;
+        }
+    }
+    Ok(())
+}
+
+fn visit_go_package_keys(
+    value: &str,
+    visit: &mut impl FnMut(&str, u16) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let part_count = value.split('/').count();
+    let minimum = if value
+        .split('/')
+        .next()
+        .is_some_and(|part| part.contains('.'))
+    {
+        2
+    } else {
+        3
+    };
+    if part_count < minimum {
+        return visit(value, EXACT_MATCH_CONFIDENCE);
+    }
+    let mut end = value.len();
+    let mut current_parts = part_count;
+    while current_parts >= minimum {
+        visit(&value[..end], EXACT_MATCH_CONFIDENCE)?;
+        if current_parts == minimum {
+            break;
+        }
+        end = value[..end].rfind('/').unwrap_or(0);
+        current_parts -= 1;
+    }
+    Ok(())
+}
+
+fn python_import_modules_iter(value: &str) -> Box<dyn Iterator<Item = &str> + '_> {
+    let value = value.trim().trim_end_matches(';').trim();
+    if let Some(rest) = value.strip_prefix("from ") {
+        return Box::new(
+            rest.split_once(" import ")
+                .map(|(module, _)| module.trim())
+                .into_iter(),
+        );
+    }
+    let rest = value.strip_prefix("import ").unwrap_or(value);
+    Box::new(rest.split(',').filter_map(|part| {
+        let module = part
+            .trim()
+            .split_once(" as ")
+            .map_or(part.trim(), |(module, _)| module.trim());
+        (!module.is_empty()).then_some(module)
+    }))
 }
 
 fn import_uses_local_specifier(module: &str, target_hint: Option<&str>) -> bool {
@@ -351,10 +644,17 @@ fn import_uses_local_specifier(module: &str, target_hint: Option<&str>) -> bool 
         || module
             .strip_prefix("from ")
             .is_some_and(|rest| rest.trim_start().starts_with(['.', '/']))
-        || quoted_specs(module)
-            .into_iter()
-            .any(|spec| spec.trim().starts_with(['.', '/']))
+        || quoted_spec_is_local(module)
         || target_hint.is_some_and(|hint| hint.trim().starts_with(['.', '/']))
+}
+
+fn quoted_spec_is_local(value: &str) -> bool {
+    let mut local = false;
+    let _ = visit_quoted_specs(value, |spec| {
+        local |= spec.trim().starts_with(['.', '/']);
+        Ok(())
+    });
+    local
 }
 
 fn dedupe_keys_keep_highest_confidence(keys: Vec<MatchKey>) -> Vec<MatchKey> {
@@ -375,111 +675,8 @@ fn dedupe_keys_keep_highest_confidence(keys: Vec<MatchKey>) -> Vec<MatchKey> {
         .collect()
 }
 
-fn push_language_import_keys(keys: &mut Vec<MatchKey>, language_id: &str, value: &str) {
-    match language_id {
-        "rust" => push_rust_import_keys(keys, value),
-        "python" => push_python_import_keys(keys, value),
-        "javascript" | "jsx" | "typescript" | "tsx" => push_package_import_keys(keys, value),
-        "go" => push_go_import_keys(keys, value),
-        "java" | "kotlin" | "scala" => push_jvm_import_keys(keys, value),
-        "c" | "cpp" => push_native_import_keys(keys, value),
-        _ => push_package_import_keys(keys, value),
-    }
-}
-
-fn push_package_import_keys(keys: &mut Vec<MatchKey>, value: &str) {
-    let specs = quoted_specs(value);
-    let specs = if specs.is_empty() {
-        vec![value.trim()]
-    } else {
-        specs
-    };
-    for spec in specs {
-        if let Some(root) = package_root(spec) {
-            push_key(keys, &root, EXACT_MATCH_CONFIDENCE);
-        }
-    }
-}
-
-fn push_rust_import_keys(keys: &mut Vec<MatchKey>, value: &str) {
-    let mut value = value.trim().trim_end_matches(';').trim();
-    value = value.strip_prefix("pub use ").unwrap_or(value);
-    value = value.strip_prefix("use ").unwrap_or(value);
-    value = value.strip_prefix("extern crate ").unwrap_or(value);
-    let root = value
-        .split([':', '{', ' ', ';'])
-        .next()
-        .unwrap_or_default()
-        .trim();
-    if !matches!(root, "" | "crate" | "self" | "super") {
-        push_key(keys, root, EXACT_MATCH_CONFIDENCE);
-    }
-}
-
-fn push_python_import_keys(keys: &mut Vec<MatchKey>, value: &str) {
-    for module in python_import_modules(value) {
-        push_python_module_key(keys, module);
-    }
-}
-
-fn push_python_import_candidate_keys(
-    keys: &mut Vec<MatchKey>,
-    module: &str,
-    resolution_state: &str,
-    python_local_modules: Option<&BTreeSet<String>>,
-) {
-    let modules = python_import_modules(module);
-    if resolution_state == "resolved" {
-        let Some(python_local_modules) = python_local_modules else {
-            return;
-        };
-        for module in modules {
-            if python_module_is_local(python_local_modules, module) {
-                continue;
-            }
-            push_python_module_key(keys, module);
-        }
-        return;
-    }
-
-    for module in modules {
-        push_python_module_key(keys, module);
-    }
-}
-
-fn python_import_modules(value: &str) -> Vec<&str> {
-    let value = value.trim().trim_end_matches(';').trim();
-    if let Some(rest) = value.strip_prefix("from ") {
-        if let Some((module, _)) = rest.split_once(" import ") {
-            return vec![module.trim()];
-        }
-        return Vec::new();
-    }
-    let rest = value.strip_prefix("import ").unwrap_or(value);
-    rest.split(',')
-        .map(|part| {
-            part.trim()
-                .split_once(" as ")
-                .map_or(part.trim(), |(module, _)| module.trim())
-        })
-        .filter(|module| !module.is_empty())
-        .collect()
-}
-
 fn python_module_is_local(local_modules: &BTreeSet<String>, module: &str) -> bool {
     local_modules.contains(&normalize_key(module))
-}
-
-fn push_python_module_key(keys: &mut Vec<MatchKey>, module: &str) {
-    let Some(root) = python_module_root(module) else {
-        return;
-    };
-    push_key(keys, root, EXACT_MATCH_CONFIDENCE);
-    push_key(
-        keys,
-        &python_distribution_key(root),
-        NORMALIZED_MATCH_CONFIDENCE,
-    );
 }
 
 fn python_module_root(module: &str) -> Option<&str> {
@@ -494,18 +691,6 @@ fn python_module_root(module: &str) -> Option<&str> {
         .filter(|root| !root.is_empty())
 }
 
-fn push_go_import_keys(keys: &mut Vec<MatchKey>, value: &str) {
-    let specs = quoted_specs(value);
-    let specs = if specs.is_empty() {
-        go_unquoted_import_specs(value)
-    } else {
-        specs
-    };
-    for spec in specs {
-        push_go_package_keys(keys, spec);
-    }
-}
-
 fn go_unquoted_import_specs(value: &str) -> Vec<&str> {
     let value = value
         .trim()
@@ -518,22 +703,6 @@ fn go_unquoted_import_specs(value: &str) -> Vec<&str> {
         .last()
         .map(|spec| vec![spec.trim_matches(['"', '\'', '`'])])
         .unwrap_or_default()
-}
-
-fn push_go_package_keys(keys: &mut Vec<MatchKey>, value: &str) {
-    let parts = value.split('/').collect::<Vec<_>>();
-    let minimum_module_parts = if parts.first().is_some_and(|part| part.contains('.')) {
-        2
-    } else {
-        3
-    };
-    if parts.len() < minimum_module_parts {
-        push_key(keys, value, EXACT_MATCH_CONFIDENCE);
-        return;
-    }
-    for end in (minimum_module_parts..=parts.len()).rev() {
-        push_key(keys, &parts[..end].join("/"), EXACT_MATCH_CONFIDENCE);
-    }
 }
 
 fn push_jvm_component_keys(keys: &mut Vec<MatchKey>, value: &str) {
@@ -573,22 +742,6 @@ fn jvm_artifact_package_key(group: &str, artifact: &str) -> Option<String> {
     Some(format!("{group}.{}", suffix.join(".")))
 }
 
-fn push_jvm_import_keys(keys: &mut Vec<MatchKey>, value: &str) {
-    let value = value
-        .trim()
-        .trim_end_matches(';')
-        .trim_start_matches("import static ")
-        .trim_start_matches("import ")
-        .trim();
-    push_key(keys, value, EXACT_MATCH_CONFIDENCE);
-    let parts = value.split('.').collect::<Vec<_>>();
-    if parts.len() > 2 {
-        for end in (2..parts.len()).rev() {
-            push_key(keys, &parts[..end].join("."), NORMALIZED_MATCH_CONFIDENCE);
-        }
-    }
-}
-
 fn push_native_component_keys(keys: &mut Vec<MatchKey>, value: &str) {
     let package = value.split('/').next().unwrap_or(value);
     push_key(keys, package, NORMALIZED_MATCH_CONFIDENCE);
@@ -597,37 +750,6 @@ fn push_native_component_keys(keys: &mut Vec<MatchKey>, value: &str) {
         &package.replace(['-', '_'], ""),
         HEURISTIC_MATCH_CONFIDENCE,
     );
-}
-
-fn push_native_import_keys(keys: &mut Vec<MatchKey>, value: &str) {
-    let mut specs = Vec::new();
-    if let Some((_, rest)) = value.split_once('<')
-        && let Some((header, _)) = rest.split_once('>')
-    {
-        specs.push(header);
-    }
-    if let Some((_, rest)) = value.split_once('"')
-        && let Some((header, _)) = rest.split_once('"')
-    {
-        specs.push(header);
-    }
-    if specs.is_empty() {
-        specs.push(value);
-    }
-    for spec in specs {
-        if let Some(root) = spec.split('/').next().filter(|root| !root.is_empty()) {
-            push_key(keys, root, NORMALIZED_MATCH_CONFIDENCE);
-        }
-        let stem = spec
-            .rsplit('/')
-            .next()
-            .unwrap_or(spec)
-            .trim_end_matches(".hpp")
-            .trim_end_matches(".hxx")
-            .trim_end_matches(".hh")
-            .trim_end_matches(".h");
-        push_key(keys, stem, HEURISTIC_MATCH_CONFIDENCE);
-    }
 }
 
 fn push_key(keys: &mut Vec<MatchKey>, value: &str, confidence_basis_points: u16) {
@@ -655,23 +777,6 @@ fn python_distribution_key(value: &str) -> String {
             other => other,
         })
         .collect::<String>()
-}
-
-fn quoted_specs(value: &str) -> Vec<&str> {
-    let mut specs = Vec::new();
-    let mut start = None::<usize>;
-    let mut quote = '\0';
-    for (index, character) in value.char_indices() {
-        if start.is_none() && matches!(character, '"' | '\'' | '`') {
-            start = Some(index + character.len_utf8());
-            quote = character;
-        } else if start.is_some() && character == quote {
-            let spec_start = start.take().unwrap_or_default();
-            specs.push(&value[spec_start..index]);
-        }
-    }
-
-    specs
 }
 
 fn package_root(spec: &str) -> Option<String> {

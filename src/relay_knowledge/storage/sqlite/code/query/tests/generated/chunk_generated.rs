@@ -82,16 +82,15 @@ async fn chunk_queries_prefer_handwritten_fts_rows_before_candidate_limit() {
 
 #[tokio::test]
 async fn chunk_queries_apply_inline_path_before_candidate_limit() {
-    let mut files = Vec::new();
+    let noise_file_id = "noise-file";
+    let noise_path = "src/noise/chunk.rs";
+    let mut files = vec![file(noise_file_id, noise_path)];
     let mut chunks = Vec::new();
     for index in 0..901 {
-        let file_id = format!("noise-file-{index:03}");
-        let path = format!("src/noise/chunk_{index:03}.rs");
-        files.push(file(&file_id, &path));
         chunks.push(chunk(
             &format!("aaa-noise-chunk-{index:03}"),
-            &file_id,
-            &path,
+            noise_file_id,
+            noise_path,
         ));
     }
     files.push(file("storage-file", "src/storage/query.rs"));

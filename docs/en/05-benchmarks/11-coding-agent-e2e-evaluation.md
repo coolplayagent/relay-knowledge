@@ -1,5 +1,7 @@
 # Coding-Agent E2E Evaluation Gate
 
+[English](11-coding-agent-e2e-evaluation.md) | [中文](../../zh/05-benchmarks/11-coding-agent-e2e-evaluation.md)
+
 Issue #300 adds a reproducible coding-agent workflow gate to the Rust self-iteration harness.
 
 ## Scope
@@ -28,3 +30,7 @@ The CI job limits the fast repository set to `agent_workflow_fixture` and checks
 ## Constraints
 
 The gate must remain product-general. Do not fix failures by special-casing the fixture repository name, paths, symbols, query text, or benchmark IDs in product code. Improvements should come from retrieval planning, ranking, indexing, evidence packing, or bounded fallback behavior.
+
+---
+
+Navigation: [Benchmark and Evaluation Records](README.md) | Previous: [7. Multilingual Syntax Self-Iteration Evaluation Set](07-multilingual-syntax-self-iteration-evaluation.md) | Next: [12. Elastic Long Budgets for Large Repository Indexing](12-elastic-index-budgets.md)

@@ -48,7 +48,12 @@ fn queue_task_in_transaction(
     task: &CodeIndexTaskSeed,
 ) -> Result<CodeIndexTaskRecord, StorageError> {
     super::retention_gc::reject_retiring_scope(transaction, &task.source_scope)?;
-    if let Some(existing) =
+    super::scope_capacity::reject_unowned_checkpoint_conflict(
+        transaction,
+        &task.repository_id,
+        &task.source_scope,
+    )?;
+    let reset_terminal_task_id = if let Some(existing) =
         task_by_fingerprint(transaction, &task.repository_id, &task.input_fingerprint)?
     {
         if existing.state.is_unfinished() {
@@ -70,7 +75,10 @@ fn queue_task_in_transaction(
             }
             return Ok(existing);
         }
-    }
+        Some(existing.task_id)
+    } else {
+        None
+    };
     require_compatible_non_retiring_bases(transaction, task)?;
     reject_worktree_behind_unfinished_commit(transaction, task)?;
     supersede_pending_worktree_tasks(transaction, task, None)?;
@@ -138,6 +146,15 @@ fn queue_task_in_transaction(
             created_at_ms,
         ],
     )?;
+    if let Some(task_id) = reset_terminal_task_id {
+        // A terminal row is reused for the new durable attempt. Receipts belong
+        // to the publication represented by the old terminal row and must not
+        // authorize completion after its attempt/generation state is reset.
+        transaction.execute(
+            "DELETE FROM code_repository_publication_receipts WHERE task_id = ?1",
+            [&task_id],
+        )?;
+    }
 
     task_by_fingerprint(transaction, &task.repository_id, &task.input_fingerprint)?
         .ok_or_else(|| StorageError::InvalidInput("code index task was not persisted".to_owned()))
@@ -229,7 +246,7 @@ fn require_compatible_non_retiring_bases(
         .is_empty()
         {
             return Err(StorageError::InvalidInput(format!(
-                "code index task base commit '{base_commit}' has no compatible non-retiring scope for repository '{}'; wait for bounded maintenance to complete, then retry or run a full index",
+                "code index task base commit '{base_commit}' has no compatible fresh, non-retiring scope for repository '{}'; wait for bounded maintenance to complete, then retry or run a full index",
                 task.alias
             )));
         }
@@ -369,3 +386,7 @@ fn json<T: serde::Serialize>(value: &T) -> Result<String, StorageError> {
 #[cfg(test)]
 #[path = "queue_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "queue_receipt_tests.rs"]
+mod receipt_tests;

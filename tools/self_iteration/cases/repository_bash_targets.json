@@ -6,6 +6,7 @@
       "ref": "53855417eb66b9c35b732ac39358f1aae3ee1977",
       "profile": "exhaustive",
       "scope": "all",
+      "isolated_index_home": true,
       "path_filters": [],
       "language_filters": [],
       "index_budget_ms": 45000,

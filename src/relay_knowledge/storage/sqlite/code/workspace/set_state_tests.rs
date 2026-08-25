@@ -1,5 +1,6 @@
 use super::super::{
     resolve_workspace_imports,
+    set_state::{clear_repository_workspace_state, has_auto_workspace_state},
     test_support::{
         insert_scope, insert_source_file, insert_unresolved_import, workspace,
         workspace_schema_connection,
@@ -327,4 +328,54 @@ fn clearing_workspace_scope_removes_edges_that_target_the_retired_scope() {
         )
         .expect("incoming edge count");
     assert_eq!(incoming_count, 0);
+}
+
+#[test]
+fn disabling_workspace_detection_clears_retained_auto_scopes_for_the_repository() {
+    let mut connection = workspace_schema_connection();
+    let transaction = connection.transaction().expect("transaction");
+    insert_scope(&transaction, "scope-enabled", "commit-main");
+    insert_scope(&transaction, "scope-disabled", "commit-main");
+    insert_unresolved_import(
+        &transaction,
+        "scope-enabled",
+        "import-enabled",
+        "@scope/core",
+    );
+    resolve_workspace_imports(
+        &transaction,
+        &[workspace(CodeMonorepoWorkspaceFormat::Pnpm)],
+        "repo",
+        "scope-enabled",
+    )
+    .expect("enabled workspace should resolve");
+    assert!(
+        has_auto_workspace_state(&transaction, "repo")
+            .expect("repository auto workspace state should be readable")
+    );
+
+    clear_repository_workspace_state(&transaction, "repo")
+        .expect("disabled workspace request should clear repository-owned auto state");
+    assert!(
+        !has_auto_workspace_state(&transaction, "repo")
+            .expect("cleared auto workspace state should be readable")
+    );
+
+    for table in [
+        "code_repository_sets",
+        "code_repository_set_members",
+        "code_workspace_package_mappings",
+        "code_repository_cross_edges",
+        "code_repository_set_overlay_status",
+    ] {
+        let count: u32 = transaction
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("table count");
+        assert_eq!(
+            count, 0,
+            "{table} should be cleared across scope identities"
+        );
+    }
 }

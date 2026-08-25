@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/21-software-global-domain-modeling.md) | [中文](../../zh/03-architecture-specs/21-software-global-domain-modeling.md)
 
-> Document version: 1.0
-> Prepared: 2026-05-28
+> Document version: 1.1
+> Prepared: 2026-08-13
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -107,10 +107,11 @@ If these constraints are missing, generation entry points must expose the gap as
 
 The first foundation slice remains bounded by repository snapshot/source scope and projects existing code-index facts into a software global read model:
 
-- `software_components` is derived from `code_repository_dependencies`, separates manifest `declared` and lockfile `locked` relationships, and preserves ecosystem, package name, requirement, resolved version, dependency group, evidence path, and line range.
-- `software_dependency_usages` links declared dependency components to matching code/config import evidence when the module root matches the package identity, preserving import `resolution_state`, `target_hint`, evidence path, and confidence without resolving unauthorized package source.
+- `software_components` is derived from `code_repository_dependencies`, separates manifest `declared` and lockfile `locked` relationships, and preserves ecosystem, package name, requirement, resolved version, dependency group, evidence path, and line range. Declared rows remain evidence-specific because their manifest directory owns dependency-usage matching. Repeated locked rows are coalesced only in this derived model by the repository/scope-level semantic key `(ecosystem, package_name, requirement, resolved_version, dependency_group, source_kind, language_id)`; the first `(evidence_path, line_start, line_end)` in deterministic order is the representative. The resulting projection remains capped at 65,536 components and rejects the first distinct semantic component beyond that cap. Authoritative `code_repository_dependencies` rows and `repo query --kind sbom` evidence are not deleted or coalesced.
+- `software_dependency_usages` links declared dependency components to matching code/config import evidence when the module root matches the package identity, preserving import `resolution_state`, `target_hint`, evidence path, and confidence without resolving unauthorized package source. Imports from generated files remain available as code and SDK facts but do not enter this derived dependency matcher. Each import retains a 32 KiB matching-input bound: identical module and target-hint text is charged and scanned once, while distinct text remains cumulative and an overflow fails and rolls back the projection transaction.
 - `software_sdk_usages` is derived from unresolved, ambiguous, or external `code_repository_imports` so SDK/API-surface usage candidates retain `resolution_state` and `target_hint` without resolving unauthorized external source.
 - `software_files` is derived from `code_repository_files` so code, config, docs, build manifests, deployments, tests, templates, and the knowledge map are whole-file nodes.
+- `software_files` refresh stays bounded at 512 authoritative rows per page. It advances with the unique `(source_scope, path)` key rather than rescanning prior pages with `OFFSET`, validates every row through the same domain constructor, and reuses one prepared projection insert for the whole refresh. The work remains inside the existing software-projection transaction and publication fence, so this storage optimization does not weaken freshness, rollback, or visibility semantics.
 - `software_topics` is derived from Markdown/spec headings and `.knowledge/knowledge-map.yaml` topic ids so repository documentation themes, architecture constraints, and knowledge routes are first-class nodes.
 - `software_relationships` is derived from committed dependency, SDK usage, feature-flag/config, and documentation-topic evidence to expose cross-domain edges such as `depends_on`, `uses_sdk`, `configures`, and `documents` with resolution state, target hints, confidence, evidence path, and line range.
 - `software_build_targets` is derived from indexed chunk evidence in Cargo, npm, Python, Go, Maven effective `pom.xml`, Gradle, CMake, Makefile, and CI workflow files, covering packages, scripts, targets, features, modules, profiles, plugins, goals, and jobs. Maven effective models resolve repository-local parent POMs, properties, dependency management, plugin management, modules, profiles, and imported BOM declarations from indexed evidence only. The projection records evidence and command hints only; it does not execute build tools, read package caches, or contact registries.

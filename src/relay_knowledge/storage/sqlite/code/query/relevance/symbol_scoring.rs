@@ -6,8 +6,26 @@ use super::super::identifiers::identifier_terms_equivalent;
 use super::{
     conversion_scoring::conversion_symbol_bonus,
     symbol_identity::{contains_scoped_terms, scoped_query_terms},
-    tokens::identifier_search_tokens,
+    tokens::{identifier_field_matches_token, identifier_search_tokens},
 };
+
+const MAX_HYBRID_TYPE_DOCUMENTATION_QUERY_TERMS: usize = 12;
+const MIN_HYBRID_TYPE_DOCUMENTATION_QUERY_TERMS: usize = 5;
+const MIN_HYBRID_TYPE_DOCUMENTATION_SURFACE_MATCHES: usize = 2;
+const MIN_HYBRID_TYPE_DOCUMENTATION_MATCHES: usize = 3;
+const HYBRID_TYPE_DOCUMENTATION_HIGH_COVERAGE_BONUS: f64 = 5.0;
+pub(in crate::storage::sqlite::code::query) const TYPE_SYMBOL_KINDS: &[&str] = &[
+    "class",
+    "enum",
+    "interface",
+    "record",
+    "struct",
+    "trait",
+    "type",
+    "type_alias",
+    "typedef",
+    "union",
+];
 
 pub(in crate::storage::sqlite::code::query) fn symbol_kind_bonus(
     kind: &str,
@@ -103,6 +121,66 @@ pub(in crate::storage::sqlite::code::query) fn symbol_query_bonus(
     } else {
         name_bonus
     }
+}
+
+pub(in crate::storage::sqlite::code::query) fn hybrid_type_documentation_surface_bonus(
+    query: &str,
+    kind: &str,
+    name: &str,
+    signature: &str,
+    doc_comment: Option<&str>,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Hybrid || !type_symbol_kind(kind) {
+        return 0.0;
+    }
+    let Some(doc_comment) = doc_comment.filter(|comment| !comment.trim().is_empty()) else {
+        return 0.0;
+    };
+    let query_terms = identifier_search_tokens(query)
+        .into_iter()
+        .filter(|term| term.len() >= 3)
+        .take(MAX_HYBRID_TYPE_DOCUMENTATION_QUERY_TERMS)
+        .collect::<Vec<_>>();
+    if query_terms.len() < MIN_HYBRID_TYPE_DOCUMENTATION_QUERY_TERMS {
+        return 0.0;
+    }
+
+    let surface = format!("{name} {signature}");
+    let surface_lower = surface.to_ascii_lowercase();
+    let documentation_lower = doc_comment.to_ascii_lowercase();
+    let surface_matches = query_terms
+        .iter()
+        .filter(|term| bounded_field_matches_term(&surface, &surface_lower, term))
+        .count();
+    let documentation_matches = query_terms
+        .iter()
+        .filter(|term| bounded_field_matches_term(doc_comment, &documentation_lower, term))
+        .count();
+    let total_matches = query_terms
+        .iter()
+        .filter(|term| {
+            bounded_field_matches_term(&surface, &surface_lower, term)
+                || bounded_field_matches_term(doc_comment, &documentation_lower, term)
+        })
+        .count();
+    let has_high_coverage = total_matches.saturating_mul(3) >= query_terms.len().saturating_mul(2);
+    if surface_matches >= MIN_HYBRID_TYPE_DOCUMENTATION_SURFACE_MATCHES
+        && documentation_matches >= MIN_HYBRID_TYPE_DOCUMENTATION_MATCHES
+        && has_high_coverage
+    {
+        HYBRID_TYPE_DOCUMENTATION_HIGH_COVERAGE_BONUS
+    } else {
+        0.0
+    }
+}
+
+fn bounded_field_matches_term(field: &str, lower_field: &str, term: &str) -> bool {
+    identifier_field_matches_token(field, term) || lower_field.contains(term)
+}
+
+pub(in crate::storage::sqlite::code::query) fn type_symbol_kind(kind: &str) -> bool {
+    TYPE_SYMBOL_KINDS.contains(&kind)
 }
 
 fn workflow_connection_lifecycle_symbol_bonus(

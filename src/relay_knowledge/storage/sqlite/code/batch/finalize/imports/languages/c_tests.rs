@@ -23,3 +23,20 @@ fn include_resolution_rejects_non_include_statements() {
         ImportResolution::Unresolved
     );
 }
+
+#[test]
+fn angle_include_with_quoted_comment_does_not_probe_the_importer_directory() {
+    let paths = BTreeMap::from([(
+        "src/api/widget.h".to_owned(),
+        vec!["src/api/widget.h".to_owned()],
+    )]);
+
+    assert_eq!(
+        resolve(
+            "src/api/client.c",
+            "#include <widget.h> // \"local note\"",
+            &paths,
+        ),
+        ImportResolution::Unresolved
+    );
+}

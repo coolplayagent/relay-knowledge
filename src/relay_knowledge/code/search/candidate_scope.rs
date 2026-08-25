@@ -4,6 +4,22 @@ use super::super::{generated_detection, languages::language_id, safe_git_blob_pa
 use super::SourceGrepRequest;
 
 pub(crate) const SOURCE_GREP_CANDIDATE_FILE_LIMIT: usize = 256;
+const SOURCE_GREP_MATCHES_PER_CANDIDATE_FILE: usize = 2;
+const SOURCE_GREP_CANDIDATE_MATCH_LIMIT: usize =
+    SOURCE_GREP_CANDIDATE_FILE_LIMIT * SOURCE_GREP_MATCHES_PER_CANDIDATE_FILE;
+
+pub(crate) fn bounded_source_grep_candidate_match_limit(
+    result_limit: usize,
+    candidate_path_count: usize,
+) -> usize {
+    let fair_candidate_limit = candidate_path_count
+        .min(SOURCE_GREP_CANDIDATE_FILE_LIMIT)
+        .saturating_mul(SOURCE_GREP_MATCHES_PER_CANDIDATE_FILE);
+
+    result_limit
+        .max(fair_candidate_limit)
+        .min(SOURCE_GREP_CANDIDATE_MATCH_LIMIT)
+}
 
 pub(super) struct CandidatePaths {
     pub(super) paths: Vec<String>,

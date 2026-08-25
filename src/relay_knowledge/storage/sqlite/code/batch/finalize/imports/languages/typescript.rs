@@ -31,20 +31,6 @@ pub(in super::super::super) fn named_import_bindings(statement: &str) -> Vec<Nam
     parse_named_import_bindings(imports)
 }
 
-pub(in super::super::super) fn named_dependency_bindings(
-    statement: &str,
-) -> Vec<NamedImportBinding> {
-    let statement = statement.trim().trim_end_matches(';').trim();
-    let body = statement
-        .strip_prefix("import ")
-        .or_else(|| statement.strip_prefix("export "));
-    let Some((bindings, _)) = body.and_then(|body| body.rsplit_once(" from ")) else {
-        return Vec::new();
-    };
-
-    parse_named_import_bindings(bindings)
-}
-
 pub(super) fn resolve_import(
     import_path: &str,
     statement: &str,

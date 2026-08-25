@@ -372,7 +372,7 @@ async fn incremental_update_rejects_unrelated_filter_baselines() {
     assert!(
         error
             .to_string()
-            .contains("no matching indexed scope for incremental filters")
+            .contains("no matching fresh, non-retiring indexed scope for incremental filters")
     );
 }
 

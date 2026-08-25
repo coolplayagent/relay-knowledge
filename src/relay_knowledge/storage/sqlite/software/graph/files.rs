@@ -8,13 +8,21 @@ use crate::{
 use super::file_role::file_role;
 
 const FILE_PROJECTION_PAGE_SIZE: usize = 512;
+const SOFTWARE_FILE_INSERT_SQL: &str = "
+    INSERT OR REPLACE INTO software_files (
+        software_file_id, repository_id, source_scope, path, language_id, file_role,
+        parse_status, created_graph_version
+    )
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+";
 
 pub(in crate::storage::sqlite::software) fn materialize_files(
     connection: &Connection,
     source_scope: &str,
     graph_version: GraphVersion,
 ) -> Result<usize, StorageError> {
-    let mut offset = 0;
+    let mut insert_statement = connection.prepare(SOFTWARE_FILE_INSERT_SQL)?;
+    let mut after_path = None::<String>;
     let mut count = 0;
     loop {
         let files = software_file_page(
@@ -22,17 +30,17 @@ pub(in crate::storage::sqlite::software) fn materialize_files(
             source_scope,
             graph_version,
             FILE_PROJECTION_PAGE_SIZE,
-            offset,
+            after_path.as_deref(),
         )?;
         if files.is_empty() {
             break;
         }
         for file in &files {
-            insert_file(connection, file)?;
+            insert_file(&mut insert_statement, file)?;
         }
         let page_len = files.len();
+        after_path = files.last().map(|file| file.path.clone());
         count += page_len;
-        offset += page_len;
     }
 
     Ok(count)
@@ -43,53 +51,109 @@ fn software_file_page(
     source_scope: &str,
     graph_version: GraphVersion,
     limit: usize,
-    offset: usize,
+    after_path: Option<&str>,
 ) -> Result<Vec<SoftwareFile>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT files.repository_id, files.source_scope, files.path, files.language_id,
-               files.parse_status,
-               EXISTS (
-                   SELECT 1
-                   FROM code_repository_symbols refs
-                   JOIN code_repository_symbols topics
-                     ON topics.repository_id = refs.repository_id
-                    AND topics.source_scope = refs.source_scope
-                    AND topics.path = refs.path
-                    AND topics.line_start = refs.line_start
-                    AND topics.kind = 'knowledge_map_topic_shard_topic'
-                   JOIN code_repository_symbols root_identity
-                     ON root_identity.repository_id = refs.repository_id
-                    AND root_identity.source_scope = refs.source_scope
-                    AND root_identity.path = refs.path
-                    AND root_identity.line_start = refs.line_start
-                    AND root_identity.kind = 'knowledge_map_topic_shard_identity'
-                   JOIN code_repository_symbols shards
-                     ON shards.repository_id = refs.repository_id
-                    AND shards.source_scope = refs.source_scope
-                    AND shards.path = refs.name
-                    AND shards.name = topics.name
-                    AND shards.kind = 'knowledge_map_topic_shard'
-                   JOIN code_repository_symbols shard_identity
-                     ON shard_identity.repository_id = shards.repository_id
-                    AND shard_identity.source_scope = shards.source_scope
-                    AND shard_identity.path = shards.path
-                    AND shard_identity.line_start = shards.line_start
-                    AND shard_identity.kind = 'knowledge_map_topic_shard_identity'
-                    AND shard_identity.name = root_identity.name
-                   WHERE refs.source_scope = files.source_scope
-                     AND refs.repository_id = files.repository_id
-                     AND refs.path = '.knowledge/knowledge-map.yaml'
-                     AND refs.kind = 'knowledge_map_topic_shard_ref'
-                     AND refs.name = files.path
-               ) AS authorized_topic_shard
-        FROM code_repository_files files
-        WHERE files.source_scope = ?1
-        ORDER BY files.path ASC
-        LIMIT ?2 OFFSET ?3
-        ",
-    )?;
-    let rows = statement.query_map(params![source_scope, limit as i64, offset as i64], |row| {
+    let (query, values) = match after_path {
+        Some(path) => (
+            "
+            SELECT files.repository_id, files.source_scope, files.path, files.language_id,
+                   files.parse_status,
+                   EXISTS (
+                       SELECT 1
+                       FROM code_repository_symbols refs
+                       JOIN code_repository_symbols topics
+                         ON topics.repository_id = refs.repository_id
+                        AND topics.source_scope = refs.source_scope
+                        AND topics.path = refs.path
+                        AND topics.line_start = refs.line_start
+                        AND topics.kind = 'knowledge_map_topic_shard_topic'
+                       JOIN code_repository_symbols root_identity
+                         ON root_identity.repository_id = refs.repository_id
+                        AND root_identity.source_scope = refs.source_scope
+                        AND root_identity.path = refs.path
+                        AND root_identity.line_start = refs.line_start
+                        AND root_identity.kind = 'knowledge_map_topic_shard_identity'
+                       JOIN code_repository_symbols shards
+                         ON shards.repository_id = refs.repository_id
+                        AND shards.source_scope = refs.source_scope
+                        AND shards.path = refs.name
+                        AND shards.name = topics.name
+                        AND shards.kind = 'knowledge_map_topic_shard'
+                       JOIN code_repository_symbols shard_identity
+                         ON shard_identity.repository_id = shards.repository_id
+                        AND shard_identity.source_scope = shards.source_scope
+                        AND shard_identity.path = shards.path
+                        AND shard_identity.line_start = shards.line_start
+                        AND shard_identity.kind = 'knowledge_map_topic_shard_identity'
+                        AND shard_identity.name = root_identity.name
+                       WHERE refs.source_scope = files.source_scope
+                         AND refs.repository_id = files.repository_id
+                         AND refs.path = '.knowledge/knowledge-map.yaml'
+                         AND refs.kind = 'knowledge_map_topic_shard_ref'
+                         AND refs.name = files.path
+                   ) AS authorized_topic_shard
+            FROM code_repository_files files
+            WHERE files.source_scope = ?1 AND files.path > ?2
+            ORDER BY files.path ASC
+            LIMIT ?3
+            ",
+            vec![
+                Value::Text(source_scope.to_owned()),
+                Value::Text(path.to_owned()),
+                Value::Integer(limit as i64),
+            ],
+        ),
+        None => (
+            "
+            SELECT files.repository_id, files.source_scope, files.path, files.language_id,
+                   files.parse_status,
+                   EXISTS (
+                       SELECT 1
+                       FROM code_repository_symbols refs
+                       JOIN code_repository_symbols topics
+                         ON topics.repository_id = refs.repository_id
+                        AND topics.source_scope = refs.source_scope
+                        AND topics.path = refs.path
+                        AND topics.line_start = refs.line_start
+                        AND topics.kind = 'knowledge_map_topic_shard_topic'
+                       JOIN code_repository_symbols root_identity
+                         ON root_identity.repository_id = refs.repository_id
+                        AND root_identity.source_scope = refs.source_scope
+                        AND root_identity.path = refs.path
+                        AND root_identity.line_start = refs.line_start
+                        AND root_identity.kind = 'knowledge_map_topic_shard_identity'
+                       JOIN code_repository_symbols shards
+                         ON shards.repository_id = refs.repository_id
+                        AND shards.source_scope = refs.source_scope
+                        AND shards.path = refs.name
+                        AND shards.name = topics.name
+                        AND shards.kind = 'knowledge_map_topic_shard'
+                       JOIN code_repository_symbols shard_identity
+                         ON shard_identity.repository_id = shards.repository_id
+                        AND shard_identity.source_scope = shards.source_scope
+                        AND shard_identity.path = shards.path
+                        AND shard_identity.line_start = shards.line_start
+                        AND shard_identity.kind = 'knowledge_map_topic_shard_identity'
+                        AND shard_identity.name = root_identity.name
+                       WHERE refs.source_scope = files.source_scope
+                         AND refs.repository_id = files.repository_id
+                         AND refs.path = '.knowledge/knowledge-map.yaml'
+                         AND refs.kind = 'knowledge_map_topic_shard_ref'
+                         AND refs.name = files.path
+                   ) AS authorized_topic_shard
+            FROM code_repository_files files
+            WHERE files.source_scope = ?1
+            ORDER BY files.path ASC
+            LIMIT ?2
+            ",
+            vec![
+                Value::Text(source_scope.to_owned()),
+                Value::Integer(limit as i64),
+            ],
+        ),
+    };
+    let mut statement = connection.prepare(query)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
         let path = row.get::<_, String>(2)?;
         let language_id = row.get::<_, String>(3)?;
         let authorized_topic_shard = row.get::<_, bool>(5)?;
@@ -112,26 +176,20 @@ fn software_file_page(
     .collect()
 }
 
-fn insert_file(connection: &Connection, file: &SoftwareFile) -> Result<(), StorageError> {
-    connection.execute(
-        "
-        INSERT OR REPLACE INTO software_files (
-            software_file_id, repository_id, source_scope, path, language_id, file_role,
-            parse_status, created_graph_version
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-        ",
-        params![
-            file.software_file_id,
-            file.repository_id,
-            file.source_scope,
-            file.path,
-            file.language_id,
-            file.file_role,
-            file.parse_status,
-            file.created_graph_version.get(),
-        ],
-    )?;
+fn insert_file(
+    statement: &mut rusqlite::Statement<'_>,
+    file: &SoftwareFile,
+) -> Result<(), StorageError> {
+    statement.execute(params![
+        file.software_file_id,
+        file.repository_id,
+        file.source_scope,
+        file.path,
+        file.language_id,
+        file.file_role,
+        file.parse_status,
+        file.created_graph_version.get(),
+    ])?;
 
     Ok(())
 }

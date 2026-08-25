@@ -53,3 +53,10 @@ fn candidate_paths_exclude_generated_paths_when_requested() {
 
     assert_eq!(candidates.paths, ["src/lib.rs"]);
 }
+
+#[test]
+fn candidate_match_pool_reserves_two_lines_per_bounded_path() {
+    assert_eq!(bounded_source_grep_candidate_match_limit(20, 256), 512);
+    assert_eq!(bounded_source_grep_candidate_match_limit(50, 1), 50);
+    assert_eq!(bounded_source_grep_candidate_match_limit(20, 257), 512);
+}

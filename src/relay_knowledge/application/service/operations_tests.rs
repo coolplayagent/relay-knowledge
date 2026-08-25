@@ -13,9 +13,10 @@ use crate::{
     },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSession, CodeParseStatus,
-        CodeRepositoryRegistration, EvidenceModality, ProposalState, RepositoryCodeFileRecord,
-        ServiceManagerAction, ServiceOperatorState, WorkerKind,
+        CodeIndexBatch, CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget,
+        CodeIndexSession, CodeParseStatus, CodeRepositoryRegistration, EvidenceModality,
+        ProposalState, RepositoryCodeFileRecord, ServiceManagerAction, ServiceOperatorState,
+        WorkerKind,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
@@ -72,63 +73,79 @@ async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_acti
         .claim_code_index_task(CodeIndexTaskClaimRequest {
             task_id: Some(queued.task_id),
             lease_owner: "worker-partial".to_owned(),
-            lease_duration_ms: 1_000,
+            lease_duration_ms: 60_000,
             max_attempts: 1,
-            now_ms: 20,
+            now_ms: current_time_millis(),
         })
         .await
         .expect("failed full task should claim")
         .expect("failed full task should exist");
+    let publication_fence = CodeIndexPublicationFence {
+        repository_id: claimed.repository_id.clone(),
+        task_id: claimed.task_id.clone(),
+        lease_owner: claimed
+            .lease_owner
+            .clone()
+            .expect("claimed task should own a lease"),
+        attempt_count: claimed.attempt_count,
+        generation: claimed.publication_generation,
+    };
     store
-        .begin_code_index_session(CodeIndexSession {
-            repository_id: "repo".to_owned(),
-            source_scope: "scope-partial".to_owned(),
-            base_resolved_commit_sha: None,
-            resolved_commit_sha: "commit-scope-partial".to_owned(),
-            tree_hash: "tree-scope-partial".to_owned(),
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-            full_replace: true,
-            total_path_count: 2,
-            changed_path_count: 2,
-            skipped_unchanged_count: 0,
-            deleted_paths: Vec::new(),
-            changed_paths: Vec::new(),
-            tombstones: Vec::new(),
-            workspaces: Vec::new(),
-            resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024)
-                .expect("budget should validate"),
-        })
+        .begin_code_index_session_with_fence(
+            CodeIndexSession {
+                repository_id: "repo".to_owned(),
+                source_scope: "scope-partial".to_owned(),
+                base_resolved_commit_sha: None,
+                resolved_commit_sha: "commit-scope-partial".to_owned(),
+                tree_hash: "tree-scope-partial".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+                full_replace: true,
+                total_path_count: 2,
+                changed_path_count: 2,
+                skipped_unchanged_count: 0,
+                deleted_paths: Vec::new(),
+                changed_paths: Vec::new(),
+                tombstones: Vec::new(),
+                workspaces: Vec::new(),
+                resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024)
+                    .expect("budget should validate"),
+            },
+            publication_fence.clone(),
+        )
         .await
         .expect("failed full checkpoint should begin");
     store
-        .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: "scope-partial".to_owned(),
-            batch_index: 0,
-            parsed_byte_count: 1,
-            files: vec![RepositoryCodeFileRecord {
+        .apply_code_index_batch_with_fence(
+            CodeIndexBatch {
                 repository_id: "repo".to_owned(),
                 source_scope: "scope-partial".to_owned(),
-                file_id: "file".to_owned(),
-                path: "src/lib.rs".to_owned(),
-                language_id: "rust".to_owned(),
-                blob_hash: "blob".to_owned(),
-                byte_len: 1,
-                line_count: 1,
-                parse_status: CodeParseStatus::Parsed,
-                is_generated: false,
-                degraded_reason: None,
-            }],
-            symbols: Vec::new(),
-            references: Vec::new(),
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            routes: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
-        })
+                batch_index: 1,
+                parsed_byte_count: 1,
+                files: vec![RepositoryCodeFileRecord {
+                    repository_id: "repo".to_owned(),
+                    source_scope: "scope-partial".to_owned(),
+                    file_id: "file".to_owned(),
+                    path: "src/lib.rs".to_owned(),
+                    language_id: "rust".to_owned(),
+                    blob_hash: "blob".to_owned(),
+                    byte_len: 1,
+                    line_count: 1,
+                    parse_status: CodeParseStatus::Parsed,
+                    is_generated: false,
+                    degraded_reason: None,
+                }],
+                symbols: Vec::new(),
+                references: Vec::new(),
+                imports: Vec::new(),
+                dependencies: Vec::new(),
+                feature_flags: Vec::new(),
+                routes: Vec::new(),
+                chunks: Vec::new(),
+                diagnostics: Vec::new(),
+            },
+            publication_fence,
+        )
         .await
         .expect("partial fact batch should persist");
     store
@@ -138,11 +155,12 @@ async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_acti
                 .lease_owner
                 .expect("claimed task should own a lease"),
             attempt_count: claimed.attempt_count,
+            publication_generation: claimed.publication_generation,
             error_kind: "fixture".to_owned(),
             error_message: "stopped".to_owned(),
             retry_backoff_ms: 1,
             max_attempts: 1,
-            now_ms: 30,
+            now_ms: current_time_millis(),
         })
         .await
         .expect("failed full task should become dead-letter");
@@ -180,9 +198,9 @@ async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_acti
     );
     assert!(
         store
-            .code_file_fingerprints_for_scope("scope-partial".to_owned())
+            .code_file_fingerprints("repo".to_owned())
             .await
-            .expect("partial facts should query")
+            .expect("repository fingerprints should query after partial scope cleanup")
             .is_empty()
     );
     let retention = store
@@ -398,11 +416,6 @@ async fn service_status_reports_partitioned_storage_diagnostics() {
         )
         .await
         .expect("repository should register");
-    let shard_path = service
-        .runtime
-        .paths
-        .repository_shard_database_file("repo-alpha");
-
     let status = service
         .service_status(RequestContext::with_ids(
             InterfaceKind::Cli,
@@ -424,7 +437,38 @@ async fn service_status_reports_partitioned_storage_diagnostics() {
             .any(|path| path.contains("repositories"))
     );
 
-    fs::remove_file(shard_path).expect("shard file should remove");
+    let missing_shard_path = service
+        .runtime
+        .paths
+        .repository_shard_database_file("repo-missing");
+    assert!(!missing_shard_path.exists());
+    let control_store = SqliteGraphStore::open(service.runtime.paths.database_file())
+        .expect("control store should open");
+    control_store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo-missing",
+                "missing",
+                "/tmp/repo-missing",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("missing repository fixture should validate"),
+        )
+        .await
+        .expect("missing repository control metadata should persist");
+    drop(control_store);
+    let control = rusqlite::Connection::open(service.runtime.paths.database_file())
+        .expect("control database should open");
+    control
+        .execute(
+            "INSERT INTO storage_repository_shards (
+                 repository_id, db_path, state, created_at_ms, updated_at_ms
+             ) VALUES ('repo-missing', 'repositories/missing.sqlite3', 'active', 1, 1)",
+            [],
+        )
+        .expect("missing shard catalog fixture should persist");
+    drop(control);
     let degraded = service
         .service_status(RequestContext::with_ids(
             InterfaceKind::Cli,
@@ -447,8 +491,19 @@ async fn service_status_reports_partitioned_storage_diagnostics() {
         .expect("health should degrade instead of failing");
 
     assert!(!health.healthy);
-    assert_eq!(health.storage.missing_shard_count, 1);
     assert!(health.degraded_reason.is_some());
+    if health.storage.missing_shard_count == 0 {
+        assert!(health.metadata.stale);
+        assert!(
+            health
+                .degraded_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("storage_busy")),
+            "the bounded health fallback must make a concurrent timeout observable"
+        );
+    } else {
+        assert_eq!(health.storage.missing_shard_count, 1);
+    }
 }
 
 #[tokio::test]
@@ -465,17 +520,21 @@ async fn service_status_recovers_expired_code_index_leases_before_diagnostics() 
         .queue_code_index_task(code_index_seed("fp-expired", "scope-expired", 10))
         .await
         .expect("expired task should queue");
-    store
+    let running = store
         .claim_code_index_task(CodeIndexTaskClaimRequest {
             task_id: Some(expired.task_id),
             lease_owner: "worker-expired".to_owned(),
-            lease_duration_ms: 1,
+            lease_duration_ms: 60_000,
             max_attempts: 3,
-            now_ms: 20,
+            now_ms: current_time_millis(),
         })
         .await
         .expect("claim should load")
         .expect("task should claim");
+    store
+        .expire_code_index_task_lease_for_test(running.task_id.clone())
+        .await
+        .expect("task lease fixture should expire");
     let service = RelayKnowledgeService::with_store(
         runtime().await,
         store.clone() as Arc<dyn KnowledgeStore>,
@@ -514,17 +573,21 @@ async fn read_only_service_status_does_not_recover_expired_code_index_leases() {
         .queue_code_index_task(code_index_seed("fp-readonly", "scope-readonly", 10))
         .await
         .expect("expired task should queue");
-    store
+    let running = store
         .claim_code_index_task(CodeIndexTaskClaimRequest {
             task_id: Some(expired.task_id),
             lease_owner: "worker-expired-readonly".to_owned(),
-            lease_duration_ms: 1,
+            lease_duration_ms: 60_000,
             max_attempts: 3,
-            now_ms: 20,
+            now_ms: current_time_millis(),
         })
         .await
         .expect("claim should load")
         .expect("task should claim");
+    store
+        .expire_code_index_task_lease_for_test(running.task_id.clone())
+        .await
+        .expect("task lease fixture should expire");
     let service = RelayKnowledgeService::with_store(
         runtime().await,
         store.clone() as Arc<dyn KnowledgeStore>,

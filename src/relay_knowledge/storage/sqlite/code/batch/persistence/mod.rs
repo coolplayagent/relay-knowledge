@@ -1,8 +1,10 @@
 //! Applies replay-safe, resource-bounded code fact batches to SQLite.
 
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap, sync::OnceLock};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{
+    Connection, OptionalExtension, ToSql, Transaction, limits::Limit, params, params_from_iter,
+};
 
 use super::super::{
     SearchDocumentInserter,
@@ -11,13 +13,38 @@ use super::super::{
 };
 use super::{checkpoint, dependencies};
 use crate::{
-    domain::{CodeIndexBatch, CodeIndexCheckpoint},
+    domain::{
+        CodeIndexBatch, CodeIndexCheckpoint, RepositoryCodeChunkRecord,
+        RepositoryCodeReferenceRecord,
+    },
     storage::StorageError,
 };
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reference_bulk_tests.rs"]
+mod reference_bulk_tests;
+
+#[cfg(test)]
+#[path = "chunk_bulk_tests.rs"]
+mod chunk_bulk_tests;
+
+const REFERENCE_INSERT_BATCH_SIZE: usize = 1_024;
+const REFERENCE_INSERT_COLUMN_COUNT: usize = 16;
+const REFERENCE_INSERT_BIND_COUNT: usize =
+    REFERENCE_INSERT_BATCH_SIZE * REFERENCE_INSERT_COLUMN_COUNT;
+const REFERENCE_INSERT_ROW_PLACEHOLDERS: &str = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+static REFERENCE_INSERT_FULL_SQL: OnceLock<String> = OnceLock::new();
+const _: () = assert!(REFERENCE_INSERT_BIND_COUNT == 16_384);
+const CHUNK_INSERT_BATCH_SIZE: usize = 1_024;
+const CHUNK_INSERT_COLUMN_COUNT: usize = 12;
+const CHUNK_INSERT_BIND_COUNT: usize = CHUNK_INSERT_BATCH_SIZE * CHUNK_INSERT_COLUMN_COUNT;
+const CHUNK_INSERT_ROW_PLACEHOLDERS: &str = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+static CHUNK_INSERT_FULL_SQL: OnceLock<String> = OnceLock::new();
+const _: () = assert!(CHUNK_INSERT_BIND_COUNT == 12_288);
 
 pub(in super::super) fn apply_batch(
     connection: &mut Connection,
@@ -44,10 +71,27 @@ fn apply_batch_once(
     batch: &CodeIndexBatch,
     fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
-    prepare_batch_staging(connection, batch, fence)?;
+    if !prepare_batch_staging(connection, batch, fence)? {
+        return checkpoint::load(connection, &batch.source_scope);
+    }
     let transaction = connection.transaction()?;
+    if fence.is_none() {
+        super::super::tasks::enforce_unfenced_target(
+            &transaction,
+            &batch.repository_id,
+            &batch.source_scope,
+        )?;
+    }
     let batch_is_new = checkpoint_batch_is_new(&transaction, batch)?;
-    delete_batch_path_indexes_if_needed(&transaction, batch, batch_is_new)?;
+    if !batch_is_new {
+        if let Some(fence) = fence {
+            fence.validate_target_scope(&transaction, &batch.source_scope)?;
+            fence.validate(&transaction)?;
+        }
+        transaction.commit()?;
+        return checkpoint::load(connection, &batch.source_scope);
+    }
+    delete_batch_path_indexes_if_needed(&transaction, batch)?;
     insert_files(&transaction, batch)?;
     symbols::insert_records(&transaction, &batch.symbols)?;
     let materialize_edge_search = should_materialize_intermediate_edge_search(&transaction, batch)?;
@@ -63,7 +107,7 @@ fn apply_batch_once(
     routes::insert_records(&transaction, &batch.routes)?;
     insert_chunks(&transaction, batch)?;
     insert_diagnostics(&transaction, batch)?;
-    update_checkpoint_after_batch(&transaction, batch, batch_is_new)?;
+    update_checkpoint_after_batch(&transaction, batch)?;
     mark_batch_staging_published(&transaction, batch)?;
     if let Some(fence) = fence {
         fence.validate_target_scope(&transaction, &batch.source_scope)?;
@@ -80,19 +124,27 @@ fn prepare_batch_staging(
     connection: &mut Connection,
     batch: &CodeIndexBatch,
     fence: Option<&super::super::lifecycle::publication_fence::PublicationFenceGuard>,
-) -> Result<(), StorageError> {
-    let fact_row_count = batch.files.len()
-        + batch.symbols.len()
-        + batch.references.len()
-        + batch.imports.len()
-        + batch.dependencies.len()
-        + batch.feature_flags.len()
-        + batch.routes.len()
-        + batch.chunks.len()
-        + batch.diagnostics.len();
+) -> Result<bool, StorageError> {
+    let fact_row_count = checked_fact_row_count(batch)?;
     let now = checkpoint::now_millis();
     let transaction = connection.transaction()?;
-    transaction.execute(
+    if fence.is_none() {
+        super::super::tasks::enforce_unfenced_target(
+            &transaction,
+            &batch.repository_id,
+            &batch.source_scope,
+        )?;
+    }
+    let batch_is_new = checkpoint_batch_is_new(&transaction, batch)?;
+    if !batch_is_new {
+        if let Some(fence) = fence {
+            fence.validate_target_scope(&transaction, &batch.source_scope)?;
+            fence.validate(&transaction)?;
+        }
+        transaction.commit()?;
+        return Ok(false);
+    }
+    let changed = transaction.execute(
         "
         INSERT INTO code_repository_index_batch_staging
             (source_scope, batch_index, state, file_count, fact_row_count,
@@ -103,6 +155,7 @@ fn prepare_batch_staging(
             file_count = excluded.file_count,
             fact_row_count = excluded.fact_row_count,
             updated_at_ms = excluded.updated_at_ms
+        WHERE code_repository_index_batch_staging.state = 'staged'
         ",
         rusqlite::params![
             batch.source_scope,
@@ -112,23 +165,29 @@ fn prepare_batch_staging(
             now,
         ],
     )?;
+    if changed != 1 {
+        return Err(StorageError::Invariant(format!(
+            "code index batch {} for scope '{}' could not prepare exactly one staged manifest",
+            batch.batch_index, batch.source_scope
+        )));
+    }
     if let Some(fence) = fence {
         fence.validate_target_scope(&transaction, &batch.source_scope)?;
         fence.validate(&transaction)?;
     }
     transaction.commit()?;
-    Ok(())
+    Ok(true)
 }
 
 fn mark_batch_staging_published(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
-    transaction.execute(
+    let changed = transaction.execute(
         "
         UPDATE code_repository_index_batch_staging
         SET state = 'published', updated_at_ms = ?3
-        WHERE source_scope = ?1 AND batch_index = ?2
+        WHERE source_scope = ?1 AND batch_index = ?2 AND state = 'staged'
         ",
         rusqlite::params![
             batch.source_scope,
@@ -136,13 +195,18 @@ fn mark_batch_staging_published(
             checkpoint::now_millis()
         ],
     )?;
+    if changed != 1 {
+        return Err(StorageError::Invariant(format!(
+            "code index batch {} for scope '{}' could not publish exactly one staged manifest",
+            batch.batch_index, batch.source_scope
+        )));
+    }
     Ok(())
 }
 
 fn delete_batch_path_indexes_if_needed(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
-    batch_is_new: bool,
 ) -> Result<(), StorageError> {
     let paths = batch
         .files
@@ -153,9 +217,8 @@ fn delete_batch_path_indexes_if_needed(
         return Ok(());
     }
 
-    let should_delete = !batch_is_new
-        || (batch.batch_index > 1
-            && path_indexes_exist(transaction, &batch.source_scope, paths.iter().copied())?);
+    let should_delete = batch.batch_index > 1
+        && path_indexes_exist(transaction, &batch.source_scope, paths.iter().copied())?;
     if should_delete {
         delete_path_indexes(transaction, &batch.source_scope, paths)?;
     }
@@ -195,9 +258,58 @@ fn insert_files(transaction: &Transaction<'_>, batch: &CodeIndexBatch) -> Result
 fn insert_references(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
-    file_languages_by_path: Option<&BTreeMap<String, String>>,
+    _file_languages_by_path: Option<&BTreeMap<String, String>>,
 ) -> Result<(), StorageError> {
-    let mut statement = transaction.prepare(
+    let reference_rows_per_statement = if batch.references.is_empty() {
+        REFERENCE_INSERT_BATCH_SIZE
+    } else {
+        let variable_limit = usize::try_from(
+            transaction.limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER),
+        )
+        .map_err(|_| {
+            StorageError::Invariant(
+                "SQLite reported a negative variable limit for reference persistence".to_owned(),
+            )
+        })?;
+        let rows_within_variable_limit = variable_limit / REFERENCE_INSERT_COLUMN_COUNT;
+        if rows_within_variable_limit == 0 {
+            return Err(StorageError::Invariant(format!(
+                "SQLite variable limit {variable_limit} cannot admit one {}-column reference row",
+                REFERENCE_INSERT_COLUMN_COUNT
+            )));
+        }
+        REFERENCE_INSERT_BATCH_SIZE.min(rows_within_variable_limit)
+    };
+    let mut full_groups = batch.references.chunks_exact(reference_rows_per_statement);
+    if batch.references.len() >= reference_rows_per_statement {
+        let full_sql: Cow<'static, str> =
+            if reference_rows_per_statement == REFERENCE_INSERT_BATCH_SIZE {
+                Cow::Borrowed(
+                    REFERENCE_INSERT_FULL_SQL
+                        .get_or_init(|| reference_insert_sql(REFERENCE_INSERT_BATCH_SIZE)),
+                )
+            } else {
+                Cow::Owned(reference_insert_sql(reference_rows_per_statement))
+            };
+        let mut statement = transaction.prepare_cached(full_sql.as_ref())?;
+        for references in full_groups.by_ref() {
+            statement.execute(params_from_iter(reference_insert_parameters(references)))?;
+        }
+    }
+    let tail = full_groups.remainder();
+    if !tail.is_empty() {
+        let tail_sql = reference_insert_sql(tail.len());
+        let mut statement = transaction.prepare(&tail_sql)?;
+        statement.execute(params_from_iter(reference_insert_parameters(tail)))?;
+    }
+    Ok(())
+}
+
+fn reference_insert_sql(row_count: usize) -> String {
+    let placeholders = std::iter::repeat_n(REFERENCE_INSERT_ROW_PLACEHOLDERS, row_count)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
         "
         INSERT INTO code_repository_references (
             repository_id, source_scope, reference_id, file_id, path, name, kind,
@@ -205,59 +317,34 @@ fn insert_references(
             confidence_basis_points, confidence_tier,
             byte_start, byte_end, line_start, line_end
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-        ",
-    )?;
-    let mut search_documents = if file_languages_by_path.is_some() {
-        Some(SearchDocumentInserter::new(transaction)?)
-    } else {
-        None
-    };
-    for reference in &batch.references {
-        statement.execute(params![
-            reference.repository_id,
-            reference.source_scope,
-            reference.reference_id,
-            reference.file_id,
-            reference.path,
-            reference.name,
-            reference.kind,
-            reference.target_symbol_snapshot_id,
-            reference.target_hint,
-            reference.resolution_state,
-            reference.confidence_basis_points,
-            reference.confidence_tier,
-            reference.byte_range.start,
-            reference.byte_range.end,
-            reference.line_range.start,
-            reference.line_range.end,
-        ])?;
-        if let (Some(search_documents), Some(file_languages_by_path)) =
-            (search_documents.as_mut(), file_languages_by_path)
-        {
-            search_documents.insert(
-                &reference.source_scope,
-                "reference",
-                &reference.reference_id,
-                &reference.path,
-                file_languages_by_path
-                    .get(reference.path.as_str())
-                    .map(String::as_str)
-                    .unwrap_or_default(),
-                [
-                    reference.name.as_str(),
-                    reference.kind.as_str(),
-                    reference.target_hint.as_deref().unwrap_or_default(),
-                    reference.path.as_str(),
-                ],
-            )?;
-        }
-    }
-    if let Some(search_documents) = search_documents {
-        search_documents.finish()?;
-    }
+        VALUES {placeholders}
+        "
+    )
+}
 
-    Ok(())
+fn reference_insert_parameters(references: &[RepositoryCodeReferenceRecord]) -> Vec<&dyn ToSql> {
+    let mut parameters = Vec::with_capacity(references.len() * REFERENCE_INSERT_COLUMN_COUNT);
+    for reference in references {
+        parameters.extend([
+            &reference.repository_id as &dyn ToSql,
+            &reference.source_scope,
+            &reference.reference_id,
+            &reference.file_id,
+            &reference.path,
+            &reference.name,
+            &reference.kind,
+            &reference.target_symbol_snapshot_id,
+            &reference.target_hint,
+            &reference.resolution_state,
+            &reference.confidence_basis_points,
+            &reference.confidence_tier,
+            &reference.byte_range.start,
+            &reference.byte_range.end,
+            &reference.line_range.start,
+            &reference.line_range.end,
+        ]);
+    }
+    parameters
 }
 
 fn insert_imports(
@@ -325,31 +412,9 @@ fn insert_chunks(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
-    let mut statement = transaction.prepare(
-        "
-        INSERT INTO code_repository_chunks (
-            repository_id, source_scope, chunk_id, file_id, path, language_id, content,
-            byte_start, byte_end, line_start, line_end, symbol_snapshot_id
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-        ",
-    )?;
+    insert_chunk_facts(transaction, &batch.chunks)?;
     let mut search_documents = SearchDocumentInserter::new(transaction)?;
     for chunk in &batch.chunks {
-        statement.execute(params![
-            chunk.repository_id,
-            chunk.source_scope,
-            chunk.chunk_id,
-            chunk.file_id,
-            chunk.path,
-            chunk.language_id,
-            chunk.content,
-            chunk.byte_range.start,
-            chunk.byte_range.end,
-            chunk.line_range.start,
-            chunk.line_range.end,
-            chunk.symbol_snapshot_id,
-        ])?;
         search_documents.insert(
             &chunk.source_scope,
             "chunk",
@@ -366,6 +431,88 @@ fn insert_chunks(
     search_documents.finish()?;
 
     Ok(())
+}
+
+fn insert_chunk_facts(
+    transaction: &Transaction<'_>,
+    chunks: &[RepositoryCodeChunkRecord],
+) -> Result<(), StorageError> {
+    if chunks.is_empty() {
+        return Ok(());
+    }
+    let variable_limit = usize::try_from(transaction.limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER))
+        .map_err(|_| {
+            StorageError::Invariant(
+                "SQLite reported a negative variable limit for chunk persistence".to_owned(),
+            )
+        })?;
+    let rows_within_variable_limit = variable_limit / CHUNK_INSERT_COLUMN_COUNT;
+    let rows_per_statement = CHUNK_INSERT_BATCH_SIZE.min(rows_within_variable_limit);
+    if rows_per_statement == 0 {
+        return Err(StorageError::Invariant(format!(
+            "SQLite variable limit {variable_limit} cannot admit one {}-column chunk row",
+            CHUNK_INSERT_COLUMN_COUNT
+        )));
+    }
+
+    let mut full_groups = chunks.chunks_exact(rows_per_statement);
+    if chunks.len() >= rows_per_statement {
+        let full_sql: Cow<'static, str> = if rows_per_statement == CHUNK_INSERT_BATCH_SIZE {
+            Cow::Borrowed(
+                CHUNK_INSERT_FULL_SQL.get_or_init(|| chunk_insert_sql(CHUNK_INSERT_BATCH_SIZE)),
+            )
+        } else {
+            Cow::Owned(chunk_insert_sql(rows_per_statement))
+        };
+        let mut statement = transaction.prepare_cached(full_sql.as_ref())?;
+        for group in full_groups.by_ref() {
+            statement.execute(params_from_iter(chunk_insert_parameters(group)))?;
+        }
+    }
+    let tail = full_groups.remainder();
+    if !tail.is_empty() {
+        let tail_sql = chunk_insert_sql(tail.len());
+        let mut statement = transaction.prepare(&tail_sql)?;
+        statement.execute(params_from_iter(chunk_insert_parameters(tail)))?;
+    }
+
+    Ok(())
+}
+
+fn chunk_insert_sql(row_count: usize) -> String {
+    let placeholders = std::iter::repeat_n(CHUNK_INSERT_ROW_PLACEHOLDERS, row_count)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "
+        INSERT INTO code_repository_chunks (
+            repository_id, source_scope, chunk_id, file_id, path, language_id, content,
+            byte_start, byte_end, line_start, line_end, symbol_snapshot_id
+        )
+        VALUES {placeholders}
+        "
+    )
+}
+
+fn chunk_insert_parameters(chunks: &[RepositoryCodeChunkRecord]) -> Vec<&dyn ToSql> {
+    let mut parameters = Vec::with_capacity(chunks.len() * CHUNK_INSERT_COLUMN_COUNT);
+    for chunk in chunks {
+        parameters.extend([
+            &chunk.repository_id as &dyn ToSql,
+            &chunk.source_scope,
+            &chunk.chunk_id,
+            &chunk.file_id,
+            &chunk.path,
+            &chunk.language_id,
+            &chunk.content,
+            &chunk.byte_range.start,
+            &chunk.byte_range.end,
+            &chunk.line_range.start,
+            &chunk.line_range.end,
+            &chunk.symbol_snapshot_id,
+        ]);
+    }
+    parameters
 }
 
 fn should_materialize_intermediate_edge_search(
@@ -389,25 +536,9 @@ fn should_materialize_intermediate_edge_search(
         .optional()?
         .flatten();
 
-    if active_scope.as_deref() == Some(batch.source_scope.as_str()) {
-        return Ok(true);
-    }
-
-    transaction
-        .query_row(
-            "
-            SELECT 1
-            FROM code_repository_scopes
-            WHERE source_scope = ?1
-              AND repository_id = ?2
-              AND retiring = 0
-            ",
-            params![batch.source_scope, batch.repository_id],
-            |_| Ok(()),
-        )
-        .optional()
-        .map(|row| row.is_some())
-        .map_err(StorageError::from)
+    // A scope registry row can describe a stale staged or retained generation.
+    // Only the active scope requires interim edge-search continuity during a batch.
+    Ok(active_scope.as_deref() == Some(batch.source_scope.as_str()))
 }
 
 fn edge_file_languages_by_path(
@@ -497,18 +628,30 @@ fn insert_diagnostics(
 fn update_checkpoint_after_batch(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
-    batch_is_new: bool,
 ) -> Result<(), StorageError> {
-    let delta_files = if batch_is_new { batch.files.len() } else { 0 };
-    let delta_symbols = if batch_is_new { batch.symbols.len() } else { 0 };
-    let delta_references = if batch_is_new {
-        batch.references.len()
-    } else {
-        0
-    };
-    let delta_chunks = if batch_is_new { batch.chunks.len() } else { 0 };
-    let delta_batches = usize::from(batch_is_new);
-    transaction.execute(
+    let fact_row_count = checked_fact_row_count(batch)?;
+    let staged_fact_row_count = transaction
+        .query_row(
+            "SELECT fact_row_count
+             FROM code_repository_index_batch_staging
+             WHERE source_scope = ?1 AND batch_index = ?2 AND state = 'staged'",
+            params![batch.source_scope, batch.batch_index],
+            |row| row.get::<_, usize>(0),
+        )
+        .map_err(StorageError::from)?;
+    if staged_fact_row_count != fact_row_count {
+        return Err(StorageError::Invariant(format!(
+            "code index batch {} for scope '{}' changed its staged fact-row proof",
+            batch.batch_index, batch.source_scope
+        )));
+    }
+    let previous_batch_count = batch.batch_index.checked_sub(1).ok_or_else(|| {
+        StorageError::Invariant(format!(
+            "code index batch 0 for scope '{}' cannot advance checkpoint progress",
+            batch.source_scope
+        ))
+    })?;
+    let changed = transaction.execute(
         "
         UPDATE code_repository_index_checkpoints
         SET parsed_file_count = parsed_file_count + ?2,
@@ -516,23 +659,39 @@ fn update_checkpoint_after_batch(
             committed_symbol_count = committed_symbol_count + ?4,
             committed_reference_count = committed_reference_count + ?5,
             committed_chunk_count = committed_chunk_count + ?6,
-            batch_count = batch_count + ?7,
-            last_path = COALESCE(?8, last_path),
-            updated_at_ms = ?9
-        WHERE source_scope = ?1
+            committed_fact_row_count = CASE
+                WHEN batch_count = 0 THEN ?7
+                WHEN committed_fact_row_count = 0 THEN 0
+                ELSE committed_fact_row_count + ?7
+            END,
+            batch_count = batch_count + ?8,
+            last_path = CASE
+                WHEN ?8 > 0 THEN COALESCE(?9, last_path)
+                ELSE last_path
+            END,
+            updated_at_ms = ?10
+        WHERE source_scope = ?1 AND state = 'indexing' AND batch_count = ?11
         ",
         params![
             batch.source_scope,
-            delta_files,
-            delta_files,
-            delta_symbols,
-            delta_references,
-            delta_chunks,
-            delta_batches,
+            batch.files.len(),
+            batch.files.len(),
+            batch.symbols.len(),
+            batch.references.len(),
+            batch.chunks.len(),
+            staged_fact_row_count,
+            1_usize,
             batch.files.last().map(|file| file.path.as_str()),
             checkpoint::now_millis(),
+            previous_batch_count,
         ],
     )?;
+    if changed != 1 {
+        return Err(StorageError::Invariant(format!(
+            "code index batch {} for scope '{}' could not advance exactly one indexing checkpoint",
+            batch.batch_index, batch.source_scope
+        )));
+    }
     transaction.execute(
         "
         UPDATE code_repositories
@@ -566,20 +725,65 @@ fn update_checkpoint_after_batch(
     Ok(())
 }
 
+fn checked_fact_row_count(batch: &CodeIndexBatch) -> Result<usize, StorageError> {
+    [
+        batch.files.len(),
+        batch.symbols.len(),
+        batch.references.len(),
+        batch.imports.len(),
+        batch.dependencies.len(),
+        batch.feature_flags.len(),
+        batch.routes.len(),
+        batch.chunks.len(),
+        batch.diagnostics.len(),
+    ]
+    .into_iter()
+    .try_fold(0usize, |total, count| {
+        total.checked_add(count).ok_or_else(|| {
+            StorageError::CapacityExceeded(format!(
+                "code index batch {} for scope '{}' exceeds the fact-row counter",
+                batch.batch_index, batch.source_scope
+            ))
+        })
+    })
+}
+
 fn checkpoint_batch_is_new(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<bool, StorageError> {
-    transaction
+    let (state, batch_count) = transaction
         .query_row(
             "
-            SELECT batch_count
+            SELECT state, batch_count
             FROM code_repository_index_checkpoints
             WHERE source_scope = ?1
             ",
             params![batch.source_scope],
-            |row| row.get::<_, usize>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?)),
         )
-        .map(|batch_count| batch.batch_index > batch_count)
-        .map_err(StorageError::from)
+        .map_err(StorageError::from)?;
+    if batch.batch_index > 0 && batch.batch_index <= batch_count {
+        return Ok(false);
+    }
+    if state != "indexing" {
+        return Err(StorageError::Invariant(format!(
+            "code index checkpoint '{}' in state '{}' no longer accepts new batch {}",
+            batch.source_scope, state, batch.batch_index
+        )));
+    }
+    let next_batch = batch_count.checked_add(1).ok_or_else(|| {
+        StorageError::Invariant(format!(
+            "code index checkpoint '{}' batch count cannot advance",
+            batch.source_scope
+        ))
+    })?;
+    if batch.batch_index == next_batch {
+        return Ok(true);
+    }
+
+    Err(StorageError::Invariant(format!(
+        "code index batch {} for scope '{}' must be the next batch {} or a replay through {}",
+        batch.batch_index, batch.source_scope, next_batch, batch_count
+    )))
 }

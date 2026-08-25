@@ -74,7 +74,8 @@ pub struct CodeWorkspacePackageMapping {
     pub ecosystem: String,
     /// Repository identifier the indexed scope belongs to.
     pub repository_id: String,
-    /// Source scope the resolved target lives in (`git_snapshot:<hash>`).
+    /// Source scope the resolved target lives in (`git_snapshot:<hash>` with
+    /// an optional canonical `workspace-v1:<mask>` semantic suffix).
     pub source_scope: String,
     /// Confidence in basis points (0–10 000) that this mapping is correct.
     pub confidence_basis_points: u32,
@@ -123,4 +124,5 @@ impl Default for CodeWorkspaceDetectionConfig {
 }
 
 #[cfg(test)]
+#[path = "mod_tests.rs"]
 mod mod_tests;

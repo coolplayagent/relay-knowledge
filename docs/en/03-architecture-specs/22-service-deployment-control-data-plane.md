@@ -105,4 +105,4 @@ Publication invokes durable retention that preserves the union of active and the
 
 ---
 
-Navigation: Previous: [21. Software Global Domain Modeling Architecture](21-software-global-domain-modeling.md)
+Navigation: Previous: [21. Software Global Domain Modeling Architecture](21-software-global-domain-modeling.md) | Next: [24. Code-Map-Backed Knowledge Development Loop](24-code-map-backed-knowledge-development-loop.md)

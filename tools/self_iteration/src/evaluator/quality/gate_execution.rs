@@ -2,6 +2,7 @@ use std::{path::Path, time::Instant};
 
 use crate::{
     command::{CommandResult, CommandSpec},
+    config::Config,
     scoring::{GateObservation, MetricObservation},
 };
 
@@ -15,14 +16,30 @@ use super::{
 };
 
 pub(in crate::evaluator) fn run_quality_gate_stages(
-    profile: &str,
+    config: &Config,
     workspace: &Path,
     limiter: &Limiter,
     commands: &mut Vec<CommandResult>,
     gates: &mut Vec<GateObservation>,
     metrics: &mut Vec<MetricObservation>,
 ) -> bool {
-    let stages = quality_gate_stages(profile);
+    let stages = quality_gate_stages(&config.profile, config.product_binary_profile());
+    run_quality_gate_plan(
+        stages,
+        |stage| run_quality_gate_stage(stage, workspace, limiter),
+        commands,
+        gates,
+        metrics,
+    )
+}
+
+fn run_quality_gate_plan(
+    stages: Vec<QualityGateStage>,
+    mut run_stage: impl FnMut(QualityGateStage) -> Vec<CommandResult>,
+    commands: &mut Vec<CommandResult>,
+    gates: &mut Vec<GateObservation>,
+    metrics: &mut Vec<MetricObservation>,
+) -> bool {
     let stage_count = stages.len();
     for (stage_index, stage) in stages.into_iter().enumerate() {
         let stage_started = Instant::now();
@@ -35,7 +52,7 @@ pub(in crate::evaluator) fn run_quality_gate_stages(
         );
         let mut stage_passed = true;
         let mut stage_gate_count = 0usize;
-        for result in run_quality_gate_stage(stage, workspace, limiter) {
+        for result in run_stage(stage) {
             stage_gate_count += 1;
             metrics.push(MetricObservation {
                 name: format!("{}_ms", result.name),
@@ -44,7 +61,9 @@ pub(in crate::evaluator) fn run_quality_gate_stages(
                 lower_is_better: true,
                 key: matches!(
                     result.name.as_str(),
-                    "cargo_build_release" | "cargo_build_debug"
+                    "cargo_build_release"
+                        | "cargo_build_debug"
+                        | "code_index_persistence_performance_suite"
                 ),
             });
             gates.push(GateObservation::from_command(&result));

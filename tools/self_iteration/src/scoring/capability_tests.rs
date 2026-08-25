@@ -3,6 +3,44 @@ use crate::scoring::{
     score_evaluation,
 };
 
+use super::{performance_score, relative_metric_ratio};
+
+#[test]
+fn relative_performance_scoring_preserves_subunit_and_zero_ratios() {
+    let metric = |value| MetricObservation {
+        name: "text_fallback_ratio".to_owned(),
+        value,
+        budget: Some(0.75),
+        lower_is_better: true,
+        key: true,
+    };
+    let previous = |value| {
+        serde_json::json!({
+            "metrics": [{"name": "text_fallback_ratio", "value": value}]
+        })
+    };
+
+    assert_eq!(relative_metric_ratio(0.25, 0.5, true), 1.25);
+    assert_eq!(relative_metric_ratio(0.25, 0.25, true), 1.0);
+    assert_eq!(relative_metric_ratio(0.0, 0.0, true), 1.0);
+    assert_eq!(relative_metric_ratio(0.0, 0.25, true), 1.25);
+    assert_eq!(relative_metric_ratio(0.25, 0.0, true), 0.0);
+    assert!(relative_metric_ratio(0.1, 0.5, true) > relative_metric_ratio(0.8, 0.5, true));
+    let improved = performance_score(&[metric(0.1)], Some(&previous(0.5)));
+    let regressed = performance_score(&[metric(0.8)], Some(&previous(0.5)));
+    assert!(improved > regressed);
+    assert!((performance_score(&[metric(0.25)], Some(&previous(0.5))) - 1.0).abs() < 1e-12);
+    assert!((performance_score(&[metric(0.25)], Some(&previous(0.25))) - 0.94).abs() < 1e-12);
+}
+
+#[test]
+fn higher_is_better_relative_scoring_handles_zero_equal_improvement_and_decline() {
+    assert_eq!(relative_metric_ratio(0.0, 0.0, false), 1.0);
+    assert_eq!(relative_metric_ratio(0.5, 0.5, false), 1.0);
+    assert_eq!(relative_metric_ratio(0.5, 0.0, false), 1.25);
+    assert_eq!(relative_metric_ratio(0.25, 0.5, false), 0.5);
+}
+
 #[test]
 fn profile_best_accepted_rejects_first_category_run_below_global_bar() {
     let profile_best = serde_json::json!({
@@ -19,7 +57,7 @@ fn profile_best_accepted_rejects_first_category_run_below_global_bar() {
         },
     );
 
-    assert!((score.base_score - 0.86613).abs() < 0.00001);
+    assert!((score.base_score - 0.905208).abs() < 0.00001);
     assert!(!score.accepted);
     assert!(
         score
@@ -39,7 +77,7 @@ fn mixed_capability_observation() -> EvaluationObservation {
         ],
         metrics: vec![MetricObservation {
             name: "query_p95_ms".to_owned(),
-            value: 1000.0,
+            value: 700.0,
             budget: Some(782.9),
             lower_is_better: true,
             key: true,

@@ -128,15 +128,32 @@ pub(super) fn performance_score(
             let Some(previous) = previous_metrics.get(&metric.name).copied() else {
                 return budget_score;
             };
-            let ratio = if metric.lower_is_better {
-                previous / metric.value.max(1.0)
-            } else {
-                metric.value / previous.max(1.0)
-            };
-            (budget_score * 0.7 + ratio.min(1.25) / 1.25 * 0.3).min(1.0)
+            let ratio = relative_metric_ratio(metric.value, previous, metric.lower_is_better);
+            (budget_score * 0.7 + ratio / 1.25 * 0.3).min(1.0)
         })
         .collect::<Vec<_>>();
     average(&scores, 1.0)
+}
+
+fn relative_metric_ratio(current: f64, previous: f64, lower_is_better: bool) -> f64 {
+    if !current.is_finite() || !previous.is_finite() || current < 0.0 || previous < 0.0 {
+        return 1.0;
+    }
+    if current == previous {
+        return 1.0;
+    }
+    let ratio = if lower_is_better {
+        if current == 0.0 {
+            1.25
+        } else {
+            previous / current
+        }
+    } else if previous == 0.0 {
+        1.25
+    } else {
+        current / previous
+    };
+    ratio.clamp(0.0, 1.25)
 }
 
 pub(super) fn stability_score(gates: &[GateObservation]) -> f64 {

@@ -27,6 +27,41 @@ pub(super) fn enforce_new_target(
     Ok(())
 }
 
+/// Prevents a newly queued target from overtaking a crash-resumable direct
+/// checkpoint that has no unfinished durable task owner.
+pub(super) fn reject_unowned_checkpoint_conflict(
+    transaction: &Transaction<'_>,
+    repository_id: &str,
+    target_scope: &str,
+) -> Result<(), StorageError> {
+    let conflict = transaction
+        .query_row(
+            "SELECT checkpoint.source_scope, checkpoint.state
+             FROM code_repository_index_checkpoints checkpoint
+             WHERE checkpoint.repository_id = ?1
+               AND checkpoint.source_scope <> ?2
+               AND checkpoint.state <> 'completed'
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM code_repository_index_tasks owner
+                   WHERE owner.repository_id = checkpoint.repository_id
+                     AND owner.source_scope = checkpoint.source_scope
+                     AND owner.state IN ('queued', 'running', 'retrying')
+               )
+             ORDER BY checkpoint.updated_at_ms ASC, checkpoint.source_scope ASC
+             LIMIT 1",
+            params![repository_id, target_scope],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((source_scope, state)) = conflict else {
+        return Ok(());
+    };
+    Err(StorageError::InvalidInput(format!(
+        "code repository '{repository_id}' has an unfinished direct checkpoint '{source_scope}' in state '{state}'; resume or adopt that scope before queueing target '{target_scope}'"
+    )))
+}
+
 /// Bounds direct storage publications that do not carry a durable task fence.
 ///
 /// Fenced publications reserve their target during queue admission (and replace
@@ -37,11 +72,56 @@ pub(in crate::storage::sqlite::code) fn enforce_unfenced_target(
     repository_id: &str,
     source_scope: &str,
 ) -> Result<(), StorageError> {
+    reject_unfenced_authority_conflict(transaction, repository_id)?;
     let usage = load_usage(transaction, repository_id, "main", "main")?;
     if !usage.scopes.contains(source_scope) {
         reject_if_full(repository_id, usage.slot_count())?;
     }
     Ok(())
+}
+
+/// Locks the durable task authority and rejects direct writers that could race
+/// an unfinished fenced publication for the same repository.
+///
+/// The no-op update is intentional: in a deferred SQLite transaction it
+/// obtains the authority database's writer lock before the task read. Queue,
+/// lease, and completion transitions therefore cannot cross this decision
+/// before the surrounding fact transaction commits or rolls back.
+fn reject_unfenced_authority_conflict(
+    connection: &Connection,
+    repository_id: &str,
+) -> Result<(), StorageError> {
+    let locked = connection.execute(
+        "UPDATE main.code_repositories
+         SET repository_id = repository_id
+         WHERE repository_id = ?1",
+        [repository_id],
+    )?;
+    if locked != 1 {
+        return Err(StorageError::InvalidInput(format!(
+            "code repository '{repository_id}' is not registered in the publication authority"
+        )));
+    }
+
+    let conflict = connection
+        .query_row(
+            "SELECT task_id, state
+             FROM main.code_repository_index_tasks
+             WHERE repository_id = ?1
+               AND state IN ('queued', 'running', 'retrying')
+             ORDER BY created_at_ms ASC, task_id ASC
+             LIMIT 1",
+            [repository_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((task_id, state)) = conflict else {
+        return Ok(());
+    };
+
+    Err(StorageError::InvalidInput(format!(
+        "unfenced code index mutation for repository '{repository_id}' conflicts with durable task '{task_id}' in state '{state}'; use the task's publication fence or wait for terminal task state"
+    )))
 }
 
 pub(in crate::storage::sqlite::code) fn enforce_rebound_target(

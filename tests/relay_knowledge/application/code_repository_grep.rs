@@ -326,7 +326,7 @@ async fn status_skips_optional_task_lease_recovery_for_partial_store() {
 }
 
 #[tokio::test]
-async fn import_query_uses_source_fallback_for_unindexed_external_dependency() {
+async fn complete_import_graph_surface_skips_redundant_source_fallback() {
     let repo = FixtureRepo::create("code-source-fallback-external-import");
     repo.write(
         "src/component.tsx",
@@ -392,19 +392,18 @@ export function Panel({ value }: { value: string }) {
             hit.path == "src/component.tsx"
                 && hit.edge_kind.as_deref() == Some("import")
                 && hit.edge_resolution_state.as_deref() == Some("unresolved")
+                && hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::ImportGraph)
         }),
         "expected unresolved import graph evidence: {:?}",
         response.results
     );
     assert!(
-        response.results.iter().any(|hit| {
-            hit.path == "src/component.tsx"
-                && hit.excerpt.contains("react")
-                && hit
-                    .retrieval_layers
-                    .contains(&CodeRetrievalLayer::TextFallback)
-        }),
-        "expected current-repository text fallback evidence: {:?}",
+        response.results.iter().all(|hit| !hit
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::TextFallback)),
+        "complete import-graph source evidence must not add redundant text fallback: {:?}",
         response.results
     );
 }

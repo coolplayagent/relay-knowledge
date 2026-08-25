@@ -1,4 +1,4 @@
-use std::{fs, path::Path, process::Command};
+use std::path::Path;
 
 use serde_json::Value;
 
@@ -15,6 +15,7 @@ use super::super::{
         contracts::{EvalRuntime, RepoReport},
         reporting::{
             budget, elastic_budget_enabled, parse_json_output, push_latency_metrics, repo_report,
+            retain_index_only_cold_index_result,
         },
     },
 };
@@ -26,6 +27,15 @@ use super::{
     selection::guardrail_gate_from_case,
 };
 
+mod expectation;
+mod isolation;
+
+use expectation::{
+    IndexExpectation, cold_index_completion_validation, incremental_index_completion_validation,
+    observed_git_file_count, scope_preview_command,
+};
+use isolation::RepositoryIsolation;
+
 pub(in crate::evaluator) fn evaluate_repository(
     runtime: &EvalRuntime,
     run_home: &Path,
@@ -34,8 +44,34 @@ pub(in crate::evaluator) fn evaluate_repository(
     repo_cases: Vec<Value>,
     software_cases: Vec<Value>,
 ) -> Result<RepoReport, String> {
-    let owned_runtime = isolated_repository_runtime(runtime, run_home, repo_name, repo_config)?;
-    let runtime = &owned_runtime;
+    let isolation = RepositoryIsolation::prepare(runtime, run_home, repo_name, repo_config)?;
+    let result = evaluate_repository_in_runtime(
+        &isolation.runtime,
+        run_home,
+        repo_name,
+        repo_config,
+        repo_cases,
+        software_cases,
+    );
+    let mut report = isolation.complete(result)?;
+    retain_index_only_cold_index_result(
+        &mut report,
+        repo_config
+            .get("index_only_performance_target")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    );
+    Ok(report)
+}
+
+fn evaluate_repository_in_runtime(
+    runtime: &EvalRuntime,
+    run_home: &Path,
+    repo_name: &str,
+    repo_config: &Value,
+    repo_cases: Vec<Value>,
+    software_cases: Vec<Value>,
+) -> Result<RepoReport, String> {
     let alias = string_or(repo_config, "alias", repo_name);
     let ref_selector = string_or(repo_config, "ref", "HEAD");
     let scope = string_or(repo_config, "scope", "all").to_owned();
@@ -45,7 +81,6 @@ pub(in crate::evaluator) fn evaluate_repository(
     let mut metrics = Vec::new();
     let (path, setup_commands) =
         prepare_repository_path(runtime, run_home, repo_name, repo_config)?;
-    let elastic_repo_config = with_observed_file_count(repo_config, &path);
     let setup_passed = setup_commands.iter().all(CommandResult::passed);
     commands.extend(setup_commands);
     eprintln!(
@@ -107,6 +142,36 @@ pub(in crate::evaluator) fn evaluate_repository(
             Value::Null,
         ));
     }
+    let (observed_repo_config, observed_git_count) =
+        observed_git_file_count(runtime, repo_name, repo_config, &path, ref_selector);
+    let observed_git_count_passed = observed_git_count.passed();
+    commands.push(observed_git_count);
+    if !observed_git_count_passed {
+        return Ok(repo_report(
+            repo_name,
+            scope,
+            commands,
+            cases,
+            metrics,
+            Value::Null,
+        ));
+    }
+    let elastic_repo_config = if elastic_budget_enabled(&observed_repo_config)
+        && observed_repo_config.get("expected_file_count").is_none()
+    {
+        let mut effective = observed_repo_config.clone();
+        if let (Some(object), Some(observed)) = (
+            effective.as_object_mut(),
+            observed_repo_config
+                .get("observed_git_file_count")
+                .and_then(Value::as_u64),
+        ) {
+            object.insert("expected_file_count".to_owned(), Value::from(observed));
+        }
+        effective
+    } else {
+        observed_repo_config.clone()
+    };
     let register = run_writer_limited(
         runtime,
         CommandSpec::new(
@@ -203,15 +268,49 @@ pub(in crate::evaluator) fn evaluate_repository(
             repo_name, scope, commands, cases, metrics, index_json,
         ));
     }
-    if let Some(validation) = cold_index_completion_validation(repo_name, repo_config, &index_json)
-    {
-        let passed = validation.passed();
-        commands.push(validation);
-        if !passed {
+    let preview = run_limited(
+        &runtime.limiter,
+        CommandSpec::new(
+            format!("{repo_name}_scope_preview"),
+            scope_preview_command(&runtime.binary, alias, ref_selector),
+            &runtime.workspace,
+            Some(runtime.env.clone()),
+            runtime.timeout,
+        ),
+    );
+    let preview_json = parse_json_output(&preview.stdout);
+    let preview_passed = preview.passed();
+    commands.push(preview);
+    if !preview_passed {
+        index_json = serde_json::json!({"index": index_json, "scope_preview": preview_json});
+        return Ok(repo_report(
+            repo_name, scope, commands, cases, metrics, index_json,
+        ));
+    }
+    let preview_expectation = match IndexExpectation::from_preview(
+        repo_name,
+        &observed_repo_config,
+        ref_selector,
+        &preview_json,
+    ) {
+        Ok(expectation) => expectation,
+        Err(validation) => {
+            commands.push(validation);
+            index_json = serde_json::json!({"index": index_json, "scope_preview": preview_json});
             return Ok(repo_report(
                 repo_name, scope, commands, cases, metrics, index_json,
             ));
         }
+    };
+    commands.push(preview_expectation.validation_command(repo_name));
+    let validation =
+        cold_index_completion_validation(repo_name, repo_config, &preview_expectation, &index_json);
+    let passed = validation.passed();
+    commands.push(validation);
+    if !passed {
+        return Ok(repo_report(
+            repo_name, scope, commands, cases, metrics, index_json,
+        ));
     }
 
     if let Some(incremental) =
@@ -276,16 +375,83 @@ pub(in crate::evaluator) fn evaluate_repository(
                 repo_name, scope, commands, cases, metrics, index_json,
             ));
         }
+        let incremental_preview = run_limited(
+            &runtime.limiter,
+            CommandSpec::new(
+                format!("{repo_name}_incremental_scope_preview"),
+                scope_preview_command(&runtime.binary, alias, &incremental.head_ref),
+                &runtime.workspace,
+                Some(runtime.env.clone()),
+                runtime.timeout,
+            ),
+        );
+        let incremental_preview_json = parse_json_output(&incremental_preview.stdout);
+        let incremental_preview_passed = incremental_preview.passed();
+        commands.push(incremental_preview);
+        if !incremental_preview_passed {
+            index_json = serde_json::json!({
+                "cold": index_json,
+                "incremental": update_json,
+                "incremental_preview": incremental_preview_json,
+            });
+            return Ok(repo_report(
+                repo_name, scope, commands, cases, metrics, index_json,
+            ));
+        }
+        let (incremental_observed_config, incremental_git_count) = observed_git_file_count(
+            runtime,
+            &format!("{repo_name}_incremental"),
+            repo_config,
+            &path,
+            &incremental.head_ref,
+        );
+        let incremental_git_count_passed = incremental_git_count.passed();
+        commands.push(incremental_git_count);
+        if !incremental_git_count_passed {
+            index_json = serde_json::json!({
+                "cold": index_json,
+                "incremental": update_json,
+                "incremental_preview": incremental_preview_json,
+            });
+            return Ok(repo_report(
+                repo_name, scope, commands, cases, metrics, index_json,
+            ));
+        }
+        let incremental_expectation = match IndexExpectation::from_preview(
+            repo_name,
+            &incremental_observed_config,
+            &incremental.head_ref,
+            &incremental_preview_json,
+        ) {
+            Ok(expectation) => expectation,
+            Err(validation) => {
+                commands.push(validation);
+                index_json = serde_json::json!({
+                    "cold": index_json,
+                    "incremental": update_json,
+                    "incremental_preview": incremental_preview_json,
+                });
+                return Ok(repo_report(
+                    repo_name, scope, commands, cases, metrics, index_json,
+                ));
+            }
+        };
+        commands.push(incremental_expectation.validation_command(repo_name));
         let validation = incremental_index_completion_validation(
             repo_name,
             repo_config,
             incremental.changed_path_count,
-            &incremental.head_ref,
+            &incremental.base_ref,
+            &incremental_expectation,
             &update_json,
         );
         let validation_passed = validation.passed();
         commands.push(validation);
-        index_json = serde_json::json!({"cold": index_json, "incremental": update_json});
+        index_json = serde_json::json!({
+            "cold": index_json,
+            "incremental": update_json,
+            "incremental_preview": incremental_preview_json,
+        });
         if !validation_passed {
             return Ok(repo_report(
                 repo_name, scope, commands, cases, metrics, index_json,
@@ -378,210 +544,12 @@ pub(in crate::evaluator) fn evaluate_repository(
     Ok(report)
 }
 
-fn historical_reuse_index_command(binary: &Path, alias: &str, head_ref: &str) -> Vec<String> {
-    vec![
-        binary.display().to_string(),
-        "repo".to_owned(),
-        "index".to_owned(),
-        alias.to_owned(),
-        "--ref".to_owned(),
-        head_ref.to_owned(),
-        "--reuse-historical".to_owned(),
-        "--format".to_owned(),
-        "json".to_owned(),
-    ]
-}
-
-fn isolated_repository_runtime(
-    runtime: &EvalRuntime,
-    run_home: &Path,
-    repo_name: &str,
-    repo_config: &Value,
-) -> Result<EvalRuntime, String> {
-    if !repo_config
-        .get("isolated_index_home")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return Ok(runtime.clone());
-    }
-    if repo_name.is_empty()
-        || !repo_name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-    {
-        return Err(format!(
-            "isolated repository name must be a safe path component: {repo_name:?}"
-        ));
-    }
-    let home = run_home.join("isolated-index-homes").join(repo_name);
-    if home.exists() {
-        fs::remove_dir_all(&home)
-            .map_err(|error| format!("failed to remove {}: {error}", home.display()))?;
-    }
-    fs::create_dir_all(&home)
-        .map_err(|error| format!("failed to create {}: {error}", home.display()))?;
-    let mut isolated = runtime.clone();
-    isolated.env.insert(
-        "RELAY_KNOWLEDGE_HOME".to_owned(),
-        home.display().to_string(),
-    );
-    eprintln!(
-        "[self-iterate] repository isolated index home name={} home={}",
-        repo_name,
-        home.display()
-    );
-    Ok(isolated)
-}
-
-fn cold_index_completion_validation(
-    repo_name: &str,
-    repo_config: &Value,
-    payload: &Value,
-) -> Option<CommandResult> {
-    let minimum_files = repo_config
-        .get("cold_index_min_file_count")
-        .and_then(Value::as_u64)?;
-    let indexed_files = payload
-        .pointer("/status/indexed_file_count")
-        .and_then(Value::as_u64)
-        .unwrap_or_default();
-    let parsed_files = payload
-        .pointer("/summary/progress/parsed_file_count")
-        .and_then(Value::as_u64)
-        .unwrap_or_default();
-    let task_succeeded =
-        payload.pointer("/task/state").and_then(Value::as_str) == Some("succeeded");
-    let passed =
-        indexed_files >= minimum_files && (task_succeeded || parsed_files >= minimum_files);
-    let evidence = serde_json::json!({
-        "minimum_files": minimum_files,
-        "indexed_files": indexed_files,
-        "parsed_files": parsed_files,
-        "task_succeeded": task_succeeded,
-    });
-    Some(CommandResult {
-        name: format!("{repo_name}_cold_index_completion"),
-        command: vec!["validate".to_owned(), "cold-index-completion".to_owned()],
-        exit_code: i32::from(!passed),
-        duration_ms: 0,
-        stdout: if passed {
-            evidence.to_string()
-        } else {
-            String::new()
-        },
-        stderr: if passed {
-            String::new()
-        } else {
-            format!("cold index completion evidence failed: {evidence}")
-        },
-    })
-}
-
-fn with_observed_file_count(config: &Value, repository_path: &Path) -> Value {
-    if !elastic_budget_enabled(config) {
-        return config.clone();
-    }
-    let Ok(output) = Command::new("git")
-        .args([
-            "-C",
-            &repository_path.display().to_string(),
-            "ls-files",
-            "-z",
-        ])
-        .output()
-    else {
-        return config.clone();
-    };
-    if !output.status.success() {
-        return config.clone();
-    }
-    let observed = output.stdout.iter().filter(|byte| **byte == 0).count();
-    if observed == 0 {
-        return config.clone();
-    }
-    let mut effective = config.clone();
-    if let Some(object) = effective.as_object_mut() {
-        object.insert(
-            "expected_file_count".to_owned(),
-            Value::from(observed as u64),
-        );
-    }
-    effective
-}
-
 fn elastic_timeout_seconds(default_seconds: u64, config: &Value, budget_name: &str) -> u64 {
     let Some(budget_ms) = budget(config, budget_name) else {
         return default_seconds;
     };
     let budget_seconds = (budget_ms / 1_000.0).ceil() as u64;
     default_seconds.max(budget_seconds.saturating_add(30))
-}
-
-fn incremental_index_completion_validation(
-    repo_name: &str,
-    repo_config: &Value,
-    expected_changed_paths: usize,
-    expected_head_ref: &str,
-    payload: &Value,
-) -> CommandResult {
-    let changed_paths = payload
-        .pointer("/summary/changed_path_count")
-        .and_then(Value::as_u64)
-        .unwrap_or_default();
-    let blob_reads = payload
-        .pointer("/summary/progress/blob_read_count")
-        .and_then(Value::as_u64)
-        .unwrap_or(u64::MAX);
-    let parsed_files = payload
-        .pointer("/summary/progress/parsed_file_count")
-        .and_then(Value::as_u64)
-        .unwrap_or(u64::MAX);
-    let resolved_head = payload
-        .pointer("/summary/resolved_commit_sha")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let max_blob_reads = repo_config
-        .get("incremental_max_blob_reads")
-        .and_then(Value::as_u64)
-        .unwrap_or(expected_changed_paths as u64);
-    let max_parsed_files = repo_config
-        .get("incremental_max_parsed_files")
-        .and_then(Value::as_u64)
-        .unwrap_or(expected_changed_paths as u64);
-    let passed = changed_paths == expected_changed_paths as u64
-        && blob_reads <= max_blob_reads
-        && parsed_files <= max_parsed_files
-        && resolved_head == expected_head_ref;
-    let evidence = serde_json::json!({
-        "expected_changed_paths": expected_changed_paths,
-        "changed_paths": changed_paths,
-        "blob_reads": blob_reads,
-        "max_blob_reads": max_blob_reads,
-        "parsed_files": parsed_files,
-        "max_parsed_files": max_parsed_files,
-        "expected_head_ref": expected_head_ref,
-        "resolved_head": resolved_head,
-    });
-    CommandResult {
-        name: format!("{repo_name}_incremental_index_completion"),
-        command: vec![
-            "validate".to_owned(),
-            "incremental-index-completion".to_owned(),
-        ],
-        exit_code: i32::from(!passed),
-        duration_ms: 0,
-        stdout: if passed {
-            evidence.to_string()
-        } else {
-            String::new()
-        },
-        stderr: if passed {
-            String::new()
-        } else {
-            format!("incremental index completion evidence failed: {evidence}")
-        },
-    }
 }
 
 #[cfg(test)]

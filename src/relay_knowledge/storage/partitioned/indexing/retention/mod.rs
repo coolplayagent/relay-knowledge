@@ -74,12 +74,15 @@ pub(in crate::storage::partitioned) fn prune(
                     Some(job.cutoff_publication_generation);
                 request.repository_retention_initial_scope = Some(job.initial_scope.clone());
             }
-            if control_retention.maintenance_pending || initial_repository_retention_job.is_some() {
-                control_retention = store
-                    .control
-                    .prune_code_repository_scopes(request.clone())
-                    .await?;
-            }
+            // The requested retention window may be narrower than the default
+            // status projection even when that projection reports no pending
+            // maintenance. Run one bounded control pass so the caller's
+            // explicit policy is applied before its retained scopes pin the
+            // shard.
+            control_retention = store
+                .control
+                .prune_code_repository_scopes(request.clone())
+                .await?;
             let repository_retention_job = control_retention.repository_retention_job.clone();
             if repository_retention_job.is_none() {
                 request.repository_retention_cutoff_ms = None;

@@ -54,7 +54,8 @@ pub(in crate::storage) fn preserve_existing_scope_commit(
         .query_row(
             "SELECT resolved_commit_sha
              FROM code_repository_scopes
-             WHERE repository_id = ?1 AND source_scope = ?2",
+             WHERE repository_id = ?1 AND source_scope = ?2
+               AND stale = 0 AND retiring = 0",
             params![repository_id, source_scope],
             |row| row.get::<_, String>(0),
         )

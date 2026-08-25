@@ -66,6 +66,40 @@ fn reference_fallback_preserves_cpp_header_language_intersection() {
 }
 
 #[test]
+fn degraded_scope_reference_hits_do_not_hide_bounded_source_recall() {
+    let request = request("ObjectUtils", CodeQueryKind::References, Vec::new());
+    let mut structured = hit("src/parsed.java", "ObjectUtils.equals(left, right)");
+    structured.retrieval_layers = vec![CodeRetrievalLayer::Reference];
+    let mut degraded = status();
+    degraded.degraded_reason = Some("one file degraded during parsing".to_owned());
+
+    let plan = plan_code_grep_fallback(&degraded, &request, &[structured.clone()])
+        .expect("degraded files can contain usages absent from structured reference facts");
+
+    assert_eq!(plan.query, "ObjectUtils");
+    assert!(plan.needs_scope_paths());
+    assert!(plan_code_grep_fallback(&status(), &request, &[structured]).is_none());
+}
+
+#[test]
+fn broad_reference_fallback_reserves_two_candidates_per_bounded_path() {
+    let request = request("ObjectUtils", CodeQueryKind::References, Vec::new());
+    let mut degraded = status();
+    degraded.degraded_reason = Some("one file degraded during parsing".to_owned());
+    let paths = (0..crate::code::SOURCE_GREP_CANDIDATE_FILE_LIMIT)
+        .map(|index| format!("src/Candidate{index:03}.java"))
+        .collect::<Vec<_>>();
+
+    let plan = plan_code_grep_fallback(&degraded, &request, &[])
+        .expect("degraded scope should plan source fallback")
+        .with_scope_paths(paths);
+    let source_request = plan.source_request();
+
+    assert_eq!(source_request.limit, 512);
+    assert_eq!(plan.limit, request.limit);
+}
+
+#[test]
 fn reference_grep_fallback_ranks_usage_before_array_declaration() {
     let request = request("rk_pipeline", CodeQueryKind::References, Vec::new());
     let mut results = vec![hit("src/pipeline.c", "int rk_dispatch(void);")];
@@ -199,6 +233,91 @@ fn reference_grep_fallback_keeps_assignment_values_at_base_score() {
         ),
         0.0
     );
+    assert_eq!(
+        reference_source_grep_score_adjustment(
+            "SessionDelegate",
+            "SessionDelegate",
+            "public let delegate: SessionDelegate"
+        ),
+        0.0
+    );
+    assert_eq!(
+        reference_source_grep_score_adjustment(
+            "SessionDelegate",
+            "SessionDelegate",
+            "/// Instance's SessionDelegate handles callbacks."
+        ),
+        -2.0
+    );
+}
+
+#[test]
+fn reference_grep_fallback_ranks_code_usage_before_document_surfaces() {
+    let selector =
+        crate::domain::CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate");
+    let request = CodeRetrievalRequest::new(
+        "SessionDelegate",
+        selector,
+        CodeQueryKind::References,
+        10,
+        crate::domain::FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+    let plan = CodeGrepFallbackPlan {
+        commit: "commit".to_owned(),
+        query: "SessionDelegate".to_owned(),
+        paths: Vec::new(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        limit: 10,
+        kind: SourceGrepKind::References,
+        identity: None,
+        exclude_generated: false,
+        read_worktree_overlay: false,
+        needs_scope_paths: false,
+    };
+    let mut results = Vec::new();
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![
+                SourceGrepMatch {
+                    path: "CHANGELOG.md".to_owned(),
+                    language_id: "markdown".to_owned(),
+                    excerpt: "SessionDelegate behavior changed.".to_owned(),
+                    byte_range: RepositoryCodeRange { start: 0, end: 33 },
+                    line_range: RepositoryCodeRange { start: 1, end: 1 },
+                    is_generated: false,
+                },
+                SourceGrepMatch {
+                    path: "Source/Core/Session.swift".to_owned(),
+                    language_id: "swift".to_owned(),
+                    excerpt: "/// Instance's SessionDelegate handles callbacks.".to_owned(),
+                    byte_range: RepositoryCodeRange { start: 0, end: 47 },
+                    line_range: RepositoryCodeRange { start: 1, end: 1 },
+                    is_generated: false,
+                },
+                SourceGrepMatch {
+                    path: "Source/Core/Session.swift".to_owned(),
+                    language_id: "swift".to_owned(),
+                    excerpt: "public let delegate: SessionDelegate".to_owned(),
+                    byte_range: RepositoryCodeRange { start: 48, end: 84 },
+                    line_range: RepositoryCodeRange { start: 2, end: 2 },
+                    is_generated: false,
+                },
+            ],
+            degraded_reason: None,
+        },
+    );
+
+    assert_eq!(results[0].excerpt, "public let delegate: SessionDelegate");
+    assert!(results[0].score > results[1].score);
+    assert!(results[0].score > results[2].score);
 }
 
 fn request(query: &str, kind: CodeQueryKind, path_filters: Vec<String>) -> CodeRetrievalRequest {

@@ -120,3 +120,7 @@ Hard constraints:
 - RocksDB: https://rocksdb.org/index.html
 - Google SRE cascading failures: https://sre.google/sre-book/addressing-cascading-failures/
 - Google SRE overload: https://sre.google/workbook/overload/
+
+---
+
+Navigation: Previous: [7. relay-knowledge Implementation Reference](07-relay-knowledge-implementation-reference.md) | Next: [9. GitNexus Feature and UI Implementation Research 2026](09-gitnexus-reference-analysis-2026.md)

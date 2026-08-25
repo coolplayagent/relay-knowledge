@@ -17,6 +17,7 @@ fn active_worktree_retains_a_clean_base_reached_through_commit_alias() {
                 resolved_commit_sha TEXT NOT NULL,
                 path_filters_json TEXT NOT NULL,
                 language_filters_json TEXT NOT NULL,
+                stale INTEGER NOT NULL DEFAULT 0,
                 retiring INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE code_repository_commit_scopes (
@@ -29,8 +30,8 @@ fn active_worktree_retains_a_clean_base_reached_through_commit_alias() {
                 source_scope TEXT NOT NULL
             );
             INSERT INTO code_repository_scopes VALUES
-                ('scope-base', 'repo', 'same-tree-newer', '[]', '[]', 0),
-                ('scope-worktree', 'repo', 'worktree:base-commit:overlay', '[]', '[]', 0);
+                ('scope-base', 'repo', 'same-tree-newer', '[]', '[]', 0, 0),
+                ('scope-worktree', 'repo', 'worktree:base-commit:overlay', '[]', '[]', 0, 0);
             INSERT INTO code_repository_commit_scopes VALUES
                 ('repo', 'base-commit', 'scope-base');
             ",
@@ -55,6 +56,7 @@ fn compatible_commit_scope_requires_matching_filters_and_no_retirement_job() {
                 resolved_commit_sha TEXT NOT NULL,
                 path_filters_json TEXT NOT NULL,
                 language_filters_json TEXT NOT NULL,
+                stale INTEGER NOT NULL DEFAULT 0,
                 retiring INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE code_repository_commit_scopes (
@@ -67,10 +69,11 @@ fn compatible_commit_scope_requires_matching_filters_and_no_retirement_job() {
                 source_scope TEXT NOT NULL
             );
             INSERT INTO code_repository_scopes VALUES
-                ('direct', 'repo', 'commit-a', '[\"src\"]', '[\"rust\"]', 0),
-                ('retiring', 'repo', 'commit-b', '[\"src\"]', '[\"rust\"]', 1),
-                ('alias', 'repo', 'newer-same-tree', '[\"src\"]', '[\"rust\"]', 0),
-                ('wrong-filter', 'repo', 'commit-a', '[]', '[\"rust\"]', 0);
+                ('direct', 'repo', 'commit-a', '[\"src\"]', '[\"rust\"]', 0, 0),
+                ('retiring', 'repo', 'commit-b', '[\"src\"]', '[\"rust\"]', 0, 1),
+                ('alias', 'repo', 'newer-same-tree', '[\"src\"]', '[\"rust\"]', 0, 0),
+                ('stale', 'repo', 'commit-c', '[\"src\"]', '[\"rust\"]', 1, 0),
+                ('wrong-filter', 'repo', 'commit-a', '[]', '[\"rust\"]', 0, 0);
             INSERT INTO code_repository_commit_scopes VALUES
                 ('repo', 'commit-b', 'alias');
             INSERT INTO code_repository_scope_gc_jobs VALUES
@@ -95,9 +98,18 @@ fn compatible_commit_scope_requires_matching_filters_and_no_retirement_job() {
         "[\"rust\"]",
     )
     .expect("alias scope should resolve");
+    let stale = compatible_non_retiring_scopes_for_commit(
+        &connection,
+        "repo",
+        "commit-c",
+        "[\"src\"]",
+        "[\"rust\"]",
+    )
+    .expect("stale scope eligibility should resolve");
 
     assert!(direct.is_empty());
     assert_eq!(alias, ["alias"]);
+    assert!(stale.is_empty());
 }
 
 #[test]

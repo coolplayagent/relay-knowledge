@@ -57,6 +57,27 @@ fn code_repository_application_root_contains_only_the_facade_and_named_subdomain
 }
 
 #[test]
+fn code_repository_indexing_root_contains_only_exact_workflow_owners() {
+    let indexing_root = source_root().join("application/code_repository/indexing");
+    assert_eq!(
+        directory_entry_names(&indexing_root),
+        [
+            "durable_incremental.rs",
+            "fast_path.rs",
+            "fast_path_tests.rs",
+            "mod.rs",
+            "queue.rs",
+            "resume_tests.rs",
+            "state.rs",
+            "state_tests.rs",
+            "task.rs",
+            "task_tests.rs",
+            "tasks.rs",
+        ]
+    );
+}
+
+#[test]
 fn repository_graph_application_root_contains_only_the_facade_and_its_direct_tests() {
     let repository_graph_root = source_root().join("application/code_repository/repository_graph");
     assert_eq!(
@@ -501,6 +522,7 @@ fn partitioned_storage_root_contains_only_the_facade_tests_and_named_subdomains(
             "indexing",
             "mod.rs",
             "mod_tests.rs",
+            "post_maintenance_tests.rs",
             "repository",
             "routing",
             "status",
@@ -519,6 +541,7 @@ fn partitioned_indexing_root_contains_only_named_workflow_subdomains() {
             "file_index",
             "lifecycle",
             "mod.rs",
+            "publication.rs",
             "retention",
             "test_support",
         ]

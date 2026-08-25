@@ -26,6 +26,7 @@ pub(in crate::evaluator) struct RepoReport {
     pub(in crate::evaluator) cases: Vec<CaseObservation>,
     pub(in crate::evaluator) metrics: Vec<MetricObservation>,
     pub(in crate::evaluator) index_summary: Value,
+    pub(in crate::evaluator) cold_index_result: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ pub(in crate::evaluator) struct EvalRuntime {
     pub(in crate::evaluator) limiter: Limiter,
     pub(in crate::evaluator) writer_lock: Arc<Mutex<()>>,
     pub(in crate::evaluator) query_jobs: usize,
+    pub(in crate::evaluator) keep_workdirs: bool,
 }
 
 #[derive(Debug, Clone)]

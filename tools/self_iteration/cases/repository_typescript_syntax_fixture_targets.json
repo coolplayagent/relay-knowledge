@@ -56,7 +56,7 @@
       "case_group": "typescript_tree_sitter_syntax"
     },
     {
-      "id": "typescript_syntax_external_react_import_grep_fallback",
+      "id": "typescript_syntax_external_react_import_graph",
       "repository": "typescript_syntax_fixture",
       "kind": "imports",
       "query": "react",
@@ -68,7 +68,7 @@
       "expected": [{
         "path": "src/component.tsx",
         "excerpt_contains": "import React from \"react\"",
-        "retrieval_layer": "text_fallback"
+        "retrieval_layer": "import_graph"
       }],
       "degraded_reason": null,
       "case_group": "typescript_tree_sitter_syntax"

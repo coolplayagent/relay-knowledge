@@ -2,10 +2,6 @@
 
 [English](../../en/05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md) | [中文](../../zh/05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
 
-This is the English documentation page for `05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md`. It follows the same structure, examples, commands, and implementation contracts as the Chinese edition so readers can switch languages without changing document location.
-
-> Translation status: the English edition preserves the current technical source text below while the full prose translation is maintained incrementally. Command examples, API paths, environment variables, filenames, and configuration contracts are authoritative.
-
 [Documentation index](../../en/README.md) | [GitHub repository](https://github.com/coolplayagent/relay-knowledge)
 
 ## Source Content

@@ -33,3 +33,46 @@ fn hit_pattern_can_require_retrieval_layer_and_absent_edge_confidence() {
 
     assert!(hit_matches_any(&hit, &[pattern]));
 }
+
+#[test]
+fn equivalent_relationship_candidates_can_be_checked_by_edge_contract() {
+    let hit = serde_json::json!({
+        "path": "src/any-importer.java",
+        "retrieval_layers": ["import_graph"],
+        "edge_kind": "import",
+        "edge_resolution_state": "resolved",
+        "edge_target_hint": "src/vendor/SharedType.java",
+        "excerpt": "import vendor.SharedType;"
+    });
+    let pattern = serde_json::json!({
+        "edge_kind": "import",
+        "edge_resolution_state": "resolved",
+        "edge_target_hint": "SharedType.java",
+        "retrieval_layer": "import_graph",
+        "excerpt_contains": "vendor.SharedType"
+    });
+
+    let wrong_kind = serde_json::json!({
+        "path": "src/any-importer.java",
+        "retrieval_layers": ["import_graph"],
+        "edge_kind": "reference",
+        "edge_resolution_state": "resolved",
+        "edge_target_hint": "src/vendor/SharedType.java",
+        "excerpt": "import vendor.SharedType;"
+    });
+    let misleading_suffix = serde_json::json!({
+        "path": "src/any-importer.java",
+        "retrieval_layers": ["import_graph"],
+        "edge_kind": "import",
+        "edge_resolution_state": "resolved",
+        "edge_target_hint": "src/vendor/FakeSharedType.java",
+        "excerpt": "import vendor.SharedType;"
+    });
+
+    assert!(hit_matches_any(&hit, std::slice::from_ref(&pattern)));
+    assert!(!hit_matches_any(
+        &wrong_kind,
+        std::slice::from_ref(&pattern),
+    ));
+    assert!(!hit_matches_any(&misleading_suffix, &[pattern]));
+}

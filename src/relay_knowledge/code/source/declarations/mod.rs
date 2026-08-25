@@ -170,33 +170,194 @@ fn first_source_declaration_match(
 }
 
 pub(crate) fn source_line_defines_identity(line: &str, identity: &str) -> bool {
+    let line = line.trim();
     if line.is_empty() || !line_contains_identifier(line, identity) {
         return false;
-    }
-    if line.starts_with("typedef ") || line.contains(" typedef ") {
-        return true;
     }
     if line.starts_with("#define ") {
         return line
             .strip_prefix("#define ")
             .is_some_and(|suffix| line_starts_with_identifier(suffix, identity));
     }
-    if line
+    if source_comment_line(line) {
+        return false;
+    }
+    if line.starts_with("typedef ") || line.contains(" typedef ") {
+        return true;
+    }
+    let declaration = strip_declaration_modifiers(line);
+    if declaration
         .strip_prefix("using ")
-        .or_else(|| line.strip_prefix("typealias "))
+        .or_else(|| declaration.strip_prefix("typealias "))
         .is_some_and(|suffix| line_starts_with_identifier(suffix, identity))
     {
         return true;
     }
-    if ["struct ", "class ", "enum ", "union ", "interface "]
-        .into_iter()
-        .filter_map(|prefix| line.strip_prefix(prefix))
-        .any(|suffix| line_starts_with_identifier(suffix, identity))
+    if [
+        "enum class ",
+        "enum struct ",
+        "record class ",
+        "record struct ",
+        "@interface ",
+        "struct ",
+        "class ",
+        "enum ",
+        "union ",
+        "interface ",
+        "trait ",
+        "protocol ",
+        "record ",
+        "actor ",
+    ]
+    .into_iter()
+    .filter_map(|prefix| declaration.strip_prefix(prefix))
+    .any(|suffix| line_starts_with_identifier(suffix, identity))
     {
         return true;
     }
+    if declaration
+        .strip_prefix(identity)
+        .is_some_and(|suffix| suffix.trim_start().starts_with('('))
+    {
+        return false;
+    }
 
-    line.contains('(') && line_looks_like_function_definition(line, identity)
+    declaration.contains('(') && line_looks_like_function_definition(declaration, identity)
+}
+
+fn source_comment_line(line: &str) -> bool {
+    line.starts_with("//")
+        || line.starts_with("/*")
+        || line.starts_with('*')
+        || (line.starts_with('#') && !line.starts_with("#["))
+        || line.starts_with("--")
+        || line.starts_with("<!--")
+}
+
+fn strip_declaration_modifiers(mut line: &str) -> &str {
+    loop {
+        let trimmed = line.trim_start();
+        if let Some(suffix) = strip_declaration_attribute(trimmed) {
+            line = suffix;
+            continue;
+        }
+        let Some((head, tail)) = trimmed.split_once(char::is_whitespace) else {
+            return trimmed;
+        };
+        if !declaration_modifier(head) {
+            return trimmed;
+        }
+        line = tail;
+    }
+}
+
+fn strip_declaration_attribute(line: &str) -> Option<&str> {
+    if line.starts_with("@interface") {
+        return None;
+    }
+    if line.starts_with("#[") {
+        return balanced_prefix_suffix(line, 1, '[', ']');
+    }
+    if line.starts_with('[') {
+        return balanced_prefix_suffix(line, 0, '[', ']');
+    }
+    let annotation = line.strip_prefix('@')?;
+    let name_end = annotation
+        .char_indices()
+        .find(|(_, character)| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '$'))
+        })
+        .map_or(annotation.len(), |(index, _)| index);
+    if name_end == 0 {
+        return None;
+    }
+    let after_name = &annotation[name_end..];
+    let whitespace_len = after_name.len() - after_name.trim_start().len();
+    let after_whitespace = &after_name[whitespace_len..];
+    if after_whitespace.starts_with('(') {
+        let open_index = line.len() - after_whitespace.len();
+        balanced_prefix_suffix(line, open_index, '(', ')')
+    } else {
+        Some(after_name)
+    }
+}
+
+fn balanced_prefix_suffix(value: &str, open_index: usize, open: char, close: char) -> Option<&str> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, character) in value[open_index..].char_indices() {
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        } else if character == open {
+            depth += 1;
+        } else if character == close {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                let end = open_index + offset + character.len_utf8();
+                return value.get(end..);
+            }
+        }
+    }
+    None
+}
+
+fn declaration_modifier(token: &str) -> bool {
+    matches!(
+        token,
+        "abstract"
+            | "async"
+            | "case"
+            | "consteval"
+            | "constexpr"
+            | "convenience"
+            | "data"
+            | "default"
+            | "distributed"
+            | "explicit"
+            | "export"
+            | "extern"
+            | "file"
+            | "final"
+            | "friend"
+            | "indirect"
+            | "inline"
+            | "internal"
+            | "mutating"
+            | "native"
+            | "non-sealed"
+            | "nonmutating"
+            | "open"
+            | "override"
+            | "partial"
+            | "private"
+            | "protected"
+            | "pub"
+            | "public"
+            | "readonly"
+            | "ref"
+            | "required"
+            | "sealed"
+            | "static"
+            | "strictfp"
+            | "synchronized"
+            | "unsafe"
+            | "value"
+            | "virtual"
+    ) || (token.starts_with("pub(") && token.ends_with(')'))
+        || (token.starts_with("private[") && token.ends_with(']'))
+        || (token.starts_with("protected[") && token.ends_with(']'))
+        || (token.starts_with('@') && token != "@interface")
 }
 
 fn line_looks_like_function_definition(line: &str, identity: &str) -> bool {
@@ -206,7 +367,11 @@ fn line_looks_like_function_definition(line: &str, identity: &str) -> bool {
         }
         let prefix = line[..identity_start].trim_start();
         let suffix = line[identity_start + identity.len()..].trim_start();
-        if !suffix.starts_with('(') || prefix.contains('=') {
+        if !suffix.starts_with('(')
+            || prefix.contains('=')
+            || prefix.ends_with('~')
+            || (prefix.ends_with("::") && !prefix.contains(char::is_whitespace))
+        {
             return false;
         }
         if prefix.chars().next_back().is_some_and(|character| {
@@ -216,7 +381,20 @@ fn line_looks_like_function_definition(line: &str, identity: &str) -> bool {
         }
         !matches!(
             prefix.split_whitespace().next(),
-            Some("if" | "for" | "while" | "switch" | "return")
+            Some(
+                "await"
+                    | "co_await"
+                    | "delete"
+                    | "for"
+                    | "if"
+                    | "new"
+                    | "return"
+                    | "switch"
+                    | "throw"
+                    | "try"
+                    | "while"
+                    | "yield"
+            )
         )
     })
 }

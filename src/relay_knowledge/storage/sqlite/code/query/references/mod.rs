@@ -1,5 +1,14 @@
-use rusqlite::{Connection, Row, params_from_iter, types::Value};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
+use rusqlite::{Connection, ErrorCode, Row, params_from_iter, types::Value};
+
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{
         CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
@@ -47,9 +56,21 @@ const REFERENCE_MEMBER_CALL_USAGE_BONUS: f64 = 1.2;
 const REFERENCE_RETURN_USAGE_BONUS: f64 = 1.45;
 const REFERENCE_PLAIN_CALL_USAGE_BONUS: f64 = 1.05;
 const REFERENCE_RETURN_CALL_USAGE_BONUS: f64 = 1.55;
+const REFERENCE_REPEATED_GROUP_MAX_BONUS: f64 = 0.75;
+const REFERENCE_EXPANSION_PROGRESS_INTERVAL: i32 = 1_000;
+const REFERENCE_EXPANSION_MAX_PROGRESS_CALLBACKS: usize = 4_096;
 struct ReferenceIdentityRows {
     rows: Vec<ReferenceRow>,
     saturated: bool,
+}
+
+struct ReferenceSearchCandidate {
+    record_id: String,
+    name: Option<String>,
+    kind: Option<String>,
+    path: Option<String>,
+    target_hint: Option<String>,
+    occurrence_count: Option<usize>,
 }
 
 pub(super) fn search_references(
@@ -57,6 +78,13 @@ pub(super) fn search_references(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    let grouped_projection = reference_search_projection_is_current(connection, status)?;
+    if status.state == "fresh" && !status.stale && !grouped_projection {
+        return Err(StorageError::Invariant(format!(
+            "fresh code repository scope '{}' is missing its current grouped reference-search projection",
+            required_scope(status)?
+        )));
+    }
     let identity = SymbolIdentityQuery::from_query(&request.query);
     let mut identity_hits = Vec::new();
     if let Some(identity) = &identity {
@@ -97,20 +125,21 @@ pub(super) fn search_references(
         }
     }
 
-    let reference_fts_rows = match search_reference_fts_rows(connection, status, request) {
-        Ok(rows) => rows,
-        Err(error) => {
-            let Some(reason) = code_search_plannable_outage_reason(request, &error) else {
-                return Err(error);
-            };
-            if identity_hits.is_empty() {
-                return Err(error);
+    let reference_fts_rows =
+        match search_reference_fts_rows(connection, status, request, grouped_projection) {
+            Ok(rows) => rows,
+            Err(error) => {
+                let Some(reason) = code_search_plannable_outage_reason(request, &error) else {
+                    return Err(error);
+                };
+                if identity_hits.is_empty() {
+                    return Err(error);
+                }
+                mark_hits_degraded(&mut identity_hits, &reason);
+                filter_dedupe_sort_truncate(&mut identity_hits, request);
+                return Ok(identity_hits);
             }
-            mark_hits_degraded(&mut identity_hits, &reason);
-            filter_dedupe_sort_truncate(&mut identity_hits, request);
-            return Ok(identity_hits);
-        }
-    };
+        };
     let mut hits = reference_rows_to_hits(status, request, reference_fts_rows);
     hits.extend(identity_hits);
 
@@ -166,41 +195,327 @@ fn search_reference_fts_rows(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
+    grouped_projection: bool,
 ) -> Result<Vec<ReferenceRow>, StorageError> {
     let fts_query = fts_match_query(&request.query);
     let fts_filter = fts_path_and_language_filter_sql(status, request);
     let exclude_generated_flag = usize::from(request.exclude_generated);
-    let sql = reference_rows_sql(&format!(
-        "
-          AND r.reference_id IN (
-              SELECT record_id
-              FROM code_repository_search
-              WHERE code_repository_search MATCH ?
-                AND source_scope = ?
-                AND document_kind = 'reference'
-                {fts_filter}
-                AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
-              ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
-                  bm25(code_repository_search) ASC,
-                  record_id ASC
-              LIMIT ?
-          )
-        "
-    ));
-    let mut statement = prepare_code_search_statement(connection, &sql)?;
-    let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
+    let reference_candidate_limit = candidate_limit(request, CandidateLayer::Reference);
+    let candidate_sql = format!(
+        "SELECT code_repository_search.record_id,
+                search_group.name, search_group.kind, search_group.path,
+                search_group.target_hint, search_group.occurrence_count,
+                coalesce((SELECT fts_file.is_generated
+                          FROM code_repository_files fts_file
+                          WHERE fts_file.source_scope = code_repository_search.source_scope
+                            AND fts_file.path = code_repository_search.path
+                          LIMIT 1), 0) AS generated_rank,
+                bm25(code_repository_search) AS fts_rank
+         FROM code_repository_search
+         LEFT JOIN code_repository_reference_search_groups search_group
+           ON search_group.source_scope = code_repository_search.source_scope
+          AND search_group.group_id = code_repository_search.record_id
+         WHERE code_repository_search MATCH ?
+           AND code_repository_search.source_scope = ?
+           AND code_repository_search.document_kind = 'reference'
+           {EXACT_SEARCH_OWNER_PREDICATE_SQL}
+           {fts_filter}
+           AND ({exclude_generated_flag} = 0 OR NOT EXISTS (
+               SELECT 1 FROM code_repository_files fts_file
+               WHERE fts_file.source_scope = code_repository_search.source_scope
+                 AND fts_file.path = code_repository_search.path
+                 AND fts_file.is_generated != 0
+           ))
+         ORDER BY generated_rank ASC,
+                  CASE
+                      WHEN coalesce(search_group.occurrence_count, 1) >= 4 THEN 0
+                      WHEN coalesce(search_group.occurrence_count, 1) >= 2 THEN 1
+                      ELSE 2
+                  END ASC,
+                  fts_rank ASC,
+                  code_repository_search.record_id ASC
+         LIMIT ?"
+    );
+    let mut candidate_values = vec![
+        Value::Text(fts_query),
+        Value::Text(required_scope(status)?.to_owned()),
+    ];
+    push_path_filter_values(&mut candidate_values, &status.path_filters);
+    push_path_filter_values(&mut candidate_values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut candidate_values, &request.query_path_substrings);
+    push_language_filter_values(&mut candidate_values, &status.language_filters);
+    push_language_filter_values(&mut candidate_values, &request.repository.language_filters);
+    push_language_filter_values(&mut candidate_values, &request.query_language_filters);
+    candidate_values.push(Value::Integer(reference_candidate_limit as i64));
+    let mut statement = prepare_code_search_statement(connection, &candidate_sql)?;
+    let candidates = statement
+        .query_map(params_from_iter(candidate_values), |row| {
+            Ok(ReferenceSearchCandidate {
+                record_id: row.get(0)?,
+                name: row.get(1)?,
+                kind: row.get(2)?,
+                path: row.get(3)?,
+                target_hint: row.get(4)?,
+                occurrence_count: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let reference_ids = if grouped_projection {
+        expand_grouped_reference_candidates(
+            connection,
             required_scope(status)?,
-            status,
-            request,
-            &fts_query,
-            candidate_limit(request, CandidateLayer::Reference),
-            candidate_limit(request, CandidateLayer::Reference),
-        )),
-        row_to_reference,
-    )?;
+            &candidates,
+            reference_candidate_limit,
+        )?
+    } else {
+        candidates
+            .into_iter()
+            .map(|candidate| candidate.record_id)
+            .collect()
+    };
+    hydrate_reference_ids(
+        connection,
+        status,
+        &reference_ids,
+        reference_candidate_limit,
+    )
+}
 
-    rows.collect::<Result<Vec<_>, _>>()
+fn expand_grouped_reference_candidates(
+    connection: &Connection,
+    source_scope: &str,
+    candidates: &[ReferenceSearchCandidate],
+    limit: usize,
+) -> Result<Vec<String>, StorageError> {
+    expand_grouped_reference_candidates_with_progress_budget(
+        connection,
+        source_scope,
+        candidates,
+        limit,
+        REFERENCE_EXPANSION_PROGRESS_INTERVAL,
+        REFERENCE_EXPANSION_MAX_PROGRESS_CALLBACKS,
+    )
+}
+
+fn expand_grouped_reference_candidates_with_progress_budget(
+    connection: &Connection,
+    source_scope: &str,
+    candidates: &[ReferenceSearchCandidate],
+    limit: usize,
+    progress_interval: i32,
+    max_progress_callbacks: usize,
+) -> Result<Vec<String>, StorageError> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut quotas = vec![0usize; candidates.len()];
+    let occurrence_counts = candidates
+        .iter()
+        .map(|candidate| {
+            candidate.occurrence_count.ok_or_else(|| {
+                StorageError::Invariant(format!(
+                    "grouped reference-search candidate '{}' is missing its occurrence count",
+                    candidate.record_id
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut remaining = limit;
+    while remaining != 0 {
+        let mut advanced = false;
+        for (quota, occurrence_count) in quotas.iter_mut().zip(&occurrence_counts) {
+            if *quota < *occurrence_count {
+                *quota += 1;
+                remaining -= 1;
+                advanced = true;
+                if remaining == 0 {
+                    break;
+                }
+            }
+        }
+        if !advanced {
+            break;
+        }
+    }
+    let callbacks = Arc::new(AtomicUsize::new(0));
+    let observed_callbacks = Arc::clone(&callbacks);
+    connection.progress_handler(
+        progress_interval,
+        Some(move || observed_callbacks.fetch_add(1, Ordering::Relaxed) >= max_progress_callbacks),
+    );
+    let result = expand_grouped_reference_candidates_with_active_budget(
+        connection,
+        source_scope,
+        candidates,
+        limit,
+        quotas,
+    );
+    connection.progress_handler(0, None::<fn() -> bool>);
+    result
+}
+
+fn expand_grouped_reference_candidates_with_active_budget(
+    connection: &Connection,
+    source_scope: &str,
+    candidates: &[ReferenceSearchCandidate],
+    limit: usize,
+    quotas: Vec<usize>,
+) -> Result<Vec<String>, StorageError> {
+    let mut per_group = candidates
+        .iter()
+        .zip(&quotas)
+        .map(|(candidate, quota)| {
+            if *quota == 0 {
+                Vec::new()
+            } else {
+                vec![candidate.record_id.clone()]
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut statement = connection
+        .prepare(
+            "SELECT reference_id
+         FROM code_repository_references INDEXED BY code_repository_references_lookup
+         WHERE source_scope = ?1 AND name = ?2 AND kind = ?3 AND path = ?4
+           AND coalesce(target_hint, '') = ?5
+           AND reference_id <> ?6
+         ORDER BY reference_id
+         LIMIT ?7",
+        )
+        .map_err(reference_expansion_sql_error)?;
+    let mut interrupted = false;
+    'groups: for (index, candidate) in candidates.iter().enumerate() {
+        let (Some(name), Some(kind), Some(path), Some(target_hint)) = (
+            candidate.name.as_deref(),
+            candidate.kind.as_deref(),
+            candidate.path.as_deref(),
+            candidate.target_hint.as_deref(),
+        ) else {
+            return Err(StorageError::Invariant(format!(
+                "grouped reference-search candidate '{}' is missing its exact group owner",
+                candidate.record_id
+            )));
+        };
+        let quota = quotas[index];
+        if quota <= 1 {
+            continue;
+        }
+        let mut rows = statement
+            .query(rusqlite::params![
+                source_scope,
+                name,
+                kind,
+                path,
+                target_hint,
+                candidate.record_id,
+                quota - 1,
+            ])
+            .map_err(reference_expansion_sql_error)?;
+        loop {
+            match rows.next() {
+                Ok(Some(row)) => per_group[index].push(row.get::<_, String>(0)?),
+                Ok(None) => break,
+                Err(error) if sqlite_operation_interrupted(&error) => {
+                    interrupted = true;
+                    break 'groups;
+                }
+                Err(error) => return Err(StorageError::from(error)),
+            }
+        }
+        if per_group[index].len() != quota {
+            return Err(StorageError::Invariant(format!(
+                "grouped reference-search candidate '{}' occurrence count does not match its facts",
+                candidate.record_id
+            )));
+        }
+    }
+    if interrupted {
+        return Err(StorageError::CapacityExceeded(
+            "grouped reference-search occurrence expansion exceeded its bounded SQL work budget"
+                .to_owned(),
+        ));
+    }
+    let mut expanded = Vec::with_capacity(limit);
+    let max_quota = quotas.into_iter().max().unwrap_or(0);
+    for ordinal in 0..max_quota {
+        for group in &per_group {
+            if let Some(reference_id) = group.get(ordinal) {
+                expanded.push(reference_id.clone());
+                if expanded.len() == limit {
+                    return Ok(expanded);
+                }
+            }
+        }
+    }
+    Ok(expanded)
+}
+
+fn sqlite_operation_interrupted(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(inner, _)
+            if inner.code == ErrorCode::OperationInterrupted
+    )
+}
+
+fn reference_expansion_sql_error(error: rusqlite::Error) -> StorageError {
+    if sqlite_operation_interrupted(&error) {
+        StorageError::CapacityExceeded(
+            "grouped reference-search occurrence expansion exceeded its bounded SQL work budget"
+                .to_owned(),
+        )
+    } else {
+        StorageError::from(error)
+    }
+}
+
+fn hydrate_reference_ids(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    reference_ids: &[String],
+    limit: usize,
+) -> Result<Vec<ReferenceRow>, StorageError> {
+    if reference_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", reference_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = reference_rows_sql(&format!("AND r.reference_id IN ({placeholders})"));
+    let mut values = Vec::with_capacity(reference_ids.len() + 2);
+    values.push(Value::Text(required_scope(status)?.to_owned()));
+    values.extend(reference_ids.iter().cloned().map(Value::Text));
+    values.push(Value::Integer(limit as i64));
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
+    let rows = statement.query_map(params_from_iter(values), row_to_reference)?;
+    let rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    if rows.len() != reference_ids.len() {
+        return Err(StorageError::Invariant(
+            "reference-search candidates do not match their exact occurrence facts".to_owned(),
+        ));
+    }
+    Ok(rows)
+}
+
+fn reference_search_projection_is_current(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1
+                 FROM code_repository_reference_search_manifests manifest
+                 WHERE manifest.source_scope = ?1
+                   AND manifest.projection_version = 2
+                   AND manifest.reference_count = ?2
+                   AND manifest.group_count <= manifest.reference_count
+             )",
+            rusqlite::params![required_scope(status)?, status.reference_count],
+            |row| row.get::<_, bool>(0),
+        )
         .map_err(StorageError::from)
 }
 
@@ -286,6 +601,17 @@ fn reference_rows_to_hits(
 ) -> Vec<CodeRetrievalHit> {
     let score_query = ScoreQuery::new(&request.query);
     let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
+    let mut group_occurrence_counts = HashMap::new();
+    for row in &rows {
+        *group_occurrence_counts
+            .entry((
+                row.path.clone(),
+                row.name.clone(),
+                row.kind.clone(),
+                row.target_hint.clone().unwrap_or_default(),
+            ))
+            .or_insert(0usize) += 1;
+    }
 
     rows.into_iter()
         .filter(|row| {
@@ -298,6 +624,15 @@ fn reference_rows_to_hits(
             )
         })
         .filter_map(|row| {
+            let group_occurrence_count = group_occurrence_counts
+                .get(&(
+                    row.path.clone(),
+                    row.name.clone(),
+                    row.kind.clone(),
+                    row.target_hint.clone().unwrap_or_default(),
+                ))
+                .copied()
+                .unwrap_or(1);
             let base_score = score_query.score([
                 row.name.as_str(),
                 row.kind.as_str(),
@@ -335,7 +670,8 @@ fn reference_rows_to_hits(
                     request,
                     query_has_test_intent,
                 )
-                + reference_same_name_file_penalty(base_score, &row.path, request);
+                + reference_same_name_file_penalty(base_score, &row.path, request)
+                + repeated_reference_group_bonus(base_score, group_occurrence_count);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -366,6 +702,14 @@ fn reference_rows_to_hits(
             })
         })
         .collect()
+}
+
+fn repeated_reference_group_bonus(base_score: f64, occurrence_count: usize) -> f64 {
+    if base_score <= 0.0 || occurrence_count < 2 {
+        return 0.0;
+    }
+    let evidence_buckets = occurrence_count.ilog2().min(3);
+    f64::from(evidence_buckets) * (REFERENCE_REPEATED_GROUP_MAX_BONUS / 3.0)
 }
 
 fn focused_reference_source_excerpt(row: &ReferenceRow) -> Option<String> {
@@ -609,3 +953,7 @@ fn identifier_is_return_value(before: &str) -> bool {
 #[cfg(test)]
 #[path = "scoring_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "grouped_projection_tests.rs"]
+mod grouped_projection_tests;

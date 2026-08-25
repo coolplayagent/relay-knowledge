@@ -32,14 +32,13 @@ fn score_query_ignores_single_letter_path_extension_noise() {
 }
 
 #[test]
-fn score_query_preserves_score_text_semantics() {
-    let query = "Cache archiveOutput";
-    let fields = ["block_cache", "def archive_output_dir() -> Path:"];
+fn score_query_preserves_exact_identifier_and_substring_weights() {
+    let exact_score = ScoreQuery::new("Cache archiveOutput").score(["cache", "archiveOutput"]);
+    let identifier_score = ScoreQuery::new("Cache archiveOutput")
+        .score(["block_cache", "def archive_output_dir() -> Path:"]);
 
-    assert_eq!(
-        ScoreQuery::new(query).score(fields),
-        score_text(query, fields)
-    );
+    assert_eq!(exact_score, 8.0);
+    assert_eq!(identifier_score, 2.0);
     assert_eq!(ScoreQuery::new("   ").score(["anything"]), 0.0);
 }
 

@@ -85,9 +85,9 @@ async fn repository_set_overlay_refresh_resolves_pnpm_workspace_package_imports(
         .await
         .expect("overlay should refresh");
 
-    assert_eq!(summary.edge_count, 2);
+    assert_eq!(summary.edge_count, 1);
     assert_eq!(summary.resolved_edge_count, 1);
-    assert_eq!(summary.unresolved_edge_count, 1);
+    assert_eq!(summary.unresolved_edge_count, 0);
     assert!(edges.iter().any(|edge| {
         edge.from_record_id == "import-ui-components"
             && edge.resolution_state == "resolved"
@@ -95,14 +95,12 @@ async fn repository_set_overlay_refresh_resolves_pnpm_workspace_package_imports(
             && edge.to_record_kind == "code_file"
             && edge.to_record_id.as_deref() == Some("ui-index-file")
     }));
-    assert!(edges.iter().any(|edge| {
-        edge.from_record_id == "import-missing-package"
-            && edge.resolution_state == "unresolved"
-            && edge.to_source_scope.is_none()
-            && edge.to_repository_id.is_none()
-            && edge.to_record_kind == "unresolved_target"
-            && edge.evidence_json.contains("@myorg/missing")
-    }));
+    assert!(
+        edges
+            .iter()
+            .all(|edge| edge.from_record_id != "import-missing-package"),
+        "an unmatched source import must not be duplicated into the set overlay"
+    );
 }
 
 fn large_package_manifest_with_late_fields() -> String {

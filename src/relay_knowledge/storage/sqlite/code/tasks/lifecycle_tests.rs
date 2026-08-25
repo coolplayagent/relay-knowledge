@@ -1,16 +1,37 @@
 use rusqlite::params;
 
-use super as tasks;
+use super::test_support::{
+    complete_task_at_request_time, fail_task_at_request_time, persist_published_task_target,
+};
 use crate::{
     domain::{
         CodeIndexMode, CodeIndexResourceBudget, CodeIndexTaskState, CodeRepositoryRegistration,
     },
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositoryStore,
-        CodeScopeRetentionRequest, SqliteGraphStore,
+        CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
     },
 };
+
+mod tasks {
+    pub(super) use super::super::{active_task, queue_task, renew_task_lease_at, task_by_id};
+
+    pub(super) fn claim_task(
+        connection: &mut rusqlite::Connection,
+        request: crate::storage::CodeIndexTaskClaimRequest,
+    ) -> Result<Option<crate::domain::CodeIndexTaskRecord>, crate::storage::StorageError> {
+        let execution_now_ms = request.now_ms;
+        super::super::claim_task_at(connection, request, execution_now_ms)
+    }
+
+    pub(super) fn recover_expired_task_leases(
+        connection: &mut rusqlite::Connection,
+        now_ms: u64,
+        max_attempts: u32,
+    ) -> Result<(), crate::storage::StorageError> {
+        super::super::recover_expired_task_leases_at(connection, now_ms, max_attempts, now_ms)
+    }
+}
 
 #[tokio::test]
 async fn code_index_task_queue_claim_and_complete_round_trip() {
@@ -69,13 +90,15 @@ async fn code_index_task_queue_claim_and_complete_round_trip() {
     let invalid_complete = store
         .run({
             let task_id = running.task_id.clone();
+            let publication_generation = running.publication_generation;
             move |connection| {
-                tasks::complete_task(
+                complete_task_at_request_time(
                     connection,
                     CodeIndexTaskCompletion {
                         task_id,
                         lease_owner: "other-worker".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         now_ms: 120,
                     },
                 )
@@ -85,16 +108,26 @@ async fn code_index_task_queue_claim_and_complete_round_trip() {
         .expect_err("wrong lease owner should be rejected");
     assert!(invalid_complete.to_string().contains("lease"));
 
+    store
+        .run({
+            let running = running.clone();
+            move |connection| persist_published_task_target(connection, &running)
+        })
+        .await
+        .expect("task target should be durably published before completion");
+
     let completed = store
         .run({
             let task_id = running.task_id.clone();
+            let publication_generation = running.publication_generation;
             move |connection| {
-                tasks::complete_task(
+                complete_task_at_request_time(
                     connection,
                     CodeIndexTaskCompletion {
                         task_id,
                         lease_owner: "worker-a".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         now_ms: 130,
                     },
                 )
@@ -268,16 +301,19 @@ async fn code_index_sqlite_lock_cases_task_transitions_return_updated_rows() {
     let renewed = store
         .run({
             let task_id = running.task_id.clone();
+            let publication_generation = running.publication_generation;
             move |connection| {
-                tasks::renew_task_lease(
+                tasks::renew_task_lease_at(
                     connection,
                     CodeIndexTaskLeaseRenewal {
                         task_id,
                         lease_owner: "worker-a".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         lease_duration_ms: 200,
                         now_ms: 30,
                     },
+                    30,
                 )
             }
         })
@@ -287,16 +323,26 @@ async fn code_index_sqlite_lock_cases_task_transitions_return_updated_rows() {
     assert_eq!(renewed.lease_owner.as_deref(), Some("worker-a"));
     assert_eq!(renewed.lease_expires_at_ms, Some(230));
 
+    store
+        .run({
+            let renewed = renewed.clone();
+            move |connection| persist_published_task_target(connection, &renewed)
+        })
+        .await
+        .expect("task target should be durably published before completion");
+
     let completed = store
         .run({
             let task_id = running.task_id.clone();
+            let publication_generation = renewed.publication_generation;
             move |connection| {
-                tasks::complete_task(
+                complete_task_at_request_time(
                     connection,
                     CodeIndexTaskCompletion {
                         task_id,
                         lease_owner: "worker-a".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         now_ms: 40,
                     },
                 )
@@ -338,13 +384,15 @@ async fn code_index_sqlite_lock_cases_task_transitions_return_updated_rows() {
     let failed = store
         .run({
             let task_id = running_failure.task_id.clone();
+            let publication_generation = running_failure.publication_generation;
             move |connection| {
-                tasks::fail_task(
+                fail_task_at_request_time(
                     connection,
                     CodeIndexTaskFailure {
                         task_id,
                         lease_owner: "worker-b".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         error_kind: "code_index".to_owned(),
                         error_message: "retryable failure".to_owned(),
                         retry_backoff_ms: 25,
@@ -445,13 +493,15 @@ async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
     let stale_complete = store
         .run({
             let task_id = queued.task_id.clone();
+            let publication_generation = first_claim.publication_generation;
             move |connection| {
-                tasks::complete_task(
+                complete_task_at_request_time(
                     connection,
                     CodeIndexTaskCompletion {
                         task_id,
                         lease_owner: "worker-a".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         now_ms: 32,
                     },
                 )
@@ -462,13 +512,15 @@ async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
     let stale_failure = store
         .run({
             let task_id = queued.task_id.clone();
+            let publication_generation = first_claim.publication_generation;
             move |connection| {
-                tasks::fail_task(
+                fail_task_at_request_time(
                     connection,
                     CodeIndexTaskFailure {
                         task_id,
                         lease_owner: "worker-a".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         error_kind: "late_worker".to_owned(),
                         error_message: "late failure".to_owned(),
                         retry_backoff_ms: 30,
@@ -486,13 +538,15 @@ async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
     let retrying = store
         .run({
             let task_id = queued.task_id.clone();
+            let publication_generation = reclaimed.publication_generation;
             move |connection| {
-                tasks::fail_task(
+                fail_task_at_request_time(
                     connection,
                     CodeIndexTaskFailure {
                         task_id,
                         lease_owner: "worker-b".to_owned(),
                         attempt_count: 2,
+                        publication_generation,
                         error_kind: "code_index".to_owned(),
                         error_message: "parse failed".to_owned(),
                         retry_backoff_ms: 30,
@@ -552,13 +606,15 @@ async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
     let dead = store
         .run({
             let task_id = queued.task_id.clone();
+            let publication_generation = final_claim.publication_generation;
             move |connection| {
-                tasks::fail_task(
+                fail_task_at_request_time(
                     connection,
                     CodeIndexTaskFailure {
                         task_id,
                         lease_owner: "worker-c".to_owned(),
                         attempt_count: 3,
+                        publication_generation,
                         error_kind: "code_index".to_owned(),
                         error_message: "still failing".to_owned(),
                         retry_backoff_ms: 30,
@@ -677,19 +733,22 @@ async fn code_index_task_lease_validation_recovery_and_renewal_are_explicit() {
         .expect("claim should load")
         .expect("task should claim");
 
+    let publication_generation = running.publication_generation;
     let renewed = store
         .run({
             let task_id = running.task_id.clone();
             move |connection| {
-                tasks::renew_task_lease(
+                tasks::renew_task_lease_at(
                     connection,
                     CodeIndexTaskLeaseRenewal {
                         task_id,
                         lease_owner: "worker-a".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         lease_duration_ms: 50,
                         now_ms: 25,
                     },
+                    25,
                 )
             }
         })
@@ -700,20 +759,24 @@ async fn code_index_task_lease_validation_recovery_and_renewal_are_explicit() {
         .run({
             let task_id = running.task_id.clone();
             move |connection| {
-                tasks::renew_task_lease(
+                tasks::renew_task_lease_at(
                     connection,
                     CodeIndexTaskLeaseRenewal {
                         task_id,
                         lease_owner: "worker-a".to_owned(),
                         attempt_count: 1,
+                        publication_generation,
                         lease_duration_ms: 10,
                         now_ms: 75,
                     },
+                    75,
                 )
             }
         })
         .await
-        .expect_err("expired lease should not renew");
+        .expect_err(
+            "expired lease must not renew even while its attempt fence remains authoritative",
+        );
     assert!(stale_renew.to_string().contains("active lease"));
 
     store
@@ -756,97 +819,6 @@ async fn code_index_task_lease_validation_recovery_and_renewal_are_explicit() {
         .expect("dead task should exist");
     assert_eq!(dead.state, CodeIndexTaskState::DeadLetter);
     assert!(dead.lease_owner.is_none());
-}
-
-#[tokio::test]
-async fn code_scope_retention_prunes_only_non_retained_scopes() {
-    let store = registered_store().await;
-    store
-        .run(|connection| {
-            for (scope, updated_at) in [
-                ("scope-old", 10_u64),
-                ("scope-one", 100),
-                ("scope-two", 200),
-                ("scope-active", 300),
-            ] {
-                insert_scope(connection, scope)?;
-                insert_checkpoint(connection, scope, updated_at)?;
-            }
-            connection.execute(
-                "
-                UPDATE code_repositories
-                SET last_indexed_scope_id = 'scope-active',
-                    last_indexed_commit = 'commit-active',
-                    tree_hash = 'tree-active'
-                WHERE repository_id = 'repo'
-                ",
-                [],
-            )?;
-            tasks::queue_task(connection, seed("fp-unfinished", "scope-two", 400))?;
-            Ok(())
-        })
-        .await
-        .expect("fixtures should insert");
-
-    let retention = store
-        .run(|connection| tasks::retention_status(connection, "repo"))
-        .await
-        .expect("retention status should query");
-    assert!(
-        retention
-            .retained_scopes
-            .contains(&"scope-active".to_owned())
-    );
-    assert!(retention.retained_scopes.contains(&"scope-two".to_owned()));
-
-    let mut retired_scopes = Vec::new();
-    let mut initial_prunable_count = 0;
-    for pass_index in 0..128 {
-        let pass = store
-            .run(|connection| {
-                tasks::prune_scopes(
-                    connection,
-                    CodeScopeRetentionRequest {
-                        repository_id: "repo".to_owned(),
-                        active_scope: "scope-active".to_owned(),
-                        retain_recent_successful_scopes: 1,
-                        repository_retention_cutoff_ms: None,
-                        repository_retention_cutoff_generation: None,
-                        repository_retention_initial_scope: None,
-                    },
-                )
-            })
-            .await
-            .expect("prune should run");
-        if pass_index == 0 {
-            initial_prunable_count = pass.prunable_scope_count;
-        }
-        retired_scopes.extend(pass.pruned_scopes);
-        if !pass.maintenance_pending {
-            break;
-        }
-    }
-    retired_scopes.sort();
-    assert_eq!(retired_scopes, ["scope-old", "scope-one"]);
-    assert_eq!(initial_prunable_count, 2);
-
-    let remaining = store
-        .run(|connection| {
-            let scope_count = connection.query_row(
-                "SELECT COUNT(*) FROM code_repository_scopes",
-                [],
-                |row| row.get::<_, usize>(0),
-            )?;
-            let old_checkpoint_count = connection.query_row(
-                "SELECT COUNT(*) FROM code_repository_index_checkpoints WHERE source_scope = 'scope-old'",
-                [],
-                |row| row.get::<_, usize>(0),
-            )?;
-            Ok((scope_count, old_checkpoint_count))
-        })
-        .await
-        .expect("remaining rows should query");
-    assert_eq!(remaining, (2, 0));
 }
 
 async fn registered_store() -> SqliteGraphStore {
@@ -893,62 +865,4 @@ fn seed_for_repo(
         payload_json: "{}".to_owned(),
         now_ms,
     }
-}
-
-fn insert_scope(
-    connection: &mut rusqlite::Connection,
-    scope: &str,
-) -> Result<(), crate::storage::StorageError> {
-    connection.execute(
-        "
-        INSERT INTO code_repository_scopes (
-            source_scope, repository_id, resolved_commit_sha, tree_hash,
-            path_filters_json, language_filters_json, indexed_file_count,
-            symbol_count, reference_count, chunk_count, stale, degraded_reason
-        )
-        VALUES (?1, 'repo', ?2, ?3, '[\"src\"]', '[\"rust\"]', 1, 0, 0, 0, 0, NULL)
-        ",
-        params![scope, format!("commit-{scope}"), format!("tree-{scope}")],
-    )?;
-    connection.execute(
-        "
-        INSERT INTO code_repository_files (
-            repository_id, source_scope, file_id, path, language_id, blob_hash,
-            byte_len, line_count, parse_status, degraded_reason
-        )
-        VALUES ('repo', ?1, ?2, 'src/lib.rs', 'rust', 'blob', 1, 1, 'parsed', NULL)
-        ",
-        params![scope, format!("file-{scope}")],
-    )?;
-    Ok(())
-}
-
-fn insert_checkpoint(
-    connection: &mut rusqlite::Connection,
-    scope: &str,
-    updated_at_ms: u64,
-) -> Result<(), crate::storage::StorageError> {
-    let resource_budget = serde_json::to_string(&CodeIndexResourceBudget::default())
-        .map_err(|error| crate::storage::StorageError::InvalidInput(error.to_string()))?;
-    connection.execute(
-        "
-        INSERT INTO code_repository_index_checkpoints (
-            source_scope, repository_id, state, resolved_commit_sha, tree_hash,
-            path_filters_json, language_filters_json, total_path_count, parsed_file_count,
-            committed_file_count, committed_symbol_count, committed_reference_count,
-            committed_chunk_count, batch_count, last_path, resource_budget_json,
-            updated_at_ms, error_message
-        )
-        VALUES (?1, 'repo', 'complete', ?2, ?3, '[\"src\"]', '[\"rust\"]',
-                1, 1, 1, 0, 0, 0, 1, 'src/lib.rs', ?4, ?5, NULL)
-        ",
-        params![
-            scope,
-            format!("commit-{scope}"),
-            format!("tree-{scope}"),
-            resource_budget,
-            updated_at_ms,
-        ],
-    )?;
-    Ok(())
 }

@@ -37,6 +37,11 @@ fn bash_source_target(line: &str) -> Option<String> {
         .filter(|rest| rest.starts_with(char::is_whitespace))
         .or_else(|| {
             statement
+                .strip_prefix(r"\.")
+                .filter(|rest| rest.starts_with(char::is_whitespace))
+        })
+        .or_else(|| {
+            statement
                 .strip_prefix('.')
                 .filter(|rest| rest.starts_with(char::is_whitespace))
         })?;

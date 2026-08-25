@@ -187,6 +187,16 @@ fn query_mentions_test_or_benchmark_detects_explicit_intent() {
     assert!(query_mentions_test_or_benchmark("db_bench cache"));
     assert!(query_mentions_test_or_benchmark("UnitTestCoverage"));
     assert!(query_mentions_test_or_benchmark("BenchmarkSuite"));
+    assert!(path_looks_like_test_or_benchmark("src/jmh/CacheLoad.java"));
+}
+
+#[test]
+fn test_double_intent_distinguishes_production_and_fake_surfaces() {
+    assert!(path_looks_like_test_double("client/rest/fake/fake.go"));
+    assert!(path_looks_like_test_double("src/MockTransport.swift"));
+    assert!(!path_looks_like_test_double("src/transport/client.go"));
+    assert!(query_mentions_test_double("FakeTransport"));
+    assert!(!query_mentions_test_double("Transport"));
 }
 
 #[test]

@@ -1,32 +1,105 @@
 //! Bounded direct, identifier, and FTS import-row retrieval.
 
-use rusqlite::{Connection, Row, params_from_iter, types::Value};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
+use rusqlite::{Connection, ErrorCode, Row, params_from_iter, types::Value};
+
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest, RepositoryCodeRange},
     storage::StorageError,
 };
 
 use super::super::{prepare_code_search_statement, relevance::*, required_scope, rows::ImportRow};
-use super::{path_context::query_looks_like_import_path, targets::target_symbol_import_query};
+use super::path_context::{import_path_lookup_token, import_target_symbol_query};
 
 pub(super) struct ImportPathRows {
     pub(super) rows: Vec<ImportRow>,
     saturated: bool,
 }
 
-const IMPORT_PATH_DIRECT_LIMIT: usize = 200;
+const IMPORT_IDENTIFIER_SQL_PROGRESS_INTERVAL: i32 = 1_000;
+const MAX_IMPORT_IDENTIFIER_SQL_PROGRESS_CALLBACKS: usize = 4_096;
+
+struct ImportIdentifierProbe {
+    rows: Vec<ImportRow>,
+    saturated: bool,
+}
+
+struct ImportIdentifierProbeBudget {
+    progress_interval: i32,
+    max_progress_callbacks: usize,
+}
 
 pub(super) fn search_import_identifier_rows(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<ImportRow>, StorageError> {
+    let probe = search_import_identifier_rows_with_progress_budget(
+        connection,
+        status,
+        request,
+        ImportIdentifierProbeBudget {
+            progress_interval: IMPORT_IDENTIFIER_SQL_PROGRESS_INTERVAL,
+            max_progress_callbacks: MAX_IMPORT_IDENTIFIER_SQL_PROGRESS_CALLBACKS,
+        },
+    )?;
+    debug_assert!(!probe.saturated || probe.rows.is_empty());
+    Ok(probe.rows)
+}
+
+fn search_import_identifier_rows_with_progress_budget(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    budget: ImportIdentifierProbeBudget,
+) -> Result<ImportIdentifierProbe, StorageError> {
     let patterns = import_identifier_patterns(&request.query);
     if request.code_query_kind != CodeQueryKind::Imports || patterns.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ImportIdentifierProbe {
+            rows: Vec::new(),
+            saturated: false,
+        });
     }
 
+    let progress_callbacks = Arc::new(AtomicUsize::new(0));
+    let observed_callbacks = Arc::clone(&progress_callbacks);
+    connection.progress_handler(
+        budget.progress_interval,
+        Some(move || {
+            observed_callbacks.fetch_add(1, Ordering::Relaxed) >= budget.max_progress_callbacks
+        }),
+    );
+    let result = search_import_identifier_rows_with_active_progress_handler(
+        connection, status, request, &patterns,
+    );
+    connection.progress_handler(0, None::<fn() -> bool>);
+
+    match result {
+        Ok(rows) => Ok(ImportIdentifierProbe {
+            rows,
+            saturated: false,
+        }),
+        Err(StorageError::Sqlite(error)) if sqlite_operation_interrupted(&error) => {
+            Ok(ImportIdentifierProbe {
+                rows: Vec::new(),
+                saturated: true,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn search_import_identifier_rows_with_active_progress_handler(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    patterns: &[String],
+) -> Result<Vec<ImportRow>, StorageError> {
     let path_filter = path_filter_sql_for_column("i.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
@@ -46,7 +119,7 @@ pub(super) fn search_import_identifier_rows(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
-               f.is_generated
+               f.is_generated, f.line_count
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -62,7 +135,7 @@ pub(super) fn search_import_identifier_rows(
     let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
     for pattern in patterns {
         values.push(Value::Text(pattern.clone()));
-        values.push(Value::Text(pattern));
+        values.push(Value::Text(pattern.clone()));
     }
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
@@ -78,6 +151,14 @@ pub(super) fn search_import_identifier_rows(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn sqlite_operation_interrupted(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(inner, _)
+            if inner.code == ErrorCode::OperationInterrupted
+    )
 }
 
 fn import_identifier_patterns(query: &str) -> Vec<String> {
@@ -120,8 +201,7 @@ pub(super) fn search_import_path_rows(
             saturated: false,
         });
     };
-    let direct_limit =
-        candidate_limit(request, CandidateLayer::Import).min(IMPORT_PATH_DIRECT_LIMIT);
+    let direct_limit = super::IMPORT_EXACT_EDGE_RESERVE_LIMIT;
     let path_filter = path_filter_sql_for_column("i.path", status, request);
     let mut query_path_clauses = Vec::new();
     push_query_path_substring_filter_sql(
@@ -145,7 +225,7 @@ pub(super) fn search_import_path_rows(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
-               f.is_generated
+               f.is_generated, f.line_count
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -187,37 +267,12 @@ pub(super) fn search_import_path_rows(
 }
 
 fn import_path_lookup_pattern(request: &CodeRetrievalRequest) -> Option<String> {
-    let path_token = import_path_lookup_token(request)?;
+    let path_token = import_path_lookup_token(&request.query)?;
 
     Some(format!(
         "%{}%",
         escape_sql_like(&path_token.to_ascii_lowercase())
     ))
-}
-
-pub(super) fn import_path_lookup_token(request: &CodeRetrievalRequest) -> Option<&str> {
-    if request.code_query_kind != CodeQueryKind::Imports
-        || !query_looks_like_import_path(&request.query)
-    {
-        return None;
-    }
-    let path_token = request
-        .query
-        .split_whitespace()
-        .map(import_path_token)
-        .find(|token| query_looks_like_import_path(token))?;
-    if path_token.is_empty() {
-        return None;
-    }
-
-    Some(path_token)
-}
-
-fn import_path_token(token: &str) -> &str {
-    token.trim_matches(|character: char| {
-        !(character.is_ascii_alphanumeric()
-            || matches!(character, '_' | '-' | '.' | '/' | '\\' | '@'))
-    })
 }
 
 pub(super) fn import_path_rows_can_answer_without_fts(
@@ -241,7 +296,7 @@ pub(super) fn import_target_symbol_rows_can_answer_without_fts(
     rows: &[ImportRow],
 ) -> bool {
     request.code_query_kind == CodeQueryKind::Imports
-        && target_symbol_import_query(&request.query)
+        && import_target_symbol_query(&request.query).is_some()
         && !rows.is_empty()
         && rows.len() <= request.limit.max(1)
 }
@@ -258,7 +313,7 @@ pub(super) fn search_import_fts_rows(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier,
-               f.is_generated
+               f.is_generated, f.line_count
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
@@ -269,6 +324,7 @@ pub(super) fn search_import_fts_rows(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'import'
+                {EXACT_SEARCH_OWNER_PREDICATE_SQL}
                 {fts_filter}
                 AND ({exclude_generated_flag} = 0 OR NOT EXISTS (
                     SELECT 1 FROM code_repository_files fts_file
@@ -325,6 +381,7 @@ fn row_to_import(row: &Row<'_>) -> rusqlite::Result<ImportRow> {
         confidence_basis_points: row.get(8)?,
         confidence_tier: row.get(9)?,
         is_generated: row.get::<_, i64>(10)? != 0,
+        source_line_count: row.get(11)?,
     })
 }
 

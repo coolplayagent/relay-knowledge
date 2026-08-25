@@ -11,11 +11,13 @@
 本规格把两个 issue 收敛为一个可执行的 Knowledge 开发闭环：
 
 1. repository bootstrap 必须同时建立 `.knowledge/knowledge-map.yaml` 导航契约和版本化代码地图；只完成其中一个不能报告初始化成功。
-2. 代码地图是源码、符号、调用、依赖和 source scope 的第一真实源；软件全域模型是与该代码地图同 scope、同发布边界的派生读模型。
+2. Git commit 是已跟踪源码事实的权威源；代码地图是针对精确 commit/source scope 发布的符号、调用、依赖和检索证据视图。软件全域模型是与该代码地图同 scope、同发布边界的派生读模型。
 3. YAML 保存稳定的知识路由和模型入口，不复制会随 commit 变化的架构摘要、构建 target 或部署事实。实际 `design`、`build`、`iac`、`relationships` 事实由 `repo software` 返回，并携带 ref、source scope、新鲜度和证据。
 4. spec 编写和 agent 编码前必须消费同一个固定 ref 的知识路由、软件模型、架构视图和代码上下文；commit 后必须刷新代码地图与软件模型，并再次验证 YAML。
 
 本规格不引入第二份代码事实、不把 LLM 叙述持久化为真源、不在查询热路径扫描仓库，也不以 shell polling loop 取代 durable task、lease 或平台服务。
+
+本章回答“如何落地”：定义 CLI 协调、任务、lease、freshness 与验收契约。关于“为什么以 commit 为事实锚、团队和 agent 如何组织决策上下文”，见[第 26 章：Git Commit + Knowledge 开发迭代理念与 Loop](26-git-commit-knowledge-development-loop.md)。
 
 ## 2. 权威状态与所有权
 
@@ -48,7 +50,7 @@ Knowledge Map v2 的根 manifest 只保存 topic 摘要、每个 topic 的有序
 因此本规格采用以下边界：
 
 - YAML 固化“去哪里读”和“哪个 repository 是模型根”。
-- code map 固化“这个 ref 的源码事实是什么”。
+- code map 固化“从这个 ref 派生并服务哪些源码事实视图”。
 - software projection 固化“从同一个 source scope 能确定性派生什么架构、构建和部署事实”。
 - 短 narrative 只能作为带 evidence id 的响应内容，不能成为持久化权威事实。
 
@@ -142,4 +144,4 @@ Agent 在验收时必须给出“requirement → authoritative evidence → test
 
 ---
 
-导航: 上一章: [23. API 代码库理解视图](23-api-codebase-views.md) | 下一章: 待规划
+导航：上一章：[23. HTTP API 参考](23-api-reference.md) | 下一章：[25. 代码索引保留策略](25-code-index-retention.md) | 返回：[架构规格](README.md)

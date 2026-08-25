@@ -1,14 +1,13 @@
 use rusqlite::Connection;
 
 use super::{
-    CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION,
     GENERATED_DETECTION_REINDEX_MIGRATION, LOSSLESS_MARKDOWN_REINDEX_MIGRATION,
-    ROUTE_EXTRACTION_REINDEX_MIGRATION, SEARCH_BACKFILL_MIGRATION,
-    SEARCH_METADATA_BACKFILL_MIGRATION, code_schema_migration_applied, initialize_code_schema,
+    ROUTE_EXTRACTION_REINDEX_MIGRATION, code_schema_migration_applied, initialize_code_schema,
 };
+use crate::storage::sqlite::schema::marker::SEARCH_OWNER_V2_MIGRATION;
 
 #[test]
-fn backfills_legacy_call_search_without_symbol_link_columns() {
+fn schema_open_does_not_backfill_legacy_call_search() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection
         .execute_batch(
@@ -38,22 +37,13 @@ fn backfills_legacy_call_search_without_symbol_link_columns() {
 
     initialize_code_schema(&connection).expect("code schema should initialize");
 
-    let (language_id, content): (String, String) = connection
-        .query_row(
-            "
-            SELECT language_id, content
-            FROM code_repository_search
-            WHERE document_kind = 'call' AND record_id = 'call-1'
-            ",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("call search row should be backfilled");
+    let search_count: usize = connection
+        .query_row("SELECT COUNT(*) FROM code_repository_search", [], |row| {
+            row.get(0)
+        })
+        .expect("search rows should count");
 
-    assert_eq!(language_id, "rust");
-    assert!(content.contains("LegacyCaller"));
-    assert!(content.contains("target_fn"));
-    assert!(content.contains("target_hint"));
+    assert_eq!(search_count, 0);
 }
 
 #[test]
@@ -197,6 +187,112 @@ fn generated_detection_migration_marks_existing_scopes_stale_once() {
 
     assert_eq!(repository_stale(&connection), 0);
     assert_eq!(scope_stale(&connection), 0);
+}
+
+#[test]
+fn search_owner_v2_capability_marks_legacy_scopes_stale_without_search_rewrite() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("code schema should initialize");
+    connection
+        .execute_batch(&format!(
+            "
+            DELETE FROM code_repository_schema_migrations
+            WHERE name = '{SEARCH_OWNER_V2_MIGRATION}';
+            INSERT INTO code_repositories (
+                repository_id, alias, root_path, path_filters_json, language_filters_json,
+                last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                indexed_file_count, symbol_count, reference_count, chunk_count,
+                stale, degraded_reason
+            ) VALUES (
+                'repo', 'fixture', '/tmp/repo', '[]', '[]', 'scope', 'commit',
+                'tree', 'fresh', 1, 1, 0, 0, 0, NULL
+            );
+            INSERT INTO code_repository_scopes (
+                source_scope, repository_id, resolved_commit_sha, tree_hash,
+                path_filters_json, language_filters_json, indexed_file_count,
+                symbol_count, reference_count, chunk_count, stale, degraded_reason
+            ) VALUES ('scope', 'repo', 'commit', 'tree', '[]', '[]', 1, 1, 0, 0, 0, NULL);
+            INSERT INTO code_repository_search (
+                source_scope, document_kind, record_id, path, language_id, content
+            ) VALUES ('scope', 'symbol', 'symbol-1', 'src/lib.rs', 'rust', 'legacy sentinel');
+            "
+        ))
+        .expect("legacy search scope should insert");
+
+    initialize_code_schema(&connection).expect("search-owner capability should install");
+
+    assert_eq!(repository_stale(&connection), 1);
+    assert_eq!(scope_stale(&connection), 1);
+    assert_eq!(search_row_count(&connection, "symbol-1"), 1);
+    assert!(
+        code_schema_migration_applied(&connection, SEARCH_OWNER_V2_MIGRATION)
+            .expect("capability marker should load")
+    );
+
+    connection
+        .execute_batch(
+            "UPDATE code_repository_scopes SET stale = 0 WHERE source_scope = 'scope';
+             UPDATE code_repositories SET stale = 0 WHERE repository_id = 'repo';",
+        )
+        .expect("fresh replacement sentinel should persist");
+    initialize_code_schema(&connection).expect("installed capability should be idempotent");
+    assert_eq!(repository_stale(&connection), 0);
+    assert_eq!(scope_stale(&connection), 0);
+}
+
+#[test]
+fn search_owner_v2_capability_rolls_back_stale_flags_and_marker_on_failure() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_code_schema(&connection).expect("code schema should initialize");
+    connection
+        .execute_batch(&format!(
+            "
+            DELETE FROM code_repository_schema_migrations
+            WHERE name = '{SEARCH_OWNER_V2_MIGRATION}';
+            INSERT INTO code_repositories (
+                repository_id, alias, root_path, path_filters_json, language_filters_json,
+                last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                indexed_file_count, symbol_count, reference_count, chunk_count,
+                stale, degraded_reason
+            ) VALUES (
+                'repo', 'fixture', '/tmp/repo', '[]', '[]', 'scope', 'commit',
+                'tree', 'fresh', 1, 1, 0, 0, 0, NULL
+            );
+            INSERT INTO code_repository_scopes (
+                source_scope, repository_id, resolved_commit_sha, tree_hash,
+                path_filters_json, language_filters_json, indexed_file_count,
+                symbol_count, reference_count, chunk_count, stale, degraded_reason
+            ) VALUES ('scope', 'repo', 'commit', 'tree', '[]', '[]', 1, 1, 0, 0, 0, NULL);
+            CREATE TRIGGER fail_search_owner_repository_stale
+            BEFORE UPDATE OF stale ON code_repositories
+            WHEN NEW.repository_id = 'repo'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected search-owner migration failure');
+            END;
+            "
+        ))
+        .expect("legacy scope and failure trigger should install");
+
+    initialize_code_schema(&connection)
+        .expect_err("search-owner migration failure should propagate");
+    assert_eq!(repository_stale(&connection), 0);
+    assert_eq!(scope_stale(&connection), 0);
+    assert!(
+        !code_schema_migration_applied(&connection, SEARCH_OWNER_V2_MIGRATION)
+            .expect("rolled-back capability marker should load")
+    );
+
+    connection
+        .execute_batch("DROP TRIGGER fail_search_owner_repository_stale")
+        .expect("failure trigger should drop");
+    initialize_code_schema(&connection).expect("search-owner capability should retry");
+
+    assert_eq!(repository_stale(&connection), 1);
+    assert_eq!(scope_stale(&connection), 1);
+    assert!(
+        code_schema_migration_applied(&connection, SEARCH_OWNER_V2_MIGRATION)
+            .expect("capability marker should load")
+    );
 }
 
 #[test]
@@ -349,7 +445,7 @@ fn route_extraction_migration_marks_non_fact_versioned_scopes_stale_once() {
 }
 
 #[test]
-fn rebuilds_existing_call_search_rows_with_symbol_signatures() {
+fn schema_open_does_not_rebuild_existing_call_search_rows() {
     let connection = Connection::open_in_memory().expect("database should open");
     initialize_code_schema(&connection).expect("code schema should initialize");
     connection
@@ -402,7 +498,7 @@ fn rebuilds_existing_call_search_rows_with_symbol_signatures() {
         )
         .expect("old call search row should insert");
 
-    initialize_code_schema(&connection).expect("code schema upgrade should rebuild call search");
+    initialize_code_schema(&connection).expect("code schema upgrade should remain read-bounded");
 
     let (content, call_rows): (String, i64) = connection
         .query_row(
@@ -418,12 +514,12 @@ fn rebuilds_existing_call_search_rows_with_symbol_signatures() {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("rebuilt call search row should load");
+        .expect("legacy call search row should load");
 
     assert_eq!(call_rows, 1);
-    assert!(content.contains("Status Table::ReadBlock"));
+    assert_eq!(content, "InternalGet ReadBlock src/table.rs");
     assert!(
-        code_schema_migration_applied(&connection, CALL_SEARCH_SIGNATURE_MIGRATION)
+        !code_schema_migration_applied(&connection, "call-search-symbol-signatures-v1")
             .expect("migration marker should load")
     );
 }
@@ -500,7 +596,7 @@ fn skips_call_search_rebuild_after_signature_migration_marker() {
 }
 
 #[test]
-fn search_backfill_is_marked_after_one_legacy_pass() {
+fn schema_open_does_not_backfill_search_facts() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection
         .execute_batch(
@@ -539,26 +635,16 @@ fn search_backfill_is_marked_after_one_legacy_pass() {
         )
         .expect("legacy code search schema should initialize");
 
-    initialize_code_schema(&connection).expect("legacy search should backfill");
-    assert_eq!(search_row_count(&connection, "symbol-1"), 1);
-    assert!(
-        code_schema_migration_applied(&connection, SEARCH_BACKFILL_MIGRATION)
-            .expect("search backfill marker should load")
-    );
-
-    connection
-        .execute(
-            "DELETE FROM code_repository_search WHERE record_id = 'symbol-1'",
-            [],
-        )
-        .expect("sentinel search row should delete");
-    initialize_code_schema(&connection).expect("marked search backfill should skip");
-
+    initialize_code_schema(&connection).expect("legacy schema should open without data backfill");
     assert_eq!(search_row_count(&connection, "symbol-1"), 0);
+    assert!(
+        !code_schema_migration_applied(&connection, "code-search-backfill-v1")
+            .expect("legacy search marker should remain absent")
+    );
 }
 
 #[test]
-fn search_metadata_backfill_tracks_existing_fts_rows() {
+fn schema_open_does_not_backfill_search_metadata() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection
         .execute_batch(
@@ -580,7 +666,7 @@ fn search_metadata_backfill_tracks_existing_fts_rows() {
         )
         .expect("legacy search row should initialize");
 
-    initialize_code_schema(&connection).expect("metadata should backfill");
+    initialize_code_schema(&connection).expect("schema should open without metadata backfill");
 
     let metadata_count: i64 = connection
         .query_row(
@@ -595,15 +681,15 @@ fn search_metadata_backfill_tracks_existing_fts_rows() {
             |row| row.get(0),
         )
         .expect("metadata count should load");
-    assert_eq!(metadata_count, 1);
+    assert_eq!(metadata_count, 0);
     assert!(
-        code_schema_migration_applied(&connection, SEARCH_METADATA_BACKFILL_MIGRATION)
-            .expect("metadata migration marker should load")
+        !code_schema_migration_applied(&connection, "code-search-metadata-backfill-v1")
+            .expect("legacy metadata marker should remain absent")
     );
 }
 
 #[test]
-fn edge_language_backfill_is_marked_after_one_legacy_update() {
+fn schema_open_does_not_backfill_legacy_edge_languages() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection
         .execute(
@@ -631,22 +717,12 @@ fn edge_language_backfill_is_marked_after_one_legacy_update() {
         )
         .expect("legacy edge search row should insert");
 
-    initialize_code_schema(&connection).expect("legacy edge language should backfill");
-    assert_eq!(edge_search_language(&connection), "rust");
-    assert!(
-        code_schema_migration_applied(&connection, EDGE_SEARCH_LANGUAGE_ID_MIGRATION)
-            .expect("migration marker should load")
-    );
-
-    connection
-        .execute(
-            "UPDATE code_repository_search SET language_id = '' WHERE record_id = 'import-1'",
-            [],
-        )
-        .expect("sentinel row should be editable");
-    initialize_code_schema(&connection).expect("marked edge language backfill should skip");
-
+    initialize_code_schema(&connection).expect("schema should open without edge backfill");
     assert_eq!(edge_search_language(&connection), "");
+    assert!(
+        !code_schema_migration_applied(&connection, "edge-search-language-ids-v1")
+            .expect("legacy edge marker should remain absent")
+    );
 }
 
 fn search_row_count(connection: &Connection, record_id: &str) -> i64 {

@@ -1,5 +1,5 @@
-use super::super::{claim_task, queue_task, task_by_id};
-use super::reset_tasks;
+use super::super::{claim_task_at, queue_task, task_by_id};
+use super::reset_tasks_at;
 use crate::{
     domain::{
         CodeIndexMode, CodeIndexResourceBudget, CodeIndexTaskState, CodeRepositoryRegistration,
@@ -9,6 +9,22 @@ use crate::{
     },
 };
 use rusqlite::params;
+
+fn claim_task(
+    connection: &mut rusqlite::Connection,
+    request: CodeIndexTaskClaimRequest,
+) -> Result<Option<crate::domain::CodeIndexTaskRecord>, crate::storage::StorageError> {
+    let execution_now_ms = request.now_ms;
+    claim_task_at(connection, request, execution_now_ms)
+}
+
+fn reset_tasks(
+    connection: &mut rusqlite::Connection,
+    repository_id: &str,
+    now_ms: u64,
+) -> Result<Vec<crate::domain::CodeIndexTaskRecord>, crate::storage::StorageError> {
+    reset_tasks_at(connection, repository_id, now_ms, now_ms)
+}
 
 #[tokio::test]
 async fn code_index_task_reset_requeues_unfinished_tasks_without_terminal_history() {

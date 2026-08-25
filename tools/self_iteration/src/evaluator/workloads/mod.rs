@@ -42,7 +42,7 @@ pub(super) use file_evaluation::evaluate_file_fixtures;
 pub(super) use repository::evaluate_repository;
 pub(super) use repository_set::{evaluate_repository_sets, selected_repository_set_member_names};
 pub(super) use selection::{
-    WorkloadSelection, evaluation_home, relay_knowledge_binary, repository_in_profile,
-    select_repository_cases_for_profile, semantic_vector_suite_for_selection,
+    WorkloadSelection, repository_in_profile, select_repository_cases_for_profile,
+    semantic_vector_suite_for_selection,
 };
 pub(super) use semantic_vector_evaluation::evaluate_semantic_vector_suite;

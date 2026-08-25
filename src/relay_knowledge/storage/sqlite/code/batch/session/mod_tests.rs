@@ -13,30 +13,6 @@ use crate::{
 };
 
 #[tokio::test]
-async fn single_batch_session_builds_query_indexes_before_fact_writes() {
-    let store = registered_store().await;
-
-    store
-        .begin_code_index_session(session_for_scope("git_snapshot:single-batch-indexes", 1))
-        .await
-        .expect("single-batch session should begin");
-
-    assert!(query_index_exists(&store, "code_repository_symbols_lookup").await);
-}
-
-#[tokio::test]
-async fn multi_batch_cold_session_defers_query_indexes_until_finalization() {
-    let store = registered_store().await;
-
-    store
-        .begin_code_index_session(session_for_scope("git_snapshot:multi-batch-indexes", 2))
-        .await
-        .expect("multi-batch session should begin");
-
-    assert!(!query_index_exists(&store, "code_repository_symbols_lookup").await);
-}
-
-#[tokio::test]
 async fn code_index_task_unfenced_checkpoint_session_obeys_scope_capacity() {
     let store = registered_store().await;
     for index in 0..super::super::super::MAX_SCOPE_SLOTS_PER_REPOSITORY {
@@ -457,10 +433,42 @@ async fn checkpointed_finalize_materializes_effective_maven_dependencies() {
         })
         .await
         .expect("batch should persist");
+    let raw_checkpoint = store
+        .code_index_checkpoint(source_scope.to_owned())
+        .await
+        .expect("raw checkpoint should load")
+        .expect("raw checkpoint should exist");
+    assert_eq!(raw_checkpoint.committed_fact_row_count, 2);
     store
         .finalize_code_index_session(session)
         .await
         .expect("session should finalize");
+    let effective_checkpoint = store
+        .code_index_checkpoint(source_scope.to_owned())
+        .await
+        .expect("effective checkpoint should load")
+        .expect("effective checkpoint should exist");
+    let scope = source_scope.to_owned();
+    let effective_dependency_count = store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "SELECT count(*) FROM code_repository_dependencies
+                     WHERE source_scope = ?1 AND ecosystem = 'maven'
+                       AND source_kind = 'pom.xml'",
+                    [&scope],
+                    |row| row.get::<_, usize>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .await
+        .expect("effective Maven dependency count should load");
+    assert_eq!(effective_checkpoint.state, "completed");
+    assert_eq!(effective_dependency_count, 6);
+    assert_eq!(
+        effective_checkpoint.committed_fact_row_count,
+        raw_checkpoint.committed_fact_row_count + effective_dependency_count
+    );
 
     let slf4j_hits = search(&store, "org.slf4j:slf4j-api", CodeQueryKind::Sbom).await;
     assert_eq!(slf4j_hits.len(), 1);
@@ -764,28 +772,6 @@ async fn reference_resolution_rows(
         .expect("reference rows should load")
 }
 
-async fn import_resolution_state(
-    store: &SqliteGraphStore,
-    source_scope: &str,
-    import_id: &str,
-) -> String {
-    let source_scope = source_scope.to_owned();
-    let import_id = import_id.to_owned();
-    store
-        .run(move |connection| {
-            connection
-                .query_row(
-                    "SELECT resolution_state FROM code_repository_imports
-                     WHERE source_scope = ?1 AND import_id = ?2",
-                    rusqlite::params![source_scope, import_id],
-                    |row| row.get(0),
-                )
-                .map_err(crate::storage::StorageError::from)
-        })
-        .await
-        .expect("import resolution should load")
-}
-
 pub(super) fn file(
     source_scope: &str,
     file_id: &str,
@@ -862,7 +848,7 @@ pub(super) fn symbol(
     }
 }
 
-fn reference(
+pub(super) fn reference(
     source_scope: &str,
     reference_id: &str,
     file_id: &str,
@@ -926,7 +912,7 @@ pub(super) fn session_for_scope(source_scope: &str, total_path_count: usize) -> 
         changed_paths: Vec::new(),
         tombstones: Vec::new(),
         workspaces: Vec::new(),
-        resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),
+        resource_budget: CodeIndexResourceBudget::new(1, 16 * 1024, 1024).expect("budget"),
     }
 }
 
@@ -970,22 +956,3 @@ async fn search_document_count(
         .await
         .expect("search document count should load")
 }
-
-async fn query_index_exists(store: &SqliteGraphStore, name: &str) -> bool {
-    let name = name.to_owned();
-    store
-        .run(move |connection| {
-            connection
-                .query_row(
-                    "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
-                    [name],
-                    |row| row.get(0),
-                )
-                .map_err(crate::storage::StorageError::from)
-        })
-        .await
-        .expect("query-index state should load")
-}
-
-#[path = "incremental_finalization_tests.rs"]
-mod incremental_finalization_tests;

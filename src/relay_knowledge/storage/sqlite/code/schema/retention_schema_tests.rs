@@ -1,8 +1,7 @@
-use rusqlite::Connection;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use super::super::initialize_code_schema;
-use crate::storage::SqliteGraphStore;
+use super::initialize_retention_schema;
+use crate::storage::sqlite::schema::marker::SEARCH_ORPHAN_GC_PHASE_MIGRATION;
+use rusqlite::Connection;
 
 #[test]
 fn retention_schema_adds_logical_retirement_and_durable_jobs() {
@@ -29,64 +28,15 @@ fn retention_schema_adds_logical_retirement_and_durable_jobs() {
         .expect("gc table should query");
     assert_eq!(gc_table, 1);
 
-    let cutoff_generation_column: usize = connection
+    let search_cursor_column: usize = connection
         .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_jobs')
-             WHERE name = 'cutoff_publication_generation' AND dflt_value = '0'",
+            "SELECT COUNT(*) FROM pragma_table_info('code_repository_scope_gc_jobs')
+             WHERE name = 'search_rowid_cursor' AND type = 'INTEGER' AND \"notnull\" = 0",
             [],
             |row| row.get(0),
         )
-        .expect("retention generation column should query");
-    assert_eq!(cutoff_generation_column, 1);
-
-    let scan_cursor_table: usize = connection
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master
-             WHERE type = 'table' AND name = 'code_repository_retention_scans'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("repository retention scan table should query");
-    assert_eq!(scan_cursor_table, 1);
-
-    let catalog_revision_column: usize = connection
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_scans')
-             WHERE name = 'catalog_revision' AND type = 'INTEGER' AND \"notnull\" = 1",
-            [],
-            |row| row.get(0),
-        )
-        .expect("candidate catalog revision column should query");
-    assert_eq!(catalog_revision_column, 1);
-
-    let catalog_table: usize = connection
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master
-             WHERE type = 'table' AND name = 'code_repository_retention_catalog'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("repository retention catalog should query");
-    assert_eq!(catalog_table, 1);
-
-    let activity_table: usize = connection
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master
-             WHERE type = 'table' AND name = 'code_repository_retention_activity'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("repository activity table should query");
-    assert_eq!(activity_table, 1);
-
-    let activity_index_columns = connection
-        .prepare("PRAGMA index_info(code_repository_retention_activity_order)")
-        .expect("repository activity index should prepare")
-        .query_map([], |row| row.get::<_, String>(2))
-        .expect("repository activity index should query")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("repository activity index columns should collect");
-    assert_eq!(activity_index_columns, ["activity_ms", "repository_id"]);
+        .expect("search cursor column should query");
+    assert_eq!(search_cursor_column, 1);
 
     let member_index_columns = connection
         .prepare("PRAGMA index_info(code_repository_set_members_repository_scope)")
@@ -102,247 +52,121 @@ fn retention_schema_adds_logical_retirement_and_durable_jobs() {
 }
 
 #[test]
-fn retention_schema_upgrades_parent_jobs_with_a_publication_generation() {
+fn retention_schema_upgrades_existing_jobs_with_a_nullable_search_cursor() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection
         .execute_batch(
-            "CREATE TABLE code_repository_retention_jobs (
-                 repository_id TEXT PRIMARY KEY,
-                 initial_scope TEXT NOT NULL,
-                 cutoff_ms INTEGER NOT NULL,
+            "CREATE TABLE code_repository_scope_gc_jobs (
+                 source_scope TEXT PRIMARY KEY,
+                 repository_id TEXT NOT NULL,
                  phase TEXT NOT NULL,
+                 deleted_rows INTEGER NOT NULL,
                  created_at_ms INTEGER NOT NULL,
                  updated_at_ms INTEGER NOT NULL,
                  last_error TEXT
-             );",
+             );
+             INSERT INTO code_repository_scope_gc_jobs (
+                 source_scope, repository_id, phase, deleted_rows,
+                 created_at_ms, updated_at_ms, last_error
+             ) VALUES ('legacy-scope', 'legacy-repo', 'search_documents', 7, 1, 2, NULL);",
         )
-        .expect("legacy retention table should create");
+        .expect("legacy retention job should initialize");
 
-    initialize_code_schema(&connection).expect("legacy schema should upgrade");
+    initialize_code_schema(&connection).expect("legacy retention schema should upgrade");
 
-    let cutoff_generation_column: usize = connection
+    let job: (String, usize, Option<i64>) = connection
         .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_jobs')
-             WHERE name = 'cutoff_publication_generation'
-               AND type = 'INTEGER' AND \"notnull\" = 1 AND dflt_value = '0'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("upgraded retention generation column should query");
-    assert_eq!(cutoff_generation_column, 1);
-}
-
-#[test]
-fn retention_schema_upgrades_candidate_scans_with_a_catalog_revision() {
-    let connection = Connection::open_in_memory().expect("database should open");
-    connection
-        .execute_batch(
-            "CREATE TABLE code_repository_retention_scans (
-                 scan_id INTEGER PRIMARY KEY,
-                 max_indexed_repositories INTEGER NOT NULL,
-                 cursor_activity_ms INTEGER NOT NULL,
-                 cursor_repository_id TEXT NOT NULL,
-                 eligible_count INTEGER NOT NULL,
-                 oldest_repository_id TEXT,
-                 oldest_source_scope TEXT,
-                 created_at_ms INTEGER NOT NULL,
-                 updated_at_ms INTEGER NOT NULL
-             );",
-        )
-        .expect("legacy candidate scan table should create");
-
-    initialize_code_schema(&connection).expect("legacy schema should upgrade");
-
-    let catalog_revision_column: usize = connection
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('code_repository_retention_scans')
-             WHERE name = 'catalog_revision' AND type = 'INTEGER'
-               AND \"notnull\" = 1 AND dflt_value = '0'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("upgraded candidate catalog revision column should query");
-    assert_eq!(catalog_revision_column, 1);
-}
-
-#[test]
-fn retention_activity_dirty_enqueue_survives_outer_upsert_conflict_policy() {
-    let connection = Connection::open_in_memory().expect("database should open");
-    initialize_code_schema(&connection).expect("schema should initialize");
-    connection
-        .execute_batch(
-            "INSERT INTO code_repositories (
-                 repository_id, alias, root_path, path_filters_json, language_filters_json,
-                 state, indexed_file_count, symbol_count, reference_count, chunk_count, stale
-             ) VALUES ('repo', 'fixture', '/repo', '[]', '[]', 'registered', 0, 0, 0, 0, 1);
-
-             INSERT INTO code_repository_scopes (
-                 source_scope, repository_id, resolved_commit_sha, tree_hash,
-                 path_filters_json, language_filters_json, indexed_file_count,
-                 symbol_count, reference_count, chunk_count, stale
-             ) VALUES ('scope', 'repo', 'commit-a', 'tree', '[]', '[]', 0, 0, 0, 0, 0)
-             ON CONFLICT(source_scope) DO UPDATE SET
-                 resolved_commit_sha = excluded.resolved_commit_sha;
-
-             INSERT INTO code_repository_scopes (
-                 source_scope, repository_id, resolved_commit_sha, tree_hash,
-                 path_filters_json, language_filters_json, indexed_file_count,
-                 symbol_count, reference_count, chunk_count, stale
-             ) VALUES ('scope', 'repo', 'commit-b', 'tree', '[]', '[]', 0, 0, 0, 0, 0)
-             ON CONFLICT(source_scope) DO UPDATE SET
-                 repository_id = excluded.repository_id,
-                 resolved_commit_sha = excluded.resolved_commit_sha;",
-        )
-        .expect("same-scope upserts should idempotently enqueue retention activity");
-
-    let dirty_count: usize = connection
-        .query_row(
-            "SELECT COUNT(*) FROM code_repository_retention_activity_dirty
-             WHERE repository_id = 'repo'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("dirty activity should query");
-    assert_eq!(dirty_count, 1);
-}
-
-#[test]
-fn retention_schema_replaces_legacy_conflict_policy_trigger() {
-    let connection = Connection::open_in_memory().expect("database should open");
-    initialize_code_schema(&connection).expect("schema should initialize");
-    connection
-        .execute_batch(
-            "DROP TRIGGER code_repository_retention_activity_scope_insert;
-             CREATE TRIGGER code_repository_retention_activity_scope_insert
-             AFTER INSERT ON code_repository_scopes BEGIN
-                 INSERT OR IGNORE INTO code_repository_retention_activity_dirty (repository_id)
-                 VALUES (NEW.repository_id);
-             END;",
-        )
-        .expect("legacy trigger should install");
-
-    initialize_code_schema(&connection).expect("legacy trigger should upgrade");
-
-    let trigger_sql: String = connection
-        .query_row(
-            "SELECT sql FROM sqlite_master
-             WHERE type = 'trigger'
-               AND name = 'code_repository_retention_activity_scope_insert'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("upgraded trigger should query");
-    assert!(trigger_sql.contains("WHERE NOT EXISTS"));
-    assert!(!trigger_sql.contains("INSERT OR IGNORE"));
-}
-
-#[test]
-fn reopening_current_schema_version_replaces_legacy_retention_trigger() {
-    let suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time should be monotonic")
-        .as_nanos();
-    let path = std::env::temp_dir()
-        .join("relay-knowledge-tests")
-        .join(format!(
-            "legacy-retention-trigger-{}-{suffix}.sqlite",
-            std::process::id()
-        ));
-    let (marker_version, route_state) = {
-        let store = SqliteGraphStore::open(&path).expect("store should open");
-        let connection = store.connection.lock().expect("connection should lock");
-        let marker_version: i64 = connection
-            .query_row(
-                "SELECT version FROM relay_storage_schema_state
-                 WHERE key = 'sqlite_graph_store'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("schema marker should query");
-        let route_state: (String, i64, i64) = connection
-            .query_row(
-                "SELECT state, indexed_graph_version, document_count
-                 FROM graph_bm25_route_state WHERE id = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .expect("retrieval route state should query");
-        connection
-            .execute_batch(
-                "DROP TRIGGER code_repository_retention_activity_scope_insert;
-                 CREATE TRIGGER code_repository_retention_activity_scope_insert
-                 AFTER INSERT ON code_repository_scopes BEGIN
-                     INSERT OR IGNORE INTO code_repository_retention_activity_dirty (repository_id)
-                     VALUES (NEW.repository_id);
-                 END;",
-            )
-            .expect("legacy trigger should install");
-        (marker_version, route_state)
-    };
-
-    let reopened = SqliteGraphStore::open(&path).expect("current schema should upgrade on open");
-    let connection = reopened.connection.lock().expect("connection should lock");
-    let reopened_marker_version: i64 = connection
-        .query_row(
-            "SELECT version FROM relay_storage_schema_state
-             WHERE key = 'sqlite_graph_store'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("reopened schema marker should query");
-    assert_eq!(reopened_marker_version, marker_version);
-    let reopened_route_state: (String, i64, i64) = connection
-        .query_row(
-            "SELECT state, indexed_graph_version, document_count
-             FROM graph_bm25_route_state WHERE id = 1",
+            "SELECT phase, deleted_rows, search_rowid_cursor
+             FROM code_repository_scope_gc_jobs WHERE source_scope = 'legacy-scope'",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
-        .expect("reopened retrieval route state should query");
-    assert_eq!(reopened_route_state, route_state);
-    let trigger_sql: String = connection
-        .query_row(
-            "SELECT sql FROM sqlite_master
-             WHERE type = 'trigger'
-               AND name = 'code_repository_retention_activity_scope_insert'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("upgraded trigger should query");
-    assert!(trigger_sql.contains("WHERE NOT EXISTS"));
-    assert!(!trigger_sql.contains("INSERT OR IGNORE"));
-    drop(connection);
-    drop(reopened);
-    let _ = std::fs::remove_file(path);
+        .expect("legacy job should remain readable");
+    assert_eq!(job, ("search_documents".to_owned(), 7, None));
 }
 
 #[test]
-fn failed_retention_trigger_upgrade_restores_legacy_definitions() {
+fn retention_search_orphan_rewind_and_marker_roll_back_together() {
     let connection = Connection::open_in_memory().expect("database should open");
     initialize_code_schema(&connection).expect("schema should initialize");
     connection
-        .execute_batch(
-            "DROP TRIGGER code_repository_retention_activity_scope_insert;
-             CREATE TRIGGER code_repository_retention_activity_scope_insert
-             AFTER INSERT ON code_repository_scopes BEGIN
-                 INSERT OR IGNORE INTO code_repository_retention_activity_dirty (repository_id)
-                 VALUES (NEW.repository_id);
-             END;
-             DROP TABLE code_repository_index_checkpoints;",
-        )
-        .expect("failing migration fixture should install");
+        .execute_batch(&format!(
+            "DELETE FROM code_repository_schema_migrations
+             WHERE name = '{SEARCH_ORPHAN_GC_PHASE_MIGRATION}';
+             INSERT INTO code_repositories (
+                 repository_id, alias, root_path, path_filters_json, language_filters_json,
+                 last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                 indexed_file_count, symbol_count, reference_count, chunk_count,
+                 stale, degraded_reason
+             ) VALUES (
+                 'legacy-repo', 'legacy', '/tmp/legacy', '[]', '[]', NULL, NULL, NULL,
+                 'empty', 0, 0, 0, 0, 1, NULL
+             );
+             INSERT INTO code_repository_scope_gc_jobs (
+                 source_scope, repository_id, phase, search_rowid_cursor, deleted_rows,
+                 created_at_ms, updated_at_ms, last_error
+             ) VALUES ('legacy-scope', 'legacy-repo', 'path_tombstones', 91, 7, 1, 2, NULL);
+             CREATE TRIGGER fail_search_orphan_rewind_marker
+             BEFORE INSERT ON code_repository_schema_migrations
+             WHEN NEW.name = '{SEARCH_ORPHAN_GC_PHASE_MIGRATION}'
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected search-orphan rewind marker failure');
+             END;"
+        ))
+        .expect("legacy job and failure trigger should initialize");
 
-    super::upgrade_legacy_retention_activity_triggers(&connection)
-        .expect_err("missing checkpoint table should fail the trigger upgrade");
+    initialize_retention_schema(&connection)
+        .expect_err("rewind marker failure should roll back the phase update");
+    assert_eq!(
+        retention_job_state(&connection),
+        ("path_tombstones".to_owned(), Some(91), 7)
+    );
+    assert!(!retention_rewind_marker_applied(&connection));
 
-    let trigger_sql: String = connection
-        .query_row(
-            "SELECT sql FROM sqlite_master
-             WHERE type = 'trigger'
-               AND name = 'code_repository_retention_activity_scope_insert'",
+    connection
+        .execute_batch("DROP TRIGGER fail_search_orphan_rewind_marker")
+        .expect("failure trigger should drop");
+    initialize_retention_schema(&connection).expect("rewind should retry");
+    assert_eq!(
+        retention_job_state(&connection),
+        ("search_orphans".to_owned(), None, 7)
+    );
+    assert!(retention_rewind_marker_applied(&connection));
+
+    connection
+        .execute(
+            "UPDATE code_repository_scope_gc_jobs
+             SET phase = 'scope_metadata', search_rowid_cursor = NULL
+             WHERE source_scope = 'legacy-scope'",
             [],
+        )
+        .expect("current job should advance past orphan cleanup");
+    initialize_retention_schema(&connection).expect("marked migration should remain idempotent");
+    assert_eq!(
+        retention_job_state(&connection),
+        ("scope_metadata".to_owned(), None, 7)
+    );
+}
+
+fn retention_job_state(connection: &Connection) -> (String, Option<i64>, usize) {
+    connection
+        .query_row(
+            "SELECT phase, search_rowid_cursor, deleted_rows
+             FROM code_repository_scope_gc_jobs WHERE source_scope = 'legacy-scope'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("legacy retention job should load")
+}
+
+fn retention_rewind_marker_applied(connection: &Connection) -> bool {
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?1
+             )",
+            [SEARCH_ORPHAN_GC_PHASE_MIGRATION],
             |row| row.get(0),
         )
-        .expect("rolled-back legacy trigger should query");
-    assert!(trigger_sql.contains("INSERT OR IGNORE"));
+        .expect("retention rewind marker should load")
 }

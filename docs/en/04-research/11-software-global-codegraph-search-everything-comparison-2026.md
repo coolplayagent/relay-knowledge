@@ -141,4 +141,4 @@ The community also provides negative signal. Graphify discussions raise concerns
 
 ---
 
-Navigation: Previous: [10. Software Global Domain Modeling Research 2026](10-software-global-domain-modeling-research-2026.md)
+Navigation: Previous: [10. Software Global Domain Modeling Research 2026](10-software-global-domain-modeling-research-2026.md) | Next: [12. Hierarchical BM25 Analysis 2026](12-hierarchical-bm25-analysis-2026.md)

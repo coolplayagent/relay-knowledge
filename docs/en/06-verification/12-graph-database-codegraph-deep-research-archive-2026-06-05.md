@@ -68,9 +68,9 @@ Reddit sources record real user pain points, skepticism, and expected workflows,
 
 ## 3. Documentation Artifacts
 
-- The Chinese Chapter 11 research note was upgraded to version 1.1: [软件全域建模、CodeGraph 与 Search Everything 对比研究 2026](../../zh/04-research/11-software-global-codegraph-search-everything-comparison-2026.md).
+- The [Chinese Chapter 11 research note](../../zh/04-research/11-software-global-codegraph-search-everything-comparison-2026.md) was upgraded to version 1.1.
 - The English Chapter 11 research note was upgraded to version 1.1: [Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](../04-research/11-software-global-codegraph-search-everything-comparison-2026.md).
-- The Chinese research overview was upgraded to version 1.1: [研究资料总览](../../zh/04-research/README.md).
+- The [Chinese research overview](../../zh/04-research/README.md) was upgraded to version 1.1.
 - The English research overview was upgraded to version 1.1: [Research Overview](../04-research/README.md).
 - This archive file and its Chinese counterpart preserve the evidence, outputs, issues, and validation state for this research pass.
 
@@ -122,3 +122,5 @@ This archive addition does not modify Rust source code, Web source code, configu
 
 Navigation: Previous:
 [11. Documentation Release Readiness Audit](11-documentation-release-readiness-2026-06-05.md)
+| Next:
+[13. Documentation and Self-Iteration Readiness Verification](13-documentation-self-iteration-readiness-2026-08-18.md)

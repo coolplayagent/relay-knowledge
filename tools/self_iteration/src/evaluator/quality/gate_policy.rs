@@ -1,6 +1,18 @@
 use super::{QualityGate, QualityGateStage};
+use crate::config::ProductBinaryProfile;
 
-pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
+const BM25_HIERARCHY_BUILD_TIMEOUT_SECONDS: u64 = 1200;
+const BM25_HIERARCHY_SUITE_TIMEOUT_SECONDS: u64 = 120;
+const CODE_INDEX_PERSISTENCE_PERFORMANCE_TIMEOUT_SECONDS: u64 = 120;
+
+// These gates must remain consecutive singleton stages: the first owns cold
+// compilation and the second measures the named suite without a competing
+// Cargo process or inherited compile/link time.
+
+pub(super) fn quality_gate_stages(
+    profile: &str,
+    product_binary_profile: Option<ProductBinaryProfile>,
+) -> Vec<QualityGateStage> {
     if profile == "smoke" {
         return vec![QualityGateStage::Parallel(vec![
             quality_gate(
@@ -45,11 +57,12 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                 linux_glibc_compatibility_policy_gate(),
                 skill_metadata_policy_gate(),
             ]),
-            QualityGateStage::Parallel(vec![quality_gate(
-                "cargo_build_debug",
-                ["cargo", "build", "--bin", "relay-knowledge"],
-                600,
+            QualityGateStage::Parallel(vec![product_binary_build_gate(
+                product_binary_profile.expect("non-smoke profile must select a product binary"),
             )]),
+            QualityGateStage::Parallel(vec![bm25_hierarchy_build_gate()]),
+            QualityGateStage::Parallel(vec![bm25_hierarchy_gate()]),
+            QualityGateStage::Parallel(vec![code_index_persistence_performance_gate()]),
             QualityGateStage::Parallel(vec![
                 quality_gate(
                     "self_iteration_cargo_check",
@@ -90,7 +103,6 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     ],
                     300,
                 ),
-                bm25_hierarchy_gate(),
             ]),
         ];
     }
@@ -116,7 +128,9 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
             linux_glibc_compatibility_policy_gate(),
         ]),
         QualityGateStage::Parallel(vec![
-            quality_gate("cargo_build_release", ["cargo", "build", "--release"], 1200),
+            product_binary_build_gate(
+                product_binary_profile.expect("non-smoke profile must select a product binary"),
+            ),
             quality_gate(
                 "self_iteration_cargo_build_release",
                 [
@@ -131,6 +145,8 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                 300,
             ),
         ]),
+        QualityGateStage::Parallel(vec![bm25_hierarchy_build_gate()]),
+        QualityGateStage::Parallel(vec![bm25_hierarchy_gate()]),
         QualityGateStage::Rails(vec![
             vec![
                 quality_gate(
@@ -146,7 +162,6 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     ],
                     1200,
                 ),
-                bm25_hierarchy_gate(),
                 quality_gate(
                     "cargo_test",
                     ["cargo", "test", "--all-targets", "--all-features"],
@@ -184,6 +199,21 @@ pub(super) fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
     ]
 }
 
+fn product_binary_build_gate(profile: ProductBinaryProfile) -> QualityGate {
+    match profile {
+        ProductBinaryProfile::Debug => quality_gate(
+            "cargo_build_debug",
+            ["cargo", "build", "--bin", "relay-knowledge"],
+            600,
+        ),
+        ProductBinaryProfile::Release => quality_gate(
+            "cargo_build_release",
+            ["cargo", "build", "--release", "--bin", "relay-knowledge"],
+            1200,
+        ),
+    }
+}
+
 fn linux_glibc_compatibility_policy_gate() -> QualityGate {
     quality_gate(
         "linux_glibc_compatibility_policy",
@@ -210,6 +240,14 @@ fn skill_metadata_policy_gate() -> QualityGate {
     )
 }
 
+fn bm25_hierarchy_build_gate() -> QualityGate {
+    quality_gate(
+        "bm25_hierarchy_build",
+        ["cargo", "test", "--lib", "--all-features", "--no-run"],
+        BM25_HIERARCHY_BUILD_TIMEOUT_SECONDS,
+    )
+}
+
 fn bm25_hierarchy_gate() -> QualityGate {
     quality_gate(
         "bm25_hierarchy_suite",
@@ -222,7 +260,23 @@ fn bm25_hierarchy_gate() -> QualityGate {
             "--",
             "--nocapture",
         ],
-        120,
+        BM25_HIERARCHY_SUITE_TIMEOUT_SECONDS,
+    )
+}
+
+fn code_index_persistence_performance_gate() -> QualityGate {
+    quality_gate(
+        "code_index_persistence_performance_suite",
+        [
+            "cargo",
+            "test",
+            "--lib",
+            "--all-features",
+            "code_index_persistence_performance_suite",
+            "--",
+            "--nocapture",
+        ],
+        CODE_INDEX_PERSISTENCE_PERFORMANCE_TIMEOUT_SECONDS,
     )
 }
 
@@ -244,6 +298,7 @@ pub(super) fn quality_budget_ms(name: &str) -> Option<f64> {
         "code_index_recovery_cases" => Some(60_000.0),
         "code_index_sqlite_lock_cases" => Some(60_000.0),
         "bm25_hierarchy_suite" => Some(30_000.0),
+        "code_index_persistence_performance_suite" => Some(30_000.0),
         "self_iteration_cargo_check" => Some(30_000.0),
         "cargo_build_release" => Some(180_000.0),
         "self_iteration_cargo_build_release" => Some(60_000.0),

@@ -53,7 +53,7 @@ The paper's billion-document latency, memory, throughput, and small-scale qualit
 
 The BM25 retrieval path implements a three-level fallback chain to maximize recall while preserving ranking quality:
 
-```
+```text
 FTS5 prefix match (BM25 scoring)
   ↓ empty result and query ≥ 2 chars
 Exact name match (JSON-safe entity_labels LIKE / LOWER(content))

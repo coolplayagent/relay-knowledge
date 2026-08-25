@@ -225,8 +225,22 @@ pub fn retry_policy_v2() -> u32 {
     .await
     .expect("dry-run preview should run after head changes");
     let preview_value = json_value(&preview_after_change);
-    assert_eq!(preview_value["scope"]["resolved_commit_sha"], base_ref);
+    assert_eq!(preview_value["scope"]["resolved_commit_sha"], head_ref);
     assert_eq!(preview_value["preview"]["resolved_commit_sha"], head_ref);
+    let status_after_preview = run_repo(
+        &service,
+        RepoCommand::Status {
+            alias: "fixture".to_owned(),
+        },
+        context("status-after-preview"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("dry-run preview must leave the active repository status unchanged");
+    assert_eq!(
+        json_value(&status_after_preview)["status"]["last_indexed_commit"],
+        base_ref
+    );
 
     let updated = run_repo(
         &service,

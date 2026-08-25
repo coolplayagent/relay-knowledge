@@ -33,6 +33,26 @@ pub(super) fn table_has_exact_columns(
             .all(|(expected, actual)| *expected == actual))
 }
 
+pub(super) fn table_has_exact_plain_columns(
+    connection: &Connection,
+    table: &str,
+    expected_columns: &[&str],
+) -> Result<bool, StorageError> {
+    if !table_exists(connection, table)? {
+        return Ok(false);
+    }
+    let mut statement = connection.prepare(&format!("PRAGMA table_xinfo({table})"))?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, usize>(6)?))
+    })?;
+    let columns = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(columns.len() == expected_columns.len()
+        && columns
+            .iter()
+            .zip(expected_columns.iter())
+            .all(|((name, hidden), expected)| name == expected && *hidden == 0))
+}
+
 pub(super) fn table_has_primary_key_columns(
     connection: &Connection,
     table: &str,
@@ -68,6 +88,19 @@ pub(super) fn table_column_is_not_null(
     Ok(table_column_info(connection, table)?
         .iter()
         .any(|column| column.name == expected_column && column.not_null))
+}
+
+pub(super) fn table_column_is_nullable(
+    connection: &Connection,
+    table: &str,
+    expected_column: &str,
+) -> Result<bool, StorageError> {
+    if !table_exists(connection, table)? {
+        return Ok(false);
+    }
+    Ok(table_column_info(connection, table)?
+        .iter()
+        .any(|column| column.name == expected_column && !column.not_null))
 }
 
 pub(super) fn table_has_unique_columns(
@@ -138,6 +171,63 @@ pub(super) fn table_column_info(
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+pub(super) fn table_columns_have_no_defaults(
+    connection: &Connection,
+    table: &str,
+) -> Result<bool, StorageError> {
+    if !table_exists(connection, table)? {
+        return Ok(false);
+    }
+    let mut statement = connection.prepare(&format!("PRAGMA table_xinfo({table})"))?;
+    let defaults = statement.query_map([], |row| row.get::<_, Option<String>>(4))?;
+    Ok(defaults
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .all(Option::is_none))
+}
+
+pub(super) fn table_has_exact_primary_key_index_surface(
+    connection: &Connection,
+    table: &str,
+    expected_columns: &[&str],
+) -> Result<bool, StorageError> {
+    if !table_exists(connection, table)? {
+        return Ok(false);
+    }
+    let mut statement = connection.prepare(&format!("PRAGMA index_list({table})"))?;
+    let indexes = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(1)?,
+            row.get::<_, bool>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, bool>(4)?,
+        ))
+    })?;
+    let indexes = indexes.collect::<Result<Vec<_>, _>>()?;
+    let [(name, unique, origin, partial)] = indexes.as_slice() else {
+        return Ok(false);
+    };
+    Ok(*unique
+        && origin == "pk"
+        && !partial
+        && index_columns_equal(connection, name, expected_columns)?)
+}
+
+pub(super) fn table_has_no_triggers(
+    connection: &Connection,
+    table: &str,
+) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "SELECT NOT EXISTS (
+                 SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?1
+             )",
+            params![table],
+            |row| row.get::<_, bool>(0),
+        )
         .map_err(StorageError::from)
 }
 

@@ -15,12 +15,13 @@ pub(in crate::code::identity) fn resolve_import(
         CppImportRequest::Include {
             candidates,
             allow_source_root_match,
+            target_hint,
         } => match context.resolve_first_module_file(&candidates, allow_source_root_match) {
             ModuleFileResolution::Resolved(target_hint) => {
                 (ImportResolution::Resolved, Some(target_hint))
             }
-            ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, None),
-            ModuleFileResolution::Unresolved => (ImportResolution::Unresolved, None),
+            ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, Some(target_hint)),
+            ModuleFileResolution::Unresolved => (ImportResolution::Unresolved, Some(target_hint)),
         },
         CppImportRequest::UsingSymbol { namespace, name } => {
             let resolution = if namespace.is_empty() {
@@ -45,6 +46,7 @@ enum CppImportRequest {
     Include {
         candidates: Vec<String>,
         allow_source_root_match: bool,
+        target_hint: String,
     },
     UsingSymbol {
         namespace: String,
@@ -107,6 +109,7 @@ fn parse_include(import_path: &str, statement: &str) -> Option<CppImportRequest>
     Some(CppImportRequest::Include {
         candidates,
         allow_source_root_match: quoted,
+        target_hint: target.to_owned(),
     })
 }
 

@@ -11,6 +11,7 @@ const MAX_SOURCE_SURFACE_CHUNK_BYTES: usize = 8_000;
 const MAX_SOURCE_SURFACE_CHUNK_LINES: usize = 200;
 const MIN_DENSE_SOURCE_SYMBOLS: usize = 64;
 const DENSE_SOURCE_SYMBOLS_PER_WINDOW: usize = 4;
+const MAX_UNCOVERED_SOURCE_CHUNKS_PER_FILE: usize = 64;
 
 pub(super) fn chunks_for_symbols(
     build: &SnapshotBuild,
@@ -51,11 +52,153 @@ pub(super) fn chunks_for_symbols(
             symbol,
         ));
     }
-    if chunks.is_empty() || keeps_file_chunk_with_symbol_chunks(content, symbols) {
+    if chunks.is_empty() {
+        chunks.extend(bounded_file_surface_chunks(
+            build,
+            path,
+            file_id,
+            language_id,
+            content,
+        )?);
+    } else if keeps_file_chunk_with_symbol_chunks(content, symbols) {
         add_file_chunk_to_vec(build, path, file_id, language_id, content, &mut chunks)?;
+    } else {
+        chunks.extend(uncovered_source_surface_chunks(
+            build,
+            path,
+            file_id,
+            language_id,
+            content,
+            symbols,
+        ));
     }
 
     Ok(chunks)
+}
+
+fn uncovered_source_surface_chunks(
+    build: &SnapshotBuild,
+    path: &str,
+    file_id: &str,
+    language_id: &str,
+    content: &str,
+    symbols: &[RepositoryCodeSymbolRecord],
+) -> Vec<RepositoryCodeChunkRecord> {
+    let mut covered_ranges = symbols
+        .iter()
+        .filter_map(|symbol| {
+            let start = usize::try_from(symbol.byte_range.start).ok()?;
+            let end = usize::try_from(symbol.byte_range.end).ok()?;
+            (start < end && end <= content.len()).then_some((start, end))
+        })
+        .collect::<Vec<_>>();
+    covered_ranges.sort_unstable_by_key(|range| range.0);
+    let line_starts = source_line_starts(content);
+    let context = UncoveredChunkContext {
+        build,
+        path,
+        file_id,
+        language_id,
+        content,
+        line_starts: &line_starts,
+    };
+    let mut chunks = Vec::new();
+    let mut covered_end = 0usize;
+    for (start, end) in covered_ranges {
+        push_uncovered_range_chunks(&context, covered_end, start, &mut chunks);
+        covered_end = covered_end.max(end);
+        if chunks.len() >= MAX_UNCOVERED_SOURCE_CHUNKS_PER_FILE {
+            return chunks;
+        }
+    }
+    push_uncovered_range_chunks(&context, covered_end, content.len(), &mut chunks);
+
+    chunks
+}
+
+struct UncoveredChunkContext<'a> {
+    build: &'a SnapshotBuild,
+    path: &'a str,
+    file_id: &'a str,
+    language_id: &'a str,
+    content: &'a str,
+    line_starts: &'a [usize],
+}
+
+fn push_uncovered_range_chunks(
+    context: &UncoveredChunkContext<'_>,
+    range_start: usize,
+    range_end: usize,
+    chunks: &mut Vec<RepositoryCodeChunkRecord>,
+) {
+    if range_start >= range_end
+        || range_end > context.content.len()
+        || !contains_source_token(&context.content[range_start..range_end])
+    {
+        return;
+    }
+    let mut byte_start = range_start;
+    while byte_start < range_end && chunks.len() < MAX_UNCOVERED_SOURCE_CHUNKS_PER_FILE {
+        let byte_end = file_surface_window_end(context.content, byte_start).min(range_end);
+        let raw_excerpt = &context.content[byte_start..byte_end];
+        if raw_excerpt.trim().is_empty() {
+            byte_start = byte_end;
+            continue;
+        }
+        let leading_bytes = raw_excerpt.len() - raw_excerpt.trim_start().len();
+        let trailing_bytes = raw_excerpt.len() - raw_excerpt.trim_end().len();
+        let excerpt_start = byte_start + leading_bytes;
+        let excerpt_end = byte_end.saturating_sub(trailing_bytes);
+        let excerpt = &context.content[excerpt_start..excerpt_end];
+        if !excerpt.is_empty() {
+            let line_start = line_number_at(context.line_starts, excerpt_start);
+            let line_end = line_start + excerpt.bytes().filter(|byte| *byte == b'\n').count();
+            chunks.push(RepositoryCodeChunkRecord {
+                repository_id: context.build.repository_id.clone(),
+                source_scope: context.build.source_scope.clone(),
+                chunk_id: stable_id(
+                    "chunk",
+                    [
+                        &context.build.repository_id,
+                        &context.build.source_scope,
+                        context.path,
+                        "uncovered-source",
+                        &excerpt_start.to_string(),
+                        &excerpt_end.to_string(),
+                        &stable_content_hash(excerpt.as_bytes()),
+                    ],
+                ),
+                file_id: context.file_id.to_owned(),
+                path: context.path.to_owned(),
+                language_id: context.language_id.to_owned(),
+                content: excerpt.to_owned(),
+                byte_range: RepositoryCodeRange {
+                    start: excerpt_start as u32,
+                    end: excerpt_end as u32,
+                },
+                line_range: RepositoryCodeRange {
+                    start: line_start as u32,
+                    end: line_end as u32,
+                },
+                symbol_snapshot_id: None,
+            });
+        }
+        byte_start = byte_end;
+    }
+}
+
+fn source_line_starts(content: &str) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(
+            content
+                .match_indices('\n')
+                .map(|(index, _)| index.saturating_add(1)),
+        )
+        .collect()
+}
+
+fn line_number_at(line_starts: &[usize], byte_start: usize) -> usize {
+    line_starts.partition_point(|line_start| *line_start <= byte_start)
 }
 
 fn uses_dense_source_windows(content: &str, symbols: &[RepositoryCodeSymbolRecord]) -> bool {

@@ -24,7 +24,7 @@
 - `repo-set create/add/remove/query/status/refresh` 和共享 API/Web/MCP 入口使用显式 repository set selector。
 - SQLite 持久化 `code_repository_sets`、`code_repository_set_members`、`code_repository_cross_edges`、overlay status 和 overlay refresh task；基础代码事实表不为 repository set 复制行。
 - 多仓查询在应用层 fan-out 到每个成员持久化的 `source_scope`，按成员 priority、freshness 和 overlay confidence 合并排序；请求级 path/language filter 只收窄成员 scope，不会通过当前仓库注册默认值重新解析或扩大 scope。去重键包含 repository、scope、path、line range 和 excerpt。
-- `repo-set refresh` 构建 import/module 层面的跨仓 overlay edges，支持 resolved、ambiguous 和 unresolved 状态，并暴露 evidence JSON。本地、相对或已在成员仓库内解析的 import 只留在成员仓库内，不会通过跨仓 symbol-name 或 basename fallback 解析。
+- `repo-set refresh` 构建 import/module 层面的跨仓 overlay edges，支持 resolved 和 ambiguous 状态，并暴露 evidence JSON。没有 member export candidate 的外部 import 继续作为来源仓库内的权威 unresolved metadata，不会重复物化进 set overlay。本地、相对或已在成员仓库内解析的 import 同样只留在成员仓库内，不会通过跨仓 symbol-name 或 basename fallback 解析。
 - workspace-aware package mapping 支持 Go `go.work`/`go.mod` module roots，以及 pnpm `pnpm-workspace.yaml` 加 package `package.json` 的名称、入口和 export subpath。手动 repository-set refresh 使用这些规则，不改变单仓 import 解析。显式启用的 automatic-workspace index 路径使用独立 legacy cross-edge builder，保持默认关闭，且不受下文手动 set materialization 上限保护。
 - scope retention 会保留仍被 repository set member 引用的单仓 snapshot；后台 overlay refresh task 使用持久租约、重试、dead-letter 状态和常驻 `service run` overlay refresh worker。
 
@@ -188,7 +188,7 @@ code_repository_cross_edges
   created_at_ms INTEGER NOT NULL
 ```
 
-overlay refresh 期间，仍为 unresolved 的成员外部 import 会和从 repository-set members 构建的只读 package/module export index 匹配。索引到 `go.work` 时，Go workspace 只会在该 `go.work` root 目录树内把 `go.mod` package prefix 限定到 `go.work use` 目录；目录树之外的 module 仍提供自己的 prefix。pnpm workspace 只会把 `pnpm-workspace.yaml` package glob 应用于 workspace root 下的 package path，并从索引时保留的完整 workspace/package manifest 内容读取 package `package.json` name。pnpm workspace root package 总是 included；没有 `packages` 字段时只包含 root package；package `exports` 优先于 `main`、`module`、`types`、`typings` 和默认 `index` 入口 alias。已声明的 `exports` 会约束 package subpath alias：conditional export object 只选择一个优先 runtime target，wildcard subpath export 会映射匹配的文件 pattern，未声明导出的文件不会获得合成 package subpath alias。仍无法匹配成员的 import 会以 `unresolved` 跨仓 edge 和 `target_hint` evidence 持久化，而不是被丢弃或转换为 degraded。
+overlay refresh 期间，仍为 unresolved 的成员外部 import 会和从 repository-set members 构建的只读 package/module export index 匹配。索引到 `go.work` 时，Go workspace 只会在该 `go.work` root 目录树内把 `go.mod` package prefix 限定到 `go.work use` 目录；目录树之外的 module 仍提供自己的 prefix。pnpm workspace 只会把 `pnpm-workspace.yaml` package glob 应用于 workspace root 下的 package path，并从索引时保留的完整 workspace/package manifest 内容读取 package `package.json` name。pnpm workspace root package 总是 included；没有 `packages` 字段时只包含 root package；package `exports` 优先于 `main`、`module`、`types`、`typings` 和默认 `index` 入口 alias。已声明的 `exports` 会约束 package subpath alias：conditional export object 只选择一个优先 runtime target，wildcard subpath export 会映射匹配的文件 pattern，未声明导出的文件不会获得合成 package subpath alias。仍无法匹配成员的 import 会以来源 scope 内的权威 `unresolved` fact 和 `target_hint` evidence 持久化，而不会重复写成跨仓 edge、被丢弃或转换为 degraded。
 
 禁止新增物化的虚拟事实表，例如 `code_repository_files` 中不得为 `RepositorySet` 复制成员仓库文件行。允许新增小型统计表或 query cache，但缓存必须以成员 `source_scope` 和其 index version 为失效键。
 
@@ -263,7 +263,7 @@ repository set members
   -> mark repository set overlay freshness
 ```
 
-第一版只需要支持 import/module 层面的明确证据。没有 package metadata 或唯一 module match 时，边应保持 `ambiguous` 或 `unresolved`。调用和 reference 的跨仓库解析可以依赖后续语言级增强，不应阻塞多仓库基础查询。
+当前实现只把 import/module 层面的明确证据解析为跨仓边。没有 package metadata 或唯一 module match 时，边保持 `ambiguous` 或 `unresolved`。调用和 reference 的跨仓解析属于未来可选的语言级增强，不是当前多仓基础查询的隐含能力。
 
 ## 9. 新鲜度、保留与失效
 

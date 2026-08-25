@@ -84,13 +84,6 @@ impl ScoreQuery {
     }
 }
 
-pub(in crate::storage::sqlite::code::query) fn score_text<'field>(
-    query: &str,
-    fields: impl IntoIterator<Item = &'field str>,
-) -> f64 {
-    ScoreQuery::new(query).score(fields)
-}
-
 pub(in crate::storage::sqlite::code::query) fn score_exact_path(query: &str, path: &str) -> f64 {
     let query = query.trim().to_lowercase();
     if query.is_empty() {

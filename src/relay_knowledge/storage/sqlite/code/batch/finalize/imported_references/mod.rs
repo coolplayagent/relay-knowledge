@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{Transaction, params, params_from_iter, types::Value};
+use rusqlite::{Transaction, params};
 
 use super::{
     imports::typescript,
@@ -20,60 +20,6 @@ pub(super) fn resolve_references(
     symbol_cache: &mut Option<Vec<SymbolKey>>,
 ) -> Result<(), StorageError> {
     let imports = load_resolved_typescript_imports(transaction, source_scope)?;
-    if imports.is_empty() {
-        return Ok(());
-    }
-
-    let symbols = symbols::load_once(transaction, source_scope, symbol_cache)?;
-    let symbols_by_name = symbols_by_name(symbols);
-    let mut update_reference = transaction.prepare(
-        "
-        UPDATE code_repository_references
-        SET target_symbol_snapshot_id = ?4,
-            target_hint = ?5,
-            resolution_state = 'resolved',
-            confidence_basis_points = 8500,
-            confidence_tier = 'inferred'
-        WHERE source_scope = ?1
-          AND path = ?2
-          AND name = ?3
-          AND resolution_state != 'resolved'
-        ",
-    )?;
-
-    for import in imports {
-        for binding in typescript::named_import_bindings(&import.module) {
-            let Some(symbol) = unique_imported_symbol(
-                &symbols_by_name,
-                &import.target_hint,
-                &binding.imported_name,
-            ) else {
-                continue;
-            };
-            update_reference.execute(params![
-                source_scope,
-                import.path.as_str(),
-                binding.local_name.as_str(),
-                symbol.symbol_snapshot_id.as_str(),
-                symbol.name.as_str(),
-            ])?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Path-scoped variant of [`resolve_references`]: only re-resolves TypeScript
-/// references through named-import bindings whose `path` is in
-/// `affected_paths`.  The symbol index still loads ALL symbols.
-pub(super) fn resolve_references_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-    symbol_cache: &mut Option<Vec<SymbolKey>>,
-) -> Result<(), StorageError> {
-    let imports =
-        load_resolved_typescript_imports_for_paths(transaction, source_scope, affected_paths)?;
     if imports.is_empty() {
         return Ok(());
     }
@@ -149,51 +95,6 @@ fn load_resolved_typescript_imports(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
-}
-
-fn load_resolved_typescript_imports_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-) -> Result<Vec<ResolvedImport>, StorageError> {
-    let mut paths = affected_paths.to_vec();
-    paths.sort_unstable();
-    paths.dedup();
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut all_imports = Vec::new();
-    for path_chunk in paths.chunks(500) {
-        let placeholders = std::iter::repeat_n("?", path_chunk.len())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let mut values = Vec::with_capacity(path_chunk.len() + 1);
-        values.push(Value::Text(source_scope.to_owned()));
-        values.extend(path_chunk.iter().map(|p| Value::Text((*p).to_owned())));
-        let mut statement = transaction.prepare(&format!(
-            "
-                SELECT import_row.path, import_row.module, import_row.target_hint
-                FROM code_repository_imports import_row
-                INNER JOIN code_repository_files file
-                    ON file.source_scope = import_row.source_scope AND file.path = import_row.path
-                WHERE import_row.source_scope = ?
-                  AND import_row.resolution_state = 'resolved'
-                  AND import_row.target_hint IS NOT NULL
-                  AND file.language_id IN ('typescript', 'tsx')
-                  AND import_row.path IN ({placeholders})
-                "
-        ))?;
-        let rows = statement.query_map(params_from_iter(values), |row| {
-            Ok(ResolvedImport {
-                path: row.get(0)?,
-                module: row.get(1)?,
-                target_hint: row.get(2)?,
-            })
-        })?;
-        all_imports.extend(rows.collect::<Result<Vec<_>, _>>()?);
-    }
-
-    Ok(all_imports)
 }
 
 fn symbols_by_name(symbols: &[SymbolKey]) -> BTreeMap<&str, Vec<&SymbolKey>> {

@@ -48,9 +48,9 @@ mod worktree_overlay_review_tests;
 mod worktree_overlay_tests;
 
 pub use error::CodeIndexError;
+pub(crate) use index::CodeIndexPlanRecovery;
 pub use index::{
     CodeIndexPlan, prepare_full_index_plan, prepare_full_index_plan_with_workspace_detection,
-    prepare_incremental_index_plan_with_workspace_detection,
 };
 pub use index::{
     build_index_snapshot, changed_paths_for_diff, changed_paths_for_diff_with_filters,
@@ -86,11 +86,16 @@ pub(crate) use index::compute_worktree_overlay_identity;
 use index::impact_paths_from_changes;
 #[cfg(test)]
 pub(crate) use index::mutate_next_filesystem_full_snapshot_read;
-pub(crate) use index::{historical_reuse_diff_fits_budget, repository_uses_filesystem_source};
+pub(crate) use index::{
+    build_index_snapshot_with_workspace_detection, historical_reuse_diff_fits_budget,
+    repository_uses_filesystem_source,
+};
 pub(crate) use registration::REGISTRATION_LANGUAGE_FILTER_ERROR;
 pub(crate) use search::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
-    SourceGrepRequest, source_grep_matches, source_grep_matches_from_worktree_overlay,
+    SourceGrepRequest, bounded_source_grep_candidate_match_limit,
+    source_fallback_reference_language_is_code, source_grep_matches,
+    source_grep_matches_from_worktree_overlay,
 };
 #[cfg(test)]
 use source::gitlink as source_gitlink;

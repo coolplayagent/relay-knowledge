@@ -100,6 +100,40 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
         CodeIndexTaskQueueStatus::default()
     );
     assert!(
+        !store
+            .code_index_publication_receipt(
+                "task".to_owned(),
+                "repo".to_owned(),
+                "scope".to_owned(),
+                1,
+            )
+            .await
+            .expect("default publication receipt should be absent")
+    );
+    assert!(
+        !store
+            .reconcile_code_index_publication_with_fence(
+                CodeIndexPublicationTarget {
+                    task_id: "task".to_owned(),
+                    repository_id: "repo".to_owned(),
+                    source_scope: "scope".to_owned(),
+                    resolved_commit_sha: "commit".to_owned(),
+                    tree_hash: "tree".to_owned(),
+                    path_filters: Vec::new(),
+                    language_filters: Vec::new(),
+                },
+                CodeIndexPublicationFence {
+                    repository_id: "repo".to_owned(),
+                    task_id: "task".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    attempt_count: 1,
+                    generation: 1,
+                },
+            )
+            .await
+            .expect("default publication reconciliation should not adopt")
+    );
+    assert!(
         store
             .latest_code_index_checkpoint("repo".to_owned())
             .await
@@ -110,6 +144,12 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
         .clear_code_workspace_state("repo".to_owned(), "scope".to_owned())
         .await
         .expect("default workspace cleanup should be a no-op");
+    assert!(
+        !store
+            .code_repository_auto_workspace_state_exists("repo".to_owned())
+            .await
+            .expect("default workspace state should be absent")
+    );
     assert_eq!(
         store
             .code_repository_totals()
@@ -163,7 +203,13 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
     assert_unavailable(
         store
             .recover_code_index_task_leases_by_task(CodeIndexTaskLeaseRecovery {
-                task_ids: vec!["task".to_owned()],
+                leases: vec![CodeIndexTaskLeaseRecord {
+                    task_id: "task".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    lease_expires_at_ms: Some(1),
+                    attempt_count: 1,
+                    publication_generation: 1,
+                }],
                 now_ms: 1,
                 max_attempts: 1,
                 error_kind: "lease".to_owned(),
@@ -182,6 +228,7 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
                 task_id: "task".to_owned(),
                 lease_owner: "worker".to_owned(),
                 attempt_count: 1,
+                publication_generation: 1,
                 lease_duration_ms: 10,
                 now_ms: 1,
             })
@@ -230,6 +277,28 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
         "checkpointed code index sessions for scope 'scope' are unavailable",
     );
     assert_unavailable(
+        store
+            .begin_code_index_session_at_checkpoint(code_index_session(), None)
+            .await,
+        "checkpoint-CAS session startup for scope 'scope' at expectation 'missing' is unavailable",
+    );
+    assert_unavailable(
+        store
+            .begin_code_index_session_at_checkpoint_with_fence(
+                code_index_session(),
+                None,
+                CodeIndexPublicationFence {
+                    repository_id: "repo".to_owned(),
+                    task_id: "task".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    attempt_count: 1,
+                    generation: 1,
+                },
+            )
+            .await,
+        "attempt-scoped checkpoint-CAS session startup for task 'task' scope 'scope' at expectation 'missing' is unavailable",
+    );
+    assert_unavailable(
         store.apply_code_index_batch(code_index_batch()).await,
         "checkpointed code index batches for scope 'scope' are unavailable",
     );
@@ -239,6 +308,25 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
             .await,
         "checkpointed code index finalization for scope 'scope' is unavailable",
     );
+    assert_unavailable(
+        store
+            .advance_code_index_session_with_fence(
+                code_index_session(),
+                CodeIndexPublicationFence {
+                    repository_id: "repo".to_owned(),
+                    task_id: "task".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    attempt_count: 1,
+                    generation: 1,
+                },
+            )
+            .await,
+        "attempt-scoped single-step finalization for task 'task' scope 'scope' is unavailable",
+    );
+    store
+        .run_code_index_post_maintenance("repo".to_owned(), "scope".to_owned())
+        .await
+        .expect("default post-index maintenance should be a no-op");
     assert_unavailable(
         store.search_code_feature_flags(feature_flags.clone()).await,
         "code feature flag search for repository 'repo' is unavailable",

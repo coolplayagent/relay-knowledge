@@ -23,6 +23,16 @@ use model::{EffectivePom, JVM_LANGUAGES, PomDocument, resolve_effective_model_lo
 
 const MAVEN_SOURCE_KIND: &str = "pom.xml";
 const FILE_CHUNK_CONTENT_BUDGET_BYTES: u64 = 8_000;
+const MAX_POM_DOCUMENTS_PER_SCOPE: usize = 8_192;
+const MAX_POM_CHUNKS_PER_SCOPE: usize = 16_384;
+const MAX_POM_BYTES_PER_SCOPE: usize = 64 * 1024 * 1024;
+const MAX_MAVEN_DEPENDENCIES_PER_SCOPE: usize = 131_072;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::storage::sqlite) struct EffectiveDependencyRefresh {
+    pub(in crate::storage::sqlite) deleted_fact_count: usize,
+    pub(in crate::storage::sqlite) inserted_fact_count: usize,
+}
 
 #[derive(Debug)]
 struct ChunkSchema {
@@ -62,21 +72,34 @@ pub(super) struct MavenBuildFact {
     line: u32,
 }
 
-pub(super) fn build_target_inputs(
+pub(super) fn visit_build_target_inputs(
+    connection: &Connection,
+    source_scope: &str,
+    graph_version: GraphVersion,
+    mut visit: impl FnMut(SoftwareBuildTargetInput) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    let loaded = effective_models(connection, source_scope)?;
+    if loaded.preserve_existing_facts {
+        return Ok(());
+    }
+    for model in loaded.models {
+        visit_build_facts(&model, |fact| visit(build_input(fact, graph_version)))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn build_target_inputs(
     connection: &Connection,
     source_scope: &str,
     graph_version: GraphVersion,
 ) -> Result<Vec<SoftwareBuildTargetInput>, StorageError> {
-    let loaded = effective_models(connection, source_scope)?;
-    if loaded.preserve_existing_facts {
-        return Ok(Vec::new());
-    }
-    Ok(loaded
-        .models
-        .into_iter()
-        .flat_map(|model| build_facts(&model))
-        .map(|fact| build_input(fact, graph_version))
-        .collect())
+    let mut inputs = Vec::new();
+    visit_build_target_inputs(connection, source_scope, graph_version, |input| {
+        inputs.push(input);
+        Ok(())
+    })?;
+    Ok(inputs)
 }
 
 pub(super) fn preserves_existing_facts(
@@ -90,7 +113,7 @@ pub(super) fn preserves_existing_facts(
 pub(super) fn refresh_effective_dependencies(
     transaction: &Transaction<'_>,
     source_scope: &str,
-) -> Result<(), StorageError> {
+) -> Result<EffectiveDependencyRefresh, StorageError> {
     let loaded = effective_models(transaction, source_scope)?;
     refresh_effective_dependency_records(transaction, source_scope, loaded)
 }
@@ -99,7 +122,7 @@ pub(super) fn refresh_effective_dependencies_with_language_filters(
     transaction: &Transaction<'_>,
     source_scope: &str,
     language_filters: &[String],
-) -> Result<(), StorageError> {
+) -> Result<EffectiveDependencyRefresh, StorageError> {
     let languages = jvm_languages_for_filters(language_filters);
     let loaded = effective_models_with_languages(transaction, source_scope, languages)?;
     refresh_effective_dependency_records(transaction, source_scope, loaded)
@@ -109,9 +132,9 @@ fn refresh_effective_dependency_records(
     transaction: &Transaction<'_>,
     source_scope: &str,
     loaded: MavenModels,
-) -> Result<(), StorageError> {
+) -> Result<EffectiveDependencyRefresh, StorageError> {
     if loaded.preserve_existing_facts {
-        return Ok(());
+        return Ok(EffectiveDependencyRefresh::default());
     }
     transaction.execute(
         "
@@ -147,7 +170,7 @@ fn refresh_effective_dependency_records(
         ",
         params![source_scope],
     )?;
-    transaction.execute(
+    let deleted_fact_count = transaction.execute(
         "
         DELETE FROM code_repository_dependencies
         WHERE source_scope = ?1
@@ -157,7 +180,10 @@ fn refresh_effective_dependency_records(
         params![source_scope],
     )?;
     if loaded.models.is_empty() {
-        return Ok(());
+        return Ok(EffectiveDependencyRefresh {
+            deleted_fact_count,
+            inserted_fact_count: 0,
+        });
     }
 
     let mut insert_dependency = transaction.prepare(
@@ -171,8 +197,9 @@ fn refresh_effective_dependency_records(
         ",
     )?;
     let mut search_documents = SearchDocumentInserter::new(transaction)?;
-    for record in dependency_records(&loaded.models) {
-        insert_dependency.execute(params![
+    let mut inserted_fact_count = 0usize;
+    visit_dependency_records(&loaded.models, MAX_MAVEN_DEPENDENCIES_PER_SCOPE, |record| {
+        let changed = insert_dependency.execute(params![
             record.repository_id,
             record.source_scope,
             record.dependency_id,
@@ -190,6 +217,17 @@ fn refresh_effective_dependency_records(
             record.line_range.end,
             record.excerpt,
         ])?;
+        if changed != 1 {
+            return Err(StorageError::Invariant(format!(
+                "Maven dependency '{}' did not persist exactly one fact row",
+                record.dependency_id
+            )));
+        }
+        inserted_fact_count = inserted_fact_count.checked_add(changed).ok_or_else(|| {
+            StorageError::CapacityExceeded(
+                "effective Maven dependency fact count exceeds platform capacity".to_owned(),
+            )
+        })?;
         search_documents.insert(
             &record.source_scope,
             "dependency",
@@ -207,10 +245,14 @@ fn refresh_effective_dependency_records(
                 record.path.as_str(),
             ],
         )?;
-    }
+        Ok(())
+    })?;
     search_documents.finish()?;
 
-    Ok(())
+    Ok(EffectiveDependencyRefresh {
+        deleted_fact_count,
+        inserted_fact_count,
+    })
 }
 
 fn effective_models(
@@ -247,6 +289,22 @@ fn effective_models_with_languages(
 }
 
 fn pom_documents(connection: &Connection, source_scope: &str) -> Result<PomLoad, StorageError> {
+    pom_documents_with_limits(
+        connection,
+        source_scope,
+        MAX_POM_DOCUMENTS_PER_SCOPE,
+        MAX_POM_CHUNKS_PER_SCOPE,
+        MAX_POM_BYTES_PER_SCOPE,
+    )
+}
+
+fn pom_documents_with_limits(
+    connection: &Connection,
+    source_scope: &str,
+    document_limit: usize,
+    chunk_limit: usize,
+    byte_limit: usize,
+) -> Result<PomLoad, StorageError> {
     let chunk_schema = read_chunk_schema(connection)?;
     let file_id_expression = if chunk_schema.has_file_id {
         "file_id"
@@ -277,20 +335,32 @@ fn pom_documents(connection: &Connection, source_scope: &str) -> Result<PomLoad,
           AND (path = 'pom.xml' OR path LIKE '%/pom.xml')
           {symbol_filter}
         ORDER BY path ASC, line_start ASC, chunk_id ASC
+        LIMIT ?2
         ",
     );
+    preflight_pom_budget(
+        connection,
+        source_scope,
+        symbol_filter,
+        document_limit,
+        chunk_limit,
+        byte_limit,
+    )?;
     let mut statement = connection.prepare(&query)?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok(PomDocument {
-            repository_id: row.get(0)?,
-            source_scope: row.get(1)?,
-            file_id: row.get(2)?,
-            path: row.get(3)?,
-            content: row.get(4)?,
-            byte_start: row.get::<_, u64>(5)?,
-            byte_end: row.get::<_, u64>(6)?,
-        })
-    })?;
+    let rows = statement.query_map(
+        params![source_scope, chunk_limit.saturating_add(1)],
+        |row| {
+            Ok(PomDocument {
+                repository_id: row.get(0)?,
+                source_scope: row.get(1)?,
+                file_id: row.get(2)?,
+                path: row.get(3)?,
+                content: row.get(4)?,
+                byte_start: row.get::<_, u64>(5)?,
+                byte_end: row.get::<_, u64>(6)?,
+            })
+        },
+    )?;
 
     let mut documents = Vec::new();
     let mut has_truncated_documents = false;
@@ -306,6 +376,51 @@ fn pom_documents(connection: &Connection, source_scope: &str) -> Result<PomLoad,
         documents,
         has_truncated_documents,
     })
+}
+
+fn preflight_pom_budget(
+    connection: &Connection,
+    source_scope: &str,
+    symbol_filter: &str,
+    document_limit: usize,
+    chunk_limit: usize,
+    byte_limit: usize,
+) -> Result<(), StorageError> {
+    let query = format!(
+        "SELECT path, LENGTH(content)
+         FROM code_repository_chunks
+         WHERE source_scope = ?1
+           AND (path = 'pom.xml' OR path LIKE '%/pom.xml')
+           {symbol_filter}
+         ORDER BY path ASC, line_start ASC, chunk_id ASC
+         LIMIT ?2"
+    );
+    let mut statement = connection.prepare(&query)?;
+    let mut rows = statement.query(params![source_scope, chunk_limit.saturating_add(1)])?;
+    let mut paths = BTreeSet::new();
+    let mut chunks = 0usize;
+    let mut bytes = 0usize;
+    while let Some(row) = rows.next()? {
+        chunks = chunks.saturating_add(1);
+        if chunks > chunk_limit {
+            return Err(StorageError::CapacityExceeded(format!(
+                "Maven POM candidate chunks exceed the bounded limit {chunk_limit}"
+            )));
+        }
+        paths.insert(row.get::<_, String>(0)?);
+        if paths.len() > document_limit {
+            return Err(StorageError::CapacityExceeded(format!(
+                "Maven POM candidate documents exceed the bounded limit {document_limit}"
+            )));
+        }
+        bytes = bytes.saturating_add(row.get::<_, usize>(1)?);
+        if bytes > byte_limit {
+            return Err(StorageError::CapacityExceeded(format!(
+                "Maven POM candidate bytes exceed the bounded limit {byte_limit}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn read_chunk_schema(connection: &Connection) -> Result<ChunkSchema, StorageError> {
@@ -366,10 +481,23 @@ fn jvm_languages_for_filters(filters: &[String]) -> Vec<&'static str> {
         .collect()
 }
 
+#[cfg(test)]
 fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
     let mut facts = Vec::new();
+    visit_build_facts(model, |fact| {
+        facts.push(fact);
+        Ok(())
+    })
+    .expect("in-memory Maven fact collection should not fail");
+    facts
+}
+
+fn visit_build_facts(
+    model: &EffectivePom,
+    mut visit: impl FnMut(MavenBuildFact) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
     for language_id in model.languages.iter().copied() {
-        facts.push(build_fact(
+        visit(build_fact(
             model,
             language_id,
             "project",
@@ -377,8 +505,8 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
             Some(format!("mvn {}", model.packaging_phase())),
             model.packaging.clone(),
             model.line,
-        ));
-        facts.push(build_fact(
+        ))?;
+        visit(build_fact(
             model,
             language_id,
             "package",
@@ -386,9 +514,9 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
             Some(format!("mvn {}", model.packaging_phase())),
             model.packaging.clone(),
             model.line,
-        ));
+        ))?;
         if let Some(packaging) = &model.packaging {
-            facts.push(build_fact(
+            visit(build_fact(
                 model,
                 language_id,
                 "packaging",
@@ -396,10 +524,10 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
                 Some(format!("mvn {}", model.packaging_phase())),
                 None,
                 model.line,
-            ));
+            ))?;
         }
         for module in &model.modules {
-            facts.push(build_fact(
+            visit(build_fact(
                 model,
                 language_id,
                 "module",
@@ -407,10 +535,10 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
                 Some(format!("mvn -pl {} package", module.value)),
                 None,
                 module.line,
-            ));
+            ))?;
         }
         for profile in &model.profiles {
-            facts.push(build_fact(
+            visit(build_fact(
                 model,
                 language_id,
                 "profile",
@@ -418,12 +546,12 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
                 Some(format!("mvn -P{} {}", profile.id, model.packaging_phase())),
                 None,
                 profile.line,
-            ));
+            ))?;
         }
         for plugin in &model.plugins {
             let plugin_help = format!("{}:help", plugin.prefix());
             let plugin_name = plugin.scoped_name(plugin.coordinate.as_str());
-            facts.push(build_fact_for_evidence(
+            visit(build_fact_for_evidence(
                 model,
                 BuildFactEvidence {
                     path: plugin.source_path.as_str(),
@@ -434,11 +562,11 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
                 plugin_name.as_str(),
                 Some(plugin.command(&plugin_help)),
                 plugin.version.clone(),
-            ));
+            ))?;
             for execution in &plugin.executions {
                 let name =
                     plugin.scoped_name(&format!("{}:{}", plugin.coordinate, execution.name()));
-                facts.push(build_fact_for_evidence(
+                visit(build_fact_for_evidence(
                     model,
                     BuildFactEvidence {
                         path: execution.source_path.as_str(),
@@ -449,11 +577,11 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
                     name.as_str(),
                     execution.command(plugin),
                     execution.phase.clone(),
-                ));
+                ))?;
                 for goal in &execution.goals {
                     let goal_target = format!("{}:{}", plugin.prefix(), goal.value);
                     let goal_name = plugin.scoped_name(&goal_target);
-                    facts.push(build_fact_for_evidence(
+                    visit(build_fact_for_evidence(
                         model,
                         BuildFactEvidence {
                             path: goal.source_path.as_str(),
@@ -464,13 +592,12 @@ fn build_facts(model: &EffectivePom) -> Vec<MavenBuildFact> {
                         goal_name.as_str(),
                         Some(plugin.command(&goal_target)),
                         execution.phase.clone(),
-                    ));
+                    ))?;
                 }
             }
         }
     }
-
-    facts
+    Ok(())
 }
 
 fn build_fact(
@@ -518,9 +645,12 @@ fn build_fact_for_evidence(
     }
 }
 
-fn dependency_records(models: &[EffectivePom]) -> Vec<CodeDependencyRecord> {
+fn visit_dependency_records(
+    models: &[EffectivePom],
+    limit: usize,
+    mut visit: impl FnMut(CodeDependencyRecord) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
     let mut seen = BTreeSet::new();
-    let mut records = Vec::new();
     for model in models {
         for dependency in &model.dependencies {
             for &language_id in &model.languages {
@@ -541,7 +671,12 @@ fn dependency_records(models: &[EffectivePom]) -> Vec<CodeDependencyRecord> {
                 if !seen.insert(key.clone()) {
                     continue;
                 }
-                records.push(CodeDependencyRecord {
+                if seen.len() > limit {
+                    return Err(StorageError::CapacityExceeded(format!(
+                        "Maven dependency facts exceed the bounded limit {limit}"
+                    )));
+                }
+                visit(CodeDependencyRecord {
                     repository_id: model.document.repository_id.clone(),
                     source_scope: model.document.source_scope.clone(),
                     dependency_id: stable_id("dependency", &key),
@@ -560,11 +695,22 @@ fn dependency_records(models: &[EffectivePom]) -> Vec<CodeDependencyRecord> {
                         end: line,
                     },
                     excerpt: dependency.excerpt(&package_name),
-                });
+                })?;
             }
         }
     }
 
+    Ok(())
+}
+
+#[cfg(test)]
+fn dependency_records(models: &[EffectivePom]) -> Vec<CodeDependencyRecord> {
+    let mut records = Vec::new();
+    visit_dependency_records(models, MAX_MAVEN_DEPENDENCIES_PER_SCOPE, |record| {
+        records.push(record);
+        Ok(())
+    })
+    .expect("test Maven dependencies should stay within the production cap");
     records
 }
 

@@ -313,6 +313,7 @@ fn create_test_schema(connection: &Connection) {
                 resolved_commit_sha TEXT NOT NULL,
                 path_filters_json TEXT NOT NULL,
                 language_filters_json TEXT NOT NULL,
+                stale INTEGER NOT NULL DEFAULT 0,
                 retiring INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE code_repositories (
@@ -346,7 +347,8 @@ fn create_test_schema(connection: &Connection) {
                 file_id TEXT NOT NULL,
                 path TEXT NOT NULL,
                 language_id TEXT NOT NULL,
-                parse_status TEXT NOT NULL
+                parse_status TEXT NOT NULL,
+                is_generated INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE code_repository_imports (
                 repository_id TEXT NOT NULL,

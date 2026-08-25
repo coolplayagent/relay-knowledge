@@ -1,16 +1,18 @@
 //! Plans bounded index batches, row budgets, and workspace metadata.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, VecDeque},
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
     thread,
 };
 
 use crate::domain::{
-    CodeFileFingerprint, CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSession,
-    CodeIndexSnapshot, CodeMonorepoWorkspace, CodeRepositoryRegistration, CodeRepositorySelector,
-    CodeWorkspaceDetectionConfig, code_snapshot_scope_id,
+    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexResourceBudget, CodeIndexSession,
+    CodeMonorepoWorkspace, CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeWorkspaceDetectionConfig, code_query_index_repair, code_query_index_subphase,
+    code_reference_resolution, code_reference_resolution_query_index_repair,
+    code_reference_search_query_index_repair, code_reference_search_rebuild,
 };
 
 use super::{
@@ -32,6 +34,12 @@ const MIN_PARALLEL_PARSE_BYTES: usize = 256 * 1024;
 const TARGET_PARSE_FILES_PER_WORKER: usize = 16;
 const TARGET_PARSE_BYTES_PER_WORKER: usize = 512 * 1024;
 
+#[derive(Debug, Clone)]
+struct PendingParsedFile {
+    parsed_byte_count: usize,
+    build: SnapshotBuild,
+}
+
 /// Blocking plan for a checkpointed full repository index.
 #[derive(Debug, Clone)]
 pub struct CodeIndexPlan {
@@ -47,165 +55,189 @@ pub struct CodeIndexPlan {
     paths: Vec<GitTreeEntry>,
     workspaces: Vec<CodeMonorepoWorkspace>,
     cursor: usize,
+    parsed_overflow: VecDeque<PendingParsedFile>,
     next_batch_index: usize,
     resource_budget: CodeIndexResourceBudget,
-    /// When set, the plan yields pre-parsed incremental snapshot data
-    /// instead of fetching and parsing git blobs.
-    incremental: Option<IncrementalPlanData>,
 }
 
-/// Pre-parsed incremental snapshot data split into bounded batches.
-#[derive(Debug, Clone)]
-struct IncrementalPlanData {
-    snapshot: CodeIndexSnapshot,
-    rows_by_path: BTreeMap<String, usize>,
-    cursor: usize,
+#[derive(Debug)]
+pub(crate) enum CodeIndexPlanRecovery {
+    Resume(CodeIndexPlan),
+    ContentEquivalentRestart(CodeIndexPlan),
 }
 
 impl CodeIndexPlan {
     /// Returns the durable session metadata that storage checkpoints.
     pub fn session(&self) -> CodeIndexSession {
-        let (
-            full_replace,
-            base_resolved_commit_sha,
-            total_path_count,
-            changed_path_count,
-            skipped_unchanged_count,
-            deleted_paths,
-            changed_paths,
-            tombstones,
-        ) = match &self.incremental {
-            Some(data) => {
-                let snapshot = &data.snapshot;
-                let changed_paths = snapshot
-                    .files
-                    .iter()
-                    .map(|file| file.path.clone())
-                    .collect::<Vec<_>>();
-                (
-                    false,
-                    snapshot.base_resolved_commit_sha.clone(),
-                    snapshot.changed_path_count,
-                    snapshot.changed_path_count,
-                    snapshot.skipped_unchanged_count,
-                    snapshot.deleted_paths.clone(),
-                    changed_paths,
-                    snapshot.tombstones.clone(),
-                )
-            }
-            None => (
-                true,
-                None,
-                self.paths.len(),
-                self.paths.len(),
-                0,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-            ),
-        };
         CodeIndexSession {
             repository_id: self.registration.repository_id.clone(),
             source_scope: self.source_scope.clone(),
-            base_resolved_commit_sha,
+            base_resolved_commit_sha: None,
             resolved_commit_sha: self.commit.clone(),
             tree_hash: self.tree_hash.clone(),
             path_filters: self.path_filters.clone(),
             language_filters: self.language_filters.clone(),
-            full_replace,
-            total_path_count,
-            changed_path_count,
-            skipped_unchanged_count,
-            deleted_paths,
-            changed_paths,
-            tombstones,
+            full_replace: true,
+            total_path_count: self.paths.len(),
+            changed_path_count: self.paths.len(),
+            skipped_unchanged_count: 0,
+            deleted_paths: Vec::new(),
+            changed_paths: Vec::new(),
+            tombstones: Vec::new(),
             workspaces: self.workspaces.clone(),
             resource_budget: self.resource_budget,
         }
     }
 
-    /// Parses the next bounded file batch without retaining prior batches.
-    pub fn parse_next_batch(mut self) -> Result<(Self, Option<CodeIndexBatch>), CodeIndexError> {
-        if let Some(incremental) = &mut self.incremental {
-            let snapshot = &incremental.snapshot;
-            if incremental.cursor >= snapshot.files.len() {
-                return Ok((self, None));
+    /// Restores the parser cursor from a fully committed durable checkpoint.
+    /// Fresh plans still begin at zero; this path is only valid before any
+    /// in-memory parse work has started.
+    pub fn resume_from_checkpoint(
+        self,
+        checkpoint: &CodeIndexCheckpoint,
+    ) -> Result<Self, CodeIndexError> {
+        match self.recover_from_checkpoint(checkpoint)? {
+            CodeIndexPlanRecovery::Resume(plan) => Ok(plan),
+            CodeIndexPlanRecovery::ContentEquivalentRestart(_) => Err(invalid_checkpoint(
+                "a completed content-equivalent checkpoint with a different resolved commit must restart instead of resuming its cursor",
+            )),
+        }
+    }
+
+    pub(crate) fn recover_from_checkpoint(
+        mut self,
+        checkpoint: &CodeIndexCheckpoint,
+    ) -> Result<CodeIndexPlanRecovery, CodeIndexError> {
+        self.validate_pristine_resume_target()?;
+        self.validate_checkpoint_content_identity(checkpoint)?;
+        self.validate_checkpoint_progress(checkpoint)?;
+
+        if checkpoint.resolved_commit_sha != self.commit {
+            if checkpoint.state == "completed" {
+                return Ok(CodeIndexPlanRecovery::ContentEquivalentRestart(self));
             }
-            let batch_end = next_incremental_batch_end(
-                &snapshot.files,
-                &incremental.rows_by_path,
-                incremental.cursor,
-                self.resource_budget,
-            );
-            let batch_paths: BTreeSet<&str> = snapshot.files[incremental.cursor..batch_end]
-                .iter()
-                .map(|file| file.path.as_str())
-                .collect();
-            let parsed_byte_count: usize = snapshot.files[incremental.cursor..batch_end]
-                .iter()
-                .map(|file| file.byte_len)
-                .sum();
-            let batch = CodeIndexBatch {
-                repository_id: snapshot.repository_id.clone(),
-                source_scope: snapshot.source_scope.clone(),
-                batch_index: self.next_batch_index,
-                parsed_byte_count,
-                files: snapshot.files[incremental.cursor..batch_end].to_vec(),
-                symbols: snapshot
-                    .symbols
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-                references: snapshot
-                    .references
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-                imports: snapshot
-                    .imports
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-                dependencies: snapshot
-                    .dependencies
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-                feature_flags: snapshot
-                    .feature_flags
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-                routes: snapshot
-                    .routes
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-                chunks: snapshot
-                    .chunks
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-                diagnostics: snapshot
-                    .diagnostics
-                    .iter()
-                    .filter(|record| batch_paths.contains(record.path.as_str()))
-                    .cloned()
-                    .collect(),
-            };
-            incremental.cursor = batch_end;
-            self.next_batch_index += 1;
-            return Ok((self, Some(batch)));
+            return Err(invalid_checkpoint(
+                "resolved commit does not match the plan and only a completed content-equivalent checkpoint may restart",
+            ));
         }
 
-        if self.cursor >= self.paths.len() {
+        self.cursor = checkpoint.committed_file_count;
+        self.next_batch_index = checkpoint.batch_count.checked_add(1).ok_or_else(|| {
+            invalid_checkpoint("batch count cannot advance to the next batch index")
+        })?;
+
+        Ok(CodeIndexPlanRecovery::Resume(self))
+    }
+
+    pub(crate) fn resume_from_content_equivalent_restart_checkpoint(
+        self,
+        checkpoint: &CodeIndexCheckpoint,
+    ) -> Result<Self, CodeIndexError> {
+        if checkpoint.state != "indexing"
+            || checkpoint.parsed_file_count != 0
+            || checkpoint.committed_file_count != 0
+            || checkpoint.committed_symbol_count != 0
+            || checkpoint.committed_reference_count != 0
+            || checkpoint.committed_chunk_count != 0
+            || checkpoint.batch_count != 0
+            || checkpoint.last_path.is_some()
+        {
+            return Err(invalid_checkpoint(
+                "a content-equivalent restart must return a zero-progress indexing checkpoint",
+            ));
+        }
+        self.resume_from_checkpoint(checkpoint)
+    }
+
+    fn validate_pristine_resume_target(&self) -> Result<(), CodeIndexError> {
+        if !self.parsed_overflow.is_empty() {
+            return Err(invalid_checkpoint(
+                "uncommitted parsed overflow must be empty before durable resume",
+            ));
+        }
+        if self.cursor != 0 || self.next_batch_index != 1 {
+            return Err(invalid_checkpoint(
+                "resume requires a newly prepared plan before any parse batch",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn validate_checkpoint_content_identity(
+        &self,
+        checkpoint: &CodeIndexCheckpoint,
+    ) -> Result<(), CodeIndexError> {
+        let identity_matches = checkpoint.repository_id == self.registration.repository_id
+            && checkpoint.source_scope == self.source_scope
+            && checkpoint.tree_hash == self.tree_hash
+            && checkpoint.path_filters == self.path_filters
+            && checkpoint.language_filters == self.language_filters
+            && checkpoint.total_path_count == self.paths.len();
+        if !identity_matches {
+            return Err(invalid_checkpoint(
+                "repository, scope, source, filters, or path count does not match the plan",
+            ));
+        }
+        if checkpoint.resource_budget != self.resource_budget {
+            return Err(invalid_checkpoint(
+                "resource budget does not match the plan that will resume",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn validate_checkpoint_progress(
+        &self,
+        checkpoint: &CodeIndexCheckpoint,
+    ) -> Result<(), CodeIndexError> {
+        let requires_complete_prefix =
+            checkpoint_state_requires_complete_prefix(checkpoint.state.as_str())
+                .ok_or_else(|| invalid_checkpoint("state is not resumable"))?;
+        if checkpoint.parsed_file_count != checkpoint.committed_file_count {
+            return Err(invalid_checkpoint(
+                "parsed and committed file counts must be equal",
+            ));
+        }
+        let committed = checkpoint.committed_file_count;
+        if committed > self.paths.len() {
+            return Err(invalid_checkpoint(
+                "committed file count exceeds the planned path count",
+            ));
+        }
+        if requires_complete_prefix && committed != self.paths.len() {
+            return Err(invalid_checkpoint(
+                "finalizing or completed state requires every planned path to be committed",
+            ));
+        }
+        if committed == 0 {
+            if checkpoint.batch_count != 0 || checkpoint.last_path.is_some() {
+                return Err(invalid_checkpoint(
+                    "an empty committed prefix requires zero batches and no last path",
+                ));
+            }
+            return Ok(());
+        }
+        if checkpoint.batch_count == 0 || checkpoint.batch_count > committed {
+            return Err(invalid_checkpoint(
+                "batch count must describe one or more bounded committed batches",
+            ));
+        }
+        let expected_last_path = self.paths[committed - 1].path.as_str();
+        if checkpoint.last_path.as_deref() != Some(expected_last_path) {
+            return Err(invalid_checkpoint(
+                "last path does not identify the committed plan prefix",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Parses the next bounded file batch while retaining at most one fetched
+    /// group's uncommitted row-budget overflow.
+    pub fn parse_next_batch(mut self) -> Result<(Self, Option<CodeIndexBatch>), CodeIndexError> {
+        if self.cursor >= self.paths.len() && self.parsed_overflow.is_empty() {
             return Ok((self, None));
         }
 
@@ -221,53 +253,14 @@ impl CodeIndexPlan {
             self.paths.len(),
             0,
         );
+        build.bind_verified_source_scope(&self.source_scope)?;
         let mut parsed_bytes = 0usize;
-        while self.cursor < self.paths.len() {
-            let fetch_end = next_fetch_end(&self, build.files.len(), parsed_bytes);
-            if fetch_end == self.cursor {
+        loop {
+            self.append_parsed_overflow(&mut build, &mut parsed_bytes);
+            if batch_budget_reached(&build, parsed_bytes, self.resource_budget) {
                 break;
             }
-            let fetched_paths = self.paths[self.cursor..fetch_end]
-                .iter()
-                .map(|entry| entry.path.clone())
-                .collect::<Vec<_>>();
-            ensure_filesystem_paths_match_content_hashes(
-                &self.root,
-                &self.commit,
-                &fetched_paths,
-                &self.filesystem_path_hashes,
-            )?;
-            let blobs = source_snapshot_batch_bytes(
-                &self.root,
-                self.source_kind,
-                &self.commit,
-                &fetched_paths,
-            )?;
-            ensure_filesystem_blobs_match_content_hashes(
-                &self.commit,
-                &fetched_paths,
-                &blobs,
-                &self.filesystem_path_hashes,
-            )?;
-            let parsed_files = parse_fetched_files(&self, &fetched_paths, &blobs)?;
-            for (bytes, parsed_file) in blobs.iter().zip(parsed_files) {
-                parsed_bytes = parsed_bytes.saturating_add(bytes.len());
-                build.append_file_records(parsed_file);
-                self.cursor += 1;
-
-                if !build.files.is_empty()
-                    && (build.files.len() >= self.resource_budget.max_files_per_batch
-                        || parsed_bytes >= self.resource_budget.max_bytes_per_batch
-                        || batch_row_count(&build) >= self.resource_budget.max_rows_per_batch)
-                {
-                    break;
-                }
-            }
-            if !build.files.is_empty()
-                && (build.files.len() >= self.resource_budget.max_files_per_batch
-                    || parsed_bytes >= self.resource_budget.max_bytes_per_batch
-                    || batch_row_count(&build) >= self.resource_budget.max_rows_per_batch)
-            {
+            if !self.fetch_and_parse_next_group(build.files.len(), parsed_bytes)? {
                 break;
             }
         }
@@ -292,6 +285,113 @@ impl CodeIndexPlan {
 
         Ok((self, Some(batch)))
     }
+
+    fn append_parsed_overflow(&mut self, build: &mut SnapshotBuild, parsed_bytes: &mut usize) {
+        while let Some(parsed_file) = self.parsed_overflow.pop_front() {
+            *parsed_bytes = (*parsed_bytes).saturating_add(parsed_file.parsed_byte_count);
+            build.append_file_records(parsed_file.build);
+            if batch_budget_reached(build, *parsed_bytes, self.resource_budget) {
+                break;
+            }
+        }
+    }
+
+    fn fetch_and_parse_next_group(
+        &mut self,
+        batch_file_count: usize,
+        parsed_bytes: usize,
+    ) -> Result<bool, CodeIndexError> {
+        debug_assert!(self.parsed_overflow.is_empty());
+        if self.cursor >= self.paths.len() {
+            return Ok(false);
+        }
+        let fetch_end = next_fetch_end(self, batch_file_count, parsed_bytes);
+        if fetch_end == self.cursor {
+            return Ok(false);
+        }
+        let fetched_paths = self.paths[self.cursor..fetch_end]
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        ensure_filesystem_paths_match_content_hashes(
+            &self.root,
+            &self.commit,
+            &fetched_paths,
+            &self.filesystem_path_hashes,
+        )?;
+        let blobs = source_snapshot_batch_bytes(
+            &self.root,
+            self.source_kind,
+            &self.commit,
+            &fetched_paths,
+        )?;
+        if blobs.len() != fetched_paths.len() {
+            return Err(CodeIndexError::InvalidInput(format!(
+                "source batch returned {} blobs for {} paths",
+                blobs.len(),
+                fetched_paths.len()
+            )));
+        }
+        ensure_filesystem_blobs_match_content_hashes(
+            &self.commit,
+            &fetched_paths,
+            &blobs,
+            &self.filesystem_path_hashes,
+        )?;
+        let parsed_files = parse_fetched_files(self, &fetched_paths, &blobs)?;
+        if parsed_files.len() != fetched_paths.len() {
+            return Err(CodeIndexError::InvalidInput(format!(
+                "parser batch returned {} files for {} paths",
+                parsed_files.len(),
+                fetched_paths.len()
+            )));
+        }
+        self.parsed_overflow
+            .extend(
+                blobs
+                    .iter()
+                    .zip(parsed_files)
+                    .map(|(bytes, build)| PendingParsedFile {
+                        parsed_byte_count: bytes.len(),
+                        build,
+                    }),
+            );
+        self.cursor = fetch_end;
+
+        Ok(true)
+    }
+}
+
+fn checkpoint_state_requires_complete_prefix(state: &str) -> Option<bool> {
+    if code_query_index_subphase(state).is_some()
+        || code_query_index_repair(state).is_some()
+        || code_reference_resolution(state).is_some()
+        || code_reference_resolution_query_index_repair(state).is_some()
+        || code_reference_search_query_index_repair(state).is_some()
+        || code_reference_search_rebuild(state).is_some()
+    {
+        return Some(true);
+    }
+    match state {
+        "indexing" => Some(false),
+        "finalizing:build_query_indexes"
+        | "finalizing:resolve_references"
+        | "finalizing:resolve_imports"
+        | "finalizing:resolve_call_targets"
+        | "finalizing:refresh_dependencies"
+        | "finalizing:rebuild_reference_search"
+        | "finalizing:rebuild_calls"
+        | "finalizing:publish_scope"
+        | "finalizing:resolve_workspace_imports"
+        | "finalizing:software_projection"
+        | "finalizing:partitioned_publish"
+        | "completed" => Some(true),
+        _ => None,
+    }
+}
+
+fn invalid_checkpoint(message: &str) -> CodeIndexError {
+    CodeIndexError::Invariant(format!("invalid code index resume checkpoint: {message}"))
 }
 
 fn parse_fetched_files(
@@ -349,6 +449,7 @@ fn parse_one_file(
         plan.paths.len(),
         0,
     );
+    build.bind_verified_source_scope(&plan.source_scope)?;
     parse_indexed_file(&mut build, path, bytes)?;
 
     Ok(build)
@@ -423,11 +524,12 @@ pub fn prepare_full_index_plan_with_workspace_detection(
     let root = PathBuf::from(&registration.root_path);
     let snapshot = scoped_source_snapshot(&registration, &selector, &root, &selector.ref_selector)?;
     let filesystem_path_hashes = filesystem_plan_path_hashes(&snapshot)?;
-    let source_scope = code_snapshot_scope_id(
+    let source_scope = crate::domain::code_snapshot_scope_id_with_workspace_detection(
         &registration.repository_id,
         &snapshot.tree_hash,
         &snapshot.path_filters,
         &snapshot.language_filters,
+        workspace_detection,
     );
     let workspaces = detect_workspaces_for_source_snapshot(
         &snapshot.root,
@@ -451,57 +553,9 @@ pub fn prepare_full_index_plan_with_workspace_detection(
         paths: snapshot.entries,
         workspaces,
         cursor: 0,
+        parsed_overflow: VecDeque::new(),
         next_batch_index: 1,
         resource_budget,
-        incremental: None,
-    })
-}
-
-/// Prepares an incremental index plan from a pre-parsed diff snapshot.
-///
-/// The plan yields bounded batches from the snapshot's already-parsed records
-/// instead of fetching and parsing git blobs. The session carries
-/// `full_replace: false` and `changed_paths` so `begin_session_once` can
-/// clone the historical scope while excluding changed paths.
-pub fn prepare_incremental_index_plan_with_workspace_detection(
-    registration: CodeRepositoryRegistration,
-    selector: CodeRepositorySelector,
-    mode: CodeIndexMode,
-    previous_hashes: Vec<CodeFileFingerprint>,
-    base_resolved_commit_sha: Option<String>,
-    workspace_detection: &CodeWorkspaceDetectionConfig,
-    resource_budget: CodeIndexResourceBudget,
-) -> Result<CodeIndexPlan, CodeIndexError> {
-    let snapshot = super::build_index_snapshot_with_workspace_detection(
-        &registration,
-        &selector,
-        mode,
-        previous_hashes,
-        base_resolved_commit_sha,
-        workspace_detection,
-    )?;
-    let root = PathBuf::from(&registration.root_path);
-    let workspaces = snapshot.workspaces.clone();
-    Ok(CodeIndexPlan {
-        registration,
-        root,
-        commit: snapshot.resolved_commit_sha.clone(),
-        tree_hash: snapshot.tree_hash.clone(),
-        source_scope: snapshot.source_scope.clone(),
-        path_filters: snapshot.path_filters.clone(),
-        language_filters: snapshot.language_filters.clone(),
-        source_kind: RepositorySourceKind::Git,
-        filesystem_path_hashes: BTreeMap::new(),
-        paths: Vec::new(),
-        workspaces,
-        cursor: 0,
-        next_batch_index: 1,
-        resource_budget,
-        incremental: Some(IncrementalPlanData {
-            rows_by_path: incremental_rows_by_path(&snapshot),
-            snapshot,
-            cursor: 0,
-        }),
     })
 }
 
@@ -574,68 +628,15 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
         .saturating_add(build.diagnostics.len())
 }
 
-fn incremental_rows_by_path(snapshot: &CodeIndexSnapshot) -> BTreeMap<String, usize> {
-    let mut counts = BTreeMap::new();
-    for path in snapshot.files.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.symbols.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.references.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.imports.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.dependencies.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.feature_flags.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.routes.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.chunks.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    for path in snapshot.diagnostics.iter().map(|record| &record.path) {
-        increment_path_count(&mut counts, path);
-    }
-    counts
-}
-
-fn increment_path_count(counts: &mut BTreeMap<String, usize>, path: &str) {
-    let count = counts.entry(path.to_owned()).or_default();
-    *count = count.saturating_add(1);
-}
-
-fn next_incremental_batch_end(
-    files: &[crate::domain::RepositoryCodeFileRecord],
-    rows_by_path: &BTreeMap<String, usize>,
-    cursor: usize,
-    budget: CodeIndexResourceBudget,
-) -> usize {
-    let mut end = cursor;
-    let mut bytes = 0usize;
-    let mut rows = 0usize;
-    while end < files.len() {
-        let file = &files[end];
-        let next_bytes = bytes.saturating_add(file.byte_len);
-        let next_rows = rows.saturating_add(rows_by_path.get(&file.path).copied().unwrap_or(1));
-        if end > cursor
-            && (end - cursor >= budget.max_files_per_batch
-                || next_bytes > budget.max_bytes_per_batch
-                || next_rows > budget.max_rows_per_batch)
-        {
-            break;
-        }
-        bytes = next_bytes;
-        rows = next_rows;
-        end += 1;
-    }
-    end
+fn batch_budget_reached(
+    build: &SnapshotBuild,
+    parsed_bytes: usize,
+    resource_budget: CodeIndexResourceBudget,
+) -> bool {
+    !build.files.is_empty()
+        && (build.files.len() >= resource_budget.max_files_per_batch
+            || parsed_bytes >= resource_budget.max_bytes_per_batch
+            || batch_row_count(build) >= resource_budget.max_rows_per_batch)
 }
 
 #[cfg(test)]

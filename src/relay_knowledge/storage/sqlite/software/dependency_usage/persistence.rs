@@ -17,11 +17,11 @@ pub(in crate::storage::sqlite::software) fn delete_scope(
     Ok(())
 }
 
-pub(in crate::storage::sqlite::software) fn insert_usage(
+pub(in crate::storage::sqlite::software) fn insert_usages(
     connection: &Connection,
-    usage: &SoftwareDependencyUsage,
+    usages: &[SoftwareDependencyUsage],
 ) -> Result<(), StorageError> {
-    connection.execute(
+    let mut statement = connection.prepare(
         "
         INSERT OR REPLACE INTO software_dependency_usages (
             usage_id, component_id, repository_id, source_scope, ecosystem, package_name,
@@ -30,7 +30,9 @@ pub(in crate::storage::sqlite::software) fn insert_usage(
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
-        params![
+    )?;
+    for usage in usages {
+        statement.execute(params![
             usage.usage_id,
             usage.component_id,
             usage.repository_id,
@@ -46,8 +48,8 @@ pub(in crate::storage::sqlite::software) fn insert_usage(
             usage.evidence_line_range.end,
             usage.confidence_basis_points,
             usage.created_graph_version.get(),
-        ],
-    )?;
+        ])?;
+    }
 
     Ok(())
 }
@@ -92,6 +94,7 @@ pub(in crate::storage::sqlite::software) fn usages_for_scope(
 pub(super) fn import_evidence(
     connection: &Connection,
     source_scope: &str,
+    limit: usize,
 ) -> Result<Vec<ImportEvidence>, StorageError> {
     let mut statement = connection.prepare(
         "
@@ -104,28 +107,40 @@ pub(super) fn import_evidence(
           ON files.source_scope = imports.source_scope
          AND files.path = imports.path
         WHERE imports.source_scope = ?1
+          AND files.is_generated = 0
         ORDER BY files.language_id ASC, imports.module ASC, imports.path ASC, imports.line_start ASC
+        LIMIT ?2
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok(ImportEvidence {
-            repository_id: row.get(0)?,
-            source_scope: row.get(1)?,
-            language_id: row.get(2)?,
-            module: row.get(3)?,
-            target_hint: row.get(4)?,
-            resolution_state: row.get(5)?,
-            evidence_path: row.get(6)?,
-            evidence_line_range: RepositoryCodeRange {
-                start: row.get(7)?,
-                end: row.get(8)?,
-            },
-            confidence_basis_points: row.get(9)?,
-        })
-    })?;
+    let rows = statement.query_map(
+        params![source_scope, limit.saturating_add(1) as i64],
+        |row| {
+            Ok(ImportEvidence {
+                repository_id: row.get(0)?,
+                source_scope: row.get(1)?,
+                language_id: row.get(2)?,
+                module: row.get(3)?,
+                target_hint: row.get(4)?,
+                resolution_state: row.get(5)?,
+                evidence_path: row.get(6)?,
+                evidence_line_range: RepositoryCodeRange {
+                    start: row.get(7)?,
+                    end: row.get(8)?,
+                },
+                confidence_basis_points: row.get(9)?,
+            })
+        },
+    )?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
+    let imports = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    if imports.len() > limit {
+        return Err(StorageError::CapacityExceeded(format!(
+            "software dependency import evidence exceeds the bounded limit {limit}"
+        )));
+    }
+    Ok(imports)
 }
 
 fn usage_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareDependencyUsage> {

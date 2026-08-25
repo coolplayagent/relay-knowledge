@@ -119,6 +119,25 @@ fn focused_symbol_fts_query_uses_bounded_high_signal_terms() {
 }
 
 #[test]
+fn focused_symbol_morphology_fts_uses_three_bounded_prefix_pairs() {
+    let fts_query = focused_symbol_morphology_fts_match_query(
+        "front controller servlet dispatch web mvc framework servlet",
+    )
+    .expect("three high-signal natural-language terms should enable morphology recall");
+
+    assert_eq!(
+        fts_query,
+        "(\"controller\"* \"dispatch\"*) OR (\"controller\"* \"framework\"*) OR (\"dispatch\"* \"framework\"*)"
+    );
+    assert_eq!(fts_query.matches(" OR ").count(), 2);
+    assert!(focused_symbol_morphology_fts_match_query("controller dispatch framework").is_none());
+    assert!(
+        focused_symbol_morphology_fts_match_query("Type API HTTP io DB parser handler service",)
+            .is_none()
+    );
+}
+
+#[test]
 fn focused_symbol_fts_query_keeps_workflow_identity_terms() {
     let fts_query = focused_symbol_fts_match_query(
         "background stream discovery reconcile multiplex run event source reconnect",

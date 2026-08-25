@@ -1,8 +1,10 @@
 # Documentation Bookshelf
 
-The documentation is maintained as two language editions. Each edition uses the
-same numbered book structure so links, chapters, specifications, research notes,
-benchmarks, and verification records stay easy to compare.
+The documentation is maintained as two language editions. Both editions use the
+same six-volume taxonomy and link their counterparts directly. Chapter sets may
+differ only when an edition explicitly identifies a language-specific deep dive
+or a pending translation; the edition index records that mapping instead of
+implying silent one-to-one coverage.
 
 - [中文文档](./zh/README.md)
 - [English documentation](./en/README.md)
@@ -24,6 +26,12 @@ the filename, such as `05-hybrid-retrieval-advantage.md`. `README.md`
 files are volume covers and tables of contents; when listed as readable pages
 they are treated as chapter 0.
 
+Every directory that contains Markdown has a `README.md` index. Each index links
+its sibling documents and child indexes, chapter prefixes are unique within a
+volume, code fences identify their language, and repository-local links must
+resolve. These rules keep archived evidence discoverable without mixing it into
+the current normative reading path.
+
 Documentation refresh audits belong in `06-verification`, not in
 `02-capabilities`, because they prove documentation freshness rather than
 describe a user-facing capability. Root-level legacy document paths were removed.
@@ -43,11 +51,49 @@ Before tagging a new release, read the documentation in this order:
    [`docs/en/03-architecture-specs/19-installation-release-and-upgrade.md`](./en/03-architecture-specs/19-installation-release-and-upgrade.md)
    and
    [`docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md`](./zh/03-architecture-specs/19-installation-release-and-upgrade.md).
-4. Latest documentation audit:
-   [`docs/en/06-verification/11-documentation-release-readiness-2026-06-05.md`](./en/06-verification/11-documentation-release-readiness-2026-06-05.md)
+4. Current documentation and self-iteration readiness record:
+   [`docs/en/06-verification/13-documentation-self-iteration-readiness-2026-08-18.md`](./en/06-verification/13-documentation-self-iteration-readiness-2026-08-18.md)
    and
-   [`docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md`](./zh/06-verification/11-documentation-release-readiness-2026-06-05.md).
+   [`docs/zh/06-verification/13-documentation-self-iteration-readiness-2026-08-18.md`](./zh/06-verification/13-documentation-self-iteration-readiness-2026-08-18.md).
 
-The Chinese edition currently carries a few benchmark and verification records
-that do not yet have English translations. English indexes call out those
-Chinese-only records instead of silently omitting them from release navigation.
+The [2026-06-05 documentation audit](./en/06-verification/11-documentation-release-readiness-2026-06-05.md)
+remains historical evidence; it is not the current readiness result.
+
+The Chinese edition currently carries detailed deployment, SRE, and security
+addenda plus a few benchmark and verification records without standalone
+English chapters. The English service chapter consolidates the core operational
+workflow, and both edition indexes call out the remaining Chinese-only records
+instead of silently omitting them from navigation.
+
+## Documentation Quality Gate
+
+Run the dependency-free checker from the repository root after changing any
+documentation:
+
+```bash
+python3 tools/docs/check_docs.py
+```
+
+On Windows, use the Python launcher from PowerShell:
+
+```powershell
+py -3 tools/docs/check_docs.py
+```
+
+The checker validates every Markdown file under `docs/`: UTF-8 and whitespace,
+one top-level title, ordered heading depth, labelled and balanced code fences,
+shell-specific command examples, repository-local link targets and anchors,
+directory index coverage, unique two-digit chapter numbers, and untranslated
+prose accidentally left in the English edition. Its own parser smoke test is:
+
+```bash
+python3 tools/docs/check_docs.py --self-test
+```
+
+```powershell
+py -3 tools/docs/check_docs.py --self-test
+```
+
+The pre-commit hook runs the equivalent combined self-test and repository check.
+`check.sh`, the PR documentation job, and the release workflow run both gates
+before Rust build or publication work.

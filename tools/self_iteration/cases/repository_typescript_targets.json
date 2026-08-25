@@ -5,6 +5,7 @@
       "alias": "opencode-typescript-self-iteration",
       "ref": "6e4db5666ae33ebadf3b8ca077d6b1b149d0b0c3",
       "scope": "all",
+      "isolated_index_home": true,
       "path_filters": [],
       "language_filters": [],
       "index_budget_ms": 120000,

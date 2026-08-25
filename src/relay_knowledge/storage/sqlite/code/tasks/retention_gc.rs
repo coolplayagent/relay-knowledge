@@ -21,6 +21,9 @@ const PHASES: &[&str] = &[
     "workspace_overlay",
     "catalog_route",
     "search_documents",
+    "search_orphans",
+    "reference_search_groups",
+    "reference_search_manifest",
     "path_tombstones",
     "file_diagnostics",
     "chunks",
@@ -87,9 +90,9 @@ pub(super) fn schedule(
     )?;
     transaction.execute(
         "INSERT OR IGNORE INTO code_repository_scope_gc_jobs (
-             source_scope, repository_id, phase, deleted_rows,
+             source_scope, repository_id, phase, search_rowid_cursor, deleted_rows,
              created_at_ms, updated_at_ms, last_error
-         ) VALUES (?1, ?2, ?3, 0, ?4, ?4, NULL)",
+         ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?4, NULL)",
         params![source_scope, repository_id, INITIAL_PHASE, now_ms],
     )?;
     transaction.execute(
@@ -115,23 +118,39 @@ pub(super) fn process_one(
     repository_id: &str,
     now_ms: u64,
 ) -> Result<Option<String>, StorageError> {
-    let Some((source_scope, phase)) = transaction
+    let Some((source_scope, phase, search_rowid_cursor)) = transaction
         .query_row(
-            "SELECT source_scope, phase
+            "SELECT source_scope, phase, search_rowid_cursor
              FROM code_repository_scope_gc_jobs
              WHERE repository_id = ?1
              ORDER BY updated_at_ms ASC, source_scope ASC
              LIMIT 1",
             params![repository_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            },
         )
         .optional()?
     else {
         return Ok(None);
     };
 
-    let result = delete_phase_batch(transaction, repository_id, &source_scope, &phase);
-    let (deleted, has_more) = match result {
+    let result = if phase == "search_orphans" {
+        delete_search_orphan_batch(transaction, &source_scope, search_rowid_cursor)
+    } else {
+        delete_phase_batch(transaction, repository_id, &source_scope, &phase).map(
+            |(deleted, has_more)| PhaseProgress {
+                deleted,
+                has_more,
+                search_rowid_cursor: None,
+            },
+        )
+    };
+    let progress = match result {
         Ok(progress) => progress,
         Err(error) => {
             transaction.execute(
@@ -143,13 +162,27 @@ pub(super) fn process_one(
             return Ok(None);
         }
     };
-    let next = (!has_more).then(|| next_phase(&phase)).flatten();
-    if has_more {
-        update_progress(transaction, &source_scope, &phase, deleted, now_ms)?;
+    let next = (!progress.has_more).then(|| next_phase(&phase)).flatten();
+    if progress.has_more {
+        update_progress(
+            transaction,
+            &source_scope,
+            &phase,
+            progress.deleted,
+            progress.search_rowid_cursor,
+            now_ms,
+        )?;
         return Ok(None);
     }
     if let Some(next) = next {
-        update_progress(transaction, &source_scope, next, deleted, now_ms)?;
+        update_progress(
+            transaction,
+            &source_scope,
+            next,
+            progress.deleted,
+            None,
+            now_ms,
+        )?;
         return Ok(None);
     }
 
@@ -187,16 +220,24 @@ fn update_progress(
     source_scope: &str,
     phase: &str,
     deleted: usize,
+    search_rowid_cursor: Option<i64>,
     now_ms: u64,
 ) -> Result<(), StorageError> {
     transaction.execute(
         "UPDATE code_repository_scope_gc_jobs
          SET phase = ?2, deleted_rows = deleted_rows + ?3,
-             updated_at_ms = ?4, last_error = NULL
+             updated_at_ms = ?4, last_error = NULL,
+             search_rowid_cursor = ?5
          WHERE source_scope = ?1",
-        params![source_scope, phase, deleted, now_ms],
+        params![source_scope, phase, deleted, now_ms, search_rowid_cursor],
     )?;
     Ok(())
+}
+
+struct PhaseProgress {
+    deleted: usize,
+    has_more: bool,
+    search_rowid_cursor: Option<i64>,
 }
 
 fn next_phase(phase: &str) -> Option<&'static str> {
@@ -229,6 +270,12 @@ fn delete_phase_batch(
         "workspace_overlay" => delete_workspace_overlay(transaction, repository_id),
         "catalog_route" => delete_catalog_route(transaction, source_scope),
         "search_documents" => delete_search_batch(transaction, source_scope),
+        "reference_search_groups" => delete_reference_search_group_batch(transaction, source_scope),
+        "reference_search_manifest" => delete_scope_table(
+            transaction,
+            "code_repository_reference_search_manifests",
+            source_scope,
+        ),
         "path_tombstones" => {
             delete_scope_table(transaction, "code_repository_path_tombstones", source_scope)
         }
@@ -295,6 +342,29 @@ fn delete_phase_batch(
             "scope GC job has unknown phase '{unknown}'"
         ))),
     }
+}
+
+fn delete_reference_search_group_batch(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+) -> Result<(usize, bool), StorageError> {
+    let deleted = transaction.execute(
+        "DELETE FROM code_repository_reference_search_groups
+         WHERE source_scope = ?1 AND group_id IN (
+             SELECT group_id FROM code_repository_reference_search_groups
+             WHERE source_scope = ?1 ORDER BY group_id LIMIT ?2
+         )",
+        params![source_scope, GC_ROW_BATCH_SIZE],
+    )?;
+    let has_more = transaction.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM code_repository_reference_search_groups
+             WHERE source_scope = ?1 LIMIT 1
+         )",
+        params![source_scope],
+        |row| row.get::<_, bool>(0),
+    )?;
+    Ok((deleted, has_more))
 }
 
 fn delete_scope_table(
@@ -408,9 +478,9 @@ fn delete_search_batch(
             pairs.iter().map(|(rowid, _)| *rowid),
         )?;
     }
-    // Search persistence and schema-open backfill maintain one indexed
-    // metadata owner for every FTS row. Never scan the FTS5 UNINDEXED
-    // source_scope column as a cleanup fallback.
+    // Do not add an unbounded FTS5 UNINDEXED source_scope fallback here.
+    // The next phase inspects the global rowid space in bounded pages and
+    // refuses to delete any row that still has a metadata owner.
     let has_more = transaction.query_row(
         "SELECT EXISTS (SELECT 1 FROM code_repository_search_metadata
          WHERE source_scope = ?1 LIMIT 1)",
@@ -418,6 +488,113 @@ fn delete_search_batch(
         |row| row.get::<_, bool>(0),
     )?;
     Ok((deleted, has_more))
+}
+
+fn delete_search_orphan_batch(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    search_rowid_cursor: Option<i64>,
+) -> Result<PhaseProgress, StorageError> {
+    let page = search_orphan_page(transaction, search_rowid_cursor)?;
+    let next_cursor = page.last().map(|candidate| candidate.rowid);
+    if let Some(candidate) = page
+        .iter()
+        .find(|candidate| candidate.source_scope == source_scope && candidate.has_metadata_owner)
+    {
+        let ownership = if candidate.has_exact_metadata_owner {
+            "an exact"
+        } else {
+            "a mismatched"
+        };
+        return Err(StorageError::Invariant(format!(
+            "scope GC search-orphan page for retiring scope '{source_scope}' found {ownership} metadata owner for FTS rowid {}; metadata-owned rows must be removed by search_documents before orphan cleanup can advance",
+            candidate.rowid
+        )));
+    }
+    let deleted = delete_rowids(
+        transaction,
+        "code_repository_search",
+        page.iter()
+            .filter(|candidate| {
+                candidate.source_scope == source_scope && !candidate.has_exact_metadata_owner
+            })
+            .map(|candidate| candidate.rowid),
+    )?;
+    let has_more = match next_cursor {
+        Some(cursor) => transaction.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM code_repository_search WHERE rowid > ?1 LIMIT 1
+             )",
+            params![cursor],
+            |row| row.get::<_, bool>(0),
+        )?,
+        None => false,
+    };
+    Ok(PhaseProgress {
+        deleted,
+        has_more,
+        search_rowid_cursor: next_cursor,
+    })
+}
+
+struct SearchOrphanCandidate {
+    rowid: i64,
+    source_scope: String,
+    has_metadata_owner: bool,
+    has_exact_metadata_owner: bool,
+}
+
+fn search_orphan_page(
+    transaction: &Transaction<'_>,
+    search_rowid_cursor: Option<i64>,
+) -> Result<Vec<SearchOrphanCandidate>, StorageError> {
+    let projection = "SELECT fts.rowid, fts.source_scope,
+                EXISTS (
+                    SELECT 1 FROM code_repository_search_metadata owner
+                    WHERE owner.search_rowid = fts.rowid
+                ),
+                EXISTS (
+                    SELECT 1 FROM code_repository_search_metadata owner
+                    WHERE owner.search_rowid = fts.rowid
+                      AND owner.source_scope = fts.source_scope
+                      AND owner.document_kind = fts.document_kind
+                      AND owner.record_id = fts.record_id
+                      AND owner.path = fts.path
+                )
+         FROM code_repository_search fts";
+    match search_rowid_cursor {
+        Some(cursor) => {
+            let mut statement = transaction.prepare(&format!(
+                "{projection} WHERE fts.rowid > ?1 ORDER BY fts.rowid LIMIT ?2"
+            ))?;
+            collect_search_orphan_page(&mut statement, params![cursor, GC_ROW_BATCH_SIZE])
+        }
+        None => {
+            let mut statement =
+                transaction.prepare(&format!("{projection} ORDER BY fts.rowid LIMIT ?1"))?;
+            collect_search_orphan_page(&mut statement, params![GC_ROW_BATCH_SIZE])
+        }
+    }
+}
+
+fn collect_search_orphan_page<P>(
+    statement: &mut rusqlite::Statement<'_>,
+    params: P,
+) -> Result<Vec<SearchOrphanCandidate>, StorageError>
+where
+    P: rusqlite::Params,
+{
+    statement
+        .query_map(params, |row| {
+            Ok(SearchOrphanCandidate {
+                rowid: row.get(0)?,
+                source_scope: row.get(1)?,
+                has_metadata_owner: row.get(2)?,
+                has_exact_metadata_owner: row.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
 }
 
 fn delete_rowids(

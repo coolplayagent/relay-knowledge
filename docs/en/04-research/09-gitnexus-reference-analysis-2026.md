@@ -212,3 +212,7 @@ Before these lessons move into implementation, update:
 - GitNexus `ARCHITECTURE.md`: <https://github.com/abhigyanpatwari/GitNexus/blob/main/ARCHITECTURE.md>
 - GitNexus README sections on CLI/MCP, Web UI, MCP tools, resources, prompts, multi-repo, and Docker: <https://github.com/abhigyanpatwari/GitNexus#readme>
 - Local source inspection at `7d500390b93068dee43c5e507edf5b9116d1c277`: `gitnexus/src/cli/index.ts`, `gitnexus/src/mcp/tools.ts`, `gitnexus/src/server/api.ts`, `gitnexus/src/server/analyze-job.ts`, `gitnexus/src/storage/repo-manager.ts`, `gitnexus/src/core/search/hybrid-search.ts`, `gitnexus-web/src/App.tsx`, `gitnexus-web/src/components/GraphCanvas.tsx`, `gitnexus-web/src/hooks/useSigma.ts`, `gitnexus-web/src/lib/graph-adapter.ts`, `gitnexus-web/src/core/llm/agent.ts`, `gitnexus-web/src/core/llm/tools.ts`.
+
+---
+
+Navigation: Previous: [8. Competitive, High-Performance, and Local File Retrieval Research 2026](08-competitive-performance-research-2026.md) | Next: [10. Software Global Domain Modeling Research 2026](10-software-global-domain-modeling-research-2026.md)

@@ -15,6 +15,7 @@ use super::{
     identity_query::{CallIdentityDirection, CallIdentityQuery, call_identity_candidate_limit},
     row_store::{CallIdentityRows, call_rows_sql, row_to_call},
 };
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{CodeRepositoryStatus, CodeRetrievalRequest},
     storage::StorageError,
@@ -248,6 +249,7 @@ fn search_indirect_call_bindings_from_fts(
         WHERE code_repository_search MATCH ?
           AND source_scope = ?
           AND document_kind = 'chunk'
+          {EXACT_SEARCH_OWNER_PREDICATE_SQL}
           {fts_filter}
           {generated_filter}
         ORDER BY bm25(code_repository_search) ASC, record_id ASC

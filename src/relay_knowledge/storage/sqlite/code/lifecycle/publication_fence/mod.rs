@@ -6,8 +6,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 
 use crate::{
     domain::{
-        CodeIndexMode, CodeIndexPublicationFence, code_snapshot_expected_scope_id,
-        code_snapshot_scope_is_fact_versioned,
+        CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget,
+        code_snapshot_scope_is_fact_versioned, code_snapshot_scope_matches_identity,
+        code_snapshot_scope_workspace_semantic,
     },
     storage::StorageError,
 };
@@ -49,8 +50,54 @@ pub(in crate::storage) fn prepare_guard(
 }
 
 impl PublicationFenceGuard {
-    pub(in crate::storage::sqlite::code) fn checkpoint_identity(&self) -> String {
-        format!("task:{}", self.fence.task_id)
+    pub(in crate::storage) fn task_id(&self) -> &str {
+        &self.fence.task_id
+    }
+
+    /// Returns whether the fenced task tables live in the same SQLite WAL as
+    /// the data transaction. Partitioned shards attach an external control
+    /// authority and must leave receipt publication to the control database.
+    pub(in crate::storage) fn authority_is_local(&self) -> bool {
+        self.authority_schema == "main"
+    }
+
+    /// Selects the direct snapshot protocol for a fenced worktree task.
+    ///
+    /// Worktree snapshots must preserve their synthetic overlay identity and
+    /// cannot fall back to the clean full-index pipeline. The eventual data
+    /// transaction still performs the exact pending-to-content scope rebind
+    /// and live lease validation before commit.
+    pub(in crate::storage) fn is_worktree_overlay_task(
+        &self,
+        connection: &Connection,
+    ) -> Result<bool, StorageError> {
+        let sql = format!(
+            "SELECT mode_json
+             FROM {}.code_repository_index_tasks
+             WHERE task_id = ?1 AND repository_id = ?2
+               AND attempt_count = ?3 AND publication_generation = ?4",
+            self.authority_schema
+        );
+        let encoded = connection
+            .query_row(
+                &sql,
+                params![
+                    self.fence.task_id,
+                    self.fence.repository_id,
+                    self.fence.attempt_count,
+                    self.fence.generation,
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| self.inactive_error())?;
+        let mode = serde_json::from_str::<CodeIndexMode>(&encoded).map_err(|error| {
+            StorageError::Invariant(format!(
+                "code index publication fence for task '{}' has an invalid durable mode: {error}",
+                self.fence.task_id
+            ))
+        })?;
+        Ok(mode == CodeIndexMode::WorktreeOverlay)
     }
 
     pub(in crate::storage) fn validate_repository(
@@ -195,19 +242,23 @@ impl PublicationFenceGuard {
             source_scope,
         )?;
 
-        let now_ms = now_millis();
+        self.lock_authority(transaction)?;
+        let execution_now_ms = now_millis()?;
         let sql = format!(
             "
             UPDATE {}.code_repository_index_tasks
-            SET source_scope = ?6, updated_at_ms = ?7
+            SET source_scope = ?6,
+                resolved_commit_sha = ?7,
+                tree_hash = ?8,
+                updated_at_ms = ?9
             WHERE task_id = ?1
               AND repository_id = ?2
-              AND source_scope = ?8
+              AND source_scope = ?10
               AND state = 'running'
               AND lease_owner = ?3
               AND attempt_count = ?4
               AND publication_generation = ?5
-              AND lease_expires_at_ms > ?7
+              AND lease_expires_at_ms > ?9
               AND NOT EXISTS (
                   SELECT 1
                   FROM {}.code_repository_scopes scope
@@ -243,7 +294,9 @@ impl PublicationFenceGuard {
                 self.fence.attempt_count,
                 self.fence.generation,
                 source_scope,
-                now_ms,
+                target.resolved_commit_sha,
+                target.tree_hash,
+                execution_now_ms,
                 pending.source_scope,
             ],
         )?;
@@ -256,30 +309,111 @@ impl PublicationFenceGuard {
         &self,
         transaction: &Transaction<'_>,
     ) -> Result<(), StorageError> {
+        self.validate_with_clock(transaction, now_millis)
+    }
+
+    pub(in crate::storage) fn resource_budget(
+        &self,
+        connection: &Connection,
+    ) -> Result<CodeIndexResourceBudget, StorageError> {
+        let sql = format!(
+            "SELECT resource_budget_json
+             FROM {}.code_repository_index_tasks
+             WHERE task_id = ?1 AND repository_id = ?2
+               AND attempt_count = ?3 AND publication_generation = ?4",
+            self.authority_schema
+        );
+        let encoded = connection
+            .query_row(
+                &sql,
+                params![
+                    self.fence.task_id,
+                    self.fence.repository_id,
+                    self.fence.attempt_count,
+                    self.fence.generation,
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| self.inactive_error())?;
+        let budget = serde_json::from_str::<CodeIndexResourceBudget>(&encoded).map_err(|error| {
+            StorageError::Invariant(format!(
+                "code index publication fence for task '{}' has an invalid durable resource budget: {error}",
+                self.fence.task_id
+            ))
+        })?;
+        CodeIndexResourceBudget::new(
+            budget.max_files_per_batch,
+            budget.max_bytes_per_batch,
+            budget.max_rows_per_batch,
+        )
+        .map_err(|error| {
+            StorageError::Invariant(format!(
+                "code index publication fence for task '{}' has an invalid durable resource budget: {error}",
+                self.fence.task_id
+            ))
+        })
+    }
+
+    /// Requires an inactive partitioned route still owned by this exact task.
+    ///
+    /// Callers invoke this only after `validate` has locked the attached
+    /// control authority, so catalog publication cannot race a shard-side
+    /// checkpoint transition out of a historical completed state.
+    pub(in crate::storage) fn validate_partitioned_staged_scope(
+        &self,
+        transaction: &Transaction<'_>,
+        repository_id: &str,
+        source_scope: &str,
+    ) -> Result<(), StorageError> {
+        self.validate_repository(repository_id)?;
+        let sql = format!(
+            "SELECT 1 FROM {}.storage_repository_shard_scopes
+             WHERE repository_id = ?1 AND source_scope = ?2
+               AND state = 'staged' AND staged_task_id = ?3",
+            self.authority_schema
+        );
+        if transaction
+            .query_row(
+                &sql,
+                params![repository_id, source_scope, self.fence.task_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some()
+        {
+            return Ok(());
+        }
+        Err(StorageError::Invariant(format!(
+            "partitioned scope '{source_scope}' is not staged by fenced task '{}'",
+            self.fence.task_id
+        )))
+    }
+
+    fn validate_with_clock(
+        &self,
+        transaction: &Transaction<'_>,
+        clock: impl FnOnce() -> Result<u64, StorageError>,
+    ) -> Result<(), StorageError> {
+        self.lock_authority(transaction)?;
+        let execution_now_ms = clock()?;
         let sql = format!(
             "
-            UPDATE {}.code_repository_publication_fences
-            SET updated_at_ms = updated_at_ms
-            WHERE repository_id = ?1
-              AND generation = ?2
-              AND task_id = ?3
-              AND attempt_count = ?4
-              AND lease_owner = ?5
-              AND EXISTS (
-                  SELECT 1
-                  FROM {}.code_repository_index_tasks task
-                  WHERE task.task_id = ?3
-                    AND task.repository_id = ?1
-                    AND task.state = 'running'
-                    AND task.lease_owner = ?5
-                    AND task.attempt_count = ?4
-                    AND task.publication_generation = ?2
-                    AND task.lease_expires_at_ms > ?6
-              )
+            SELECT EXISTS (
+                SELECT 1
+                FROM {}.code_repository_index_tasks task
+                WHERE task.task_id = ?3
+                  AND task.repository_id = ?1
+                  AND task.state = 'running'
+                  AND task.lease_owner = ?5
+                  AND task.attempt_count = ?4
+                  AND task.publication_generation = ?2
+                  AND task.lease_expires_at_ms > ?6
+            )
             ",
-            self.authority_schema, self.authority_schema
+            self.authority_schema
         );
-        let changed = transaction.execute(
+        let active = transaction.query_row(
             &sql,
             params![
                 self.fence.repository_id,
@@ -287,17 +421,51 @@ impl PublicationFenceGuard {
                 self.fence.task_id,
                 self.fence.attempt_count,
                 self.fence.lease_owner,
-                now_millis(),
+                execution_now_ms,
             ],
+            |row| row.get::<_, bool>(0),
         )?;
-        if changed == 1 {
+        if active {
             return Ok(());
         }
 
-        Err(StorageError::InvalidInput(format!(
+        Err(self.inactive_error())
+    }
+
+    /// Obtains the SQLite authority-writer lock before any execution-time
+    /// sample can authorize a lease-sensitive mutation.
+    fn lock_authority(&self, transaction: &Transaction<'_>) -> Result<(), StorageError> {
+        let sql = format!(
+            "UPDATE {}.code_repository_publication_fences
+             SET updated_at_ms = updated_at_ms
+             WHERE repository_id = ?1
+               AND generation = ?2
+               AND task_id = ?3
+               AND attempt_count = ?4
+               AND lease_owner = ?5",
+            self.authority_schema
+        );
+        let locked = transaction.execute(
+            &sql,
+            params![
+                self.fence.repository_id,
+                self.fence.generation,
+                self.fence.task_id,
+                self.fence.attempt_count,
+                self.fence.lease_owner,
+            ],
+        )?;
+        if locked == 1 {
+            return Ok(());
+        }
+        Err(self.inactive_error())
+    }
+
+    fn inactive_error(&self) -> StorageError {
+        StorageError::InvalidInput(format!(
             "code index publication fence for task '{}' attempt {} is no longer active",
             self.fence.task_id, self.fence.attempt_count
-        )))
+        ))
     }
 }
 
@@ -387,11 +555,19 @@ impl PendingWorktreeTarget {
         };
         let path_filters = parse_filters(&self.path_filters_json)?;
         let language_filters = parse_filters(&self.language_filters_json)?;
-        let expected_pending_scope = code_snapshot_expected_scope_id(
+        let pending_scope_matches = code_snapshot_scope_matches_identity(
             repository_id,
             &self.tree_hash,
             &path_filters,
             &language_filters,
+            &self.source_scope,
+        );
+        let pending_semantic = code_snapshot_scope_workspace_semantic(
+            repository_id,
+            &self.tree_hash,
+            &path_filters,
+            &language_filters,
+            &self.source_scope,
         );
 
         let target_matches_base = target.base_commit.as_deref().map_or_else(
@@ -402,7 +578,8 @@ impl PendingWorktreeTarget {
         Ok(mode == CodeIndexMode::WorktreeOverlay
             && !base_commit.is_empty()
             && self.tree_hash == self.resolved_commit_sha
-            && expected_pending_scope.as_deref() == Some(self.source_scope.as_str())
+            && pending_scope_matches
+            && pending_semantic == Some(target.workspace_semantic)
             && target.repository_id == repository_id
             && target_matches_base
             && target.path_filters == path_filters
@@ -413,8 +590,11 @@ impl PendingWorktreeTarget {
 struct WorktreeScopeIdentity {
     repository_id: String,
     base_commit: Option<String>,
+    resolved_commit_sha: String,
+    tree_hash: String,
     path_filters: Vec<String>,
     language_filters: Vec<String>,
+    workspace_semantic: Option<u8>,
 }
 
 fn verified_worktree_scope_from_target(
@@ -423,15 +603,25 @@ fn verified_worktree_scope_from_target(
     if !code_snapshot_scope_is_fact_versioned(&target.source_scope) {
         return Ok(None);
     }
-    let expected_scope = code_snapshot_expected_scope_id(
+    let scope_matches = code_snapshot_scope_matches_identity(
         &target.repository_id,
         &target.tree_hash,
         &target.path_filters,
         &target.language_filters,
+        &target.source_scope,
     );
-    if expected_scope.as_deref() != Some(target.source_scope.as_str()) {
+    if !scope_matches {
         return Ok(None);
     }
+    let Some(workspace_semantic) = code_snapshot_scope_workspace_semantic(
+        &target.repository_id,
+        &target.tree_hash,
+        &target.path_filters,
+        &target.language_filters,
+        &target.source_scope,
+    ) else {
+        return Ok(None);
+    };
 
     let base_commit = if let Some(identity) = target
         .resolved_commit_sha
@@ -466,8 +656,11 @@ fn verified_worktree_scope_from_target(
     Ok(Some(WorktreeScopeIdentity {
         repository_id: target.repository_id.clone(),
         base_commit,
+        resolved_commit_sha: target.resolved_commit_sha.clone(),
+        tree_hash: target.tree_hash.clone(),
         path_filters: target.path_filters.clone(),
         language_filters: target.language_filters.clone(),
+        workspace_semantic,
     }))
 }
 
@@ -524,21 +717,34 @@ fn load_verified_worktree_scope(
         );
     let path_filters = parse_filters(&path_json)?;
     let language_filters = parse_filters(&language_json)?;
-    let expected_scope = code_snapshot_expected_scope_id(
+    let scope_matches = code_snapshot_scope_matches_identity(
         &repository_id,
         &tree_hash,
         &path_filters,
         &language_filters,
+        source_scope,
     );
-    if !valid_tree_identity || expected_scope.as_deref() != Some(source_scope) {
+    if !valid_tree_identity || !scope_matches {
         return Ok(None);
     }
+    let Some(workspace_semantic) = code_snapshot_scope_workspace_semantic(
+        &repository_id,
+        &tree_hash,
+        &path_filters,
+        &language_filters,
+        source_scope,
+    ) else {
+        return Ok(None);
+    };
 
     Ok(Some(WorktreeScopeIdentity {
         repository_id,
         base_commit,
+        resolved_commit_sha,
+        tree_hash,
         path_filters,
         language_filters,
+        workspace_semantic,
     }))
 }
 
@@ -576,12 +782,19 @@ fn attach_authority(connection: &Connection, authority_path: &Path) -> Result<()
     Ok(())
 }
 
-fn now_millis() -> u64 {
-    SystemTime::now()
+fn now_millis() -> Result<u64, StorageError> {
+    system_time_millis(SystemTime::now())
+}
+
+fn system_time_millis(now: SystemTime) -> Result<u64, StorageError> {
+    let elapsed = now
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
+        .map_err(|error| {
+            StorageError::Invariant(format!("system clock is before Unix epoch: {error}"))
+        })?;
+    u64::try_from(elapsed.as_millis()).map_err(|_| {
+        StorageError::Invariant("system clock milliseconds exceed u64 range".to_owned())
+    })
 }
 
 #[cfg(test)]

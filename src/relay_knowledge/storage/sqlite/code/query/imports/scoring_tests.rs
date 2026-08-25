@@ -1,24 +1,30 @@
 use super::*;
 
 #[test]
-fn extensionless_path_import_context_bonus_uses_only_target_basename() {
-    let services_only_bonus = import_importer_path_context_bonus(
+fn extensionless_target_requires_extra_importer_identity_context() {
+    let target_only = import_importer_path_context_bonus(
         1.0,
         1,
         "services/cache",
-        "src/services/bootstrap.ts",
+        &importer_path_context(
+            "src/cache/cache_consumer.ts",
+            "import cache from \"services/cache\";",
+        ),
         CodeQueryKind::Imports,
     );
-    let basename_bonus = import_importer_path_context_bonus(
+    let contextual = import_importer_path_context_bonus(
         1.0,
         1,
-        "services/cache",
-        "src/cache/cache_consumer.ts",
+        "cache_consumer services/cache",
+        &importer_path_context(
+            "src/cache/cache_consumer.ts",
+            "import cache from \"services/cache\";",
+        ),
         CodeQueryKind::Imports,
     );
 
-    assert_eq!(services_only_bonus, 0.0);
-    assert!(basename_bonus > services_only_bonus);
+    assert_eq!(target_only, 0.0);
+    assert!(contextual > target_only);
 }
 
 #[test]
@@ -102,13 +108,16 @@ fn import_source_path_overlap_bonus_uses_robust_test_path_detection() {
 }
 
 #[test]
-fn path_import_context_bonus_matches_target_stem_terms_to_importer_path() {
+fn path_import_context_bonus_requires_explicit_importer_identity() {
     assert_eq!(
         import_importer_path_context_bonus(
             3.0,
             2,
-            "store/cache.hpp",
-            "src/storage/cache_consumer.cc",
+            "cache_consumer store/cache.hpp",
+            &importer_path_context(
+                "src/storage/cache_consumer.cc",
+                "#include <store/cache.hpp>",
+            ),
             CodeQueryKind::Imports,
         ),
         0.65
@@ -117,8 +126,8 @@ fn path_import_context_bonus_matches_target_stem_terms_to_importer_path() {
         import_importer_path_context_bonus(
             3.0,
             2,
-            "store/cache.hpp",
-            "src/storage/consumer.cc",
+            "cache_consumer store/cache.hpp",
+            &importer_path_context("src/storage/consumer.cc", "#include <store/cache.hpp>"),
             CodeQueryKind::Imports,
         ),
         0.0
@@ -127,8 +136,11 @@ fn path_import_context_bonus_matches_target_stem_terms_to_importer_path() {
         import_importer_path_context_bonus(
             0.0,
             2,
-            "store/cache.hpp",
-            "src/storage/cache_consumer.cc",
+            "cache_consumer store/cache.hpp",
+            &importer_path_context(
+                "src/storage/cache_consumer.cc",
+                "#include <store/cache.hpp>",
+            ),
             CodeQueryKind::Imports,
         ),
         0.0
@@ -137,12 +149,71 @@ fn path_import_context_bonus_matches_target_stem_terms_to_importer_path() {
         import_importer_path_context_bonus(
             3.0,
             0,
-            "store/cache.hpp",
-            "src/storage/cache_consumer.cc",
+            "cache_consumer store/cache.hpp",
+            &importer_path_context(
+                "src/storage/cache_consumer.cc",
+                "#include <store/cache.hpp>",
+            ),
             CodeQueryKind::Imports,
         ),
         0.0
     );
+}
+
+#[test]
+fn symbol_import_context_bonus_uses_explicit_importer_identity_terms() {
+    let expected = importer_path_context(
+        "spring-beans/src/ExtendedBeanInfo.java",
+        "import org.springframework.util.ObjectUtils;",
+    );
+    let other = importer_path_context(
+        "spring-beans/src/OtherBeanInfo.java",
+        "import org.springframework.util.ObjectUtils;",
+    );
+    let target_only = import_importer_path_context_bonus(
+        3.0,
+        2,
+        "org.springframework.util.ObjectUtils",
+        &expected,
+        CodeQueryKind::Imports,
+    );
+    let contextual = import_importer_path_context_bonus(
+        3.0,
+        2,
+        "ExtendedBeanInfo org.springframework.util.ObjectUtils",
+        &expected,
+        CodeQueryKind::Imports,
+    );
+    let unrelated = import_importer_path_context_bonus(
+        3.0,
+        2,
+        "ExtendedBeanInfo org.springframework.util.ObjectUtils",
+        &other,
+        CodeQueryKind::Imports,
+    );
+
+    assert_eq!(target_only, 0.0);
+    assert!(contextual >= IMPORT_PATH_CONTEXT_BONUS_PER_TERM);
+    assert_eq!(unrelated, 0.0);
+}
+
+#[test]
+fn importer_usage_bonus_counts_the_first_use_after_the_import_statement() {
+    assert!(import_same_file_usage_bonus(3.0, 1, CodeQueryKind::Imports) > 0.0);
+    assert_eq!(
+        import_same_file_usage_bonus(3.0, 0, CodeQueryKind::Imports),
+        0.0
+    );
+}
+
+fn importer_path_context<'a>(path: &'a str, module: &'a str) -> ImporterPathContext<'a> {
+    ImporterPathContext {
+        path,
+        module,
+        target_hint: None,
+        matched_symbol_name: None,
+        target_symbol_names: None,
+    }
 }
 
 #[test]

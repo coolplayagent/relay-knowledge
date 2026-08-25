@@ -11,7 +11,16 @@ pub enum StorageError {
     LockPoisoned,
     Busy(String),
     CapacityExceeded(String),
+    DurableStagingRequired(String),
+    DurableStagingPending {
+        completed_steps: usize,
+        max_steps: usize,
+    },
+    DurableFinalizationRequired {
+        checkpoint_state: String,
+    },
     InvalidInput(String),
+    Invariant(String),
 }
 
 impl fmt::Display for StorageError {
@@ -25,7 +34,22 @@ impl fmt::Display for StorageError {
             Self::CapacityExceeded(message) => {
                 write!(formatter, "storage capacity exceeded: {message}")
             }
+            Self::DurableStagingRequired(message) => {
+                write!(formatter, "durable staging required: {message}")
+            }
+            Self::DurableStagingPending {
+                completed_steps,
+                max_steps,
+            } => write!(
+                formatter,
+                "durable staging pending after step {completed_steps} of at most {max_steps}"
+            ),
+            Self::DurableFinalizationRequired { checkpoint_state } => write!(
+                formatter,
+                "durable incremental delta committed; finalization must resume from '{checkpoint_state}'"
+            ),
             Self::InvalidInput(message) => write!(formatter, "invalid storage input: {message}"),
+            Self::Invariant(message) => write!(formatter, "storage invariant failed: {message}"),
         }
     }
 }

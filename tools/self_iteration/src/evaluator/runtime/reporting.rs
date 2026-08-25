@@ -164,11 +164,36 @@ pub(in crate::evaluator) fn repo_report(
         cases,
         metrics,
         index_summary,
+        cold_index_result: None,
     }
 }
 
+pub(in crate::evaluator) fn retain_index_only_cold_index_result(
+    report: &mut RepoReport,
+    index_only_performance_target: bool,
+) {
+    if !index_only_performance_target {
+        return;
+    }
+    let completion_name = format!("{}_cold_index_completion", report.repository);
+    if !report
+        .commands
+        .iter()
+        .any(|command| command.name == completion_name && command.passed())
+    {
+        return;
+    }
+    report.cold_index_result = Some(
+        report
+            .index_summary
+            .get("cold")
+            .cloned()
+            .unwrap_or_else(|| report.index_summary.clone()),
+    );
+}
+
 pub(super) fn serializable_repo_report(report: &RepoReport) -> Value {
-    serde_json::json!({
+    let mut serialized = serde_json::json!({
         "repository": report.repository,
         "scope": report.scope,
         "commands": report.commands.iter().map(CommandResult::serializable).collect::<Vec<_>>(),
@@ -176,7 +201,13 @@ pub(super) fn serializable_repo_report(report: &RepoReport) -> Value {
         "cases": report.cases,
         "metrics": report.metrics,
         "index_summary": report.index_summary.get("summary").cloned().unwrap_or_else(|| report.index_summary.clone()),
-    })
+    });
+    if let (Some(object), Some(cold_index_result)) =
+        (serialized.as_object_mut(), &report.cold_index_result)
+    {
+        object.insert("cold_index_result".to_owned(), cold_index_result.clone());
+    }
+    serialized
 }
 
 #[cfg(test)]

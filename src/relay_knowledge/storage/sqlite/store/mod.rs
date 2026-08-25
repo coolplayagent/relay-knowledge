@@ -47,6 +47,7 @@ impl SqliteGraphStore {
             migration::prepare_existing_database(&connection)?;
             initialization::initialize_schema_for_open(&connection)?;
         }
+        code::schema::validate_existing_query_indexes(&connection)?;
         let read_pool = ReadConnectionPool::open(&path)?;
 
         Ok(Self {
@@ -283,4 +284,5 @@ impl SqliteGraphStore {
 }
 
 #[cfg(test)]
+#[path = "mod_tests.rs"]
 mod mod_tests;

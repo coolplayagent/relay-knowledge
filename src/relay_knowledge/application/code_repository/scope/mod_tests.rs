@@ -1,12 +1,11 @@
 // Direct tests for indexed-scope and filter compatibility.
 
 use super::*;
+use crate::domain::code_snapshot_scope_id;
 
 #[test]
 fn current_fact_version_scope_requires_expected_source_scope() {
-    let expected_scope =
-        code_snapshot_expected_scope_id("repo", "tree-a", &["src".to_owned()], &[])
-            .expect("code snapshots should have a fact-version scope");
+    let expected_scope = code_snapshot_scope_id("repo", "tree-a", &["src".to_owned()], &[]);
     let compatible = status_for_scope(
         Some(expected_scope),
         Some("tree-a"),

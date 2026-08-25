@@ -5,8 +5,10 @@ use rusqlite::{Connection, params};
 use crate::storage::StorageError;
 
 pub(in crate::storage::sqlite::code) const MAX_REPOSITORY_SET_MEMBERS: usize = 64;
-pub(super) const MAX_REPOSITORY_SET_OVERLAY_IMPORTS: usize = 8_192;
 pub(super) const MAX_REPOSITORY_SET_OVERLAY_EXPORTS: usize = 131_072;
+pub(super) const MAX_REPOSITORY_SET_OVERLAY_IMPORT_SCAN_ROWS: usize =
+    MAX_REPOSITORY_SET_OVERLAY_EXPORTS * 2;
+pub(super) const REPOSITORY_SET_OVERLAY_IMPORT_PAGE_ROWS: usize = 512;
 pub(in crate::storage::sqlite::code) const MAX_REPOSITORY_SET_OVERLAY_EDGES: usize = 8_192;
 pub(super) const MAX_REPOSITORY_SET_MANIFEST_CHUNKS: usize = 4_096;
 pub(super) const MAX_REPOSITORY_SET_MANIFEST_BYTES: usize = 16 * 1024 * 1024;

@@ -82,6 +82,10 @@ mod enum_tests;
 mod review_tests;
 
 #[cfg(test)]
+#[path = "tests/rust.rs"]
+mod rust_tests;
+
+#[cfg(test)]
 #[path = "tests/sql.rs"]
 mod sql_tests;
 

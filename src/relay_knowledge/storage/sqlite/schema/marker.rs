@@ -3,12 +3,22 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::storage::StorageError;
 
 use super::introspection::{
-    index_has_columns, table_column_is_not_null, table_exists, table_has_columns,
-    table_has_exact_columns, table_has_primary_key_columns, table_has_unique_columns,
+    index_has_columns, table_column_is_not_null, table_columns_have_no_defaults, table_exists,
+    table_has_columns, table_has_exact_columns, table_has_exact_plain_columns,
+    table_has_exact_primary_key_index_surface, table_has_no_triggers,
+    table_has_primary_key_columns, table_has_unique_columns,
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
 pub(super) const SCHEMA_MARKER_VERSION: i64 = 6;
+pub(in crate::storage::sqlite) const SEARCH_OWNER_V2_MIGRATION: &str =
+    "search-owner-v2-writer-and-serving-gate";
+pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_V2_MIGRATION: &str =
+    "reference-search-group-owner-v2";
+pub(in crate::storage::sqlite) const SEARCH_ORPHAN_GC_PHASE_MIGRATION: &str =
+    "scope-gc-search-orphans-phase-v1";
+pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION: &str =
+    "scope-gc-reference-search-groups-phase-v1";
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
@@ -225,6 +235,88 @@ const FILE_CONTENT_CURSOR_COLUMNS: &[&str] = &[
     "stale_reason",
     "updated_at_ms",
 ];
+const CODE_REFERENCE_SEARCH_PROGRESS_COLUMNS: &[&str] = &[
+    "source_scope",
+    "projection_version",
+    "stage",
+    "completed_page_ordinal",
+    "cleanup_cursor_rowid",
+    "cleanup_cursor_record_id",
+    "discovery_cursor_reference_id",
+    "build_cursor_group_id",
+    "expected_reference_count",
+    "cleanup_total_count",
+    "discovered_reference_count",
+    "discovered_group_count",
+    "build_total_count",
+    "cleaned_count",
+    "built_count",
+    "page_document_limit",
+    "page_byte_limit",
+];
+const CODE_REFERENCE_RESOLUTION_PROGRESS_COLUMNS: &[&str] = &[
+    "source_scope",
+    "protocol_version",
+    "stage",
+    "completed_page_ordinal",
+    "cursor_reference_id",
+    "expected_reference_count",
+    "resolved_reference_count",
+    "page_document_limit",
+    "page_byte_limit",
+];
+const CODE_REFERENCE_RESOLUTION_PROGRESS_DDL: &str = concat!(
+    "createtablecode_repository_reference_resolution_progress(",
+    "source_scopetextnotnullprimarykey,protocol_versionintegernotnullcheck(protocol_version=1),",
+    "stagetextnotnullcheck(stage='resolve'),completed_page_ordinalintegernotnullcheck(completed_page_ordinal>=0),",
+    "cursor_reference_idtext,expected_reference_countintegernotnullcheck(expected_reference_count>=0),",
+    "resolved_reference_countintegernotnullcheck(resolved_reference_count>=0),",
+    "page_document_limitintegernotnullcheck(page_document_limit>0andpage_document_limit<=32768),",
+    "page_byte_limitintegernotnullcheck(page_byte_limit>0andpage_byte_limit<=16777216),",
+    "check(resolved_reference_count<=expected_reference_count),",
+    "foreignkey(source_scope)referencescode_repository_index_checkpoints(source_scope)ondeletecascade)"
+);
+const CODE_REFERENCE_SEARCH_PROGRESS_DDL: &str = concat!(
+    "createtablecode_repository_reference_search_progress(",
+    "source_scopetextnotnullprimarykey,projection_versionintegernotnullcheck(projection_version>0),",
+    "stagetextnotnullcheck(stagein('cleanup','discover','build')),",
+    "completed_page_ordinalintegernotnullcheck(completed_page_ordinal>=0),",
+    "cleanup_cursor_rowidinteger,cleanup_cursor_record_idtext,discovery_cursor_reference_idtext,",
+    "build_cursor_group_idtext,expected_reference_countintegernotnullcheck(expected_reference_count>=0),",
+    "cleanup_total_countintegernotnullcheck(cleanup_total_count>=0),",
+    "discovered_reference_countintegernotnullcheck(discovered_reference_count>=0),",
+    "discovered_group_countintegernotnullcheck(discovered_group_count>=0),",
+    "build_total_countintegernotnullcheck(build_total_count>=0),cleaned_countintegernotnullcheck(cleaned_count>=0),",
+    "built_countintegernotnullcheck(built_count>=0),page_document_limitintegernotnullcheck(page_document_limit>0),",
+    "page_byte_limitintegernotnullcheck(page_byte_limit>0),",
+    "foreignkey(source_scope)referencescode_repository_index_checkpoints(source_scope)ondeletecascade)"
+);
+const CODE_REFERENCE_SEARCH_GROUP_COLUMNS: &[&str] = &[
+    "source_scope",
+    "group_id",
+    "name",
+    "kind",
+    "path",
+    "target_hint",
+    "language_id",
+    "occurrence_count",
+];
+const CODE_REFERENCE_SEARCH_MANIFEST_COLUMNS: &[&str] = &[
+    "source_scope",
+    "projection_version",
+    "reference_count",
+    "group_count",
+];
+const CODE_SCOPE_GC_JOB_COLUMNS: &[&str] = &[
+    "source_scope",
+    "repository_id",
+    "phase",
+    "search_rowid_cursor",
+    "deleted_rows",
+    "created_at_ms",
+    "updated_at_ms",
+    "last_error",
+];
 
 pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     connection: &Connection,
@@ -357,19 +449,10 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
         )?
         || !table_has_columns(
             connection,
-            "code_repository_retention_activity",
-            &["repository_id", "source_scope", "activity_ms"],
+            "code_repository_scope_gc_jobs",
+            CODE_SCOPE_GC_JOB_COLUMNS,
         )?
-        || !table_has_columns(
-            connection,
-            "code_repository_retention_activity_dirty",
-            &["repository_id"],
-        )?
-        || !index_has_columns(
-            connection,
-            "code_repository_retention_activity_order",
-            &["activity_ms", "repository_id"],
-        )?
+        || !code_schema_capability_markers_are_current(connection)?
         || !table_has_columns(connection, "file_index_roots", FILE_INDEX_ROOT_COLUMNS)?
         || !table_has_columns(
             connection,
@@ -387,6 +470,10 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
             FILE_CONTENT_CURSOR_COLUMNS,
         )?
         || !table_has_columns(connection, "file_content_search", &["chunk_id", "content"])?
+        || !reference_search_progress_schema_is_current(connection)?
+        || !reference_resolution_progress_schema_is_current(connection)?
+        || !super::incremental_clone_marker::schema_is_current(connection)?
+        || !reference_search_group_schema_is_current(connection)?
     {
         return Ok(false);
     }
@@ -398,6 +485,280 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     }
 
     Ok(true)
+}
+
+fn code_schema_capability_markers_are_current(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
+    if !table_exists(connection, "code_repository_schema_migrations")? {
+        return Ok(false);
+    }
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?1
+             ) AND EXISTS (
+                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?2
+             ) AND EXISTS (
+                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?3
+             ) AND EXISTS (
+                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?4
+             )",
+            params![
+                SEARCH_OWNER_V2_MIGRATION,
+                SEARCH_ORPHAN_GC_PHASE_MIGRATION,
+                REFERENCE_SEARCH_GROUP_V2_MIGRATION,
+                REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION,
+            ],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StorageError::from)
+}
+
+pub(in crate::storage::sqlite) fn reference_resolution_progress_schema_is_current(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
+    let table = "code_repository_reference_resolution_progress";
+    if !table_has_exact_plain_columns(
+        connection,
+        table,
+        CODE_REFERENCE_RESOLUTION_PROGRESS_COLUMNS,
+    )? || !table_has_primary_key_columns(connection, table, &["source_scope"])?
+    {
+        return Ok(false);
+    }
+    for column in CODE_REFERENCE_RESOLUTION_PROGRESS_COLUMNS
+        .iter()
+        .copied()
+        .filter(|column| *column != "cursor_reference_id")
+    {
+        if !table_column_is_not_null(connection, table, column)? {
+            return Ok(false);
+        }
+    }
+    if table_column_is_not_null(connection, table, "cursor_reference_id")? {
+        return Ok(false);
+    }
+    let definition = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [table],
+            |row| row.get::<_, String>(0),
+        )?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if !progress_table_has_exact_constraint_surface(
+        connection,
+        table,
+        &definition,
+        CODE_REFERENCE_RESOLUTION_PROGRESS_DDL,
+    )? {
+        return Ok(false);
+    }
+    let mut foreign_keys = connection.prepare(&format!("PRAGMA foreign_key_list({table})"))?;
+    let foreign_keys = foreign_keys
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(6)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(foreign_keys.as_slice()
+        == [(
+            "code_repository_index_checkpoints".to_owned(),
+            "source_scope".to_owned(),
+            "source_scope".to_owned(),
+            "CASCADE".to_owned(),
+        )]
+        .as_slice())
+}
+
+pub(in crate::storage::sqlite) fn reference_search_progress_schema_is_current(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
+    if !table_has_exact_plain_columns(
+        connection,
+        "code_repository_reference_search_progress",
+        CODE_REFERENCE_SEARCH_PROGRESS_COLUMNS,
+    )? || !table_has_primary_key_columns(
+        connection,
+        "code_repository_reference_search_progress",
+        &["source_scope"],
+    )? {
+        return Ok(false);
+    }
+    for column in [
+        "source_scope",
+        "projection_version",
+        "stage",
+        "completed_page_ordinal",
+        "expected_reference_count",
+        "cleanup_total_count",
+        "discovered_reference_count",
+        "discovered_group_count",
+        "build_total_count",
+        "cleaned_count",
+        "built_count",
+        "page_document_limit",
+        "page_byte_limit",
+    ] {
+        if !table_column_is_not_null(
+            connection,
+            "code_repository_reference_search_progress",
+            column,
+        )? {
+            return Ok(false);
+        }
+    }
+    for column in [
+        "cleanup_cursor_rowid",
+        "cleanup_cursor_record_id",
+        "discovery_cursor_reference_id",
+        "build_cursor_group_id",
+    ] {
+        if table_column_is_not_null(
+            connection,
+            "code_repository_reference_search_progress",
+            column,
+        )? {
+            return Ok(false);
+        }
+    }
+    let definition = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_reference_search_progress'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if !progress_table_has_exact_constraint_surface(
+        connection,
+        "code_repository_reference_search_progress",
+        &definition,
+        CODE_REFERENCE_SEARCH_PROGRESS_DDL,
+    )? {
+        return Ok(false);
+    }
+    let mut foreign_keys =
+        connection.prepare("PRAGMA foreign_key_list(code_repository_reference_search_progress)")?;
+    let foreign_keys = foreign_keys
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(6)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(foreign_keys.as_slice()
+        == [(
+            "code_repository_index_checkpoints".to_owned(),
+            "source_scope".to_owned(),
+            "source_scope".to_owned(),
+            "CASCADE".to_owned(),
+        )]
+        .as_slice())
+}
+
+fn progress_table_has_exact_constraint_surface(
+    connection: &Connection,
+    table: &str,
+    normalized_definition: &str,
+    expected_definition: &str,
+) -> Result<bool, StorageError> {
+    let compact_definition = normalized_definition
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    Ok(table_columns_have_no_defaults(connection, table)?
+        && table_has_exact_primary_key_index_surface(connection, table, &["source_scope"])?
+        && table_has_no_triggers(connection, table)?
+        && compact_definition == expected_definition)
+}
+
+pub(in crate::storage::sqlite) fn reference_search_group_schema_is_current(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
+    if !(table_has_exact_columns(
+        connection,
+        "code_repository_reference_search_groups",
+        CODE_REFERENCE_SEARCH_GROUP_COLUMNS,
+    )? && table_has_primary_key_columns(
+        connection,
+        "code_repository_reference_search_groups",
+        &["source_scope", "group_id"],
+    )? && table_has_unique_columns(
+        connection,
+        "code_repository_reference_search_groups",
+        &["source_scope", "name", "kind", "path", "target_hint"],
+    )? && index_has_columns(
+        connection,
+        "code_repository_reference_search_groups_path",
+        &["source_scope", "path", "group_id"],
+    )? && table_has_exact_columns(
+        connection,
+        "code_repository_reference_search_manifests",
+        CODE_REFERENCE_SEARCH_MANIFEST_COLUMNS,
+    )? && table_has_primary_key_columns(
+        connection,
+        "code_repository_reference_search_manifests",
+        &["source_scope"],
+    )?) {
+        return Ok(false);
+    }
+    let compact_sql = |object_type: &str, name: &str| -> Result<String, StorageError> {
+        let definition = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type = ?1 AND name = ?2",
+            params![object_type, name],
+            |row| row.get::<_, String>(0),
+        )?;
+        Ok(definition
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .flat_map(char::to_lowercase)
+            .collect())
+    };
+    let group = compact_sql("table", "code_repository_reference_search_groups")?;
+    let manifest = compact_sql("table", "code_repository_reference_search_manifests")?;
+    let path_index = compact_sql("index", "code_repository_reference_search_groups_path")?;
+    Ok(!group.contains("collate")
+        && !manifest.contains("collate")
+        && !path_index.contains("collate")
+        && !path_index.contains("desc")
+        && [
+            "source_scopetextnotnull",
+            "group_idtextnotnull",
+            "nametextnotnull",
+            "kindtextnotnull",
+            "pathtextnotnull",
+            "target_hinttextnotnull",
+            "language_idtextnotnull",
+            "occurrence_countintegernotnullcheck(occurrence_count>0)",
+            "primarykey(source_scope,group_id)",
+            "unique(source_scope,name,kind,path,target_hint)",
+        ]
+        .iter()
+        .all(|fragment| group.contains(fragment))
+        && [
+            "source_scopetextnotnullprimarykey",
+            "projection_versionintegernotnullcheck(projection_version>0)",
+            "reference_countintegernotnullcheck(reference_count>=0)",
+            "group_countintegernotnullcheck(group_count>=0)",
+        ]
+        .iter()
+        .all(|fragment| manifest.contains(fragment))
+        && path_index
+            .contains("oncode_repository_reference_search_groups(source_scope,path,group_id)"))
 }
 
 fn graph_bm25_schema_is_current(connection: &Connection) -> Result<bool, StorageError> {
@@ -600,3 +961,7 @@ fn fact_evidence_link_exists(
 #[cfg(test)]
 #[path = "marker_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reference_resolution_progress_tests.rs"]
+mod reference_resolution_progress_tests;

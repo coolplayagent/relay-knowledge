@@ -1,5 +1,9 @@
 //! Stable symbol and reference record materialization.
 
+#[cfg(test)]
+#[path = "doc_comments_tests.rs"]
+mod doc_comments_tests;
+
 use std::collections::HashSet;
 
 use crate::domain::{
@@ -61,7 +65,14 @@ pub(super) fn records_from_captures(
                 kind.to_owned(),
             );
             if seen_symbols.insert(key) {
-                let symbol = symbol_record(context, &capture.name, kind, &capture.target_node)?;
+                let symbol = symbol_record_with_doc_owner(
+                    context,
+                    &capture.name,
+                    kind,
+                    &capture.target_node,
+                    &capture.name,
+                    capture.doc_owner_node.byte_start,
+                )?;
                 if cpp_function_capture_should_be_skipped(context, &capture, &symbol) {
                     continue;
                 }
@@ -197,7 +208,7 @@ fn function_body_end(content: &str, byte_start: usize) -> Option<usize> {
     None
 }
 
-pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCodeSymbolRecord) {
+pub(super) fn upsert_symbol(output: &mut FileParseOutput, mut symbol: RepositoryCodeSymbolRecord) {
     if symbol.kind == "function"
         && cpp_function_signature_is_destructor(&symbol.signature, &symbol.name)
     {
@@ -229,6 +240,9 @@ pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCode
         });
     if let Some(existing_index) = existing_index {
         let existing = &output.symbols[existing_index];
+        if symbol.doc_comment.is_none() {
+            symbol.doc_comment.clone_from(&existing.doc_comment);
+        }
         let existing_width = existing
             .byte_range
             .end
@@ -380,6 +394,24 @@ pub(super) fn symbol_record_with_qualified_suffix(
     range: &SyntaxRange,
     qualified_suffix: &str,
 ) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
+    symbol_record_with_doc_owner(
+        context,
+        name,
+        kind,
+        range,
+        qualified_suffix,
+        range.byte_start,
+    )
+}
+
+fn symbol_record_with_doc_owner(
+    context: &FileParseContext<'_>,
+    name: &str,
+    kind: &str,
+    range: &SyntaxRange,
+    qualified_suffix: &str,
+    doc_owner_byte_start: usize,
+) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
     let signature = normalized_symbol_signature(context, name, kind, range);
     let qualified_name = format!("{}::{qualified_suffix}", module_path(context.path));
     let symbol_snapshot_id = stable_id(
@@ -406,7 +438,12 @@ pub(super) fn symbol_record_with_qualified_suffix(
         qualified_name,
         kind: kind.to_owned(),
         signature,
-        doc_comment: doc_comment_before(context.content, range.byte_start, context.language_id),
+        doc_comment: doc_comment_before(
+            context.content,
+            doc_owner_byte_start,
+            context.language_id,
+            kind,
+        ),
         byte_range: RepositoryCodeRange::new("byte_range", range.byte_start, range.byte_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
@@ -568,7 +605,130 @@ fn module_path(path: &str) -> String {
     strip_supported_extension(path).replace(['/', '\\'], "::")
 }
 
-fn doc_comment_before(content: &str, byte_start: usize, language_id: &str) -> Option<String> {
+fn doc_comment_before(
+    content: &str,
+    byte_start: usize,
+    language_id: &str,
+    symbol_kind: &str,
+) -> Option<String> {
+    doc_block_before(content, byte_start, language_id, symbol_kind)
+        .or_else(|| line_doc_comment_before(content, byte_start, language_id))
+}
+
+const MAX_DOC_BLOCK_BYTES: usize = 4_096;
+const MAX_DOC_BLOCK_LINES: usize = 64;
+const MAX_TYPE_DOC_BLOCK_SCAN_BYTES: usize = 16_384;
+
+fn doc_block_before(
+    content: &str,
+    byte_start: usize,
+    language_id: &str,
+    symbol_kind: &str,
+) -> Option<String> {
+    if !language_supports_doc_blocks(language_id) {
+        return None;
+    }
+    let prefix = content.get(..byte_start)?;
+    let scan_bytes = doc_block_scan_bytes(symbol_kind);
+    let mut search_start = prefix.len().saturating_sub(scan_bytes);
+    while !prefix.is_char_boundary(search_start) {
+        search_start += 1;
+    }
+    let adjacent = prefix[search_start..].trim_end_matches(char::is_whitespace);
+    if !adjacent.ends_with("*/") {
+        return None;
+    }
+
+    let opening = adjacent.rfind("/*")?;
+    let block = &adjacent[opening..];
+    if block.len() > scan_bytes || !(block.starts_with("/**") || block.starts_with("/*!")) {
+        return None;
+    }
+    let body = symbol_doc_block_body(block, language_id)?;
+
+    normalize_doc_block(body)
+}
+
+fn doc_block_scan_bytes(symbol_kind: &str) -> usize {
+    if matches!(
+        symbol_kind,
+        "class"
+            | "enum"
+            | "interface"
+            | "record"
+            | "struct"
+            | "trait"
+            | "type"
+            | "type_alias"
+            | "typedef"
+            | "union"
+    ) {
+        MAX_TYPE_DOC_BLOCK_SCAN_BYTES
+    } else {
+        MAX_DOC_BLOCK_BYTES
+    }
+}
+
+fn symbol_doc_block_body<'block>(block: &'block str, language_id: &str) -> Option<&'block str> {
+    let is_outer = block.starts_with("/**");
+    let is_supported_inner = block.starts_with("/*!") && matches!(language_id, "c" | "cpp");
+    if !is_outer && !is_supported_inner {
+        return None;
+    }
+    block.get(3..block.len().checked_sub(2)?)
+}
+
+fn language_supports_doc_blocks(language_id: &str) -> bool {
+    matches!(
+        language_id,
+        "c" | "cpp"
+            | "csharp"
+            | "go"
+            | "java"
+            | "javascript"
+            | "jsx"
+            | "kotlin"
+            | "php"
+            | "rust"
+            | "scala"
+            | "swift"
+            | "typescript"
+            | "tsx"
+    )
+}
+
+fn normalize_doc_block(body: &str) -> Option<String> {
+    let mut lines = body
+        .lines()
+        .map(|line| {
+            let line = line.trim_end_matches('\r').trim();
+            line.strip_prefix('*')
+                .map_or(line, |without_star| {
+                    without_star.strip_prefix(' ').unwrap_or(without_star)
+                })
+                .trim_end()
+        })
+        .take(MAX_DOC_BLOCK_LINES)
+        .collect::<Vec<_>>();
+    while lines.first().is_some_and(|line| line.is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    let mut normalized = lines.join("\n");
+    truncate_to_char_boundary(&mut normalized, MAX_DOC_BLOCK_BYTES);
+    while normalized.ends_with('\n') {
+        normalized.pop();
+    }
+
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn line_doc_comment_before(content: &str, byte_start: usize, language_id: &str) -> Option<String> {
     let prefix = content.get(..byte_start)?;
     let previous_lines = prefix
         .rfind('\n')

@@ -24,6 +24,7 @@ pub(super) fn source_scope_for_request(
         FROM code_repository_scopes scope
         WHERE scope.repository_id = ?1
           AND scope.resolved_commit_sha = ?2
+          AND scope.stale = 0
           AND scope.retiring = 0
         ORDER BY scope.path_filters_json ASC, scope.language_filters_json ASC,
                  scope.source_scope ASC
@@ -185,6 +186,7 @@ fn exact_source_scope_for_request(
         FROM code_repository_scopes scope
         WHERE scope.repository_id = ?1
           AND scope.resolved_commit_sha = ?2
+          AND scope.stale = 0
           AND scope.path_filters_json = ?3
           AND scope.language_filters_json = ?4
           AND scope.retiring = 0

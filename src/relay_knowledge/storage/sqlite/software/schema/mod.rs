@@ -5,7 +5,7 @@ use crate::storage::StorageError;
 use super::super::schema::columns;
 use super::{dependency_usage, lifecycle};
 
-pub(super) const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 = 3;
+pub(super) const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 = 5;
 
 pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -117,7 +117,7 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
             build_target_count INTEGER NOT NULL DEFAULT 0,
             iac_resource_count INTEGER NOT NULL DEFAULT 0,
             design_element_count INTEGER NOT NULL DEFAULT 0,
-            projection_schema_version INTEGER NOT NULL DEFAULT 3,
+            projection_schema_version INTEGER NOT NULL DEFAULT 5,
             last_error TEXT
         );
         ",

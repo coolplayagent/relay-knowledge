@@ -1,9 +1,6 @@
-use std::collections::BTreeSet;
-
-use crate::domain::{CodeParseStatus, CodeRepositoryRegistration};
-
 use super::*;
-
+use crate::domain::{CodeParseStatus, CodeRepositoryRegistration};
+use std::collections::BTreeSet;
 #[test]
 fn tree_sitter_captures_symbols_references_imports_and_chunks() {
     let registration =

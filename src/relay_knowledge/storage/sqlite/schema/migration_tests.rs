@@ -11,6 +11,37 @@ use crate::storage::StorageError;
 use rusqlite::Connection;
 
 #[test]
+fn migration_preserves_nonempty_incompatible_reference_search_progress_fail_closed() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
+    let connection = store.connection.lock().expect("connection should lock");
+    connection
+        .execute_batch(
+            "DROP TABLE code_repository_reference_search_progress;
+             CREATE TABLE code_repository_reference_search_progress (
+                 source_scope TEXT PRIMARY KEY,
+                 stage TEXT NOT NULL
+             );
+             INSERT INTO code_repository_reference_search_progress (source_scope, stage)
+             VALUES ('scope', 'cleanup');",
+        )
+        .expect("incompatible durable progress should seed");
+
+    let error = prepare_existing_database_once(&connection)
+        .expect_err("nonempty incompatible durable progress must not be discarded");
+    assert!(matches!(error, StorageError::Invariant(_)));
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM code_repository_reference_search_progress",
+                [],
+                |row| row.get::<_, usize>(0),
+            )
+            .expect("durable progress should remain"),
+        1
+    );
+}
+
+#[test]
 fn schema_compatibility_retry_is_limited_to_transient_open_errors() {
     assert!(schema_compatibility_error_message_is_retryable(
         "vtable constructor failed: graph_bm25"

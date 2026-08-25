@@ -1,11 +1,22 @@
 //! Cross-owner code scope-status persistence scenarios.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use super::code_tests::{
     incremental_snapshot_for_parsed_file, retarget_snapshot_scope, retarget_snapshot_to_fact_scope,
     snapshot_with_chunk,
 };
 use super::*;
-use crate::{domain::CodeRepositoryRegistration, storage::SqliteGraphStore};
+use crate::{
+    domain::{
+        CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget,
+        CodeRepositoryRegistration,
+    },
+    storage::{
+        CodeIndexPublicationTarget, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
+        CodeIndexTaskSeed, SqliteGraphStore,
+    },
+};
 
 #[tokio::test]
 async fn incremental_update_rejects_legacy_fact_version_baseline() {
@@ -143,18 +154,14 @@ async fn same_tree_commit_alias_keeps_the_previous_commit_queryable() {
     let mut first = snapshot_with_chunk("repo", "src/lib.rs", "fn stable_tree() {}");
     retarget_snapshot_to_fact_scope(&mut first);
     first.resolved_commit_sha = "commit-a".to_owned();
-    let mut empty_commit = first.clone();
-    empty_commit.resolved_commit_sha = "commit-b".to_owned();
     let expected_scope = first.source_scope.clone();
+    let tree_hash = first.tree_hash.clone();
 
     store
         .apply_code_index_snapshot(first)
         .await
         .expect("first commit should persist");
-    store
-        .apply_code_index_snapshot(empty_commit)
-        .await
-        .expect("same-tree commit should persist");
+    adopt_same_tree_commit(&store, &expected_scope, &tree_hash, "commit-b").await;
 
     for commit in ["commit-a", "commit-b"] {
         let status = store
@@ -181,16 +188,13 @@ async fn same_tree_commit_alias_remains_a_valid_incremental_base() {
     let mut first = snapshot_with_chunk("repo", "src/lib.rs", "fn stable_tree() {}");
     retarget_snapshot_to_fact_scope(&mut first);
     first.resolved_commit_sha = "commit-a".to_owned();
-    let mut empty_commit = first.clone();
-    empty_commit.resolved_commit_sha = "commit-b".to_owned();
+    let source_scope = first.source_scope.clone();
+    let tree_hash = first.tree_hash.clone();
     store
         .apply_code_index_snapshot(first)
         .await
         .expect("first commit should persist");
-    store
-        .apply_code_index_snapshot(empty_commit)
-        .await
-        .expect("same-tree commit should persist");
+    adopt_same_tree_commit(&store, &source_scope, &tree_hash, "commit-b").await;
 
     let mut incremental = incremental_snapshot_for_parsed_file();
     incremental.base_resolved_commit_sha = Some("commit-a".to_owned());
@@ -208,6 +212,84 @@ async fn same_tree_commit_alias_remains_a_valid_incremental_base() {
         Some("commit-a")
     );
     assert_eq!(summary.resolved_commit_sha, "commit-c");
+}
+
+async fn adopt_same_tree_commit(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+    tree_hash: &str,
+    resolved_commit_sha: &str,
+) {
+    store
+        .refresh_software_global_projection(source_scope.to_owned())
+        .await
+        .expect("active content scope should receive its software projection");
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should follow Unix epoch")
+        .as_millis() as u64;
+    let queued = store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: "repo".to_owned(),
+            alias: "fixture".to_owned(),
+            ref_selector: resolved_commit_sha.to_owned(),
+            resolved_commit_sha: resolved_commit_sha.to_owned(),
+            tree_hash: tree_hash.to_owned(),
+            source_scope: source_scope.to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            mode: CodeIndexMode::Full,
+            input_fingerprint: format!("same-tree-alias-{resolved_commit_sha}"),
+            resource_budget: CodeIndexResourceBudget::default(),
+            payload_json: "{}".to_owned(),
+            now_ms,
+        })
+        .await
+        .expect("same-tree alias task should queue");
+    let running = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: "same-tree-alias-worker".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms,
+        })
+        .await
+        .expect("same-tree alias claim should run")
+        .expect("same-tree alias task should claim");
+    let fence = CodeIndexPublicationFence {
+        repository_id: running.repository_id.clone(),
+        task_id: running.task_id.clone(),
+        lease_owner: "same-tree-alias-worker".to_owned(),
+        attempt_count: running.attempt_count,
+        generation: running.publication_generation,
+    };
+    let adopted = store
+        .reconcile_code_index_publication_with_fence(
+            CodeIndexPublicationTarget {
+                task_id: running.task_id.clone(),
+                repository_id: running.repository_id.clone(),
+                source_scope: running.source_scope.clone(),
+                resolved_commit_sha: running.resolved_commit_sha.clone(),
+                tree_hash: running.tree_hash.clone(),
+                path_filters: running.path_filters.clone(),
+                language_filters: running.language_filters.clone(),
+            },
+            fence,
+        )
+        .await
+        .expect("same-tree alias reconcile should run");
+    assert!(adopted, "same-tree content must use alias-only adoption");
+    store
+        .complete_code_index_task(CodeIndexTaskCompletion {
+            task_id: running.task_id,
+            lease_owner: "same-tree-alias-worker".to_owned(),
+            attempt_count: running.attempt_count,
+            publication_generation: running.publication_generation,
+            now_ms: now_ms.saturating_add(1),
+        })
+        .await
+        .expect("adopted same-tree alias task should complete");
 }
 
 async fn empty_store_with_repository() -> SqliteGraphStore {

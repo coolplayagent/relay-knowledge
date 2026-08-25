@@ -27,6 +27,25 @@ pub(super) fn reject_reasons(
     if !failed_gates.is_empty() {
         reasons.push(format!("quality gates failed: {}", failed_gates.join(", ")));
     }
+    let failed_key_metrics = observation
+        .metrics
+        .iter()
+        .filter(|metric| metric.key_budget_failed())
+        .map(|metric| {
+            format!(
+                "{}={} budget={}",
+                metric.name,
+                metric.value,
+                metric.budget.unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>();
+    if !failed_key_metrics.is_empty() {
+        reasons.push(format!(
+            "key metric budgets failed: {}",
+            failed_key_metrics.join(", ")
+        ));
+    }
     let bug_fix_priority = bug_fix_priority_improved(improvements);
     let Some(previous) = baselines.workload_previous else {
         if let Some(reason) = profile_best_score_reject_reason(

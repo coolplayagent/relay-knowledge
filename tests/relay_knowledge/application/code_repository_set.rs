@@ -538,7 +538,7 @@ async fn repository_set_refresh_persists_fact_version_member_scope_before_overla
 }
 
 #[tokio::test]
-async fn repository_set_import_query_reports_external_dependency_source_fallback() {
+async fn complete_import_graph_surface_skips_redundant_source_fallback() {
     let repo = FixtureRepo::create("repo-set-external-import");
     repo.write(
         "src/lib.rs",
@@ -593,20 +593,20 @@ pub struct Event {
             result.member.repository_alias == "app"
                 && result.hit.edge_kind.as_deref() == Some("import")
                 && result.hit.edge_resolution_state.as_deref() == Some("unresolved")
+                && result
+                    .hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::ImportGraph)
         }),
         "expected unresolved import graph evidence: {:?}",
         response.results
     );
     assert!(
-        response.results.iter().any(|result| {
-            result.member.repository_alias == "app"
-                && result.hit.excerpt.contains("serde")
-                && result
-                    .hit
-                    .retrieval_layers
-                    .contains(&CodeRetrievalLayer::TextFallback)
-        }),
-        "expected current-repository text fallback evidence: {:?}",
+        response.results.iter().all(|result| !result
+            .hit
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::TextFallback)),
+        "complete import-graph source evidence must not add redundant text fallback: {:?}",
         response.results
     );
 }

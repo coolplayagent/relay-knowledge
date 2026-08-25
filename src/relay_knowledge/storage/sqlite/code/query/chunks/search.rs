@@ -1,5 +1,6 @@
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{
         CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
@@ -48,7 +49,10 @@ use super::super::{
     scoring::path_ranking::declaration_surface_path_bonus,
     scoring::proximity::query_proximity_chunk_bonus,
 };
-use super::{exact_definition_chunk_bonus, exact_reference_chunk_bonus};
+use super::{
+    exact_definition_chunk_bonus, exact_reference_chunk_bonus,
+    exact_reference_chunk_contains_usage, reference_usage_language_filter_sql,
+};
 
 pub(in crate::storage::sqlite::code::query) fn search_chunks(
     connection: &Connection,
@@ -58,7 +62,8 @@ pub(in crate::storage::sqlite::code::query) fn search_chunks(
     let chunk_first = request.code_query_kind == CodeQueryKind::Hybrid
         && hybrid_query_prefers_chunk_first(request)
         && hybrid_query_should_use_layered_chunk_search(request);
-    let chunk_candidate_limit = hybrid_chunk_candidate_limit(request);
+    let narrow_chunk_candidate_limit = hybrid_narrow_chunk_candidate_limit(request);
+    let broad_chunk_candidate_limit = candidate_limit(request, CandidateLayer::Chunk);
     let mut narrow_hits = Vec::new();
     if request.code_query_kind == CodeQueryKind::Hybrid {
         if let Some(strict_fts_query) = strict_hybrid_chunk_fts_match_query(&request.query) {
@@ -75,7 +80,7 @@ pub(in crate::storage::sqlite::code::query) fn search_chunks(
                 return Ok(hits);
             }
             narrow_hits =
-                merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+                merge_strict_and_broad_chunk_hits(narrow_hits, hits, narrow_chunk_candidate_limit);
         }
     }
 
@@ -87,10 +92,11 @@ pub(in crate::storage::sqlite::code::query) fn search_chunks(
             status,
             request,
             &structured_fts_query,
-            chunk_candidate_limit,
+            narrow_chunk_candidate_limit,
         )?;
         retain_query_language_scoped_workflow_hits(request, &mut hits);
-        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+        narrow_hits =
+            merge_strict_and_broad_chunk_hits(narrow_hits, hits, narrow_chunk_candidate_limit);
         let filtered_narrow_hits = filtered_hits_for_gate(&narrow_hits, request);
         if hybrid_hits_can_answer_without_graph_expansion(request, &filtered_narrow_hits) {
             return Ok(narrow_hits);
@@ -105,10 +111,11 @@ pub(in crate::storage::sqlite::code::query) fn search_chunks(
             status,
             request,
             &focused_fts_query,
-            chunk_candidate_limit,
+            narrow_chunk_candidate_limit,
         )?;
         retain_query_language_scoped_workflow_hits(request, &mut hits);
-        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+        narrow_hits =
+            merge_strict_and_broad_chunk_hits(narrow_hits, hits, narrow_chunk_candidate_limit);
     }
 
     if chunk_first
@@ -119,10 +126,11 @@ pub(in crate::storage::sqlite::code::query) fn search_chunks(
             status,
             request,
             &lifecycle_fts_query,
-            chunk_candidate_limit,
+            narrow_chunk_candidate_limit,
         )?;
         retain_query_language_scoped_workflow_hits(request, &mut hits);
-        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+        narrow_hits =
+            merge_strict_and_broad_chunk_hits(narrow_hits, hits, narrow_chunk_candidate_limit);
     }
 
     if chunk_first
@@ -133,10 +141,11 @@ pub(in crate::storage::sqlite::code::query) fn search_chunks(
             status,
             request,
             &compound_fts_query,
-            chunk_candidate_limit,
+            narrow_chunk_candidate_limit,
         )?;
         retain_query_language_scoped_workflow_hits(request, &mut hits);
-        narrow_hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+        narrow_hits =
+            merge_strict_and_broad_chunk_hits(narrow_hits, hits, narrow_chunk_candidate_limit);
     }
     if chunk_first && !narrow_hits.is_empty() {
         let filtered_narrow_hits = filtered_hits_for_gate(&narrow_hits, request);
@@ -155,16 +164,16 @@ pub(in crate::storage::sqlite::code::query) fn search_chunks(
         status,
         request,
         &fts_query,
-        chunk_candidate_limit,
+        broad_chunk_candidate_limit,
     )?;
     if !narrow_hits.is_empty() {
-        hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, chunk_candidate_limit);
+        hits = merge_strict_and_broad_chunk_hits(narrow_hits, hits, broad_chunk_candidate_limit);
     }
 
     Ok(hits)
 }
 
-fn hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
+fn hybrid_narrow_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
     if request.code_query_kind == CodeQueryKind::Hybrid
         && hybrid_query_prefers_chunk_first(request)
         && hybrid_query_should_use_layered_chunk_search(request)
@@ -218,6 +227,7 @@ fn search_chunks_with_fts_query(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'chunk'
+                {EXACT_SEARCH_OWNER_PREDICATE_SQL}
                 {fts_filter}
                 AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))
               ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
@@ -277,6 +287,9 @@ fn search_chunks_with_fts_query(
             status,
             request,
         ) {
+            continue;
+        }
+        if !exact_reference_chunk_contains_usage(request, &row.language_id, &row.content) {
             continue;
         }
         let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
@@ -395,17 +408,22 @@ fn chunk_fts_path_and_language_filter_sql(
     query_language_filters: &[String],
 ) -> String {
     let mut filter = fts_path_and_language_filter_sql(status, request);
+    append_chunk_filter(&mut filter, reference_usage_language_filter_sql(request));
     let extra_filter = exact_language_filter_sql("language_id", query_language_filters.len());
-    if extra_filter.is_empty() {
-        return filter;
-    }
+    append_chunk_filter(&mut filter, extra_filter);
 
+    filter
+}
+
+fn append_chunk_filter(filter: &mut String, clause: String) {
+    if clause.is_empty() {
+        return;
+    }
     if filter.is_empty() {
-        format!("AND {extra_filter}")
+        *filter = format!("AND {clause}");
     } else {
         filter.push_str(" AND ");
-        filter.push_str(&extra_filter);
-        filter
+        filter.push_str(&clause);
     }
 }
 

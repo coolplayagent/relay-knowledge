@@ -1,9 +1,12 @@
 use super::{
     build_facts, build_target_inputs, dependency_records,
     model::{PomDocument, resolve_effective_model_load},
-    refresh_effective_dependencies, refresh_effective_dependencies_with_language_filters,
+    pom_documents_with_limits, refresh_effective_dependencies,
+    refresh_effective_dependencies_with_language_filters, visit_build_target_inputs,
+    visit_dependency_records,
 };
 use crate::domain::GraphVersion;
+use crate::storage::StorageError;
 use rusqlite::{Connection, params};
 
 #[test]
@@ -591,6 +594,47 @@ fn refresh_deletes_stale_maven_dependencies_when_poms_disappear() {
 }
 
 #[test]
+fn pom_budget_rejects_before_parsing_and_dependency_output_stops_at_cap_plus_one() {
+    let connection = Connection::open_in_memory().expect("sqlite should open");
+    create_refresh_schema(&connection);
+    for (index, path) in ["a/pom.xml", "b/pom.xml"].into_iter().enumerate() {
+        connection
+            .execute(
+                "INSERT INTO code_repository_chunks (
+                    repository_id, source_scope, chunk_id, file_id, path, content,
+                    byte_start, byte_end, line_start, line_end, symbol_snapshot_id
+                 ) VALUES ('repo', 'scope', ?1, ?2, ?3, '<project/>', 0, 10, 1, 1, NULL)",
+                params![format!("chunk-{index}"), format!("file-{index}"), path],
+            )
+            .expect("POM candidate should seed");
+    }
+    let error = pom_documents_with_limits(&connection, "scope", 1, 8, 1_024)
+        .expect_err("document cap+1 must reject before XML parsing");
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+    let error = pom_documents_with_limits(&connection, "scope", 8, 1, 1_024)
+        .expect_err("chunk cap+1 must reject before XML parsing");
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+    let error = pom_documents_with_limits(&connection, "scope", 8, 8, 19)
+        .expect_err("byte cap+1 must reject before XML parsing");
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+
+    let models = resolve_effective_model_load(vec![document(
+        "pom.xml",
+        "<project><modelVersion>4.0.0</modelVersion><groupId>a</groupId><artifactId>b</artifactId><version>1</version><dependencies><dependency><groupId>x</groupId><artifactId>one</artifactId></dependency><dependency><groupId>x</groupId><artifactId>two</artifactId></dependency></dependencies></project>",
+    )])
+    .expect("POM should parse")
+    .models;
+    let mut visited = 0usize;
+    let error = visit_dependency_records(&models, 1, |_| {
+        visited += 1;
+        Ok(())
+    })
+    .expect_err("dependency cap+1 must stop output");
+    assert!(matches!(error, StorageError::CapacityExceeded(_)));
+    assert_eq!(visited, 1);
+}
+
+#[test]
 fn refresh_preserves_existing_maven_dependencies_when_pom_is_malformed() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_refresh_schema(&connection);
@@ -691,6 +735,40 @@ fn build_targets_honor_scope_language_filters() {
     assert!(targets.iter().any(|target| target.language_id == "kotlin"));
     assert!(!targets.iter().any(|target| target.language_id == "java"));
     assert!(!targets.iter().any(|target| target.language_id == "scala"));
+}
+
+#[test]
+fn build_target_visitor_stops_at_the_callers_bounded_capacity() {
+    let connection = Connection::open_in_memory().expect("sqlite should open");
+    create_refresh_schema(&connection);
+    connection
+        .execute(
+            "
+            INSERT INTO code_repository_chunks (
+                repository_id, source_scope, chunk_id, file_id, path, content,
+                byte_start, byte_end, line_start, line_end, symbol_snapshot_id
+            )
+            VALUES ('repo', 'scope', 'pom-chunk', 'pom-file', 'pom.xml',
+                '<project><modelVersion>4.0.0</modelVersion><groupId>com.acme</groupId><artifactId>service</artifactId><version>1.0.0</version></project>',
+                0, 139, 1, 1, NULL)
+            ",
+            [],
+        )
+        .expect("pom chunk should seed");
+    let mut visited = 0_usize;
+
+    let error = visit_build_target_inputs(&connection, "scope", GraphVersion::new(1), |_| {
+        if visited >= 1 {
+            return Err(StorageError::CapacityExceeded("test target cap".to_owned()));
+        }
+        visited += 1;
+        Ok(())
+    })
+    .expect_err("visitor capacity should stop Maven fact generation");
+
+    assert_eq!(visited, 1);
+    assert!(matches!(error, StorageError::CapacityExceeded(message)
+        if message == "test target cap"));
 }
 
 #[test]

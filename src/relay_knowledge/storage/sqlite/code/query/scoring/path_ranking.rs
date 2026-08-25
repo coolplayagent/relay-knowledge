@@ -400,6 +400,13 @@ pub(in super::super) fn query_mentions_test_or_benchmark(query: &str) -> bool {
         .any(term_mentions_test_or_benchmark)
 }
 
+pub(in super::super) fn query_mentions_test_double(query: &str) -> bool {
+    query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+        .any(term_mentions_test_double)
+}
+
 pub(in super::super) fn query_mentions_example_or_sample(query: &str) -> bool {
     query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
@@ -428,6 +435,16 @@ pub(in super::super) fn path_looks_like_test_or_benchmark(path: &str) -> bool {
             .rsplit('/')
             .next()
             .is_some_and(file_name_looks_like_test_or_benchmark)
+}
+
+pub(in super::super) fn path_looks_like_test_double(path: &str) -> bool {
+    path.split('/').any(term_mentions_test_double)
+        || path.rsplit('/').next().is_some_and(|file_name| {
+            let stem = file_name
+                .rsplit_once('.')
+                .map_or(file_name, |(stem, _)| stem);
+            term_mentions_test_double(stem)
+        })
 }
 
 fn path_looks_like_example_or_sample(path: &str) -> bool {
@@ -476,8 +493,17 @@ fn file_name_looks_like_test_or_benchmark(file_name: &str) -> bool {
 fn term_is_test_or_benchmark(term: &str) -> bool {
     matches!(
         term,
-        "test" | "tests" | "testing" | "bench" | "benchmark" | "benchmarks"
+        "test" | "tests" | "testing" | "bench" | "benchmark" | "benchmarks" | "jmh"
     )
+}
+
+fn term_mentions_test_double(term: &str) -> bool {
+    identifier_intent_parts(term).iter().any(|part| {
+        matches!(
+            part.as_str(),
+            "double" | "doubles" | "fake" | "fakes" | "mock" | "mocks" | "stub" | "stubs"
+        )
+    })
 }
 
 fn file_name_looks_like_example_or_sample(file_name: &str) -> bool {

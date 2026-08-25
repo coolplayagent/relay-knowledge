@@ -4,10 +4,12 @@
 
 本目录按“书”的方式组织：先读用户手册，再看功能说明，随后进入架构规格、研究资料、基准记录和验证记录。正文只维护在 `docs/zh/` 和 `docs/en/` 两个语言目录中。
 
-目录职责固定如下：`01-user-guide` 只放可执行用户流程；`02-capabilities` 只描述当前已实现能力；`03-architecture-specs` 保留硬约束、接口边界和前瞻产品要求；`04-research` 保留带日期的研究和差距分析；`05-benchmarks` 放基准与优化记录；`06-verification` 放验证、审计和文档新鲜度记录。各卷正文文件使用两位章节号前缀；`README.md` 是卷首目录，在阅读路径中作为第 0 章。
+目录职责固定如下：`01-user-guide` 只放可执行用户流程；`02-capabilities` 只描述当前已实现能力；`03-architecture-specs` 保留硬约束、接口边界和前瞻产品要求；`04-research` 保留带日期的研究和差距分析；`05-benchmarks` 放基准与优化记录；`06-verification` 放验证、审计和文档新鲜度记录。每卷的 `README.md` 是卷首目录；正文文件使用两位编号。专题参考与历史详情放入带索引的子目录，不重复占用章节号。
 
 发版准备时，先读根 README、第 1 章安装流程、第 19 章安装/发布架构契约，以及最新的
-[文档发版准备审计](06-verification/11-documentation-release-readiness-2026-06-05.md)。
+[文档与自迭代准备度验证记录](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md)。
+[2026-06-05 文档审计](06-verification/11-documentation-release-readiness-2026-06-05.md)
+继续作为历史快照保留，不代表当前工作树结论。
 中文卷目前保留若干尚未翻译成英文的基准和验证记录；英文目录会显式标注这些中文-only
 记录，避免发布导航静默缺项。
 
@@ -27,9 +29,15 @@
 - [第 11 章 可观测性与遥测](01-user-guide/11-observability-and-telemetry.md)
 - [第 12 章 高级配置参考](01-user-guide/12-advanced-configuration.md)
 - [第 13 章 运维与排障](01-user-guide/13-operations-and-troubleshooting.md)
+- [第 15 章 完整服务化部署指南](01-user-guide/15-service-deployment-full-guide.md)
+- [第 16 章 SRE 运维手册](01-user-guide/16-sre-operations-runbook.md)
+- [第 17 章 安全配置完整指南](01-user-guide/17-security-configuration.md)
+
+第 14 章尚未分配，编号保留。
 
 ## 第二卷：能力说明
 
+- [第二卷卷首：能力说明](02-capabilities/README.md)：当前能力边界、阅读路径和状态用语。
 - [第 1 章 能力版图总览](02-capabilities/01-capability-overview.md)
 - [第 2 章 本地优先运行时与 CLI](02-capabilities/02-local-first-runtime-and-cli.md)
 - [第 3 章 证据与图事实](02-capabilities/03-evidence-and-graph-facts.md)
@@ -48,6 +56,7 @@
 
 ## 第三卷：架构规格
 
+- [第三卷卷首：架构规格](03-architecture-specs/README.md)：规范性契约、阅读路径和契约解释。
 - [第 1 章 架构愿景与算法版图](03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
 - [第 2 章 工程硬约束](03-architecture-specs/02-engineering-hard-constraints.md)
 - [第 3 章 基础运行时层](03-architecture-specs/03-foundational-runtime.md)
@@ -70,8 +79,11 @@
 - [第 20 章 多仓库代码图谱薄覆盖层](03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 - [第 21 章 软件全域建模架构](03-architecture-specs/21-software-global-domain-modeling.md)
 - [第 22 章 服务化部署、控制面与数据面分离](03-architecture-specs/22-service-deployment-control-data-plane.md)
+- [第 23 章 HTTP API 参考](03-architecture-specs/23-api-reference.md)
 - [第 24 章 代码地图驱动的 Knowledge 开发闭环](03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
-- [第 25 章 代码索引保留策略](03-architecture-specs/25-code-index-retention.md)
+- [第 26 章 Git Commit + Knowledge：开发迭代理念与 Loop](03-architecture-specs/26-git-commit-knowledge-development-loop.md)
+
+第 23 章的窄专题见[架构 API 专题索引](03-architecture-specs/reference/README.md)。
 
 ## 第四卷：研究资料
 
@@ -91,22 +103,25 @@
 
 ## 附录 A：基准记录
 
+- [附录 A 卷首：基准与评测记录](05-benchmarks/README.md)：当前入口、历史边界和结果判读规则。
 - [附录 A.1 relay-teams 基线 2026-05-14](05-benchmarks/01-relay-teams-baseline-2026-05-14.md)
 - [附录 A.2 relay-teams 优化问题清单 2026-05-14](05-benchmarks/02-relay-teams-optimization-issues-2026-05-14.md)
 - [附录 A.3 relay-teams 优化研究 2026-05-14](05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
-- [附录 A.4 自迭代已采纳优化记录](05-benchmarks/04-self-iteration-accepted-optimizations.md)
+- [附录 A.4 自迭代优化状态账本](05-benchmarks/04-self-iteration-accepted-optimizations.md)
 - [附录 A.5 竞争力与高性能基准目标 2026-05-17](05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
 - [附录 A.6 C/C++ 语法型自迭代测评集 2026-05-20](05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
 - [附录 A.7 多语言语法型自迭代测评集 2026-05-21](05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md)
 - [附录 A.8 代码索引事实版本化](05-benchmarks/08-code-index-fact-versioning.md)
 - [附录 A.9 代码查询排序基础门禁](05-benchmarks/09-code-query-ranking-foundational.md)
 - [附录 A.10 profile 全量性能与 source surface 2026-06-04](05-benchmarks/10-profile-all-performance-source-surface-2026-06-04.md)
+- [附录 A.11 Coding-Agent 端到端评测门禁](05-benchmarks/11-coding-agent-e2e-evaluation.md)
+- [附录 A.12 大仓库索引弹性长预算模型](05-benchmarks/12-elastic-index-budgets.md)
 
-附录 A.4 的历史归档文件保留在同目录，用于比较自迭代记录在 2026-05-17、2026-05-24
-和 2026-05-31 的快照；主阅读路径使用当前 A.4 页面。
+附录 A.4 的历史运行详情见[归档索引](05-benchmarks/archive/README.md)；归档是带日期的证据快照，主阅读路径始终使用当前 A.4 页面。
 
 ## 附录 B：验证记录
 
+- [附录 B 卷首：验证与审计记录](06-verification/README.md)：记录索引、时效边界和证据规则。
 - [附录 B.1 文档书架刷新审计 2026-05-17](06-verification/01-documentation-book-refresh-2026-05-17.md)：目录职责、能力关闭状态和书籍式索引刷新记录。
 - [附录 B.2 文档刷新审计 2026-05-17](06-verification/02-documentation-refresh-audit-2026-05-17.md)：代码仓库检索自迭代提交的文档同步记录。
 - [附录 B.3 文档刷新审计 2026-05-14](06-verification/03-documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和开放产品化工作。
@@ -119,3 +134,4 @@
 - [附录 B.10 服务化部署、控制面与数据面分离文档刷新审计 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md)：issue #250 服务化部署方案和架构目录同步记录。
 - [附录 B.11 文档发版准备审计 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md)：发版导航、文件清单、本地链接检查和文档-only 改动边界。
 - [附录 B.12 图数据库、知识图谱与 CodeGraph 深度研究归档 2026-06-05](06-verification/12-graph-database-codegraph-deep-research-archive-2026-06-05.md)：arXiv、X.com、Reddit 和开源来源清单、研究产物、竞品特性 issue 与验证状态归档。
+- [附录 B.13 文档与自迭代准备度验证记录 2026-08-18](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md)：记录当前已确认的 Rust/package/Web build/runtime/browser/coverage 证据、已通过的 focused-fast performance 报告、本地 `--with-deps` 环境限制、仍 pending 的 exhaustive/Kubernetes accuracy 证据，以及失败的 Kubernetes 210 秒性能 rail。

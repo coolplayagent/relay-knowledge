@@ -26,18 +26,31 @@ pub(super) fn upsert(
             .await?;
         store
             .catalog
-            .import_control_repository(
-                Arc::clone(&shard),
-                status.repository_id.clone(),
-                imported_scope.clone(),
-            )
+            .import_control_repository_metadata(Arc::clone(&shard), status.repository_id.clone())
             .await?;
         let shard_status = shard.upsert_code_repository(registration).await?;
         if let Some(source_scope) = imported_scope {
-            store
-                .catalog
-                .record_scope(status.repository_id.clone(), source_scope)
-                .await?;
+            let shard_has_scope = match status.last_indexed_commit.as_deref() {
+                Some(commit) => shard
+                    .code_repository_scope_status(
+                        status.repository_id.clone(),
+                        commit.to_owned(),
+                        status.path_filters.clone(),
+                        status.language_filters.clone(),
+                    )
+                    .await?
+                    .is_some_and(|scope| {
+                        !scope.stale
+                            && scope.last_indexed_scope_id.as_deref() == Some(source_scope.as_str())
+                    }),
+                None => false,
+            };
+            if shard_has_scope {
+                store
+                    .catalog
+                    .record_scope(status.repository_id.clone(), source_scope)
+                    .await?;
+            }
         } else {
             store
                 .catalog
@@ -73,6 +86,11 @@ pub(super) fn status(
         else {
             return Ok(Some(control_status));
         };
+        if shard_status.last_indexed_scope_id != control_status.last_indexed_scope_id
+            || !status_has_active_route(&store, &shard_status).await?
+        {
+            return Ok(Some(control_status));
+        }
         shard_status.alias = control_status.alias;
         Ok(Some(shard_status))
     })
@@ -148,6 +166,17 @@ pub(super) fn scope_status(
             )
             .await?;
         if let Some(mut status) = status {
+            if !status_has_active_route(&store, &status).await? {
+                return store
+                    .control
+                    .code_repository_scope_status(
+                        control_status.repository_id,
+                        resolved_commit_sha,
+                        path_filters,
+                        language_filters,
+                    )
+                    .await;
+            }
             status.alias = control_status.alias;
             return Ok(Some(status));
         }
@@ -196,6 +225,16 @@ pub(super) fn latest_scope_status(
             )
             .await?;
         if let Some(mut status) = status {
+            if !status_has_active_route(&store, &status).await? {
+                return store
+                    .control
+                    .latest_code_repository_scope_status(
+                        control_status.repository_id,
+                        path_filters,
+                        language_filters,
+                    )
+                    .await;
+            }
             status.alias = control_status.alias;
             return Ok(Some(status));
         }
@@ -208,6 +247,21 @@ pub(super) fn latest_scope_status(
             )
             .await
     })
+}
+
+async fn status_has_active_route(
+    store: &PartitionedSqliteKnowledgeStore,
+    status: &CodeRepositoryStatus,
+) -> Result<bool, crate::storage::StorageError> {
+    let Some(source_scope) = status.last_indexed_scope_id.clone() else {
+        return Ok(false);
+    };
+    Ok(store
+        .catalog
+        .active_repository_for_scope(source_scope)
+        .await?
+        .as_deref()
+        == Some(status.repository_id.as_str()))
 }
 
 #[cfg(test)]

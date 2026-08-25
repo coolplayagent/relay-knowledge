@@ -10,10 +10,11 @@ mod set_state;
 
 pub(super) use set_state::{
     clear_auto_workspace_state, clear_auto_workspace_state_with_fence, clear_workspace_state,
-    workspace_set_id,
+    has_auto_workspace_state, workspace_set_id,
 };
 
 #[cfg(test)]
+#[path = "test_support.rs"]
 mod test_support;
 
 /// Resolves unresolved imports against workspace package mappings and

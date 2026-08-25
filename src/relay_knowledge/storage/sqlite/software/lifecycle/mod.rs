@@ -1,5 +1,7 @@
 //! Build, infrastructure, and design projection lifecycle orchestration.
 
+use std::collections::HashSet;
+
 use rusqlite::Connection;
 
 use crate::{
@@ -23,6 +25,47 @@ pub(super) struct LifecycleProjection {
     pub(super) design_elements: Vec<SoftwareDesignElement>,
 }
 
+struct BoundedFacts<T> {
+    values: Vec<T>,
+    identities: HashSet<String>,
+    limit: usize,
+    label: &'static str,
+}
+
+impl<T> BoundedFacts<T> {
+    fn new(limit: usize, label: &'static str) -> Self {
+        Self {
+            values: Vec::new(),
+            identities: HashSet::new(),
+            limit,
+            label,
+        }
+    }
+
+    fn insert(&mut self, identity: String, value: T) -> Result<(), StorageError> {
+        if self.identities.contains(&identity) {
+            return Ok(());
+        }
+        if self.values.len() >= self.limit {
+            return Err(StorageError::CapacityExceeded(format!(
+                "software lifecycle {} exceed the bounded limit {}",
+                self.label, self.limit
+            )));
+        }
+        self.identities.insert(identity);
+        self.values.push(value);
+        Ok(())
+    }
+
+    fn as_slice(&self) -> &[T] {
+        &self.values
+    }
+
+    fn into_vec(self) -> Vec<T> {
+        self.values
+    }
+}
+
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     build::initialize_schema(connection)?;
     iac::initialize_schema(connection)?;
@@ -43,15 +86,29 @@ pub(super) fn refresh_projection(
     source_scope: &str,
     graph_version: GraphVersion,
 ) -> Result<LifecycleProjection, StorageError> {
-    let documents = document::load(connection, source_scope)?;
-    let build_targets = build::refresh(connection, source_scope, graph_version, &documents)?;
-    let iac_resources = iac::refresh(connection, graph_version, &documents)?;
-    let design_elements = design::refresh(connection, graph_version, &documents)?;
+    let mut build_targets = build::begin_refresh(connection, source_scope)?;
+    let mut iac_resources = iac::new_resources();
+    let mut design_elements = design::new_elements();
+    let stats = document::visit_candidates(connection, source_scope, |candidate| {
+        build::collect(&candidate, graph_version, &mut build_targets)?;
+        iac::collect(&candidate, graph_version, &mut iac_resources)?;
+        design::collect(&candidate, graph_version, &mut design_elements)
+    })?;
+    build::persist(connection, source_scope, graph_version, &mut build_targets)?;
+    iac::persist(connection, iac_resources.as_slice())?;
+    design::persist(connection, design_elements.as_slice())?;
+    tracing::debug!(
+        source_scope,
+        candidate_document_count = stats.document_count,
+        candidate_chunk_count = stats.chunk_count,
+        candidate_materialized_bytes = stats.materialized_bytes,
+        "software lifecycle candidate stream completed"
+    );
 
     Ok(LifecycleProjection {
-        build_targets,
-        iac_resources,
-        design_elements,
+        build_targets: build_targets.into_vec(),
+        iac_resources: iac_resources.into_vec(),
+        design_elements: design_elements.into_vec(),
     })
 }
 

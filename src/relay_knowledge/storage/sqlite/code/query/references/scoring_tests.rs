@@ -1,4 +1,7 @@
-use super::reference_usage_context_bonus;
+use super::{
+    REFERENCE_REPEATED_GROUP_MAX_BONUS, reference_usage_context_bonus,
+    repeated_reference_group_bonus,
+};
 use crate::domain::{CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy};
 
 #[test]
@@ -29,4 +32,15 @@ fn reference_usage_context_prioritizes_returns_over_assignments() {
         &request,
     );
     assert!(returned > assignment);
+}
+
+#[test]
+fn repeated_reference_group_bonus_is_bounded_and_requires_query_evidence() {
+    assert_eq!(repeated_reference_group_bonus(5.0, 1), 0.0);
+    assert_eq!(repeated_reference_group_bonus(0.0, 8), 0.0);
+    assert!(repeated_reference_group_bonus(5.0, 4) > repeated_reference_group_bonus(5.0, 2));
+    assert_eq!(
+        repeated_reference_group_bonus(5.0, usize::MAX),
+        REFERENCE_REPEATED_GROUP_MAX_BONUS
+    );
 }

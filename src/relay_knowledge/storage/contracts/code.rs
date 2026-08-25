@@ -23,6 +23,38 @@ pub const CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE: &str =
 pub const CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE: &str =
     "code index task lease renewal is unavailable";
 
+/// Stable coarse states in the durable code-index finalization plan.
+pub const CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT: usize = 11;
+
+/// Hard bound for missing index units, coarse phases, and terminal observation.
+pub const CODE_INDEX_FINALIZATION_MAX_STEPS: usize = crate::domain::CODE_QUERY_INDEX_PLAN_UNIT_COUNT
+    + CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT
+    + 2;
+
+/// Derives the hard finalization quantum bound including worst-case
+/// byte-limited reference resolution plus reference-search cleanup, group
+/// discovery, and build pages.
+pub fn code_index_finalization_max_steps(
+    committed_reference_count: usize,
+) -> Result<usize, StorageError> {
+    committed_reference_count
+        .checked_mul(4)
+        .and_then(|pages| pages.checked_add(CODE_INDEX_FINALIZATION_MAX_STEPS + 6))
+        .ok_or_else(|| {
+            StorageError::CapacityExceeded(
+                "reference-resolution and search finalization step bound exceeds platform capacity"
+                    .to_owned(),
+            )
+        })
+}
+
+/// Result of advancing one durable code-index finalization writer quantum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodeIndexFinalizationStep {
+    Pending { checkpoint_state: String },
+    Ready(Box<CodeIndexSummary>),
+}
+
 /// Diff-derived inputs used to seed code impact expansion.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CodeImpactChanges {
@@ -56,6 +88,9 @@ pub struct CodeIndexTaskSeed {
 }
 
 /// Lease acquisition request for one background code index task.
+///
+/// `now_ms` is a caller observation. Storage samples authoritative execution
+/// time only after obtaining its writer lock and rejects future observations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskClaimRequest {
     pub task_id: Option<String>,
@@ -65,13 +100,19 @@ pub struct CodeIndexTaskClaimRequest {
     pub now_ms: u64,
 }
 
-/// Lease renewal request for an actively running code index task.
+/// Strict renewal request for one still-live fenced code-index attempt.
+///
+/// Expiry is irrevocable. `now_ms` is only the caller's observation; storage
+/// samples authoritative time after acquiring its writer lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskLeaseRenewal {
     pub task_id: String,
     pub lease_owner: String,
     pub attempt_count: u32,
+    pub publication_generation: u64,
     pub lease_duration_ms: u64,
+    /// Caller-observed time used only to reject future/rollback observations.
+    /// Storage samples authoritative time after obtaining its writer lock.
     pub now_ms: u64,
 }
 
@@ -82,12 +123,26 @@ pub struct CodeIndexTaskLeaseRecord {
     pub lease_owner: String,
     pub lease_expires_at_ms: Option<u64>,
     pub attempt_count: u32,
+    pub publication_generation: u64,
 }
 
-/// Recovery request for running task leases known to be orphaned.
+/// Durable task target whose already-complete publication may be adopted by
+/// a later fenced attempt without rebuilding code or software facts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeIndexPublicationTarget {
+    pub task_id: String,
+    pub repository_id: String,
+    pub source_scope: String,
+    pub resolved_commit_sha: String,
+    pub tree_hash: String,
+    pub path_filters: Vec<String>,
+    pub language_filters: Vec<String>,
+}
+
+/// Recovery request carrying the exact running leases observed as orphaned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskLeaseRecovery {
-    pub task_ids: Vec<String>,
+    pub leases: Vec<CodeIndexTaskLeaseRecord>,
     pub now_ms: u64,
     pub max_attempts: u32,
     pub error_kind: String,
@@ -95,20 +150,28 @@ pub struct CodeIndexTaskLeaseRecovery {
 }
 
 /// Completion report guarded by task lease and attempt token.
+///
+/// Expiry is irrevocable. `now_ms` is only the caller's observation; storage
+/// samples authoritative time after acquiring its writer lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskCompletion {
     pub task_id: String,
     pub lease_owner: String,
     pub attempt_count: u32,
+    pub publication_generation: u64,
     pub now_ms: u64,
 }
 
 /// Failure report for retry and dead-letter handling.
+///
+/// Expiry is irrevocable. `now_ms` is only the caller's observation; storage
+/// samples authoritative time after acquiring its writer lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskFailure {
     pub task_id: String,
     pub lease_owner: String,
     pub attempt_count: u32,
+    pub publication_generation: u64,
     pub error_kind: String,
     pub error_message: String,
     pub retry_backoff_ms: u64,
@@ -320,6 +383,32 @@ pub trait CodeRepositoryStore: Send + Sync {
         request: CodeIndexTaskCompletion,
     ) -> StorageFuture<'_, CodeIndexTaskRecord>;
 
+    fn run_code_index_post_maintenance(
+        &self,
+        _repository_id: String,
+        _source_scope: String,
+    ) -> StorageFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn code_index_publication_receipt(
+        &self,
+        _task_id: String,
+        _repository_id: String,
+        _source_scope: String,
+        _now_ms: u64,
+    ) -> StorageFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
+    fn reconcile_code_index_publication_with_fence(
+        &self,
+        _target: CodeIndexPublicationTarget,
+        _fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
     fn fail_code_index_task(
         &self,
         request: CodeIndexTaskFailure,
@@ -471,6 +560,15 @@ pub trait CodeRepositoryStore: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
+    /// Reports whether repository-owned auto-detected workspace artifacts
+    /// still exist and therefore require a durable disabled-mode cleanup.
+    fn code_repository_auto_workspace_state_exists(
+        &self,
+        _repository_id: String,
+    ) -> StorageFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
     fn clear_code_workspace_state_with_fence(
         &self,
         repository_id: String,
@@ -506,6 +604,45 @@ pub trait CodeRepositoryStore: Send + Sync {
             Err(StorageError::InvalidInput(format!(
                 "attempt-scoped session startup for task '{}' scope '{}' is unavailable",
                 fence.task_id, session.source_scope
+            )))
+        })
+    }
+
+    /// Starts a checkpointed session only if the durable checkpoint still
+    /// exactly matches the value observed during read-only plan validation.
+    /// `None` means that no checkpoint may exist at transaction time.
+    fn begin_code_index_session_at_checkpoint(
+        &self,
+        session: CodeIndexSession,
+        expected_checkpoint: Option<CodeIndexCheckpoint>,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        Box::pin(async move {
+            let expectation = expected_checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.source_scope.as_str())
+                .unwrap_or("missing");
+            Err(StorageError::InvalidInput(format!(
+                "checkpoint-CAS session startup for scope '{}' at expectation '{}' is unavailable",
+                session.source_scope, expectation
+            )))
+        })
+    }
+
+    /// Fenced variant of [`CodeRepositoryStore::begin_code_index_session_at_checkpoint`].
+    fn begin_code_index_session_at_checkpoint_with_fence(
+        &self,
+        session: CodeIndexSession,
+        expected_checkpoint: Option<CodeIndexCheckpoint>,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        Box::pin(async move {
+            let expectation = expected_checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.source_scope.as_str())
+                .unwrap_or("missing");
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped checkpoint-CAS session startup for task '{}' scope '{}' at expectation '{}' is unavailable",
+                fence.task_id, session.source_scope, expectation
             )))
         })
     }
@@ -555,6 +692,19 @@ pub trait CodeRepositoryStore: Send + Sync {
         Box::pin(async move {
             Err(StorageError::InvalidInput(format!(
                 "attempt-scoped session finalization for task '{}' scope '{}' is unavailable",
+                fence.task_id, session.source_scope
+            )))
+        })
+    }
+
+    fn advance_code_index_session_with_fence(
+        &self,
+        session: CodeIndexSession,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexFinalizationStep> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "attempt-scoped single-step finalization for task '{}' scope '{}' is unavailable",
                 fence.task_id, session.source_scope
             )))
         })

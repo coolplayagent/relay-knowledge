@@ -2,7 +2,13 @@
 
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
-use super::{text_scoring::ScoreQuery, tokens::identifier_search_tokens};
+use super::{
+    super::scoring::path_ranking::query_mentions_test_or_benchmark, text_scoring::ScoreQuery,
+    tokens::identifier_search_tokens,
+};
+
+const MIN_RETAINED_CALL_SCORE: f64 = 0.01;
+const MAX_CALLER_TEST_CONTEXT_PENALTY: f64 = 1.5;
 
 pub(in crate::storage::sqlite::code::query) fn call_edge_confidence_bonus(
     confidence_basis_points: u16,
@@ -98,6 +104,28 @@ pub(in crate::storage::sqlite::code::query) fn same_named_caller_penalty(
     let callee = compact_identifier(&callee_leaf);
     if !caller.is_empty() && caller == callee {
         -2.5
+    } else {
+        0.0
+    }
+}
+
+pub(in crate::storage::sqlite::code::query) fn caller_test_context_penalty(
+    base_score: f64,
+    caller_name: Option<&str>,
+    caller_canonical_symbol_id: Option<&str>,
+    request: &CodeRetrievalRequest,
+    query_has_test_intent: bool,
+) -> f64 {
+    if base_score <= 0.0
+        || request.code_query_kind != CodeQueryKind::Callers
+        || query_has_test_intent
+    {
+        return 0.0;
+    }
+    if caller_name.is_some_and(query_mentions_test_or_benchmark)
+        || caller_canonical_symbol_id.is_some_and(query_mentions_test_or_benchmark)
+    {
+        -(base_score - MIN_RETAINED_CALL_SCORE).clamp(0.0, MAX_CALLER_TEST_CONTEXT_PENALTY)
     } else {
         0.0
     }

@@ -26,6 +26,9 @@ pub(in crate::code::parser) fn line_imports(content: &str) -> Vec<ScriptLineImpo
 fn bash_source_statement(statement: &str) -> bool {
     bash_keyword_statement(statement, "source")
         || statement
+            .strip_prefix(r"\.")
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace) && !rest.trim().is_empty())
+        || statement
             .strip_prefix('.')
             .is_some_and(|rest| rest.starts_with(char::is_whitespace) && !rest.trim().is_empty())
 }
@@ -45,3 +48,7 @@ fn previous_shellcheck_source_comment<'a>(
 
     (text.starts_with("# shellcheck ") && text.contains("source=")).then_some(previous)
 }
+
+#[cfg(test)]
+#[path = "imports_tests.rs"]
+mod tests;

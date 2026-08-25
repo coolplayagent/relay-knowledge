@@ -81,9 +81,36 @@ pub(in super::super) fn clear_auto_workspace_state(
     source_scope: &str,
 ) -> Result<(), StorageError> {
     let transaction = connection.transaction()?;
-    clear_workspace_state(&transaction, repository_id, source_scope)?;
+    super::super::tasks::enforce_unfenced_target(&transaction, repository_id, source_scope)?;
+    clear_repository_workspace_state(&transaction, repository_id)?;
     transaction.commit()?;
     Ok(())
+}
+
+pub(in super::super) fn has_auto_workspace_state(
+    connection: &rusqlite::Connection,
+    repository_id: &str,
+) -> Result<bool, StorageError> {
+    let set_id = workspace_set_id(repository_id);
+    connection
+        .query_row(
+            "
+            SELECT EXISTS (
+                SELECT 1 FROM code_repository_sets WHERE set_id = ?1
+                UNION ALL
+                SELECT 1 FROM code_repository_set_members WHERE set_id = ?1
+                UNION ALL
+                SELECT 1 FROM code_repository_set_overlay_status WHERE set_id = ?1
+                UNION ALL
+                SELECT 1 FROM code_workspace_package_mappings WHERE set_id = ?1
+                UNION ALL
+                SELECT 1 FROM code_repository_cross_edges WHERE set_id = ?1
+            )
+            ",
+            params![set_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StorageError::from)
 }
 
 pub(in super::super) fn clear_auto_workspace_state_with_fence(
@@ -94,10 +121,41 @@ pub(in super::super) fn clear_auto_workspace_state_with_fence(
 ) -> Result<(), StorageError> {
     fence.validate_repository(repository_id)?;
     let transaction = connection.transaction()?;
-    clear_workspace_state(&transaction, repository_id, source_scope)?;
+    clear_repository_workspace_state(&transaction, repository_id)?;
     fence.validate_target_scope(&transaction, source_scope)?;
     fence.validate(&transaction)?;
     transaction.commit()?;
+    Ok(())
+}
+
+/// Clears every auto-detected workspace artifact owned by a repository when
+/// the active indexing request disables workspace detection, without touching
+/// user-managed repository sets or another repository's retained scopes.
+pub(super) fn clear_repository_workspace_state(
+    transaction: &Transaction<'_>,
+    repository_id: &str,
+) -> Result<(), StorageError> {
+    let set_id = workspace_set_id(repository_id);
+    transaction.execute(
+        "DELETE FROM code_repository_cross_edges WHERE set_id = ?1",
+        params![&set_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_workspace_package_mappings WHERE set_id = ?1",
+        params![&set_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_set_members WHERE set_id = ?1",
+        params![&set_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_set_overlay_status WHERE set_id = ?1",
+        params![&set_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_sets WHERE set_id = ?1",
+        params![&set_id],
+    )?;
     Ok(())
 }
 

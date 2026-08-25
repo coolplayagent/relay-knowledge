@@ -14,6 +14,7 @@ pub(super) fn compatible_non_retiring_scopes_for_commit(
         SELECT scope.source_scope
         FROM code_repository_scopes scope
         WHERE scope.repository_id = ?1
+          AND scope.stale = 0
           AND scope.retiring = 0
           AND NOT EXISTS (
               SELECT 1

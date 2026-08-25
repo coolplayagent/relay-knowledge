@@ -58,6 +58,15 @@ impl ApiError {
             metadata: None,
         }
     }
+
+    /// Creates an internal consistency error that is not attributable to user input.
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            error_kind: ErrorKind::Internal,
+            message: message.into(),
+            metadata: None,
+        }
+    }
 }
 
 #[cfg(test)]

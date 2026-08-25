@@ -106,3 +106,83 @@ fn rejects_included_case_files_with_non_object_roots() {
 
     assert_eq!(error, "case config roots must be objects");
 }
+
+#[test]
+fn rejects_isolated_repository_set_members_after_include_merge() {
+    let tree = CaseTree::new();
+    tree.write(
+        "included/repositories.json",
+        r#"{
+            "repositories": {
+                "member_a": {"isolated_index_home": true}
+            }
+        }"#,
+    );
+    let root = tree.write(
+        "cases.json",
+        r#"{
+            "include_files": ["included/repositories.json"],
+            "repository_sets": {
+                "workspace": {
+                    "members": [{"repository": "member_a"}]
+                }
+            }
+        }"#,
+    );
+
+    let error = load_cases(&root).expect_err("isolated set member should fail after merge");
+
+    assert!(error.contains("repository set \"workspace\""));
+    assert!(error.contains("member \"member_a\""));
+    assert!(error.contains("must share one evaluation home"));
+}
+
+#[test]
+fn checked_in_case_matrix_isolates_heavy_repositories_but_keeps_one_shared_regression() {
+    let cases_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("cases.json");
+    let cases = load_cases(&cases_path).expect("checked-in case matrix should be valid");
+    let repositories = cases["repositories"]
+        .as_object()
+        .expect("repositories should be configured");
+    let isolated_repositories = [
+        "relay_teams",
+        "opencode_typescript",
+        "linux_sample",
+        "linux_full",
+        "kubernetes_go_sample",
+        "spring_framework_java",
+        "rustfs_rust",
+        "codex_python",
+        "nvm_bash",
+        "dotnet_runtime_csharp",
+        "okhttp_kotlin",
+        "laravel_php",
+        "rails_ruby",
+        "scala3_scala",
+        "alamofire_swift",
+    ];
+    for name in isolated_repositories {
+        assert_eq!(
+            repositories[name]["isolated_index_home"].as_bool(),
+            Some(true),
+            "{name} must keep cold-index measurements isolated"
+        );
+    }
+    assert_eq!(
+        repositories["leveldb_cpp"]["isolated_index_home"].as_bool(),
+        None,
+        "the small LevelDB workload intentionally protects shared-order behavior"
+    );
+    for name in [
+        "temporal_samples_go",
+        "temporal_sdk_go",
+        "otel_collector_contrib",
+        "otel_collector",
+    ] {
+        assert_ne!(
+            repositories[name]["isolated_index_home"].as_bool(),
+            Some(true),
+            "repository-set member {name} must use the shared evaluation home"
+        );
+    }
+}

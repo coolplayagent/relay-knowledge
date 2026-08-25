@@ -2,6 +2,8 @@ use std::fs;
 
 use serde_json::Value;
 
+use crate::config::run_matches_product_binary_profile;
+
 use super::{
     HistoryPaths,
     run_state::{adopted, automated_baseline_run},
@@ -37,6 +39,7 @@ pub fn previous_scored_run_for_workload(
     Ok(latest_scored_run(runs.into_iter().filter(|run| {
         run_profile(run) == profile
             && run_category_focus(run) == category_focus
+            && run_matches_product_binary_profile(run, profile)
             && automated_baseline_run(run)
     })))
 }
@@ -69,11 +72,23 @@ pub fn best_accepted_run_for_workload(
 ) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
     Ok(best_accepted_run(runs.into_iter().filter(|run| {
-        run_profile(run) == profile && run_category_focus(run) == category_focus
+        run_profile(run) == profile
+            && run_category_focus(run) == category_focus
+            && run_matches_product_binary_profile(run, profile)
     })))
 }
 
 pub fn best_accepted_run_for_profile(
+    paths: &HistoryPaths,
+    profile: &str,
+) -> Result<Option<Value>, String> {
+    let runs = load_runs(paths)?;
+    Ok(best_accepted_run(runs.into_iter().filter(|run| {
+        run_profile(run) == profile && run_matches_product_binary_profile(run, profile)
+    })))
+}
+
+pub fn best_accepted_run_for_profile_across_product_binaries(
     paths: &HistoryPaths,
     profile: &str,
 ) -> Result<Option<Value>, String> {

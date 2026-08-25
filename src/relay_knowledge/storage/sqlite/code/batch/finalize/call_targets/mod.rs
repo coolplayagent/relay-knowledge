@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{Transaction, params, params_from_iter, types::Value};
+use rusqlite::{Transaction, params};
 
 use crate::{
     domain::code_call_targets::{
@@ -20,90 +20,7 @@ pub(super) fn resolve_references(
     source_scope: &str,
 ) -> Result<(), StorageError> {
     let index = CallTargetIndex::load(transaction, source_scope)?;
-    if index.is_empty() {
-        return Ok(());
-    }
     let references = load_call_references(transaction, source_scope)?;
-    if references.is_empty() {
-        return Ok(());
-    }
-    let mut update = transaction.prepare(
-        "
-        UPDATE code_repository_references
-        SET target_symbol_snapshot_id = ?3,
-            target_hint = ?4,
-            resolution_state = ?5,
-            confidence_basis_points = ?6,
-            confidence_tier = ?7
-        WHERE source_scope = ?1 AND reference_id = ?2
-        ",
-    )?;
-    for reference in references {
-        match index.resolve(&reference.name, &reference.path) {
-            TargetResolution::Resolved(symbol, target_hint) => {
-                update.execute(params![
-                    source_scope,
-                    reference.reference_id,
-                    symbol.symbol_snapshot_id,
-                    target_hint,
-                    "resolved",
-                    8_000_u16,
-                    "inferred"
-                ])?;
-            }
-            TargetResolution::Ambiguous(target_hint) => {
-                if index.should_keep_existing_resolution(&reference)
-                    || reference.is_ambiguous_baseline(&target_hint)
-                {
-                    continue;
-                }
-                update.execute(params![
-                    source_scope,
-                    reference.reference_id,
-                    Option::<String>::None,
-                    target_hint,
-                    "ambiguous",
-                    5_000_u16,
-                    "ambiguous"
-                ])?;
-            }
-            TargetResolution::Unresolved => {
-                if index.should_keep_existing_resolution(&reference)
-                    || reference.is_unresolved_baseline()
-                {
-                    continue;
-                }
-                update.execute(params![
-                    source_scope,
-                    reference.reference_id,
-                    Option::<String>::None,
-                    reference.name,
-                    "unresolved",
-                    2_500_u16,
-                    "ambiguous"
-                ])?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Path-scoped variant of [`resolve_references`]: only re-resolves call
-/// references whose `path` is in `affected_paths`.  The
-/// [`CallTargetIndex`] still loads ALL callable symbols in the scope because
-/// a call in an affected path may resolve to a callable in an unchanged
-/// path.
-pub(super) fn resolve_references_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-) -> Result<(), StorageError> {
-    let index = CallTargetIndex::load(transaction, source_scope)?;
-    if index.is_empty() {
-        return Ok(());
-    }
-    let references = load_call_references_for_paths(transaction, source_scope, affected_paths)?;
     if references.is_empty() {
         return Ok(());
     }
@@ -238,10 +155,6 @@ impl CallTargetIndex {
             by_name,
             by_snapshot_id,
         })
-    }
-
-    fn is_empty(&self) -> bool {
-        self.by_name.is_empty()
     }
 
     fn should_keep_existing_resolution(&self, reference: &CallReference) -> bool {
@@ -381,51 +294,6 @@ fn load_call_references(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
-}
-
-fn load_call_references_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-) -> Result<Vec<CallReference>, StorageError> {
-    let mut paths = affected_paths.to_vec();
-    paths.sort_unstable();
-    paths.dedup();
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut all_refs = Vec::new();
-    for path_chunk in paths.chunks(500) {
-        let placeholders = std::iter::repeat_n("?", path_chunk.len())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let mut values = Vec::with_capacity(path_chunk.len() + 1);
-        values.push(Value::Text(source_scope.to_owned()));
-        values.extend(path_chunk.iter().map(|p| Value::Text((*p).to_owned())));
-        let mut statement = transaction.prepare(&format!(
-            "
-                SELECT reference_id, path, name, target_symbol_snapshot_id, target_hint,
-                       resolution_state, confidence_basis_points, confidence_tier
-                FROM code_repository_references
-                WHERE source_scope = ? AND kind = 'call' AND path IN ({placeholders})
-                "
-        ))?;
-        let rows = statement.query_map(params_from_iter(values), |row| {
-            Ok(CallReference {
-                reference_id: row.get(0)?,
-                path: row.get(1)?,
-                name: row.get(2)?,
-                target_symbol_snapshot_id: row.get(3)?,
-                target_hint: row.get(4)?,
-                resolution_state: row.get(5)?,
-                confidence_basis_points: row.get(6)?,
-                confidence_tier: row.get(7)?,
-            })
-        })?;
-        all_refs.extend(rows.collect::<Result<Vec<_>, _>>()?);
-    }
-
-    Ok(all_refs)
 }
 
 impl CallReference {

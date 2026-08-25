@@ -134,6 +134,12 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
     assert!(performance_discovered_dependency.contains("rk_perf_discovered_dependency"));
     assert!(wide_performance_tail.contains("rk_wide_target_2047"));
     assert!(wide_performance_bridge.contains("rk_wide_bridge_dispatch"));
+    assert_eq!(
+        wide_performance_bridge
+            .matches("rk_wide_target_2047(")
+            .count(),
+        2
+    );
     assert!(agent_context.contains("AgentContextPackBuilder"));
     assert!(agent_policy.contains("AGENT_POLICY_BUDGET"));
 

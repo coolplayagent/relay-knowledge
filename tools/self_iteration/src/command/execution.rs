@@ -2,6 +2,7 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
+use wait_timeout::ChildExt;
 
 use super::{
     COMMAND_PROGRESS_INTERVAL, CommandResult, CommandSpec,
@@ -51,7 +52,29 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
     let timeout = Duration::from_secs(spec.timeout_seconds);
     let mut next_progress = COMMAND_PROGRESS_INTERVAL;
     loop {
-        match child.try_wait() {
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            let stdout = join_reader(stdout_reader);
+            let mut stderr = join_reader(stderr_reader);
+            append_stdin_error(&mut stderr, stdin_writer);
+            stderr.push_str(&format!("\ntimeout after {}s", spec.timeout_seconds));
+            let result = CommandResult {
+                name: spec.name.clone(),
+                command: spec.command.clone(),
+                exit_code: 124,
+                duration_ms: started.elapsed().as_millis() as u64,
+                stdout,
+                stderr,
+            };
+            log_command_timeout(&result, spec.timeout_seconds);
+            return result;
+        }
+        let wait_for = timeout
+            .saturating_sub(elapsed)
+            .min(next_progress.saturating_sub(elapsed));
+        match child.wait_timeout(wait_for) {
             Ok(Some(status)) => {
                 let stdout = join_reader(stdout_reader);
                 let mut stderr = join_reader(stderr_reader);
@@ -67,24 +90,6 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
                 log_command_finished(&result);
                 return result;
             }
-            Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let stdout = join_reader(stdout_reader);
-                let mut stderr = join_reader(stderr_reader);
-                append_stdin_error(&mut stderr, stdin_writer);
-                stderr.push_str(&format!("\ntimeout after {}s", spec.timeout_seconds));
-                let result = CommandResult {
-                    name: spec.name.clone(),
-                    command: spec.command.clone(),
-                    exit_code: 124,
-                    duration_ms: started.elapsed().as_millis() as u64,
-                    stdout,
-                    stderr,
-                };
-                log_command_timeout(&result, spec.timeout_seconds);
-                return result;
-            }
             Ok(None) => {
                 let elapsed = started.elapsed();
                 if elapsed >= next_progress {
@@ -93,7 +98,6 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
                         next_progress += COMMAND_PROGRESS_INTERVAL;
                     }
                 }
-                std::thread::sleep(Duration::from_millis(20));
             }
             Err(error) => {
                 let message = error.to_string();

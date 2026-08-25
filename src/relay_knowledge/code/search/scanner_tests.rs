@@ -28,6 +28,34 @@ fn internal_scanner_filters_definition_lines_before_enforcing_limit() {
 }
 
 #[test]
+fn definition_scanner_prefers_modified_type_declarations_over_docs_and_constructors() {
+    let mut tree = TempSourceTree::create().expect("temp tree should be created");
+    tree.write(
+        "src/Widget.java",
+        b"/** @see #Widget(Value) */\npublic final class Widget {\n  public Widget(Value value) {}\n}\n",
+    )
+    .expect("source path should be written");
+    let request = SourceGrepRequest {
+        query: "Widget".to_owned(),
+        paths: vec!["src/Widget.java".to_owned()],
+        path_filters: Vec::new(),
+        language_filters: vec!["java".to_owned()],
+        limit: 1,
+        kind: SourceGrepKind::Definition,
+        exclude_generated: false,
+    };
+
+    let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |matched| {
+        source_line_defines_identity(&matched.excerpt, "Widget")
+    })
+    .expect("definition scan should remain bounded after shape filtering");
+
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].line_range.start, 2);
+    assert_eq!(matches[0].excerpt, "public final class Widget {");
+}
+
+#[test]
 fn internal_scanner_includes_template_preamble_for_declaration_lines() {
     let mut tree = TempSourceTree::create().expect("temp tree should be created");
     tree.write(
@@ -246,4 +274,78 @@ fn internal_scanner_prefers_handwritten_matches_before_limit() {
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].path, "src/api.ts");
     assert!(!matches[0].is_generated);
+}
+
+#[test]
+fn internal_scanner_distributes_candidate_pool_across_paths_before_reuse() {
+    let mut tree = TempSourceTree::create().expect("temp tree should be created");
+    tree.write("src/a.java", b"Target.a();\nTarget.a2();\n")
+        .expect("first source should be written");
+    tree.write(
+        "src/b.java",
+        b"import example.Target;\nTarget.expectedUsage();\n",
+    )
+    .expect("second source should be written");
+    tree.write("src/c.java", b"Target.c();\nTarget.c2();\n")
+        .expect("third source should be written");
+    let request = SourceGrepRequest {
+        query: "Target".to_owned(),
+        paths: vec![
+            "src/a.java".to_owned(),
+            "src/b.java".to_owned(),
+            "src/c.java".to_owned(),
+        ],
+        path_filters: Vec::new(),
+        language_filters: vec!["java".to_owned()],
+        limit: 6,
+        kind: SourceGrepKind::References,
+        exclude_generated: false,
+    };
+
+    let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
+        .expect("reference candidates should be distributed fairly");
+
+    assert_eq!(matches.len(), 6);
+    assert_eq!(
+        matches
+            .iter()
+            .map(|matched| matched.path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "src/a.java",
+            "src/b.java",
+            "src/c.java",
+            "src/a.java",
+            "src/b.java",
+            "src/c.java",
+        ]
+    );
+    assert_eq!(matches[1].line_range.start, 2);
+    assert_eq!(matches[4].line_range.start, 1);
+}
+
+#[test]
+fn reference_scanner_keeps_code_usage_before_comments_and_imports_within_path() {
+    let mut tree = TempSourceTree::create().expect("temp tree should be created");
+    tree.write(
+        "src/Session.swift",
+        b"/// Target handles callbacks.\nimport ExampleTarget\npublic let delegate: Target\nTarget.run()\n",
+    )
+    .expect("source should be written");
+    let request = SourceGrepRequest {
+        query: "Target".to_owned(),
+        paths: vec!["src/Session.swift".to_owned()],
+        path_filters: Vec::new(),
+        language_filters: vec!["swift".to_owned()],
+        limit: 2,
+        kind: SourceGrepKind::References,
+        exclude_generated: false,
+    };
+
+    let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
+        .expect("reference scanner should retain bounded code usages");
+
+    assert_eq!(matches.len(), 2);
+    assert_eq!(matches[0].excerpt, "public let delegate: Target");
+    assert_eq!(matches[1].excerpt, "Target.run()");
 }

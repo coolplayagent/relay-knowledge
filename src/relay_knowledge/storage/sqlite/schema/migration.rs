@@ -36,6 +36,19 @@ const INDEX_REFRESH_TASK_COLUMNS: &[&str] = &[
 ];
 const LEGACY_NEXT_RETRY_AFTER_COLUMN: &str = "next_retry_after_ms";
 const SCHEMA_COMPATIBILITY_RETRY_DELAYS_MS: [u64; 5] = [10, 30, 90, 270, 810];
+const LEGACY_REFERENCE_SEARCH_PROGRESS_COLUMNS: &[&str] = &[
+    "source_scope",
+    "stage",
+    "completed_page_ordinal",
+    "cleanup_cursor_rowid",
+    "build_cursor_reference_id",
+    "cleanup_total_count",
+    "build_total_count",
+    "cleaned_count",
+    "built_count",
+    "page_document_limit",
+    "page_byte_limit",
+];
 
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
@@ -441,7 +454,109 @@ fn prepare_existing_database_in_transaction(connection: &Connection) -> Result<(
     rebuild_incompatible_code_graph_tables(connection)?;
     rebuild_incompatible_index_refresh_tasks(connection)?;
     rebuild_incompatible_workspace_package_mappings(connection)?;
+    prepare_reference_search_progress_schema(connection)?;
 
+    Ok(())
+}
+
+fn prepare_reference_search_progress_schema(connection: &Connection) -> Result<(), StorageError> {
+    let table = "code_repository_reference_search_progress";
+    if !table_exists(connection, table)?
+        || super::marker::reference_search_progress_schema_is_current(connection)?
+    {
+        return Ok(());
+    }
+    if reference_search_progress_schema_is_legacy_v1(connection)? {
+        migrate_reference_search_progress_v1(connection)?;
+        return Ok(());
+    }
+    let row_count = connection.query_row(
+        "SELECT COUNT(*) FROM code_repository_reference_search_progress",
+        [],
+        |row| row.get::<_, usize>(0),
+    )?;
+    if row_count != 0 {
+        return Err(StorageError::Invariant(
+            "nonempty reference-search progress has an incompatible schema".to_owned(),
+        ));
+    }
+    connection.execute("DROP TABLE code_repository_reference_search_progress", [])?;
+    Ok(())
+}
+
+fn reference_search_progress_schema_is_legacy_v1(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
+    if !table_has_exact_columns(
+        connection,
+        "code_repository_reference_search_progress",
+        LEGACY_REFERENCE_SEARCH_PROGRESS_COLUMNS,
+    )? || !table_has_primary_key_columns(
+        connection,
+        "code_repository_reference_search_progress",
+        &["source_scope"],
+    )? {
+        return Ok(false);
+    }
+    let definition = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'table' AND name = 'code_repository_reference_search_progress'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    Ok(
+        definition.contains("stage text not null check (stage in ('cleanup', 'build'))")
+            && definition.contains("completed_page_ordinal integer not null")
+            && definition.contains("page_document_limit integer not null")
+            && definition.contains("page_byte_limit integer not null"),
+    )
+}
+
+fn migrate_reference_search_progress_v1(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute_batch(
+        "ALTER TABLE code_repository_reference_search_progress
+             RENAME TO code_repository_reference_search_progress_v1;
+         CREATE TABLE code_repository_reference_search_progress (
+             source_scope TEXT NOT NULL PRIMARY KEY,
+             projection_version INTEGER NOT NULL CHECK (projection_version > 0),
+             stage TEXT NOT NULL CHECK (stage IN ('cleanup', 'discover', 'build')),
+             completed_page_ordinal INTEGER NOT NULL CHECK (completed_page_ordinal >= 0),
+             cleanup_cursor_rowid INTEGER,
+             cleanup_cursor_record_id TEXT,
+             discovery_cursor_reference_id TEXT,
+             build_cursor_group_id TEXT,
+             expected_reference_count INTEGER NOT NULL CHECK (expected_reference_count >= 0),
+             cleanup_total_count INTEGER NOT NULL CHECK (cleanup_total_count >= 0),
+             discovered_reference_count INTEGER NOT NULL CHECK (discovered_reference_count >= 0),
+             discovered_group_count INTEGER NOT NULL CHECK (discovered_group_count >= 0),
+             build_total_count INTEGER NOT NULL CHECK (build_total_count >= 0),
+             cleaned_count INTEGER NOT NULL CHECK (cleaned_count >= 0),
+             built_count INTEGER NOT NULL CHECK (built_count >= 0),
+             page_document_limit INTEGER NOT NULL CHECK (page_document_limit > 0),
+             page_byte_limit INTEGER NOT NULL CHECK (page_byte_limit > 0),
+             FOREIGN KEY (source_scope) REFERENCES code_repository_index_checkpoints(source_scope)
+                 ON DELETE CASCADE
+         );
+         INSERT INTO code_repository_reference_search_progress (
+             source_scope, projection_version, stage, completed_page_ordinal,
+             cleanup_cursor_rowid, cleanup_cursor_record_id,
+             discovery_cursor_reference_id, build_cursor_group_id,
+             expected_reference_count, cleanup_total_count, discovered_reference_count,
+             discovered_group_count, build_total_count, cleaned_count, built_count,
+             page_document_limit, page_byte_limit
+         )
+         SELECT source_scope, 1, stage, completed_page_ordinal,
+                cleanup_cursor_rowid, NULL, NULL, build_cursor_reference_id,
+                build_total_count, cleanup_total_count, 0, 0, build_total_count,
+                cleaned_count, built_count, page_document_limit, page_byte_limit
+         FROM code_repository_reference_search_progress_v1;
+         DROP TABLE code_repository_reference_search_progress_v1;",
+    )?;
     Ok(())
 }
 

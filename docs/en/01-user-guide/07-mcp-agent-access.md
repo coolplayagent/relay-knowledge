@@ -25,7 +25,7 @@ Default endpoint:
 http://127.0.0.1:8791/mcp
 ```
 
-For same-port Web/API/MCP, see [Chapter 9: Resident Service](09-resident-service.md).
+For same-port Web/API/MCP, see [Chapter 9: Service Deployment and Resident Operation](09-resident-service.md).
 
 ## 7.2 Policy Variables
 
@@ -48,7 +48,7 @@ Registered repository aliases are added to a process-local dynamic allow-list on
 
 Unknown scopes are still rejected and return a remediation hint such as `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>`. Remote binds are rejected by default; non-localhost listening requires `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`.
 
-Before allowing remote clients, verify HTTP bind, origin allow-list, scope allow-list, QoS budgets, and audit policy. Do not make remote bind plus unspecified scope the default configuration.
+These settings do not authenticate an inbound caller. A scope is only a resource allow-list, Origin is a caller-controlled request signal, and the remote-client flag only permits non-loopback exposure. Remote MCP must pass through an external gateway that authenticates callers with OIDC/validated tokens or mTLS client certificates and applies a deny-by-default identity ACL. TLS termination alone is insufficient; without that gateway, keep MCP on loopback. Scope, Origin, QoS, and audit remain additional controls after authentication.
 
 ## 7.3 Session Flow
 

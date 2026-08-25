@@ -408,7 +408,7 @@ async fn code_index_task_queue_rejects_incremental_base_after_gc_schedules_retir
         error,
         StorageError::InvalidInput(message)
             if message.contains("base commit 'base-commit'")
-                && message.contains("no compatible non-retiring scope")
+                && message.contains("no compatible fresh, non-retiring scope")
                 && message.contains("full index")
     ));
 }

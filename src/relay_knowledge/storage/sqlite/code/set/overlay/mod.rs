@@ -17,7 +17,8 @@ use super::super::super::evidence_identity::stable_id;
 use super::{
     capacity::{
         MAX_REPOSITORY_SET_MEMBERS, MAX_REPOSITORY_SET_OVERLAY_EDGES,
-        MAX_REPOSITORY_SET_OVERLAY_IMPORTS, capacity_error, ensure_overlay_delete_is_bounded,
+        MAX_REPOSITORY_SET_OVERLAY_IMPORT_SCAN_ROWS, REPOSITORY_SET_OVERLAY_IMPORT_PAGE_ROWS,
+        capacity_error, ensure_overlay_delete_is_bounded,
     },
     manifest::normalize_module_key,
     membership::{member_statuses, set_by_alias},
@@ -28,6 +29,24 @@ mod projection;
 
 use export_index::{ExportIndex, ExportTarget};
 pub(in crate::storage::sqlite::code) use projection::cross_edges_for_selector;
+
+const IMPORT_PAGE_FIRST_SQL: &str = "
+    SELECT repository_id, source_scope, import_id, path, module, target_hint,
+           resolution_state, line_start, line_end
+    FROM code_repository_imports
+    WHERE source_scope = ?1
+    ORDER BY import_id ASC
+    LIMIT ?2
+";
+
+const IMPORT_PAGE_AFTER_SQL: &str = "
+    SELECT repository_id, source_scope, import_id, path, module, target_hint,
+           resolution_state, line_start, line_end
+    FROM code_repository_imports
+    WHERE source_scope = ?1 AND import_id > ?2
+    ORDER BY import_id ASC
+    LIMIT ?3
+";
 
 pub(in super::super) fn set_status(
     connection: &mut Connection,
@@ -101,22 +120,14 @@ fn refresh_overlay_with_publication(
         || Ok(status.clone()),
         |publication| status_with_replacements(connection, status.clone(), publication),
     )?;
-    let imports = imports_for_members(connection, &status.members)?;
     let exports = ExportIndex::for_members(connection, &status.members)?;
-    let mut edges = Vec::new();
-    for import in imports {
-        if let Some(candidates) = matching_exports(&import, &exports) {
-            if edges.len() >= MAX_REPOSITORY_SET_OVERLAY_EDGES {
-                return Err(capacity_error("edge", MAX_REPOSITORY_SET_OVERLAY_EDGES));
-            }
-            edges.push(edge_for_import(
-                &status.repository_set.set_id,
-                &import,
-                &candidates,
-                0,
-            ));
-        }
-    }
+    let mut edges = candidate_edges_for_members(
+        connection,
+        &status.repository_set.set_id,
+        &status.members,
+        &exports,
+        MAX_REPOSITORY_SET_OVERLAY_IMPORT_SCAN_ROWS,
+    )?;
 
     let now_ms = requested_now_ms.map_or_else(system_now_millis, Ok)?;
     for edge in &mut edges {
@@ -607,48 +618,120 @@ fn overlay_status(
     })
 }
 
-fn imports_for_members(
+fn candidate_edges_for_members(
     connection: &mut Connection,
+    set_id: &str,
     members: &[CodeRepositorySetMemberStatus],
-) -> Result<Vec<ImportRecord>, StorageError> {
-    let mut imports = Vec::new();
+    exports: &ExportIndex,
+    max_import_scan_rows: usize,
+) -> Result<Vec<CodeRepositoryCrossEdge>, StorageError> {
+    let mut scanned = 0usize;
+    let mut edges = Vec::new();
     for member in members {
-        let mut statement = connection.prepare(
-            "
-            SELECT repository_id, source_scope, import_id, path, module, target_hint,
-                   resolution_state, line_start, line_end
-            FROM code_repository_imports
-            WHERE source_scope = ?1
-            ORDER BY path ASC, import_id ASC
-            LIMIT ?2
-            ",
-        )?;
-        let remaining = MAX_REPOSITORY_SET_OVERLAY_IMPORTS.saturating_sub(imports.len());
-        let rows = statement.query_map(
-            params![member.member.source_scope, remaining.saturating_add(1)],
-            |row| {
-                Ok(ImportRecord {
-                    repository_id: row.get(0)?,
-                    source_scope: row.get(1)?,
-                    import_id: row.get(2)?,
-                    path: row.get(3)?,
-                    module: row.get(4)?,
-                    target_hint: row.get(5)?,
-                    resolution_state: row.get(6)?,
-                    line_start: row.get(7)?,
-                    line_end: row.get(8)?,
-                })
-            },
-        )?;
-        for row in rows {
-            if imports.len() >= MAX_REPOSITORY_SET_OVERLAY_IMPORTS {
-                return Err(capacity_error("import", MAX_REPOSITORY_SET_OVERLAY_IMPORTS));
+        let mut cursor = None;
+        loop {
+            let remaining = max_import_scan_rows.saturating_sub(scanned);
+            let page_capacity = remaining.min(REPOSITORY_SET_OVERLAY_IMPORT_PAGE_ROWS);
+            let mut page = import_page(
+                connection,
+                &member.member.source_scope,
+                cursor.as_ref(),
+                page_capacity.saturating_add(1),
+            )?;
+            if page.len() > page_capacity {
+                if page_capacity < REPOSITORY_SET_OVERLAY_IMPORT_PAGE_ROWS {
+                    return Err(capacity_error("import scan row", max_import_scan_rows));
+                }
+                // The extra row is only a continuation sentinel. Leave it for
+                // the next keyset page so each processed page stays bounded.
+                page.pop();
             }
-            imports.push(row?);
+            if page.is_empty() {
+                break;
+            }
+            scanned = advance_import_scan(scanned, page.len(), max_import_scan_rows)?;
+            for import in &page {
+                let Some(candidates) = matching_exports(import, exports) else {
+                    continue;
+                };
+                // The source import remains the authoritative unresolved
+                // metadata when no set member exports a candidate. The set
+                // overlay stores only relationships introduced by membership.
+                if candidates.is_empty() {
+                    continue;
+                }
+                if edges.len() >= MAX_REPOSITORY_SET_OVERLAY_EDGES {
+                    return Err(capacity_error("edge", MAX_REPOSITORY_SET_OVERLAY_EDGES));
+                }
+                edges.push(edge_for_import(set_id, import, &candidates, 0));
+            }
+            cursor = page.last().map(ImportCursor::from);
         }
     }
 
-    Ok(imports)
+    Ok(edges)
+}
+
+fn advance_import_scan(
+    scanned: usize,
+    page_len: usize,
+    max_import_scan_rows: usize,
+) -> Result<usize, StorageError> {
+    let next = scanned
+        .checked_add(page_len)
+        .ok_or_else(|| capacity_error("import scan row", max_import_scan_rows))?;
+    if next > max_import_scan_rows {
+        return Err(capacity_error("import scan row", max_import_scan_rows));
+    }
+    Ok(next)
+}
+
+fn import_page(
+    connection: &Connection,
+    source_scope: &str,
+    cursor: Option<&ImportCursor>,
+    limit: usize,
+) -> Result<Vec<ImportRecord>, StorageError> {
+    let limit = i64::try_from(limit).map_err(|_| {
+        StorageError::CapacityExceeded(format!(
+            "repository-set overlay import page limit {limit} exceeds SQLite integer capacity"
+        ))
+    })?;
+    let (sql, values) = match cursor {
+        Some(cursor) => (
+            IMPORT_PAGE_AFTER_SQL,
+            vec![
+                rusqlite::types::Value::Text(source_scope.to_owned()),
+                rusqlite::types::Value::Text(cursor.import_id.clone()),
+                rusqlite::types::Value::Integer(limit),
+            ],
+        ),
+        None => (
+            IMPORT_PAGE_FIRST_SQL,
+            vec![
+                rusqlite::types::Value::Text(source_scope.to_owned()),
+                rusqlite::types::Value::Integer(limit),
+            ],
+        ),
+    };
+    let mut statement = connection.prepare(sql)?;
+    let rows = statement.query_map(rusqlite::params_from_iter(values), import_from_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn import_from_row(row: &Row<'_>) -> rusqlite::Result<ImportRecord> {
+    Ok(ImportRecord {
+        repository_id: row.get(0)?,
+        source_scope: row.get(1)?,
+        import_id: row.get(2)?,
+        path: row.get(3)?,
+        module: row.get(4)?,
+        target_hint: row.get(5)?,
+        resolution_state: row.get(6)?,
+        line_start: row.get(7)?,
+        line_end: row.get(8)?,
+    })
 }
 
 fn matching_exports<'a>(
@@ -774,6 +857,18 @@ struct ImportRecord {
     resolution_state: String,
     line_start: u32,
     line_end: u32,
+}
+
+struct ImportCursor {
+    import_id: String,
+}
+
+impl From<&ImportRecord> for ImportCursor {
+    fn from(import: &ImportRecord) -> Self {
+        Self {
+            import_id: import.import_id.clone(),
+        }
+    }
 }
 
 fn is_local_or_relative_module(module: &str) -> bool {

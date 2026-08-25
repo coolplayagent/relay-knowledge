@@ -1,5 +1,6 @@
 use rusqlite::{Connection, Row, params_from_iter, types::Value};
 
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{CodeRepositoryStatus, CodeRetrievalRequest, RepositoryCodeRange},
     storage::StorageError,
@@ -84,6 +85,7 @@ pub(super) fn search_call_fts_rows(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'call'
+                {EXACT_SEARCH_OWNER_PREDICATE_SQL}
                 {fts_filter}
                 {call_direction_filter}
                 AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path AND fts_file.is_generated != 0))

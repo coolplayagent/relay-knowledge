@@ -29,6 +29,7 @@ pub use retrieval_results::{
     CodeFeatureFlagGraph, CodeFeatureFlagUsage, CodeImpactPathGroups, CodeRetrievalHit,
 };
 pub use scope_identity::{
-    clean_git_commit_from_snapshot_identity, code_snapshot_expected_scope_id,
-    code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
+    clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
+    code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
+    code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
 };

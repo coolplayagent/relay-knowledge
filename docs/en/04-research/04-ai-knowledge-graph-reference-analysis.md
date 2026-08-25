@@ -202,3 +202,7 @@ This analysis should be cited as research material. Before implementation work s
 - Advanced observability: add prompt version, model, provider latency, schema validation failure, and degraded proposal metrics.
 
 As of 2026-05-15, this analysis has started to feed the worker/proposal path selectively; unfinished items still need separate architecture-backed implementation work.
+
+---
+
+Navigation: Previous: [3. arXiv Knowledge Graph Paper Insights](03-arxiv-knowledge-graph-paper-insights.md) | Next: [5. Code Repository Tree-sitter Retrieval Research](05-code-repository-tree-sitter-retrieval-research.md)

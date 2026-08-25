@@ -75,6 +75,8 @@ pub(crate) fn persist_scored_run_with_score(
     let report = serde_json::json!({
         "run_id": input.run_id,
         "profile": input.config.profile,
+        "product_binary_profile": input.config.product_binary_profile().map(|profile| profile.as_str()),
+        "product_binary_path": input.config.product_binary_path().map(|path| path.display().to_string()),
         "strategy": input.config.strategy.label(),
         "category_focus": category_focus.as_deref(),
         "selected_categories": selected_categories_report,
@@ -103,6 +105,7 @@ pub(crate) fn persist_scored_run_with_score(
         run_id: input.run_id,
         timestamp: &timestamp,
         profile: &input.config.profile,
+        product_binary_profile: input.config.product_binary_profile(),
         category_focus: category_focus.as_deref(),
         selected_categories: &selected_categories,
         report_path: &report_path,

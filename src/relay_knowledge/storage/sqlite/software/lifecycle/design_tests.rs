@@ -2,12 +2,12 @@ use rusqlite::Connection;
 
 use crate::domain::GraphVersion;
 
-use super::{collect, initialize_schema};
+use super::{collect, initialize_schema, new_elements};
 use crate::storage::sqlite::software::lifecycle::document::{IndexedDocument, IndexedLine};
 
 #[test]
 fn collectors_extract_documented_architecture_and_manifest_module() {
-    let mut elements = Vec::new();
+    let mut elements = new_elements();
     collect(
         &document(
             "docs/architecture.md",
@@ -29,12 +29,12 @@ fn collectors_extract_documented_architecture_and_manifest_module() {
     )
     .expect("manifest design should collect");
 
-    assert!(elements.iter().any(|element| {
+    assert!(elements.as_slice().iter().any(|element| {
         element.element_kind == "architecture"
             && element.name == "Runtime Architecture"
             && element.summary.as_deref() == Some("Coordinates query workers.")
     }));
-    assert!(elements.iter().any(|element| {
+    assert!(elements.as_slice().iter().any(|element| {
         element.element_kind == "module"
             && element.name == "relay-core"
             && element.summary.as_deref() == Some("rust package/module boundary")

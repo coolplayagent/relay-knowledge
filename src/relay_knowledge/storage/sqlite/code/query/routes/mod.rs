@@ -2,6 +2,7 @@
 
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{
         CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest,
@@ -71,6 +72,7 @@ pub(super) fn search_routes(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'route'
+                {EXACT_SEARCH_OWNER_PREDICATE_SQL}
                 {fts_filter}
                   ORDER BY coalesce((SELECT fts_file.is_generated FROM code_repository_files fts_file WHERE fts_file.source_scope = code_repository_search.source_scope AND fts_file.path = code_repository_search.path LIMIT 1), 0) ASC,
                       bm25(code_repository_search) ASC,

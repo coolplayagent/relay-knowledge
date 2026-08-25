@@ -34,6 +34,7 @@ fn repository_remove_deletes_index_aliases_tasks_and_invalidates_sets() {
     insert_search_row(&connection, "scope-b", "svc-symbol");
     insert_index_task(&connection, "repo", "task-a", "scope-a");
     insert_index_task(&connection, "repo", "task-pending", "scope-pending");
+    insert_publication_receipt(&connection, "repo", "task-a", "scope-a");
     insert_checkpoint(&connection, "repo", "scope-pending");
     connection
         .execute(
@@ -90,6 +91,14 @@ fn repository_remove_deletes_index_aliases_tasks_and_invalidates_sets() {
         count_where(
             &connection,
             "code_repository_index_tasks",
+            "repository_id = 'repo'"
+        ),
+        0
+    );
+    assert_eq!(
+        count_where(
+            &connection,
+            "code_repository_publication_receipts",
             "repository_id = 'repo'"
         ),
         0
@@ -363,6 +372,7 @@ fn create_minimal_schema(connection: &Connection) {
     connection
             .execute_batch(
                 "
+                PRAGMA foreign_keys = ON;
                 CREATE TABLE code_repositories (
                     repository_id TEXT PRIMARY KEY,
                     alias TEXT NOT NULL UNIQUE,
@@ -408,6 +418,8 @@ fn create_minimal_schema(connection: &Connection) {
                 CREATE TABLE code_repository_symbols (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_references (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_imports (source_scope TEXT NOT NULL);
+                CREATE TABLE code_repository_reference_search_groups (source_scope TEXT NOT NULL);
+                CREATE TABLE code_repository_reference_search_manifests (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_dependencies (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_feature_flags (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_calls (source_scope TEXT NOT NULL);
@@ -423,6 +435,15 @@ fn create_minimal_schema(connection: &Connection) {
                     state TEXT NOT NULL DEFAULT 'queued',
                     lease_expires_at_ms INTEGER,
                     created_at_ms INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE code_repository_publication_receipts (
+                    task_id TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    publication_generation INTEGER NOT NULL,
+                    published_at_ms INTEGER NOT NULL,
+                    FOREIGN KEY (task_id) REFERENCES code_repository_index_tasks(task_id)
+                        ON DELETE CASCADE
                 );
                 CREATE TABLE software_components (source_scope TEXT NOT NULL);
                 CREATE TABLE software_dependency_usages (source_scope TEXT NOT NULL);
@@ -567,6 +588,22 @@ fn insert_index_task(connection: &Connection, repository_id: &str, task_id: &str
             params![task_id, repository_id, scope],
         )
         .expect("task should insert");
+}
+
+fn insert_publication_receipt(
+    connection: &Connection,
+    repository_id: &str,
+    task_id: &str,
+    scope: &str,
+) {
+    connection
+        .execute(
+            "INSERT INTO code_repository_publication_receipts
+             (task_id, repository_id, source_scope, publication_generation, published_at_ms)
+             VALUES (?1, ?2, ?3, 1, 1)",
+            params![task_id, repository_id, scope],
+        )
+        .expect("publication receipt should insert");
 }
 
 fn insert_running_index_task(

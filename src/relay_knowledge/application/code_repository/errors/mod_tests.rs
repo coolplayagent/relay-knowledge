@@ -10,3 +10,13 @@ fn code_index_task_queue_capacity_maps_to_retryable_qos_rejection() {
     assert_eq!(error.error_kind, ErrorKind::QosRejected);
     assert!(error.message.contains("retry"));
 }
+
+#[test]
+fn checkpoint_invariant_maps_to_internal_error() {
+    let error = storage_api_error(StorageError::Invariant(
+        "durable checkpoint progress is inconsistent".to_owned(),
+    ));
+
+    assert_eq!(error.error_kind, ErrorKind::Internal);
+    assert!(error.message.contains("checkpoint"));
+}

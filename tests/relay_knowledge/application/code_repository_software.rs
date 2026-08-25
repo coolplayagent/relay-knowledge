@@ -14,7 +14,8 @@ use relay_knowledge::{
         CodeRetrievalRequest, FreshnessPolicy, SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     env::{EnvironmentConfig, PlatformKind},
-    storage::SqliteGraphStore,
+    paths::RuntimePaths,
+    storage::{KnowledgeStore, PartitionedSqliteKnowledgeStore, SqliteGraphStore},
 };
 use rusqlite::{Connection, params};
 
@@ -69,7 +70,7 @@ serde = "1"
 }
 
 #[tokio::test]
-async fn fast_full_index_reuses_code_scope_but_refreshes_stale_software_projection() {
+async fn stale_software_projection_uses_a_durable_repair_task() {
     let repo = FixtureRepo::create("code-software-fast-refresh");
     let db_path = repo.path.join("relay-knowledge.sqlite");
     repo.write(
@@ -111,8 +112,8 @@ serde = "1"
         .expect("initial index should refresh software projection");
     mark_software_projection_stale(&db_path, &first.summary.source_scope);
 
-    let second = service
-        .index_code_repository(
+    let started = service
+        .start_code_repository_index(
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
@@ -123,13 +124,24 @@ serde = "1"
             context("index-software-fast-second"),
         )
         .await
-        .expect("fresh full-index reuse should refresh software projection");
+        .expect("stale projection should queue a durable repair");
+    assert!(started.summary.is_none());
+    let task = started
+        .task
+        .expect("projection repair should return a task");
+    let completed = service
+        .run_code_index_task_once(
+            Some(task.task_id),
+            context("run-software-projection-repair"),
+        )
+        .await
+        .expect("projection repair worker should run")
+        .expect("projection repair worker should claim the task");
     let projection = software_projection(&service, "HEAD", FreshnessPolicy::WaitUntilFresh)
         .await
-        .expect("fast-path refresh should clear stale software status");
+        .expect("durable repair should clear stale software status");
 
-    assert_eq!(second.summary.source_scope, first.summary.source_scope);
-    assert_eq!(second.summary.progress.blob_read_count, 0);
+    assert_eq!(completed.source_scope, first.summary.source_scope);
     assert!(!projection.status.stale);
     assert_eq!(projection.status.last_error, None);
     assert!(
@@ -138,6 +150,126 @@ serde = "1"
             .iter()
             .any(|component| component.name == "serde")
     );
+}
+
+#[tokio::test]
+async fn fresh_full_index_start_does_not_rewrite_software_projection() {
+    let repo = FixtureRepo::create("code-software-fast-read-only");
+    let db_path = repo.path.join("relay-knowledge.sqlite");
+    repo.write(
+        "Cargo.toml",
+        r#"
+[package]
+name = "fixture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1"
+"#,
+    );
+    repo.write("src/lib.rs", "pub fn stable_projection() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "stable projection"]);
+    let service = service_with_store_path(&db_path).await;
+    register_fixture_repo(&service, &repo, Vec::new(), "register-fast-read-only").await;
+    let first = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-fast-read-only-first"),
+        )
+        .await
+        .expect("initial index should succeed");
+    let observer = Connection::open(&db_path).expect("observer connection should open");
+    let before = sqlite_data_version(&observer);
+
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("start-fast-read-only-second"),
+        )
+        .await
+        .expect("fresh index start should reuse the completed scope");
+
+    assert!(started.task.is_none());
+    assert_eq!(
+        started
+            .summary
+            .as_ref()
+            .map(|summary| summary.source_scope.as_str()),
+        Some(first.summary.source_scope.as_str())
+    );
+    assert_eq!(sqlite_data_version(&observer), before);
+}
+
+#[tokio::test]
+async fn partitioned_stale_software_projection_uses_a_fenced_repair_task() {
+    let repo = FixtureRepo::create("partitioned-software-repair");
+    let runtime_root = repo.path.join("runtime");
+    repo.write("src/lib.rs", "pub fn partitioned_projection() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "partitioned projection"]);
+    let (service, paths) = service_with_partitioned_store(&runtime_root).await;
+    register_fixture_repo(&service, &repo, Vec::new(), "register-partitioned-repair").await;
+    let first = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-partitioned-repair-first"),
+        )
+        .await
+        .expect("initial partitioned index should succeed");
+    mark_software_projection_stale(
+        &paths.repository_shard_database_file(&first.summary.repository_id),
+        &first.summary.source_scope,
+    );
+
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("start-partitioned-repair"),
+        )
+        .await
+        .expect("stale partitioned projection should queue a repair");
+    assert!(started.summary.is_none());
+    let task = started
+        .task
+        .expect("partitioned repair should return a task");
+    let completed = service
+        .run_code_index_task_once(Some(task.task_id), context("run-partitioned-repair"))
+        .await
+        .expect("partitioned repair worker should run")
+        .expect("partitioned repair worker should claim the task");
+    let projection = software_projection(&service, "HEAD", FreshnessPolicy::WaitUntilFresh)
+        .await
+        .expect("partitioned projection should be fresh after fenced repair");
+
+    assert_eq!(completed.source_scope, first.summary.source_scope);
+    assert!(!projection.status.stale);
+    assert_eq!(projection.status.source_scope, first.summary.source_scope);
 }
 
 #[tokio::test]
@@ -596,7 +728,28 @@ async fn service_with_store_path(path: &Path) -> RelayKnowledgeService {
     .await
 }
 
-async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKnowledgeService {
+async fn service_with_partitioned_store(root: &Path) -> (RelayKnowledgeService, RuntimePaths) {
+    fs::create_dir_all(root).expect("partitioned runtime root should exist");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            (
+                "RELAY_KNOWLEDGE_HOME",
+                root.to_str().expect("runtime root should be UTF-8"),
+            ),
+        ],
+    )
+    .expect("partitioned environment should parse");
+    let paths = RuntimePaths::resolve(&environment.platform, &environment.paths)
+        .expect("partitioned runtime paths should resolve");
+    let store = PartitionedSqliteKnowledgeStore::open(paths.database_file(), paths.clone())
+        .expect("partitioned store should open");
+    (service_with_store(Arc::new(store)).await, paths)
+}
+
+async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
@@ -611,6 +764,12 @@ async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKnowledgeServi
         .expect("runtime should compose");
 
     RelayKnowledgeService::with_store(runtime, store)
+}
+
+fn sqlite_data_version(connection: &Connection) -> i64 {
+    connection
+        .query_row("PRAGMA data_version", [], |row| row.get(0))
+        .expect("SQLite data version should load")
 }
 
 fn mark_software_projection_stale(path: &Path, source_scope: &str) {

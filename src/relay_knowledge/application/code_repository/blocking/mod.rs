@@ -82,6 +82,7 @@ where
 fn code_api_error(error: CodeIndexError) -> ApiError {
     match error {
         CodeIndexError::InvalidInput(message) => ApiError::invalid_argument(message),
+        CodeIndexError::Invariant(message) => ApiError::internal(message),
         CodeIndexError::Git { .. } | CodeIndexError::Io(_) | CodeIndexError::TreeSitter(_) => {
             ApiError::storage_unavailable(error.to_string())
         }

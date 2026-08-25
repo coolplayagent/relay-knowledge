@@ -58,6 +58,57 @@ pub(super) fn import_grep_candidate_paths(
     paths
 }
 
+pub(super) fn import_graph_results_have_complete_source_surface(
+    results: &[CodeRetrievalHit],
+    specifier: &str,
+) -> bool {
+    let matching = results
+        .iter()
+        .filter(|hit| unindexed_external_import_specifier(hit).as_deref() == Some(specifier))
+        .collect::<Vec<_>>();
+    !matching.is_empty()
+        && matching
+            .into_iter()
+            .all(|hit| import_hit_has_complete_source_statement(hit, specifier))
+}
+
+pub(super) fn import_query_requires_source_search(query: &str, specifier: &str) -> bool {
+    relative_path_import_specifier(specifier) || dynamic_import_query(query)
+}
+
+fn import_hit_has_complete_source_statement(hit: &CodeRetrievalHit, specifier: &str) -> bool {
+    hit.excerpt.lines().any(|line| {
+        let line = line.trim();
+        source_like_import_statement(line)
+            && external_import_specifier(line).as_deref() == Some(specifier)
+    })
+}
+
+fn source_like_import_statement(line: &str) -> bool {
+    line.starts_with("import ")
+        || line.starts_with("from ")
+        || line.starts_with("use ")
+        || line.starts_with("pub use ")
+        || line.starts_with("using ")
+        || line.starts_with("require ")
+        || line.starts_with("#include ")
+        || line.starts_with(". \"")
+        || line.starts_with(". '")
+}
+
+fn dynamic_import_query(query: &str) -> bool {
+    query.match_indices("import").any(|(index, _)| {
+        let before = query.get(..index).unwrap_or_default();
+        let after = query
+            .get(index + "import".len()..)
+            .unwrap_or_default()
+            .trim_start();
+        before.chars().next_back().is_none_or(|character| {
+            !character.is_ascii_alphanumeric() && character != '_' && character != '.'
+        }) && after.starts_with('(')
+    })
+}
+
 fn unindexed_external_import_specifier(hit: &CodeRetrievalHit) -> Option<String> {
     if hit.edge_kind.as_deref() != Some("import")
         || hit.edge_resolution_state.as_deref() != Some("unresolved")
@@ -143,3 +194,7 @@ pub(super) fn relative_path_import_specifier(specifier: &str) -> bool {
     let specifier = specifier.trim();
     specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/')
 }
+
+#[cfg(test)]
+#[path = "imports_tests.rs"]
+mod tests;

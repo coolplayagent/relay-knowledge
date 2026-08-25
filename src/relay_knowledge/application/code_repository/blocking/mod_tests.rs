@@ -8,7 +8,21 @@ use tokio::sync::Semaphore;
 
 use crate::api::ErrorKind;
 
-use super::{run_blocking_domain, run_blocking_domain_with_policy};
+use super::{run_blocking_code, run_blocking_domain, run_blocking_domain_with_policy};
+
+#[tokio::test(flavor = "current_thread")]
+async fn code_index_invariants_map_to_internal_errors() {
+    let error = run_blocking_code(|| {
+        Err::<(), _>(crate::code::CodeIndexError::Invariant(
+            "checkpoint cursor is inconsistent".to_owned(),
+        ))
+    })
+    .await
+    .expect_err("checkpoint corruption should not become user input");
+
+    assert_eq!(error.error_kind, ErrorKind::Internal);
+    assert!(error.message.contains("checkpoint cursor"));
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn domain_projection_runs_off_executor_and_maps_domain_errors() {

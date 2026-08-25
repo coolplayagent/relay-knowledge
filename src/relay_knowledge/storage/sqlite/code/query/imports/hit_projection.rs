@@ -21,16 +21,15 @@ use super::super::{
     selected_row,
 };
 use super::{
-    path_context::query_looks_like_import_path,
-    row_store::import_path_lookup_token,
+    path_context::{import_path_lookup_token, query_looks_like_import_path},
     scoring::{
-        hybrid_import_sparse_query_penalty, import_binding_context_bonus,
-        import_importer_path_context_bonus, import_line_priority,
+        ImportSourceSignificance, ImporterPathContext, hybrid_import_sparse_query_penalty,
+        import_binding_context_bonus, import_importer_path_context_bonus, import_line_priority,
         import_public_dependency_surface_bonus, import_reexport_surface_penalty,
         import_same_file_usage_bonus, import_self_implementation_penalty,
         import_single_module_path_tiebreaker_bonus, import_source_path_query_overlap_bonus,
-        import_statement_shape_bonus, import_surface_bonus, import_target_directory_bonus,
-        import_target_symbol_bonus,
+        import_source_significance_bonus, import_statement_shape_bonus, import_surface_bonus,
+        import_target_directory_bonus, import_target_symbol_bonus,
     },
     targets::{attach_import_query_usage_context, attach_import_target_symbols},
 };
@@ -70,6 +69,7 @@ pub(super) fn import_rows_to_hits(
         })
         .filter_map(|row| {
             let excerpt = import_excerpt(
+                &row.language_id,
                 &row.module,
                 row.target_symbol_names.as_deref(),
                 group_modules
@@ -106,7 +106,13 @@ pub(super) fn import_rows_to_hits(
                     base_score,
                     row.same_file_query_usage_count,
                     scoring_query,
-                    &row.path,
+                    &ImporterPathContext {
+                        path: &row.path,
+                        module: &row.module,
+                        target_hint: row.target_hint.as_deref(),
+                        matched_symbol_name: row.matched_symbol_name.as_deref(),
+                        target_symbol_names: row.target_symbol_names.as_deref(),
+                    },
                     request.code_query_kind,
                 )
                 + import_target_directory_bonus(
@@ -167,6 +173,18 @@ pub(super) fn import_rows_to_hits(
                     row.target_hint.as_deref(),
                     request.code_query_kind,
                 )
+                + import_source_significance_bonus(
+                    base_score,
+                    scoring_query,
+                    &ImportSourceSignificance {
+                        path: &row.path,
+                        is_generated: row.is_generated,
+                        module: &row.module,
+                        target_hint: row.target_hint.as_deref(),
+                        source_line_count: row.source_line_count,
+                    },
+                    request.code_query_kind,
+                )
                 + import_reexport_surface_penalty(
                     base_score,
                     scoring_query,
@@ -206,7 +224,18 @@ pub(super) fn import_rows_to_hits(
 }
 
 fn import_scoring_query(request: &CodeRetrievalRequest) -> &str {
-    import_path_lookup_token(request).unwrap_or(&request.query)
+    let Some(path_token) = import_path_lookup_token(&request.query) else {
+        return &request.query;
+    };
+    let contextual = request
+        .query
+        .split_whitespace()
+        .any(|token| !token.contains(path_token));
+    if contextual {
+        &request.query
+    } else {
+        path_token
+    }
 }
 
 fn import_resolution_confidence_bonus(
@@ -258,17 +287,13 @@ fn import_group_modules(
         return Ok(BTreeMap::new());
     }
 
-    let predicates = keys
-        .iter()
-        .map(|_| "(path = ? AND line_start = ? AND line_end = ?)")
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let key_rows = import_group_key_rows(keys.len());
     let sql = format!(
         "
         SELECT path, module, line_start, line_end
         FROM code_repository_imports
         WHERE source_scope = ?
-          AND ({predicates})
+          AND (path, line_start, line_end) IN (VALUES {key_rows})
         ORDER BY path ASC, line_start ASC, module ASC
         "
     );
@@ -302,16 +327,23 @@ fn import_group_modules(
     Ok(groups)
 }
 
+fn import_group_key_rows(key_count: usize) -> String {
+    std::iter::repeat_n("(?, ?, ?)", key_count)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn import_excerpt(
+    language_id: &str,
     module: &str,
     target_symbol_names: Option<&str>,
     group_modules: &[String],
 ) -> String {
     let mut excerpt_modules = Vec::with_capacity(group_modules.len().saturating_add(1));
-    excerpt_modules.push(source_like_import_module(module));
+    excerpt_modules.push(source_like_import_module(language_id, module));
     for group_module in group_modules {
         if group_module != module {
-            let rendered = source_like_import_module(group_module);
+            let rendered = source_like_import_module(language_id, group_module);
             if !excerpt_modules.contains(&rendered) {
                 excerpt_modules.push(rendered);
             }
@@ -330,7 +362,7 @@ fn import_excerpt(
     excerpt
 }
 
-fn source_like_import_module(module: &str) -> String {
+fn source_like_import_module(language_id: &str, module: &str) -> String {
     let trimmed = module.trim();
     if trimmed.starts_with("import ")
         || trimmed.starts_with("from ")
@@ -345,8 +377,11 @@ fn source_like_import_module(module: &str) -> String {
         return trimmed.to_owned();
     }
     let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-    if parts.len() == 2 && import_alias_like(parts[0]) {
-        return format!("{trimmed} ({} \"{}\")", parts[0], parts[1]);
+    if language_id == "go" && parts.len() == 2 && import_alias_like(parts[0]) {
+        return format!("import {} \"{}\"", parts[0], parts[1]);
+    }
+    if language_id == "go" && parts.len() == 1 && import_path_like(parts[0]) {
+        return format!("import \"{trimmed}\"");
     }
     if parts.len() == 1 && import_path_like(parts[0]) {
         return format!("{trimmed} (\"{trimmed}\")");

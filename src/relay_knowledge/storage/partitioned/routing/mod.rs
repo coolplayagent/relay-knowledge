@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use crate::{
     domain::{
-        CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactRequest, CodeRetrievalHit,
-        CodeRetrievalRequest, CodebaseViewRequest, CodebaseViewSnapshot, IndexedRepositoryDocument,
+        CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactRequest, CodeRepositoryReport,
+        CodeRepositorySelector, CodeRetrievalHit, CodeRetrievalRequest, CodebaseViewRequest,
+        CodebaseViewSnapshot, IndexedRepositoryDocument,
     },
     storage::{
         CodeImpactChanges, CodeRepositoryStore, SqliteGraphStore, StorageError, StorageFuture,
@@ -17,36 +18,136 @@ use super::{PartitionedSqliteKnowledgeStore, catalog::SqliteShardCatalog};
 pub(super) async fn repository_store_for_selector(
     control: &Arc<SqliteGraphStore>,
     catalog: &SqliteShardCatalog,
-    repository: String,
+    selector: CodeRepositorySelector,
 ) -> Result<Option<Arc<SqliteGraphStore>>, StorageError> {
-    let Some(status) = control.code_repository_status(repository).await? else {
+    let Some(status) = control
+        .code_repository_status(selector.repository.clone())
+        .await?
+    else {
         return Ok(None);
     };
+    let Some(shard) = catalog
+        .existing_repository_store(status.repository_id.clone())
+        .await?
+    else {
+        return Ok(None);
+    };
+    let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
+    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let mut candidate = shard
+        .code_repository_scope_status(
+            status.repository_id.clone(),
+            selector.ref_selector.clone(),
+            path_filters,
+            language_filters,
+        )
+        .await?;
+    if candidate.is_none()
+        && (!selector.path_filters.is_empty() || !selector.language_filters.is_empty())
+    {
+        candidate = shard
+            .code_repository_scope_status(
+                status.repository_id.clone(),
+                selector.ref_selector,
+                status.path_filters,
+                status.language_filters,
+            )
+            .await?;
+    }
+    let Some(source_scope) = candidate.and_then(|status| status.last_indexed_scope_id) else {
+        return Ok(None);
+    };
+    let active_repository = catalog.active_repository_for_scope(source_scope).await?;
+    Ok((active_repository.as_deref() == Some(status.repository_id.as_str())).then_some(shard))
+}
 
-    catalog
-        .existing_repository_store(status.repository_id)
-        .await
+pub(super) async fn repository_store_for_report(
+    control: &Arc<SqliteGraphStore>,
+    catalog: &SqliteShardCatalog,
+    repository: String,
+) -> Result<Option<Arc<SqliteGraphStore>>, StorageError> {
+    let Some(control_status) = control.code_repository_status(repository).await? else {
+        return Ok(None);
+    };
+    let Some(source_scope) = control_status.last_indexed_scope_id.clone() else {
+        return Ok(None);
+    };
+    if catalog
+        .active_repository_for_scope(source_scope.clone())
+        .await?
+        .as_deref()
+        != Some(control_status.repository_id.as_str())
+    {
+        return Ok(None);
+    }
+    let Some(shard) = catalog
+        .existing_repository_store(control_status.repository_id.clone())
+        .await?
+    else {
+        return Ok(None);
+    };
+    let shard_status = shard
+        .code_repository_status(control_status.repository_id)
+        .await?;
+    Ok(shard_status
+        .is_some_and(|status| {
+            status.state == "fresh"
+                && !status.stale
+                && status.last_indexed_scope_id == Some(source_scope)
+        })
+        .then_some(shard))
+}
+
+pub(super) async fn report_matches_active_control(
+    control: &Arc<SqliteGraphStore>,
+    catalog: &SqliteShardCatalog,
+    repository: String,
+    report: &CodeRepositoryReport,
+) -> Result<bool, StorageError> {
+    let Some(status) = control.code_repository_status(repository).await? else {
+        return Ok(false);
+    };
+    let Some(source_scope) = status.last_indexed_scope_id else {
+        return Ok(false);
+    };
+    Ok(status.state == "fresh"
+        && !status.stale
+        && report.freshness_state == "fresh"
+        && report.repository_id == status.repository_id
+        && report.path_filters == status.path_filters
+        && report.language_filters == status.language_filters
+        && report.resolved_commit_sha == status.last_indexed_commit
+        && report.tree_hash == status.tree_hash
+        && report.indexed_file_count == status.indexed_file_count
+        && report.symbol_count == status.symbol_count
+        && report.reference_count == status.reference_count
+        && report.chunk_count == status.chunk_count
+        && catalog
+            .active_repository_for_scope(source_scope)
+            .await?
+            .as_deref()
+            == Some(status.repository_id.as_str()))
+}
+
+fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for value in left.iter().chain(right) {
+        if !merged.contains(value) {
+            merged.push(value.clone());
+        }
+    }
+    merged
 }
 
 pub(super) async fn source_scope_store(
     catalog: &SqliteShardCatalog,
     source_scope: String,
 ) -> Result<Option<Arc<SqliteGraphStore>>, StorageError> {
-    let Some(repository_id) = catalog.repository_for_scope(source_scope).await? else {
+    let Some(repository_id) = catalog.active_repository_for_scope(source_scope).await? else {
         return Ok(None);
     };
 
     catalog.existing_repository_store(repository_id).await
-}
-
-pub(super) async fn current_control_scope(
-    control: &Arc<SqliteGraphStore>,
-    repository_id: String,
-) -> Result<Option<String>, StorageError> {
-    Ok(control
-        .code_repository_status(repository_id)
-        .await?
-        .and_then(|status| status.last_indexed_scope_id))
 }
 
 pub(super) fn search_code_scope(

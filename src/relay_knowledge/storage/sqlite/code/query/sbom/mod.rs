@@ -2,6 +2,7 @@
 
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{
         CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest,
@@ -45,6 +46,7 @@ pub(super) fn search_sbom(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'dependency'
+                {EXACT_SEARCH_OWNER_PREDICATE_SQL}
                 {fts_filter}
                 AND ({exclude_generated_flag} = 0 OR NOT EXISTS (SELECT 1 FROM code_repository_files file WHERE file.source_scope = code_repository_search.source_scope AND file.path = code_repository_search.path AND file.is_generated != 0))
               ORDER BY is_generated ASC, fts_rank ASC, record_id ASC

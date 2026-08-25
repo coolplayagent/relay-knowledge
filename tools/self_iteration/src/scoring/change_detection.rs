@@ -9,7 +9,8 @@ use super::{
 
 const CASE_SCORE_EPSILON: f64 = 0.005;
 const METRIC_RELATIVE_EPSILON: f64 = 0.03;
-const METRIC_ABSOLUTE_EPSILON: f64 = 25.0;
+const METRIC_ABSOLUTE_NOISE_CAP: f64 = 25.0;
+const SUBUNIT_METRIC_EPSILON: f64 = 1e-9;
 
 pub(super) fn changes(
     observation: &EvaluationObservation,
@@ -81,9 +82,8 @@ pub(super) fn changes(
     let previous_metrics = previous_metrics(previous);
     for metric in &observation.metrics {
         if let Some(previous_value) = previous_metrics.get(&metric.name).copied() {
-            let threshold =
-                (previous_value.abs() * METRIC_RELATIVE_EPSILON).max(METRIC_ABSOLUTE_EPSILON);
             let delta = metric.value - previous_value;
+            let threshold = metric_change_threshold(previous_value, metric.value, metric.budget);
             let better = if metric.lower_is_better {
                 delta < -threshold
             } else {
@@ -107,6 +107,18 @@ pub(super) fn changes(
     changes
 }
 
+fn metric_change_threshold(previous: f64, current: f64, budget: Option<f64>) -> f64 {
+    let observed_scale = previous.abs().max(current.abs());
+    let relative_threshold = observed_scale * METRIC_RELATIVE_EPSILON;
+    let budget_noise_floor = budget
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(|value| (value.abs() * METRIC_RELATIVE_EPSILON).min(METRIC_ABSOLUTE_NOISE_CAP))
+        .unwrap_or_default();
+    relative_threshold
+        .max(budget_noise_floor)
+        .max(SUBUNIT_METRIC_EPSILON)
+}
+
 fn push_score_change(
     changes: &mut Vec<Value>,
     name: &str,
@@ -128,7 +140,7 @@ fn push_score_change(
 pub(super) fn metric_budget_failures(metrics: &[MetricObservation]) -> Vec<Value> {
     metrics
         .iter()
-        .filter(|metric| metric.key && metric.budget.is_some() && metric.score() < 1.0)
+        .filter(|metric| metric.key_budget_failed())
         .map(|metric| {
             serde_json::json!({
                 "name": metric.name,

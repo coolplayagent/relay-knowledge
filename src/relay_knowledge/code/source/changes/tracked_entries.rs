@@ -4,7 +4,7 @@ use std::{
 };
 
 #[cfg(test)]
-use std::sync::Mutex;
+use std::{collections::BTreeMap, sync::Mutex};
 
 use super::{
     scope::TrackedEntryScope,
@@ -23,13 +23,14 @@ use crate::code::{
 const MAX_SUBMODULE_EXPANSION_DEPTH: usize = 8;
 
 #[cfg(test)]
-static TRACKED_ENTRIES_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
+static TRACKED_ENTRIES_OBSERVER: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
 
 #[cfg(test)]
 pub(crate) fn reset_tracked_entries_call_count_for_root(root: PathBuf) {
-    *TRACKED_ENTRIES_OBSERVER
+    TRACKED_ENTRIES_OBSERVER
         .lock()
-        .expect("tracked entries observer should lock") = Some((root, 0));
+        .expect("tracked entries observer should lock")
+        .insert(root, 0);
 }
 
 #[cfg(test)]
@@ -37,9 +38,8 @@ pub(crate) fn tracked_entries_call_count_for_root(root: &Path) -> usize {
     TRACKED_ENTRIES_OBSERVER
         .lock()
         .expect("tracked entries observer should lock")
-        .as_ref()
-        .filter(|(observed_root, _)| observed_root == root)
-        .map(|(_, count)| *count)
+        .get(root)
+        .copied()
         .unwrap_or(0)
 }
 
@@ -78,11 +78,10 @@ fn record_tracked_entries_call(_root: &Path) {
     #[cfg(test)]
     let root = _root;
     #[cfg(test)]
-    if let Some((observed_root, count)) = TRACKED_ENTRIES_OBSERVER
+    if let Some(count) = TRACKED_ENTRIES_OBSERVER
         .lock()
         .expect("tracked entries observer should lock")
-        .as_mut()
-        && observed_root == root
+        .get_mut(root)
     {
         *count += 1;
     }

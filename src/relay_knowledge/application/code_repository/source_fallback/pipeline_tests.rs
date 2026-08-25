@@ -249,7 +249,7 @@ fn hybrid_fallback_uses_exact_file_filter_without_scope_path_lookup() {
 }
 
 #[test]
-fn hybrid_exact_path_fallback_uses_leading_identity_before_member_surface() {
+fn hybrid_exact_path_fallback_does_not_replace_missing_context_terms() {
     let request = request(
         "NoDestructor variadic constructor template instance type",
         CodeQueryKind::Hybrid,
@@ -264,12 +264,7 @@ fn hybrid_exact_path_fallback_uses_leading_identity_before_member_surface() {
     field_result.canonical_symbol_id =
         Some("repo://repo/util::no_destructor::NoDestructor.alignas".to_owned());
 
-    let plan = plan_code_grep_fallback(&status(), &request, &[field_result])
-        .expect("exact path hybrid query should plan declaration source recall");
-
-    assert_eq!(plan.query, "NoDestructor");
-    assert_eq!(plan.paths, ["util/no_destructor.h"]);
-    assert!(!plan.needs_scope_paths());
+    assert!(plan_code_grep_fallback(&status(), &request, &[field_result]).is_none());
 }
 
 #[test]
@@ -459,7 +454,7 @@ fn hybrid_source_surface_fallback_refreshes_related_incomplete_paths() {
 }
 
 #[test]
-fn import_fallback_runs_for_unresolved_external_imports_without_degrading() {
+fn import_fallback_repairs_incomplete_unresolved_external_import_surfaces() {
     let request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     let mut import_hit = hit("src/component.tsx", "react");
     import_hit.edge_kind = Some("import".to_owned());

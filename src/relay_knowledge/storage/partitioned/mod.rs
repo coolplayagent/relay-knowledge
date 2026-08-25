@@ -1,4 +1,8 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 mod catalog;
 mod control_plane;
@@ -21,9 +25,9 @@ use crate::{
     },
     paths::RuntimePaths,
     storage::{
-        CodeImpactChanges, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
-        CodeIndexTaskFailure, CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery,
-        CodeIndexTaskLeaseRenewal, CodeRepositorySetMemberSeed,
+        CodeImpactChanges, CodeIndexPublicationTarget, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskLeaseRecord,
+        CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal, CodeRepositorySetMemberSeed,
         CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
         CodeRepositorySetRefreshTaskFailure, CodeRepositorySetRefreshTaskSeed,
         CodeRepositorySetSeed, CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore,
@@ -32,7 +36,10 @@ use crate::{
 };
 
 use catalog::{SqliteShardCatalog, initialize_catalog_schema};
-use routing::{is_missing_code_scope_error, repository_store_for_selector, source_scope_store};
+use routing::{
+    is_missing_code_scope_error, report_matches_active_control, repository_store_for_report,
+    repository_store_for_selector, source_scope_store,
+};
 
 /// SQLite topology that keeps global control state in one DB and code facts in
 /// one DB per registered repository.
@@ -162,6 +169,58 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         request: CodeIndexTaskCompletion,
     ) -> StorageFuture<'_, crate::domain::CodeIndexTaskRecord> {
         self.control.complete_code_index_task(request)
+    }
+
+    fn run_code_index_post_maintenance(
+        &self,
+        repository_id: String,
+        source_scope: String,
+    ) -> StorageFuture<'_, ()> {
+        let this = self.clone();
+        Box::pin(async move {
+            let active = this
+                .catalog
+                .active_repository_for_scope(source_scope.clone())
+                .await?
+                .as_deref()
+                == Some(repository_id.as_str());
+            let shard = if active {
+                this.catalog
+                    .existing_repository_store(repository_id.clone())
+                    .await?
+            } else {
+                this.catalog
+                    .checkpoint_repository_store(repository_id.clone())
+                    .await?
+            }
+            .ok_or_else(|| {
+                StorageError::InvalidInput(format!(
+                    "repository shard for '{repository_id}' is unavailable for post-index maintenance"
+                ))
+            })?;
+            shard
+                .run_code_index_post_maintenance(repository_id, source_scope)
+                .await
+        })
+    }
+
+    fn code_index_publication_receipt(
+        &self,
+        task_id: String,
+        repository_id: String,
+        source_scope: String,
+        now_ms: u64,
+    ) -> StorageFuture<'_, bool> {
+        self.control
+            .code_index_publication_receipt(task_id, repository_id, source_scope, now_ms)
+    }
+
+    fn reconcile_code_index_publication_with_fence(
+        &self,
+        target: CodeIndexPublicationTarget,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, bool> {
+        indexing::publication::reconcile(self, target, fence)
     }
 
     fn fail_code_index_task(
@@ -306,6 +365,13 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         indexing::lifecycle::clear_workspace(self, repository_id, source_scope)
     }
 
+    fn code_repository_auto_workspace_state_exists(
+        &self,
+        repository_id: String,
+    ) -> StorageFuture<'_, bool> {
+        indexing::lifecycle::auto_workspace_state_exists(self, repository_id)
+    }
+
     fn clear_code_workspace_state_with_fence(
         &self,
         repository_id: String,
@@ -327,6 +393,28 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         fence: CodeIndexPublicationFence,
     ) -> StorageFuture<'_, CodeIndexCheckpoint> {
         indexing::lifecycle::begin_session_with_fence(self, session, fence)
+    }
+
+    fn begin_code_index_session_at_checkpoint(
+        &self,
+        session: CodeIndexSession,
+        expected_checkpoint: Option<CodeIndexCheckpoint>,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        indexing::lifecycle::begin_session_at_checkpoint(self, session, expected_checkpoint)
+    }
+
+    fn begin_code_index_session_at_checkpoint_with_fence(
+        &self,
+        session: CodeIndexSession,
+        expected_checkpoint: Option<CodeIndexCheckpoint>,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        indexing::lifecycle::begin_session_at_checkpoint_with_fence(
+            self,
+            session,
+            expected_checkpoint,
+            fence,
+        )
     }
 
     fn apply_code_index_batch(
@@ -359,6 +447,14 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         indexing::lifecycle::finalize_session_with_fence(self, session, fence)
     }
 
+    fn advance_code_index_session_with_fence(
+        &self,
+        session: CodeIndexSession,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, crate::storage::CodeIndexFinalizationStep> {
+        indexing::lifecycle::advance_session_with_fence(self, session, fence)
+    }
+
     fn search_code(
         &self,
         request: CodeRetrievalRequest,
@@ -368,7 +464,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             if let Some(shard) = repository_store_for_selector(
                 &this.control,
                 &this.catalog,
-                request.repository.repository.clone(),
+                request.repository.clone(),
             )
             .await?
             {
@@ -393,7 +489,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             if let Some(shard) = repository_store_for_selector(
                 &this.control,
                 &this.catalog,
-                request.repository.repository.clone(),
+                request.repository.clone(),
             )
             .await?
             {
@@ -435,7 +531,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             if let Some(shard) = repository_store_for_selector(
                 &this.control,
                 &this.catalog,
-                request.repository.repository.clone(),
+                request.repository.clone(),
             )
             .await?
             {
@@ -500,10 +596,20 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         let this = self.clone();
         Box::pin(async move {
             if let Some(shard) =
-                repository_store_for_selector(&this.control, &this.catalog, repository.clone())
+                repository_store_for_report(&this.control, &this.catalog, repository.clone())
                     .await?
             {
-                return shard.code_repository_report(repository).await;
+                let report = shard.code_repository_report(repository.clone()).await?;
+                if report_matches_active_control(
+                    &this.control,
+                    &this.catalog,
+                    repository.clone(),
+                    &report,
+                )
+                .await?
+                {
+                    return Ok(report);
+                }
             }
             this.control.code_repository_report(repository).await
         })
@@ -541,14 +647,37 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, SoftwareGlobalProjection> {
         let this = self.clone();
         Box::pin(async move {
-            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
-                return shard
-                    .refresh_software_global_projection_with_fence(source_scope, fence)
-                    .await;
-            }
-            this.control
-                .refresh_software_global_projection_with_fence(source_scope, fence)
-                .await
+            let shard = this
+                .catalog
+                .checkpoint_repository_store(fence.repository_id.clone())
+                .await?
+                .ok_or_else(|| {
+                    StorageError::InvalidInput(format!(
+                        "repository shard for fenced software projection '{}' is missing",
+                        fence.repository_id
+                    ))
+                })?;
+            let projection = shard
+                .refresh_software_global_projection_with_fence(source_scope.clone(), fence.clone())
+                .await?;
+            let status = shard
+                .code_repository_status(projection.status.repository_id.clone())
+                .await?
+                .ok_or_else(|| {
+                    StorageError::InvalidInput(
+                        "sharded code repository status is missing after software publication"
+                            .to_owned(),
+                    )
+                })?;
+            this.catalog
+                .publish_scope_status_with_fence(
+                    projection.status.repository_id.clone(),
+                    source_scope,
+                    status,
+                    fence,
+                )
+                .await?;
+            Ok(projection)
         })
     }
 
@@ -561,7 +690,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             if let Some(shard) = repository_store_for_selector(
                 &this.control,
                 &this.catalog,
-                request.repository.repository.clone(),
+                request.repository.clone(),
             )
             .await?
             {
@@ -695,6 +824,18 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     }
 }
 
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "post_maintenance_tests.rs"]
+mod post_maintenance_tests;

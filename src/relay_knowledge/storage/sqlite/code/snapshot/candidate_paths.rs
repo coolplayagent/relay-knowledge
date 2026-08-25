@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
+use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 
 use super::super::query::prepare::retry_code_search_operation;
 
@@ -122,6 +123,7 @@ fn file_candidate_paths_from_search(
         FROM code_repository_search
         WHERE code_repository_search MATCH ?
           AND source_scope = ?
+          {EXACT_SEARCH_OWNER_PREDICATE_SQL}
           {path_filter}
           {language_filter}
           {generated_filter}

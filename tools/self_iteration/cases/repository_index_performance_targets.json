@@ -79,6 +79,7 @@
       "query_max_budget_ms": 1200
     },
     "relay_teams": {
+      "isolated_index_home": true,
       "index_budget_ms": 45000,
       "register_index_budget_ms": 46000
     },
@@ -87,10 +88,12 @@
       "register_index_budget_ms": 12500
     },
     "opencode_typescript": {
+      "isolated_index_home": true,
       "index_budget_ms": 120000,
       "register_index_budget_ms": 122000
     },
     "linux_sample": {
+      "isolated_index_home": true,
       "index_budget_mode": "elastic",
       "baseline_file_count": 34150,
       "expected_file_count": 93601,
@@ -100,6 +103,8 @@
       "max_index_budget_ms": 1800000
     },
     "linux_full": {
+      "isolated_index_home": true,
+      "index_only_performance_target": true,
       "index_budget_mode": "elastic",
       "baseline_file_count": 34150,
       "expected_file_count": 93601,
@@ -109,10 +114,12 @@
       "max_index_budget_ms": 1800000
     },
     "kubernetes_go_sample": {
+      "isolated_index_home": true,
       "index_budget_ms": 210000,
       "register_index_budget_ms": 211000
     },
     "spring_framework_java": {
+      "isolated_index_home": true,
       "index_budget_ms": 120000,
       "register_index_budget_ms": 121000
     }
@@ -227,16 +234,17 @@
     {
       "id": "index_performance_wide_ref_available_after_finalize",
       "repository": "index_performance_wide_mixed_files",
-      "kind": "definition",
-      "query": "rk_wide_bridge_dispatch",
+      "kind": "references",
+      "query": "rk_wide_target_2047",
       "guardrail": true,
       "limit": 10,
-      "max_rank": 1,
+      "max_rank": 2,
+      "path_filters": ["crates/perf_core/src/bridge.rs"],
       "language_filters": ["rust"],
       "expected": [
         {
           "path": "crates/perf_core/src/bridge.rs",
-          "excerpt_contains": "rk_wide_bridge_dispatch"
+          "excerpt_contains": "rk_wide_target_2047(middle)"
         }
       ],
       "degraded_reason": false,

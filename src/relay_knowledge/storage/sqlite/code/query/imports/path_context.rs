@@ -1,12 +1,92 @@
 //! Import query-path classification and target/source path context.
 
-use super::binding_terms::camel_case_terms;
+use super::{super::relevance::query_is_single_symbol_identity, binding_terms::camel_case_terms};
 
 const MIN_IMPORT_COVERAGE_TERM_LEN: usize = 3;
 
 pub(super) fn query_looks_like_import_path(query: &str) -> bool {
     let trimmed = query.trim();
     trimmed.contains('/') || trimmed.contains('\\') || query_contains_file_extension(trimmed)
+}
+
+pub(super) fn import_path_lookup_token(request_query: &str) -> Option<&str> {
+    if !query_looks_like_import_path(request_query) {
+        return None;
+    }
+    let path_token = request_query
+        .split_whitespace()
+        .map(import_path_token)
+        .find(|token| query_looks_like_import_path(token))?;
+    (!path_token.is_empty()).then_some(path_token)
+}
+
+pub(in super::super) fn import_target_symbol_query(query: &str) -> Option<&str> {
+    let trimmed = query.trim();
+    if standalone_import_target_symbol(trimmed) {
+        return Some(trimmed);
+    }
+    if !query_looks_like_import_path(trimmed) {
+        return None;
+    }
+
+    let mut candidates = trimmed
+        .split_whitespace()
+        .map(|token| {
+            token.trim_matches(|character: char| {
+                !(character.is_ascii_alphanumeric() || character == '_')
+            })
+        })
+        .filter(|token| standalone_import_target_symbol(token))
+        .filter(|token| {
+            token
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_uppercase())
+        });
+    let candidate = candidates.next()?;
+    candidates.next().is_none().then_some(candidate)
+}
+
+pub(super) fn import_path_token_matches_target_hint(path_token: &str, target_hint: &str) -> bool {
+    let normalized_path = normalized_import_path(path_token);
+    let normalized_target = normalized_import_path(target_hint);
+    !normalized_path.is_empty()
+        && (normalized_target == normalized_path
+            || normalized_target.ends_with(&format!("/{normalized_path}")))
+}
+
+fn standalone_import_target_symbol(token: &str) -> bool {
+    !token.is_empty()
+        && query_is_single_symbol_identity(token)
+        && !token.contains('/')
+        && !token.contains('\\')
+        && !token.contains('.')
+        && !token.contains("::")
+        && !query_contains_file_extension(token)
+}
+
+fn import_path_token(token: &str) -> &str {
+    token.trim_matches(|character: char| {
+        !(character.is_ascii_alphanumeric()
+            || matches!(character, '_' | '-' | '.' | '/' | '\\' | '@'))
+    })
+}
+
+fn normalized_import_path(path: &str) -> String {
+    path.trim_matches(|character: char| {
+        !(character.is_ascii_alphanumeric()
+            || matches!(character, '_' | '-' | '.' | '/' | '\\' | '@'))
+    })
+    .chars()
+    .map(|character| match character {
+        '.' | '\\' => '/',
+        other => other.to_ascii_lowercase(),
+    })
+    .collect::<String>()
+    .split('/')
+    .filter(|component| !component.is_empty())
+    .collect::<Vec<_>>()
+    .join("/")
 }
 
 pub(super) fn query_contains_file_extension(query: &str) -> bool {

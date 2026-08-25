@@ -1,9 +1,4 @@
 //! Direct persistence tests for checkpointed fact batches and replay behavior.
-
-use std::collections::BTreeMap;
-
-use rusqlite::params;
-
 use crate::{
     domain::{
         CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,
@@ -13,12 +8,13 @@ use crate::{
     },
     storage::{CodeRepositoryStore, SqliteGraphStore},
 };
-
+use rusqlite::params;
+use std::collections::BTreeMap;
 #[tokio::test]
-async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
+async fn cold_staged_scope_defers_edge_search_until_finalize() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:edge-languages";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 2);
     let rust_file = file(source_scope, "rust-file", "src/lib.rs", "rust");
     let python_file = file(source_scope, "python-file", "py/app.py", "python");
     let rust_reference = reference(
@@ -35,11 +31,11 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
         "py/app.py",
         "from service import TargetService",
     );
-
     store
         .begin_code_index_session(session.clone())
         .await
         .expect("session should begin");
+    stage_scope(&store, source_scope).await;
     store
         .apply_code_index_batch(CodeIndexBatch {
             repository_id: "repo".to_owned(),
@@ -68,19 +64,36 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
             .is_empty(),
         "cold scopes should defer edge search rows until finalize rebuilds them"
     );
+    let indexing_status = store
+        .code_repository_status("repo".to_owned())
+        .await
+        .expect("indexing status should load")
+        .expect("repository status should exist");
+    assert_eq!(indexing_status.state, "indexing");
+    assert!(indexing_status.stale);
+    assert!(indexing_status.last_indexed_scope_id.is_none());
     store
         .finalize_code_index_session(session)
         .await
         .expect("session should finalize");
-
     let languages = search_document_languages(&store, source_scope).await;
     let checkpoint = store
         .code_index_checkpoint(source_scope.to_owned())
         .await
         .expect("checkpoint should read")
         .expect("checkpoint should exist");
-
+    let finalized_status = store
+        .code_repository_status("repo".to_owned())
+        .await
+        .expect("finalized status should load")
+        .expect("repository status should exist");
     assert_eq!(checkpoint.state, "completed");
+    assert_eq!(finalized_status.state, "fresh");
+    assert!(!finalized_status.stale);
+    assert_eq!(
+        finalized_status.last_indexed_scope_id.as_deref(),
+        Some(source_scope)
+    );
     assert_eq!(edge_search_metadata_count(&store, source_scope).await, 3);
     assert_eq!(
         languages.get(&("reference".to_owned(), "src/lib.rs".to_owned())),
@@ -120,7 +133,7 @@ async fn batch_staging_state(
 async fn checkpointed_batches_persist_route_records() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:route-batch";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 1);
     let path = "src/routes.ts";
 
     store
@@ -154,7 +167,7 @@ async fn checkpointed_batches_persist_route_records() {
 async fn checkpointed_batches_search_routes_and_persist_handler_roles() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:route-search";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 1);
     let path = "src/routes.ts";
     let mut handler = symbol(
         source_scope,
@@ -233,7 +246,7 @@ async fn checkpointed_batches_search_routes_and_persist_handler_roles() {
 async fn checkpointed_batches_search_unlinked_routes_as_unresolved_edges() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:unlinked-route";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 1);
     let path = "src/routes.ts";
     let mut unlinked_route = route(source_scope, "route-unlinked", "route-file", path);
     unlinked_route.url = "/api/status".to_owned();
@@ -299,7 +312,7 @@ async fn checkpointed_batches_search_unlinked_routes_as_unresolved_edges() {
 async fn checkpointed_call_search_uses_caller_signature_for_scoped_callee_queries() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:call-signature-search";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 1);
     let path = "table/table.cc";
     let file = file(source_scope, "table-file", path, "cpp");
     let mut caller = symbol(
@@ -370,7 +383,7 @@ async fn checkpointed_call_search_uses_caller_signature_for_scoped_callee_querie
 async fn checkpointed_call_search_uses_callee_signature_for_scoped_caller_queries() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:call-callee-signature-search";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 2);
     let caller_path = "table/table.cc";
     let callee_path = "table/block.cc";
     let caller_file = file(source_scope, "table-file", caller_path, "cpp");
@@ -451,7 +464,7 @@ async fn checkpointed_call_search_uses_callee_signature_for_scoped_caller_querie
 async fn checkpointed_call_search_documents_include_finalized_signatures() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:bulk-call-search-content";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 2);
     let caller_path = "table/table.cc";
     let callee_path = "table/block.cc";
     let caller_file = file(source_scope, "table-file", caller_path, "cpp");
@@ -521,7 +534,7 @@ async fn checkpointed_call_search_documents_include_finalized_signatures() {
 async fn checkpointed_import_search_documents_include_finalized_target_and_path() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:bulk-import-search-content";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 2);
     let app_file = file(source_scope, "app-file", "src/app.c", "c");
     let header_file = file(source_scope, "header-file", "src/service.h", "c");
     let import = import(
@@ -567,10 +580,10 @@ async fn checkpointed_import_search_documents_include_finalized_target_and_path(
 }
 
 #[tokio::test]
-async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
+async fn active_scope_reindex_keeps_only_non_grouped_intermediate_edge_search_rows() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:active-edge-languages";
-    let session = session_for_scope(source_scope);
+    let session = session_for_scope(source_scope, 2);
     let rust_file = file(source_scope, "rust-file", "src/lib.rs", "rust");
     let python_file = file(source_scope, "python-file", "py/app.py", "python");
     let rust_reference = reference(
@@ -592,6 +605,7 @@ async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
         .begin_code_index_session(session)
         .await
         .expect("session should begin");
+    stage_scope(&store, source_scope).await;
     mark_scope_active(&store, source_scope).await;
     store
         .apply_code_index_batch(CodeIndexBatch {
@@ -614,9 +628,9 @@ async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
 
     let languages = search_document_languages(&store, source_scope).await;
 
-    assert_eq!(
-        languages.get(&("reference".to_owned(), "src/lib.rs".to_owned())),
-        Some(&"rust".to_owned())
+    assert!(
+        !languages.contains_key(&("reference".to_owned(), "src/lib.rs".to_owned())),
+        "grouped reference search must wait for its exact v2 manifest"
     );
     assert_eq!(
         languages.get(&("import".to_owned(), "py/app.py".to_owned())),
@@ -656,7 +670,7 @@ async fn mark_scope_active(store: &SqliteGraphStore, source_scope: &str) {
         .expect("active scope should update");
 }
 
-async fn mark_scope_retained(store: &SqliteGraphStore, source_scope: &str) {
+async fn stage_scope(store: &SqliteGraphStore, source_scope: &str) {
     let source_scope = source_scope.to_owned();
     store
         .run(move |connection| {
@@ -667,7 +681,7 @@ async fn mark_scope_retained(store: &SqliteGraphStore, source_scope: &str) {
                     path_filters_json, language_filters_json, indexed_file_count,
                     symbol_count, reference_count, chunk_count, stale, degraded_reason
                 )
-                VALUES (?1, 'repo', 'commit', 'tree', '[]', '[]', 0, 0, 0, 0, 0, NULL)
+                VALUES (?1, 'repo', 'commit', 'tree', '[]', '[]', 0, 0, 0, 0, 1, NULL)
                 ",
                 params![source_scope],
             )?;
@@ -675,7 +689,7 @@ async fn mark_scope_retained(store: &SqliteGraphStore, source_scope: &str) {
             Ok(())
         })
         .await
-        .expect("retained scope should insert");
+        .expect("staged scope should insert");
 }
 
 fn file(
@@ -790,7 +804,7 @@ fn route(source_scope: &str, route_id: &str, file_id: &str, path: &str) -> CodeR
     }
 }
 
-fn session_for_scope(source_scope: &str) -> CodeIndexSession {
+fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSession {
     CodeIndexSession {
         repository_id: "repo".to_owned(),
         source_scope: source_scope.to_owned(),
@@ -800,14 +814,15 @@ fn session_for_scope(source_scope: &str) -> CodeIndexSession {
         path_filters: Vec::new(),
         language_filters: Vec::new(),
         full_replace: true,
-        total_path_count: 1,
-        changed_path_count: 1,
+        total_path_count,
+        changed_path_count: total_path_count,
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
         changed_paths: Vec::new(),
         tombstones: Vec::new(),
         workspaces: Vec::new(),
-        resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),
+        resource_budget: CodeIndexResourceBudget::new(total_path_count, 1024, 1024)
+            .expect("budget"),
     }
 }
 
@@ -959,6 +974,3 @@ async fn edge_search_document_content(
         .await
         .expect("edge search document should load")
 }
-
-#[path = "retained_scope_tests.rs"]
-mod retained_scope_tests;

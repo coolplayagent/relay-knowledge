@@ -6,6 +6,9 @@ mod status;
 #[cfg(test)]
 #[path = "test_support.rs"]
 pub(super) mod test_support;
+#[cfg(test)]
+#[path = "workspace_scope_tests.rs"]
+mod workspace_scope_tests;
 mod worktree;
 #[cfg(test)]
 #[path = "worktree_review_tests.rs"]

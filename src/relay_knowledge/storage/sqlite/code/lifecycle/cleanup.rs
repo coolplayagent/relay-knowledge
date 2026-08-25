@@ -19,6 +19,8 @@ pub(in crate::storage::sqlite::code) fn delete_scope_index(
         "code_repository_feature_flags",
         "code_repository_dependencies",
         "code_repository_imports",
+        "code_repository_reference_search_groups",
+        "code_repository_reference_search_manifests",
         "code_repository_references",
         "code_repository_symbols",
         "code_repository_files",
@@ -41,14 +43,6 @@ pub(in crate::storage::sqlite::code) fn delete_scope_index(
     delete_search_documents_for_scope(transaction, source_scope)?;
 
     Ok(())
-}
-
-pub(in crate::storage::sqlite::code) fn delete_path_index(
-    transaction: &rusqlite::Transaction<'_>,
-    source_scope: &str,
-    path: &str,
-) -> Result<(), StorageError> {
-    delete_path_indexes(transaction, source_scope, [path])
 }
 
 pub(in crate::storage::sqlite::code) fn path_indexes_exist<'path>(
@@ -103,6 +97,10 @@ pub(in crate::storage::sqlite::code) fn delete_path_indexes<'path>(
         return Ok(());
     }
 
+    for path_chunk in paths.chunks(MAX_PATH_DELETE_PATHS_PER_STATEMENT) {
+        decrement_reference_search_manifest_for_paths(transaction, source_scope, path_chunk)?;
+    }
+
     for table in [
         "code_repository_file_diagnostics",
         "code_repository_chunks",
@@ -111,6 +109,7 @@ pub(in crate::storage::sqlite::code) fn delete_path_indexes<'path>(
         "code_repository_feature_flags",
         "code_repository_dependencies",
         "code_repository_imports",
+        "code_repository_reference_search_groups",
         "code_repository_references",
         "code_repository_symbols",
         "code_repository_files",
@@ -134,6 +133,62 @@ pub(in crate::storage::sqlite::code) fn delete_path_indexes<'path>(
     }
     delete_search_documents_for_paths(transaction, source_scope, paths)?;
 
+    Ok(())
+}
+
+fn decrement_reference_search_manifest_for_paths(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    paths: &[&str],
+) -> Result<(), StorageError> {
+    let placeholders = std::iter::repeat_n("?", paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut values = Vec::with_capacity(paths.len() + 1);
+    values.push(Value::Text(source_scope.to_owned()));
+    values.extend(paths.iter().map(|path| Value::Text((*path).to_owned())));
+    let reference_count = transaction.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM code_repository_references
+             WHERE source_scope = ? AND path IN ({placeholders})"
+        ),
+        params_from_iter(values.clone()),
+        |row| row.get::<_, usize>(0),
+    )?;
+    let group_count = transaction.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM code_repository_reference_search_groups
+             WHERE source_scope = ? AND path IN ({placeholders})"
+        ),
+        params_from_iter(values),
+        |row| row.get::<_, usize>(0),
+    )?;
+    let manifest = transaction
+        .query_row(
+            "SELECT reference_count, group_count
+             FROM code_repository_reference_search_manifests WHERE source_scope = ?1",
+            params![source_scope],
+            |row| Ok((row.get::<_, usize>(0)?, row.get::<_, usize>(1)?)),
+        )
+        .optional()?;
+    let Some((manifest_references, manifest_groups)) = manifest else {
+        return Ok(());
+    };
+    let next_references = manifest_references.checked_sub(reference_count).ok_or_else(|| {
+        StorageError::Invariant(format!(
+            "reference-search manifest for scope '{source_scope}' undercounts deleted path references"
+        ))
+    })?;
+    let next_groups = manifest_groups.checked_sub(group_count).ok_or_else(|| {
+        StorageError::Invariant(format!(
+            "reference-search manifest for scope '{source_scope}' undercounts deleted path groups"
+        ))
+    })?;
+    transaction.execute(
+        "UPDATE code_repository_reference_search_manifests
+         SET reference_count = ?2, group_count = ?3 WHERE source_scope = ?1",
+        params![source_scope, next_references, next_groups],
+    )?;
     Ok(())
 }
 

@@ -147,7 +147,14 @@
       "max_rank": 8,
       "expected": [
         {
-          "path": "pkg/kubeapiserver/authorizer/config.go"
+          "language_id": "go",
+          "edge_resolution_state": "resolved",
+          "edge_target_hint": "k8s.io/client-go/informers"
+        },
+        {
+          "language_id": "go",
+          "edge_resolution_state": "resolved",
+          "edge_target_hint": "k8s.io/client-go/metadata/metadatainformer"
         }
       ]
     },

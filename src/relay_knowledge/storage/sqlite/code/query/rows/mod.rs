@@ -75,6 +75,7 @@ pub(super) struct ImportRow {
     pub(super) confidence_basis_points: u16,
     pub(super) confidence_tier: String,
     pub(super) is_generated: bool,
+    pub(super) source_line_count: usize,
 }
 
 pub(super) struct DependencyRow {

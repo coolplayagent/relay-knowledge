@@ -72,7 +72,8 @@ pub use export::export_history;
 pub use persistence::{RunRecordInput, append_run, make_run_record, write_report};
 pub use run_state::{adopted, is_evaluate_run};
 pub use runs::{
-    best_accepted_run_for_profile, best_accepted_run_for_workload, load_runs, previous_scored_run,
+    best_accepted_run_for_profile, best_accepted_run_for_profile_across_product_binaries,
+    best_accepted_run_for_workload, load_runs, previous_scored_run,
     previous_scored_run_for_workload,
 };
 

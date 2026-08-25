@@ -11,6 +11,64 @@ use crate::storage::{FileSearchRequest, GraphStore, IndexStore, StorageError};
 
 use super::SqliteGraphStore;
 
+#[tokio::test]
+async fn code_index_task_fresh_and_marker_current_open_do_not_create_query_indexes() {
+    let path = unique_database_path();
+    let store = SqliteGraphStore::open(&path).expect("store should open");
+    assert!(!query_index_exists(&store, "code_repository_symbols_lookup").await);
+    assert!(!query_index_exists(&store, "code_repository_symbols_name_path_lookup").await);
+    drop(store);
+
+    let store = SqliteGraphStore::open(&path).expect("marker-current store should reopen");
+    assert!(!query_index_exists(&store, "code_repository_symbols_lookup").await);
+    assert!(!query_index_exists(&store, "code_repository_symbols_name_path_lookup").await);
+    drop(store);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("sqlite-wal"));
+    let _ = std::fs::remove_file(path.with_extension("sqlite-shm"));
+}
+
+#[tokio::test]
+async fn code_index_task_reopen_retains_an_exact_retired_symbol_lookup() {
+    let path = unique_database_path();
+    let store = SqliteGraphStore::open(&path).expect("store should open");
+    store
+        .run(|connection| {
+            connection.execute(
+                "CREATE INDEX code_repository_symbols_lookup
+                 ON code_repository_symbols(source_scope, name, qualified_name, path)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("exact legacy index should install");
+    drop(store);
+
+    let store = SqliteGraphStore::open(&path).expect("exact retired shape should reopen");
+    assert!(query_index_exists(&store, "code_repository_symbols_lookup").await);
+    drop(store);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("sqlite-wal"));
+    let _ = std::fs::remove_file(path.with_extension("sqlite-shm"));
+}
+
+async fn query_index_exists(store: &SqliteGraphStore, name: &str) -> bool {
+    let name = name.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?1)",
+                    [name],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .await
+        .expect("query-index state should load")
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn in_memory_health_snapshot_reports_busy_when_write_connection_is_held() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");

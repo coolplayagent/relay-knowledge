@@ -40,16 +40,21 @@ pub(super) fn snapshot_with_target_symbol() -> CodeIndexSnapshot {
 }
 
 pub(super) fn snapshot_with_path_filtered_candidate_overflow() -> CodeIndexSnapshot {
-    let mut files = Vec::new();
+    let noise_file_id = "noise-file";
+    let noise_path = "vendor/noise.rs";
+    let mut files = vec![file(
+        noise_file_id,
+        noise_path,
+        "rust",
+        CodeParseStatus::Parsed,
+        None,
+    )];
     let mut symbols = Vec::new();
     for index in 0..600 {
-        let file_id = format!("noise-file-{index:03}");
-        let path = format!("vendor/noise_{index:03}.rs");
-        files.push(file(&file_id, &path, "rust", CodeParseStatus::Parsed, None));
         symbols.push(symbol(
             &format!("noise-symbol-{index:03}"),
-            &file_id,
-            &path,
+            noise_file_id,
+            noise_path,
             "target",
         ));
     }

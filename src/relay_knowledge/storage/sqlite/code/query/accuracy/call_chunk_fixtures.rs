@@ -56,19 +56,18 @@ pub(super) fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot {
 }
 
 pub(super) fn snapshot_with_many_caller_candidate_ties() -> CodeIndexSnapshot {
-    let mut files = Vec::new();
+    let noise_file_id = "noise-file";
+    let noise_path = "src/exactOwner/noise.py";
+    let mut files = vec![file(
+        noise_file_id,
+        noise_path,
+        "python",
+        CodeParseStatus::Parsed,
+        None,
+    )];
     let mut calls = Vec::new();
     for index in 0..550 {
-        let file_id = format!("noise-file-{index}");
-        let path = format!("src/exactOwner/noise_{index}.py");
-        files.push(file(
-            &file_id,
-            &path,
-            "python",
-            CodeParseStatus::Parsed,
-            None,
-        ));
-        let mut call = call(&format!("noise-call-{index}"), &file_id, &path);
+        let mut call = call(&format!("noise-call-{index}"), noise_file_id, noise_path);
         call.caller_name = Some(format!("noiseCaller{index}"));
         call.callee_name = "TargetCall".to_owned();
         call.target_hint = Some("TargetCall".to_owned());

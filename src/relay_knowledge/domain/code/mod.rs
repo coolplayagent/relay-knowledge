@@ -37,8 +37,9 @@ pub use repository::{
     CodeRetrievalLayer, CodeRetrievalRequest, CodeRouteRecord, CodeSymbolGenerationCounts,
     RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
     RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
-    clean_git_commit_from_snapshot_identity, code_snapshot_expected_scope_id,
-    code_snapshot_scope_id, code_snapshot_scope_is_fact_versioned,
+    clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
+    code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
+    code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
 };
 pub use repository_graph::{
     IndexedRepositoryDocument, REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT,
@@ -47,10 +48,23 @@ pub use repository_graph::{
     RepositoryGraphNeighborhood, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
     project_okf_neighborhood,
 };
+pub(crate) use repository_index::{
+    CODE_QUERY_INDEX_PLAN_UNIT_COUNT, CodeIncrementalClonePhase, CodeQueryIndexRepair,
+    CodeQueryIndexRepairResumePhase, CodeReferenceResolution,
+    CodeReferenceResolutionQueryIndexRepair, CodeReferenceResolutionStage,
+    CodeReferenceSearchQueryIndexRepair, CodeReferenceSearchRebuild,
+    CodeReferenceSearchRebuildStage, code_incremental_clone, code_incremental_clone_state,
+    code_query_index_repair, code_query_index_repair_state, code_query_index_subphase,
+    code_query_index_subphase_state, code_reference_resolution,
+    code_reference_resolution_cursor_digest, code_reference_resolution_query_index_repair,
+    code_reference_resolution_query_index_repair_state, code_reference_resolution_state,
+    code_reference_search_query_index_repair, code_reference_search_query_index_repair_state,
+    code_reference_search_rebuild, code_reference_search_rebuild_state,
+};
 pub use repository_index::{
-    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexPublicationFence,
-    CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
-    CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeIndexTaskState,
+    CodeIncrementalSummaryReceipt, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary,
+    CodeIndexPublicationFence, CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot,
+    CodeIndexSummary, CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeIndexTaskState,
     CodeRepositoryRetentionJobStatus, CodeScopeRetentionSummary, CodeScopeRetirementJobStatus,
 };
 pub use repository_set::{

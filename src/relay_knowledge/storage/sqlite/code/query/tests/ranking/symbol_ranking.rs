@@ -2,8 +2,8 @@ use super::*;
 use crate::{
     domain::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
-        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeSymbolRecord,
+        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
+        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
     storage::CodeRepositoryStore,
     storage::SqliteGraphStore,
@@ -587,6 +587,100 @@ async fn generated_symbols_are_demoted_and_can_be_excluded() {
         .expect("filtered symbol query should succeed");
     assert!(filtered.iter().any(|hit| hit.path == handwritten_path));
     assert!(!filtered.iter().any(|hit| hit.path == generated_path));
+}
+
+#[tokio::test]
+async fn broad_hybrid_keeps_document_results_while_promoting_a_high_coverage_type_surface() {
+    let target_path = "src/web/GatewayServlet.java";
+    let mut target = symbol(
+        "gateway-servlet",
+        "gateway-file",
+        target_path,
+        "class",
+        "public class GatewayDispatcherServlet extends WebMvcFramework {",
+        range(40, 40),
+    );
+    target.name = "GatewayDispatcherServlet".to_owned();
+    target.qualified_name = "web.GatewayDispatcherServlet".to_owned();
+    target.canonical_symbol_id = "repo://repo/src::web::GatewayDispatcherServlet".to_owned();
+    target.language_id = "java".to_owned();
+    target.doc_comment = Some(
+        "Central front-facing dispatcher coordinates controllers and web MVC servlet workflows across frameworks."
+            .to_owned(),
+    );
+
+    let mut files = vec![file_with_language("gateway-file", target_path, "java")];
+    let mut chunks = Vec::new();
+    for index in 0..6 {
+        let file_id = format!("guide-file-{index}");
+        let path = format!("docs/controller-guide-{index}.md");
+        let content = format!(
+            "Architecture guide {index}: central front controller servlet dispatch for web MVC framework requests."
+        );
+        files.push(file_with_language(&file_id, &path, "markdown"));
+        chunks.push(RepositoryCodeChunkRecord {
+            repository_id: "repo".to_owned(),
+            source_scope: TEST_SOURCE_SCOPE.to_owned(),
+            chunk_id: format!("guide-chunk-{index}"),
+            file_id,
+            path,
+            language_id: "markdown".to_owned(),
+            content: content.clone(),
+            byte_range: range(0, content.len() as u32),
+            line_range: range(1, 1),
+            symbol_snapshot_id: None,
+        });
+    }
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: vec![target],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        routes: Vec::new(),
+        chunks,
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "central front controller servlet dispatch web mvc framework",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("broad hybrid query should succeed");
+    let target_rank = hits
+        .iter()
+        .position(|hit| hit.path == target_path)
+        .map(|index| index + 1)
+        .expect("high-coverage type declaration should be recalled");
+
+    assert!(target_rank <= 5, "type declaration ranked at {target_rank}");
+    assert!(
+        hits.iter().take(5).any(|hit| hit.language_id == "markdown"),
+        "documentation results should remain represented in the top five"
+    );
+    assert!(
+        hits[target_rank - 1]
+            .excerpt
+            .contains("class GatewayDispatcherServlet")
+    );
 }
 
 fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {

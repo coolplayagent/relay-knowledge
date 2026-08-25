@@ -11,9 +11,9 @@ use crate::storage::sqlite::code::query::{
     relevance::*,
     rows::SymbolRow,
     scoring::path_ranking::{
-        path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
-        symbol_declaration_surface_path_bonus, symbol_implementation_path_bonus,
-        symbol_test_path_penalty,
+        path_looks_like_test_double, path_looks_like_test_or_benchmark, query_mentions_test_double,
+        query_mentions_test_or_benchmark, symbol_declaration_surface_path_bonus,
+        symbol_implementation_path_bonus, symbol_test_path_penalty,
     },
     selected_row,
 };
@@ -68,11 +68,24 @@ pub(super) fn symbol_rows_to_hits(
                 )
                 + scoped_member_identity_bonus(exact_identity.as_ref(), &row, request)
                 + type_symbol_identity_bonus(exact_identity.as_ref(), &row, request)
+                + hybrid_exact_type_role_bonus(exact_identity.as_ref(), &row, request)
                 + typed_function_value_surface_bonus(
                     &row,
                     typed_function_value_query.as_ref(),
                     query_has_test_intent,
-                );
+                )
+                + if query_has_test_intent || !path_looks_like_test_or_benchmark(&row.path) {
+                    hybrid_type_documentation_surface_bonus(
+                        query,
+                        &row.kind,
+                        &row.name,
+                        &row.signature,
+                        row.doc_comment.as_deref(),
+                        request,
+                    )
+                } else {
+                    0.0
+                };
             (score > 0.0).then(|| {
                 let score = score
                     + 2.0
@@ -115,6 +128,44 @@ pub(super) fn symbol_rows_to_hits(
             })
         })
         .collect()
+}
+
+fn hybrid_exact_type_role_bonus(
+    identity: Option<&SymbolIdentityQuery>,
+    row: &SymbolRow,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Hybrid
+        || !query_is_single_symbol_identity(&request.query)
+        || !type_symbol_kind(&row.kind)
+    {
+        return 0.0;
+    }
+    let Some(identity) = identity else {
+        return 0.0;
+    };
+    if !identity.matches_symbol(
+        &row.name,
+        &row.qualified_name,
+        &row.signature,
+        &row.canonical_symbol_id,
+    ) {
+        return 0.0;
+    }
+
+    let declaration_role_bonus = match row.kind.as_str() {
+        "class" | "record" | "struct" => 0.8,
+        "interface" | "trait" => 0.15,
+        _ => 0.35,
+    };
+    let test_double_penalty =
+        if path_looks_like_test_double(&row.path) && !query_mentions_test_double(&request.query) {
+            -1.0
+        } else {
+            0.0
+        };
+
+    declaration_role_bonus + test_double_penalty
 }
 
 fn should_drop_test_symbols(
@@ -191,22 +242,6 @@ fn scoped_member_identity_bonus(
     } else {
         0.0
     }
-}
-
-fn type_symbol_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "class"
-            | "enum"
-            | "interface"
-            | "record"
-            | "struct"
-            | "trait"
-            | "type"
-            | "type_alias"
-            | "typedef"
-            | "union"
-    )
 }
 
 #[cfg(test)]

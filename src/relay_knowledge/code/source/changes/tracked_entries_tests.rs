@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{
-    push_blob_entry, tracked_entries_commit_lookup_failed, tracked_entries_git_dir_ls_tree_bytes,
-    tracked_entries_ls_tree_bytes,
+    push_blob_entry, record_tracked_entries_call, reset_tracked_entries_call_count_for_root,
+    tracked_entries_call_count_for_root, tracked_entries_commit_lookup_failed,
+    tracked_entries_git_dir_ls_tree_bytes, tracked_entries_ls_tree_bytes,
 };
 use crate::code::{CodeIndexError, source::changes::TrackedEntryScope};
 
@@ -20,6 +21,21 @@ fn push_blob_entry_preserves_prefix_path_and_size() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].path, "vendor/lib/src/lib.rs");
     assert_eq!(entries[0].byte_count, 42);
+}
+
+#[test]
+fn tracked_entry_observers_are_isolated_by_repository_root() {
+    let first = PathBuf::from("/test/tracked-entries-observer-first");
+    let second = PathBuf::from("/test/tracked-entries-observer-second");
+    reset_tracked_entries_call_count_for_root(first.clone());
+    reset_tracked_entries_call_count_for_root(second.clone());
+
+    record_tracked_entries_call(&first);
+    record_tracked_entries_call(&second);
+    record_tracked_entries_call(&second);
+
+    assert_eq!(tracked_entries_call_count_for_root(&first), 1);
+    assert_eq!(tracked_entries_call_count_for_root(&second), 2);
 }
 
 #[test]

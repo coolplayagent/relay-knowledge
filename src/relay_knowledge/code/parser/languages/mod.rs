@@ -122,6 +122,7 @@ pub(super) fn manual_definition_candidate(language_id: &str, node_kind: &str) ->
             go::manual_definition_candidate(node_kind)
                 || definition_kind(language_id, node_kind).is_some()
         }
+        "rust" => node_kind == "impl_item" || definition_kind(language_id, node_kind).is_some(),
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => {
             config::manual_definition_candidate(language_id, node_kind)
         }
@@ -139,6 +140,7 @@ pub(super) fn language_manual_definitions(
         "c" => c::manual_definitions(content, node),
         "cpp" => cpp::manual_definitions(content, node),
         "go" => go::manual_definitions(content, node),
+        "rust" => rust::manual_definitions(content, node),
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => {
             config::manual_definitions(content, language_id, node)
         }

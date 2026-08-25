@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, time::Instant};
+use std::time::Instant;
 
 use crate::{
     command::CommandResult,
@@ -20,18 +20,15 @@ pub(super) struct FinishInput<'a> {
     pub(super) metrics: Vec<MetricObservation>,
     pub(super) commands: Vec<CommandResult>,
     pub(super) repo_reports: Vec<RepoReport>,
-    pub(super) run_home: PathBuf,
-    pub(super) cached_home: bool,
+    pub(super) run_home: std::path::PathBuf,
     pub(super) job_plan: JobPlan,
     pub(super) selection: WorkloadSelection,
     pub(super) started: Instant,
 }
 
 pub(super) fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
-    if input.run_home.exists() && !input.config.keep_workdirs && !input.cached_home {
-        fs::remove_dir_all(&input.run_home)
-            .map_err(|error| format!("failed to remove {}: {error}", input.run_home.display()))?;
-    }
+    let product_binary_profile = input.config.product_binary_profile();
+    let product_binary_path = input.config.product_binary_path();
     let observation = EvaluationObservation {
         gates: input.gates,
         cases: input.cases,
@@ -53,10 +50,13 @@ pub(super) fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
     );
     let report = serde_json::json!({
         "profile": input.config.profile,
+        "product_binary_profile": product_binary_profile.map(|profile| profile.as_str()),
+        "product_binary_path": product_binary_path.map(|path| path.display().to_string()),
         "selected_categories": input.selection.selected_categories_report(),
         "generated_diff": input.generated_diff,
         "evaluation_home": input.run_home.display().to_string(),
-        "cached_home": input.cached_home,
+        "cached_home": false,
+        "run_scoped_home": true,
         "skipped_suites": input.selection.skipped_suites(&input.config.profile),
         "parallelism": {
             "requested_jobs": input.config.jobs.label(),

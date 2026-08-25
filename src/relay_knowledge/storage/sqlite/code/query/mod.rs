@@ -58,14 +58,14 @@ use hybrid::planning::hybrid_query_prefers_chunk_first;
 #[cfg(test)]
 use hybrid::planning::query_language_scoped_workflow_surface_scopes;
 #[cfg(test)]
+use imports::path_context::import_target_symbol_query;
+#[cfg(test)]
 use imports::scoring::{
     import_public_dependency_surface_bonus, import_reexport_surface_penalty,
     import_self_implementation_penalty, import_source_path_query_overlap_bonus,
     import_surface_bonus, import_target_symbol_bonus,
 };
 use imports::search_imports;
-#[cfg(test)]
-use imports::targets::target_symbol_import_query;
 use references::search_references;
 use relevance::*;
 use routes::search_routes;
@@ -235,7 +235,12 @@ fn search_code_with_status(
         hits.extend(search_references(connection, status, request)?);
     }
     if references_query_needs_chunk_fallback(request, &hits) {
-        hits.extend(search_chunks(connection, status, request)?);
+        let chunk_hits = search_chunks(connection, status, request);
+        if let Some(partial_hits) =
+            append_hits_or_return_partial_on_search_outage(&mut hits, request, chunk_hits)?
+        {
+            return Ok(partial_hits);
+        }
     }
     if matches!(
         request.code_query_kind,

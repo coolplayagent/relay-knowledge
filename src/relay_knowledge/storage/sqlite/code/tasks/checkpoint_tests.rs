@@ -23,6 +23,10 @@ async fn checkpoint_reads_scope_and_latest_repository_progress_deterministically
         .expect("checkpoint should query")
         .expect("checkpoint should exist");
     assert_eq!(by_scope.source_scope, "scope-a");
+    assert_eq!(by_scope.resolved_commit_sha, "commit-scope-a");
+    assert_eq!(by_scope.tree_hash, "tree-scope-a");
+    assert_eq!(by_scope.path_filters, ["src"]);
+    assert_eq!(by_scope.language_filters, ["rust"]);
     assert_eq!(by_scope.committed_file_count, 1);
 
     let latest = store
@@ -32,6 +36,31 @@ async fn checkpoint_reads_scope_and_latest_repository_progress_deterministically
         .expect("latest checkpoint should exist");
     assert_eq!(latest.source_scope, "scope-b");
     assert_eq!(latest.updated_at_ms, 225);
+}
+
+#[tokio::test]
+async fn malformed_checkpoint_projection_is_an_internal_invariant() {
+    let store = registered_store().await;
+    store
+        .run(|connection| {
+            insert_checkpoint(connection, "scope-corrupt", 1)?;
+            connection.execute(
+                "UPDATE code_repository_index_checkpoints
+                 SET resource_budget_json = '{'
+                 WHERE source_scope = 'scope-corrupt'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("corrupt checkpoint fixture should persist");
+
+    let error = store
+        .code_index_checkpoint("scope-corrupt".to_owned())
+        .await
+        .expect_err("malformed checkpoint must fail as an invariant");
+
+    assert!(matches!(error, StorageError::Invariant(_)));
 }
 
 async fn registered_store() -> SqliteGraphStore {

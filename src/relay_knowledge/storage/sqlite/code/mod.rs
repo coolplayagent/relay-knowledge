@@ -1,25 +1,31 @@
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use super::{scope_filters as code_query_scope, software};
 
 mod batch;
+mod checkpoint_receipt;
 mod documents;
 mod feature_flags;
 mod generated;
 mod impact;
 pub(in crate::storage) mod lifecycle;
+pub(in crate::storage::sqlite) mod publication;
 mod query;
 mod routes;
-pub(super) mod schema;
+pub(in crate::storage::sqlite) mod schema;
 mod search;
+mod session_finalization;
 mod set;
 mod snapshot;
 mod symbols;
 mod tasks;
 mod views;
 mod workspace;
+
+#[cfg(test)]
+pub(in crate::storage) use schema::ensure_code_query_indexes;
 
 #[cfg(test)]
 #[path = "tests/mod_tests.rs"]
@@ -45,6 +51,10 @@ mod code_query_accuracy_tests;
 #[path = "tests/metadata.rs"]
 mod code_metadata_tests;
 
+#[cfg(test)]
+#[path = "tests/unfenced_authority.rs"]
+mod code_unfenced_authority_tests;
+
 use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
@@ -62,11 +72,60 @@ pub(in crate::storage) use lifecycle::commit_scope::{
     preserve_existing_scope_commit, record as record_commit_scope,
 };
 use lifecycle::{cleanup, removal, report, status};
+pub(in crate::storage) use publication::record_receipt_from_active_fence;
 pub(super) use search::SearchDocumentInserter;
 #[cfg(test)]
 pub(in crate::storage) use tasks::MAX_SCOPE_SLOTS_PER_REPOSITORY;
 
 const MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT: usize = 500;
+
+impl SqliteGraphStore {
+    pub(in crate::storage) fn code_query_indexes_ready_for_publication(
+        &self,
+    ) -> StorageFuture<'_, bool> {
+        self.run_read(|connection| schema::query_indexes_ready_for_fact_publication(connection))
+    }
+
+    pub(in crate::storage) fn materialize_partitioned_completed_checkpoint(
+        &self,
+        expected: CodeIndexCheckpoint,
+        fence: Option<CodeIndexPublicationFence>,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        let authority_path = self.publication_authority_path.clone();
+        self.run(move |connection| {
+            let guard = fence
+                .map(|fence| {
+                    lifecycle::publication_fence::prepare_guard(
+                        connection,
+                        fence,
+                        authority_path.as_deref(),
+                    )
+                })
+                .transpose()?;
+            batch::materialize_partitioned_completed_checkpoint(
+                connection,
+                expected,
+                guard.as_ref(),
+            )
+        })
+    }
+
+    pub(in crate::storage) fn reopen_completed_checkpoint_for_partitioned_repair(
+        &self,
+        expected: CodeIndexCheckpoint,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        let authority_path = self.publication_authority_path.clone();
+        self.run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(
+                connection,
+                fence,
+                authority_path.as_deref(),
+            )?;
+            batch::reopen_completed_checkpoint_for_partitioned_repair(connection, expected, &guard)
+        })
+    }
+}
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     schema::initialize_code_schema(connection)?;
@@ -126,6 +185,23 @@ fn ensure_queryable_code_scope(
     source_scope: &str,
 ) -> Result<(), StorageError> {
     tasks::retention_gc::reject_retiring_scope(connection, source_scope)?;
+    let stale = connection
+        .query_row(
+            "SELECT stale FROM code_repository_scopes WHERE source_scope = ?1",
+            [source_scope],
+            |row| row.get::<_, bool>(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            StorageError::InvalidInput(format!(
+                "code repository scope '{source_scope}' is unavailable"
+            ))
+        })?;
+    if stale {
+        return Err(StorageError::InvalidInput(format!(
+            "code repository scope '{source_scope}' is not published"
+        )));
+    }
     #[cfg(test)]
     read_snapshot_test_hook::after_retiring_check();
     Ok(())
@@ -249,6 +325,49 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: crate::storage::CodeIndexTaskCompletion,
     ) -> StorageFuture<'_, crate::domain::CodeIndexTaskRecord> {
         self.run(move |connection| tasks::complete_task(connection, request))
+    }
+
+    fn run_code_index_post_maintenance(
+        &self,
+        _repository_id: String,
+        _source_scope: String,
+    ) -> StorageFuture<'_, ()> {
+        let maintenance = self.maintenance.clone();
+        self.run(move |connection| {
+            super::connection_runtime::maintenance::run_post_index_maintenance(
+                connection,
+                &maintenance,
+            );
+            Ok(())
+        })
+    }
+
+    fn code_index_publication_receipt(
+        &self,
+        task_id: String,
+        repository_id: String,
+        source_scope: String,
+        now_ms: u64,
+    ) -> StorageFuture<'_, bool> {
+        self.run_read(move |connection| {
+            tasks::publication_receipt(connection, &task_id, &repository_id, &source_scope, now_ms)
+        })
+    }
+
+    fn reconcile_code_index_publication_with_fence(
+        &self,
+        target: crate::storage::CodeIndexPublicationTarget,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, bool> {
+        let authority_path = self.publication_authority_path.clone();
+        self.run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(
+                connection,
+                fence,
+                authority_path.as_deref(),
+            )?;
+            publication::adopt_active_target(connection, &target, &guard)
+        })
     }
 
     fn fail_code_index_task(
@@ -419,14 +538,12 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        let maintenance = self.maintenance.clone();
-        self.run(move |connection| {
-            let summary = snapshot::apply_snapshot(connection, snapshot)?;
-            super::connection_runtime::maintenance::run_post_index_maintenance(
-                connection,
-                &maintenance,
-            );
-
+        let this = self.clone();
+        Box::pin(async move {
+            let summary = this
+                .run(move |connection| snapshot::apply_snapshot(connection, snapshot))
+                .await?;
+            session_finalization::run_best_effort_maintenance(&this).await;
             Ok(summary)
         })
     }
@@ -436,7 +553,6 @@ impl CodeRepositoryStore for SqliteGraphStore {
         snapshot: CodeIndexSnapshot,
         fence: CodeIndexPublicationFence,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        let maintenance = self.maintenance.clone();
         let authority_path = self.publication_authority_path.clone();
         self.run(move |connection| {
             let guard = lifecycle::publication_fence::prepare_guard(
@@ -444,12 +560,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
                 fence,
                 authority_path.as_deref(),
             )?;
-            let summary = snapshot::apply_snapshot_with_fence(connection, snapshot, Some(&guard))?;
-            super::connection_runtime::maintenance::run_post_index_maintenance(
-                connection,
-                &maintenance,
-            );
-            Ok(summary)
+            snapshot::apply_snapshot_with_fence(connection, snapshot, Some(&guard))
         })
     }
 
@@ -460,6 +571,15 @@ impl CodeRepositoryStore for SqliteGraphStore {
     ) -> StorageFuture<'_, ()> {
         self.run(move |connection| {
             workspace::clear_auto_workspace_state(connection, &repository_id, &source_scope)
+        })
+    }
+
+    fn code_repository_auto_workspace_state_exists(
+        &self,
+        repository_id: String,
+    ) -> StorageFuture<'_, bool> {
+        self.run_read(move |connection| {
+            workspace::has_auto_workspace_state(connection, &repository_id)
         })
     }
 
@@ -508,6 +628,38 @@ impl CodeRepositoryStore for SqliteGraphStore {
         })
     }
 
+    fn begin_code_index_session_at_checkpoint(
+        &self,
+        session: CodeIndexSession,
+        expected_checkpoint: Option<CodeIndexCheckpoint>,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        self.run(move |connection| {
+            batch::begin_session_at_checkpoint(connection, session, expected_checkpoint)
+        })
+    }
+
+    fn begin_code_index_session_at_checkpoint_with_fence(
+        &self,
+        session: CodeIndexSession,
+        expected_checkpoint: Option<CodeIndexCheckpoint>,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        let authority_path = self.publication_authority_path.clone();
+        self.run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(
+                connection,
+                fence,
+                authority_path.as_deref(),
+            )?;
+            batch::begin_session_at_checkpoint_with_fence(
+                connection,
+                session,
+                expected_checkpoint,
+                Some(&guard),
+            )
+        })
+    }
+
     fn apply_code_index_batch(
         &self,
         batch: CodeIndexBatch,
@@ -535,16 +687,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         session: CodeIndexSession,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        let maintenance = self.maintenance.clone();
-        self.run(move |connection| {
-            let summary = batch::finalize_session(connection, session)?;
-            super::connection_runtime::maintenance::run_post_index_maintenance(
-                connection,
-                &maintenance,
-            );
-
-            Ok(summary)
-        })
+        session_finalization::finalize_session(self, session)
     }
 
     fn finalize_code_index_session_with_fence(
@@ -552,21 +695,15 @@ impl CodeRepositoryStore for SqliteGraphStore {
         session: CodeIndexSession,
         fence: CodeIndexPublicationFence,
     ) -> StorageFuture<'_, CodeIndexSummary> {
-        let maintenance = self.maintenance.clone();
-        let authority_path = self.publication_authority_path.clone();
-        self.run(move |connection| {
-            let guard = lifecycle::publication_fence::prepare_guard(
-                connection,
-                fence,
-                authority_path.as_deref(),
-            )?;
-            let summary = batch::finalize_session_with_fence(connection, session, Some(&guard))?;
-            super::connection_runtime::maintenance::run_post_index_maintenance(
-                connection,
-                &maintenance,
-            );
-            Ok(summary)
-        })
+        session_finalization::finalize_session_with_fence(self, session, fence)
+    }
+
+    fn advance_code_index_session_with_fence(
+        &self,
+        session: CodeIndexSession,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, crate::storage::CodeIndexFinalizationStep> {
+        session_finalization::advance_session_with_fence(self, session, fence)
     }
 
     fn search_code(

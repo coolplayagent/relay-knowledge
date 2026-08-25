@@ -96,3 +96,33 @@ cargo test --lib hybrid_grep_fallback_fills_after_structured_hits
 cargo test --lib hybrid_exact_path_fallback_uses_leading_identity_before_member_surface
 cargo test --lib reference_grep_fallback_ranks_declaration_first_for_typedef_intent
 ```
+
+## 2026-08-14 Bounded Recall Follow-up
+
+A later full-profile diagnosis found two general recall gaps behind otherwise
+bounded query plans. Layered Hybrid search reused its 40-to-120 narrow-probe
+cap for the final OR-FTS pass, and exact-file queries could defer contextual
+queries after symbol coverage alone. The correction keeps every narrow probe
+unchanged, restores the existing 300-to-900 Chunk cap only for the final broad
+pass, and keeps merge/dedupe within that bound. Exact-file symbol-only return
+and its targeted source refresh now require a true single-symbol identity;
+multi-term queries continue through bounded chunk retrieval instead of replacing
+missing context with a source fallback identity. Bash import coverage also treats
+the exact escaped dot builtin `\.` as `.`, with whitespace/non-empty-operand
+boundaries and the same local target resolution.
+
+The direct synthetic regression filters are:
+
+```sh
+cargo test --lib broad_hybrid_fallback_recalls_beyond_strict_probe_cap
+cargo test --lib exact_path_contextual_hybrid_query_keeps_chunk_body_evidence
+cargo test --lib escaped_dot_builtin_is_a_bounded_source_import
+cargo test --lib bash_escaped_dot_import_resolves_like_plain_dot_builtin
+cargo test --lib hybrid_exact_path_fallback_does_not_replace_missing_context_terms
+```
+
+These fixtures exceed the strict probe cap with generated distractors, verify
+body context under an exact path, and exercise the Bash token boundary. They do
+not encode external repository names, paths, challenge ids, or known production
+symbols. This follow-up records the algorithm and targeted gates; it does not
+claim a new full-profile score until the complete evaluation is rerun.

@@ -3,30 +3,28 @@ use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::{Connection, params, params_from_iter, types::Value};
 
 use crate::{
-    domain::{
-        CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary,
-        code_snapshot_expected_scope_id, code_snapshot_scope_is_fact_versioned,
-    },
+    domain::{CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary},
     storage::StorageError,
 };
 
 use super::{
-    MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT,
-    cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index},
-    lifecycle::commit_scope,
+    MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT, SearchDocumentInserter,
+    cleanup::{count_code_rows, delete_path_indexes},
     report,
-    search::{SearchDocumentInserter, backfill_search_metadata_for_scope},
-    status::{canonical_filter_values, canonical_path_filters, parse_json_list},
 };
 
+mod admission;
 mod candidate_paths;
+mod durable_clone;
+mod durable_handoff;
 mod fingerprints;
 mod import_compat;
+mod reference_projection;
 mod repository_import;
 mod scope_tables;
+mod search_copy;
 mod snapshot_import;
 
-use self::scope_tables::{CODE_SCOPE_TABLES, CodeScopeTable};
 pub(super) use candidate_paths::{
     file_candidate_paths_for_query_scope, file_candidate_paths_for_scope,
 };
@@ -34,6 +32,8 @@ pub(super) use fingerprints::{
     file_fingerprints, file_fingerprints_for_paths, file_fingerprints_for_scope,
 };
 pub(super) use repository_import::import_repository_from_database;
+
+use self::scope_tables::{CODE_SCOPE_TABLES, CodeScopeTable, REFERENCE_SEARCH_SCOPE_TABLES};
 
 #[cfg(test)]
 #[path = "progress_tests.rs"]
@@ -51,77 +51,185 @@ pub(super) fn apply_snapshot_with_fence(
     snapshot: CodeIndexSnapshot,
     fence: Option<&super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexSummary, StorageError> {
+    let Some(guard) = fence.filter(|_| !snapshot.full_replace) else {
+        return apply_snapshot_attempt(connection, &snapshot, fence, None);
+    };
+    if guard.is_worktree_overlay_task(connection)? {
+        return apply_snapshot_attempt(connection, &snapshot, fence, None);
+    }
+    let session = durable_clone::begin_or_resume(connection, &snapshot, guard).map_err(
+        |error| match error {
+            StorageError::CapacityExceeded(message) => {
+                StorageError::DurableStagingRequired(message)
+            }
+            other => other,
+        },
+    )?;
+    if session.initialized {
+        return Err(StorageError::DurableStagingPending {
+            completed_steps: 0,
+            max_steps: session.max_steps,
+        });
+    }
+    match durable_clone::advance(connection, &session.identity, guard, session.max_steps)? {
+        durable_clone::CloneAdvance::Pending { completed_steps } => {
+            if completed_steps > session.max_steps {
+                return Err(StorageError::Invariant(format!(
+                    "incremental clone for scope '{}' exceeded its durable step proof",
+                    snapshot.source_scope
+                )));
+            }
+            return Err(StorageError::DurableStagingPending {
+                completed_steps,
+                max_steps: session.max_steps,
+            });
+        }
+        durable_clone::CloneAdvance::CloneComplete => {}
+    }
+    apply_snapshot_attempt(connection, &snapshot, fence, Some(&session))
+}
+
+fn apply_snapshot_attempt(
+    connection: &mut Connection,
+    snapshot: &CodeIndexSnapshot,
+    fence: Option<&super::lifecycle::publication_fence::PublicationFenceGuard>,
+    durable_session: Option<&durable_clone::CloneSession>,
+) -> Result<CodeIndexSummary, StorageError> {
     if let Some(fence) = fence {
         fence.validate_repository(&snapshot.repository_id)?;
     }
     let transaction = connection.transaction()?;
     super::tasks::retention_gc::reject_retiring_scope(&transaction, &snapshot.source_scope)?;
-    if fence.is_none() {
+    if let Some(fence) = fence {
+        fence.validate(&transaction)?;
+        super::publication::reject_fenced_active_scope_rebuild(
+            &transaction,
+            &snapshot.repository_id,
+            &snapshot.source_scope,
+        )?;
+    } else {
         super::tasks::enforce_unfenced_target(
             &transaction,
             &snapshot.repository_id,
             &snapshot.source_scope,
         )?;
     }
-    if snapshot.full_replace {
-        delete_scope_index(&transaction, &snapshot.source_scope)?;
-    } else {
-        let mut excluded_paths = snapshot.deleted_paths.clone();
-        for file in &snapshot.files {
-            if !excluded_paths.contains(&file.path) {
-                excluded_paths.push(file.path.clone());
-            }
-        }
-        excluded_paths.sort_unstable();
-        excluded_paths.dedup();
-        let cloned_with_exclusion = clone_active_scope_for_incremental(
-            &transaction,
-            &snapshot.repository_id,
-            &snapshot.source_scope,
-            &snapshot.path_filters,
-            &snapshot.language_filters,
-            snapshot.base_resolved_commit_sha.as_deref(),
-            &excluded_paths,
-        )?;
-        // When the clone excluded changed paths, those old rows are already
-        // absent from the new scope and the delete steps would be no-ops.
-        // When the clone was skipped (same scope) or ran without exclusion,
-        // the old rows are still present and must be deleted before reinsert.
-        if !cloned_with_exclusion {
-            for path in &snapshot.deleted_paths {
-                delete_path_index(&transaction, &snapshot.source_scope, path)?;
-            }
-            delete_path_indexes(
+    let direct_budget = fence
+        .map(|guard| guard.resource_budget(&transaction))
+        .transpose()?
+        .unwrap_or_default();
+    let durable_completion = durable_session
+        .map(|session| {
+            let guard = fence.ok_or_else(|| {
+                StorageError::Invariant(
+                    "durable incremental clone requires a publication fence".to_owned(),
+                )
+            })?;
+            durable_clone::validate_clone_complete(
                 &transaction,
+                snapshot,
+                &session.identity,
+                guard,
+                direct_budget,
+            )
+        })
+        .transpose()?;
+    if let Some(completion) = durable_completion.as_ref() {
+        let mut measure = admission::measure_snapshot_insert_surface(snapshot, direct_budget)?;
+        let (_, encoded_summary) = durable_handoff::encoded_summary(snapshot, &completion.task_id)?;
+        measure.add_scaled(0, encoded_summary.len(), 1)?;
+        measure.add_scaled(
+            completion.terminal_cleanup_rows,
+            completion.terminal_cleanup_bytes,
+            1,
+        )?;
+    }
+    let incremental_plan = if durable_completion.is_some() {
+        None
+    } else if snapshot.full_replace {
+        admission::require_fresh_full_snapshot_within_budget(
+            &transaction,
+            snapshot,
+            direct_budget,
+        )?;
+        None
+    } else {
+        Some(admission::require_incremental_snapshot_within_budget(
+            &transaction,
+            snapshot,
+            direct_budget,
+        )?)
+    };
+    super::schema::prepare_query_indexes_for_empty_owners(&transaction)?;
+    if durable_completion.is_none() {
+        super::schema::require_code_query_indexes_for_fact_publication(&transaction)?;
+    }
+    if durable_completion.is_some() {
+        // Every affected base owner was omitted while scanning the immutable base. The bounded
+        // delta below therefore consists only of inserts and cannot trigger a scope-wide delete.
+    } else if let Some(plan) = incremental_plan.as_ref() {
+        if plan.clone_base {
+            for table in CODE_SCOPE_TABLES
+                .iter()
+                .chain(REFERENCE_SEARCH_SCOPE_TABLES)
+            {
+                clone_code_table(
+                    &transaction,
+                    table,
+                    &plan.base_scope,
+                    &snapshot.source_scope,
+                )?;
+            }
+            search_copy::clone_exact_search_documents(
+                &transaction,
+                &plan.base_scope,
                 &snapshot.source_scope,
-                snapshot.files.iter().map(|file| file.path.as_str()),
+                plan.owned_search_document_count,
             )?;
         }
+        delete_path_indexes(
+            &transaction,
+            &snapshot.source_scope,
+            snapshot
+                .deleted_paths
+                .iter()
+                .map(String::as_str)
+                .chain(snapshot.files.iter().map(|file| file.path.as_str())),
+        )?;
+    } else {
+        reference_projection::require_full_grouped_projection_within_budget(
+            &transaction,
+            snapshot,
+            direct_budget,
+        )?;
     }
 
-    let mut file_statement = transaction.prepare(
-        "
-        INSERT INTO code_repository_files (
-            repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
-            line_count, parse_status, is_generated, degraded_reason
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-        ",
-    )?;
+    if let Some(completion) = durable_completion.as_ref() {
+        insert_durable_reference_manifest(&transaction, snapshot, completion)?;
+    }
     for file in &snapshot.files {
-        file_statement.execute(params![
-            file.repository_id,
-            file.source_scope,
-            file.file_id,
-            file.path,
-            file.language_id,
-            file.blob_hash,
-            file.byte_len,
-            file.line_count,
-            file.parse_status.as_str(),
-            file.is_generated,
-            file.degraded_reason,
-        ])?;
+        transaction.execute(
+            "
+            INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
+                line_count, parse_status, is_generated, degraded_reason
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ",
+            params![
+                file.repository_id,
+                file.source_scope,
+                file.file_id,
+                file.path,
+                file.language_id,
+                file.blob_hash,
+                file.byte_len,
+                file.line_count,
+                file.parse_status.as_str(),
+                file.is_generated,
+                file.degraded_reason,
+            ],
+        )?;
     }
     let file_languages_by_path = snapshot
         .files
@@ -130,59 +238,62 @@ pub(super) fn apply_snapshot_with_fence(
         .collect::<BTreeMap<_, _>>();
     super::symbols::insert_records(&transaction, &snapshot.symbols)?;
     let mut search_inserter = SearchDocumentInserter::new(&transaction)?;
-    let mut reference_statement = transaction.prepare(
-        "
-        INSERT INTO code_repository_references (
-            repository_id, source_scope, reference_id, file_id, path, name, kind,
-            target_symbol_snapshot_id, target_hint, resolution_state,
-            confidence_basis_points, confidence_tier,
-            byte_start, byte_end, line_start, line_end
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-        ",
-    )?;
     for reference in &snapshot.references {
-        reference_statement.execute(params![
-            reference.repository_id,
-            reference.source_scope,
-            reference.reference_id,
-            reference.file_id,
-            reference.path,
-            reference.name,
-            reference.kind,
-            reference.target_symbol_snapshot_id,
-            reference.target_hint,
-            reference.resolution_state,
-            reference.confidence_basis_points,
-            reference.confidence_tier,
-            reference.byte_range.start,
-            reference.byte_range.end,
-            reference.line_range.start,
-            reference.line_range.end,
-        ])?;
-        search_inserter.insert(
-            &reference.source_scope,
-            "reference",
-            &reference.reference_id,
-            &reference.path,
-            file_languages_by_path
-                .get(reference.path.as_str())
-                .copied()
-                .unwrap_or_default(),
-            [
-                reference.name.as_str(),
-                reference.kind.as_str(),
-                reference.target_hint.as_deref().unwrap_or_default(),
-                reference.path.as_str(),
+        transaction.execute(
+            "
+            INSERT INTO code_repository_references (
+                repository_id, source_scope, reference_id, file_id, path, name, kind,
+                target_symbol_snapshot_id, target_hint, resolution_state,
+                confidence_basis_points, confidence_tier,
+                byte_start, byte_end, line_start, line_end
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            ",
+            params![
+                reference.repository_id,
+                reference.source_scope,
+                reference.reference_id,
+                reference.file_id,
+                reference.path,
+                reference.name,
+                reference.kind,
+                reference.target_symbol_snapshot_id,
+                reference.target_hint,
+                reference.resolution_state,
+                reference.confidence_basis_points,
+                reference.confidence_tier,
+                reference.byte_range.start,
+                reference.byte_range.end,
+                reference.line_range.start,
+                reference.line_range.end,
             ],
         )?;
     }
-    drop(file_statement);
-    drop(reference_statement);
-    insert_imports_calls_chunks_diagnostics(&transaction, &snapshot, &mut search_inserter)?;
+    reference_projection::insert_direct_reference_search_projection(
+        &transaction,
+        snapshot,
+        &file_languages_by_path,
+        direct_budget,
+    )?;
+    insert_imports_calls_chunks_diagnostics(&transaction, snapshot, &mut search_inserter)?;
     search_inserter.finish()?;
-    super::schema::ensure_code_query_indexes(&transaction)?;
-    update_repository_after_snapshot(&transaction, &snapshot)?;
+    if let Some(completion) = durable_completion.as_ref() {
+        stage_repository_after_durable_snapshot(&transaction, snapshot, completion)?;
+        require_durable_grouped_reference_projection(&transaction, snapshot, completion)?;
+        durable_handoff::mark_delta_ready_for_finalization(
+            &transaction,
+            snapshot,
+            completion,
+            direct_budget,
+        )?;
+        durable_clone::remove_after_delta(&transaction, &snapshot.source_scope)?;
+    } else {
+        stage_repository_after_snapshot(&transaction, snapshot, fence.is_some())?;
+        repository_import::require_grouped_reference_projection(
+            &transaction,
+            &snapshot.source_scope,
+        )?;
+    }
     // Resolve workspace-level cross-repo imports when monorepo workspaces
     // were detected during snapshot build.  No-op when workspaces is empty.
     super::workspace::resolve_workspace_imports(
@@ -197,19 +308,28 @@ pub(super) fn apply_snapshot_with_fence(
     }
     transaction.commit()?;
 
-    let status = super::status::repository_status(connection, &snapshot.repository_id)?
-        .ok_or_else(|| {
-            StorageError::InvalidInput("code repository status is missing after index".to_owned())
-        })?;
+    if durable_completion.is_some() {
+        return Err(StorageError::DurableFinalizationRequired {
+            checkpoint_state: durable_handoff::FINALIZATION_HANDOFF_STATE.to_owned(),
+        });
+    }
+
+    let status =
+        super::status::repository_scope_status_by_source_scope(connection, &snapshot.source_scope)?
+            .ok_or_else(|| {
+                StorageError::InvalidInput(
+                    "code repository scope is missing after index".to_owned(),
+                )
+            })?;
     let symbol_generation_counts =
         report::scope_symbol_generation_counts(connection, &snapshot.source_scope)?;
 
     Ok(CodeIndexSummary {
-        repository_id: snapshot.repository_id,
-        source_scope: snapshot.source_scope,
-        base_resolved_commit_sha: snapshot.base_resolved_commit_sha,
-        resolved_commit_sha: snapshot.resolved_commit_sha,
-        tree_hash: snapshot.tree_hash,
+        repository_id: snapshot.repository_id.clone(),
+        source_scope: snapshot.source_scope.clone(),
+        base_resolved_commit_sha: snapshot.base_resolved_commit_sha.clone(),
+        resolved_commit_sha: snapshot.resolved_commit_sha.clone(),
+        tree_hash: snapshot.tree_hash.clone(),
         indexed_file_count: status.indexed_file_count,
         changed_path_count: snapshot.changed_path_count,
         skipped_unchanged_count: snapshot.skipped_unchanged_count,
@@ -244,158 +364,27 @@ pub(super) fn apply_snapshot_with_fence(
             degraded_file_count: snapshot.diagnostics.len(),
             batch_count: 1,
             checkpoint_file_count: snapshot.files.len(),
-            resource_budget: crate::domain::CodeIndexResourceBudget::default(),
+            resource_budget: direct_budget,
         },
-    })
-}
-
-pub(in crate::storage::sqlite::code) fn clone_active_scope_for_incremental(
-    transaction: &rusqlite::Transaction<'_>,
-    repository_id: &str,
-    source_scope: &str,
-    path_filters: &[String],
-    language_filters: &[String],
-    base_resolved_commit_sha: Option<&str>,
-    excluded_paths: &[String],
-) -> Result<bool, StorageError> {
-    let previous_scope = resolve_incremental_base_scope(
-        transaction,
-        repository_id,
-        path_filters,
-        language_filters,
-        base_resolved_commit_sha,
-    )?;
-    if previous_scope == source_scope {
-        return Ok(false);
-    }
-    delete_scope_index(transaction, source_scope)?;
-    for table in CODE_SCOPE_TABLES {
-        clone_code_table(
-            transaction,
-            table,
-            &previous_scope,
-            source_scope,
-            excluded_paths,
-        )?;
-    }
-    backfill_search_metadata_for_scope(transaction, source_scope)?;
-
-    Ok(!excluded_paths.is_empty())
-}
-
-pub(in crate::storage::sqlite::code) fn resolve_incremental_base_scope(
-    transaction: &rusqlite::Transaction<'_>,
-    repository_id: &str,
-    path_filters: &[String],
-    language_filters: &[String],
-    base_resolved_commit_sha: Option<&str>,
-) -> Result<String, StorageError> {
-    let path_filters_json = serde_json::to_string(path_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let language_filters_json = serde_json::to_string(language_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let requested_path_filters = canonical_path_filters(path_filters);
-    let requested_language_filters = canonical_filter_values(language_filters);
-    let mut statement = transaction.prepare(
-        "
-        SELECT source_scope, tree_hash, path_filters_json, language_filters_json
-        FROM code_repository_scopes
-        WHERE repository_id = ?1
-          AND (
-              resolved_commit_sha = ?4
-              OR EXISTS (
-                  SELECT 1
-                  FROM code_repository_commit_scopes commit_scope
-                  WHERE commit_scope.repository_id = code_repository_scopes.repository_id
-                    AND commit_scope.resolved_commit_sha = ?4
-                    AND commit_scope.source_scope = code_repository_scopes.source_scope
-              )
-          )
-        ORDER BY
-          CASE WHEN path_filters_json = ?2 AND language_filters_json = ?3 THEN 0 ELSE 1 END,
-          rowid DESC
-        ",
-    )?;
-    let base_commit = base_resolved_commit_sha.ok_or_else(|| {
-        StorageError::InvalidInput(format!(
-            "code repository '{repository_id}' incremental snapshot is missing its resolved base commit"
-        ))
-    })?;
-    let rows = statement.query_map(
-        params![
-            repository_id,
-            path_filters_json,
-            language_filters_json,
-            base_commit
-        ],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                parse_json_list(row.get::<_, String>(2)?)?,
-                parse_json_list(row.get::<_, String>(3)?)?,
-            ))
-        },
-    )?;
-    let mut previous_scope = None;
-    for row in rows {
-        let (scope_id, tree_hash, stored_path_filters, stored_language_filters) = row?;
-        if canonical_path_filters(&stored_path_filters) == requested_path_filters
-            && canonical_filter_values(&stored_language_filters) == requested_language_filters
-            && (!code_snapshot_scope_is_fact_versioned(&scope_id)
-                || code_snapshot_expected_scope_id(
-                    repository_id,
-                    &tree_hash,
-                    &stored_path_filters,
-                    &stored_language_filters,
-                )
-                .is_some_and(|expected| expected == scope_id))
-        {
-            previous_scope = Some(scope_id);
-            break;
-        }
-    }
-    previous_scope.ok_or_else(|| {
-        StorageError::InvalidInput(format!(
-            "code repository '{repository_id}' has no matching indexed scope for incremental filters at the current base commit and code fact version"
-        ))
     })
 }
 
 fn clone_code_table(
     transaction: &rusqlite::Transaction<'_>,
     table: &CodeScopeTable,
-    previous_scope: &str,
-    next_scope: &str,
-    excluded_paths: &[String],
+    base_scope: &str,
+    target_scope: &str,
 ) -> Result<(), StorageError> {
     let selected_columns = table.columns.replacen("source_scope", "?2", 1);
-    if excluded_paths.is_empty() {
-        transaction.execute(
-            &format!(
-                "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1",
-                table = table.table,
-                columns = table.columns,
-            ),
-            params![previous_scope, next_scope],
-        )?;
-    } else {
-        let placeholders = std::iter::repeat_n("?", excluded_paths.len())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let mut values: Vec<Value> = Vec::with_capacity(2 + excluded_paths.len());
-        values.push(Value::Text(previous_scope.to_owned()));
-        values.push(Value::Text(next_scope.to_owned()));
-        values.extend(excluded_paths.iter().map(|path| Value::Text(path.clone())));
-        transaction.execute(
-            &format!(
-                "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1 AND path NOT IN ({placeholders})",
-                table = table.table,
-                columns = table.columns,
-            ),
-            params_from_iter(values),
-        )?;
-    }
+    transaction.execute(
+        &format!(
+            "INSERT INTO {table_name} ({columns})
+             SELECT {selected_columns} FROM {table_name} WHERE source_scope = ?1",
+            table_name = table.table,
+            columns = table.columns,
+        ),
+        params![base_scope, target_scope],
+    )?;
 
     Ok(())
 }
@@ -650,9 +639,10 @@ fn call_symbol_signatures_by_snapshot_id(
     Ok(signatures)
 }
 
-fn update_repository_after_snapshot(
+fn stage_repository_after_snapshot(
     transaction: &rusqlite::Transaction<'_>,
     snapshot: &CodeIndexSnapshot,
+    defer_until_software_projection: bool,
 ) -> Result<(), StorageError> {
     let file_count = count_code_rows(transaction, "code_repository_files", &snapshot.source_scope)?;
     let symbol_count = count_code_rows(
@@ -681,79 +671,152 @@ fn update_repository_after_snapshot(
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let language_filters_json = serde_json::to_string(&snapshot.language_filters)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    commit_scope::preserve_existing_scope_commit(
+    crate::storage::sqlite::code::publication::stage(
         transaction,
-        &snapshot.repository_id,
-        &snapshot.source_scope,
-    )?;
-    transaction.execute(
-        "
-        INSERT INTO code_repository_scopes (
-            source_scope, repository_id, resolved_commit_sha, tree_hash,
-            path_filters_json, language_filters_json, indexed_file_count,
-            symbol_count, reference_count, chunk_count, stale, degraded_reason
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11)
-        ON CONFLICT(source_scope) DO UPDATE SET
-            repository_id = excluded.repository_id,
-            resolved_commit_sha = excluded.resolved_commit_sha,
-            tree_hash = excluded.tree_hash,
-            path_filters_json = excluded.path_filters_json,
-            language_filters_json = excluded.language_filters_json,
-            indexed_file_count = excluded.indexed_file_count,
-            symbol_count = excluded.symbol_count,
-            reference_count = excluded.reference_count,
-            chunk_count = excluded.chunk_count,
-            stale = 0,
-            degraded_reason = excluded.degraded_reason
-        ",
-        params![
-            snapshot.source_scope,
-            snapshot.repository_id,
-            snapshot.resolved_commit_sha,
-            snapshot.tree_hash,
-            path_filters_json,
-            language_filters_json,
-            file_count,
+        &crate::storage::sqlite::code::publication::ScopePublication {
+            repository_id: &snapshot.repository_id,
+            source_scope: &snapshot.source_scope,
+            resolved_commit_sha: &snapshot.resolved_commit_sha,
+            tree_hash: &snapshot.tree_hash,
+            path_filters_json: &path_filters_json,
+            language_filters_json: &language_filters_json,
+            indexed_file_count: file_count,
             symbol_count,
             reference_count,
             chunk_count,
-            degraded_reason,
-        ],
-    )?;
-    commit_scope::record(
-        transaction,
-        &snapshot.repository_id,
-        &snapshot.resolved_commit_sha,
-        &snapshot.source_scope,
-    )?;
-    transaction.execute(
-        "
-        UPDATE code_repositories
-        SET last_indexed_scope_id = ?2,
-            last_indexed_commit = ?3,
-            tree_hash = ?4,
-            state = 'fresh',
-            indexed_file_count = ?5,
-            symbol_count = ?6,
-            reference_count = ?7,
-            chunk_count = ?8,
-            stale = 0,
-            degraded_reason = ?9
-        WHERE repository_id = ?1
-        ",
-        params![
-            snapshot.repository_id,
-            snapshot.source_scope,
-            snapshot.resolved_commit_sha,
-            snapshot.tree_hash,
-            file_count,
-            symbol_count,
-            reference_count,
-            chunk_count,
-            degraded_reason,
-        ],
+            degraded_reason: degraded_reason.as_deref(),
+        },
+        defer_until_software_projection,
     )?;
 
     Ok(())
+}
+
+fn insert_durable_reference_manifest(
+    transaction: &rusqlite::Transaction<'_>,
+    snapshot: &CodeIndexSnapshot,
+    completion: &durable_clone::CloneCompletion,
+) -> Result<(), StorageError> {
+    if completion.cloned_reference_group_count > completion.cloned_reference_count {
+        return Err(StorageError::Invariant(format!(
+            "incremental clone for scope '{}' has more grouped reference owners than references",
+            snapshot.source_scope
+        )));
+    }
+    let changed = transaction.execute(
+        "INSERT INTO code_repository_reference_search_manifests (
+             source_scope, projection_version, reference_count, group_count
+         ) VALUES (?1, 2, ?2, ?3)",
+        params![
+            snapshot.source_scope,
+            completion.cloned_reference_count,
+            completion.cloned_reference_group_count,
+        ],
+    )?;
+    if changed == 1 {
+        return Ok(());
+    }
+    Err(StorageError::Invariant(format!(
+        "incremental clone for scope '{}' could not create its grouped-reference manifest",
+        snapshot.source_scope
+    )))
+}
+
+fn stage_repository_after_durable_snapshot(
+    transaction: &rusqlite::Transaction<'_>,
+    snapshot: &CodeIndexSnapshot,
+    completion: &durable_clone::CloneCompletion,
+) -> Result<(), StorageError> {
+    let file_count = durable_count(
+        completion.cloned_file_count,
+        snapshot.files.len(),
+        &snapshot.source_scope,
+    )?;
+    let symbol_count = durable_count(
+        completion.cloned_symbol_count,
+        snapshot.symbols.len(),
+        &snapshot.source_scope,
+    )?;
+    let reference_count = durable_count(
+        completion.cloned_reference_count,
+        snapshot.references.len(),
+        &snapshot.source_scope,
+    )?;
+    let chunk_count = durable_count(
+        completion.cloned_chunk_count,
+        snapshot.chunks.len(),
+        &snapshot.source_scope,
+    )?;
+    let degraded_file_count = durable_count(
+        completion.cloned_diagnostic_count,
+        snapshot.diagnostics.len(),
+        &snapshot.source_scope,
+    )?;
+    let degraded_reason = (degraded_file_count > 0)
+        .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
+    let path_filters_json = serde_json::to_string(&snapshot.path_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let language_filters_json = serde_json::to_string(&snapshot.language_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    crate::storage::sqlite::code::publication::stage(
+        transaction,
+        &crate::storage::sqlite::code::publication::ScopePublication {
+            repository_id: &snapshot.repository_id,
+            source_scope: &snapshot.source_scope,
+            resolved_commit_sha: &snapshot.resolved_commit_sha,
+            tree_hash: &snapshot.tree_hash,
+            path_filters_json: &path_filters_json,
+            language_filters_json: &language_filters_json,
+            indexed_file_count: file_count,
+            symbol_count,
+            reference_count,
+            chunk_count,
+            degraded_reason: degraded_reason.as_deref(),
+        },
+        true,
+    )
+}
+
+fn require_durable_grouped_reference_projection(
+    transaction: &rusqlite::Transaction<'_>,
+    snapshot: &CodeIndexSnapshot,
+    completion: &durable_clone::CloneCompletion,
+) -> Result<(), StorageError> {
+    let delta_group_count = reference_projection::reference_search_group_count(snapshot)?;
+    let expected_reference_count = durable_count(
+        completion.cloned_reference_count,
+        snapshot.references.len(),
+        &snapshot.source_scope,
+    )?;
+    let expected_group_count = durable_count(
+        completion.cloned_reference_group_count,
+        delta_group_count,
+        &snapshot.source_scope,
+    )?;
+    let exact = transaction.query_row(
+        "SELECT projection_version = 2 AND reference_count = ?2 AND group_count = ?3
+         FROM code_repository_reference_search_manifests
+         WHERE source_scope = ?1",
+        params![
+            snapshot.source_scope,
+            expected_reference_count,
+            expected_group_count,
+        ],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if exact && expected_group_count <= expected_reference_count {
+        return Ok(());
+    }
+    Err(StorageError::Invariant(format!(
+        "incremental clone for scope '{}' has an inexact grouped-reference manifest",
+        snapshot.source_scope
+    )))
+}
+
+fn durable_count(left: usize, right: usize, source_scope: &str) -> Result<usize, StorageError> {
+    left.checked_add(right).ok_or_else(|| {
+        StorageError::CapacityExceeded(format!(
+            "incremental clone counters for scope '{source_scope}' exceed platform capacity"
+        ))
+    })
 }

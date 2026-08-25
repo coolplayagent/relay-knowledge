@@ -121,12 +121,21 @@ pub(super) fn call_rows_to_hits(
                 request,
                 query_has_example_intent,
             );
-            let repeated_site_bonus =
-                if test_path_penalty >= 0.0 && (source_path_bonus > 0.0 || query_has_test_intent) {
-                    repeated_call_site_bonus(base_score, caller_target_call_count, request)
-                } else {
-                    0.0
-                };
+            let caller_has_test_context = caller_test_context_penalty(
+                base_score,
+                row.caller_name.as_deref(),
+                row.caller_canonical_symbol_id.as_deref(),
+                request,
+                query_has_test_intent,
+            ) < 0.0;
+            let repeated_site_bonus = if test_path_penalty >= 0.0
+                && !caller_has_test_context
+                && (source_path_bonus > 0.0 || query_has_test_intent)
+            {
+                repeated_call_site_bonus(base_score, caller_target_call_count, request)
+            } else {
+                0.0
+            };
             let score = base_score
                 + scoped_identity_bonus
                 + directional_call_context_bonus(
@@ -190,6 +199,14 @@ pub(super) fn call_rows_to_hits(
                 + repeated_site_bonus
                 + callee_related_name_bonus(query, &row.callee_name, request);
             let score = score + source_path_bonus + test_path_penalty + example_path_penalty;
+            let score = score
+                + caller_test_context_penalty(
+                    score,
+                    row.caller_name.as_deref(),
+                    row.caller_canonical_symbol_id.as_deref(),
+                    request,
+                    query_has_test_intent,
+                );
             (score > 0.0).then(|| {
                 let line_range = call_result_line_range(request.code_query_kind, &row);
                 let caller = call_display_name(

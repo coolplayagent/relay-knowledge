@@ -405,7 +405,8 @@ use crate::shard_031::file_2047::rk_wide_target_2047;
 pub fn rk_wide_bridge_dispatch(input: u64) -> u64 {
     let early = rk_wide_target_0000(input);
     let middle = rk_wide_target_1023(early);
-    rk_wide_target_2047(middle)
+    let late = rk_wide_target_2047(middle);
+    rk_wide_target_2047(late)
 }
 
 pub fn rk_wide_cross_shard_pipeline(values: &[u64]) -> u64 {

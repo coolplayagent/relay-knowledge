@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::{
+    BoundedFacts,
     document::{IndexedDocument, IndexedLine},
     syntax::{
         clean_scalar, design_heading_kind, file_name, json_string_value, markdown_heading,
@@ -19,6 +20,12 @@ use super::{
 };
 
 const MEDIUM_CONFIDENCE: u16 = 7_500;
+const MAX_DESIGN_ELEMENTS_PER_SCOPE: usize = 65_536;
+type DesignElements = BoundedFacts<SoftwareDesignElement>;
+
+pub(super) fn new_elements() -> DesignElements {
+    DesignElements::new(MAX_DESIGN_ELEMENTS_PER_SCOPE, "design elements")
+}
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -60,20 +67,40 @@ pub(super) fn delete_scope(
     Ok(())
 }
 
-pub(super) fn refresh(
+pub(super) fn persist(
     connection: &Connection,
-    graph_version: GraphVersion,
-    documents: &[IndexedDocument],
-) -> Result<Vec<SoftwareDesignElement>, StorageError> {
-    let mut elements = Vec::new();
-    for document in documents {
-        collect(document, graph_version, &mut elements)?;
-    }
-    for element in &elements {
-        insert_design_element(connection, element)?;
+    elements: &[SoftwareDesignElement],
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "
+        INSERT OR REPLACE INTO software_design_elements (
+            element_id, repository_id, source_scope, language_id, element_kind, name,
+            parent, summary, source_kind, evidence_path, evidence_line_start,
+            evidence_line_end, confidence_basis_points, created_graph_version
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        ",
+    )?;
+    for element in elements {
+        statement.execute(params![
+            element.element_id,
+            element.repository_id,
+            element.source_scope,
+            element.language_id,
+            element.element_kind,
+            element.name,
+            element.parent,
+            element.summary,
+            element.source_kind,
+            element.evidence_path,
+            element.evidence_line_range.start,
+            element.evidence_line_range.end,
+            element.confidence_basis_points,
+            element.created_graph_version.get(),
+        ])?;
     }
 
-    Ok(elements)
+    Ok(())
 }
 
 pub(in super::super) fn design_elements_for_scope(
@@ -112,39 +139,6 @@ pub(in super::super) fn design_elements_for_scope(
         .map_err(StorageError::from)
 }
 
-fn insert_design_element(
-    connection: &Connection,
-    element: &SoftwareDesignElement,
-) -> Result<(), StorageError> {
-    connection.execute(
-        "
-        INSERT OR REPLACE INTO software_design_elements (
-            element_id, repository_id, source_scope, language_id, element_kind, name,
-            parent, summary, source_kind, evidence_path, evidence_line_start,
-            evidence_line_end, confidence_basis_points, created_graph_version
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-        ",
-        params![
-            element.element_id,
-            element.repository_id,
-            element.source_scope,
-            element.language_id,
-            element.element_kind,
-            element.name,
-            element.parent,
-            element.summary,
-            element.source_kind,
-            element.evidence_path,
-            element.evidence_line_range.start,
-            element.evidence_line_range.end,
-            element.confidence_basis_points,
-            element.created_graph_version.get(),
-        ],
-    )?;
-    Ok(())
-}
-
 fn design_element_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareDesignElement> {
     Ok(SoftwareDesignElement {
         element_id: row.get(0)?,
@@ -167,18 +161,12 @@ fn design_element_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Software
 }
 
 fn push_design_element(
-    elements: &mut Vec<SoftwareDesignElement>,
+    elements: &mut DesignElements,
     input: SoftwareDesignElementInput,
 ) -> Result<(), StorageError> {
     let element = SoftwareDesignElement::new(input)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    if !elements
-        .iter()
-        .any(|existing| existing.element_id == element.element_id)
-    {
-        elements.push(element);
-    }
-    Ok(())
+    elements.insert(element.element_id.clone(), element)
 }
 
 fn design_input(
@@ -208,10 +196,10 @@ fn design_input(
     }
 }
 
-fn collect(
+pub(super) fn collect(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    elements: &mut Vec<SoftwareDesignElement>,
+    elements: &mut DesignElements,
 ) -> Result<(), StorageError> {
     let lower_path = document.path.to_ascii_lowercase();
     if lower_path.ends_with(".md") || lower_path.ends_with(".mdx") {
@@ -230,7 +218,7 @@ fn collect(
 fn collect_markdown(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    elements: &mut Vec<SoftwareDesignElement>,
+    elements: &mut DesignElements,
 ) -> Result<(), StorageError> {
     for (index, line) in document.lines.iter().enumerate() {
         let trimmed = line.text.trim();
@@ -251,7 +239,7 @@ fn collect_manifest(
     document: &IndexedDocument,
     graph_version: GraphVersion,
     ecosystem: &str,
-    elements: &mut Vec<SoftwareDesignElement>,
+    elements: &mut DesignElements,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         let trimmed = line.text.trim();

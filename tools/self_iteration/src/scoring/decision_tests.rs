@@ -25,6 +25,127 @@ fn failed_gate_rejects() {
     assert!(score.reject_reasons[0].contains("quality gates failed"));
 }
 
+#[test]
+fn key_metric_over_budget_rejects_even_with_bug_fix_priority() {
+    let previous = serde_json::json!({
+        "score": 0.9,
+        "foundational_capability": 0.0,
+        "competitive_capability": 0.0,
+        "semantic_vector": 0.0,
+        "performance": 1.0,
+        "stability": 1.0,
+        "gates": [{"name": "cargo_test", "passed": false}],
+        "cases": [],
+        "metrics": []
+    });
+    let observation = EvaluationObservation {
+        gates: vec![GateObservation {
+            name: "cargo_test".to_owned(),
+            passed: true,
+            duration_ms: 1,
+            message: "fixed".to_owned(),
+        }],
+        cases: Vec::new(),
+        metrics: vec![MetricObservation {
+            name: "query_p95_ms".to_owned(),
+            value: 240.0,
+            budget: Some(200.0),
+            lower_is_better: true,
+            key: true,
+        }],
+        generated_diff: true,
+    };
+
+    let score = score_evaluation(
+        &observation,
+        ScoreBaselines {
+            workload_previous: Some(&previous),
+            profile_best_accepted: None,
+        },
+    );
+
+    assert!(!score.accepted);
+    assert!(score.improvements.iter().any(|item| {
+        item.get("kind").and_then(Value::as_str) == Some("gate")
+            && item.get("name").and_then(Value::as_str) == Some("cargo_test")
+    }));
+    assert!(
+        score
+            .reject_reasons
+            .iter()
+            .any(|reason| { reason == "key metric budgets failed: query_p95_ms=240 budget=200" })
+    );
+}
+
+#[test]
+fn non_key_metric_over_budget_does_not_hard_reject() {
+    let observation = EvaluationObservation {
+        gates: Vec::new(),
+        cases: Vec::new(),
+        metrics: vec![MetricObservation {
+            name: "diagnostic_p95_ms".to_owned(),
+            value: 240.0,
+            budget: Some(200.0),
+            lower_is_better: true,
+            key: false,
+        }],
+        generated_diff: true,
+    };
+
+    let score = score_evaluation(&observation, ScoreBaselines::default());
+
+    assert!(score.accepted);
+    assert!(score.metric_budget_failures.is_empty());
+}
+
+#[test]
+fn key_metric_within_budget_can_proceed() {
+    let observation = EvaluationObservation {
+        gates: Vec::new(),
+        cases: Vec::new(),
+        metrics: vec![MetricObservation {
+            name: "text_fallback_ratio".to_owned(),
+            value: 0.166,
+            budget: Some(0.75),
+            lower_is_better: true,
+            key: true,
+        }],
+        generated_diff: true,
+    };
+
+    let score = score_evaluation(&observation, ScoreBaselines::default());
+
+    assert!(score.accepted);
+    assert!(score.metric_budget_failures.is_empty());
+}
+
+#[test]
+fn higher_is_better_key_metric_below_budget_hard_rejects() {
+    let observation = EvaluationObservation {
+        gates: Vec::new(),
+        cases: Vec::new(),
+        metrics: vec![MetricObservation {
+            name: "minimum_recall".to_owned(),
+            value: 0.7,
+            budget: Some(0.8),
+            lower_is_better: false,
+            key: true,
+        }],
+        generated_diff: true,
+    };
+
+    let score = score_evaluation(&observation, ScoreBaselines::default());
+
+    assert!(!score.accepted);
+    assert_eq!(score.metric_budget_failures.len(), 1);
+    assert!(
+        score
+            .reject_reasons
+            .iter()
+            .any(|reason| { reason == "key metric budgets failed: minimum_recall=0.7 budget=0.8" })
+    );
+}
+
 fn case(case_id: &str, objective: &str, score_override: f64) -> CaseObservation {
     CaseObservation {
         case_id: case_id.to_owned(),

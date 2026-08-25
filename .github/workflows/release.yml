@@ -79,6 +79,11 @@ jobs:
             echo "publish_crate=$publish_crate"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Documentation structure and local-link gate
+        run: |
+          python3 tools/docs/check_docs.py --self-test
+          python3 tools/docs/check_docs.py
+
       - name: Format gate
         run: cargo fmt --all -- --check
 

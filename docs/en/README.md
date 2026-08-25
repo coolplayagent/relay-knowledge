@@ -2,13 +2,11 @@
 
 [English](../en/README.md) | [中文](../zh/README.md)
 
-This edition follows the same numbered book structure as the Chinese edition:
-user workflows first, feature behavior second, then architecture specifications,
-research notes, benchmark records, and verification records.
-
-> Translation status: several English pages still preserve Chinese source prose
-> while the full translation is maintained incrementally. Commands, API paths,
-> environment variables, filenames, and configuration contracts are authoritative.
+The English and Chinese editions share the same six-volume taxonomy: user
+workflows first, feature behavior second, then architecture specifications,
+research notes, benchmark records, and verification records. Chapter sets may
+differ only where this bookshelf or a volume cover maps the difference
+explicitly; a matching volume does not imply a one-to-one chapter translation.
 
 Directory responsibilities are fixed: `01-user-guide` is for executable user
 workflows; `02-capabilities` describes implemented behavior only;
@@ -21,7 +19,9 @@ volume covers and count as chapter 0 when they appear in a reading path.
 
 For release preparation, start with the root README, Chapter 1 installation
 workflow, Chapter 19 installation/release architecture contract, and the latest
-[documentation release-readiness audit](06-verification/11-documentation-release-readiness-2026-06-05.md).
+[documentation and self-iteration readiness record](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md).
+The [2026-06-05 audit](06-verification/11-documentation-release-readiness-2026-06-05.md)
+remains a historical snapshot rather than evidence for the current worktree.
 The Chinese edition currently includes several benchmark and verification
 records that are intentionally listed below as Chinese-only until translated.
 
@@ -36,7 +36,7 @@ records that are intentionally listed below as Chinese-only until translated.
 - [Chapter 6: Web Workspace](01-user-guide/06-web-workspace.md)
 - [Chapter 7: MCP Agent Access](01-user-guide/07-mcp-agent-access.md)
 - [Chapter 8: ACP Local Adapter](01-user-guide/08-acp-local-adapter.md)
-- [Chapter 9: Resident Service](01-user-guide/09-resident-service.md)
+- [Chapter 9: Service Deployment and Resident Operation](01-user-guide/09-resident-service.md)
 - [Chapter 10: Workers, Proposals, and Audit](01-user-guide/10-workers-proposals-audit.md)
 - [Chapter 11: Observability and Telemetry](01-user-guide/11-observability-and-telemetry.md)
 - [Chapter 12: Advanced Configuration](01-user-guide/12-advanced-configuration.md)
@@ -44,6 +44,7 @@ records that are intentionally listed below as Chinese-only until translated.
 
 ## Book 2: Capabilities
 
+- [Chapter 0: Capabilities Overview](02-capabilities/README.md): implemented behavior, reading order, and status-language conventions.
 - [Chapter 1: Capability Overview](02-capabilities/01-capability-overview.md)
 - [Chapter 2: Local-first Runtime and CLI](02-capabilities/02-local-first-runtime-and-cli.md)
 - [Chapter 3: Evidence and Graph Facts](02-capabilities/03-evidence-and-graph-facts.md)
@@ -62,6 +63,7 @@ records that are intentionally listed below as Chinese-only until translated.
 
 ## Book 3: Architecture Specifications
 
+- [Chapter 0: Architecture Specifications Overview](03-architecture-specs/README.md): normative contracts, reading order, and contract interpretation.
 - [Chapter 1: Architecture Vision and Algorithm Map](03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
 - [Chapter 2: Engineering Hard Constraints](03-architecture-specs/02-engineering-hard-constraints.md)
 - [Chapter 3: Foundational Runtime](03-architecture-specs/03-foundational-runtime.md)
@@ -85,7 +87,7 @@ records that are intentionally listed below as Chinese-only until translated.
 - [Chapter 21: Software Global Domain Modeling Architecture](03-architecture-specs/21-software-global-domain-modeling.md)
 - [Chapter 22: Service Deployment, Control Plane, and Data Plane](03-architecture-specs/22-service-deployment-control-data-plane.md)
 - [Chapter 24: Code-Map-Backed Knowledge Development Loop](03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
-- [Chapter 25: Code Index Retention](03-architecture-specs/25-code-index-retention.md)
+- [Chapter 26: Git Commit + Knowledge Development Philosophy and Iteration Loop](03-architecture-specs/26-git-commit-knowledge-development-loop.md)
 
 ## Book 4: Research
 
@@ -105,10 +107,11 @@ records that are intentionally listed below as Chinese-only until translated.
 
 ## Appendix A: Benchmarks
 
+- [Appendix A.0: Benchmark and Evaluation Records](05-benchmarks/README.md): dated evidence boundaries, result index, and safe comparison rules.
 - [Appendix A.1: relay-teams Baseline 2026-05-14](05-benchmarks/01-relay-teams-baseline-2026-05-14.md)
 - [Appendix A.2: relay-teams Optimization Issues 2026-05-14](05-benchmarks/02-relay-teams-optimization-issues-2026-05-14.md)
 - [Appendix A.3: relay-teams Optimization Study 2026-05-14](05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
-- [Appendix A.4: Self-Iteration Accepted Optimization Records](05-benchmarks/04-self-iteration-accepted-optimizations.md)
+- [Appendix A.4: Self-Iteration Optimization Status Ledger](05-benchmarks/04-self-iteration-accepted-optimizations.md)
 - [Appendix A.5: Competitive and High-Performance Benchmark Targets 2026-05-17](05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
 - [Appendix A.6: C/C++ Syntax Self-Iteration Evaluation Set 2026-05-20](05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
 - [Appendix A.7: Multilingual Syntax Self-Iteration Evaluation Set 2026-05-21](05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md)
@@ -117,9 +120,12 @@ Chinese-only benchmark addenda pending English translation:
 [Appendix A.8](../zh/05-benchmarks/08-code-index-fact-versioning.md),
 [Appendix A.9](../zh/05-benchmarks/09-code-query-ranking-foundational.md), and
 [Appendix A.10](../zh/05-benchmarks/10-profile-all-performance-source-surface-2026-06-04.md).
+The detailed historical runs split from Appendix A.4 are also Chinese-only;
+their entry point is the [Chinese archive index](../zh/05-benchmarks/archive/README.md).
 
 ## Appendix B: Verification
 
+- [Appendix B.0: Verification Records](06-verification/README.md): dated audit index and evidence rules.
 - [Appendix B.1: Documentation Book Refresh Audit 2026-05-17](06-verification/01-documentation-book-refresh-2026-05-17.md): directory responsibilities, closed capability status, and bookshelf index refresh.
 - [Appendix B.2: Documentation Refresh Audit 2026-05-17](06-verification/02-documentation-refresh-audit-2026-05-17.md): documentation sync record for the code retrieval self-iteration commits.
 - [Appendix B.3: Documentation Refresh Audit 2026-05-14](06-verification/03-documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and open productization work.
@@ -130,6 +136,7 @@ Chinese-only benchmark addenda pending English translation:
 - [Appendix B.10: Service Deployment, Control Plane, and Data Plane Documentation Refresh Audit 2026-06-04](06-verification/10-service-deployment-control-data-plane-2026-06-04.md): issue #250 service deployment plan and architecture index sync record.
 - [Appendix B.11: Documentation Release Readiness Audit 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md): release navigation, file inventory, local link checking, and documentation-only change boundaries.
 - [Appendix B.12: Graph Database, Knowledge Graph, and CodeGraph Deep Research Archive 2026-06-05](06-verification/12-graph-database-codegraph-deep-research-archive-2026-06-05.md): arXiv, X.com, Reddit, and open-source source ledger, research artifacts, competitive feature issues, and validation state archive.
+- [Appendix B.13: Documentation and Self-Iteration Readiness Verification 2026-08-18](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md): current confirmed Rust/package/Web-build/runtime/browser/coverage evidence, an accepted focused-fast performance report, the local `--with-deps` setup limitation, pending exhaustive/Kubernetes accuracy evidence, and the failed Kubernetes 210-second performance rail.
 
 Chinese-only verification records pending English translation:
 [Appendix B.5](../zh/06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md) and

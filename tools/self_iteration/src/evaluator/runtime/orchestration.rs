@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -10,7 +9,7 @@ use serde_json::Value;
 use crate::{
     cases::{array_field, object_field, objects_by_repository},
     command::inherited_env,
-    config::{CategorySet, Config, JobPlan},
+    config::{CategorySet, Config, EvaluationCategory, JobPlan},
     history::HistoryPaths,
     scoring::GateObservation,
 };
@@ -21,15 +20,16 @@ use super::super::{
     workloads::{
         WorkloadSelection, evaluate_agent_workflows, evaluate_cli_contract_cases,
         evaluate_file_fixtures, evaluate_registration_cases, evaluate_repository,
-        evaluate_repository_sets, evaluate_semantic_vector_suite, evaluation_home,
-        relay_knowledge_binary, repository_in_profile, select_repository_cases_for_profile,
-        selected_repository_set_member_names, semantic_vector_suite_for_selection,
+        evaluate_repository_sets, evaluate_semantic_vector_suite, repository_in_profile,
+        select_repository_cases_for_profile, selected_repository_set_member_names,
+        semantic_vector_suite_for_selection,
     },
 };
 use super::{
     concurrency::parallel_map,
     contracts::{EvalRuntime, EvaluationRun, Limiter},
     finish::{FinishInput, finish},
+    workdir::EvaluationHome,
 };
 
 type RepositoryWorkItem = (String, Value, Vec<Value>, Vec<Value>);
@@ -42,26 +42,39 @@ pub fn evaluate_candidate(
     generated_diff: bool,
     candidate_diff: &str,
 ) -> Result<EvaluationRun, String> {
+    let evaluation_home = EvaluationHome::prepare(paths, run_id, config.keep_workdirs)?;
+    let run_home = evaluation_home.path().to_path_buf();
+    let result = evaluate_candidate_in_home(
+        config,
+        run_id,
+        cases_config,
+        generated_diff,
+        candidate_diff,
+        run_home,
+    );
+    evaluation_home.complete_result(result)
+}
+
+fn evaluate_candidate_in_home(
+    config: &Config,
+    run_id: &str,
+    cases_config: &Value,
+    generated_diff: bool,
+    candidate_diff: &str,
+    run_home: std::path::PathBuf,
+) -> Result<EvaluationRun, String> {
     let evaluation_started = Instant::now();
     let job_plan = JobPlan::resolve(config);
     let limiter = Limiter::new(job_plan.global);
-    let (run_home, cached_home) = evaluation_home(config, paths, run_id);
     eprintln!(
-        "[self-iterate] evaluation start run_id={} profile={} home={} cached_home={} jobs=global:{},repo:{},query:{}",
+        "[self-iterate] evaluation start run_id={} profile={} home={} run_scoped_home=true jobs=global:{},repo:{},query:{}",
         run_id,
         config.profile,
         run_home.display(),
-        cached_home,
         job_plan.global,
         job_plan.repositories,
         job_plan.queries
     );
-    if run_home.exists() && !config.keep_workdirs && !cached_home {
-        fs::remove_dir_all(&run_home)
-            .map_err(|error| format!("failed to remove {}: {error}", run_home.display()))?;
-    }
-    fs::create_dir_all(&run_home)
-        .map_err(|error| format!("failed to create {}: {error}", run_home.display()))?;
     let mut commands = Vec::new();
     let mut gates = Vec::new();
     let mut cases = Vec::new();
@@ -70,7 +83,7 @@ pub fn evaluate_candidate(
     let selection = WorkloadSelection::new(config);
 
     if !run_quality_gate_stages(
-        &config.profile,
+        config,
         &config.workspace,
         &limiter,
         &mut commands,
@@ -86,7 +99,6 @@ pub fn evaluate_candidate(
             commands,
             repo_reports,
             run_home,
-            cached_home,
             job_plan,
             selection,
             started: evaluation_started,
@@ -102,14 +114,18 @@ pub fn evaluate_candidate(
             commands,
             repo_reports,
             run_home,
-            cached_home,
             job_plan,
             selection,
             started: evaluation_started,
         });
     }
 
-    let binary = relay_knowledge_binary(config);
+    let binary = config.product_binary_path().ok_or_else(|| {
+        format!(
+            "profile `{}` does not select a product binary workload",
+            config.profile
+        )
+    })?;
     let mut env = inherited_env();
     env.insert(
         "RELAY_KNOWLEDGE_HOME".to_owned(),
@@ -125,6 +141,7 @@ pub fn evaluate_candidate(
         limiter: limiter.clone(),
         writer_lock: Arc::new(Mutex::new(())),
         query_jobs: job_plan.queries,
+        keep_workdirs: config.keep_workdirs,
     };
 
     let cli_contract_report = evaluate_cli_contract_cases(
@@ -370,7 +387,6 @@ pub fn evaluate_candidate(
         commands,
         repo_reports,
         run_home,
-        cached_home,
         job_plan,
         selection,
         started: evaluation_started,
@@ -392,6 +408,11 @@ fn select_repository_work_items(
             if !needed_for_repo_set && !repository_in_profile(profile, name, repo_config) {
                 return None;
             }
+            let selected_index_only_performance_target = repo_config
+                .get("index_only_performance_target")
+                .and_then(Value::as_bool)
+                == Some(true)
+                && categories.is_none_or(|items| items.contains(EvaluationCategory::Performance));
             let repo_cases = grouped_cases
                 .get(name)
                 .cloned()
@@ -402,7 +423,11 @@ fn select_repository_work_items(
                 .cloned()
                 .map(|cases| select_repository_cases_for_profile(profile, categories, cases))
                 .unwrap_or_default();
-            if repo_cases.is_empty() && software_cases.is_empty() && !needed_for_repo_set {
+            if repo_cases.is_empty()
+                && software_cases.is_empty()
+                && !needed_for_repo_set
+                && !selected_index_only_performance_target
+            {
                 return None;
             }
             Some((

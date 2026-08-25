@@ -7,12 +7,13 @@ use crate::{
     },
     code::{reset_tracked_entries_call_count_for_root, tracked_entries_call_count_for_root},
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
-        CodeIndexResourceBudget, CodeIndexSession, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, FreshnessPolicy,
-        RepositoryCodeRange, SoftwareGlobalKind, SoftwareGlobalRequest, StalenessHint,
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexPublicationFence,
+        CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSession, CodeQueryKind,
+        CodeRepositorySelector, CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest,
+        FreshnessPolicy, RepositoryCodeRange, SoftwareGlobalKind, SoftwareGlobalRequest,
+        StalenessHint,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, SqliteGraphStore},
 };
 
 use super::test_support::*;
@@ -736,28 +737,49 @@ async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
         )
         .await
         .expect("head refresh should queue");
-    let active_task = started.task.expect("active task should be queued");
-    store
-        .begin_code_index_session(CodeIndexSession {
-            repository_id: active_task.repository_id.clone(),
-            source_scope: active_task.source_scope.clone(),
-            base_resolved_commit_sha: Some(initial_commit.clone()),
-            resolved_commit_sha: active_task.resolved_commit_sha.clone(),
-            tree_hash: active_task.tree_hash.clone(),
-            path_filters: active_task.path_filters.clone(),
-            language_filters: active_task.language_filters.clone(),
-            full_replace: true,
-            total_path_count: 8,
-            changed_path_count: 8,
-            skipped_unchanged_count: 0,
-            deleted_paths: Vec::new(),
-            changed_paths: Vec::new(),
-            tombstones: Vec::new(),
-            workspaces: Vec::new(),
-            resource_budget: CodeIndexResourceBudget::default(),
+    let queued_task = started.task.expect("active task should be queued");
+    let running_task = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued_task.task_id),
+            lease_owner: "unmatched-active-worker".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: super::now_millis(),
         })
         .await
-        .expect("unmatched active checkpoint should begin");
+        .expect("active task claim should run")
+        .expect("queued active task should claim");
+    let fence = CodeIndexPublicationFence {
+        repository_id: running_task.repository_id.clone(),
+        task_id: running_task.task_id.clone(),
+        lease_owner: "unmatched-active-worker".to_owned(),
+        attempt_count: running_task.attempt_count,
+        generation: running_task.publication_generation,
+    };
+    store
+        .begin_code_index_session_with_fence(
+            CodeIndexSession {
+                repository_id: running_task.repository_id.clone(),
+                source_scope: running_task.source_scope.clone(),
+                base_resolved_commit_sha: Some(initial_commit.clone()),
+                resolved_commit_sha: running_task.resolved_commit_sha.clone(),
+                tree_hash: running_task.tree_hash.clone(),
+                path_filters: running_task.path_filters.clone(),
+                language_filters: running_task.language_filters.clone(),
+                full_replace: true,
+                total_path_count: 8,
+                changed_path_count: 8,
+                skipped_unchanged_count: 0,
+                deleted_paths: Vec::new(),
+                changed_paths: Vec::new(),
+                tombstones: Vec::new(),
+                workspaces: Vec::new(),
+                resource_budget: CodeIndexResourceBudget::default(),
+            },
+            fence,
+        )
+        .await
+        .expect("fenced unmatched active checkpoint should begin");
 
     let query = service
         .query_code_repository(
@@ -791,7 +813,7 @@ async fn fresh_ref_query_ignores_unmatched_active_task_checkpoint() {
             .cursor
             .as_ref()
             .map(|cursor| cursor.source_scope.as_str()),
-        Some(active_task.source_scope.as_str())
+        Some(running_task.source_scope.as_str())
     );
 }
 

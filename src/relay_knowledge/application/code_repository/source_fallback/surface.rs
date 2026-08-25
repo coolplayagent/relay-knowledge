@@ -8,6 +8,7 @@ use crate::{
 };
 
 use super::super::source_surface::hit_has_complete_source_surface;
+use super::identity::source_grep_identity;
 
 pub(super) fn hybrid_source_surface_fallback(
     request: &CodeRetrievalRequest,
@@ -48,6 +49,10 @@ pub(super) fn hybrid_exact_path_source_fallback(
     results: &[CodeRetrievalHit],
 ) -> Option<(String, Vec<String>)> {
     let query = exact_path_hybrid_source_query(&request.query, results)?;
+    if source_grep_identity(&request.query).is_none() && ordered_identifier_terms(&query).len() < 2
+    {
+        return None;
+    }
     let paths = request
         .repository
         .path_filters
@@ -74,10 +79,11 @@ pub(super) fn hit_source_line_is_better(
     matched: &SourceGrepMatch,
     query: &str,
 ) -> bool {
-    if source_type_declaration_line_matches_query(&matched.excerpt, query)
-        && !source_type_declaration_line_matches_query(&hit.excerpt, query)
-    {
-        return true;
+    let matched_is_type_declaration =
+        source_type_declaration_line_matches_query(&matched.excerpt, query);
+    let hit_is_type_declaration = source_type_declaration_line_matches_query(&hit.excerpt, query);
+    if matched_is_type_declaration != hit_is_type_declaration {
+        return matched_is_type_declaration;
     }
     if matched.excerpt.contains(query) && !hit.excerpt.contains(query) {
         return true;

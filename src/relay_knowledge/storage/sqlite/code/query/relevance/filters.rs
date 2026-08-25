@@ -9,25 +9,37 @@ pub(in crate::storage::sqlite::code::query) fn fts_path_and_language_filter_sql(
     request: &CodeRetrievalRequest,
 ) -> String {
     let mut clauses = Vec::new();
-    push_path_filter_sql(&mut clauses, "path", &status.path_filters);
-    push_path_filter_sql(&mut clauses, "path", &request.repository.path_filters);
-    push_query_path_substring_filter_sql(&mut clauses, "path", &request.query_path_substrings);
+    push_path_filter_sql(
+        &mut clauses,
+        "code_repository_search.path",
+        &status.path_filters,
+    );
+    push_path_filter_sql(
+        &mut clauses,
+        "code_repository_search.path",
+        &request.repository.path_filters,
+    );
+    push_query_path_substring_filter_sql(
+        &mut clauses,
+        "code_repository_search.path",
+        &request.query_path_substrings,
+    );
     push_language_filter_sql(
         &mut clauses,
-        "language_id",
-        "path",
+        "code_repository_search.language_id",
+        "code_repository_search.path",
         &status.language_filters,
     );
     push_language_filter_sql(
         &mut clauses,
-        "language_id",
-        "path",
+        "code_repository_search.language_id",
+        "code_repository_search.path",
         &request.repository.language_filters,
     );
     push_language_filter_sql(
         &mut clauses,
-        "language_id",
-        "path",
+        "code_repository_search.language_id",
+        "code_repository_search.path",
         &request.query_language_filters,
     );
     if request.exclude_generated {
@@ -118,10 +130,18 @@ pub(in crate::storage::sqlite::code::query) fn kind_filter_sql_for_column(
 }
 
 fn push_path_filter_sql(clauses: &mut Vec<String>, column: &str, filters: &[String]) {
+    // Repository paths use SQLite's BINARY collation. Appending `0` is an
+    // exclusive upper bound for the exact path and its `/` descendants because
+    // `/` (0x2f) immediately precedes `0` (0x30); the residual rejects siblings.
     let clauses_for_filters = filters
         .iter()
         .filter_map(|filter| normalized_sql_path_filter(filter))
-        .map(|_| format!("({column} = ? OR {column} LIKE ? ESCAPE '\\')"))
+        .map(|_| {
+            format!(
+                "({column} >= ? AND {column} < ? \
+                 AND substr({column}, length(?) + 1, 1) IN ('', '/'))"
+            )
+        })
         .collect::<Vec<_>>();
     if !clauses_for_filters.is_empty() {
         clauses.push(format!("({})", clauses_for_filters.join(" OR ")));
@@ -175,7 +195,8 @@ pub(in crate::storage::sqlite::code::query) fn push_path_filter_values(
         .filter_map(|filter| normalized_sql_path_filter(filter))
     {
         values.push(Value::Text(filter.clone()));
-        values.push(Value::Text(format!("{}/%", escape_sql_like(&filter))));
+        values.push(Value::Text(format!("{filter}0")));
+        values.push(Value::Text(filter));
     }
 }
 
@@ -217,3 +238,7 @@ fn normalized_sql_path_filter(filter: &str) -> Option<String> {
     }
     (!filter.is_empty() && filter != ".").then(|| filter.to_owned())
 }
+
+#[cfg(test)]
+#[path = "filters_tests.rs"]
+mod tests;

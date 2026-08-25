@@ -259,6 +259,101 @@ fn dense_sources_use_windows_and_keep_callable_context_chunks() {
     assert!(chunks[1].content.contains("rk_dense_run"));
 }
 
+#[test]
+fn large_symbolized_sources_keep_top_level_relationship_assertions() {
+    let registration = registration();
+    let build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        1,
+        0,
+    );
+    let assertion = "var _ runtime.Contract = &Worker{}\n";
+    let padding = "// bounded top-level context\n".repeat(340);
+    let worker_start = padding.len() + assertion.len();
+    let worker = "type Worker struct{}\n";
+    let content = format!("{padding}{assertion}{worker}");
+    assert!(content.len() > MAX_SOURCE_SURFACE_CHUNK_BYTES);
+    let symbols = vec![symbol(
+        "Worker",
+        "struct",
+        worker_start,
+        worker_start + worker.len(),
+        342,
+    )];
+
+    let chunks = chunks_for_symbols(
+        &build,
+        "runtime/worker.go",
+        "file-worker",
+        "go",
+        &content,
+        &symbols,
+    )
+    .expect("large Go source chunks should build");
+
+    assert!(chunks.iter().any(|chunk| {
+        chunk.symbol_snapshot_id.is_none()
+            && chunk.content.contains("var _ runtime.Contract = &Worker{}")
+    }));
+    assert!(chunks.iter().all(|chunk| {
+        chunk.symbol_snapshot_id.is_some() || chunk.content.len() <= MAX_SOURCE_SURFACE_CHUNK_BYTES
+    }));
+}
+
+#[test]
+fn uncovered_source_chunks_have_a_per_file_footprint_ceiling() {
+    let registration = registration();
+    let build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        1,
+        0,
+    );
+    let symbol_count = 64usize;
+    let mut content = String::new();
+    let mut symbols = Vec::with_capacity(symbol_count);
+    for index in 0..symbol_count {
+        content.push_str(&format!("// file-level relationship context {index}\n").repeat(50));
+        let start = content.len();
+        content.push_str(&format!("struct Item{index:02};\n"));
+        symbols.push(symbol(
+            &format!("Item{index:02}"),
+            "struct",
+            start,
+            content.len(),
+            index.saturating_mul(51).saturating_add(51),
+        ));
+    }
+    content.push_str("// trailing file-level relationship context\n");
+    let uncovered_gap_count = symbol_count.saturating_add(1);
+
+    let chunks = chunks_for_symbols(
+        &build,
+        "include/footprint.h",
+        "file-footprint",
+        "c",
+        &content,
+        &symbols,
+    )
+    .expect("bounded uncovered source chunks should build");
+    let uncovered_chunk_count = chunks
+        .iter()
+        .filter(|chunk| chunk.symbol_snapshot_id.is_none())
+        .count();
+
+    assert_eq!(
+        uncovered_chunk_count,
+        uncovered_gap_count.min(MAX_UNCOVERED_SOURCE_CHUNKS_PER_FILE)
+    );
+    assert_eq!(chunks.len(), symbol_count + uncovered_chunk_count);
+    assert!(chunks.len() <= symbol_count.saturating_add(MAX_UNCOVERED_SOURCE_CHUNKS_PER_FILE));
+}
+
 fn symbol(
     name: &str,
     kind: &str,

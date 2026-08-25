@@ -28,15 +28,18 @@ static FILESYSTEM_POLICY_READ_MUTATION: Mutex<Option<FileSystemPolicyReadMutatio
     Mutex::new(None);
 
 #[cfg(test)]
-#[derive(Debug)]
-struct SourceReadObserver {
-    root: PathBuf,
+#[derive(Debug, Default)]
+struct SourceReadCounts {
     single_reads: usize,
     batch_reads: usize,
 }
 
 #[cfg(test)]
-static SOURCE_READ_OBSERVER: Mutex<Option<SourceReadObserver>> = Mutex::new(None);
+const MAX_SOURCE_READ_OBSERVERS: usize = 64;
+
+#[cfg(test)]
+static SOURCE_READ_OBSERVERS: Mutex<BTreeMap<PathBuf, SourceReadCounts>> =
+    Mutex::new(BTreeMap::new());
 
 #[cfg(test)]
 pub(crate) fn mutate_next_filesystem_policy_read(root: PathBuf, path: &str, content: &[u8]) {
@@ -160,47 +163,50 @@ fn source_batch_bytes_after_policy_verification(
 
 #[cfg(test)]
 pub(crate) fn reset_source_read_counts_for_root(root: PathBuf) {
-    *SOURCE_READ_OBSERVER
+    let root = source_read_observer_key(&root);
+    let mut observers = SOURCE_READ_OBSERVERS
         .lock()
-        .expect("source read observer should lock") = Some(SourceReadObserver {
-        root,
-        single_reads: 0,
-        batch_reads: 0,
-    });
+        .expect("source read observers should lock");
+    if !observers.contains_key(&root) && observers.len() >= MAX_SOURCE_READ_OBSERVERS {
+        observers.pop_first();
+    }
+    observers.insert(root, SourceReadCounts::default());
 }
 
 #[cfg(test)]
 pub(crate) fn source_read_counts_for_root(root: &Path) -> (usize, usize) {
-    SOURCE_READ_OBSERVER
+    SOURCE_READ_OBSERVERS
         .lock()
-        .expect("source read observer should lock")
-        .as_ref()
-        .filter(|observer| observer.root == root)
-        .map(|observer| (observer.single_reads, observer.batch_reads))
+        .expect("source read observers should lock")
+        .get(&source_read_observer_key(root))
+        .map(|counts| (counts.single_reads, counts.batch_reads))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+fn source_read_observer_key(root: &Path) -> PathBuf {
+    root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
 }
 
 fn record_source_single_read(_root: &Path) {
     #[cfg(test)]
-    if let Some(observer) = SOURCE_READ_OBSERVER
+    if let Some(counts) = SOURCE_READ_OBSERVERS
         .lock()
-        .expect("source read observer should lock")
-        .as_mut()
-        && observer.root == _root
+        .expect("source read observers should lock")
+        .get_mut(&source_read_observer_key(_root))
     {
-        observer.single_reads += 1;
+        counts.single_reads += 1;
     }
 }
 
 fn record_source_batch_read(_root: &Path) {
     #[cfg(test)]
-    if let Some(observer) = SOURCE_READ_OBSERVER
+    if let Some(counts) = SOURCE_READ_OBSERVERS
         .lock()
-        .expect("source read observer should lock")
-        .as_mut()
-        && observer.root == _root
+        .expect("source read observers should lock")
+        .get_mut(&source_read_observer_key(_root))
     {
-        observer.batch_reads += 1;
+        counts.batch_reads += 1;
     }
 }
 

@@ -53,6 +53,40 @@ fn missing_manifests_return_empty() {
     assert!(result.is_empty());
 }
 
+#[test]
+fn workspace_format_order_and_duplicates_do_not_change_detected_facts() {
+    let root = test_root("canonical-formats");
+    fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/a'\n  - 'packages/b'\n",
+    )
+    .unwrap();
+    for name in ["a", "b"] {
+        fs::create_dir_all(root.join(format!("packages/{name}"))).unwrap();
+        fs::write(
+            root.join(format!("packages/{name}/package.json")),
+            format!("{{\"name\":\"{name}\"}}"),
+        )
+        .unwrap();
+    }
+    let canonical = CodeWorkspaceDetectionConfig {
+        enabled: true,
+        supported_formats: vec![CodeMonorepoWorkspaceFormat::Pnpm],
+    };
+    let duplicated = CodeWorkspaceDetectionConfig {
+        enabled: true,
+        supported_formats: vec![
+            CodeMonorepoWorkspaceFormat::Pnpm,
+            CodeMonorepoWorkspaceFormat::Pnpm,
+        ],
+    };
+
+    assert_eq!(
+        detect_workspaces(&root, &canonical),
+        detect_workspaces(&root, &duplicated)
+    );
+}
+
 // ── Full pipeline: Pnpm workspace ──────────────────────────────────
 
 #[test]

@@ -27,6 +27,7 @@ Knowledge map: `.knowledge/knowledge-map.yaml`
 - `cargo run`: run the default binary.
 - `cargo package`: verify the crate contents that would be published to crates.io.
 - `cargo publish --dry-run`: validate the center-repository publishing path without publishing.
+- `python3 tools/docs/check_docs.py`: validate documentation structure, local links and anchors, code fences, chapter numbering, indexes, and English-edition translation hygiene.
 - `./setup.sh` or `setup.bat`: install/check the Rust toolchain, set up hooks, and run quality gates.
 - `pre-commit run --all-files`: run the local quality hooks.
 

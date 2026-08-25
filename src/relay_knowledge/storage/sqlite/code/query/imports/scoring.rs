@@ -7,7 +7,7 @@ use super::super::{
 use super::{
     binding_terms::{
         camel_case_terms, identifier_tokens, import_usage_identifier_terms,
-        named_import_binding_count_for_query, query_terms,
+        named_import_binding_count_for_query, query_local_binding_terms, query_terms,
     },
     path_context::{
         file_stem, import_target_mentions_query, parent_dir, path_has_header_extension,
@@ -174,6 +174,40 @@ pub(super) fn import_single_module_path_tiebreaker_bonus(
     1.0 / path.len().max(1) as f64
 }
 
+pub(super) struct ImportSourceSignificance<'a> {
+    pub(super) path: &'a str,
+    pub(super) is_generated: bool,
+    pub(super) module: &'a str,
+    pub(super) target_hint: Option<&'a str>,
+    pub(super) source_line_count: usize,
+}
+
+pub(super) fn import_source_significance_bonus(
+    base_score: f64,
+    query: &str,
+    source: &ImportSourceSignificance<'_>,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0
+        || kind != CodeQueryKind::Imports
+        || source.source_line_count == 0
+        || source.is_generated
+        || path_looks_like_test_or_benchmark(source.path)
+        || import_module_has_wildcard_binding(source.module)
+        || !import_target_mentions_query(source.module, source.target_hint, query)
+    {
+        return 0.0;
+    }
+
+    ((source.source_line_count as f64).log2() * IMPORT_SOURCE_SIGNIFICANCE_PER_DOUBLING)
+        .min(MAX_IMPORT_SOURCE_SIGNIFICANCE_BONUS)
+}
+
+fn import_module_has_wildcard_binding(module: &str) -> bool {
+    let module = module.trim_end_matches([';', ' ']);
+    module.contains('*') || module.ends_with("._")
+}
+
 pub(in super::super) fn import_reexport_surface_penalty(
     base_score: f64,
     query: &str,
@@ -226,38 +260,37 @@ pub(super) fn import_same_file_usage_bonus(
     usage_count: usize,
     kind: CodeQueryKind,
 ) -> f64 {
-    if base_score <= 0.0 || kind != CodeQueryKind::Imports || usage_count <= 1 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || usage_count == 0 {
         return 0.0;
     }
 
-    ((usage_count - 1) as f64 * IMPORT_USAGE_BONUS_PER_REFERENCE).min(MAX_IMPORT_USAGE_BONUS)
+    (usage_count as f64 * IMPORT_USAGE_BONUS_PER_REFERENCE).min(MAX_IMPORT_USAGE_BONUS)
+}
+
+pub(super) struct ImporterPathContext<'a> {
+    pub(super) path: &'a str,
+    pub(super) module: &'a str,
+    pub(super) target_hint: Option<&'a str>,
+    pub(super) matched_symbol_name: Option<&'a str>,
+    pub(super) target_symbol_names: Option<&'a str>,
 }
 
 pub(super) fn import_importer_path_context_bonus(
     base_score: f64,
     usage_count: usize,
     query: &str,
-    path: &str,
+    context: &ImporterPathContext<'_>,
     kind: CodeQueryKind,
 ) -> f64 {
-    if base_score <= 0.0
-        || usage_count == 0
-        || kind != CodeQueryKind::Imports
-        || !query_looks_like_import_path(query)
-    {
+    if base_score <= 0.0 || usage_count == 0 || kind != CodeQueryKind::Imports {
         return 0.0;
     }
-    let last_segment = query.rsplit(['/', '\\']).next().unwrap_or(query);
-    let target_stem = last_segment
-        .rsplit_once('.')
-        .map(|(stem, _)| stem)
-        .unwrap_or(last_segment);
-    let target_terms = import_usage_identifier_terms(target_stem);
-    if target_terms.is_empty() {
+    let importer_identity_terms = explicit_importer_identity_terms(query, context);
+    if importer_identity_terms.is_empty() {
         return 0.0;
     }
-    let path_terms = import_usage_identifier_terms(path);
-    let matched_terms = target_terms
+    let path_terms = import_usage_identifier_terms(context.path);
+    let matched_terms = importer_identity_terms
         .iter()
         .filter(|term| {
             path_terms
@@ -267,6 +300,28 @@ pub(super) fn import_importer_path_context_bonus(
         .count();
 
     (matched_terms as f64 * IMPORT_PATH_CONTEXT_BONUS_PER_TERM).min(MAX_IMPORT_PATH_CONTEXT_BONUS)
+}
+
+fn explicit_importer_identity_terms(query: &str, context: &ImporterPathContext<'_>) -> Vec<String> {
+    let imported_identity_terms = [
+        Some(context.module),
+        context.target_hint,
+        context.matched_symbol_name,
+        context.target_symbol_names,
+    ]
+    .into_iter()
+    .flatten()
+    .flat_map(import_usage_identifier_terms)
+    .collect::<Vec<_>>();
+
+    query_local_binding_terms(query)
+        .into_iter()
+        .filter(|query_term| {
+            !imported_identity_terms
+                .iter()
+                .any(|target_term| identifier_terms_equivalent(target_term, query_term))
+        })
+        .collect()
 }
 
 pub(super) fn import_target_directory_bonus(
@@ -356,6 +411,8 @@ const MIN_SPARSE_IMPORT_BASE_SCORE: f64 = 0.5;
 const MIN_IMPORT_COVERAGE_TERM_LEN: usize = 3;
 const IMPORT_USAGE_BONUS_PER_REFERENCE: f64 = 0.08;
 const MAX_IMPORT_USAGE_BONUS: f64 = 0.8;
+const IMPORT_SOURCE_SIGNIFICANCE_PER_DOUBLING: f64 = 0.04;
+const MAX_IMPORT_SOURCE_SIGNIFICANCE_BONUS: f64 = 0.5;
 const IMPORT_PATH_CONTEXT_BONUS_PER_TERM: f64 = 0.65;
 const MAX_IMPORT_PATH_CONTEXT_BONUS: f64 = 1.3;
 const IMPORT_BINDING_CONTEXT_BONUS_PER_BINDING: f64 = 0.25;

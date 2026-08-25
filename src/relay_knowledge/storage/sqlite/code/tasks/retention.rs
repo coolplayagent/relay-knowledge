@@ -955,3 +955,7 @@ mod tests;
 #[cfg(test)]
 #[path = "retention_fairness_tests.rs"]
 mod fairness_tests;
+
+#[cfg(test)]
+#[path = "retention_lifecycle_tests.rs"]
+mod lifecycle_tests;

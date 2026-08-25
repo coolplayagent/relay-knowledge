@@ -138,16 +138,15 @@ async fn symbol_fts_queries_prefer_handwritten_rows_before_candidate_limit() {
 
 #[tokio::test]
 async fn symbol_fts_queries_apply_kind_before_candidate_limit() {
-    let mut files = Vec::new();
+    let class_file_id = "class-file";
+    let class_path = "src/noise/retry.rs";
+    let mut files = vec![file(class_file_id, class_path)];
     let mut symbols = Vec::new();
     for index in 0..801 {
-        let file_id = format!("class-file-{index:03}");
-        let path = format!("src/noise/retry_{index:03}.rs");
-        files.push(file(&file_id, &path));
         let mut class_symbol = symbol_with_signature(
             &format!("aaa-retry-class-{index:03}"),
-            &file_id,
-            &path,
+            class_file_id,
+            class_path,
             "class RetryAlphaBetaGamma",
         );
         class_symbol.kind = "class".to_owned();
@@ -211,6 +210,127 @@ async fn symbol_fts_queries_apply_kind_before_candidate_limit() {
     assert_eq!(
         hits[0].canonical_symbol_id.as_deref(),
         Some("repo://repo/src::storage::retry.rs::Recover")
+    );
+}
+
+#[tokio::test]
+async fn broad_hybrid_recalls_documented_type_across_inflections_after_primary_candidate_noise() {
+    let rust_noise_file_id = "noise-file";
+    let rust_noise_path = "src/noise/controller.rs";
+    let mut files = vec![file(rust_noise_file_id, rust_noise_path)];
+    let mut symbols = Vec::new();
+    for index in 0..=800 {
+        let mut noise = symbol_with_signature(
+            &format!("noise-symbol-{index:03}"),
+            rust_noise_file_id,
+            rust_noise_path,
+            "fn noise(controller: Controller, dispatch: Dispatch, framework: Framework)",
+        );
+        noise.name = format!("Noise{index:03}");
+        noise.qualified_name = format!("noise::Noise{index:03}");
+        noise.canonical_symbol_id = format!("repo://repo/src::noise::Noise{index:03}");
+        symbols.push(noise);
+    }
+
+    let morphology_file_id = "morphology-noise-file";
+    let morphology_path = "src/noise/ControllerDispatcherNoise.java";
+    let mut morphology_file = file(morphology_file_id, morphology_path);
+    morphology_file.language_id = "java".to_owned();
+    files.push(morphology_file);
+    for index in 0..=120 {
+        let name = format!("ControllerDispatcherNoise{index:03}");
+        let mut noise = symbol_with_signature(
+            &format!("morphology-noise-symbol-{index:03}"),
+            morphology_file_id,
+            morphology_path,
+            &format!("public class {name}"),
+        );
+        noise.language_id = "java".to_owned();
+        noise.name = name.clone();
+        noise.qualified_name = format!("noise.{name}");
+        noise.canonical_symbol_id = format!("repo://repo/src::noise::{name}");
+        noise.kind = "class".to_owned();
+        noise.doc_comment =
+            Some("Controllers coordinate dispatchers for servlet web workflows.".to_owned());
+        symbols.push(noise);
+    }
+
+    let target_path = "src/web/EventDispatcherServlet.java";
+    let mut target_file = file("documented-type-file", target_path);
+    target_file.language_id = "java".to_owned();
+    files.push(target_file);
+    let mut target = symbol_with_signature(
+        "documented-type-symbol",
+        "documented-type-file",
+        target_path,
+        "public class EventDispatcherServlet",
+    );
+    target.language_id = "java".to_owned();
+    target.name = "EventDispatcherServlet".to_owned();
+    target.qualified_name = "web.EventDispatcherServlet".to_owned();
+    target.canonical_symbol_id = "repo://repo/src::web::EventDispatcherServlet".to_owned();
+    target.kind = "class".to_owned();
+    target.doc_comment = Some(
+        "Front-facing dispatcher coordinates controllers for web MVC workflows across servlet frameworks."
+            .to_owned(),
+    );
+    symbols.push(target);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: SYMBOL_SEARCH_TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols,
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        routes: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let request = crate::domain::CodeRetrievalRequest::new(
+        "front controller servlet dispatch web mvc framework servlet",
+        selector,
+        CodeQueryKind::Hybrid,
+        20,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("bounded morphology recall should keep the documented type");
+    let target_rank = hits
+        .iter()
+        .position(|hit| hit.path == target_path)
+        .expect("documented type should survive saturated primary and morphology candidate noise");
+
+    assert!(
+        target_rank < 5,
+        "documented type rank was {}",
+        target_rank + 1
+    );
+    assert!(
+        hits[target_rank]
+            .excerpt
+            .contains("class EventDispatcherServlet")
     );
 }
 

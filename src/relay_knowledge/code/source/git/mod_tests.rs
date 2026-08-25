@@ -157,6 +157,18 @@ fn bounded_worktree_observation_is_stable_and_changes_with_file_bytes() {
 }
 
 #[test]
+fn read_only_git_commands_disable_optional_repository_locks() {
+    let command = read_only_git_command();
+    let optional_locks = command
+        .get_envs()
+        .find(|(name, _)| *name == "GIT_OPTIONAL_LOCKS")
+        .and_then(|(_, value)| value)
+        .and_then(|value| value.to_str());
+
+    assert_eq!(optional_locks, Some("0"));
+}
+
+#[test]
 fn git_dir_bytes_reads_committed_blob_without_worktree_context() {
     let repo = TestRepo::create("git-dir-read");
     repo.write("src/alpha.rs", "pub fn alpha() {}\n");

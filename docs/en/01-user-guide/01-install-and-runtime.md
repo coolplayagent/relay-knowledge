@@ -2,7 +2,7 @@
 
 [English](../../en/01-user-guide/01-install-and-runtime.md) | [中文](../../zh/01-user-guide/01-install-and-runtime.md)
 
-This chapter covers the shortest path for getting the local development environment running. Full release, installer, and service-hosting requirements are covered in [Chapter 9: Resident Service](09-resident-service.md) and [Installation, Release, and Upgrade](../03-architecture-specs/19-installation-release-and-upgrade.md).
+This chapter covers the shortest path for getting the local development environment running. Full release, installer, and service-hosting requirements are covered in [Chapter 9: Service Deployment and Resident Operation](09-resident-service.md) and [Installation, Release, and Upgrade](../03-architecture-specs/19-installation-release-and-upgrade.md).
 
 ## 1.1 Prerequisites
 

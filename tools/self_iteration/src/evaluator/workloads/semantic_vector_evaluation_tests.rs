@@ -20,6 +20,7 @@ fn external_backend_without_required_environment_stops_before_provider_process()
         limiter: Limiter::new(1),
         writer_lock: Arc::new(Mutex::new(())),
         query_jobs: 1,
+        keep_workdirs: false,
     };
 
     let report = evaluate_semantic_vector_suite(&runtime, &serde_json::json!({}))

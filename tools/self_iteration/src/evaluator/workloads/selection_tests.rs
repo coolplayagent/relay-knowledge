@@ -299,18 +299,18 @@ fn semantic_vector_focus_runs_full_suite() {
 }
 
 #[test]
-fn fast_preserves_grep_and_external_import_guardrail_cases() {
+fn fast_preserves_import_graph_and_grep_guardrail_cases() {
     let cases = vec![
         serde_json::json!({"id": "regular_a", "kind": "definition"}),
         serde_json::json!({
-            "id": "typescript_syntax_external_react_import_grep_fallback",
+            "id": "typescript_syntax_external_react_import_graph",
             "repository": "typescript_syntax_fixture",
             "kind": "imports",
             "query": "react",
             "guardrail": true,
             "expected": [{
                 "path": "src/component.tsx",
-                "retrieval_layer": "text_fallback"
+                "retrieval_layer": "import_graph"
             }],
             "degraded_reason": null
         }),
@@ -353,16 +353,14 @@ fn fast_preserves_grep_and_external_import_guardrail_cases() {
     let selected = select_repository_cases_for_profile("fast", None, cases);
     let case = selected
         .iter()
-        .find(|case| {
-            string_or(case, "id", "") == "typescript_syntax_external_react_import_grep_fallback"
-        })
-        .expect("fast should preserve the import grep fallback guardrail");
+        .find(|case| string_or(case, "id", "") == "typescript_syntax_external_react_import_graph")
+        .expect("fast should preserve the structured import guardrail");
     let expected = array_field(case, "expected");
 
     assert_eq!(string_or(case, "kind", ""), "imports");
     assert_eq!(
         string_or(&expected[0], "retrieval_layer", ""),
-        "text_fallback"
+        "import_graph"
     );
     assert!(case.get("degraded_reason").is_some_and(Value::is_null));
     assert!(

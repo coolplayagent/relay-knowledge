@@ -10,6 +10,7 @@ const PATH_TABLES: &[&str] = &[
     "code_repository_feature_flags",
     "code_repository_dependencies",
     "code_repository_imports",
+    "code_repository_reference_search_groups",
     "code_repository_references",
     "code_repository_symbols",
     "code_repository_files",
@@ -24,6 +25,8 @@ const SCOPE_TABLES: &[&str] = &[
     "code_repository_feature_flags",
     "code_repository_dependencies",
     "code_repository_imports",
+    "code_repository_reference_search_groups",
+    "code_repository_reference_search_manifests",
     "code_repository_references",
     "code_repository_symbols",
     "code_repository_files",
@@ -141,6 +144,7 @@ fn delete_path_indexes_removes_multiple_paths_from_all_path_tables() {
         )
         .expect("search table should create");
     create_search_metadata_table(&connection);
+    create_reference_search_manifest_table(&connection);
 
     for path in ["src/a.rs", "src/b.rs", "src/c.rs"] {
         for table in PATH_TABLES {
@@ -164,6 +168,14 @@ fn delete_path_indexes_removes_multiple_paths_from_all_path_tables() {
             .expect("search row should insert");
     }
     backfill_search_metadata(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_reference_search_manifests (
+                 source_scope, reference_count, group_count
+             ) VALUES ('scope', 3, 3)",
+            [],
+        )
+        .expect("reference-search manifest should insert");
 
     let transaction = connection.transaction().expect("transaction should open");
     assert!(
@@ -192,6 +204,18 @@ fn delete_path_indexes_removes_multiple_paths_from_all_path_tables() {
             .expect("remaining row count should load");
         assert_eq!(remaining, 1, "{table} should keep only the unmatched path");
     }
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT reference_count, group_count
+                 FROM code_repository_reference_search_manifests
+                 WHERE source_scope = 'scope'",
+                [],
+                |row| Ok((row.get::<_, usize>(0)?, row.get::<_, usize>(1)?)),
+            )
+            .expect("reference-search manifest should load"),
+        (1, 1)
+    );
 }
 
 fn create_search_metadata_table(connection: &Connection) {
@@ -210,6 +234,19 @@ fn create_search_metadata_table(connection: &Connection) {
             [],
         )
         .expect("search metadata table should create");
+}
+
+fn create_reference_search_manifest_table(connection: &Connection) {
+    connection
+        .execute(
+            "CREATE TABLE code_repository_reference_search_manifests (
+                 source_scope TEXT PRIMARY KEY,
+                 reference_count INTEGER NOT NULL,
+                 group_count INTEGER NOT NULL
+             )",
+            [],
+        )
+        .expect("reference-search manifest table should create");
 }
 
 fn backfill_search_metadata(connection: &Connection) {

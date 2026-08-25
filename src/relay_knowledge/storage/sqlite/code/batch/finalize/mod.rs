@@ -5,12 +5,11 @@ mod calls;
 mod files;
 mod imported_references;
 mod imports;
-pub(super) mod phases;
-mod references;
-mod search_documents;
+mod pages;
+pub(in crate::storage::sqlite::code) mod phases;
+pub(in crate::storage::sqlite::code::batch) mod references;
+pub(super) mod search_documents;
 mod symbols;
-
-pub(crate) mod affected_paths;
 
 #[cfg(test)]
 #[path = "tests/typescript.rs"]

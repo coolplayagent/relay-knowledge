@@ -18,6 +18,31 @@ pub(crate) const REBUILD_REFERENCE_SEARCH: &str = "finalizing:rebuild_reference_
 pub(crate) const REBUILD_CALLS: &str = "finalizing:rebuild_calls";
 pub(crate) const RESOLVE_WORKSPACE_IMPORTS: &str = "finalizing:resolve_workspace_imports";
 pub(crate) const PUBLISH_SCOPE: &str = "finalizing:publish_scope";
+pub(crate) const SOFTWARE_PROJECTION: &str = "finalizing:software_projection";
+pub(crate) const PARTITIONED_PUBLISH: &str = "finalizing:partitioned_publish";
+
+pub(crate) const ORDERED_FINALIZATION_PHASES: [&str; 11] = [
+    BUILD_QUERY_INDEXES,
+    RESOLVE_REFERENCES,
+    RESOLVE_IMPORTS,
+    RESOLVE_CALL_TARGETS,
+    REFRESH_DEPENDENCIES,
+    REBUILD_REFERENCE_SEARCH,
+    REBUILD_CALLS,
+    PUBLISH_SCOPE,
+    RESOLVE_WORKSPACE_IMPORTS,
+    SOFTWARE_PROJECTION,
+    PARTITIONED_PUBLISH,
+];
+
+const _: [(); crate::storage::CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT] =
+    [(); ORDERED_FINALIZATION_PHASES.len()];
+
+pub(crate) fn position(state: &str) -> Option<usize> {
+    ORDERED_FINALIZATION_PHASES
+        .iter()
+        .position(|phase| *phase == state)
+}
 
 #[derive(Default)]
 pub(crate) struct FinalizeSymbolCache {
@@ -62,7 +87,7 @@ pub(crate) fn refresh_dependencies(
     transaction: &Transaction<'_>,
     source_scope: &str,
     language_filters: &[String],
-) -> Result<(), StorageError> {
+) -> Result<maven::EffectiveDependencyRefresh, StorageError> {
     maven::refresh_effective_dependencies_with_language_filters(
         transaction,
         source_scope,
@@ -73,8 +98,15 @@ pub(crate) fn refresh_dependencies(
 pub(crate) fn rebuild_reference_search(
     transaction: &Transaction<'_>,
     source_scope: &str,
+    resource_budget: crate::domain::CodeIndexResourceBudget,
+    expected_reference_count: usize,
 ) -> Result<(), StorageError> {
-    super::search_documents::rebuild_reference_search_documents(transaction, source_scope)
+    super::search_documents::rebuild_reference_search_documents(
+        transaction,
+        source_scope,
+        resource_budget,
+        expected_reference_count,
+    )
 }
 
 pub(crate) fn rebuild_calls(
@@ -87,78 +119,6 @@ pub(crate) fn rebuild_calls(
         transaction,
         source_scope,
         repository_id,
-        &mut symbol_cache.symbols,
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Path-aware variants — used by incremental sessions to avoid full-scope
-// edge finalization when only a subset of paths changed.
-// ---------------------------------------------------------------------------
-
-pub(crate) fn resolve_references_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-) -> Result<(), StorageError> {
-    references::normalize_unresolved_for_paths(transaction, source_scope, affected_paths)?;
-    references::resolve_for_paths(transaction, source_scope, affected_paths)
-}
-
-pub(crate) fn resolve_imports_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-    symbol_cache: &mut FinalizeSymbolCache,
-) -> Result<(), StorageError> {
-    let file_languages = super::files::load_file_languages(transaction, source_scope)?;
-    imports::resolve_for_paths(
-        transaction,
-        source_scope,
-        &file_languages,
-        affected_paths,
-        &mut symbol_cache.symbols,
-    )?;
-    super::imported_references::resolve_references_for_paths(
-        transaction,
-        source_scope,
-        affected_paths,
-        &mut symbol_cache.symbols,
-    )
-}
-
-pub(crate) fn resolve_call_targets_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-) -> Result<(), StorageError> {
-    super::call_targets::resolve_references_for_paths(transaction, source_scope, affected_paths)
-}
-
-pub(crate) fn rebuild_reference_search_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    affected_paths: &[&str],
-) -> Result<(), StorageError> {
-    super::search_documents::rebuild_reference_search_documents_for_paths(
-        transaction,
-        source_scope,
-        affected_paths,
-    )
-}
-
-pub(crate) fn rebuild_calls_for_paths(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    repository_id: &str,
-    affected_paths: &[&str],
-    symbol_cache: &mut FinalizeSymbolCache,
-) -> Result<(), StorageError> {
-    calls::rebuild_for_paths(
-        transaction,
-        source_scope,
-        repository_id,
-        affected_paths,
         &mut symbol_cache.symbols,
     )
 }

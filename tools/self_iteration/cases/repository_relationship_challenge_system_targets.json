@@ -195,7 +195,9 @@
       ],
       "expected": [
         {
-          "path": "pkg/controller/ttl/ttl_controller.go",
+          "language_id": "go",
+          "edge_resolution_state": "resolved",
+          "edge_target_hint": "k8s.io/client-go/kubernetes",
           "excerpt_contains": "k8s.io/client-go/kubernetes"
         }
       ],
@@ -206,11 +208,13 @@
       "forbidden_rank_penalty": 0.08,
       "expected_all": [
         {
-          "path": "pkg/controller/ttl/ttl_controller.go"
+          "language_id": "go",
+          "edge_resolution_state": "resolved",
+          "edge_target_hint": "k8s.io/client-go/kubernetes"
         },
         {
-          "path": "pkg/controller/ttl/ttl_controller.go",
-          "excerpt_contains": "kubernetes.Interface"
+          "language_id": "go",
+          "excerpt_contains": "k8s.io/client-go/kubernetes"
         }
       ]
     },

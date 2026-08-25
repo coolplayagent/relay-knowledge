@@ -181,6 +181,7 @@ fn path_filter_covers(filter: &str, path: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
+#[derive(Debug, Clone)]
 pub(in crate::code) struct SnapshotBuild {
     pub(in crate::code) repository_id: String,
     pub(in crate::code) source_scope: String,
@@ -215,6 +216,25 @@ pub(in crate::code) struct SnapshotScopeFilters {
 }
 
 impl SnapshotBuild {
+    pub(in crate::code) fn bind_verified_source_scope(
+        &mut self,
+        source_scope: &str,
+    ) -> Result<(), crate::code::CodeIndexError> {
+        if !crate::domain::code_snapshot_scope_matches_identity(
+            &self.repository_id,
+            &self.tree_hash,
+            &self.path_filters,
+            &self.language_filters,
+            source_scope,
+        ) {
+            return Err(crate::code::CodeIndexError::InvalidInput(format!(
+                "source scope '{source_scope}' does not match the snapshot identity"
+            )));
+        }
+        self.source_scope = source_scope.to_owned();
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(in crate::code) fn new(
         registration: &CodeRepositoryRegistration,
@@ -444,6 +464,13 @@ impl SnapshotBuild {
         entries: &[GitTreeEntry],
         config: &crate::domain::CodeWorkspaceDetectionConfig,
     ) {
+        self.source_scope = crate::domain::code_snapshot_scope_id_with_workspace_detection(
+            &self.repository_id,
+            &self.tree_hash,
+            &self.path_filters,
+            &self.language_filters,
+            config,
+        );
         self.workspaces = detect_workspaces_for_source_snapshot(
             root_path,
             kind,

@@ -72,6 +72,122 @@ pub(super) fn named_import_binding_terms_for_query(
     terms
 }
 
+pub(super) fn terminal_import_binding_terms(module: &str) -> Vec<String> {
+    if named_import_bounds(module).is_some() || dynamic_import_surface(module) {
+        return Vec::new();
+    }
+    let Some(binding) = terminal_import_binding(module) else {
+        return Vec::new();
+    };
+    let mut terms = import_usage_identifier_terms(binding);
+    if import_surface_has_wildcard(module) {
+        if let Some(singular) = conservative_singular_binding(binding) {
+            push_import_usage_term(&mut terms, singular);
+        }
+    }
+
+    terms
+}
+
+pub(super) fn import_surface_declares_local_binding(module: &str) -> bool {
+    let module = module.trim_start();
+    if dynamic_import_surface(module) {
+        return false;
+    }
+    named_import_bounds(module).is_some()
+        || module.starts_with("import ")
+        || module.starts_with("from ")
+        || module.starts_with("use ")
+        || matches!(module.split_whitespace().collect::<Vec<_>>().as_slice(), [alias, path]
+            if import_alias_binding(alias)
+                && path.chars().any(|character| matches!(character, '/' | '.' | '\\')))
+}
+
+fn dynamic_import_surface(module: &str) -> bool {
+    let module = module.trim_start();
+    module.starts_with("import(")
+        || module
+            .strip_prefix("await ")
+            .is_some_and(|module| module.trim_start().starts_with("import("))
+}
+
+fn terminal_import_binding(module: &str) -> Option<&str> {
+    let module = module.trim().trim_end_matches(';').trim();
+    let binding_surface = if let Some(imports) = module.strip_prefix("from ") {
+        imports.split_once(" import ")?.1
+    } else if let Some(imports) = module.strip_prefix("import ") {
+        imports
+            .split_once(" from ")
+            .map_or(imports, |(binding, _)| binding)
+    } else if let Some(imports) = module.strip_prefix("use ") {
+        imports
+    } else {
+        normalized_module_binding(module)?
+    };
+    if binding_surface.contains(',') {
+        return None;
+    }
+    let binding_surface = binding_surface
+        .rsplit_once(" as ")
+        .map_or(binding_surface, |(_, alias)| alias)
+        .trim();
+    let binding_surface = binding_surface
+        .strip_suffix("._")
+        .unwrap_or(binding_surface)
+        .trim_end_matches('*')
+        .trim_end_matches(['.', ':', '\\'])
+        .trim();
+    identifier_tokens(binding_surface).last()
+}
+
+fn normalized_module_binding(module: &str) -> Option<&str> {
+    let parts = module.split_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        [alias, path]
+            if import_alias_binding(alias)
+                && path
+                    .chars()
+                    .any(|character| matches!(character, '/' | '.' | '\\')) =>
+        {
+            Some(alias)
+        }
+        [path]
+            if !path.starts_with('#')
+                && !path.starts_with("./")
+                && !path.starts_with("../")
+                && !path.starts_with('/') =>
+        {
+            Some(path)
+        }
+        _ => None,
+    }
+}
+
+fn import_alias_binding(alias: &str) -> bool {
+    !matches!(alias, "." | "_")
+        && alias
+            .chars()
+            .next()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && alias
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn import_surface_has_wildcard(module: &str) -> bool {
+    let module = module.trim_end_matches([';', ' ']);
+    module.ends_with('*') || module.ends_with("._")
+}
+
+fn conservative_singular_binding(binding: &str) -> Option<&str> {
+    let singular = binding.strip_suffix('s')?;
+    (singular.len() >= 4
+        && !binding.ends_with("ss")
+        && !binding.ends_with("us")
+        && !binding.ends_with("is"))
+    .then_some(singular)
+}
+
 fn named_import_bounds(module: &str) -> Option<(usize, usize)> {
     let start = module.find('{')?;
     let end = module[start + 1..].find('}')? + start + 1;
@@ -121,6 +237,22 @@ pub(super) fn query_terms(query: &str) -> Vec<String> {
         .filter(|term| !term.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+pub(super) fn query_local_binding_terms(query: &str) -> Vec<String> {
+    let terms = query_terms(query);
+    let last_index = terms.len().checked_sub(1);
+    let mut bindings = terms
+        .into_iter()
+        .enumerate()
+        .filter(|(index, term)| {
+            Some(*index) == last_index || term.contains('_') || term_has_case_boundary(term)
+        })
+        .map(|(_, term)| term.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    bindings.sort();
+    bindings.dedup();
+    bindings
 }
 
 pub(super) fn import_usage_identifier_terms(value: &str) -> Vec<String> {

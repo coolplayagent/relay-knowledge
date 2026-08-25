@@ -451,13 +451,16 @@ async fn callers_match_scoped_callee_query_from_symbol_signature() {
 
 #[tokio::test]
 async fn callees_apply_direction_before_candidate_limit() {
-    let mut files = Vec::new();
+    let noise_file_id = "noise-file";
+    let noise_path = "noise/callee.py";
+    let mut files = vec![file(noise_file_id, noise_path, "python")];
     let mut calls = Vec::new();
     for index in 0..520 {
-        let file_id = format!("noise-file-{index}");
-        let path = format!("noise/callee_{index}.py");
-        files.push(file(&file_id, &path, "python"));
-        let mut call = call(&format!("aa-noise-call-{index:04}"), &file_id, &path);
+        let mut call = call(
+            &format!("aa-noise-call-{index:04}"),
+            noise_file_id,
+            noise_path,
+        );
         call.caller_name = Some("NoiseCaller".to_owned());
         call.callee_name = "TargetThing".to_owned();
         calls.push(call);
@@ -505,13 +508,16 @@ async fn callees_apply_direction_before_candidate_limit() {
 
 #[tokio::test]
 async fn callees_use_exact_caller_identity_before_fts_candidate_window() {
-    let mut files = Vec::new();
+    let noise_file_id = "noise-file";
+    let noise_path = "noise/caller.py";
+    let mut files = vec![file(noise_file_id, noise_path, "python")];
     let mut calls = Vec::new();
     for index in 0..1050 {
-        let file_id = format!("noise-file-{index}");
-        let path = format!("noise/caller_{index}.py");
-        files.push(file(&file_id, &path, "python"));
-        let mut call = call(&format!("aa-noise-call-{index:04}"), &file_id, &path);
+        let mut call = call(
+            &format!("aa-noise-call-{index:04}"),
+            noise_file_id,
+            noise_path,
+        );
         call.caller_name = Some("TargetThingNoise".to_owned());
         call.callee_name = "TargetThing".to_owned();
         calls.push(call);

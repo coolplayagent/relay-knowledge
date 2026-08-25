@@ -641,7 +641,7 @@ pub fn serve() -> u32 {
 }
 
 #[tokio::test]
-async fn request_enabled_workspace_detection_creates_auto_set_edges() {
+async fn reusing_a_disabled_scope_queues_cleanup_of_later_enabled_workspace_state() {
     let repo = FixtureRepo::create("go-auto-workspace");
     repo.write(
         "go.work",
@@ -701,9 +701,22 @@ func Consume() int {
         &repo,
         "auto-go",
         Vec::new(),
-        CodeWorkspaceDetectionConfig::enabled_all(),
+        CodeWorkspaceDetectionConfig::default(),
     )
     .await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("auto-go"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: CodeWorkspaceDetectionConfig::enabled_all(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("auto-workspace-enabled-index"),
+        )
+        .await
+        .expect("enabled workspace index should succeed");
 
     let repository_status = service
         .code_repository_status(selector("auto-go"), context("auto-workspace-status"))
@@ -753,8 +766,8 @@ func Consume() int {
         import_results.results
     );
 
-    service
-        .index_code_repository(
+    let started = service
+        .start_code_repository_index(
             CodeIndexRequest {
                 repository: selector("auto-go"),
                 mode: CodeIndexMode::Full,
@@ -765,7 +778,19 @@ func Consume() int {
             context("auto-workspace-disabled-reindex"),
         )
         .await
-        .expect("disabled fresh reindex should succeed");
+        .expect("disabled scope reuse should queue durable cleanup");
+    assert!(started.summary.is_none());
+    let task = started
+        .task
+        .expect("disabled workspace cleanup should return a task");
+    service
+        .run_code_index_task_once(
+            Some(task.task_id),
+            context("auto-workspace-disabled-worker"),
+        )
+        .await
+        .expect("disabled workspace cleanup worker should run")
+        .expect("disabled workspace cleanup worker should claim the task");
 
     assert!(
         service
@@ -774,12 +799,28 @@ func Consume() int {
             .is_err(),
         "disabled workspace detection should clear the auto workspace set"
     );
+
+    let repeated = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("auto-go"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: CodeWorkspaceDetectionConfig::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("auto-workspace-disabled-repeat"),
+        )
+        .await
+        .expect("clean disabled scope should reuse the read-only fast path");
+    assert!(repeated.summary.is_some());
+    assert!(repeated.task.is_none());
 }
 
 // ── storage-level workspace mapping test ──────────────────────────────
 
 #[tokio::test]
-async fn storage_level_workspace_package_mapping_survives_snapshot_apply() {
+async fn storage_level_unmatched_import_is_not_duplicated_into_set_overlay() {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
 
     let scope_lib = code_snapshot_scope_id("repo-lib", "commit-1", &["src".to_owned()], &[]);
@@ -932,10 +973,8 @@ async fn storage_level_workspace_package_mapping_survives_snapshot_apply() {
         .await
         .expect("overlay refresh task should complete");
 
-    assert!(
-        refresh.edge_count > 0,
-        "set overlay should produce cross edges: edge_count={}, resolved={}",
-        refresh.edge_count,
-        refresh.resolved_edge_count
-    );
+    assert_eq!(refresh.edge_count, 0);
+    assert_eq!(refresh.resolved_edge_count, 0);
+    assert_eq!(refresh.ambiguous_edge_count, 0);
+    assert_eq!(refresh.unresolved_edge_count, 0);
 }

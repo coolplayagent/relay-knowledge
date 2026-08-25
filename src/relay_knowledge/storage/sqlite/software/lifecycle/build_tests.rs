@@ -2,7 +2,11 @@ use rusqlite::Connection;
 
 use crate::domain::GraphVersion;
 
-use super::{collect, initialize_schema};
+use super::{
+    BuildTargets, MAX_BUILD_TARGETS_PER_SCOPE, collect, existing_maven_build_targets,
+    initialize_schema,
+};
+use crate::storage::StorageError;
 use crate::storage::sqlite::software::lifecycle::document::{IndexedDocument, IndexedLine};
 
 #[test]
@@ -18,17 +22,18 @@ fn package_manifest_collection_keeps_nonempty_scripts() {
             "}",
         ],
     );
-    let mut targets = Vec::new();
+    let mut targets = BuildTargets::new(MAX_BUILD_TARGETS_PER_SCOPE, "build targets");
 
     collect(&document, GraphVersion::new(7), &mut targets).expect("targets should collect");
 
-    assert_eq!(targets.len(), 2);
+    assert_eq!(targets.as_slice().len(), 2);
     assert!(
         targets
+            .as_slice()
             .iter()
             .any(|target| target.name == "relay-web" && target.kind == "package")
     );
-    assert!(targets.iter().any(|target| {
+    assert!(targets.as_slice().iter().any(|target| {
         target.name == "build"
             && target.kind == "script"
             && target.command.as_deref() == Some("vite build")
@@ -54,6 +59,31 @@ fn initialize_schema_creates_build_target_lookup_index() {
         )
         .expect("index count should load");
     assert_eq!(index_count, 1);
+}
+
+#[test]
+fn existing_maven_targets_reject_cap_plus_one_at_sql_boundary() {
+    let connection = Connection::open_in_memory().expect("sqlite should open");
+    initialize_schema(&connection).expect("build schema should initialize");
+    for index in 0..2 {
+        connection
+            .execute(
+                "INSERT INTO software_build_targets (
+                    target_id, repository_id, source_scope, ecosystem, language_id, name, kind,
+                    command, output_hint, source_kind, evidence_path, evidence_line_start,
+                    evidence_line_end, confidence_basis_points, created_graph_version
+                 ) VALUES (?1, 'repo', 'scope', 'maven', 'java', ?2, 'project', NULL, NULL,
+                    'pom.xml', 'pom.xml', 1, 1, 9000, 1)",
+                rusqlite::params![format!("target-{index}"), format!("name-{index}")],
+            )
+            .expect("Maven target should insert");
+    }
+
+    let error = existing_maven_build_targets(&connection, "scope", 1)
+        .expect_err("two persisted targets should exceed a one-row cap");
+
+    assert!(matches!(error, StorageError::CapacityExceeded(message)
+        if message.contains("existing Maven build targets")));
 }
 
 fn document(path: &str, language_id: &str, lines: &[&str]) -> IndexedDocument {

@@ -2,8 +2,8 @@
 
 [中文](../../zh/01-user-guide/README.md) | [English](../../en/01-user-guide/README.md)
 
-> 文档版本: 1.3
-> 编制日期: 2026-05-17
+> 文档版本: 1.4
+> 更新日期: 2026-08-13
 > 范围: 面向本地开发、CLI 操作、知识图谱检索、代码仓库图谱、Web 工作区、MCP/ACP 接入、常驻服务、后台 worker、可观测性、日常排障和高级配置的可执行用户说明。
 
 本卷只写用户可以直接运行、验证和排障的路径。架构约束、接口边界和前瞻设计仍保留在 `docs/zh/03-architecture-specs/`；本卷负责把能力落到命令、配置、运行状态和诊断步骤上。
@@ -37,6 +37,11 @@
 - [第 11 章 可观测性与遥测](11-observability-and-telemetry.md): Prometheus metrics、OTLP traces/metrics 和诊断状态。
 - [第 12 章 高级配置参考](12-advanced-configuration.md): 运行时目录、存储拓扑、检索后端、网络/QoS、MCP、worker、audit 和 setup 变量。
 - [第 13 章 运维与排障](13-operations-and-troubleshooting.md): 健康检查、索引新鲜度、常见错误、隔离复现和 PR 验证。
+- [第 15 章 完整服务化部署指南](15-service-deployment-full-guide.md): 中文深入专题，展开 Linux、macOS 与 Windows 的部署、升级、回滚和卸载流程。
+- [第 16 章 SRE 运维手册](16-sre-operations-runbook.md): 中文深入专题，覆盖服务生命周期、健康诊断、监控、告警、备份恢复和故障处置。
+- [第 17 章 安全配置完整指南](17-security-configuration.md): 中文深入专题，覆盖 QoS、远端访问、MCP scope/origin、审计、代理和 TLS 边界。
+
+第 14 章尚未分配；编号保留，避免重排已经发布的章节链接。第 15–17 章是中文读者的深入运维专题，不宣称与英文卷逐章对应；英文版的核心服务部署与运维路径集中在 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)。
 
 ## 推荐阅读顺序
 
@@ -50,7 +55,7 @@ target/debug/relay-knowledge query SQLite --source docs --freshness wait-until-f
 target/debug/relay-knowledge setup doctor --format json
 ```
 
-需要把代码仓库作为检索源时读第 5 章；需要浏览器操作面时读第 6 章；需要给 agent 暴露本地图检索能力时读第 7 章和第 8 章；需要长期运行、后台任务或遥测时读第 9 章到第 11 章；只有接入外部后端、调整预算或复现环境问题时再查第 12 章和第 13 章。
+需要把代码仓库作为检索源时读第 5 章；需要浏览器操作面时读第 6 章；需要给 agent 暴露本地图检索能力时读第 7 章和第 8 章；需要长期运行、后台任务或遥测时读第 9 章到第 11 章；接入外部后端、调整预算或复现环境问题时查第 12 章和第 13 章；生产部署与 SRE 值守再读第 15 章到第 17 章。
 
 ## 输出与审计约定
 

@@ -31,6 +31,8 @@ const COMPOUND_HYBRID_CHUNK_MAX_TERMS: usize = 8;
 const COMPOUND_HYBRID_CHUNK_PAIR_DISTANCE: usize = 1;
 const FOCUSED_SYMBOL_MAX_TERMS: usize = 3;
 const FOCUSED_SYMBOL_MAX_WORKFLOW_TERMS: usize = 2;
+const FOCUSED_SYMBOL_MORPHOLOGY_MIN_PREFIX_LEN: usize = 6;
+const FOCUSED_SYMBOL_MORPHOLOGY_TERM_COUNT: usize = 3;
 
 pub(in crate::storage::sqlite::code::query) fn fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::candidate_plan::fts_query_terms(query), " ", true)
@@ -43,6 +45,42 @@ pub(in crate::storage::sqlite::code::query) fn symbol_fts_match_query(query: &st
 pub(in crate::storage::sqlite::code::query) fn focused_symbol_fts_match_query(
     query: &str,
 ) -> Option<String> {
+    focused_symbol_recall_terms(query)
+        .map(|terms| fts_match_query_with_operator(&terms, " OR ", false))
+}
+
+pub(in crate::storage::sqlite::code::query) fn focused_symbol_morphology_fts_match_query(
+    query: &str,
+) -> Option<String> {
+    let prefix_terms = focused_symbol_recall_terms(query)?
+        .into_iter()
+        .filter(|term| {
+            term.chars().count() >= FOCUSED_SYMBOL_MORPHOLOGY_MIN_PREFIX_LEN
+                && term
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+        })
+        .take(FOCUSED_SYMBOL_MORPHOLOGY_TERM_COUNT)
+        .collect::<Vec<_>>();
+    if prefix_terms.len() < FOCUSED_SYMBOL_MORPHOLOGY_TERM_COUNT {
+        return None;
+    }
+
+    let mut pairs = Vec::with_capacity(FOCUSED_SYMBOL_MORPHOLOGY_TERM_COUNT);
+    for (index, left) in prefix_terms.iter().enumerate() {
+        for right in prefix_terms.iter().skip(index + 1) {
+            pairs.push(format!(
+                "({}* {}*)",
+                quote_fts_term(left),
+                quote_fts_term(right)
+            ));
+        }
+    }
+
+    Some(pairs.join(" OR "))
+}
+
+fn focused_symbol_recall_terms(query: &str) -> Option<Vec<String>> {
     let terms = dedupe_terms(super::candidate_plan::fts_query_terms(query));
     if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return None;
@@ -77,7 +115,7 @@ pub(in crate::storage::sqlite::code::query) fn focused_symbol_fts_match_query(
     append_focused_symbol_workflow_terms(&terms, &mut recall_terms);
     append_type_surface_companion_terms(&terms, &mut recall_terms);
 
-    (recall_terms.len() >= 2).then(|| fts_match_query_with_operator(&recall_terms, " OR ", false))
+    (recall_terms.len() >= 2).then_some(recall_terms)
 }
 
 fn append_focused_symbol_workflow_terms(terms: &[String], recall_terms: &mut Vec<String>) {

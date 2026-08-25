@@ -73,10 +73,18 @@ impl MetricObservation {
             return 1.0;
         }
         if self.lower_is_better {
-            (budget / self.value.max(1.0)).min(1.0)
+            if self.value <= budget {
+                1.0
+            } else {
+                (budget / self.value).clamp(0.0, 1.0)
+            }
         } else {
             (self.value / budget).min(1.0)
         }
+    }
+
+    pub fn key_budget_failed(&self) -> bool {
+        self.key && self.budget.is_some() && self.score() < 1.0
     }
 }
 

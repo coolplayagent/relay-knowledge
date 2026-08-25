@@ -1,9 +1,11 @@
 //! Tree-sitter parsing and bounded capture extraction.
 
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     ops::ControlFlow,
     panic::{self, AssertUnwindSafe},
-    time::{Duration, Instant},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use tree_sitter::{
@@ -21,52 +23,149 @@ pub(super) struct TagCapture {
     pub(super) capture_kind: String,
     pub(super) name_node: SyntaxRange,
     pub(super) target_node: SyntaxRange,
+    pub(super) doc_owner_node: SyntaxRange,
     pub(super) target_has_error: bool,
     pub(super) local_type_parameter: bool,
 }
 
-const SYNTAX_BASE_BUDGET: Duration = Duration::from_millis(100);
-const SYNTAX_MAX_BUDGET: Duration = Duration::from_millis(750);
-const SYNTAX_BUDGET_BYTES_PER_MILLISECOND: usize = 1_024;
+const SYNTAX_BASE_WORK_QUANTA: usize = 4_096;
+const SYNTAX_MAX_WORK_QUANTA: usize = 32_768;
+const SYNTAX_BUDGET_BYTES_PER_WORK_QUANTUM: usize = 24;
 const MIN_REPEATED_INITIALIZER_FRAGMENT_LINES: usize = 32;
+const MAX_CACHED_SYNTAX_PARSERS: usize = 64;
+const MAX_CACHED_TAG_QUERIES: usize = 64;
+
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+struct SyntaxParserCacheKey {
+    language_id: &'static str,
+    language_factory_address: usize,
+}
+
+#[derive(Default)]
+struct SyntaxParserCache {
+    parsers: HashMap<SyntaxParserCacheKey, Box<Parser>>,
+}
+
+impl SyntaxParserCache {
+    fn get_or_try_insert(
+        &mut self,
+        key: SyntaxParserCacheKey,
+        create: impl FnOnce() -> Result<Parser, CodeIndexError>,
+    ) -> Result<Option<&mut Parser>, CodeIndexError> {
+        let at_capacity = self.parsers.len() >= MAX_CACHED_SYNTAX_PARSERS;
+        match self.parsers.entry(key) {
+            std::collections::hash_map::Entry::Occupied(parser) => {
+                Ok(Some(parser.into_mut().as_mut()))
+            }
+            std::collections::hash_map::Entry::Vacant(_) if at_capacity => Ok(None),
+            std::collections::hash_map::Entry::Vacant(parser) => {
+                Ok(Some(parser.insert(Box::new(create()?)).as_mut()))
+            }
+        }
+    }
+}
+
+thread_local! {
+    static SYNTAX_PARSERS: RefCell<SyntaxParserCache> =
+        RefCell::new(SyntaxParserCache::default());
+}
+
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+struct TagQueryCacheKey {
+    language_id: &'static str,
+    language_factory_address: usize,
+    // Static query identity keeps lookup constant-time without hashing the
+    // complete capture query and separates test-only alternate specifications.
+    query_address: usize,
+    query_len: usize,
+}
+
+type CompiledTagQueryCache = HashMap<TagQueryCacheKey, Arc<Query>>;
+
+static COMPILED_TAG_QUERIES: OnceLock<Mutex<CompiledTagQueryCache>> = OnceLock::new();
+
+struct SyntaxCallbackWorkBudget {
+    remaining_quanta: usize,
+    exhausted: bool,
+}
+
+impl SyntaxCallbackWorkBudget {
+    fn new(work_quanta: usize) -> Self {
+        Self {
+            remaining_quanta: work_quanta,
+            exhausted: false,
+        }
+    }
+
+    fn consume(&mut self) -> ControlFlow<()> {
+        if self.remaining_quanta == 0 {
+            self.exhausted = true;
+            return ControlFlow::Break(());
+        }
+        self.remaining_quanta -= 1;
+        ControlFlow::Continue(())
+    }
+}
 
 pub(super) fn parse_tree(
     language: LanguageSpec,
     content: &str,
 ) -> Result<tree_sitter::Tree, CodeIndexError> {
-    parse_tree_with_budget(language, content, syntax_stage_budget(content.len()))
+    parse_tree_with_budget(language, content, syntax_stage_work_quanta(content.len()))
 }
 
 fn parse_tree_with_budget(
     language: LanguageSpec,
     content: &str,
-    budget: Duration,
+    work_quanta: usize,
 ) -> Result<tree_sitter::Tree, CodeIndexError> {
     reject_pathological_c_family_fragment(language.id, content)?;
+    let mut work_budget = SyntaxCallbackWorkBudget::new(work_quanta);
+    let mut progress = |_: &tree_sitter::ParseState| work_budget.consume();
+    let bytes = content.as_bytes();
+    let parsed = with_syntax_parser(language, |parser| {
+        parser.parse_with_options(
+            &mut |offset, _| bytes.get(offset..).unwrap_or_default(),
+            None,
+            Some(ParseOptions::new().progress_callback(&mut progress)),
+        )
+    })?;
+    if work_budget.exhausted {
+        return Err(syntax_budget_error("parser", work_quanta));
+    }
+    parsed.ok_or_else(|| CodeIndexError::TreeSitter("parser returned no tree".to_owned()))
+}
+
+fn with_syntax_parser<T>(
+    language: LanguageSpec,
+    operation: impl FnOnce(&mut Parser) -> T,
+) -> Result<T, CodeIndexError> {
+    let key = SyntaxParserCacheKey {
+        language_id: language.id,
+        language_factory_address: language.language as usize,
+    };
+    SYNTAX_PARSERS.with(|parsers| {
+        let mut parsers = parsers.borrow_mut();
+        if let Some(parser) =
+            parsers.get_or_try_insert(key, || configured_syntax_parser(language))?
+        {
+            parser.reset();
+            return Ok(operation(parser));
+        }
+
+        drop(parsers);
+        let mut parser = configured_syntax_parser(language)?;
+        parser.reset();
+        Ok(operation(&mut parser))
+    })
+}
+
+fn configured_syntax_parser(language: LanguageSpec) -> Result<Parser, CodeIndexError> {
     let mut parser = Parser::new();
     parser
         .set_language(&(language.language)())
         .map_err(|error| CodeIndexError::TreeSitter(error.to_string()))?;
-    let deadline = Instant::now() + budget;
-    let mut budget_exhausted = false;
-    let mut progress = |_: &tree_sitter::ParseState| {
-        if Instant::now() >= deadline {
-            budget_exhausted = true;
-            ControlFlow::Break(())
-        } else {
-            ControlFlow::Continue(())
-        }
-    };
-    let bytes = content.as_bytes();
-    let parsed = parser.parse_with_options(
-        &mut |offset, _| bytes.get(offset..).unwrap_or_default(),
-        None,
-        Some(ParseOptions::new().progress_callback(&mut progress)),
-    );
-    if budget_exhausted {
-        return Err(syntax_budget_error("parser", budget));
-    }
-    parsed.ok_or_else(|| CodeIndexError::TreeSitter("parser returned no tree".to_owned()))
+    Ok(parser)
 }
 
 fn reject_pathological_c_family_fragment(
@@ -122,23 +221,14 @@ fn extract_tag_captures(
     root: Node<'_>,
     content: &str,
 ) -> Result<Vec<TagCapture>, CodeIndexError> {
-    let query = Query::new(&(language.language)(), language.tags_query)
-        .map_err(|error| CodeIndexError::TreeSitter(error.to_string()))?;
+    let query = compiled_tag_query(language)?;
     let capture_names = query.capture_names().to_vec();
     let mut cursor = QueryCursor::new();
-    let budget = syntax_stage_budget(content.len());
-    let deadline = Instant::now() + budget;
-    let mut budget_exhausted = false;
-    let mut progress = |_: &tree_sitter::QueryCursorState| {
-        if Instant::now() >= deadline {
-            budget_exhausted = true;
-            ControlFlow::Break(())
-        } else {
-            ControlFlow::Continue(())
-        }
-    };
+    let work_quanta = syntax_stage_work_quanta(content.len());
+    let mut work_budget = SyntaxCallbackWorkBudget::new(work_quanta);
+    let mut progress = |_: &tree_sitter::QueryCursorState| work_budget.consume();
     let mut matches = cursor.matches_with_options(
-        &query,
+        query.as_ref(),
         root,
         content.as_bytes(),
         QueryCursorOptions::new().progress_callback(&mut progress),
@@ -165,11 +255,13 @@ fn extract_tag_captures(
         if let (Some(name_node), Some((capture_kind, target_node))) =
             (name_capture, primary_capture)
         {
+            let doc_owner_node = capture_doc_owner_node(language.id, &capture_kind, target_node);
             captures.push(TagCapture {
                 name: node_text(content, name_node),
                 capture_kind,
                 name_node: syntax_range(name_node),
                 target_node: syntax_range(target_node),
+                doc_owner_node: syntax_range(doc_owner_node),
                 target_has_error: target_node.has_error(),
                 local_type_parameter: local_type_parameter_reference(
                     language.id,
@@ -181,25 +273,105 @@ fn extract_tag_captures(
     }
 
     drop(matches);
-    if budget_exhausted {
-        return Err(syntax_budget_error("query", budget));
+    if work_budget.exhausted {
+        return Err(syntax_budget_error("query", work_quanta));
     }
 
     Ok(captures)
 }
 
-fn syntax_stage_budget(content_len: usize) -> Duration {
-    let size_millis = content_len.saturating_add(SYNTAX_BUDGET_BYTES_PER_MILLISECOND - 1)
-        / SYNTAX_BUDGET_BYTES_PER_MILLISECOND;
-    SYNTAX_BASE_BUDGET
-        .saturating_add(Duration::from_millis(size_millis as u64))
-        .min(SYNTAX_MAX_BUDGET)
+fn capture_doc_owner_node<'tree>(
+    language_id: &str,
+    capture_kind: &str,
+    target_node: Node<'tree>,
+) -> Node<'tree> {
+    if !matches!(language_id, "c" | "cpp") || !capture_kind.starts_with("definition.") {
+        return target_node;
+    }
+
+    let mut cursor = target_node;
+    let mut declaration = None;
+    while let Some(parent) = cursor.parent() {
+        if matches!(
+            parent.kind(),
+            "declaration" | "field_declaration" | "friend_declaration" | "function_definition"
+        ) {
+            declaration = Some(parent);
+            break;
+        }
+        if matches!(
+            parent.kind(),
+            "class_specifier" | "namespace_definition" | "translation_unit"
+        ) {
+            break;
+        }
+        cursor = parent;
+    }
+
+    let mut owner = declaration.unwrap_or(target_node);
+    while let Some(parent) = owner.parent() {
+        if parent.kind() != "template_declaration" {
+            break;
+        }
+        owner = parent;
+    }
+    owner
 }
 
-fn syntax_budget_error(stage: &str, budget: Duration) -> CodeIndexError {
+fn compiled_tag_query(language: LanguageSpec) -> Result<Arc<Query>, CodeIndexError> {
+    let key = tag_query_cache_key(language);
+    {
+        let queries = lock_compiled_tag_queries();
+        if let Some(query) = queries.get(&key) {
+            return Ok(Arc::clone(query));
+        }
+    }
+
+    let query = Arc::new(
+        Query::new(&(language.language)(), language.tags_query)
+            .map_err(|error| CodeIndexError::TreeSitter(error.to_string()))?,
+    );
+    let mut queries = lock_compiled_tag_queries();
+    if let Some(existing) = queries.get(&key) {
+        return Ok(Arc::clone(existing));
+    }
+    if queries.len() < MAX_CACHED_TAG_QUERIES {
+        queries.insert(key, Arc::clone(&query));
+    }
+
+    Ok(query)
+}
+
+fn tag_query_cache_key(language: LanguageSpec) -> TagQueryCacheKey {
+    TagQueryCacheKey {
+        language_id: language.id,
+        language_factory_address: language.language as usize,
+        query_address: language.tags_query.as_ptr() as usize,
+        query_len: language.tags_query.len(),
+    }
+}
+
+fn lock_compiled_tag_queries() -> std::sync::MutexGuard<'static, CompiledTagQueryCache> {
+    match COMPILED_TAG_QUERIES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        Ok(queries) => queries,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn syntax_stage_work_quanta(content_len: usize) -> usize {
+    let size_quanta = content_len.saturating_add(SYNTAX_BUDGET_BYTES_PER_WORK_QUANTUM - 1)
+        / SYNTAX_BUDGET_BYTES_PER_WORK_QUANTUM;
+    SYNTAX_BASE_WORK_QUANTA
+        .saturating_add(size_quanta)
+        .min(SYNTAX_MAX_WORK_QUANTA)
+}
+
+fn syntax_budget_error(stage: &str, work_quanta: usize) -> CodeIndexError {
     CodeIndexError::TreeSitter(format!(
-        "{stage} exceeded bounded {} ms syntax budget",
-        budget.as_millis()
+        "{stage} exceeded bounded syntax budget of {work_quanta} callback work quanta"
     ))
 }
 
@@ -291,64 +463,5 @@ pub(super) fn extract_tag_captures_safely(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn c_language() -> LanguageSpec {
-        LanguageSpec {
-            id: "c",
-            language: || tree_sitter_c::LANGUAGE.into(),
-            tags_query: "",
-        }
-    }
-
-    #[test]
-    fn syntax_budget_scales_with_content_and_stays_bounded() {
-        assert_eq!(syntax_stage_budget(0), SYNTAX_BASE_BUDGET);
-        assert!(syntax_stage_budget(64 * 1_024) > SYNTAX_BASE_BUDGET);
-        assert_eq!(syntax_stage_budget(usize::MAX), SYNTAX_MAX_BUDGET);
-    }
-
-    #[test]
-    fn parser_cancels_pathological_error_recovery_at_the_budget() {
-        let fragment = "(".repeat(64 * 1_024);
-
-        let error = parse_tree_with_budget(c_language(), &fragment, Duration::ZERO)
-            .expect_err("the progress callback should cancel pathological recovery");
-
-        assert!(
-            error
-                .to_string()
-                .contains("exceeded bounded 0 ms syntax budget")
-        );
-    }
-
-    #[test]
-    fn parser_rejects_repeated_top_level_initializer_fragments_before_grammar_recovery() {
-        let mut fragment = String::new();
-        for index in 0..MIN_REPEATED_INITIALIZER_FRAGMENT_LINES {
-            fragment.push_str(&format!("{{ .flag = {index}, .value = 1 }},\n"));
-        }
-
-        let error = parse_tree(c_language(), &fragment)
-            .expect_err("a repeated declaration-free initializer fragment should be bounded");
-
-        assert!(
-            error
-                .to_string()
-                .contains("top-level designated initializer fragment")
-        );
-    }
-
-    #[test]
-    fn parser_keeps_designated_initializers_inside_a_declaration() {
-        let mut declaration = String::from("static const struct item values[] = {\n");
-        for index in 0..MIN_REPEATED_INITIALIZER_FRAGMENT_LINES {
-            declaration.push_str(&format!("    {{ .flag = {index}, .value = 1 }},\n"));
-        }
-        declaration.push_str("};\n");
-
-        parse_tree(c_language(), &declaration)
-            .expect("a declared initializer table remains eligible for structured parsing");
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;

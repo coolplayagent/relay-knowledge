@@ -18,8 +18,15 @@ use matching::{
     DependencyMatchIndex, component_alias_keys, import_match_candidates_with_python_locals,
 };
 use persistence::import_evidence;
-pub(super) use persistence::{delete_scope, insert_usage, usages_for_scope};
+pub(super) use persistence::{delete_scope, insert_usages, usages_for_scope};
 pub(super) use schema::initialize_schema;
+
+const MAX_COMPONENT_ALIAS_EVIDENCE_PER_SCOPE: usize = 65_536;
+const MAX_IMPORT_EVIDENCE_PER_SCOPE: usize = 131_072;
+const MAX_PYTHON_FILES_PER_SCOPE: usize = 131_072;
+const MAX_PYTHON_LOCAL_MODULES_PER_SCOPE: usize = 262_144;
+const MAX_DEPENDENCY_USAGES_PER_SCOPE: usize = 131_072;
+const MAX_MATCH_CANDIDATES_PER_IMPORT: usize = 128;
 
 pub(super) fn derive_dependency_usages(
     connection: &Connection,
@@ -27,24 +34,35 @@ pub(super) fn derive_dependency_usages(
     graph_version: GraphVersion,
     components: &[SoftwareComponent],
 ) -> Result<Vec<SoftwareDependencyUsage>, StorageError> {
-    let alias_keys = component_alias_keys(connection, source_scope)?;
+    let alias_keys = component_alias_keys(
+        connection,
+        source_scope,
+        MAX_COMPONENT_ALIAS_EVIDENCE_PER_SCOPE,
+    )?;
     let index = DependencyMatchIndex::new(components, &alias_keys);
     if index.is_empty() {
         return Ok(Vec::new());
     }
 
-    let imports = import_evidence(connection, source_scope)?;
-    let python_local_modules = python::local_modules(connection, source_scope)?;
+    let imports = import_evidence(connection, source_scope, MAX_IMPORT_EVIDENCE_PER_SCOPE)?;
+    let python_local_modules = python::local_modules(
+        connection,
+        source_scope,
+        MAX_PYTHON_FILES_PER_SCOPE,
+        MAX_PYTHON_LOCAL_MODULES_PER_SCOPE,
+    )?;
     let mut seen_usage_ids = BTreeSet::new();
     let mut usages = Vec::new();
     for import in imports {
-        for candidate in import_match_candidates_with_python_locals(
+        let candidates = import_match_candidates_with_python_locals(
             &import.language_id,
             &import.module,
             import.target_hint.as_deref(),
             &import.resolution_state,
             Some(&python_local_modules),
-        ) {
+            MAX_MATCH_CANDIDATES_PER_IMPORT,
+        )?;
+        for candidate in candidates {
             let matches = index.matching_components(
                 &import.language_id,
                 &candidate.value,
@@ -72,9 +90,12 @@ pub(super) fn derive_dependency_usages(
                     created_graph_version: graph_version,
                 })
                 .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-                if seen_usage_ids.insert(usage.usage_id.clone()) {
-                    usages.push(usage);
-                }
+                insert_bounded_usage(
+                    &mut usages,
+                    &mut seen_usage_ids,
+                    usage,
+                    MAX_DEPENDENCY_USAGES_PER_SCOPE,
+                )?;
             }
         }
     }
@@ -91,6 +112,24 @@ pub(super) fn derive_dependency_usages(
             })
     });
     Ok(usages)
+}
+
+fn insert_bounded_usage(
+    usages: &mut Vec<SoftwareDependencyUsage>,
+    seen_usage_ids: &mut BTreeSet<String>,
+    usage: SoftwareDependencyUsage,
+    limit: usize,
+) -> Result<(), StorageError> {
+    if !seen_usage_ids.insert(usage.usage_id.clone()) {
+        return Ok(());
+    }
+    if usages.len() >= limit {
+        return Err(StorageError::CapacityExceeded(format!(
+            "software dependency usages exceed the bounded limit {limit}"
+        )));
+    }
+    usages.push(usage);
+    Ok(())
 }
 
 #[cfg(test)]

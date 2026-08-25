@@ -187,8 +187,15 @@ pub(in crate::code) fn detect_workspaces_from_source(
         return Vec::new();
     }
     let mut workspaces = Vec::new();
-    for format in &config.supported_formats {
-        match *format {
+    for format in [
+        CodeMonorepoWorkspaceFormat::Pnpm,
+        CodeMonorepoWorkspaceFormat::GoModules,
+        CodeMonorepoWorkspaceFormat::CargoWorkspace,
+    ] {
+        if !config.supported_formats.contains(&format) {
+            continue;
+        }
+        match format {
             CodeMonorepoWorkspaceFormat::Pnpm => {
                 if let Some(members) = pnpm_workspace::detect_pnpm_workspace(source) {
                     workspaces.push(CodeMonorepoWorkspace {

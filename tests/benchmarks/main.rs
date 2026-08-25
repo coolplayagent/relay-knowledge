@@ -66,20 +66,6 @@ async fn benchmark_code_repository_fast_paths() {
     repo.git(["commit", "-m", "head"]);
     let head = repo.git_text(["rev-parse", "HEAD"]);
 
-    service
-        .index_code_repository(
-            CodeIndexRequest {
-                repository: selector("bench", &head),
-                mode: CodeIndexMode::Full,
-                workspace_detection: Default::default(),
-                freshness_policy: FreshnessPolicy::WaitUntilFresh,
-                reuse_historical: false,
-            },
-            context("benchmark-active-head"),
-        )
-        .await
-        .expect("head full index should seed active head");
-
     let incremental = timed(
         "persisted-base incremental",
         Duration::from_secs(5),
@@ -101,6 +87,11 @@ async fn benchmark_code_repository_fast_paths() {
         },
     )
     .await;
+    assert_eq!(
+        incremental.summary.base_resolved_commit_sha.as_deref(),
+        Some(base.as_str())
+    );
+    assert_eq!(incremental.summary.resolved_commit_sha, head);
     assert_eq!(incremental.summary.changed_path_count, 1);
     assert_eq!(incremental.summary.progress.blob_read_count, 1);
     assert_eq!(incremental.summary.progress.parsed_file_count, 1);

@@ -1,9 +1,13 @@
 use super::*;
 use crate::{
     domain::{
-        CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot, CodeRepositoryRegistration,
+        CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget, CodeIndexSession,
+        CodeIndexSnapshot, CodeRepositoryRegistration,
     },
-    storage::{CodeRepositoryStore, GraphStore, SqliteGraphStore},
+    storage::{
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeRepositoryStore,
+        GraphStore, SqliteGraphStore,
+    },
 };
 use rusqlite::OpenFlags;
 
@@ -208,6 +212,108 @@ async fn finalized_code_index_session_records_post_index_maintenance_diagnostics
     cleanup_database_path(&path);
 }
 
+#[tokio::test]
+async fn code_index_task_fenced_finalization_defers_maintenance_until_terminal_completion() {
+    let (store, path) = registered_file_store("fenced-finalize").await;
+    let source_scope = "git_snapshot:maintenance-fenced-finalize";
+    let session = empty_session(source_scope);
+    let observed_now_ms = epoch_millis();
+    let queued = store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: "repo".to_owned(),
+            alias: "fixture".to_owned(),
+            ref_selector: "HEAD".to_owned(),
+            resolved_commit_sha: session.resolved_commit_sha.clone(),
+            tree_hash: session.tree_hash.clone(),
+            source_scope: source_scope.to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            mode: CodeIndexMode::Full,
+            input_fingerprint: "maintenance-fenced-finalize".to_owned(),
+            resource_budget: session.resource_budget,
+            payload_json: "{}".to_owned(),
+            now_ms: observed_now_ms,
+        })
+        .await
+        .expect("task should queue");
+    let claimed = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: "maintenance-worker".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: epoch_millis(),
+        })
+        .await
+        .expect("task claim should run")
+        .expect("task should claim");
+    let fence = CodeIndexPublicationFence {
+        repository_id: claimed.repository_id.clone(),
+        task_id: claimed.task_id.clone(),
+        lease_owner: "maintenance-worker".to_owned(),
+        attempt_count: claimed.attempt_count,
+        generation: claimed.publication_generation,
+    };
+
+    store
+        .begin_code_index_session_with_fence(session.clone(), fence.clone())
+        .await
+        .expect("fenced session should begin");
+    store
+        .finalize_code_index_session_with_fence(session, fence.clone())
+        .await
+        .expect("fenced session should finalize without maintenance");
+    assert_eq!(
+        store
+            .inspect_graph()
+            .await
+            .expect("prepublication diagnostics should load")
+            .sqlite
+            .last_maintenance_at_ms,
+        None
+    );
+
+    store
+        .refresh_software_global_projection_with_fence(source_scope.to_owned(), fence)
+        .await
+        .expect("fenced publication should complete");
+    store
+        .complete_code_index_task(CodeIndexTaskCompletion {
+            task_id: claimed.task_id,
+            lease_owner: "maintenance-worker".to_owned(),
+            attempt_count: claimed.attempt_count,
+            publication_generation: claimed.publication_generation,
+            now_ms: epoch_millis(),
+        })
+        .await
+        .expect("task should become terminal");
+    assert_eq!(
+        store
+            .inspect_graph()
+            .await
+            .expect("terminal diagnostics should load")
+            .sqlite
+            .last_maintenance_at_ms,
+        None,
+        "terminal task transition itself must not hold the maintenance writer"
+    );
+
+    store
+        .run_code_index_post_maintenance("repo".to_owned(), source_scope.to_owned())
+        .await
+        .expect("post-terminal maintenance should run");
+    assert!(
+        store
+            .inspect_graph()
+            .await
+            .expect("maintained diagnostics should load")
+            .sqlite
+            .last_maintenance_at_ms
+            .is_some()
+    );
+    cleanup_database_path(&path);
+}
+
 async fn registered_file_store(label: &str) -> (SqliteGraphStore, PathBuf) {
     let path = unique_database_path(label);
     let store = SqliteGraphStore::open(&path).expect("store should open");
@@ -281,6 +387,16 @@ fn query_string(connection: &Connection, sql: &str) -> Result<String, StorageErr
     connection
         .query_row(sql, [], |row| row.get::<_, String>(0))
         .map_err(StorageError::from)
+}
+
+fn epoch_millis() -> u64 {
+    u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("test clock should follow Unix epoch")
+            .as_millis(),
+    )
+    .expect("epoch milliseconds should fit u64")
 }
 
 fn unique_database_path(label: &str) -> PathBuf {

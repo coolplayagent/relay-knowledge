@@ -6,7 +6,8 @@ use crate::{
     api::ApiError,
     domain::{
         CodeRepositorySetMember, CodeRepositorySetMemberStatus, CodeRepositorySetStatus,
-        CodeRepositoryStatus, code_snapshot_expected_scope_id,
+        CodeRepositoryStatus, code_snapshot_scope_is_fact_versioned,
+        code_snapshot_scope_matches_identity,
     },
     storage::KnowledgeStore,
 };
@@ -109,23 +110,16 @@ pub(super) fn fact_version_scope_mismatch_reason(
 pub(super) fn member_scope_matches_current_fact_version(
     member_status: &CodeRepositorySetMemberStatus,
 ) -> bool {
-    if !is_generated_git_snapshot_scope(&member_status.member.source_scope) {
+    if !code_snapshot_scope_is_fact_versioned(&member_status.member.source_scope) {
         return true;
     }
-    code_snapshot_expected_scope_id(
+    code_snapshot_scope_matches_identity(
         &member_status.member.repository_id,
         &member_status.tree_hash,
         &member_status.indexed_path_filters,
         &member_status.indexed_language_filters,
+        &member_status.member.source_scope,
     )
-    .is_some_and(|expected| expected == member_status.member.source_scope)
-}
-
-fn is_generated_git_snapshot_scope(source_scope: &str) -> bool {
-    let Some(hash) = source_scope.strip_prefix("git_snapshot:") else {
-        return false;
-    };
-    hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn mark_member_stale(member_status: &mut CodeRepositorySetMemberStatus, reason: String) {

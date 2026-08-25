@@ -11,11 +11,17 @@
 This specification consolidates the two issues into one executable Knowledge development loop:
 
 1. Repository bootstrap must establish both the `.knowledge/knowledge-map.yaml` navigation contract and a versioned code map. Completing only one is not a successful initialization.
-2. The code map is the primary source of truth for source, symbols, calls, dependencies, and source scopes. The whole-software model is a derived read model published for the same code-map scope.
+2. A Git commit is authoritative for tracked source facts. The code map is the published symbol, call, dependency, and retrieval-evidence view for one exact commit/source scope. The whole-software model is a derived read model published for the same code-map scope.
 3. YAML stores stable knowledge routes and a model entry point. It does not copy commit-varying architecture narratives, build targets, or deployment facts. The actual `design`, `build`, `iac`, and `relationships` facts come from `repo software` with ref, source-scope, freshness, and evidence metadata.
 4. Before producing a spec or code, an agent must consume the knowledge routes, software model, architecture view, and code context for one pinned ref. After a commit, it must refresh the code map and software model and validate YAML again.
 
 This specification does not introduce a second copy of code facts, persist LLM narratives as authoritative facts, scan repositories on query hot paths, or replace durable tasks and leases with shell polling loops.
+
+This chapter answers how to implement the loop through CLI coordination,
+durable tasks, leases, freshness, and evidence gates. For why commits are the
+fact anchors and how humans and agents organize decision context, read
+[Chapter 26: Git Commit + Knowledge Development Philosophy and Iteration
+Loop](26-git-commit-knowledge-development-loop.md).
 
 ## 2. Authoritative State and Ownership
 
@@ -48,7 +54,7 @@ Writing a resolved commit, architecture narrative, build targets, and deployment
 The contract therefore separates responsibilities:
 
 - YAML fixes where knowledge is read and which repository is the model root.
-- The code map fixes the source facts for a ref.
+- The code map fixes which source-fact views are derived and served for a ref.
 - The software projection fixes what architecture, build, and deployment facts can be derived deterministically from that same source scope.
 - Short narratives may appear only as response sections backed by evidence ids; they are not persisted authoritative facts.
 
@@ -142,4 +148,4 @@ Missing external dependency source remains unresolved metadata, not repository d
 
 ---
 
-Navigation: Previous: [22. Service Deployment, Control Plane, and Data Plane](22-service-deployment-control-data-plane.md) | Next: To be planned
+Navigation: Previous: [22. Service Deployment, Control Plane, and Data Plane](22-service-deployment-control-data-plane.md) | Next: [25. Code Index Retention](25-code-index-retention.md)

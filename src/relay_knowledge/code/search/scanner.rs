@@ -8,6 +8,7 @@ use crate::{
 use super::{
     SourceGrepKind, SourceGrepMatch, SourceGrepRequest,
     query::{find_query_bytes, source_grep_queries},
+    source_fallback_reference_language_is_code,
 };
 
 const MAX_GREP_LINE_BYTES: usize = 4096;
@@ -23,14 +24,10 @@ pub(super) fn internal_source_grep_matches(
         return Ok(Vec::new());
     }
 
-    let mut handwritten_matches = Vec::new();
-    let mut generated_matches = Vec::new();
+    let per_path_limit = request.limit.div_ceil(paths.len().max(1));
+    let mut handwritten_matches_by_path = Vec::new();
+    let mut generated_matches_by_path = Vec::new();
     for path in paths {
-        if handwritten_matches.len() >= request.limit
-            && (request.exclude_generated || generated_matches.len() >= request.limit)
-        {
-            break;
-        }
         let Ok(bytes) = fs::read(root.join(path)) else {
             continue;
         };
@@ -41,14 +38,7 @@ pub(super) fn internal_source_grep_matches(
         if request.exclude_generated && is_generated {
             continue;
         }
-        let matches = if is_generated {
-            &mut generated_matches
-        } else {
-            &mut handwritten_matches
-        };
-        if matches.len() >= request.limit {
-            continue;
-        }
+        let mut matches = Vec::new();
         push_internal_file_matches(
             InternalFileScan {
                 path,
@@ -57,21 +47,57 @@ pub(super) fn internal_source_grep_matches(
             },
             &queries,
             request.kind,
-            request.limit,
+            per_path_limit,
             &accepts,
-            matches,
+            &mut matches,
         )?;
+        if matches.is_empty() {
+            continue;
+        }
+        if is_generated {
+            generated_matches_by_path.push(matches);
+        } else {
+            handwritten_matches_by_path.push(matches);
+        }
     }
 
-    let mut matches = handwritten_matches;
+    let mut matches = fair_path_matches(handwritten_matches_by_path, request.limit);
     if matches.len() < request.limit {
-        matches.extend(
-            generated_matches
-                .into_iter()
-                .take(request.limit - matches.len()),
-        );
+        matches.extend(fair_path_matches(
+            generated_matches_by_path,
+            request.limit - matches.len(),
+        ));
     }
     Ok(matches)
+}
+
+fn fair_path_matches(
+    matches_by_path: Vec<Vec<SourceGrepMatch>>,
+    limit: usize,
+) -> Vec<SourceGrepMatch> {
+    let mut matches_by_path = matches_by_path
+        .into_iter()
+        .map(Vec::into_iter)
+        .collect::<Vec<_>>();
+    let mut matches = Vec::with_capacity(limit);
+    while matches.len() < limit {
+        let mut advanced = false;
+        for path_matches in &mut matches_by_path {
+            let Some(matched) = path_matches.next() else {
+                continue;
+            };
+            matches.push(matched);
+            advanced = true;
+            if matches.len() == limit {
+                break;
+            }
+        }
+        if !advanced {
+            break;
+        }
+    }
+
+    matches
 }
 
 struct InternalFileScan<'a> {
@@ -93,7 +119,7 @@ fn push_internal_file_matches(
     let mut line_start = 0usize;
     let mut line_number = 1usize;
     let mut previous_line = None;
-    while line_start < bytes.len() && matches.len() < limit {
+    while line_start < bytes.len() {
         let line_end = bytes[line_start..]
             .iter()
             .position(|byte| *byte == b'\n')
@@ -159,7 +185,7 @@ fn push_internal_file_matches(
                 is_generated: input.is_generated,
             };
             if accepts(&matched) {
-                matches.push(matched);
+                retain_preferred_file_match(matches, matched, kind, limit);
             }
         }
         previous_line = Some(carried_line);
@@ -172,6 +198,70 @@ fn push_internal_file_matches(
     }
 
     Ok(())
+}
+
+fn retain_preferred_file_match(
+    matches: &mut Vec<SourceGrepMatch>,
+    matched: SourceGrepMatch,
+    kind: SourceGrepKind,
+    limit: usize,
+) {
+    if limit == 0 {
+        return;
+    }
+    let insert_at = matches
+        .iter()
+        .position(|existing| source_match_precedes(&matched, existing, kind))
+        .unwrap_or(matches.len());
+    if insert_at == matches.len() && matches.len() == limit {
+        return;
+    }
+    matches.insert(insert_at, matched);
+    matches.truncate(limit);
+}
+
+fn source_match_precedes(
+    left: &SourceGrepMatch,
+    right: &SourceGrepMatch,
+    kind: SourceGrepKind,
+) -> bool {
+    source_match_priority(left, kind)
+        .cmp(&source_match_priority(right, kind))
+        .reverse()
+        .then_with(|| left.line_range.start.cmp(&right.line_range.start))
+        .is_lt()
+}
+
+fn source_match_priority(matched: &SourceGrepMatch, kind: SourceGrepKind) -> u8 {
+    if kind == SourceGrepKind::References
+        && !source_fallback_reference_language_is_code(&matched.language_id)
+    {
+        return 0;
+    }
+    let line = matched.excerpt.trim_start();
+    if source_line_starts_with_comment(line) {
+        return 1;
+    }
+    if kind == SourceGrepKind::References && source_line_imports_identity(line) {
+        return 2;
+    }
+
+    3
+}
+
+fn source_line_starts_with_comment(line: &str) -> bool {
+    ["//", "#", "/*", "*", "--", "<!--"]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+}
+
+fn source_line_imports_identity(line: &str) -> bool {
+    let line = line.trim_start_matches(|character: char| {
+        character.is_ascii_whitespace() || matches!(character, '@' | '(' | ')')
+    });
+    ["import ", "using ", "use ", "#include", "require("]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
 }
 
 #[derive(Clone, Copy)]

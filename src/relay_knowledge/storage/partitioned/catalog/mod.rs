@@ -23,6 +23,10 @@ use crate::{
 
 const CATALOG_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
 
+mod schema;
+
+pub(super) use schema::initialize_catalog_schema;
+
 #[derive(Debug)]
 pub(super) struct SqliteShardCatalog {
     control_path: PathBuf,
@@ -113,18 +117,13 @@ impl SqliteShardCatalog {
         .await?
     }
 
-    pub(super) async fn import_control_repository(
+    pub(super) async fn import_control_repository_metadata(
         &self,
         shard: Arc<SqliteGraphStore>,
         repository_id: String,
-        source_scope: Option<String>,
     ) -> Result<(), StorageError> {
         shard
-            .import_code_repository_from_database(
-                self.control_path.clone(),
-                repository_id,
-                source_scope,
-            )
+            .import_code_repository_from_database(self.control_path.clone(), repository_id, None)
             .await
     }
 
@@ -171,21 +170,25 @@ impl SqliteShardCatalog {
         .await?
     }
 
-    pub(super) async fn record_scope_with_fence(
+    /// Atomically opens the control-plane read gate for one already-published
+    /// shard scope and mirrors the matching repository status.
+    pub(super) async fn publish_scope_status_with_fence(
         &self,
         repository_id: String,
         source_scope: String,
+        status: CodeRepositoryStatus,
         fence: CodeIndexPublicationFence,
     ) -> Result<(), StorageError> {
         let control_path = self.control_path.clone();
         let db_path = self.paths.repository_shard_database_file(&repository_id);
         let shard_locator = shard_locator(&self.paths, &db_path);
         tokio::task::spawn_blocking(move || {
-            record_catalog_scope_with_fence(
+            publish_catalog_scope_status_with_fence(
                 &control_path,
                 &repository_id,
                 &source_scope,
                 &shard_locator,
+                &status,
                 fence,
             )
         })
@@ -227,6 +230,7 @@ impl SqliteShardCatalog {
         .await?
     }
 
+    #[cfg(test)]
     pub(super) async fn repository_for_scope(
         &self,
         source_scope: String,
@@ -234,6 +238,41 @@ impl SqliteShardCatalog {
         let control_path = self.control_path.clone();
         tokio::task::spawn_blocking(move || {
             catalog_repository_for_scope(&control_path, &source_scope)
+        })
+        .await?
+    }
+
+    pub(super) async fn active_repository_for_scope(
+        &self,
+        source_scope: String,
+    ) -> Result<Option<String>, StorageError> {
+        let control_path = self.control_path.clone();
+        tokio::task::spawn_blocking(move || {
+            catalog_active_repository_for_scope(&control_path, &source_scope)
+        })
+        .await?
+    }
+
+    pub(super) async fn staged_scope_owned_by_task(
+        &self,
+        repository_id: String,
+        source_scope: String,
+        task_id: String,
+    ) -> Result<bool, StorageError> {
+        let control_path = self.control_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let connection = open_catalog_readonly_connection(&control_path)?;
+            connection
+                .query_row(
+                    "SELECT 1 FROM storage_repository_shard_scopes
+                     WHERE repository_id = ?1 AND source_scope = ?2
+                       AND state = 'staged' AND staged_task_id = ?3",
+                    params![repository_id, source_scope, task_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map(|row| row.is_some())
+                .map_err(StorageError::from)
         })
         .await?
     }
@@ -331,31 +370,6 @@ fn shard_locator(paths: &RuntimePaths, db_path: &Path) -> String {
         .to_string()
 }
 
-pub(super) fn initialize_catalog_schema(control_path: &Path) -> Result<(), StorageError> {
-    let connection = open_catalog_connection(control_path)?;
-    connection.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS storage_repository_shards (
-            repository_id TEXT PRIMARY KEY,
-            db_path TEXT NOT NULL,
-            state TEXT NOT NULL,
-            created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS storage_repository_shard_scopes (
-            source_scope TEXT PRIMARY KEY,
-            repository_id TEXT NOT NULL,
-            updated_at_ms INTEGER NOT NULL,
-            FOREIGN KEY (repository_id) REFERENCES storage_repository_shards(repository_id)
-                ON DELETE CASCADE
-        );
-        ",
-    )?;
-
-    Ok(())
-}
-
 fn upsert_catalog_repository(
     control_path: &Path,
     repository_id: &str,
@@ -411,32 +425,19 @@ fn record_catalog_scope(
     let connection = open_catalog_connection(control_path)?;
     connection.execute(
         "
-        INSERT INTO storage_repository_shard_scopes (source_scope, repository_id, updated_at_ms)
-        VALUES (?1, ?2, ?3)
+        INSERT INTO storage_repository_shard_scopes (
+            source_scope, repository_id, state, staged_task_id, updated_at_ms
+        )
+        VALUES (?1, ?2, 'active', NULL, ?3)
         ON CONFLICT(source_scope) DO UPDATE SET
             repository_id = excluded.repository_id,
+            state = excluded.state,
+            staged_task_id = NULL,
             updated_at_ms = excluded.updated_at_ms
         ",
         params![source_scope, repository_id, now_millis()],
     )?;
     Ok(())
-}
-
-fn record_catalog_scope_with_fence(
-    control_path: &Path,
-    repository_id: &str,
-    source_scope: &str,
-    shard_locator: &str,
-    fence: CodeIndexPublicationFence,
-) -> Result<(), StorageError> {
-    write_catalog_scope_with_fence(
-        control_path,
-        repository_id,
-        source_scope,
-        shard_locator,
-        "active",
-        fence,
-    )
 }
 
 fn stage_catalog_scope(
@@ -449,10 +450,21 @@ fn stage_catalog_scope(
     let connection = open_catalog_connection(control_path)?;
     connection.execute(
         "
-        INSERT INTO storage_repository_shard_scopes (source_scope, repository_id, updated_at_ms)
-        VALUES (?1, ?2, ?3)
+        INSERT INTO storage_repository_shard_scopes (
+            source_scope, repository_id, state, staged_task_id, updated_at_ms
+        )
+        VALUES (?1, ?2, 'staged', NULL, ?3)
         ON CONFLICT(source_scope) DO UPDATE SET
-            repository_id = excluded.repository_id,
+            repository_id = CASE
+                WHEN storage_repository_shard_scopes.state = 'active'
+                THEN storage_repository_shard_scopes.repository_id
+                ELSE excluded.repository_id
+            END,
+            state = CASE
+                WHEN storage_repository_shard_scopes.state = 'active'
+                THEN 'active'
+                ELSE excluded.state
+            END,
             updated_at_ms = excluded.updated_at_ms
         ",
         params![source_scope, repository_id, now_millis()],
@@ -497,13 +509,38 @@ fn write_catalog_scope_with_fence(
     upsert_catalog_repository_in_transaction(&transaction, repository_id, shard_locator, state)?;
     transaction.execute(
         "
-        INSERT INTO storage_repository_shard_scopes (source_scope, repository_id, updated_at_ms)
-        VALUES (?1, ?2, ?3)
+        INSERT INTO storage_repository_shard_scopes (
+            source_scope, repository_id, state, staged_task_id, updated_at_ms
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5)
         ON CONFLICT(source_scope) DO UPDATE SET
-            repository_id = excluded.repository_id,
+            repository_id = CASE
+                WHEN storage_repository_shard_scopes.state = 'active'
+                    AND excluded.state = 'staged'
+                THEN storage_repository_shard_scopes.repository_id
+                ELSE excluded.repository_id
+            END,
+            state = CASE
+                WHEN storage_repository_shard_scopes.state = 'active'
+                    AND excluded.state = 'staged'
+                THEN 'active'
+                ELSE excluded.state
+            END,
+            staged_task_id = CASE
+                WHEN storage_repository_shard_scopes.state = 'active'
+                    AND excluded.state = 'staged'
+                THEN storage_repository_shard_scopes.staged_task_id
+                ELSE excluded.staged_task_id
+            END,
             updated_at_ms = excluded.updated_at_ms
         ",
-        params![source_scope, repository_id, now_millis()],
+        params![
+            source_scope,
+            repository_id,
+            state,
+            guard.task_id(),
+            now_millis()
+        ],
     )?;
     guard.validate_target_scope(&transaction, source_scope)?;
     guard.validate(&transaction)?;
@@ -538,11 +575,79 @@ fn upsert_catalog_repository_in_transaction(
     Ok(())
 }
 
+fn publish_catalog_scope_status_with_fence(
+    control_path: &Path,
+    repository_id: &str,
+    source_scope: &str,
+    shard_locator: &str,
+    status: &CodeRepositoryStatus,
+    fence: CodeIndexPublicationFence,
+) -> Result<(), StorageError> {
+    if status.repository_id != repository_id
+        || status.last_indexed_scope_id.as_deref() != Some(source_scope)
+        || status.stale
+        || status.state != "fresh"
+    {
+        return Err(StorageError::InvalidInput(format!(
+            "shard status for repository '{repository_id}' does not describe fresh scope '{source_scope}'"
+        )));
+    }
+    initialize_catalog_schema(control_path)?;
+    let mut connection = open_catalog_connection(control_path)?;
+    let guard = crate::storage::sqlite::code::lifecycle::publication_fence::prepare_guard(
+        &connection,
+        fence,
+        None,
+    )?;
+    guard.validate_repository(repository_id)?;
+    let transaction = connection.transaction()?;
+    guard.validate_target_scope(&transaction, source_scope)?;
+    guard.validate(&transaction)?;
+    let route_is_publishable = transaction
+        .query_row(
+            "SELECT 1 FROM storage_repository_shard_scopes
+             WHERE repository_id = ?1 AND source_scope = ?2
+               AND (state = 'active'
+                    OR (state = 'staged' AND staged_task_id = ?3))",
+            params![repository_id, source_scope, guard.task_id()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !route_is_publishable {
+        return Err(StorageError::InvalidInput(format!(
+            "catalog scope '{source_scope}' is not active or staged by task '{}'",
+            guard.task_id()
+        )));
+    }
+    upsert_catalog_repository_in_transaction(&transaction, repository_id, shard_locator, "active")?;
+    transaction.execute(
+        "
+        INSERT INTO storage_repository_shard_scopes (
+            source_scope, repository_id, state, staged_task_id, updated_at_ms
+        )
+        VALUES (?1, ?2, 'active', NULL, ?3)
+        ON CONFLICT(source_scope) DO UPDATE SET
+            repository_id = excluded.repository_id,
+            state = excluded.state,
+            staged_task_id = NULL,
+            updated_at_ms = excluded.updated_at_ms
+        ",
+        params![source_scope, repository_id, now_millis()],
+    )?;
+    mirror_repository_status(&transaction, status)?;
+    guard.validate_target_scope(&transaction, source_scope)?;
+    crate::storage::sqlite::code::record_receipt_from_active_fence(&transaction, source_scope)?;
+    guard.validate(&transaction)?;
+    transaction.commit()?;
+    Ok(())
+}
+
 fn catalog_repository_for_scope(
     control_path: &Path,
     source_scope: &str,
 ) -> Result<Option<String>, StorageError> {
-    let connection = open_catalog_connection(control_path)?;
+    let connection = open_catalog_readonly_connection(control_path)?;
     connection
         .query_row(
             "
@@ -557,12 +662,35 @@ fn catalog_repository_for_scope(
         .map_err(StorageError::from)
 }
 
+fn catalog_active_repository_for_scope(
+    control_path: &Path,
+    source_scope: &str,
+) -> Result<Option<String>, StorageError> {
+    let connection = open_catalog_readonly_connection(control_path)?;
+    connection
+        .query_row(
+            "
+            SELECT scope.repository_id
+            FROM storage_repository_shard_scopes scope
+            JOIN storage_repository_shards shard
+              ON shard.repository_id = scope.repository_id
+            WHERE scope.source_scope = ?1
+              AND scope.state = 'active'
+              AND shard.state = 'active'
+            ",
+            params![source_scope],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StorageError::from)
+}
+
 fn catalog_repository_path(
     control_path: &Path,
     paths: &RuntimePaths,
     repository_id: &str,
 ) -> Result<Option<PathBuf>, StorageError> {
-    let connection = open_catalog_connection(control_path)?;
+    let connection = open_catalog_readonly_connection(control_path)?;
     let is_active = connection
         .query_row(
             "
@@ -579,7 +707,7 @@ fn catalog_repository_path(
 }
 
 fn catalog_repository_ids(control_path: &Path) -> Result<Vec<String>, StorageError> {
-    let connection = open_catalog_connection(control_path)?;
+    let connection = open_catalog_readonly_connection(control_path)?;
     let mut statement = connection.prepare(
         "
         SELECT repository_id
@@ -597,7 +725,7 @@ pub(super) fn catalog_has_active_repositories(control_path: &Path) -> Result<boo
     if !control_path.exists() {
         return Ok(false);
     }
-    let connection = open_catalog_connection(control_path)?;
+    let connection = open_catalog_readonly_connection(control_path)?;
     let has_catalog = connection
         .query_row(
             "

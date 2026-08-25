@@ -1,6 +1,11 @@
 use rusqlite::Connection;
 
 use crate::storage::StorageError;
+use crate::storage::sqlite::schema::marker::{
+    REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION, SEARCH_ORPHAN_GC_PHASE_MIGRATION,
+};
+
+use super::migrations::{code_schema_migration_applied, mark_code_schema_migration};
 
 #[path = "retention_activity_trigger_schema.rs"]
 mod retention_activity_trigger_schema;
@@ -18,6 +23,7 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
             source_scope TEXT PRIMARY KEY,
             repository_id TEXT NOT NULL,
             phase TEXT NOT NULL,
+            search_rowid_cursor INTEGER,
             deleted_rows INTEGER NOT NULL,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
@@ -233,7 +239,65 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
         "catalog_revision",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    super::super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_scope_gc_jobs",
+        "search_rowid_cursor",
+        "INTEGER",
+    )?;
+    rewind_legacy_jobs_for_search_orphan_gc_once(connection)?;
+    rewind_legacy_jobs_for_reference_search_group_gc_once(connection)?;
     Ok(())
+}
+
+fn rewind_legacy_jobs_for_search_orphan_gc_once(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, SEARCH_ORPHAN_GC_PHASE_MIGRATION)? {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute(
+        "UPDATE code_repository_scope_gc_jobs
+         SET phase = 'search_orphans', search_rowid_cursor = NULL
+         WHERE phase IN (
+             'path_tombstones', 'file_diagnostics', 'chunks', 'calls', 'routes',
+             'feature_flags', 'dependencies', 'imports', 'references', 'symbols', 'files',
+             'software_components', 'software_dependency_usages', 'software_sdk_usages',
+             'software_files', 'software_topics', 'software_relationships',
+             'software_global_status', 'software_build_targets', 'software_iac_resources',
+             'software_design_elements', 'commit_scopes', 'index_batch_staging',
+             'index_task_history', 'checkpoint', 'scope_metadata'
+         )",
+        [],
+    )?;
+    mark_code_schema_migration(&transaction, SEARCH_ORPHAN_GC_PHASE_MIGRATION)?;
+    transaction.commit().map_err(StorageError::from)
+}
+
+fn rewind_legacy_jobs_for_reference_search_group_gc_once(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION)? {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute(
+        "UPDATE code_repository_scope_gc_jobs
+         SET phase = 'reference_search_groups', search_rowid_cursor = NULL
+         WHERE phase IN (
+             'path_tombstones', 'file_diagnostics', 'chunks', 'calls', 'routes',
+             'feature_flags', 'dependencies', 'imports', 'references', 'symbols', 'files',
+             'software_components', 'software_dependency_usages', 'software_sdk_usages',
+             'software_files', 'software_topics', 'software_relationships',
+             'software_global_status', 'software_build_targets', 'software_iac_resources',
+             'software_design_elements', 'commit_scopes', 'index_batch_staging',
+             'index_task_history', 'checkpoint', 'scope_metadata'
+         )",
+        [],
+    )?;
+    mark_code_schema_migration(&transaction, REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION)?;
+    transaction.commit().map_err(StorageError::from)
 }
 
 pub(in crate::storage::sqlite) fn upgrade_legacy_retention_activity_triggers(

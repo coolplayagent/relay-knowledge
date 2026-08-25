@@ -40,6 +40,17 @@ static GIT_SHOW_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
 #[cfg(test)]
 static GIT_LS_TREE_FULL_SCAN_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
 
+/// Builds a Git command that cannot take optional locks in the source repository.
+///
+/// Code indexing treats Git repositories as read-only inputs. In particular,
+/// commands such as `git status` must not refresh the repository index because
+/// that races with an editor or user process running `git add` or `git commit`.
+fn read_only_git_command() -> Command {
+    let mut command = Command::new("git");
+    command.env("GIT_OPTIONAL_LOCKS", "0");
+    command
+}
+
 #[cfg(test)]
 pub(crate) fn reset_git_show_call_count_for_root(root: PathBuf) {
     *GIT_SHOW_OBSERVER
@@ -338,7 +349,7 @@ pub(in crate::code) fn git_optional<const N: usize>(
     root: &Path,
     args: [&str; N],
 ) -> Result<Option<String>, CodeIndexError> {
-    let output = Command::new("git")
+    let output = read_only_git_command()
         .arg("-C")
         .arg(root)
         .args(args)
@@ -365,7 +376,7 @@ pub(in crate::code) fn git_bytes_slice(
 ) -> Result<Vec<u8>, CodeIndexError> {
     record_git_show_call(root, args);
     record_git_ls_tree_full_scan_call(root, args);
-    let output = Command::new("git")
+    let output = read_only_git_command()
         .arg("-C")
         .arg(root)
         .args(args)
@@ -384,7 +395,7 @@ pub(in crate::code) fn git_dir_bytes(
     git_dir: &Path,
     args: &[&str],
 ) -> Result<Vec<u8>, CodeIndexError> {
-    let output = Command::new("git")
+    let output = read_only_git_command()
         .arg("--git-dir")
         .arg(git_dir)
         .arg("--work-tree")
@@ -531,7 +542,7 @@ fn cat_file_output<const N: usize>(
     paths: &[String],
 ) -> Result<Output, CodeIndexError> {
     let input = cat_file_batch_input(commit, paths);
-    let mut command = Command::new("git");
+    let mut command = read_only_git_command();
     command.arg("-C").arg(root).args(args);
 
     command_output_with_stdin(

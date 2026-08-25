@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::{
+    BoundedFacts,
     document::{IndexedDocument, IndexedLine},
     syntax::{
         clean_scalar, file_name, file_stem, indentation, strip_comment, terraform_block,
@@ -19,6 +20,12 @@ use super::{
 };
 
 const HIGH_CONFIDENCE: u16 = 9_000;
+const MAX_IAC_RESOURCES_PER_SCOPE: usize = 65_536;
+type IacResources = BoundedFacts<SoftwareIacResource>;
+
+pub(super) fn new_resources() -> IacResources {
+    IacResources::new(MAX_IAC_RESOURCES_PER_SCOPE, "IaC resources")
+}
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -62,20 +69,43 @@ pub(super) fn delete_scope(
     Ok(())
 }
 
-pub(super) fn refresh(
+pub(super) fn persist(
     connection: &Connection,
-    graph_version: GraphVersion,
-    documents: &[IndexedDocument],
-) -> Result<Vec<SoftwareIacResource>, StorageError> {
-    let mut resources = Vec::new();
-    for document in documents {
-        collect(document, graph_version, &mut resources)?;
-    }
-    for resource in &resources {
-        insert_iac_resource(connection, resource)?;
+    resources: &[SoftwareIacResource],
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "
+        INSERT OR REPLACE INTO software_iac_resources (
+            resource_id, repository_id, source_scope, language_id, provider, resource_kind,
+            name, scope_hint, target_hint, resolution_state, source_kind, evidence_path,
+            evidence_line_start, evidence_line_end, confidence_basis_points,
+            created_graph_version
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ",
+    )?;
+    for resource in resources {
+        statement.execute(params![
+            resource.resource_id,
+            resource.repository_id,
+            resource.source_scope,
+            resource.language_id,
+            resource.provider,
+            resource.resource_kind,
+            resource.name,
+            resource.scope_hint,
+            resource.target_hint,
+            resource.resolution_state,
+            resource.source_kind,
+            resource.evidence_path,
+            resource.evidence_line_range.start,
+            resource.evidence_line_range.end,
+            resource.confidence_basis_points,
+            resource.created_graph_version.get(),
+        ])?;
     }
 
-    Ok(resources)
+    Ok(())
 }
 
 pub(in super::super) fn iac_resources_for_scope(
@@ -140,42 +170,6 @@ pub(in super::super) fn iac_resources_for_scope(
         .map_err(StorageError::from)
 }
 
-fn insert_iac_resource(
-    connection: &Connection,
-    resource: &SoftwareIacResource,
-) -> Result<(), StorageError> {
-    connection.execute(
-        "
-        INSERT OR REPLACE INTO software_iac_resources (
-            resource_id, repository_id, source_scope, language_id, provider, resource_kind,
-            name, scope_hint, target_hint, resolution_state, source_kind, evidence_path,
-            evidence_line_start, evidence_line_end, confidence_basis_points,
-            created_graph_version
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-        ",
-        params![
-            resource.resource_id,
-            resource.repository_id,
-            resource.source_scope,
-            resource.language_id,
-            resource.provider,
-            resource.resource_kind,
-            resource.name,
-            resource.scope_hint,
-            resource.target_hint,
-            resource.resolution_state,
-            resource.source_kind,
-            resource.evidence_path,
-            resource.evidence_line_range.start,
-            resource.evidence_line_range.end,
-            resource.confidence_basis_points,
-            resource.created_graph_version.get(),
-        ],
-    )?;
-    Ok(())
-}
-
 fn iac_resource_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareIacResource> {
     Ok(SoftwareIacResource {
         resource_id: row.get(0)?,
@@ -200,18 +194,12 @@ fn iac_resource_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareIa
 }
 
 fn push_iac_resource(
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
     input: SoftwareIacResourceInput,
 ) -> Result<(), StorageError> {
     let resource = SoftwareIacResource::new(input)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    if !resources
-        .iter()
-        .any(|existing| existing.resource_id == resource.resource_id)
-    {
-        resources.push(resource);
-    }
-    Ok(())
+    resources.insert(resource.resource_id.clone(), resource)
 }
 
 fn iac_input(
@@ -244,10 +232,10 @@ fn iac_input(
     }
 }
 
-fn collect(
+pub(super) fn collect(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     let file_name = file_name(&document.path);
     let lower_path = document.path.to_ascii_lowercase();
@@ -277,7 +265,7 @@ fn collect(
 fn collect_dockerfile(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         let trimmed = strip_comment(&line.text, '#').trim();
@@ -315,7 +303,7 @@ fn collect_dockerfile(
 fn collect_terraform(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         let trimmed = strip_comment(&line.text, '#').trim();
@@ -345,7 +333,7 @@ fn collect_terraform(
 fn collect_systemd(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     let name = file_stem(&document.path).unwrap_or_else(|| document.path.clone());
     for line in &document.lines {
@@ -369,7 +357,7 @@ fn collect_systemd(
 fn collect_launchd(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     for (index, line) in document.lines.iter().enumerate() {
         if line.text.contains("<key>Label</key>")
@@ -396,7 +384,7 @@ fn collect_launchd(
 fn collect_yaml(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     let file_name = file_name(&document.path).unwrap_or_default();
     if matches!(
@@ -421,7 +409,7 @@ fn collect_yaml(
 fn collect_compose(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     let mut in_services = false;
     let mut current_service = None::<String>;
@@ -468,7 +456,7 @@ fn collect_compose(
 fn collect_kubernetes(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     let mut kind = None::<String>;
     let mut in_metadata = false;
@@ -508,7 +496,7 @@ fn collect_kubernetes(
 fn collect_helm(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         let trimmed = strip_comment(&line.text, '#').trim();
@@ -535,7 +523,7 @@ fn collect_workflow(
     document: &IndexedDocument,
     graph_version: GraphVersion,
     provider: &str,
-    resources: &mut Vec<SoftwareIacResource>,
+    resources: &mut IacResources,
 ) -> Result<(), StorageError> {
     let mut in_jobs = false;
     for line in &document.lines {

@@ -4,7 +4,7 @@ use relay_knowledge::{
     domain::{CodeRepositorySelector, CodebaseViewKind, CodebaseViewRequest, FreshnessPolicy},
     storage::{
         CodeIndexTaskClaimRequest, CodeRepositorySetRefreshTaskSeed, CodeRepositoryStore,
-        GraphStore, PartitionedSqliteKnowledgeStore, SqliteGraphStore,
+        GraphStore, PartitionedSqliteKnowledgeStore, SqliteGraphStore, StorageError,
     },
 };
 
@@ -32,14 +32,9 @@ async fn partitioned_sqlite_routes_repository_code_facts_to_shards() {
 
     let alpha_scope = "scope-alpha".to_owned();
     let beta_scope = "scope-beta".to_owned();
-    store
-        .apply_code_index_snapshot(snapshot("repo-alpha", &alpha_scope, "alpha needle"))
-        .await
-        .expect("alpha indexes");
-    store
-        .apply_code_index_snapshot(snapshot("repo-beta", &beta_scope, "beta needle"))
-        .await
-        .expect("beta indexes");
+    publish_partitioned_snapshot(&store, snapshot("repo-alpha", &alpha_scope, "alpha needle"))
+        .await;
+    publish_partitioned_snapshot(&store, snapshot("repo-beta", &beta_scope, "beta needle")).await;
 
     let alpha_hits = store
         .search_code_scope(
@@ -81,10 +76,8 @@ async fn partitioned_sqlite_routes_codebase_view_snapshots_to_shards() {
         .upsert_code_repository(registration("repo-alpha", "alpha"))
         .await
         .expect("alpha registers");
-    store
-        .apply_code_index_snapshot(snapshot("repo-alpha", &alpha_scope, "alpha needle"))
-        .await
-        .expect("alpha indexes");
+    publish_partitioned_snapshot(&store, snapshot("repo-alpha", &alpha_scope, "alpha needle"))
+        .await;
 
     let request = CodebaseViewRequest::new(
         CodeRepositorySelector::new("alpha", "HEAD", Vec::new(), Vec::new())
@@ -190,7 +183,7 @@ async fn partitioned_sqlite_reregister_legacy_repo_imports_latest_scope_before_a
 }
 
 #[tokio::test]
-async fn partitioned_sqlite_queue_task_does_not_publish_scope_before_shard_exists() {
+async fn partitioned_sqlite_queue_task_keeps_unpublished_scope_unavailable() {
     let paths = runtime_paths();
     let control_path = paths.database_file();
     let single = SqliteGraphStore::open(&control_path).expect("single store opens");
@@ -211,12 +204,13 @@ async fn partitioned_sqlite_queue_task_does_not_publish_scope_before_shard_exist
         ))
         .await
         .expect("task queues");
-    let fingerprints = store
+    let error = store
         .code_file_fingerprints_for_scope("scope-queued".to_owned())
         .await
-        .expect("unpublished queued scope falls back to control");
+        .expect_err("an unpublished queued scope must not be queryable");
 
-    assert!(fingerprints.is_empty());
+    assert!(matches!(error, StorageError::InvalidInput(_)));
+    assert!(error.to_string().contains("scope-queued"));
     assert!(!paths.repository_shard_database_file("repo-legacy").exists());
 }
 
@@ -240,10 +234,11 @@ async fn partitioned_sqlite_totals_include_legacy_control_rows_when_shards_exist
         .upsert_code_repository(registration("repo-alpha", "alpha"))
         .await
         .expect("alpha registers");
-    store
-        .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
-        .await
-        .expect("alpha indexes");
+    publish_partitioned_snapshot(
+        &store,
+        snapshot("repo-alpha", "scope-alpha", "alpha needle"),
+    )
+    .await;
     let totals = store
         .code_repository_totals()
         .await
@@ -270,15 +265,16 @@ async fn partitioned_sqlite_totals_do_not_double_count_migrated_control_rows() {
         .expect("legacy facts persist");
 
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store opens");
-    store
-        .apply_code_index_snapshot(snapshot_with_commit(
+    publish_partitioned_snapshot(
+        &store,
+        snapshot_with_commit(
             "repo-legacy",
             "scope-legacy-next",
             "repo-legacy-next-commit",
             "legacy next needle",
-        ))
-        .await
-        .expect("partitioned reindex succeeds");
+        ),
+    )
+    .await;
     let totals = store
         .code_repository_totals()
         .await
@@ -306,10 +302,11 @@ async fn partitioned_sqlite_graph_diagnostics_include_shard_maintenance() {
         .expect("initial graph diagnostics load");
     assert_eq!(before.sqlite.last_maintenance_at_ms, None);
 
-    store
-        .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
-        .await
-        .expect("alpha indexes");
+    publish_partitioned_snapshot(
+        &store,
+        snapshot("repo-alpha", "scope-alpha", "alpha needle"),
+    )
+    .await;
     drop(store);
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store reopens");
 
@@ -349,15 +346,16 @@ async fn partitioned_sqlite_repository_search_falls_back_to_control_for_legacy_r
         .expect("legacy facts persist");
 
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store opens");
-    store
-        .apply_code_index_snapshot(snapshot_with_commit(
+    publish_partitioned_snapshot(
+        &store,
+        snapshot_with_commit(
             "repo-legacy",
             "scope-legacy-next",
             "repo-legacy-next-commit",
             "legacy next needle",
-        ))
-        .await
-        .expect("partitioned reindex succeeds");
+        ),
+    )
+    .await;
     let hits = store
         .search_code(retrieval_request_for_ref(
             "legacy",
@@ -386,15 +384,16 @@ async fn partitioned_sqlite_scope_status_falls_back_to_control_for_legacy_ref_af
         .expect("legacy facts persist");
 
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store opens");
-    store
-        .apply_code_index_snapshot(snapshot_with_commit(
+    publish_partitioned_snapshot(
+        &store,
+        snapshot_with_commit(
             "repo-legacy",
             "scope-legacy-next",
             "repo-legacy-next-commit",
             "legacy next needle",
-        ))
-        .await
-        .expect("partitioned reindex succeeds");
+        ),
+    )
+    .await;
     let status = store
         .code_repository_scope_status(
             "legacy".to_owned(),
@@ -435,15 +434,7 @@ async fn partitioned_sqlite_checkpoint_full_index_keeps_legacy_report_visible_be
         "repo-legacy-next-commit",
         "legacy next needle",
     );
-    let session = session_for_snapshot(&staged);
-    store
-        .begin_code_index_session(session)
-        .await
-        .expect("checkpoint session begins");
-    store
-        .apply_code_index_batch(batch_from_snapshot(staged))
-        .await
-        .expect("checkpoint batch is staged");
+    stage_partitioned_snapshot(&store, staged).await;
 
     let report = store
         .code_repository_report("legacy".to_owned())
@@ -468,10 +459,11 @@ async fn partitioned_sqlite_recomputes_shard_paths_after_runtime_move() {
             .upsert_code_repository(registration("repo-alpha", "alpha"))
             .await
             .expect("alpha registers");
-        store
-            .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
-            .await
-            .expect("alpha indexes");
+        publish_partitioned_snapshot(
+            &store,
+            snapshot("repo-alpha", "scope-alpha", "alpha needle"),
+        )
+        .await;
     }
     let locator = catalog_shard_locator(&original_control_path, "repo-alpha");
     let moved_root = unique_temp_dir("partitioned-moved");
@@ -583,15 +575,16 @@ async fn partitioned_sqlite_prune_removes_legacy_control_scopes_after_sharding()
         .expect("legacy facts persist");
 
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store opens");
-    store
-        .apply_code_index_snapshot(snapshot_with_commit(
+    publish_partitioned_snapshot(
+        &store,
+        snapshot_with_commit(
             "repo-legacy",
             "scope-active",
             "repo-legacy-active-commit",
             "active needle",
-        ))
-        .await
-        .expect("partitioned reindex succeeds");
+        ),
+    )
+    .await;
     let mut legacy_scope_pruned = false;
     for _ in 0..128 {
         let retention = store
@@ -627,22 +620,25 @@ async fn partitioned_sqlite_incremental_snapshot_reports_missing_active_shard() 
             .upsert_code_repository(registration("repo-alpha", "alpha"))
             .await
             .expect("alpha registers");
-        store
-            .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
-            .await
-            .expect("alpha indexes");
+        publish_partitioned_snapshot(
+            &store,
+            snapshot("repo-alpha", "scope-alpha", "alpha needle"),
+        )
+        .await;
     }
     fs::remove_file(&shard_path).expect("shard file is removed");
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store reopens");
-    let error = store
-        .apply_code_index_snapshot(incremental_snapshot(
+    let error = try_apply_partitioned_snapshot(
+        &store,
+        incremental_snapshot(
             "repo-alpha",
             "scope-alpha-next",
             "repo-alpha-commit",
             "alpha next needle",
-        ))
-        .await
-        .expect_err("missing active shard rejects incremental writes");
+        ),
+    )
+    .await
+    .expect_err("missing active shard rejects incremental writes");
 
     assert!(error.to_string().contains("repository shard"));
     assert!(error.to_string().contains("missing"));
@@ -661,10 +657,11 @@ async fn partitioned_sqlite_totals_report_missing_active_shards() {
             .upsert_code_repository(registration("repo-alpha", "alpha"))
             .await
             .expect("alpha registers");
-        store
-            .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
-            .await
-            .expect("alpha indexes");
+        publish_partitioned_snapshot(
+            &store,
+            snapshot("repo-alpha", "scope-alpha", "alpha needle"),
+        )
+        .await;
     }
     fs::remove_file(&shard_path).expect("shard file is removed");
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store reopens");
@@ -704,10 +701,11 @@ async fn partitioned_sqlite_topology_snapshot_reports_missing_active_shards() {
             .upsert_code_repository(registration("repo-alpha", "alpha"))
             .await
             .expect("alpha registers");
-        store
-            .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
-            .await
-            .expect("alpha indexes");
+        publish_partitioned_snapshot(
+            &store,
+            snapshot("repo-alpha", "scope-alpha", "alpha needle"),
+        )
+        .await;
     }
     fs::remove_file(&shard_path).expect("shard file is removed");
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store reopens");
@@ -736,10 +734,11 @@ async fn partitioned_sqlite_remove_missing_shard_does_not_delete_control_reposit
             .upsert_code_repository(registration("repo-alpha", "alpha"))
             .await
             .expect("alpha registers");
-        store
-            .apply_code_index_snapshot(snapshot("repo-alpha", "scope-alpha", "alpha needle"))
-            .await
-            .expect("alpha indexes");
+        publish_partitioned_snapshot(
+            &store,
+            snapshot("repo-alpha", "scope-alpha", "alpha needle"),
+        )
+        .await;
     }
     fs::remove_file(&shard_path).expect("shard file is removed");
     let store = PartitionedSqliteKnowledgeStore::open(&control_path, paths).expect("store reopens");
@@ -758,7 +757,7 @@ async fn partitioned_sqlite_remove_missing_shard_does_not_delete_control_reposit
 }
 
 #[tokio::test]
-async fn partitioned_sqlite_migrates_legacy_base_scope_before_incremental_snapshot() {
+async fn partitioned_sqlite_requires_staging_instead_of_copying_a_legacy_incremental_base() {
     let paths = runtime_paths();
     let control_path = paths.database_file();
     let single = SqliteGraphStore::open(&control_path).expect("single store opens");
@@ -773,25 +772,31 @@ async fn partitioned_sqlite_migrates_legacy_base_scope_before_incremental_snapsh
 
     let store =
         PartitionedSqliteKnowledgeStore::open(&control_path, paths.clone()).expect("store opens");
-    store
-        .apply_code_index_snapshot(incremental_snapshot(
+    let error = try_apply_partitioned_snapshot(
+        &store,
+        incremental_snapshot(
             "repo-legacy",
             "scope-legacy-next",
             "repo-legacy-commit",
             "legacy next needle",
-        ))
-        .await
-        .expect("incremental snapshot migrates base scope");
-    let hits = store
-        .search_code_scope(
-            "scope-legacy-next".to_owned(),
-            retrieval_request_for_ref("legacy", "repo-legacy-next-commit", "legacy next needle"),
+        ),
+    )
+    .await
+    .expect_err("an unbudgeted legacy base must not be copied into the shard");
+    let shard = SqliteGraphStore::open(paths.repository_shard_database_file("repo-legacy"))
+        .expect("repository shard opens");
+    let imported_base = shard
+        .code_repository_scope_status(
+            "repo-legacy".to_owned(),
+            "repo-legacy-commit".to_owned(),
+            Vec::new(),
+            Vec::new(),
         )
         .await
-        .expect("incremental scope is queryable");
+        .expect("shard scope status loads");
 
-    assert_eq!(hits.len(), 1);
-    assert!(paths.repository_shard_database_file("repo-legacy").exists());
+    assert!(matches!(error, StorageError::DurableStagingRequired(_)));
+    assert!(imported_base.is_none());
 }
 
 #[tokio::test]
@@ -803,24 +808,26 @@ async fn partitioned_sqlite_prune_retains_control_task_scopes() {
         .upsert_code_repository(registration("repo-alpha", "alpha"))
         .await
         .expect("alpha registers");
-    store
-        .apply_code_index_snapshot(snapshot_with_commit(
+    publish_partitioned_snapshot(
+        &store,
+        snapshot_with_commit(
             "repo-alpha",
             "scope-old",
             "repo-alpha-old-commit",
             "old retained needle",
-        ))
-        .await
-        .expect("old scope indexes");
-    store
-        .apply_code_index_snapshot(snapshot_with_commit(
+        ),
+    )
+    .await;
+    publish_partitioned_snapshot(
+        &store,
+        snapshot_with_commit(
             "repo-alpha",
             "scope-active",
             "repo-alpha-active-commit",
             "active needle",
-        ))
-        .await
-        .expect("active scope indexes");
+        ),
+    )
+    .await;
     store
         .queue_code_index_task(code_index_task_seed(
             "repo-alpha",
@@ -867,10 +874,11 @@ async fn partitioned_sqlite_remove_keeps_shard_when_control_rejects_running_task
         .upsert_code_repository(registration("repo-alpha", "alpha"))
         .await
         .expect("alpha registers");
-    store
-        .apply_code_index_snapshot(snapshot("repo-alpha", &source_scope, "alpha needle"))
-        .await
-        .expect("alpha indexes");
+    publish_partitioned_snapshot(
+        &store,
+        snapshot("repo-alpha", &source_scope, "alpha needle"),
+    )
+    .await;
     let task = store
         .queue_code_index_task(code_index_task_seed(
             "repo-alpha",

@@ -1,6 +1,13 @@
 repos:
 - repo: local
   hooks:
+  - id: documentation
+    name: documentation structure and links
+    entry: python tools/docs/check_docs.py --self-test-and-check
+    language: python
+    pass_filenames: false
+    always_run: true
+
   - id: cargo-fmt
     name: cargo fmt
     entry: cargo fmt --all

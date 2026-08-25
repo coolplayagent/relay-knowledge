@@ -7,14 +7,18 @@ use std::{
 
 use relay_knowledge::{
     domain::{
-        CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSession,
-        CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
-        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord,
-        RepositoryCodeFileRecord, RepositoryCodeRange, SoftwareGlobalKind, SoftwareGlobalRequest,
+        CodeIndexBatch, CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget,
+        CodeIndexSession, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
+        CodeRepositoryRegistration, CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
+        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     env::{EnvironmentConfig, PlatformKind},
     paths::RuntimePaths,
-    storage::CodeIndexTaskSeed,
+    storage::{
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeRepositoryStore,
+        PartitionedSqliteKnowledgeStore, StorageError,
+    },
 };
 use rusqlite::Connection;
 
@@ -171,7 +175,7 @@ pub(super) fn batch_from_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexBatch
     CodeIndexBatch {
         repository_id: snapshot.repository_id,
         source_scope: snapshot.source_scope,
-        batch_index: 0,
+        batch_index: 1,
         parsed_byte_count: snapshot.files.iter().map(|file| file.byte_len).sum(),
         files: snapshot.files,
         symbols: snapshot.symbols,
@@ -207,6 +211,166 @@ pub(super) fn code_index_task_seed(
         payload_json: "{}".to_owned(),
         now_ms,
     }
+}
+
+pub(super) async fn publish_partitioned_snapshot(
+    store: &PartitionedSqliteKnowledgeStore,
+    snapshot: CodeIndexSnapshot,
+) {
+    let repository_id = snapshot.repository_id.clone();
+    let source_scope = snapshot.source_scope.clone();
+    let status = store
+        .code_repository_status(repository_id.clone())
+        .await
+        .expect("repository status should load")
+        .expect("repository should be registered");
+    let mode = if snapshot.full_replace {
+        CodeIndexMode::Full
+    } else {
+        CodeIndexMode::incremental(
+            snapshot
+                .base_resolved_commit_sha
+                .clone()
+                .expect("incremental fixture should carry its base commit"),
+            snapshot.resolved_commit_sha.clone(),
+        )
+        .expect("incremental fixture mode should validate")
+    };
+    let (running, fence) =
+        claim_partitioned_snapshot_task(store, &status.alias, &snapshot, mode).await;
+    store
+        .apply_code_index_snapshot_with_fence(snapshot, fence.clone())
+        .await
+        .expect("fenced snapshot should persist");
+    store
+        .refresh_software_global_projection_with_fence(source_scope.clone(), fence)
+        .await
+        .expect("fenced snapshot projection should publish");
+    store
+        .complete_code_index_task(CodeIndexTaskCompletion {
+            task_id: running.task_id,
+            lease_owner: running
+                .lease_owner
+                .expect("claimed task should retain its lease owner"),
+            attempt_count: running.attempt_count,
+            publication_generation: running.publication_generation,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("fenced snapshot task should complete");
+    store
+        .run_code_index_post_maintenance(repository_id, source_scope)
+        .await
+        .expect("terminal fenced snapshot maintenance should complete");
+}
+
+pub(super) async fn stage_partitioned_snapshot(
+    store: &PartitionedSqliteKnowledgeStore,
+    snapshot: CodeIndexSnapshot,
+) {
+    let status = store
+        .code_repository_status(snapshot.repository_id.clone())
+        .await
+        .expect("repository status should load")
+        .expect("repository should be registered");
+    let (running, fence) =
+        claim_partitioned_snapshot_task(store, &status.alias, &snapshot, CodeIndexMode::Full).await;
+    let session = session_for_snapshot(&snapshot);
+    store
+        .begin_code_index_session_with_fence(session, fence.clone())
+        .await
+        .expect("fenced checkpoint session should begin");
+    store
+        .apply_code_index_batch_with_fence(batch_from_snapshot(snapshot), fence)
+        .await
+        .expect("fenced checkpoint batch should persist");
+    assert_eq!(
+        running.state,
+        relay_knowledge::domain::CodeIndexTaskState::Running
+    );
+}
+
+pub(super) async fn try_apply_partitioned_snapshot(
+    store: &PartitionedSqliteKnowledgeStore,
+    snapshot: CodeIndexSnapshot,
+) -> Result<relay_knowledge::domain::CodeIndexSummary, StorageError> {
+    let status = store
+        .code_repository_status(snapshot.repository_id.clone())
+        .await?
+        .ok_or_else(|| StorageError::InvalidInput("fixture repository is missing".to_owned()))?;
+    let mode = CodeIndexMode::incremental(
+        snapshot.base_resolved_commit_sha.clone().ok_or_else(|| {
+            StorageError::InvalidInput("fixture base commit is missing".to_owned())
+        })?,
+        snapshot.resolved_commit_sha.clone(),
+    )
+    .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let (_, fence) = claim_partitioned_snapshot_task(store, &status.alias, &snapshot, mode).await;
+    store
+        .apply_code_index_snapshot_with_fence(snapshot, fence)
+        .await
+}
+
+async fn claim_partitioned_snapshot_task(
+    store: &PartitionedSqliteKnowledgeStore,
+    alias: &str,
+    snapshot: &CodeIndexSnapshot,
+    mode: CodeIndexMode,
+) -> (
+    relay_knowledge::domain::CodeIndexTaskRecord,
+    CodeIndexPublicationFence,
+) {
+    let sequence = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let lease_owner = format!("partitioned-fixture-worker-{sequence}");
+    let queued = store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: snapshot.repository_id.clone(),
+            alias: alias.to_owned(),
+            ref_selector: "HEAD".to_owned(),
+            resolved_commit_sha: snapshot.resolved_commit_sha.clone(),
+            tree_hash: snapshot.tree_hash.clone(),
+            source_scope: snapshot.source_scope.clone(),
+            path_filters: snapshot.path_filters.clone(),
+            language_filters: snapshot.language_filters.clone(),
+            mode,
+            input_fingerprint: format!(
+                "partitioned-fixture:{}:{}:{sequence}",
+                snapshot.repository_id, snapshot.source_scope
+            ),
+            resource_budget: CodeIndexResourceBudget::default(),
+            payload_json: "{}".to_owned(),
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("fixture task should queue");
+    let running = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: lease_owner.clone(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("fixture task claim should run")
+        .expect("fixture task should claim");
+    let fence = CodeIndexPublicationFence {
+        repository_id: running.repository_id.clone(),
+        task_id: running.task_id.clone(),
+        lease_owner,
+        attempt_count: running.attempt_count,
+        generation: running.publication_generation,
+    };
+    (running, fence)
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should follow epoch")
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 pub(super) fn retrieval_request(repository: &str, query: &str) -> CodeRetrievalRequest {

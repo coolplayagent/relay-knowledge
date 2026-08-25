@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::{
+    BoundedFacts,
     document::IndexedDocument,
     syntax::{
         clean_scalar, file_name, first_call_arg, gradle_plugin, indentation, json_string_pair,
@@ -19,6 +20,8 @@ use super::{
 };
 
 const HIGH_CONFIDENCE: u16 = 9_000;
+const MAX_BUILD_TARGETS_PER_SCOPE: usize = 65_536;
+type BuildTargets = BoundedFacts<SoftwareBuildTarget>;
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -68,29 +71,23 @@ pub(super) fn delete_scope(
     Ok(())
 }
 
-pub(super) fn refresh(
+pub(super) fn begin_refresh(
     connection: &Connection,
     source_scope: &str,
-    graph_version: GraphVersion,
-    documents: &[IndexedDocument],
-) -> Result<Vec<SoftwareBuildTarget>, StorageError> {
-    let mut targets = existing_maven_build_targets(connection, source_scope)?;
-    for document in documents {
-        collect(document, graph_version, &mut targets)?;
+) -> Result<BuildTargets, StorageError> {
+    let mut targets = BuildTargets::new(MAX_BUILD_TARGETS_PER_SCOPE, "build targets");
+    for target in
+        existing_maven_build_targets(connection, source_scope, MAX_BUILD_TARGETS_PER_SCOPE)?
+    {
+        targets.insert(target.target_id.clone(), target)?;
     }
-    for input in maven::build_target_inputs(connection, source_scope, graph_version)? {
-        push_build_target(&mut targets, input)?;
-    }
-    for target in &targets {
-        insert_build_target(connection, target)?;
-    }
-
     Ok(targets)
 }
 
 fn existing_maven_build_targets(
     connection: &Connection,
     source_scope: &str,
+    limit: usize,
 ) -> Result<Vec<SoftwareBuildTarget>, StorageError> {
     let mut statement = connection.prepare(
         "
@@ -101,12 +98,23 @@ fn existing_maven_build_targets(
         WHERE source_scope = ?1
           AND ecosystem = 'maven'
         ORDER BY kind ASC, name ASC, evidence_path ASC
+        LIMIT ?2
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], build_target_from_row)?;
+    let rows = statement.query_map(
+        params![source_scope, limit.saturating_add(1) as i64],
+        build_target_from_row,
+    )?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
+    let targets = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    if targets.len() > limit {
+        return Err(StorageError::CapacityExceeded(format!(
+            "existing Maven build targets exceed the bounded limit {limit}"
+        )));
+    }
+    Ok(targets)
 }
 
 pub(in super::super) fn build_targets_for_scope(
@@ -166,11 +174,16 @@ pub(in super::super) fn build_targets_for_scope(
         .map_err(StorageError::from)
 }
 
-fn insert_build_target(
+pub(super) fn persist(
     connection: &Connection,
-    target: &SoftwareBuildTarget,
+    source_scope: &str,
+    graph_version: GraphVersion,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
-    connection.execute(
+    maven::visit_build_target_inputs(connection, source_scope, graph_version, |input| {
+        push_build_target(targets, input)
+    })?;
+    let mut statement = connection.prepare(
         "
         INSERT OR REPLACE INTO software_build_targets (
             target_id, repository_id, source_scope, ecosystem, language_id, name, kind,
@@ -179,7 +192,9 @@ fn insert_build_target(
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
-        params![
+    )?;
+    for target in targets.as_slice() {
+        statement.execute(params![
             target.target_id,
             target.repository_id,
             target.source_scope,
@@ -195,8 +210,8 @@ fn insert_build_target(
             target.evidence_line_range.end,
             target.confidence_basis_points,
             target.created_graph_version.get(),
-        ],
-    )?;
+        ])?;
+    }
     Ok(())
 }
 
@@ -223,20 +238,14 @@ fn build_target_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareBu
 }
 
 fn push_build_target(
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
     mut input: SoftwareBuildTargetInput,
 ) -> Result<(), StorageError> {
     input.command = non_empty_optional(input.command);
     input.output_hint = non_empty_optional(input.output_hint);
     let target = SoftwareBuildTarget::new(input)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    if !targets
-        .iter()
-        .any(|existing| existing.target_id == target.target_id)
-    {
-        targets.push(target);
-    }
-    Ok(())
+    targets.insert(target.target_id.clone(), target)
 }
 
 fn non_empty_optional(value: Option<String>) -> Option<String> {
@@ -277,7 +286,7 @@ fn build_input(
 pub(super) fn collect(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     let file_name = file_name(&document.path);
     match file_name.as_deref() {
@@ -305,7 +314,7 @@ pub(super) fn collect(
 fn collect_cargo(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     let mut section = "";
     for line in &document.lines {
@@ -358,7 +367,7 @@ fn collect_cargo(
 fn collect_package_json(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     let mut in_scripts = false;
     for line in &document.lines {
@@ -408,7 +417,7 @@ fn collect_package_json(
 fn collect_pyproject(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     let mut section = "";
     for line in &document.lines {
@@ -459,7 +468,7 @@ fn collect_pyproject(
 fn collect_go_mod(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         if let Some(module) = line.text.trim().strip_prefix("module ").map(str::trim) {
@@ -483,7 +492,7 @@ fn collect_go_mod(
 fn collect_cmake(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         let trimmed = strip_comment(&line.text, '#').trim();
@@ -514,7 +523,7 @@ fn collect_cmake(
 fn collect_makefile(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         let trimmed = strip_comment(&line.text, '#').trim();
@@ -546,7 +555,7 @@ fn collect_makefile(
 fn collect_gradle(
     document: &IndexedDocument,
     graph_version: GraphVersion,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     for line in &document.lines {
         let trimmed = line
@@ -602,7 +611,7 @@ fn collect_ci_jobs(
     document: &IndexedDocument,
     graph_version: GraphVersion,
     source_kind: &str,
-    targets: &mut Vec<SoftwareBuildTarget>,
+    targets: &mut BuildTargets,
 ) -> Result<(), StorageError> {
     let mut in_jobs = false;
     for line in &document.lines {

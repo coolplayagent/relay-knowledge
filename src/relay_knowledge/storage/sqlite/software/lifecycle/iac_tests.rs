@@ -2,12 +2,12 @@ use rusqlite::Connection;
 
 use crate::domain::GraphVersion;
 
-use super::{collect, initialize_schema};
+use super::{collect, initialize_schema, new_resources};
 use crate::storage::sqlite::software::lifecycle::document::{IndexedDocument, IndexedLine};
 
 #[test]
 fn collectors_extract_container_and_kubernetes_resources() {
-    let mut resources = Vec::new();
+    let mut resources = new_resources();
     collect(
         &document(
             "Dockerfile",
@@ -29,12 +29,12 @@ fn collectors_extract_container_and_kubernetes_resources() {
     )
     .expect("kubernetes resources should collect");
 
-    assert!(resources.iter().any(|resource| {
+    assert!(resources.as_slice().iter().any(|resource| {
         resource.provider == "container"
             && resource.resource_kind == "base_image"
             && resource.target_hint.as_deref() == Some("rust:1.88")
     }));
-    assert!(resources.iter().any(|resource| {
+    assert!(resources.as_slice().iter().any(|resource| {
         resource.provider == "kubernetes"
             && resource.resource_kind == "Deployment"
             && resource.name == "relay-api"

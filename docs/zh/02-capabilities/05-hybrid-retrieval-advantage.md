@@ -53,7 +53,7 @@ SQLite schema marker v4 会在旧 flat FTS 保持可读时重建 `graph_bm25_reb
 
 BM25 检索路径内部实现三级降级链，最大化召回率的同时保持排序质量：
 
-```
+```text
 FTS5 prefix match (BM25 评分)
   ↓ 结果为空且 query ≥ 2 字符
 精确名匹配 (JSON-safe entity_labels LIKE / LOWER(content))

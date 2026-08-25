@@ -1,6 +1,7 @@
 use crate::{
     code::{
-        SourceGrepKind, SourceGrepMatch, simple_source_identifier, source_line_defines_identity,
+        SourceGrepKind, SourceGrepMatch, simple_source_identifier,
+        source_fallback_reference_language_is_code, source_line_defines_identity,
     },
     domain::{CodeRetrievalHit, CodeRetrievalRequest},
 };
@@ -16,6 +17,8 @@ const DYNAMIC_IMPORT_SOURCE_FALLBACK_BONUS: f64 = 1.1;
 const HYBRID_EXACT_TYPE_DECLARATION_BONUS: f64 = 6.0;
 const REFERENCE_DECLARATION_INTENT_BONUS: f64 = 2.2;
 const REFERENCE_SOURCE_DECLARATION_PENALTY: f64 = -1.9;
+const REFERENCE_SOURCE_COMMENT_PENALTY: f64 = -2.0;
+const REFERENCE_DOCUMENT_SURFACE_PENALTY: f64 = -3.0;
 const GENERATED_FILE_SCORE_MULTIPLIER: f64 = 0.35;
 
 #[derive(Clone, Copy)]
@@ -79,7 +82,18 @@ pub(super) fn source_grep_match_score(
 
     let adjustment = match plan.kind {
         SourceGrepKind::References => {
-            reference_source_grep_score_adjustment(&request.query, &plan.query, &matched.excerpt)
+            let language_adjustment =
+                if source_fallback_reference_language_is_code(&matched.language_id) {
+                    0.0
+                } else {
+                    REFERENCE_DOCUMENT_SURFACE_PENALTY
+                };
+            language_adjustment
+                + reference_source_grep_score_adjustment(
+                    &request.query,
+                    &plan.query,
+                    &matched.excerpt,
+                )
         }
         SourceGrepKind::Imports => {
             import_source_grep_score_adjustment(&request.query, &plan.query, &matched.excerpt)
@@ -144,8 +158,11 @@ pub(super) fn reference_source_grep_score_adjustment(
         return 0.0;
     }
     let line = excerpt.trim();
-    if line.is_empty() || line.starts_with("//") || line.starts_with('*') {
+    if line.is_empty() {
         return 0.0;
+    }
+    if source_line_starts_with_comment(line) {
+        return REFERENCE_SOURCE_COMMENT_PENALTY;
     }
 
     if source_reference_line_declares_identity(line, identity) {
@@ -173,7 +190,10 @@ fn source_reference_line_declares_identity(line: &str, identity: &str) -> bool {
     source_identifier_ranges(line, identity).any(|(start, end)| {
         let before = line.get(..start).unwrap_or_default().trim_end();
         let after = line.get(end..).unwrap_or_default().trim_start();
-        if before.ends_with('.') || before.ends_with("->") || identifier_is_assignment_value(before)
+        if before.ends_with('.')
+            || before.ends_with("->")
+            || before.ends_with(':')
+            || identifier_is_assignment_value(before)
         {
             return false;
         }

@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/21-software-global-domain-modeling.md) | [English](../../en/03-architecture-specs/21-software-global-domain-modeling.md)
 
-> 文档版本: 1.0
-> 编制日期: 2026-05-28
+> 文档版本: 1.1
+> 编制日期: 2026-08-13
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -107,10 +107,11 @@ source or manifest changed
 
 首版基础能力以 repository snapshot/source scope 为边界，把现有代码索引事实投影为软件全域读模型：
 
-- `software_components` 从 `code_repository_dependencies` 生成，区分 manifest `declared` 和 lockfile `locked`，保留 ecosystem、package name、requirement、resolved version、dependency group、证据路径和行号。
-- `software_dependency_usages` 把 declared 依赖组件与匹配的代码/配置 import 证据关联；匹配依据是 module root 与 package identity，保留 import 的 `resolution_state`、`target_hint`、证据路径和 confidence，但不解析未授权包源码。
+- `software_components` 从 `code_repository_dependencies` 生成，区分 manifest `declared` 和 lockfile `locked`，保留 ecosystem、package name、requirement、resolved version、dependency group、证据路径和行号。Declared row 继续按证据位置独立保留，因为 manifest 目录承担 dependency-usage owner 语义；重复 locked row 只在该派生模型内按 repository/source-scope 级语义键 `(ecosystem, package_name, requirement, resolved_version, dependency_group, source_kind, language_id)` 合并，并确定性选择排序最前的 `(evidence_path, line_start, line_end)` 作为代表。合并后的投影仍严格限制为 65,536 个 component，第 65,537 个不同语义 component 必须使投影失败；权威 `code_repository_dependencies` row 与 `repo query --kind sbom` 证据不得删除或合并。
+- `software_dependency_usages` 把 declared 依赖组件与匹配的代码/配置 import 证据关联；匹配依据是 module root 与 package identity，保留 import 的 `resolution_state`、`target_hint`、证据路径和 confidence，但不解析未授权包源码。生成文件的 import 仍保留为 code/SDK 事实，但不参与该派生依赖匹配；单条匹配输入保持 32 KiB 上限，完全相同的 module/target hint 只计费和扫描一次，不同文本仍累计计费并在越界时使投影事务失败回滚。
 - `software_sdk_usages` 从 unresolved、ambiguous 或 external 的 `code_repository_imports` 生成，用于表达 SDK/API surface 使用候选，保留 `resolution_state` 和 `target_hint`，但不解析未授权外部源码。
 - `software_files` 从 `code_repository_files` 生成，把代码、配置、文档、构建、部署、测试、模板和 knowledge map 文件作为整体节点。
+- `software_files` refresh 严格保持每页最多 512 条权威事实，以唯一 `(source_scope, path)` keyset 前进，不再用 `OFFSET` 重扫已消费前缀；每条 row 继续经过同一个领域构造器校验，整个 refresh 只复用一个 prepared projection insert。该存储优化仍位于既有 software-projection transaction 与 publication fence 内，不削弱 freshness、rollback 或可见性语义。
 - `software_topics` 从 Markdown/spec heading 和 `.knowledge/knowledge-map.yaml` 的 topic id 生成，用于表达仓库文档主题、架构约束和知识路由主题。
 - `software_relationships` 从已提交依赖、SDK usage、feature flag/config facts 和文档 topic evidence 生成 `depends_on`、`uses_sdk`、`configures`、`documents` 等跨域关系，保留 `resolution_state`、target hint、confidence、证据路径和行号。
 - `software_build_targets` 从已索引 chunk 中的构建证据生成，覆盖 Cargo、npm、Python、Go、Maven effective `pom.xml`、Gradle、CMake、Makefile 和 CI workflow 的 package、script、target、feature、module、profile、plugin、goal、job 等入口。Maven effective model 只基于已索引证据解析仓库内 parent POM、properties、dependency management、plugin management、modules、profiles 和 imported BOM 声明；投影只记录证据和命令提示，不执行构建工具、不读取包缓存、不访问 registry。

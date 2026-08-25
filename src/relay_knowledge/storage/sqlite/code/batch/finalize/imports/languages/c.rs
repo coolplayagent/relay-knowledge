@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use super::super::{ImportResolution, module_paths, specifier::quoted};
+use super::super::{
+    ImportResolution, module_paths,
+    specifier::{CIncludeDelimiter, c_include_specifier},
+};
 
 #[cfg(test)]
 #[path = "c_tests.rs"]
@@ -11,9 +14,11 @@ pub(super) fn resolve(
     statement: &str,
     indexed_module_paths: &BTreeMap<String, Vec<String>>,
 ) -> ImportResolution {
-    let Some((target, is_quoted)) = include_target(statement) else {
+    let Some(specifier) = c_include_specifier(statement) else {
         return ImportResolution::Unresolved;
     };
+    let target = specifier.target;
+    let is_quoted = specifier.delimiter == CIncludeDelimiter::Quoted;
     let mut candidates = Vec::new();
     if is_quoted
         && let Some(relative) =
@@ -27,19 +32,4 @@ pub(super) fn resolve(
     }
 
     module_paths::resolve_first_file(&candidates, is_quoted, indexed_module_paths)
-}
-
-fn include_target(statement: &str) -> Option<(&str, bool)> {
-    let statement = statement.trim();
-    if !statement.starts_with("#include") {
-        return None;
-    }
-    if let Some(target) = quoted(statement) {
-        return Some((target, true));
-    }
-    let start = statement.find('<')?;
-    let rest = &statement[start + 1..];
-    let end = rest.find('>')?;
-
-    Some((&rest[..end], false))
 }

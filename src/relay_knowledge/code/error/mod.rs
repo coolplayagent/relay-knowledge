@@ -13,6 +13,7 @@ pub enum CodeIndexError {
     Git { args: Vec<String>, message: String },
     TreeSitter(String),
     InvalidInput(String),
+    Invariant(String),
 }
 
 impl fmt::Display for CodeIndexError {
@@ -24,6 +25,7 @@ impl fmt::Display for CodeIndexError {
             }
             Self::TreeSitter(message) => write!(formatter, "tree-sitter parse failed: {message}"),
             Self::InvalidInput(message) => write!(formatter, "invalid code index input: {message}"),
+            Self::Invariant(message) => write!(formatter, "code index invariant failed: {message}"),
         }
     }
 }
