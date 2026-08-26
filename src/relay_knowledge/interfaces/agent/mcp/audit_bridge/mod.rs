@@ -238,6 +238,7 @@ fn audit_result_count(structured: &Value) -> Option<usize> {
         .as_array()
         .map(Vec::len)
         .or_else(|| structured["flags"].as_array().map(Vec::len))
+        .or_else(|| structured["terms"].as_array().map(Vec::len))
         .or_else(|| structured["sections"].as_array().map(Vec::len))
         .or_else(|| software_projection_result_count(structured))
 }

@@ -90,10 +90,9 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
     let performance_tail =
         std::fs::read_to_string(root.join("index_performance/src/shard_015/file_1023.rs"))
             .expect("index performance tail source");
-    let performance_discovered_dependency = std::fs::read_to_string(
-        root.join("index_performance/external_deps/rust_sdk/lib.rs"),
-    )
-    .expect("index performance discovered dependency source");
+    let performance_discovered_dependency =
+        std::fs::read_to_string(root.join("index_performance/external_deps/rust_sdk/lib.rs"))
+            .expect("index performance discovered dependency source");
     let wide_performance_tail = std::fs::read_to_string(
         root.join("wide_index_performance/crates/perf_core/src/shard_031/file_2047.rs"),
     )

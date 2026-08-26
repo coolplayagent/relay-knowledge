@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::CodebaseViewSnapshot;
 
@@ -9,6 +9,24 @@ use super::{
 
 pub(super) fn derive_business_domains(builder: &mut ViewBuilder, snapshot: &CodebaseViewSnapshot) {
     let mut domains = BTreeMap::<String, Vec<String>>::new();
+    let mut labels = BTreeMap::new();
+    let mut declared = BTreeSet::new();
+    for domain in &snapshot.declared_business_domains {
+        let evidence_id = builder.evidence(
+            "business_glossary",
+            &domain.source_path,
+            Some(domain.id.clone()),
+            None,
+            Some("declared_domain".to_owned()),
+            format!("authored business domain evidence {}", domain.evidence_id),
+        );
+        labels.insert(domain.id.clone(), domain.name.clone());
+        declared.insert(domain.id.clone());
+        domains
+            .entry(domain.id.clone())
+            .or_default()
+            .push(evidence_id);
+    }
     for route in &snapshot.routes {
         if let Some(domain) = route_domain(&route.url) {
             let evidence_id = builder.evidence(
@@ -54,22 +72,33 @@ pub(super) fn derive_business_domains(builder: &mut ViewBuilder, snapshot: &Code
         builder.mark_node_budget_truncated();
     }
     for (domain, evidence_ids) in ordered.into_iter().take(builder.limit) {
+        let is_declared = declared.contains(&domain);
+        let confidence = if is_declared {
+            1.0
+        } else {
+            domain_confidence(evidence_ids.len())
+        };
+        let label = labels
+            .get(&domain)
+            .cloned()
+            .unwrap_or_else(|| domain.clone());
         let node_id = builder.node(
             format!("domain:{domain}"),
-            domain.clone(),
+            label.clone(),
             "business_domain",
             None,
-            domain_confidence(evidence_ids.len()),
+            confidence,
             evidence_ids.first().cloned(),
         );
         builder.section(
             format!("section:domain:{domain}"),
-            format!("{domain} domain"),
-            format!(
-                "{domain} is a candidate business domain from {} route, feature flag, or path signal(s).",
-                evidence_ids.len()
-            ),
-            domain_confidence(evidence_ids.len()),
+            format!("{label} domain"),
+            if is_declared {
+                format!("{label} is declared by the repository business glossary and reinforced by {} total evidence signal(s).", evidence_ids.len())
+            } else {
+                format!("{label} is a candidate business domain from {} route, feature flag, or path signal(s).", evidence_ids.len())
+            },
+            confidence,
             SectionRefs {
                 node_ids: node_id.into_iter().collect(),
                 evidence_ids,

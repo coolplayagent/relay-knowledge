@@ -81,6 +81,7 @@
 - [第 22 章 服务化部署、控制面与数据面分离](03-architecture-specs/22-service-deployment-control-data-plane.md)
 - [第 23 章 HTTP API 参考](03-architecture-specs/23-api-reference.md)
 - [第 24 章 代码地图驱动的 Knowledge 开发闭环](03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
+- [第 27 章 业务知识与技术图谱映射](03-architecture-specs/27-business-knowledge-technical-mapping.md)
 - [第 26 章 Git Commit + Knowledge：开发迭代理念与 Loop](03-architecture-specs/26-git-commit-knowledge-development-loop.md)
 
 第 23 章的窄专题见[架构 API 专题索引](03-architecture-specs/reference/README.md)。

@@ -45,6 +45,11 @@ const PHASES: &[&str] = &[
     "software_build_targets",
     "software_iac_resources",
     "software_design_elements",
+    "business_mappings",
+    "business_term_aliases",
+    "business_terms",
+    "business_domains",
+    "business_knowledge_status",
     "commit_scopes",
     "index_batch_staging",
     "index_task_history",
@@ -322,6 +327,15 @@ fn delete_phase_batch(
         }
         "software_design_elements" => {
             delete_scope_table(transaction, "software_design_elements", source_scope)
+        }
+        "business_mappings" => delete_scope_table(transaction, "business_mappings", source_scope),
+        "business_term_aliases" => {
+            delete_scope_table(transaction, "business_term_aliases", source_scope)
+        }
+        "business_terms" => delete_scope_table(transaction, "business_terms", source_scope),
+        "business_domains" => delete_scope_table(transaction, "business_domains", source_scope),
+        "business_knowledge_status" => {
+            delete_scope_table(transaction, "business_knowledge_status", source_scope)
         }
         "commit_scopes" => {
             delete_scope_table(transaction, "code_repository_commit_scopes", source_scope)

@@ -1,4 +1,32 @@
 use super::*;
+
+#[test]
+fn parses_business_query_with_domain_and_fixed_ref() {
+    assert_eq!(
+        parse_repo(&[
+            "business".to_owned(),
+            "repo".to_owned(),
+            "--kind".to_owned(),
+            "mappings".to_owned(),
+            "--query".to_owned(),
+            "monthly revenue".to_owned(),
+            "--domain".to_owned(),
+            "sales".to_owned(),
+            "--ref".to_owned(),
+            "abc123".to_owned(),
+        ])
+        .expect("business command"),
+        RepoCommand::Business {
+            alias: "repo".to_owned(),
+            ref_selector: "abc123".to_owned(),
+            domain: Some("sales".to_owned()),
+            query: Some("monthly revenue".to_owned()),
+            kind: BusinessKnowledgeQueryKind::Mappings,
+            freshness: FreshnessPolicy::AllowStale,
+            limit: 100,
+        }
+    );
+}
 use crate::domain::CodeQueryKind;
 
 #[test]

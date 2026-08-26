@@ -3,7 +3,8 @@
 This ClawHub-compatible skill teaches LLM agents to operate `relay-knowledge`
 through the local CLI. It is for local knowledge graph ingestion, hybrid
 GraphRAG queries, code repository indexing, code graph search, multi-repository
-queries, software graph relationship queries, feature flag graph queries,
+queries, authored business-term and technical-mapping queries, software graph
+relationship queries, feature flag graph queries,
 OKF Markdown neighborhoods, commit-driven impact/context loops, setup
 diagnostics, installation checks, and upgrade checks. For large repositories,
 it tells agents to treat cold and incremental indexing as durable single-writer
@@ -11,12 +12,14 @@ tasks so command-runner timeouts do not interrupt or obscure progress.
 
 Repository bootstrap initializes or upgrades the
 `.knowledge/knowledge-map.yaml` contract and the code map as one recoverable
-workflow. The YAML contains a stable `software-model` route to the repository;
-snapshot-bound architecture, build, deployment, dependency, and design facts
-remain in the code-derived `repo software`/`repo view` read models. Before a
-spec or coding task, agents pin one ref and combine those models with map routes
-and code context. After a commit, they refresh the durable code task, model,
-impact/context evidence, and map validation together.
+workflow. The YAML contains stable `software-model` and `business-knowledge`
+routes; the latter points to the version-controlled authored
+`.knowledge/business-glossary.yaml`. Snapshot-bound business, architecture,
+build, deployment, dependency, and design facts remain in the indexed `repo
+business`/`repo software`/`repo view` read models. Before a spec or coding task,
+agents pin one ref and combine those models with business/domain views and code
+context. After a commit, they refresh the durable code task, impact/context
+evidence, and final map validation together.
 
 For code-structure questions such as function definitions, symbol locations,
 references, callers, callees, call graphs, and call chains, agents should use
@@ -35,6 +38,11 @@ For repository-wide software graph prompts, agents should use
 `relationships`, `build`, `iac`, `design`, or `all`. Use
 `repo software --kind relationships` when the user asks for graph
 relationships, dependency paths, architecture maps, or `代码图关系`.
+
+For authored domain terms, aliases, acronyms, semantics, conflicts, or
+business-to-technical links, agents should read `map route business-knowledge`
+and then use `repo business --kind terms|mappings|all` at the same immutable ref
+as `repo context`, software, and architecture/business-domain views.
 
 For YAML-frontmatter Markdown knowledge bundles, agents should use `repo graph`
 with an explicit focus file, bundle-root path, and immutable indexed ref. This

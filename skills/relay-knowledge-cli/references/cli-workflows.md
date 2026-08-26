@@ -281,6 +281,27 @@ relay-knowledge repo software core \
   --format json
 ```
 
+### `repo business --kind`
+
+Read `map route business-knowledge --format json` first, then use `repo
+business` for authored domain terms, aliases/acronyms, semantics, conflicting
+definitions, and technical mappings. The command-local kinds are `terms`,
+`mappings`, and `all`. Pin the same immutable `--ref` used by context and
+software queries. Supply `--domain` for homonyms; do not guess when resolution
+is `ambiguous`. Preserve unresolved `target_hint` values as bounded follow-up
+seeds rather than treating them as parser or repository degradation.
+
+```bash
+relay-knowledge repo business core \
+  --kind all \
+  --query "conversion rate" \
+  --domain sales \
+  --ref "$pinned_head" \
+  --freshness wait-until-fresh \
+  --limit 20 \
+  --format json
+```
+
 ### `repo context` and OKF `repo graph`
 
 Use `repo context` to build one bounded coding-agent context pack from a fresh,

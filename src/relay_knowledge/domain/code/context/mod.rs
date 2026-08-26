@@ -126,6 +126,8 @@ pub struct CodeGraphContextBudget {
 /// Internal context packing input grouped by structural role.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeGraphContextPack {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub business_context: Vec<crate::domain::BusinessTerm>,
     pub entry_points: Vec<CodeRetrievalHit>,
     pub related_symbols: Vec<CodeRetrievalHit>,
     pub graph_paths: Vec<CodeRetrievalHit>,

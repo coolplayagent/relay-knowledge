@@ -1,4 +1,4 @@
-use crate::domain::{FreshnessPolicy, SoftwareGlobalKind};
+use crate::domain::{BusinessKnowledgeQueryKind, FreshnessPolicy, SoftwareGlobalKind};
 
 #[cfg(test)]
 use super::query::parse_query_kind;
@@ -26,6 +26,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("status") => parse_status(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
         Some("software") => parse_software(&tokens[1..]),
+        Some("business") => parse_business(&tokens[1..]),
         Some("view") => super::view::parse_view(&tokens[1..]).map(RepoCommand::View),
         Some(other) => Err(CliError::UnexpectedArgument(other.to_owned())),
         None => Err(CliError::UnexpectedArgument("repo".to_owned())),
@@ -395,6 +396,64 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     Ok(RepoCommand::Software {
         alias,
         ref_selector,
+        kind,
+        freshness,
+        limit,
+    })
+}
+
+fn parse_business(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut domain = None;
+    let mut query = None;
+    let mut kind = BusinessKnowledgeQueryKind::All;
+    let mut freshness = FreshnessPolicy::AllowStale;
+    let mut limit = 100;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--domain" => {
+                domain = Some(value_after(tokens, index, "--domain")?);
+                index += 2;
+            }
+            "--query" => {
+                let (value, next) = collect_query_value(tokens, index, "--query")?;
+                query = Some(value);
+                index = next;
+            }
+            "--kind" => {
+                kind = match value_after(tokens, index, "--kind")?.as_str() {
+                    "terms" => BusinessKnowledgeQueryKind::Terms,
+                    "mappings" => BusinessKnowledgeQueryKind::Mappings,
+                    "all" => BusinessKnowledgeQueryKind::All,
+                    value => return Err(CliError::UnexpectedArgument(value.to_owned())),
+                };
+                index += 2;
+            }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+    Ok(RepoCommand::Business {
+        alias,
+        ref_selector,
+        domain,
+        query,
         kind,
         freshness,
         limit,

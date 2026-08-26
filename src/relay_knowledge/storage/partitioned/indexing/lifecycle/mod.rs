@@ -10,6 +10,9 @@ use crate::{
     storage::{CodeRepositoryStore, StorageError, StorageFuture},
 };
 
+#[cfg(test)]
+use crate::storage::BusinessKnowledgeStore;
+
 use super::super::{PartitionedSqliteKnowledgeStore, status::mirror_status};
 
 pub(in crate::storage::partitioned) fn apply_snapshot(
@@ -33,7 +36,23 @@ pub(in crate::storage::partitioned) fn seed_snapshot_for_test(
     store: &PartitionedSqliteKnowledgeStore,
     snapshot: CodeIndexSnapshot,
 ) -> StorageFuture<'_, CodeIndexSummary> {
-    apply_snapshot_inner(store, snapshot, None)
+    let store = store.clone();
+    Box::pin(async move {
+        let projection = crate::domain::BusinessKnowledgeProjectionInput {
+            repository_id: snapshot.repository_id.clone(),
+            source_scope: snapshot.source_scope.clone(),
+            resolved_commit_sha: snapshot.resolved_commit_sha.clone(),
+            sources: Vec::new(),
+        };
+        let summary = apply_snapshot_inner(&store, snapshot, None).await?;
+        store
+            .replace_business_knowledge_projection(projection)
+            .await?;
+        store
+            .refresh_software_global_projection(summary.source_scope.clone())
+            .await?;
+        Ok(summary)
+    })
 }
 
 fn apply_snapshot_inner(

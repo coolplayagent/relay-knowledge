@@ -12,9 +12,10 @@ use serde::Deserialize;
 use crate::{
     api::{ApiError, CodeRepositoryUpdateRequest, InterfaceKind, RequestContext},
     domain::{
-        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
-        CodeIndexRequest, CodeRepositorySelector, CodeRetrievalRequest, CodebaseViewRequest,
-        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
+        BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositorySelector,
+        CodeRetrievalRequest, CodebaseViewRequest, RepositoryGraphNeighborhoodRequest,
+        SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::normalize_index_request,
 };
@@ -69,6 +70,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/software",
             post(code_repository_software),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/business",
+            post(code_repository_business),
         )
         .route(
             "/api/v1/code/repositories/{alias}/views",
@@ -319,6 +324,28 @@ async fn code_repository_software(
     }
 }
 
+async fn code_repository_business(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<BusinessKnowledgeQueryRequest>,
+) -> Response {
+    if let Some(error) = normalize_business_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .business_knowledge_query(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
 async fn codebase_view(
     State(state): State<WebState>,
     AxumPath(alias): AxumPath<String>,
@@ -495,6 +522,26 @@ fn normalize_software_request(request: &mut SoftwareGlobalRequest) -> Option<Api
     }
     match SoftwareGlobalRequest::new(
         request.repository.clone(),
+        request.kind,
+        request.freshness_policy,
+        request.limit,
+    ) {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_business_request(request: &mut BusinessKnowledgeQueryRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match BusinessKnowledgeQueryRequest::new(
+        request.repository.clone(),
+        request.domain.take(),
+        request.query.take(),
         request.kind,
         request.freshness_policy,
         request.limit,

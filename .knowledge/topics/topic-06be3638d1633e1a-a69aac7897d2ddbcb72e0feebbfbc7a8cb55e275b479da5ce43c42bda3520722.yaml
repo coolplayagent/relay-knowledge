@@ -1,0 +1,32 @@
+schema_version: 2
+topic:
+  id: release-documentation
+  title: Release documentation knowledge
+  description: Release-readiness documentation, navigation, and validation records.
+sources:
+- id: documentation-release-readiness-2026-06-05
+  topic: release-documentation
+  kind: doc
+  uri: docs/zh/06-verification/11-documentation-release-readiness-2026-06-05.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Historical 2026-06-05 release-readiness documentation refresh audit and validation record.
+- id: documentation-self-iteration-readiness-2026-08-18
+  topic: release-documentation
+  kind: doc
+  uri: docs/zh/06-verification/13-documentation-self-iteration-readiness-2026-08-18.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Current documentation and self-iteration readiness evidence, including the accepted focused-fast performance report, explicit pending gates, and the failed Kubernetes performance rail.
+route:
+  topic: release-documentation
+  source_order:
+  - documentation-self-iteration-readiness-2026-08-18
+  - documentation-release-readiness-2026-06-05
+  fallback: bounded-search

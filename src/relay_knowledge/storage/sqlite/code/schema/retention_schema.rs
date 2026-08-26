@@ -266,7 +266,9 @@ fn rewind_legacy_jobs_for_search_orphan_gc_once(
              'software_components', 'software_dependency_usages', 'software_sdk_usages',
              'software_files', 'software_topics', 'software_relationships',
              'software_global_status', 'software_build_targets', 'software_iac_resources',
-             'software_design_elements', 'commit_scopes', 'index_batch_staging',
+             'software_design_elements', 'business_mappings', 'business_term_aliases',
+             'business_terms', 'business_domains', 'business_knowledge_status',
+             'commit_scopes', 'index_batch_staging',
              'index_task_history', 'checkpoint', 'scope_metadata'
          )",
         [],
@@ -291,7 +293,9 @@ fn rewind_legacy_jobs_for_reference_search_group_gc_once(
              'software_components', 'software_dependency_usages', 'software_sdk_usages',
              'software_files', 'software_topics', 'software_relationships',
              'software_global_status', 'software_build_targets', 'software_iac_resources',
-             'software_design_elements', 'commit_scopes', 'index_batch_staging',
+             'software_design_elements', 'business_mappings', 'business_term_aliases',
+             'business_terms', 'business_domains', 'business_knowledge_status',
+             'commit_scopes', 'index_batch_staging',
              'index_task_history', 'checkpoint', 'scope_metadata'
          )",
         [],

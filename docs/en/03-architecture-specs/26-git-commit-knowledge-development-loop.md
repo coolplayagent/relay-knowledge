@@ -28,7 +28,7 @@ The loop has three distinct kinds of state:
 | State | Meaning | Authority |
 | --- | --- | --- |
 | Git commit | Immutable tracked repository content identified by a commit and tree | Git |
-| Derived knowledge | Code graph, software projection, impact, and retrieval evidence published for an exact source scope | Versioned indexes and projections |
+| Derived knowledge | Business terms/mappings, code graph, software projection, impact, and retrieval evidence published for an exact source scope | Versioned indexes and projections |
 | Decision context | Requirement, evidence, constraints, alternatives, uncertainty, verification, and handoff notes | Human-reviewed workflow artifacts backed by provenance |
 
 Git does not contain every reason behind a decision. Knowledge does not replace
@@ -69,8 +69,9 @@ flowchart LR
     L --> O
 ```
 
-1. **Observe** — select a clean commit baseline; read relevant knowledge routes,
-   repository status, software views, code context, freshness, and degradation.
+1. **Observe** — select a clean commit baseline; read the `business-knowledge`
+   route plus same-ref business, software, architecture/business-domain views,
+   code context, freshness, and degradation.
 2. **Frame** — state the requirement, constraints, alternatives, uncertainties,
    and acceptance evidence before editing.
 3. **Change** — make bounded worktree changes. When provisional retrieval is
@@ -80,8 +81,9 @@ flowchart LR
    immutable fact boundary. The commit records what changed, while verification
    evidence records what was demonstrated.
 5. **Publish** — update or index that exact commit through the durable
-   single-writer workflow. Wait for the exact target and its derived software
-   model to become current before calling the publication complete.
+   single-writer workflow. Business and code/software projections share the
+   task lease, attempt, and publication fence; no exact target is published
+   until all of them are complete.
 6. **Learn** — compare impact, outcomes, and diagnostics with the framed
    decision. Update stable knowledge routes when authoritative sources moved;
    do not persist an unverified narrative as a repository fact.
@@ -119,7 +121,7 @@ agent-generated statement.
 | Dirty worktree described as `HEAD` | Relabel and query `worktree`, or commit and use the new immutable ref | Treat uncommitted text as a commit fact |
 | Index task queued, retrying, or leased | Resume through the managed service or bounded single-shot worker described in Chapter 24 | Start competing writers or an unmanaged polling loop |
 | Exact commit is stale or unpublished | Keep the last fresh scope visible, report lag, and wait or recover the durable task | Return success before finalization |
-| Projection is degraded | Use unaffected evidence with disclosure and verify affected source directly | Hide degradation or omit indexing stages |
+| Projection is degraded | Use unaffected evidence with disclosure, verify affected source directly, and preserve out-of-scope technical targets as unresolved hints | Hide degradation, classify unresolved external mappings as repository damage, or omit indexing stages |
 | Knowledge map is invalid or conflicting | Stop mutation, preserve the file, and report validation diagnostics | Overwrite routes or edit history silently |
 | Verification fails | Keep or revert to the last accepted commit, refine the decision, and rerun the failed layer | Reclassify the failing gate as optional |
 | Commit is reverted or rebased | Publish the new exact history and retain the old commit as auditable prior state | Rewrite derived scope identity in place |
@@ -171,4 +173,4 @@ mental model; Chapter 24 supplies the operational contract.
 
 ---
 
-Navigation: [Architecture Specifications](README.md) | Previous: [25. Code Index Retention](25-code-index-retention.md) | Next: [Documentation bookshelf](../README.md)
+Navigation: [Architecture Specifications](README.md) | Previous: [25. Code Index Retention](25-code-index-retention.md) | Next: [27. Business Knowledge to Technical Graph Mapping](27-business-knowledge-technical-mapping.md)

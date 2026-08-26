@@ -2,7 +2,7 @@ use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{scope_filters as code_query_scope, software};
+use super::{business, scope_filters as code_query_scope, software};
 
 mod batch;
 mod checkpoint_receipt;
@@ -57,14 +57,18 @@ mod code_unfenced_authority_tests;
 
 use crate::{
     domain::{
-        CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
-        CodeIndexBatch, CodeIndexCheckpoint, CodeIndexPublicationFence, CodeIndexSession,
-        CodeIndexSnapshot, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryReport,
-        CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
-        CodeSymbolGenerationCounts, CodebaseViewRequest, CodebaseViewSnapshot,
-        IndexedRepositoryDocument, SoftwareGlobalProjection, SoftwareGlobalRequest,
+        BusinessKnowledgeProjection, BusinessKnowledgeProjectionInput,
+        BusinessKnowledgeQueryRequest, BusinessKnowledgeStatus, CodeFeatureFlagGraph,
+        CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch,
+        CodeIndexCheckpoint, CodeIndexPublicationFence, CodeIndexSession, CodeIndexSnapshot,
+        CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeSymbolGenerationCounts,
+        CodebaseViewRequest, CodebaseViewSnapshot, IndexedRepositoryDocument,
+        SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
-    storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
+    storage::{
+        BusinessKnowledgeStore, CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture,
+    },
 };
 
 use super::SqliteGraphStore;
@@ -129,7 +133,8 @@ impl SqliteGraphStore {
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     schema::initialize_code_schema(connection)?;
-    software::initialize_schema(connection)
+    software::initialize_schema(connection)?;
+    business::initialize_schema(connection)
 }
 
 pub(super) fn import_repository_from_database(
@@ -934,6 +939,51 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: crate::storage::CodeRepositorySetRefreshTaskFailure,
     ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
         self.run(move |connection| set::refresh_tasks::fail_refresh_task(connection, request))
+    }
+}
+
+impl BusinessKnowledgeStore for SqliteGraphStore {
+    fn replace_business_knowledge_projection(
+        &self,
+        input: BusinessKnowledgeProjectionInput,
+    ) -> StorageFuture<'_, BusinessKnowledgeStatus> {
+        self.run(move |connection| business::replace_projection(connection, input, None))
+    }
+
+    fn replace_business_knowledge_projection_with_fence(
+        &self,
+        input: BusinessKnowledgeProjectionInput,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, BusinessKnowledgeStatus> {
+        let authority_path = self.publication_authority_path.clone();
+        self.run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(
+                connection,
+                fence,
+                authority_path.as_deref(),
+            )?;
+            business::replace_projection(connection, input, Some(&guard))
+        })
+    }
+
+    fn business_knowledge_projection_for_scope(
+        &self,
+        source_scope: String,
+        request: BusinessKnowledgeQueryRequest,
+    ) -> StorageFuture<'_, BusinessKnowledgeProjection> {
+        self.run_read_snapshot(move |connection| {
+            ensure_queryable_code_scope(connection, &source_scope)?;
+            business::projection_for_scope(connection, &source_scope, request)
+        })
+    }
+
+    fn business_knowledge_status(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, Option<BusinessKnowledgeStatus>> {
+        self.run_read_snapshot(move |connection| {
+            business::status_for_scope(connection, &source_scope)
+        })
     }
 }
 

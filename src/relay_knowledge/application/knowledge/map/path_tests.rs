@@ -94,7 +94,12 @@ async fn publication_rejects_an_in_tree_artifact_leaf_symlink() {
     let topic = map.topics[0].clone();
     let shard = KnowledgeMapTopicShard {
         schema_version: ARTIFACT_SCHEMA_VERSION,
-        sources: map.sources.clone(),
+        sources: map
+            .sources
+            .iter()
+            .filter(|source| source.topic == topic.id)
+            .cloned()
+            .collect(),
         route: map.routes.first().cloned(),
         topic: topic.clone(),
     };

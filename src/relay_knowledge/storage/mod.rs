@@ -11,3 +11,47 @@ mod sqlite;
 pub use contracts::*;
 pub use partitioned::PartitionedSqliteKnowledgeStore;
 pub use sqlite::SqliteGraphStore;
+
+#[cfg(test)]
+pub(crate) async fn stage_empty_business_projection_with_fence_for_test<S>(
+    store: &S,
+    repository_id: impl Into<String>,
+    source_scope: impl Into<String>,
+    resolved_commit_sha: impl Into<String>,
+    fence: crate::domain::CodeIndexPublicationFence,
+) -> Result<crate::domain::BusinessKnowledgeStatus, StorageError>
+where
+    S: BusinessKnowledgeStore + CodeRepositoryStore + ?Sized,
+{
+    store
+        .replace_business_knowledge_projection_with_fence(
+            crate::domain::BusinessKnowledgeProjectionInput {
+                repository_id: repository_id.into(),
+                source_scope: source_scope.into(),
+                resolved_commit_sha: resolved_commit_sha.into(),
+                sources: Vec::new(),
+            },
+            fence,
+        )
+        .await
+}
+
+#[cfg(test)]
+pub(crate) async fn publish_empty_business_projection_for_test<S>(
+    store: &S,
+    repository_id: impl Into<String>,
+    source_scope: impl Into<String>,
+    resolved_commit_sha: impl Into<String>,
+) -> Result<crate::domain::BusinessKnowledgeStatus, StorageError>
+where
+    S: BusinessKnowledgeStore + CodeRepositoryStore + ?Sized,
+{
+    store
+        .replace_business_knowledge_projection(crate::domain::BusinessKnowledgeProjectionInput {
+            repository_id: repository_id.into(),
+            source_scope: source_scope.into(),
+            resolved_commit_sha: resolved_commit_sha.into(),
+            sources: Vec::new(),
+        })
+        .await
+}

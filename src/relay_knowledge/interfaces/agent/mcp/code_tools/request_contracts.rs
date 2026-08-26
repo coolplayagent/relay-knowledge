@@ -5,9 +5,10 @@ use serde::Deserialize;
 use crate::{
     api::AgentAccessPolicy,
     domain::{
-        CODEGRAPH_CONTEXT_DEFAULT_LIMIT, CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES,
-        CODEGRAPH_CONTEXT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_LIMIT, CODEGRAPH_CONTEXT_MIN_BYTES,
-        CodeQueryKind, SoftwareGlobalKind,
+        BusinessKnowledgeQueryKind, CODEGRAPH_CONTEXT_DEFAULT_LIMIT,
+        CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_BYTES,
+        CODEGRAPH_CONTEXT_MAX_LIMIT, CODEGRAPH_CONTEXT_MIN_BYTES, CodeQueryKind,
+        SoftwareGlobalKind,
     },
     interfaces::agent::{AgentAdapterError, AgentAdapterErrorKind, authorize_limit},
 };
@@ -117,6 +118,37 @@ pub(super) struct CodeSoftwareQueryArgs {
     pub(super) language_filters: Vec<String>,
     #[serde(default)]
     pub(super) freshness: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CodeBusinessQueryArgs {
+    pub(super) repository: String,
+    #[serde(default)]
+    pub(super) domain: Option<String>,
+    #[serde(default)]
+    pub(super) query: Option<String>,
+    #[serde(default)]
+    pub(super) kind: Option<String>,
+    #[serde(default)]
+    pub(super) limit: Option<usize>,
+    #[serde(default)]
+    pub(super) ref_selector: Option<String>,
+    #[serde(default)]
+    pub(super) freshness: Option<String>,
+}
+
+pub(super) fn parse_business_query_kind(
+    value: &str,
+) -> Result<BusinessKnowledgeQueryKind, AgentAdapterError> {
+    match value {
+        "terms" => Ok(BusinessKnowledgeQueryKind::Terms),
+        "mappings" => Ok(BusinessKnowledgeQueryKind::Mappings),
+        "all" => Ok(BusinessKnowledgeQueryKind::All),
+        other => Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::InvalidArgument,
+            format!("invalid business knowledge query kind '{other}'"),
+        )),
+    }
 }
 
 #[derive(Debug, Deserialize)]

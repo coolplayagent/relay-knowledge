@@ -84,6 +84,7 @@ relay-knowledge service doctor
 开发闭环的两章职责不同：
 
 - [第 24 章：Code Map 驱动的知识开发闭环](docs/zh/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
+- [第 27 章：业务知识与技术图谱映射](docs/zh/03-architecture-specs/27-business-knowledge-technical-mapping.md)
   是可执行的操作合同。
 - [第 26 章：Git Commit + Knowledge 开发迭代理念与 Loop](docs/zh/03-architecture-specs/26-git-commit-knowledge-development-loop.md)
   独立说明 commit 事实边界、派生 knowledge、决策上下文、恢复模型和人机交接理念。

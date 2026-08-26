@@ -13,7 +13,7 @@
 1. repository bootstrap 必须同时建立 `.knowledge/knowledge-map.yaml` 导航契约和版本化代码地图；只完成其中一个不能报告初始化成功。
 2. Git commit 是已跟踪源码事实的权威源；代码地图是针对精确 commit/source scope 发布的符号、调用、依赖和检索证据视图。软件全域模型是与该代码地图同 scope、同发布边界的派生读模型。
 3. YAML 保存稳定的知识路由和模型入口，不复制会随 commit 变化的架构摘要、构建 target 或部署事实。实际 `design`、`build`、`iac`、`relationships` 事实由 `repo software` 返回，并携带 ref、source scope、新鲜度和证据。
-4. spec 编写和 agent 编码前必须消费同一个固定 ref 的知识路由、软件模型、架构视图和代码上下文；commit 后必须刷新代码地图与软件模型，并再次验证 YAML。
+4. spec 编写和 agent 编码前必须消费同一个固定 ref 的 `business-knowledge` 路由、业务术语/映射、软件模型、architecture/business-domain 视图和代码上下文；commit 后必须刷新同一 fenced projection 并再次验证 YAML。
 
 本规格不引入第二份代码事实、不把 LLM 叙述持久化为真源、不在查询热路径扫描仓库，也不以 shell polling loop 取代 durable task、lease 或平台服务。
 
@@ -27,6 +27,7 @@
 | Knowledge map | topic、source、route、有限 recent history 和稳定软件模型入口 | `.knowledge/knowledge-map.yaml` 根 manifest、`.knowledge/topics/` 分片、`.knowledge/history/` 归档 | `schema_version`、`map_version`、SHA-256 digest |
 | Code map | file、symbol、reference、call、import、chunk 和变更事实 | code repository index | repository id、resolved commit、tree hash、source scope |
 | Software model | dependency、SDK、file、topic、relationship、build、IaC、design 投影 | software global projection | 与 code map 相同的 source scope 和 graph version |
+| Business model | domain、canonical term、alias、semantics、definition conflict 与技术映射 | Git-authored glossary 的 fenced projection | 与 code map 相同的 resolved commit、source scope 和 graph version |
 | Agent context | map route、software/view/context/impact 的有界组合 | skill workflow | 固定 base/head、freshness、evidence id |
 
 `.knowledge/knowledge-map.yaml` 的默认稳定入口为：
@@ -38,6 +39,8 @@
 - source scope: `repo`
 
 该 source 表示“当前仓库的 code-map-backed 软件模型入口”，而不是一份生成结果缓存。`map init` 对新旧 map 都必须幂等确保该入口存在；如果保留 id 已被用于不兼容的 topic、kind、URI 或 scope，命令必须报告冲突，不能静默覆盖用户契约。
+
+`map init` 同时确保 `business-knowledge` topic、`repository-business-glossary` file source、`.knowledge/business-glossary.yaml` URI 和 `repo` scope。该 route 只负责授权；glossary 保存 authored 业务事实，索引后才成为绑定 commit、scope、freshness 和 evidence 的图事实。已有 glossary 必须保留，保留 route/source 冲突必须失败。
 
 Knowledge Map v2 的根 manifest 只保存 topic 摘要、每个 topic 的有序 source-id 摘要、内容寻址分片 ref、map version 与最多 16 条 recent history。持久 artifact schema v2 与 `map show` 使用的有界 `KnowledgeMapView` 是不同类型，部分 history 视图不能被回写为存储 contract。根摘要必须在加载任一分片前拒绝跨 topic 的重复 source id、history 版本溢出，以及非法 topic/archive ref 或 digest。各 topic 的 source/route 位于 `.knowledge/topics/`；超出窗口的完整历史位于 `.knowledge/history/` 的内容寻址归档。`map route <topic>` 只加载根 manifest 与目标分片；`map show` 加载当前分片但不读取 history archive，并返回 `archived_through`、`complete` 与 recent entries；`map history` 显式提供单页最多 256 条的有界读取。根 manifest 的可选 `history.index` 指向 fanout 64、最大高度 10 的内容寻址 B+ tree；节点 range 必须连续、无重叠且完整覆盖 `1..=archived_through`，因此定位一个归档最多读取 11 个节点和一个归档，与归档总数无关。缺 index 的早期 v2 只允许 show、route 和完整 validate，并要求分页前通过受锁 `map init` 表示层迁移；读取路径禁止回扫 reverse chain。`map validate` 与所有 mutation 仍完整验证 archive chain 和 index 一致性。mutation 使用等待上限十秒的 OS advisory repository lock，活跃 writer 保持独占，异常退出则自动释放 owner。code parser 分别产生根授权事实与 digest 验证后的 shard 事实，software projection 通过 join 只接纳当前根引用的 shard，同时继续兼容 v1 根 topic。
 
@@ -66,7 +69,7 @@ Skill 在初始化仓库知识时必须按以下顺序协调现有 CLI：
 4. 执行 `repo list --format json`，按规范化 root 和注册 scope 复用已完成 alias；没有匹配项时执行 `repo register`，并从响应捕获 alias。
 5. 对 Git repository 先建立 clean `HEAD` 基线。若 map 是新建/升级或需要包含其他已授权的未提交文件，再建立 `worktree` overlay；非 Git source directory 继续使用 `HEAD` filesystem snapshot。
 6. 把 `repo index` 当作 durable、bounded、single-writer task。命令超时后通过 `repo status` 恢复；已有 managed service 时不得启动竞争 worker；没有 service 且任务 queued/retrying 时只运行有界 single-shot `repo index-worker`。
-7. 只有在 status 指向精确 resolved target、checkpoint 完成且 scope 不 stale 后，才读取同一 ref 的 `repo software --kind all` 与 `repo view --kind architecture-layers`。
+7. 只有在 status 指向精确 resolved target、checkpoint 完成且 scope 不 stale 后，才读取同一 ref 的 `repo business --kind all`、`repo software --kind all`、`repo view --kind architecture-layers|business-domains` 与业务驱动 `repo context`。
 8. 最后再次执行 `map validate`，并把 map version、resolved ref、source scope、freshness 和 degraded diagnostics 纳入初始化结果。
 
 Bootstrap 不是跨 YAML 与 SQLite 的假原子事务。中途失败时保留可恢复的 map 文件、durable task、checkpoint 和诊断；下一次运行从状态恢复，不删除有效成果或启动无界重试。
@@ -81,11 +84,11 @@ Bootstrap 不是跨 YAML 与 SQLite 的假原子事务。中途失败时保留�
 
 1. 等待 `repo status` 报告精确 head 已发布且不 stale。
 2. 在固定 base/head 上执行 `repo impact`。
-3. 在固定 head 上执行 `repo context`、`repo software --kind all` 和必要的 `repo view`。
+3. 在固定 head 上执行 `repo business --kind all`、`repo context`、`repo software --kind all` 和 architecture/business-domain `repo view`。
 4. 如果 Markdown、spec 或 knowledge map 发生变化，再读取 `repo software --kind topics|relationships` 和受影响 OKF neighborhood。
 5. 执行 `map validate`。新增、移动或删除权威文档/config/CI/runtime source 时，只通过 `map source add/update/remove` 修改路由并保留 history。
 
-Code index publication 已在同一个 task lease/publication fence 内刷新 software projection，所以不允许为“同步模型”增加第二个无 lease writer、查询时全仓扫描或未管理后台 loop。
+Code index publication 已在同一个 task lease、attempt 与 publication fence 内刷新 business/software projection；business 未完成时 staged scope 不得发布，所以不允许增加第二个 writer、查询时 YAML/全仓扫描或未管理后台 loop。
 
 ### 5.2 Worktree 迭代
 
@@ -97,9 +100,11 @@ Map mutation 会改变 worktree。若本轮 spec/编码决策必须立即看到�
 
 Agent 在写 spec 前至少读取：
 
+- `map route business-knowledge` 与固定 ref 的 `repo business --kind all`；
 - 相关 `map route`，包含 architecture、build、deployment 或 repository-specific topic；
 - 固定 ref 的 `repo software --kind all`，重点检查 `design`、`build`、`iac`、`relationships`；
 - `repo view --kind architecture-layers`；
+- `repo view --kind business-domains`，并区分 authored 与 inferred evidence kind；
 - 与需求相关的 `repo context` 或具体 definition/references/callers/callees 查询；
 - freshness、unresolved edge、direct-source-read 和 degraded diagnostics。
 
@@ -124,7 +129,7 @@ Agent 在验收时必须给出“requirement → authoritative evidence → test
 
 - 所有 index/update 都保留 bounded queue、lease、checkpoint、backoff、dead-letter 和单 repository active writer 约束。
 - Skill 不杀死竞争进程、不提高无界 busy timeout、不删除 runtime state 来制造成功。
-- `repo software`、`repo view`、`repo context` 只读取已提交投影/图事实，不在查询热路径递归扫描仓库。
+- `repo business`、`repo software`、`repo view`、`repo context` 只读取已提交投影/图事实，不在查询热路径读取 glossary 或递归扫描仓库。
 - Map mutation 使用文件锁、原子 rename、连续 history version 和 CLI validation；不手工改写 YAML，除非 CLI 不可用且用户明确要求修复。
 - 静默后台更新仍由平台 service manager 承载，必须可暂停、可观察、可恢复。
 
@@ -141,6 +146,7 @@ Agent 在验收时必须给出“requirement → authoritative evidence → test
 | KDL-07 | Spec/编码入口消费 map、model、impact/context | skill 默认 prompt、reference workflow 和 package validation |
 | KDL-08 | 文档与发布包不会回退到旧提示词 | shared skill metadata/policy self-test、PR gate、release bundle gate |
 | KDL-09 | 仓库交付通过全量质量门禁 | fmt、clippy、all-target tests、coverage、package、publish dry-run 和相关 self-iteration cases |
+| KDL-10 | 业务模型与代码/软件模型使用同一发布身份 | 端到端测试串联 business route、glossary authoring、index、business/view/context，并断言 commit、scope、freshness、evidence 与 publication fence 一致 |
 
 ---
 

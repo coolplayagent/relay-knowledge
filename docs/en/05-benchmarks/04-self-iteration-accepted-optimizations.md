@@ -115,6 +115,12 @@ profile, product binary, environment, budgets, and result.
 - Kubernetes phase diagnostic: a separate fresh-home run polled read-only status roughly every 10 seconds and completed in 612.08 seconds. Polling contaminated total latency, so it is not an acceptance sample. Coarse observations put base ingest near 158 seconds, query-index plus ordinary-reference work near another 100 seconds, grouped discovery/build near 107/109 seconds, call rebuild near 30 seconds, and software projection near 67 seconds. The cadence cannot provide exact phase timing, but it identifies reference-wide finalization for bounded optimization without authorizing a skipped stage or larger budget.
 - Current-candidate verification: report `manual-evaluate-1787657485515273930-0-3038475.json` passed all 346 gates, 119 cases, and 293 commands with score 1.0, `score_accepted=true`, and `adoption_status=would_accept`; manual evaluation created no commit. The 1,024-file product rails were 382/12,000 ms cold, 453/13,000 ms register plus cold, and 423/3,000 ms incremental. Release build was 321/180,000 ms and the named persistence suite was 739/30,000 ms. This closes the preceding focused-fast release-build rejection while leaving exhaustive and the failed Kubernetes rail independent.
 
+## 2026-08-26 Business-Knowledge Fast Regression Gate
+
+- Algorithm and architecture: `business_knowledge_regression_cases` runs the real product business modules in every fast evaluation, covering acronym/alias resolution, cross-domain homonym ambiguity, competing definitions, resolved/unresolved technical mappings, Knowledge Map route authorization, and the shared publication barrier. The gate filters behavioral modules rather than enumerating repositories, queries, paths, symbols, or fixture ids.
+- Invariants: workload ranking, case scoring, performance budgets, durable task ownership, and the product query hot path are unchanged. The glossary remains an index-time authorized source; business and code/software projections share one task/attempt/fence, and external targets remain unresolved metadata.
+- Expected impact and risk: regressions that guess homonyms, discard competing facts, lose hints, bypass route scope, or publish before business projection now fail fast. The named gate has a 30-second diagnostic budget and 180-second timeout; it is not a business-query latency metric.
+
 ## Documentation Maintenance
 
 - The primary Chinese accepted-optimization log is kept below the 1000-line hard cap by moving late detailed records to dated archive files.

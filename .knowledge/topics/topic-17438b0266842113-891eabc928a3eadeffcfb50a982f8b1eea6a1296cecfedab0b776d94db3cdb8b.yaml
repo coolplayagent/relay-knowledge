@@ -1,0 +1,21 @@
+schema_version: 2
+topic:
+  id: business-knowledge
+  title: Business knowledge
+  description: Version-controlled business domains, terminology, aliases, semantics, and technical mappings.
+sources:
+- id: repository-business-glossary
+  topic: business-knowledge
+  kind: file
+  uri: .knowledge/business-glossary.yaml
+  source_scope: repo
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Authored business glossary projected by the repository index writer at an immutable commit.
+route:
+  topic: business-knowledge
+  source_order:
+  - repository-business-glossary
+  fallback: bounded-search

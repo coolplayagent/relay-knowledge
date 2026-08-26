@@ -16,8 +16,8 @@ use relay_knowledge::{
     env::{EnvironmentConfig, PlatformKind},
     paths::RuntimePaths,
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeRepositoryStore,
-        PartitionedSqliteKnowledgeStore, StorageError,
+        BusinessKnowledgeStore, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
+        CodeIndexTaskSeed, CodeRepositoryStore, PartitionedSqliteKnowledgeStore, StorageError,
     },
 };
 use rusqlite::Connection;
@@ -219,6 +219,7 @@ pub(super) async fn publish_partitioned_snapshot(
 ) {
     let repository_id = snapshot.repository_id.clone();
     let source_scope = snapshot.source_scope.clone();
+    let resolved_commit_sha = snapshot.resolved_commit_sha.clone();
     let status = store
         .code_repository_status(repository_id.clone())
         .await
@@ -242,6 +243,18 @@ pub(super) async fn publish_partitioned_snapshot(
         .apply_code_index_snapshot_with_fence(snapshot, fence.clone())
         .await
         .expect("fenced snapshot should persist");
+    store
+        .replace_business_knowledge_projection_with_fence(
+            relay_knowledge::domain::BusinessKnowledgeProjectionInput {
+                repository_id: repository_id.clone(),
+                source_scope: source_scope.clone(),
+                resolved_commit_sha,
+                sources: Vec::new(),
+            },
+            fence.clone(),
+        )
+        .await
+        .expect("fenced business projection should persist");
     store
         .refresh_software_global_projection_with_fence(source_scope.clone(), fence)
         .await

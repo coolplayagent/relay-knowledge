@@ -4,6 +4,7 @@
 //! owners while keeping concrete connection lifecycle and transactions in
 //! responsibility-named modules.
 
+mod business;
 mod canvas;
 pub(in crate::storage) mod code;
 mod code_graph;

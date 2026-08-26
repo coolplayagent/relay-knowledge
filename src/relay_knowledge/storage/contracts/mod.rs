@@ -1,4 +1,5 @@
 mod boundary;
+mod business;
 mod canvas;
 mod code;
 mod code_graph;
@@ -11,6 +12,7 @@ mod search;
 mod topology;
 
 pub use boundary::{StorageError, StorageFuture};
+pub use business::BusinessKnowledgeStore;
 pub use canvas::{
     GraphCanvasSelection, GraphCanvasStorageEdge, GraphCanvasStorageNode,
     GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
@@ -57,11 +59,21 @@ pub use topology::{StorageShardCatalogEntry, StorageTopology, StorageTopologySna
 
 /// Combined storage facade used by the application service.
 pub trait KnowledgeStore:
-    GraphStore + MutationLogStore + IndexStore + CodeGraphStore + CodeRepositoryStore
+    GraphStore
+    + MutationLogStore
+    + IndexStore
+    + CodeGraphStore
+    + CodeRepositoryStore
+    + BusinessKnowledgeStore
 {
 }
 
 impl<T> KnowledgeStore for T where
-    T: GraphStore + MutationLogStore + IndexStore + CodeGraphStore + CodeRepositoryStore
+    T: GraphStore
+        + MutationLogStore
+        + IndexStore
+        + CodeGraphStore
+        + CodeRepositoryStore
+        + BusinessKnowledgeStore
 {
 }

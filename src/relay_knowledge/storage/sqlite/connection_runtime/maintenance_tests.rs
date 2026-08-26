@@ -273,6 +273,15 @@ async fn code_index_task_fenced_finalization_defers_maintenance_until_terminal_c
         None
     );
 
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        claimed.repository_id.clone(),
+        source_scope.to_owned(),
+        claimed.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("business projection should stage before publication");
     store
         .refresh_software_global_projection_with_fence(source_scope.to_owned(), fence)
         .await

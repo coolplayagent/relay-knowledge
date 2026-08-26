@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: "Use relay-knowledge local CLI for repository knowledge bootstrap and GraphRAG: initialize/validate .knowledge/knowledge-map.yaml plus the code map; treat the code map as primary truth; read snapshot-bound repo software/view models for specs and coding; run durable update/status/impact/context loops after commits. Use for 知识地图初始化, git commit知识库增量更新, 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, SDK/API, 代码地图, definitions, references, usage, impact. Recover durable single-writer index tasks through repo status, a managed service, or bounded local index-worker attempts. Pin immutable refs. Prefer graph CLI before grep/rg unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP/ACP setup or protocol access."
+description: "Use relay-knowledge local CLI for repository knowledge bootstrap and GraphRAG: initialize/validate .knowledge/knowledge-map.yaml plus code and authored business maps; read snapshot-bound repo business/software/view/context models for specs and coding; run durable update/status/impact loops after commits. Use for 知识地图初始化, 业务术语与技术映射, git commit知识库增量更新, 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, SDK/API, 代码地图, definitions, references, usage, impact. Recover durable single-writer index tasks through repo status, a managed service, or bounded local index-worker attempts. Pin immutable refs. Prefer graph CLI before grep/rg unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP/ACP setup or protocol access."
 metadata:
   version: 1.1.13
   openclaw:
@@ -240,11 +240,15 @@ graph-backed CLI surfaces before raw text search:
 - `repo software --kind ...` for repository-wide software graph projections:
   dependencies, SDK/API usage, files, topics, relationships, build, IaC, design,
   or all slices together.
+- `repo business --kind ...` for authored domains, canonical terms, aliases,
+  semantics, conflicts, and business-to-technical mappings.
 - `repo feature-flags` for configuration-driven feature flags and guarded-code
   relationships.
 
 Treat kind values as command-local. Do not pass `repo software` kinds to
-`repo query`, do not pass `repo query` kinds to `repo software`, and do not use
+`repo query`, do not pass `repo query` kinds to `repo software`, and do not
+pass `repo business` kinds (`terms`, `mappings`, `all`) to either command. Do
+not use
 `index refresh` kinds (`bm25`, `semantic`, `vector`), worker kinds
 (`embedding`, `ocr`, `vision`, `extractor`), or knowledge-map source kinds
 (`repo`, `file`, `doc`, `config`, `db`, `ci`, `runtime`, `wiki`,
@@ -270,19 +274,25 @@ with the same-ref architecture view and another map validation:
 ```bash
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
+relay-knowledge map route business-knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register . --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
 relay-knowledge repo status <alias> --format json
+relay-knowledge repo business <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind business-domains --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge map validate --format json
 ```
 
-`map init` idempotently ensures the YAML `software-model` route whose
-`repository-software-model` source points to `.`. YAML remains navigation and
-model-entry metadata; do not copy derived architecture, build, IaC, or resolved
-commit facts into it. Follow `references/knowledge-map-workflows.md` for
+`map init` idempotently ensures the `software-model` route and the
+`business-knowledge` route whose repository-scoped source points to
+`.knowledge/business-glossary.yaml`; it creates the minimal valid glossary only
+when that file is absent. Edit the glossary as the version-controlled authored
+business surface, but never copy derived architecture, build, IaC, resolved
+mapping ids, or commit facts into the Knowledge Map. Follow
+`references/knowledge-map-workflows.md` for
 missing/invalid-map handling, conditional register/worktree steps, durable task
 recovery, source reconciliation, and shell-specific examples.
 
@@ -366,6 +376,28 @@ relay-knowledge repo software core \
   --format json
 ```
 
+### `repo business --kind` Authored Business Graph
+
+Use `repo business` when the user asks for a domain term, synonym or acronym,
+definition conflict, calculation semantics, or a business-to-technical link.
+Use `terms` for the glossary surface, `mappings` for technical links, and `all`
+when both are required. Pin `--ref`; add `--domain` when homonyms exist. Treat
+an `ambiguous` response as a request for domain evidence, never as permission
+to guess. Preserve unresolved `target_hint` metadata and use it as a bounded
+`repo context` or `repo query` seed rather than declaring repository damage.
+
+```bash
+relay-knowledge map route business-knowledge --format json
+relay-knowledge repo business core \
+  --kind all \
+  --query "conversion rate" \
+  --domain sales \
+  --ref HEAD \
+  --freshness wait-until-fresh \
+  --limit 20 \
+  --format json
+```
+
 ### Feature Flags
 
 For feature flag, config gate, environment-variable gate, settings gate,
@@ -389,9 +421,10 @@ expecting new facts in this command.
 
 ### Spec-Grounded Incremental Loop
 
-Before writing a spec, combine relevant `map route` results with a pinned
-`repo software --kind all`, `repo view --kind architecture-layers`, and
-requirement-specific code context. For a registered Git repository, omit both
+Before writing a spec, read `map route business-knowledge` and combine relevant
+route results with pinned `repo business --kind all`, `repo software --kind
+all`, both architecture/business-domain views, and requirement-specific code
+context. For a registered Git repository, omit both
 refs for the normal commit event:
 
 ```bash
@@ -417,9 +450,11 @@ a non-null summary:
 
 ```bash
 relay-knowledge repo impact core --base <pinned-base> --head <pinned-head> --limit 100 --format json
+relay-knowledge repo business core --kind all --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge repo context core --query "explain the affected implementation" --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge repo software core --kind all --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge repo view core --kind architecture-layers --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge repo view core --kind business-domains --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge map validate --format json
 ```
 

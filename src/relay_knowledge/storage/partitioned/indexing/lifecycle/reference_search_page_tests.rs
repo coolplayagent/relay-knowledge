@@ -361,6 +361,15 @@ async fn partitioned_reference_build_page_and_repair_token_survive_full_reopen()
     assert_eq!(finalized.document_ids, reference_ids(5));
     assert_partition_remains_staged_without_receipt(&store, &task, source_scope).await;
 
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        task.repository_id.clone(),
+        source_scope.to_owned(),
+        task.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("business projection should stage before catalog handoff");
     store
         .refresh_software_global_projection_with_fence(source_scope.to_owned(), fence)
         .await

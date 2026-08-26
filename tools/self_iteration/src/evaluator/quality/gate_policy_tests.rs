@@ -84,6 +84,7 @@ fn fast_profile_skips_full_quality_gates() {
         .collect::<Vec<_>>();
     assert!(gate_names.contains(&"cargo_build_release"));
     assert!(gate_names.contains(&"code_index_recovery_cases"));
+    assert!(gate_names.contains(&"business_knowledge_regression_cases"));
     assert!(gate_names.contains(&"code_index_sqlite_lock_cases"));
     assert!(gate_names.contains(&"bm25_hierarchy_build"));
     assert!(gate_names.contains(&"bm25_hierarchy_suite"));

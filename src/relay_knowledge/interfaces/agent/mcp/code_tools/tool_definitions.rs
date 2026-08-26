@@ -8,8 +8,9 @@ use crate::{
 };
 
 use super::super::tool_registry::{
-    CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL,
-    CODE_REPOSITORY_GRAPH_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL, CODE_SOFTWARE_QUERY_TOOL,
+    CODE_BUSINESS_QUERY_TOOL, CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL,
+    CODE_QUERY_TOOL, CODE_REPOSITORY_GRAPH_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
+    CODE_SOFTWARE_QUERY_TOOL,
 };
 
 const CODE_QUERY_KIND_SCHEMA_VALUES: &[&str] = &[
@@ -143,6 +144,29 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
                 "ref_selector": {"type": "string"},
                 "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
+                "freshness": {
+                    "type": "string",
+                    "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
+                }
+            },
+            "required": ["repository"]
+        }
+    })
+}
+
+pub(in crate::interfaces::agent::mcp) fn code_business_query_tool_definition() -> Value {
+    json!({
+        "name": CODE_BUSINESS_QUERY_TOOL,
+        "description": "Read route-authorized business terms, aliases, semantics, conflicts, evidence, and declared technical mappings from one indexed repository snapshot.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repository": {"type": "string", "minLength": 1},
+                "domain": {"type": "string", "minLength": 1, "maxLength": 128},
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_AGENT_QUERY_CHARS},
+                "kind": {"type": "string", "enum": ["terms", "mappings", "all"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                "ref_selector": {"type": "string"},
                 "freshness": {
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]

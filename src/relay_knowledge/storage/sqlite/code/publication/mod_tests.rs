@@ -33,6 +33,7 @@ fn fenced_publication_withholds_scope_repository_and_checkpoint_until_projection
             [],
         )
         .expect("staged projection should insert");
+    stage_business_projection(&connection, "scope-new", "commit-new");
     let transaction = connection
         .unchecked_transaction()
         .expect("publication transaction should begin");
@@ -59,6 +60,7 @@ fn projection_failure_rolls_back_to_the_previous_published_scope() {
             [],
         )
         .expect("staged projection should insert");
+    stage_business_projection(&connection, "scope-new", "commit-new");
     let transaction = connection
         .unchecked_transaction()
         .expect("publication transaction should begin");
@@ -327,6 +329,9 @@ fn active_adoption_database() -> Connection {
             WHERE source_scope = 'scope-old';
             INSERT INTO software_global_status (source_scope, repository_id, stale, component_count)
             VALUES ('scope-old', 'repo', 0, 17);
+            INSERT INTO business_knowledge_status (
+                source_scope, repository_id, resolved_commit_sha, stale
+            ) VALUES ('scope-old', 'repo', 'commit-old', 0);
             INSERT INTO code_repository_index_checkpoints (
                 source_scope, repository_id, state, resolved_commit_sha, tree_hash,
                 path_filters_json, language_filters_json, updated_at_ms, error_message
@@ -354,6 +359,9 @@ fn retained_adoption_database() -> Connection {
             INSERT INTO software_global_status (
                 source_scope, repository_id, stale, component_count
             ) VALUES ('scope-current', 'repo', 0, 23);
+            INSERT INTO business_knowledge_status (
+                source_scope, repository_id, resolved_commit_sha, stale
+            ) VALUES ('scope-current', 'repo', 'commit-current', 0);
             INSERT INTO code_repository_files (source_scope, path, blob_hash)
             VALUES ('scope-current', 'src/lib.rs', 'blob-current');
             UPDATE code_repositories
@@ -494,6 +502,26 @@ fn publication_database() -> Connection {
                 stale INTEGER NOT NULL,
                 component_count INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE business_knowledge_status (
+                source_scope TEXT PRIMARY KEY,
+                repository_id TEXT NOT NULL DEFAULT 'repo',
+                resolved_commit_sha TEXT NOT NULL,
+                stale INTEGER NOT NULL
+            );
+            CREATE TABLE business_mappings (
+                source_scope TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                domain_id TEXT NOT NULL,
+                term_id TEXT NOT NULL,
+                mapping_index INTEGER NOT NULL,
+                relation_kind TEXT NOT NULL,
+                target_kind TEXT NOT NULL,
+                target TEXT NOT NULL,
+                target_path TEXT,
+                target_source_scope TEXT,
+                resolution_state TEXT NOT NULL,
+                resolved_id TEXT
+            );
             CREATE TABLE code_repository_files (
                 source_scope TEXT NOT NULL,
                 path TEXT NOT NULL,
@@ -567,6 +595,17 @@ fn publication_database() -> Connection {
         )
         .expect("publication schema should initialize");
     connection
+}
+
+fn stage_business_projection(connection: &Connection, source_scope: &str, commit: &str) {
+    connection
+        .execute(
+            "INSERT INTO business_knowledge_status (
+                 source_scope, repository_id, resolved_commit_sha, stale
+             ) VALUES (?1, 'repo', ?2, 1)",
+            [source_scope, commit],
+        )
+        .expect("staged business projection should insert");
 }
 
 fn publication_receipt_count(connection: &Connection) -> usize {

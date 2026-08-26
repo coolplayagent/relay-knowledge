@@ -105,6 +105,7 @@ HTTP 响应头包含 `mcp-session-id: <uuid>`。
 | `relay_service_status` | 返回常驻服务状态 |
 | `relay_index_status` | 返回派生索引状态 |
 | `relay_code_query` | 代码仓库检索 |
+| `relay_business_query` | 查询 authored 业务术语与技术映射 |
 | `relay_codegraph_context` | 构建 one-call codegraph context pack |
 | `relay_repository_graph` | 读取有界 OKF repository graph neighborhood |
 | `relay_code_feature_flags` | 代码特性标志查询 |
@@ -144,6 +145,10 @@ HTTP 响应头包含 `mcp-session-id: <uuid>`。
 #### relay_code_impact
 
 变更影响分析工具。参数包括 `alias`、`base_ref`、`head_ref`、`limit`。
+
+#### relay_business_query
+
+只读业务知识投影工具。参数包括 `alias`、可选 `ref`、`domain`、`query`，以及 `kind`（`terms`、`mappings`、`all`）、`freshness` 和 `limit`。跨 domain 同名词返回 `ambiguous`；未解析技术目标保留 `target_hint`，不会触发查询时仓库扫描。
 
 #### relay_software_query
 

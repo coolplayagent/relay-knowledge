@@ -87,9 +87,20 @@ pub(super) async fn fresh_full_index_response(
         .software_global_projection_for_scope(source_scope.clone(), projection_request)
         .await
         .map_err(storage_api_error)?;
+    let business_status = store
+        .business_knowledge_status(source_scope.clone())
+        .await
+        .map_err(storage_api_error)?;
+    let Some(business_status) = business_status else {
+        return Ok(None);
+    };
     if software_projection.status.stale
         || software_projection.status.repository_id != scoped_status.repository_id
         || software_projection.status.source_scope != source_scope
+        || business_status.stale
+        || business_status.repository_id != scoped_status.repository_id
+        || business_status.source_scope != source_scope
+        || business_status.resolved_commit_sha != probe.resolved_commit_sha
     {
         return Ok(None);
     }
@@ -212,6 +223,22 @@ pub(super) async fn published_task_response(
             lease.task_id
         )));
     }
+    let business = store
+        .business_knowledge_status(lease.source_scope.clone())
+        .await
+        .map_err(storage_api_error)?
+        .filter(|status| {
+            !status.stale
+                && status.repository_id == lease.publication_fence.repository_id
+                && status.resolved_commit_sha == lease.resolved_commit_sha
+        })
+        .ok_or_else(|| {
+            ApiError::storage_unavailable(format!(
+                "published receipt for task '{}' does not match its business projection",
+                lease.task_id
+            ))
+        })?;
+    debug_assert_eq!(business.source_scope, lease.source_scope);
     let graph_version = store
         .current_graph_version()
         .await

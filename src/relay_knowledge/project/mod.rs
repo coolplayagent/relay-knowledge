@@ -36,6 +36,12 @@ pub const KNOWLEDGE_MAP_FILE_NAME: &str = "knowledge-map.yaml";
 /// Repository-relative knowledge navigation contract path referenced by agents.
 pub const KNOWLEDGE_MAP_RELATIVE_PATH: &str = ".knowledge/knowledge-map.yaml";
 
+/// Repository-relative authored business glossary filename.
+pub const BUSINESS_GLOSSARY_FILE_NAME: &str = "business-glossary.yaml";
+
+/// Repository-relative authored business glossary path.
+pub const BUSINESS_GLOSSARY_RELATIVE_PATH: &str = ".knowledge/business-glossary.yaml";
+
 /// Repository-local directory containing Knowledge Map v2 topic shards.
 pub const KNOWLEDGE_MAP_TOPICS_DIR_NAME: &str = "topics";
 

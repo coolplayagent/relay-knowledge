@@ -92,6 +92,7 @@ responsibility-specific documentation, not in this navigation page.
 Two development-loop chapters have distinct responsibilities:
 
 - [Chapter 24: Code-Map-Backed Knowledge Development Loop](docs/en/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
+- [Chapter 27: Business Knowledge to Technical Graph Mapping](docs/en/03-architecture-specs/27-business-knowledge-technical-mapping.md)
   is the executable operating contract.
 - [Chapter 26: Git Commit + Knowledge Development Philosophy and Iteration Loop](docs/en/03-architecture-specs/26-git-commit-knowledge-development-loop.md)
   explains the commit fact boundary, derived knowledge, decision context,

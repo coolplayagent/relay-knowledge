@@ -70,6 +70,7 @@ fn budget_truncation_keeps_impact_hints_aligned_with_graph_paths() {
         .map(|index| call_graph_hit_at(&format!("src/path_{index}.rs")))
         .collect::<Vec<_>>();
     let mut pack = CodeGraphContextPack {
+        business_context: Vec::new(),
         entry_points: Vec::new(),
         related_symbols: Vec::new(),
         impact_hints: impact_hints(&graph_paths, &HashMap::new()),
@@ -90,6 +91,7 @@ fn budget_truncation_clears_hit_excerpts_before_dropping_evidence() {
     let mut hit = call_graph_hit();
     hit.excerpt = "x".repeat(5000);
     let mut pack = CodeGraphContextPack {
+        business_context: Vec::new(),
         entry_points: vec![hit],
         related_symbols: Vec::new(),
         graph_paths: Vec::new(),
@@ -115,6 +117,7 @@ fn budget_truncation_preserves_entry_excerpt_before_expansion_evidence() {
         })
         .collect::<Vec<_>>();
     let mut pack = CodeGraphContextPack {
+        business_context: Vec::new(),
         entry_points: vec![entry],
         related_symbols: Vec::new(),
         impact_hints: impact_hints(&graph_paths, &HashMap::new()),

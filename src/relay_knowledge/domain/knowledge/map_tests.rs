@@ -23,6 +23,46 @@ fn initial_map_routes_the_repository_software_model() {
 }
 
 #[test]
+fn initial_map_routes_the_repository_business_glossary() {
+    let map = KnowledgeMap::initial("now".to_owned());
+    let route = map
+        .routes
+        .iter()
+        .find(|route| route.topic == "business-knowledge")
+        .unwrap();
+    let source = map
+        .sources
+        .iter()
+        .find(|source| source.id == "repository-business-glossary")
+        .unwrap();
+
+    assert_eq!(route.source_order, ["repository-business-glossary"]);
+    assert_eq!(source.kind, KnowledgeMapSourceKind::File);
+    assert_eq!(source.uri, ".knowledge/business-glossary.yaml");
+    assert_eq!(source.source_scope.as_deref(), Some("repo"));
+}
+
+#[test]
+fn business_route_upgrade_is_idempotent_and_rejects_reserved_drift() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    map.remove_source("repository-business-glossary").unwrap();
+    assert!(map.ensure_business_knowledge_route().unwrap());
+    assert!(!map.ensure_business_knowledge_route().unwrap());
+
+    map.sources
+        .iter_mut()
+        .find(|source| source.id == "repository-business-glossary")
+        .unwrap()
+        .uri = "other.yaml".to_owned();
+    assert!(
+        map.validate()
+            .unwrap_err()
+            .to_string()
+            .contains("reserved source")
+    );
+}
+
+#[test]
 fn software_model_route_upgrade_is_idempotent() {
     let mut map = KnowledgeMap::initial("now".to_owned());
     map.remove_source("repository-software-model")
@@ -69,8 +109,15 @@ fn adds_source_and_route() {
     )
     .expect("source should add");
 
-    assert_eq!(map.topics[0].id, "build");
-    assert_eq!(map.routes[0].source_order, ["build-cargo"]);
+    assert!(map.topics.iter().any(|topic| topic.id == "build"));
+    assert_eq!(
+        map.routes
+            .iter()
+            .find(|route| route.topic == "build")
+            .unwrap()
+            .source_order,
+        ["build-cargo"]
+    );
     map.validate().expect("map should validate");
 }
 
@@ -102,7 +149,11 @@ fn keeps_multiple_sources_under_one_topic() {
     }
 
     assert_eq!(
-        map.routes[0].source_order,
+        map.routes
+            .iter()
+            .find(|route| route.topic == "cli")
+            .unwrap()
+            .source_order,
         ["cli-reference".to_owned(), "cli-skill".to_owned()]
     );
     assert_eq!(
@@ -172,7 +223,12 @@ fn rejects_duplicate_sources_and_bad_routes() {
         .expect("first add should work");
     assert!(map.add_source(source).is_err());
 
-    map.routes[0].source_order.push("missing".to_owned());
+    map.routes
+        .iter_mut()
+        .find(|route| route.topic == "architecture")
+        .unwrap()
+        .source_order
+        .push("missing".to_owned());
     assert!(map.validate().is_err());
 }
 
@@ -193,7 +249,12 @@ fn rejects_duplicate_route_topics() {
 #[test]
 fn rejects_duplicate_sources_inside_route_order() {
     let mut map = routed_map();
-    map.routes[0].source_order.push("docs".to_owned());
+    map.routes
+        .iter_mut()
+        .find(|route| route.topic == "architecture")
+        .unwrap()
+        .source_order
+        .push("docs".to_owned());
 
     let error = map
         .validate()

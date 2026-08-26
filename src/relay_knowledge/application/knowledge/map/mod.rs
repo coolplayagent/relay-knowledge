@@ -10,10 +10,13 @@ use tokio::time::sleep;
 
 use crate::{
     api::RequestContext,
-    domain::{KnowledgeMap, KnowledgeMapChange, KnowledgeMapRoute, KnowledgeMapSource},
+    domain::{
+        BusinessGlossary, KnowledgeMap, KnowledgeMapChange, KnowledgeMapRoute, KnowledgeMapSource,
+        KnowledgeMapSourceKind,
+    },
     project::{
-        AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME,
-        KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
+        AGENT_CONTRACT_DIR_NAME, BUSINESS_GLOSSARY_FILE_NAME, KNOWLEDGE_MAP_FILE_NAME,
+        KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
     },
 };
 
@@ -65,20 +68,25 @@ impl KnowledgeMapService {
                 .schema_version
                 == 1;
             let mut snapshot = self.load_for_mutation().await?;
-            if snapshot
+            let software_changed = snapshot
                 .map
-                .ensure_software_model_route_snapshot(snapshot.archived_through)?
-            {
+                .ensure_software_model_route_snapshot(snapshot.archived_through)?;
+            let business_changed = snapshot
+                .map
+                .ensure_business_knowledge_route_snapshot(snapshot.archived_through)?;
+            let glossary_created = self.ensure_default_business_glossary().await?;
+            if software_changed || business_changed {
                 snapshot.map.record_change(
-                    "software-model.ensure",
-                    "Added the repository code-map-backed software-model route.".to_owned(),
+                    "builtin-routes.ensure",
+                    "Ensured repository software-model and business-knowledge routes.".to_owned(),
                     now_stamp(),
                 );
                 self.write_map(&mut snapshot).await?;
                 return Ok(self.mutation_response(
                     context,
                     snapshot.map.map_version,
-                    "initialized repository software-model route".to_owned(),
+                    "initialized repository software-model and business-knowledge routes"
+                        .to_owned(),
                 ));
             }
             if legacy || snapshot.requires_publish {
@@ -96,16 +104,21 @@ impl KnowledgeMapService {
             return Ok(self.mutation_response(
                 context,
                 snapshot.map.map_version,
-                "knowledge map and repository software-model route already exist".to_owned(),
+                if glossary_created {
+                    "created missing repository business glossary".to_owned()
+                } else {
+                    "knowledge map and built-in repository routes already exist".to_owned()
+                },
             ));
         }
 
         let mut snapshot = MutableKnowledgeMap::initial(now_stamp());
+        self.ensure_default_business_glossary().await?;
         self.write_map(&mut snapshot).await?;
         Ok(self.mutation_response(
             context,
             snapshot.map.map_version,
-            "created knowledge map with repository software-model route".to_owned(),
+            "created knowledge map with software-model and business-knowledge routes".to_owned(),
         ))
     }
 
@@ -245,6 +258,10 @@ impl KnowledgeMapService {
     ) -> Result<KnowledgeMapValidationResponse, KnowledgeMapServiceError> {
         let mut diagnostics = Vec::new();
         match self.validate_map_contract().await {
+            Ok(()) => {}
+            Err(error) => diagnostics.push(error.to_string()),
+        }
+        match self.validate_business_glossary_route().await {
             Ok(()) => {}
             Err(error) => diagnostics.push(error.to_string()),
         }
@@ -659,6 +676,64 @@ impl KnowledgeMapService {
         self.map_path().with_extension("yaml.previous")
     }
 
+    fn business_glossary_path(&self) -> PathBuf {
+        self.repository_root
+            .join(Path::new(AGENT_CONTRACT_DIR_NAME))
+            .join(BUSINESS_GLOSSARY_FILE_NAME)
+    }
+
+    async fn ensure_default_business_glossary(&self) -> Result<bool, KnowledgeMapServiceError> {
+        let contract = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
+        let owned_contract = ensure_owned_directory(&self.repository_root, &contract).await?;
+        let path = self.business_glossary_path();
+        if fs::try_exists(&path).await? {
+            ensure_regular_file_within(&path, &owned_contract).await?;
+            let content = fs::read(&path).await?;
+            BusinessGlossary::parse(&content)?;
+            return Ok(false);
+        }
+        let yaml = serialize_yaml(&BusinessGlossary::empty_v1())?;
+        let temp = temporary_path(&path);
+        if let Err(error) = fs::write(&temp, yaml.as_bytes()).await {
+            let _ = fs::remove_file(&temp).await;
+            return Err(error.into());
+        }
+        if let Err(error) = fs::rename(&temp, &path).await {
+            let _ = fs::remove_file(temp).await;
+            return Err(error.into());
+        }
+        Ok(true)
+    }
+
+    async fn validate_business_glossary_route(&self) -> Result<(), KnowledgeMapServiceError> {
+        let (route, sources) = self.load_topic_route("business-knowledge").await?;
+        let Some(route) = route else {
+            return Ok(());
+        };
+        for source_id in route.source_order {
+            let source = sources
+                .iter()
+                .find(|source| source.id == source_id)
+                .ok_or_else(|| {
+                    KnowledgeMapServiceError::Integrity(format!(
+                        "business-knowledge route references missing source '{source_id}'"
+                    ))
+                })?;
+            if source.kind != KnowledgeMapSourceKind::File
+                || source.source_scope.as_deref() != Some("repo")
+            {
+                return Err(KnowledgeMapServiceError::Integrity(format!(
+                    "business glossary source '{}' must use kind file and source scope repo",
+                    source.id
+                )));
+            }
+            let path = safe_repository_source_path(&self.repository_root, &source.uri).await?;
+            let content = fs::read(path).await?;
+            BusinessGlossary::parse(&content)?;
+        }
+        Ok(())
+    }
+
     async fn read_root_content(&self) -> Result<String, KnowledgeMapServiceError> {
         let path = self.map_path();
         match read_root_file(&self.repository_root, &path).await {
@@ -679,6 +754,41 @@ impl KnowledgeMapService {
             Err(error) => Err(error),
         }
     }
+}
+
+async fn safe_repository_source_path(
+    repository_root: &Path,
+    relative: &str,
+) -> Result<PathBuf, KnowledgeMapServiceError> {
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+    }
+    let repository = fs::canonicalize(repository_root).await?;
+    let path = repository_root.join(relative_path);
+    let metadata = fs::symlink_metadata(&path).await?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+    }
+    if metadata.len() > 4 * 1024 * 1024 {
+        return Err(KnowledgeMapServiceError::Integrity(format!(
+            "business glossary '{relative}' exceeds 4194304 bytes"
+        )));
+    }
+    let canonical = fs::canonicalize(&path).await?;
+    if !canonical.starts_with(repository) {
+        return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
+    }
+    Ok(canonical)
 }
 
 fn parse_v1_map(content: &str) -> Result<KnowledgeMap, KnowledgeMapServiceError> {

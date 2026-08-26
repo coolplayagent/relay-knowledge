@@ -408,6 +408,15 @@ async fn fenced_full_scope_routes_to_its_staged_shard_before_catalog_activation(
         "the new scope must remain hidden from ordinary reads before projection"
     );
 
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        running.repository_id.clone(),
+        source_scope.clone(),
+        running.resolved_commit_sha.clone(),
+        publication_fence.clone(),
+    )
+    .await
+    .expect("business projection should route by fenced repository ownership");
     let projection = store
         .refresh_software_global_projection_with_fence(source_scope.clone(), publication_fence)
         .await

@@ -86,6 +86,8 @@ mod mod_tests;
 /// Bounded raw graph rows used to derive codebase views.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CodebaseViewSnapshot {
+    #[serde(default)]
+    pub declared_business_domains: Vec<CodebaseViewDeclaredBusinessDomain>,
     pub files: Vec<CodebaseViewFile>,
     pub symbols: Vec<CodebaseViewSymbol>,
     pub imports: Vec<CodeImportRecord>,
@@ -94,6 +96,15 @@ pub struct CodebaseViewSnapshot {
     pub dependencies: Vec<CodebaseViewDependency>,
     pub feature_flags: Vec<CodeFeatureFlagRecord>,
     pub truncated: bool,
+}
+
+/// Authored domain row merged ahead of inferred route, flag, and path signals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodebaseViewDeclaredBusinessDomain {
+    pub id: String,
+    pub name: String,
+    pub source_path: String,
+    pub evidence_id: String,
 }
 
 /// File evidence row in a codebase view snapshot.

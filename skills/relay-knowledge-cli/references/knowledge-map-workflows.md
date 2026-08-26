@@ -17,7 +17,8 @@ recovery-manifest refs. The code map is the primary source of truth for
 repository facts. The map stores stable navigation and repository-model entry
 metadata; it must not copy derived architecture narratives, build targets,
 deployment resources, framework scan results, or resolved commit ids. Read
-those snapshot-bound facts through `repo software` and `repo view`.
+those snapshot-bound facts through `repo business`, `repo software`, `repo
+context`, and `repo view`.
 
 `map init` creates a new contract or idempotently ensures this default model
 entry on an existing contract:
@@ -27,6 +28,19 @@ entry on an existing contract:
 - kind: `repo`
 - URI: `.`
 - scope: `repo`
+
+It also ensures the authored business entry:
+
+- topic: `business-knowledge`
+- source: `repository-business-glossary`
+- kind: `file`
+- URI: `.knowledge/business-glossary.yaml`
+- scope: `repo`
+
+The Knowledge Map remains routing metadata. The glossary is the intentionally
+authored, version-controlled business surface; edit it directly and review it
+as source code. `map init` creates only a missing minimal valid glossary and
+must never overwrite an existing one.
 
 If that reserved source id has incompatible fields, stop and report the
 conflict. Do not overwrite it.
@@ -47,8 +61,11 @@ conflict. Do not overwrite it.
   normal mutations, then validate again.
 - Do not copy the YAML into `AGENTS.md`; keep only
   `Knowledge map: .knowledge/knowledge-map.yaml`.
+- Read `map route business-knowledge --format json` before business/spec/coding
+  work and verify the routed glossary is the intended authority.
 - Do not materialize `repo software` or `repo view` responses into the YAML.
-  They remain derived, source-scope-bound read models.
+  Do not materialize `repo business` responses into the Knowledge Map or
+  glossary. They remain derived, source-scope-bound read models.
 - If a map mutation must affect the current uncommitted coding decision,
   refresh a `worktree` overlay after a clean `HEAD` base exists. Otherwise
   commit the map with its related sources and publish it in the next update.
@@ -71,8 +88,9 @@ recoverable workflow, not an atomic cross-file/database transaction.
    work.
 5. Wait for the exact target and completed checkpoint. Do not treat stale,
    queued, running, retrying, or dead-letter state as success.
-6. At that same immutable ref, read `repo software --kind all` and
-   `repo view --kind architecture-layers`, then validate the map once more.
+6. At that same immutable ref, read `repo business --kind all`, `repo software
+   --kind all`, and both architecture/business-domain views, then validate the
+   map once more.
 7. Report alias, map version, resolved ref, source scope, freshness, degraded
    diagnostics, and whether direct source reads are required.
 
@@ -82,13 +100,16 @@ POSIX bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
+relay-knowledge map route business-knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register . --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
 relay-knowledge repo status <alias> --format json
 relay-knowledge repo index <alias> --ref worktree --format json
+relay-knowledge repo business <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind business-domains --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge map validate --format json
 ```
 
@@ -102,13 +123,16 @@ PowerShell bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
+relay-knowledge map route business-knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register (Get-Location).Path --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
 relay-knowledge repo status <alias> --format json
 relay-knowledge repo index <alias> --ref worktree --format json
+relay-knowledge repo business <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind business-domains --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge map validate --format json
 ```
 
@@ -118,13 +142,16 @@ cmd.exe bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
+relay-knowledge map route business-knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register "%CD%" --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
 relay-knowledge repo status <alias> --format json
 relay-knowledge repo index <alias> --ref worktree --format json
+relay-knowledge repo business <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo software <alias> --kind all --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-ref> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind business-domains --ref <pinned-ref> --freshness wait-until-fresh --format json
 relay-knowledge map validate --format json
 ```
 
@@ -136,8 +163,9 @@ to obtain a non-null summary. Let the service drain the task or run bounded
 local worker attempts, then require `repo status` to identify the exact head as
 fresh.
 
-Before writing or revising a spec, combine the relevant `map route` with
-snapshot-bound software, architecture, and code context. After implementation,
+Before writing or revising a spec, read `map route business-knowledge` and
+combine snapshot-bound business terms/mappings, software, architecture and
+business-domain views, and code context. After implementation,
 run impact on the pinned pair and repeat the model/context reads at the pinned
 head. When Markdown, specs, or the map changed, also inspect software topics,
 relationships, and a focused OKF neighborhood.
@@ -146,9 +174,11 @@ relationships, and a focused OKF neighborhood.
 relay-knowledge repo update <alias> --format json
 relay-knowledge repo status <alias> --format json
 relay-knowledge repo impact <alias> --base <pinned-base> --head <pinned-head> --limit 100 --format json
+relay-knowledge repo business <alias> --kind all --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge repo context <alias> --query "explain the affected implementation and tests" --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge repo software <alias> --kind all --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge repo view <alias> --kind architecture-layers --ref <pinned-head> --freshness wait-until-fresh --format json
+relay-knowledge repo view <alias> --kind business-domains --ref <pinned-head> --freshness wait-until-fresh --format json
 relay-knowledge map validate --format json
 ```
 
@@ -197,5 +227,6 @@ A successful handoff records:
 - pinned ref or base/head and code-index source scope;
 - completed checkpoint and non-stale state;
 - software-model and architecture-view freshness/evidence;
+- authored business term/mapping and business-domain view freshness/evidence;
 - impact/context evidence used for the spec or code;
 - every degraded, unresolved, truncated, or direct-source-read requirement.

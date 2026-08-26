@@ -25,13 +25,13 @@ use crate::{
     },
     paths::RuntimePaths,
     storage::{
-        CodeImpactChanges, CodeIndexPublicationTarget, CodeIndexTaskClaimRequest,
-        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskLeaseRecord,
-        CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal, CodeRepositorySetMemberSeed,
-        CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
-        CodeRepositorySetRefreshTaskFailure, CodeRepositorySetRefreshTaskSeed,
-        CodeRepositorySetSeed, CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore,
-        StorageError, StorageFuture,
+        BusinessKnowledgeStore, CodeImpactChanges, CodeIndexPublicationTarget,
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
+        CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal,
+        CodeRepositorySetMemberSeed, CodeRepositorySetRefreshTaskClaimRequest,
+        CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskFailure,
+        CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
+        CodeScopeRetentionRequest, SqliteGraphStore, StorageError, StorageFuture,
     },
 };
 
@@ -821,6 +821,79 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         request: CodeRepositorySetRefreshTaskFailure,
     ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
         self.control.fail_code_repository_set_refresh_task(request)
+    }
+}
+
+impl BusinessKnowledgeStore for PartitionedSqliteKnowledgeStore {
+    fn replace_business_knowledge_projection(
+        &self,
+        input: crate::domain::BusinessKnowledgeProjectionInput,
+    ) -> StorageFuture<'_, crate::domain::BusinessKnowledgeStatus> {
+        let this = self.clone();
+        Box::pin(async move {
+            if let Some(shard) =
+                source_scope_store(&this.catalog, input.source_scope.clone()).await?
+            {
+                return shard.replace_business_knowledge_projection(input).await;
+            }
+            this.control
+                .replace_business_knowledge_projection(input)
+                .await
+        })
+    }
+
+    fn replace_business_knowledge_projection_with_fence(
+        &self,
+        input: crate::domain::BusinessKnowledgeProjectionInput,
+        fence: CodeIndexPublicationFence,
+    ) -> StorageFuture<'_, crate::domain::BusinessKnowledgeStatus> {
+        let this = self.clone();
+        Box::pin(async move {
+            let shard = this
+                .catalog
+                .checkpoint_repository_store(fence.repository_id.clone())
+                .await?
+                .ok_or_else(|| {
+                    StorageError::InvalidInput(format!(
+                        "repository shard for fenced business projection '{}' is missing",
+                        fence.repository_id
+                    ))
+                })?;
+            shard
+                .replace_business_knowledge_projection_with_fence(input, fence)
+                .await
+        })
+    }
+
+    fn business_knowledge_projection_for_scope(
+        &self,
+        source_scope: String,
+        request: crate::domain::BusinessKnowledgeQueryRequest,
+    ) -> StorageFuture<'_, crate::domain::BusinessKnowledgeProjection> {
+        let this = self.clone();
+        Box::pin(async move {
+            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
+                return shard
+                    .business_knowledge_projection_for_scope(source_scope, request)
+                    .await;
+            }
+            this.control
+                .business_knowledge_projection_for_scope(source_scope, request)
+                .await
+        })
+    }
+
+    fn business_knowledge_status(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, Option<crate::domain::BusinessKnowledgeStatus>> {
+        let this = self.clone();
+        Box::pin(async move {
+            if let Some(shard) = source_scope_store(&this.catalog, source_scope.clone()).await? {
+                return shard.business_knowledge_status(source_scope).await;
+            }
+            this.control.business_knowledge_status(source_scope).await
+        })
     }
 }
 

@@ -2,8 +2,8 @@ use crate::{
     api::{CodeRepositoryRegisterRequest, CodeRepositoryUpdateRequest, RequestContext},
     application::RelayKnowledgeService,
     domain::{
-        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
-        CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
+        BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
         RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request},
@@ -422,6 +422,35 @@ pub async fn run_repo(
 
             render_response(
                 "code.repo.software",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoCommand::Business {
+            alias,
+            ref_selector,
+            domain,
+            query,
+            kind,
+            freshness,
+            limit,
+        } => {
+            let request = BusinessKnowledgeQueryRequest::new(
+                selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
+                domain,
+                query,
+                kind,
+                freshness,
+                limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = service
+                .business_knowledge_query(request, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+            render_response(
+                "code.repo.business",
                 response.metadata.clone(),
                 &response,
                 format,

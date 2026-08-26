@@ -455,6 +455,11 @@ fn create_minimal_schema(connection: &Connection) {
                 CREATE TABLE software_iac_resources (source_scope TEXT NOT NULL);
                 CREATE TABLE software_design_elements (source_scope TEXT NOT NULL);
                 CREATE TABLE software_global_status (source_scope TEXT NOT NULL);
+                CREATE TABLE business_domains (source_scope TEXT NOT NULL);
+                CREATE TABLE business_terms (source_scope TEXT NOT NULL);
+                CREATE TABLE business_term_aliases (source_scope TEXT NOT NULL);
+                CREATE TABLE business_mappings (source_scope TEXT NOT NULL);
+                CREATE TABLE business_knowledge_status (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_sets (set_id TEXT PRIMARY KEY, updated_at_ms INTEGER NOT NULL);
                 CREATE TABLE code_repository_set_members (set_id TEXT NOT NULL, repository_id TEXT NOT NULL, source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_cross_edges (set_id TEXT NOT NULL);
@@ -538,6 +543,11 @@ fn insert_scope_rows(connection: &Connection, repository_id: &str, scope: &str, 
         "software_iac_resources",
         "software_design_elements",
         "software_global_status",
+        "business_domains",
+        "business_terms",
+        "business_term_aliases",
+        "business_mappings",
+        "business_knowledge_status",
     ] {
         connection
             .execute(

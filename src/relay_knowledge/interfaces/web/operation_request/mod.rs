@@ -7,8 +7,9 @@ use crate::{
     },
     application::MAX_HISTORY_PAGE_SIZE,
     domain::{
-        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeQueryKind,
-        CodeRepositorySelector, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
+        BusinessKnowledgeQueryKind, BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest,
+        CodeGraphContextRequest, CodeImpactRequest, CodeQueryKind, CodeRepositorySelector,
+        CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
         CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
         FreshnessPolicy, IndexKind, ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest,
         WorkerKind,
@@ -165,6 +166,20 @@ pub(super) fn code_software_request(payload: &Value) -> Result<SoftwareGlobalReq
     SoftwareGlobalRequest::new(
         code_selector(payload)?,
         parse_software_kind(string_field(payload, "kind")?)?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+        usize_field(payload, "limit")?,
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+pub(super) fn code_business_request(
+    payload: &Value,
+) -> Result<BusinessKnowledgeQueryRequest, WebError> {
+    BusinessKnowledgeQueryRequest::new(
+        code_selector(payload)?,
+        optional_string_field(payload, "domain"),
+        optional_string_field(payload, "query"),
+        parse_business_kind(string_field(payload, "kind")?)?,
         parse_freshness(string_field(payload, "freshness")?)?,
         usize_field(payload, "limit")?,
     )
@@ -373,6 +388,17 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(WebError::bad_request(format!(
             "unsupported software kind '{other}'"
+        ))),
+    }
+}
+
+fn parse_business_kind(value: &str) -> Result<BusinessKnowledgeQueryKind, WebError> {
+    match value {
+        "terms" => Ok(BusinessKnowledgeQueryKind::Terms),
+        "mappings" => Ok(BusinessKnowledgeQueryKind::Mappings),
+        "all" => Ok(BusinessKnowledgeQueryKind::All),
+        other => Err(WebError::bad_request(format!(
+            "unsupported business knowledge kind '{other}'"
         ))),
     }
 }

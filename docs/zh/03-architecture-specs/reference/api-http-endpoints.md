@@ -31,6 +31,7 @@
 | POST | `/api/v1/code/repositories/{alias}/impact` | 变更影响分析 |
 | GET | `/api/v1/code/repositories/{alias}/report` | 仓库索引报告 |
 | POST | `/api/v1/code/repositories/{alias}/software` | 软件全局投影 |
+| POST | `/api/v1/code/repositories/{alias}/business` | 业务术语与技术映射投影 |
 | POST | `/api/v1/code/repositories/{alias}/views` | 代码库理解派生视图 |
 | GET | `/api/v1/code/repositories/{alias}/status` | 仓库索引状态 |
 | GET | `/api/configs/model/profiles` | 模型 profile 列表 |

@@ -109,6 +109,7 @@ relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--pat
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo business <alias> [--ref <ref>] [--domain <id>] [--query <text>] [--kind terms|mappings|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo view <alias> [--kind architecture-layers|business-domains|dependency-tour|process-flow|affected-scope] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--changed-path <path>]
 relay-knowledge repo status <alias>
 relay-knowledge graph inspect
@@ -140,6 +141,7 @@ Kind 取值按命令家族隔离：
   `definition`、`references`、`callers`、`callees`、`imports`、`sbom`。
 - `repo software --kind`：`dependencies`、`sdks`、`files`、`topics`、
   `relationships`、`build`、`iac`、`design`、`all`。
+- `repo business --kind`：`terms`、`mappings`、`all`。
 - `repo view --kind`：`architecture-layers`、`business-domains`、
   `dependency-tour`、`process-flow`、`affected-scope`。
 - `index refresh --kind`：`bm25`、`semantic`、`vector`；省略 `--kind`
@@ -171,7 +173,7 @@ Kind 取值按命令家族隔离：
 
 `repo query` 的 `definition`、`references` 和 `hybrid` 查询先走已索引 tree-sitter 图和 SQLite FTS 读模型。`--freshness allow-stale` 在目标 ref 正在 full indexing 且尚未 finalize 时，会继续读取上一个已完成 committed scope，并在响应中标记 stale/degraded reason；`wait-until-fresh` 仍会要求目标 scope 新鲜。JSON 响应包含 `freshness.state`、`freshness.index_lag`、`freshness.pending`、`freshness.cursor`、`freshness.direct_source_read_required` 和 `freshness.agent_instructions`，让 agent 能看到 checkpoint 进度，并知道哪些返回路径在编辑或引用前必须直接读取源码。只有这些结构化层存在明确召回缺口时，查询才会在同一 indexed commit 上启动有界内部 exact-text source fallback；命中会在 JSON 中标记 `retrieval_layers=["lexical","text_fallback"]`，definition 兜底还会带 `definition`。候选路径查询、候选文件数、物化字节或单行长度预算耗尽只会降级兜底层，并通过 `degraded_reason` 暴露，不会让结构化代码图结果失效。
 
-`repo context` 是面向 coding agent 的 one-call context pack，复用同一个已提交 code graph 读模型。它先执行有界 hybrid、definition 和 symbol 入口查询，再围绕 top seed 展开 references、callers、callees 和 imports。JSON 响应暴露 `entry_points`、`related_symbols`、`graph_paths`、`impact_hints`、`code_excerpts`、`retrieval_layers`、`budget`、`truncated`、`freshness` 和 `diagnostics`。`--max-context-bytes` 限制证据包大小，`--no-code` 会移除代码摘录但保留 provenance；该命令不会启动 repository indexing 或 refresh。
+`repo context` 是面向 coding agent 的 one-call context pack，复用同一个已提交 read model。它先解析 authored 业务术语和 alias，把 resolved mapping id 或 unresolved `target_hint` 作为有界技术检索 seed，再展开 hybrid、definition、symbol、references、callers、callees 和 imports。JSON 额外暴露 `business_context`；业务与技术候选绑定同一 resolved commit/source scope，并共同受结果数、字节、截断和 provenance 预算约束。该命令不会在查询时读取 glossary YAML，也不会启动 repository indexing。
 
 `repo query --query` 支持内联过滤标签，例如 `kind:function`、`lang:rust` 或 `language:rust`、`path:storage`、`name:query`。未知 `prefix:value` 会保留为普通检索文本。查询内 language filter 与显式 `--language` 取交集；`kind` 和 language 收窄 SQL 候选，`path` 和 `name` 在打分后、截断前过滤命中。`name:` 匹配符号 identity 和 SBOM 包 identity，不匹配任意 excerpt 文本。
 
@@ -179,9 +181,11 @@ Kind 取值按命令家族隔离：
 
 `repo software` 读取所选 repository scope 的软件全域模型投影。`--kind dependencies` 返回由 manifest 和 lockfile 生成的包组件，以及把 declared package 与代码/配置 import 证据关联的 `dependency_usages`。同一仓库级 package/version 坐标在多个 lockfile 中重复时，派生视图只返回一个带确定性代表证据的 locked component；declared component 与原始 `repo query --kind sbom` 证据仍按证据位置独立保留。`--kind sdks` 返回 unresolved external import/include 目标，作为 SDK 或 API surface 使用候选；`--kind files` 返回代码、配置、文档、构建、部署、测试和模板文件整体节点；`--kind topics` 返回从 Markdown/spec heading 和 `.knowledge/knowledge-map.yaml` 抽取的主题；`--kind relationships` 返回 `documents`、`depends_on`、`uses_sdk` 和 `configures` 等跨域关系。`--kind build` 返回从 Cargo、npm、Python、Go、Maven effective `pom.xml`、Gradle、CMake、Makefile 和 CI workflow 证据中提取的 package、script、target、feature、module、profile、plugin、goal、job 等构建入口。`--kind iac` 返回 Dockerfile、Compose、Kubernetes YAML、Helm chart、Terraform、systemd、launchd 和 CI workflow 中提取的部署/基础设施资源。`--kind design` 返回 README、架构/设计 Markdown 和 package/module manifest 中有证据支撑的软件系统、模块、组件、接口和能力元素。该命令不会执行构建工具、扫描包缓存、SDK 目录、云 API、未索引外部源码或查询时全仓文档；source scope 变化后需要重新 `repo index` 或 `repo update` 刷新投影。
 
-`repo view` 以 JSON 返回从代码图谱派生的代码库理解视图。`architecture-layers`、`business-domains`、`dependency-tour` 和 `process-flow` 从所选 repository scope 中已索引的文件、符号、import、call、route、dependency 和 feature flag 事实派生。`affected-scope` 在 deterministic v1 中需要一个或多个 `--changed-path`，返回变更文件、受影响模块、调用边和附近的测试/配置/文档候选。响应包含 `nodes`、`edges`、`sections`、`evidence`、freshness 诊断和截断预算元数据；section narrative 只是带 evidence id 的短派生说明，不会作为图谱事实持久化，也不是 AI 生成的事实真源。
+`repo business` 读取索引时从 Knowledge Map `business-knowledge` route 授权的 `.knowledge/business-glossary.yaml` 投影。`--kind terms` 返回 canonical term、definition、alias、semantics、冲突和 evidence；`mappings` 返回 `represented_by`/`calculated_from` 技术映射。跨 domain 同名且未给 `--domain` 时返回 `ambiguous`，不会猜测；授权 scope 外或尚未覆盖的目标保留 `resolution_state=unresolved` 和 `target_hint`，不会把仓库标成 degraded。业务定义只能通过版本化 glossary 和代码评审修改。
 
-面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_software_query` 覆盖软件全域模型 kind，`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
+`repo view` 以 JSON 返回从代码图谱派生的代码库理解视图。`business-domains` 优先合并 glossary 声明的 domain（`evidence.kind=business_glossary`），再补充路径、路由和 feature flag 推断；其余视图从所选 repository scope 中已索引的文件、符号、import、call、route、dependency 和 feature flag 事实派生。`affected-scope` 在 deterministic v1 中需要一个或多个 `--changed-path`，返回变更文件、受影响模块、调用边和附近的测试/配置/文档候选。响应包含 `nodes`、`edges`、`sections`、`evidence`、freshness 诊断和截断预算元数据；section narrative 只是带 evidence id 的短派生说明，不会作为图谱事实持久化，也不是 AI 生成的事实真源。
+
+面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_business_query` 覆盖 authored 业务术语与技术映射，`relay_software_query` 覆盖软件全域模型 kind，`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
 
 `map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。`map init` 会创建 Knowledge Map v2 根 manifest，或把有效的 v1 单文件 map 幂等迁移为 v2，同时确保保留的 `software-model` route 与 `repository-software-model` repository source；保留 source 不兼容时会拒绝覆盖。V2 把各 topic 的 source 与 route 写入 `.knowledge/topics/` 下的内容寻址分片；`map route <topic>` 只读取根文件和目标分片。`map show` 读取全部当前分片，但只返回根文件内有界的 recent history，并通过 `archived_through` 与 `complete` 明确说明被省略的历史。Text 与 Markdown 输出会显示 `history_complete`、`history_archived_through` 和 recent 条目数；窗口不完整时还会明确提示使用 `map history` 开始分页读取归档历史。根文件最多保留 16 条最近变更，更早历史位于 `.knowledge/history/` 下的 SHA-256 校验不可变归档。内容寻址的有界深度 B+ tree index 让 `map history --from <version> --limit <count>` 直接定位旧归档：每个归档最多读取 11 个 index node 和一个 archive，单页上限为 256。早期 v2 归档链缺少 `history.index` 时，分页会提示先运行 `relay-knowledge map init`；该命令在 writer lock 下原子发布 index root，不会让读取请求回退为线性链扫描。`map validate` 会完整校验归档、index 和全部分片。
 

@@ -29,6 +29,15 @@ async fn live_worktree_attempt_rebinds_target_before_publication_and_retention()
         .apply_code_index_snapshot_with_fence(snapshot, publication_fence.clone())
         .await
         .expect("live dirty worktree snapshot should stage");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        summary.repository_id.clone(),
+        summary.source_scope.clone(),
+        summary.resolved_commit_sha.clone(),
+        publication_fence.clone(),
+    )
+    .await
+    .expect("worktree business projection should stage");
     store
         .refresh_software_global_projection_with_fence(
             summary.source_scope.clone(),
@@ -157,6 +166,15 @@ async fn partitioned_publication_rebinds_control_target_before_status_mirror() {
         .apply_code_index_snapshot_with_fence(base_snapshot, base_fence.clone())
         .await
         .expect("base scope should publish");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        base_summary.repository_id.clone(),
+        base_summary.source_scope.clone(),
+        base_summary.resolved_commit_sha.clone(),
+        base_fence.clone(),
+    )
+    .await
+    .expect("base business projection should stage");
     store
         .refresh_software_global_projection_with_fence(base_summary.source_scope, base_fence)
         .await
@@ -203,6 +221,15 @@ async fn partitioned_publication_rebinds_control_target_before_status_mirror() {
         .apply_code_index_snapshot_with_fence(snapshot, publication_fence.clone())
         .await
         .expect("partitioned overlay should stage across shard and control");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        summary.repository_id.clone(),
+        summary.source_scope.clone(),
+        summary.resolved_commit_sha.clone(),
+        publication_fence.clone(),
+    )
+    .await
+    .expect("partitioned business projection should stage");
     store
         .refresh_software_global_projection_with_fence(
             summary.source_scope.clone(),

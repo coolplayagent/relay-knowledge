@@ -81,6 +81,11 @@ pub(super) fn quality_gate_stages(
                     300,
                 ),
                 quality_gate(
+                    "business_knowledge_regression_cases",
+                    ["cargo", "test", "--lib", "business", "--", "--nocapture"],
+                    180,
+                ),
+                quality_gate(
                     "code_index_sqlite_lock_cases",
                     [
                         "cargo",
@@ -296,6 +301,7 @@ pub(super) fn quality_budget_ms(name: &str) -> Option<f64> {
     match name {
         "cargo_build_debug" => Some(90_000.0),
         "code_index_recovery_cases" => Some(60_000.0),
+        "business_knowledge_regression_cases" => Some(30_000.0),
         "code_index_sqlite_lock_cases" => Some(60_000.0),
         "bm25_hierarchy_suite" => Some(30_000.0),
         "code_index_persistence_performance_suite" => Some(30_000.0),

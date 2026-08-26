@@ -30,13 +30,14 @@ use crate::{
 use assets::{asset_or_index, default_web_dist, index};
 use code::{code_index_request, code_view_request};
 use operation_request::{
-    code_context_request, code_feature_flag_request, code_impact_request, code_query_request,
-    code_register_request, code_repository_set_add_request, code_repository_set_create_request,
-    code_repository_set_query_request, code_repository_set_remove_request, code_selector,
-    code_software_request, graph_request, index_request, ingest_request,
-    knowledge_map_history_page, optional_bool_field, optional_proposal_state,
-    optional_string_array_field, optional_string_field, optional_worker_kind, parse_freshness,
-    proposal_decision_request, retrieve_request, string_field, usize_field,
+    code_business_request, code_context_request, code_feature_flag_request, code_impact_request,
+    code_query_request, code_register_request, code_repository_set_add_request,
+    code_repository_set_create_request, code_repository_set_query_request,
+    code_repository_set_remove_request, code_selector, code_software_request, graph_request,
+    index_request, ingest_request, knowledge_map_history_page, optional_bool_field,
+    optional_proposal_state, optional_string_array_field, optional_string_field,
+    optional_worker_kind, parse_freshness, proposal_decision_request, retrieve_request,
+    string_field, usize_field,
 };
 
 /// Builds the Web router without opening sockets.
@@ -405,6 +406,12 @@ async fn dispatch_operation(
         "code.repo.software" => {
             let response = service
                 .software_global_projection(code_software_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "code.repo.business" => {
+            let response = service
+                .business_knowledge_query(code_business_request(payload)?, context)
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }

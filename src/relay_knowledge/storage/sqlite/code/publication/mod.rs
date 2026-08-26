@@ -131,6 +131,8 @@ pub(in crate::storage::sqlite) fn complete_after_software_projection(
             "code scope '{source_scope}' cannot publish before its fenced software projection is complete"
         )));
     }
+    super::super::business::refresh_mapping_resolutions(connection, source_scope)?;
+    super::super::business::mark_published(connection, source_scope)?;
     connection.execute(
         "UPDATE software_global_status SET stale = 0 WHERE source_scope = ?1",
         params![source_scope],
@@ -238,6 +240,10 @@ pub(in crate::storage::sqlite) fn adopt_active_target(
             JOIN software_global_status software
               ON software.source_scope = scope.source_scope
              AND software.repository_id = scope.repository_id
+            JOIN business_knowledge_status business
+              ON business.source_scope = scope.source_scope
+             AND business.repository_id = scope.repository_id
+             AND business.resolved_commit_sha = scope.resolved_commit_sha
             LEFT JOIN code_repository_index_checkpoints checkpoint
               ON checkpoint.source_scope = scope.source_scope
             WHERE repository.repository_id = ?1
@@ -247,16 +253,22 @@ pub(in crate::storage::sqlite) fn adopt_active_target(
               AND trim(scope.resolved_commit_sha) <> ''
               AND scope.stale = 0 AND scope.retiring = 0
               AND software.stale = 0
+              AND business.stale = 0
               AND EXISTS (
                   SELECT 1
                   FROM code_repository_scopes active_scope
                   JOIN software_global_status active_software
                     ON active_software.source_scope = active_scope.source_scope
                    AND active_software.repository_id = active_scope.repository_id
+                  JOIN business_knowledge_status active_business
+                    ON active_business.source_scope = active_scope.source_scope
+                   AND active_business.repository_id = active_scope.repository_id
+                   AND active_business.resolved_commit_sha = active_scope.resolved_commit_sha
                   WHERE active_scope.repository_id = repository.repository_id
                     AND active_scope.source_scope = repository.last_indexed_scope_id
                     AND active_scope.stale = 0 AND active_scope.retiring = 0
                     AND active_software.stale = 0
+                    AND active_business.stale = 0
               )
               AND (
                   repository.last_indexed_commit IS NULL
@@ -388,6 +400,18 @@ pub(in crate::storage::sqlite) fn adopt_active_target(
             language_filters_json,
         ],
     )?;
+    let business_changed = transaction.execute(
+        "UPDATE business_knowledge_status
+         SET resolved_commit_sha = ?3
+         WHERE repository_id = ?1 AND source_scope = ?2
+           AND resolved_commit_sha = ?4 AND stale = 0",
+        params![
+            target.repository_id,
+            target.source_scope,
+            target.resolved_commit_sha,
+            previous_scope_commit,
+        ],
+    )?;
     let repository_changed = transaction.execute(
         "
         UPDATE code_repositories
@@ -417,7 +441,7 @@ pub(in crate::storage::sqlite) fn adopt_active_target(
             previous_active_scope,
         ],
     )?;
-    if scope_changed != 1 || repository_changed != 1 {
+    if scope_changed != 1 || business_changed != 1 || repository_changed != 1 {
         return Err(StorageError::InvalidInput(format!(
             "active code scope '{}' changed while its commit alias was being adopted",
             target.source_scope

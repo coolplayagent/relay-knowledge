@@ -29,6 +29,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         repo::repo_status(),
         repo::repo_report(),
         repo::repo_software(),
+        repo::repo_business(),
         repo_set::repo_set(),
     ]);
     commands.extend(map::command_specs());

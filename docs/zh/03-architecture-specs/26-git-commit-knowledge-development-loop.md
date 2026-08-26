@@ -19,7 +19,7 @@
 | 状态 | 含义 | 权威来源 |
 | --- | --- | --- |
 | Git commit | 由 commit 和 tree 标识的不可变、已跟踪仓库内容 | Git |
-| 派生 Knowledge | 针对精确 source scope 发布的代码图、软件投影、impact 和检索证据 | 版本化索引与投影 |
+| 派生 Knowledge | 针对精确 source scope 发布的业务术语/映射、代码图、软件投影、impact 和检索证据 | 版本化索引与投影 |
 | 决策上下文 | requirement、证据、约束、备选方案、不确定性、验证和交接记录 | 带 provenance、经人审查的工作流产物 |
 
 Git 不保存每项决策背后的全部理由；Knowledge 也不能取代 Git 的事实边界。只有当决策上下文指向精确 commit，或明确标记为临时 `worktree` overlay，且每个派生视图报告其真实 scope 和 freshness 时，闭环才成立。
@@ -50,11 +50,11 @@ flowchart LR
     L --> O
 ```
 
-1. **观察（Observe）**：选择 clean commit 基线；读取相关 knowledge route、repository status、software view、code context、freshness 与 degradation。
+1. **观察（Observe）**：选择 clean commit 基线；读取 `business-knowledge` route、同 ref 的 `repo business`、software/architecture/business-domain view、code context、freshness 与 degradation。
 2. **定义（Frame）**：编辑前写清 requirement、约束、备选方案、不确定性和验收证据。
 3. **修改（Change）**：进行有边界的 worktree 变更。若需要检索未提交内容，显式索引并查询 worktree overlay，不暗示 `HEAD` 已包含这些变更。
 4. **提交（Commit）**：运行与风险相称的门禁、审查 diff，并创建一个不可变事实边界。Commit 记录“改了什么”，验证证据记录“证明了什么”。
-5. **发布（Publish）**：通过 durable single-writer 工作流更新或索引精确 commit。在精确 target 及其派生软件模型达到当前状态之前，不声称发布完成。
+5. **发布（Publish）**：通过 durable single-writer 工作流更新或索引精确 commit。业务与代码/软件 projection 共用 task lease、attempt 和 publication fence；任一未完成时都不得声称精确 target 已发布。
 6. **学习（Learn）**：把 impact、结果和 diagnostics 与初始决策对照。权威源移动时更新稳定 knowledge route；不得把未验证叙述持久化为仓库事实。
 
 闭环可以回退到较早阶段：门禁失败回到“定义”或“修改”，stale publication 停在“发布”，证据冲突回到“观察”。恢复必须保留最后一个有效 commit 和 durable checkpoint，不能制造虚假的 clean 状态。
@@ -83,7 +83,7 @@ flowchart LR
 | Dirty worktree 被描述为 `HEAD` | 重新标记并查询 `worktree`，或提交后使用新的不可变 ref | 把未提交文本当作 commit 事实 |
 | Index task queued、retrying 或持有 lease | 按第 24 章通过 managed service 或有界 single-shot worker 恢复 | 启动竞争 writer 或 unmanaged polling loop |
 | 精确 commit stale 或未发布 | 保持最后一个 fresh scope 可读，报告 lag，并等待或恢复 durable task | finalize 前返回成功 |
-| Projection degraded | 披露缺口、使用未受影响证据，并直接核对受影响源码 | 隐藏 degradation 或省略索引阶段 |
+| Projection degraded | 披露缺口、使用未受影响证据，并直接核对受影响源码；授权 scope 外技术目标只保留 unresolved hint | 隐藏 degradation、把 unresolved external 映射标成仓库损坏或省略索引阶段 |
 | Knowledge map invalid 或 conflicting | 停止 mutation、保留文件并报告 validation diagnostics | 覆盖 route 或静默改写 history |
 | Verification 失败 | 保留或回到最后 accepted commit，修正决策并重跑失败层 | 把失败门禁降级为 optional |
 | Commit 被 revert 或 rebase | 发布新的精确历史，将旧 commit 保留为可审计前态 | 就地改写派生 scope identity |
@@ -123,4 +123,4 @@ flowchart LR
 
 ---
 
-导航：上一章：[25. 代码索引保留策略](25-code-index-retention.md) | 返回：[架构规格](README.md)
+导航：上一章：[25. 代码索引保留策略](25-code-index-retention.md) | 下一章：[27. 业务知识与技术图谱映射](27-business-knowledge-technical-mapping.md) | 返回：[架构规格](README.md)

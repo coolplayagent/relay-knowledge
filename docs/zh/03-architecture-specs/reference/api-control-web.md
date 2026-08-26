@@ -252,6 +252,7 @@
 | `code.repo.index` | 全量索引 | `alias`；可选 `ref`, `path_filters`, `language_filters` |
 | `code.repo.update` | 增量索引 | `alias`；可选 `base_ref`, `head_ref` |
 | `code.repo.query` / `code.repo.context` | 查询代码仓库 / 打包 one-call codegraph context | `alias`, `query`, `kind` 或 context budget, `freshness`, `limit` |
+| `code.repo.business` | 读取 authored 业务术语与技术映射 | `alias`, `kind`, `freshness`, `limit`；可选 `query`, `domain`, `ref` |
 | `code.repo.view` | 从已索引代码图派生有界代码库理解视图 | `alias`, `kind`；可选 `ref`, `freshness`, `limit`, `changed_paths` |
 | `code.repo.feature_flags` | 特性标志查询 | `alias`, `freshness`, `limit`；可选 `query` |
 | `code.repo.impact` | 变更影响分析 | `alias`, `base_ref`, `head_ref`, `limit` |

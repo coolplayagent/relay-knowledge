@@ -228,7 +228,33 @@ fn publication_software_is_fresh(
         )
         .optional()?;
     if let Some(fresh) = local_status {
-        return Ok(fresh);
+        if !fresh {
+            return Ok(false);
+        }
+        return connection
+            .query_row(
+                "SELECT business.repository_id = ?1 AND business.stale = 0 AND (
+                    business.resolved_commit_sha = (
+                        SELECT resolved_commit_sha
+                        FROM code_repository_scopes
+                        WHERE source_scope = ?2
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM code_repository_commit_scopes alias
+                        WHERE alias.repository_id = ?1
+                          AND alias.source_scope = ?2
+                          AND alias.resolved_commit_sha = business.resolved_commit_sha
+                    )
+                 )
+                 FROM business_knowledge_status business
+                 WHERE business.source_scope = ?2",
+                params![repository_id, source_scope],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()
+            .map(|fresh| fresh.unwrap_or(false))
+            .map_err(StorageError::from);
     }
 
     let has_partition_catalog = connection

@@ -222,6 +222,45 @@ async fn init_upgrades_legacy_map_once() {
 }
 
 #[tokio::test]
+async fn init_creates_and_then_preserves_business_glossary_without_version_churn() {
+    let root = temp_root("business-glossary-init");
+    fs::create_dir_all(&root).await.expect("root should create");
+    fs::write(
+        root.join("AGENTS.md"),
+        "Knowledge map: .knowledge/knowledge-map.yaml\n",
+    )
+    .await
+    .expect("agent contract should write");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
+
+    let initialized = service.init(&context).await.expect("init should work");
+    let glossary_path = root.join(".knowledge/business-glossary.yaml");
+    let empty = fs::read(&glossary_path)
+        .await
+        .expect("glossary should exist");
+    crate::domain::BusinessGlossary::parse(&empty).expect("empty glossary should validate");
+    let authored = "schema_version: 1\ndomains:\n  - id: sales\n    name: Sales\nterms: []\n";
+    fs::write(&glossary_path, authored)
+        .await
+        .expect("authored glossary should write");
+
+    let repeated = service
+        .init(&context)
+        .await
+        .expect("repeat init should work");
+    let validation = service
+        .validate(&context)
+        .await
+        .expect("validate should run");
+
+    assert_eq!(repeated.map_version, initialized.map_version);
+    assert_eq!(fs::read_to_string(&glossary_path).await.unwrap(), authored);
+    assert!(validation.valid);
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn route_loads_only_the_requested_topic_shard() {
     let root = temp_root("progressive");
     fs::create_dir_all(&root).await.expect("root should create");
@@ -846,7 +885,12 @@ async fn rejects_an_existing_artifact_symlink_that_escapes_the_repository() {
     let topic = map.topics[0].clone();
     let shard = KnowledgeMapTopicShard {
         schema_version: ARTIFACT_SCHEMA_VERSION,
-        sources: map.sources.clone(),
+        sources: map
+            .sources
+            .iter()
+            .filter(|source| source.topic == topic.id)
+            .cloned()
+            .collect(),
         route: map.routes.first().cloned(),
         topic: topic.clone(),
     };

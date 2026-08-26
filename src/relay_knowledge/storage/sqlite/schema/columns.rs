@@ -5,6 +5,15 @@ use crate::storage::StorageError;
 use super::super::indexing;
 
 pub(super) fn ensure_core_schema_columns(connection: &Connection) -> Result<(), StorageError> {
+    ensure_column(
+        connection,
+        "entities",
+        "entity_kind",
+        "TEXT NOT NULL DEFAULT 'untyped'",
+    )?;
+    ensure_column(connection, "entities", "ontology_source_scope", "TEXT")?;
+    ensure_column(connection, "entities", "ontology_domain_id", "TEXT")?;
+    ensure_column(connection, "entities", "ontology_entity_id", "TEXT")?;
     ensure_column(connection, "evidence", "source_path", "TEXT")?;
     ensure_column(connection, "evidence", "span_start_byte", "INTEGER")?;
     ensure_column(connection, "evidence", "span_end_byte", "INTEGER")?;

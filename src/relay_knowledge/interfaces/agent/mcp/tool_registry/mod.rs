@@ -8,9 +8,10 @@ use serde_json::{Value, json};
 use crate::interfaces::agent::MAX_AGENT_QUERY_CHARS;
 
 use super::code_tools::{
-    code_context_tool_definition, code_feature_flags_tool_definition, code_impact_tool_definition,
-    code_query_tool_definition, code_repository_graph_tool_definition,
-    code_software_query_tool_definition, codebase_view_tool_definition,
+    code_business_query_tool_definition, code_context_tool_definition,
+    code_feature_flags_tool_definition, code_impact_tool_definition, code_query_tool_definition,
+    code_repository_graph_tool_definition, code_software_query_tool_definition,
+    codebase_view_tool_definition,
 };
 
 pub(super) const RETRIEVE_CONTEXT_TOOL: &str = "relay_retrieve_context";
@@ -25,6 +26,7 @@ pub(super) const CODE_FEATURE_FLAGS_TOOL: &str = "relay_code_feature_flags";
 pub(super) const CODE_IMPACT_TOOL: &str = "relay_code_impact";
 pub(super) const CODE_REPOSITORY_SET_QUERY_TOOL: &str = "relay_code_repository_set_query";
 pub(super) const CODE_SOFTWARE_QUERY_TOOL: &str = "relay_software_query";
+pub(super) const CODE_BUSINESS_QUERY_TOOL: &str = "relay_business_query";
 pub(super) const CODEBASE_VIEW_TOOL: &str = "relay_codebase_view";
 
 pub(super) fn is_known_tool(name: &str) -> bool {
@@ -42,6 +44,7 @@ pub(super) fn is_known_tool(name: &str) -> bool {
             | CODE_IMPACT_TOOL
             | CODE_REPOSITORY_SET_QUERY_TOOL
             | CODE_SOFTWARE_QUERY_TOOL
+            | CODE_BUSINESS_QUERY_TOOL
             | CODEBASE_VIEW_TOOL
     )
 }
@@ -61,6 +64,7 @@ pub(super) fn tools_list_result() -> Value {
         code_repository_graph_tool_definition(),
         code_feature_flags_tool_definition(),
         code_software_query_tool_definition(),
+        code_business_query_tool_definition(),
         codebase_view_tool_definition(),
         code_impact_tool_definition(),
         super::code_tools::code_repository_set_query_tool_definition(),

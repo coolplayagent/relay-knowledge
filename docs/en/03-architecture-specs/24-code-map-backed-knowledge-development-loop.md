@@ -13,7 +13,7 @@ This specification consolidates the two issues into one executable Knowledge dev
 1. Repository bootstrap must establish both the `.knowledge/knowledge-map.yaml` navigation contract and a versioned code map. Completing only one is not a successful initialization.
 2. A Git commit is authoritative for tracked source facts. The code map is the published symbol, call, dependency, and retrieval-evidence view for one exact commit/source scope. The whole-software model is a derived read model published for the same code-map scope.
 3. YAML stores stable knowledge routes and a model entry point. It does not copy commit-varying architecture narratives, build targets, or deployment facts. The actual `design`, `build`, `iac`, and `relationships` facts come from `repo software` with ref, source-scope, freshness, and evidence metadata.
-4. Before producing a spec or code, an agent must consume the knowledge routes, software model, architecture view, and code context for one pinned ref. After a commit, it must refresh the code map and software model and validate YAML again.
+4. Before producing a spec or code, an agent must consume the `business-knowledge` route, business terms/mappings, software model, architecture/business-domain views, and code context for one pinned ref. After a commit, it must refresh the same fenced projections and validate YAML again.
 
 This specification does not introduce a second copy of code facts, persist LLM narratives as authoritative facts, scan repositories on query hot paths, or replace durable tasks and leases with shell polling loops.
 
@@ -31,6 +31,7 @@ Loop](26-git-commit-knowledge-development-loop.md).
 | Knowledge map | Topics, sources, routes, bounded recent history, and stable software-model entry point | `.knowledge/knowledge-map.yaml` root manifest, `.knowledge/topics/` shards, `.knowledge/history/` archive | `schema_version`, `map_version`, SHA-256 digest |
 | Code map | Files, symbols, references, calls, imports, chunks, and change facts | Code repository index | Repository id, resolved commit, tree hash, source scope |
 | Software model | Dependency, SDK, file, topic, relationship, build, IaC, and design projections | Software global projection | Same source scope and graph version as the code map |
+| Business model | Domains, canonical terms, aliases, semantics, definition conflicts, and technical mappings | Fenced projection of the Git-authored glossary | Same resolved commit, source scope, and graph version as the code map |
 | Agent context | Bounded map-route, software/view, context, and impact evidence | Skill workflow | Pinned base/head, freshness, evidence ids |
 
 The default stable entry in `.knowledge/knowledge-map.yaml` is:
@@ -42,6 +43,8 @@ The default stable entry in `.knowledge/knowledge-map.yaml` is:
 - source scope: `repo`
 
 This source denotes the current repository's code-map-backed software-model entry point; it is not a generated-result cache. `map init` must idempotently ensure the entry for both new and existing maps. If the reserved id is already attached to an incompatible topic, kind, URI, or scope, initialization must report a conflict instead of overwriting the user's contract.
+
+`map init` also ensures the `business-knowledge` topic, `repository-business-glossary` file source, `.knowledge/business-glossary.yaml` URI, and `repo` scope. That route grants authorization only. The glossary stores authored business facts, which become commit-, scope-, freshness-, and evidence-bound graph facts only after indexing. An existing glossary is preserved, and incompatible reserved route/source fields fail closed.
 
 Knowledge Map v2 keeps only topic summaries, each topic's ordered source-id summary, content-addressed shard refs, map version, and at most 16 recent history entries in the root manifest. Persistent artifact schema v2 and the bounded `KnowledgeMapView` used by `map show` have distinct type identities, so a partial history view cannot be written back as a storage contract. Before any shard is loaded, the root summary rejects source ids duplicated across topics, history-version overflow, and invalid topic/archive ref or digest. Topic sources/routes live under `.knowledge/topics/`; complete history beyond that window lives in content-addressed archives under `.knowledge/history/`. `map route <topic>` loads only the root and requested shard; `map show` loads current shards but not history archives and reports `archived_through`, `complete`, and recent entries; `map history` exposes bounded pages up to 256 entries. The root manifest's optional `history.index` references a content-addressed B+ tree with fanout 64 and maximum height 10. Node ranges must be contiguous, non-overlapping, and cover `1..=archived_through`, so locating one archive reads at most 11 nodes plus that archive independently of the total archive count. Early v2 maps without an index remain available to show, route, and complete validation, but require a writer-locked `map init` representation migration before paging; reads never fall back to walking the reverse chain. `map validate` and every mutation still verify the complete archive chain and its index. Mutations use an OS advisory repository lock with a ten-second bounded wait, so live writers remain exclusive and abnormal process exit releases ownership automatically. The code parser emits separate root authorization and digest-verified shard facts; software projection joins those facts and therefore accepts only current root-referenced shards, while v1 root topics remain compatible.
 
@@ -70,7 +73,7 @@ When initializing repository knowledge, the skill must coordinate the existing C
 4. Run `repo list --format json` and reuse a completed alias whose normalized root and registered scope match. Otherwise run `repo register` and capture the returned alias.
 5. Establish a clean `HEAD` baseline for a Git repository. If the map was created or upgraded, or other authorized uncommitted files must be visible, then establish a `worktree` overlay. Non-Git source directories continue to use a `HEAD` filesystem snapshot.
 6. Treat `repo index` as a durable, bounded, single-writer task. Recover a command timeout through `repo status`; do not start a competing worker when a managed service is active; without a service, run only bounded single-shot `repo index-worker` attempts for queued or retrying work.
-7. Only after status identifies the exact resolved target, the checkpoint is complete, and the scope is not stale, read `repo software --kind all` and `repo view --kind architecture-layers` at the same ref.
+7. Only after status identifies the exact resolved target, the checkpoint is complete, and the scope is not stale, read same-ref `repo business --kind all`, `repo software --kind all`, architecture/business-domain views, and business-driven `repo context`.
 8. Run `map validate` once more and include map version, resolved ref, source scope, freshness, and degraded diagnostics in the initialization result.
 
 Bootstrap is not a fictitious cross-YAML/SQLite transaction. A partial failure retains the recoverable map, durable task, checkpoint, and diagnostics. A later run resumes from state instead of deleting valid work or starting unbounded retries.
@@ -85,11 +88,11 @@ It must then:
 
 1. Wait until `repo status` reports the exact head as published and not stale.
 2. Run `repo impact` on the pinned base/head.
-3. Run `repo context`, `repo software --kind all`, and relevant `repo view` kinds at the pinned head.
+3. Run `repo business --kind all`, `repo context`, `repo software --kind all`, and architecture/business-domain views at the pinned head.
 4. When Markdown, specifications, or the knowledge map changed, also read `repo software --kind topics|relationships` and the affected OKF neighborhood.
 5. Run `map validate`. When authoritative document, config, CI, or runtime sources were added, moved, or removed, maintain routes only through `map source add/update/remove` and retain history.
 
-Code-index publication already refreshes the software projection under the same task lease and publication fence. A second unleased writer, query-time repository scan, or unmanaged background loop is not an acceptable synchronization mechanism.
+Code-index publication refreshes business and software projections under the same task lease, attempt, and publication fence. A staged scope cannot publish while business projection is incomplete. A second writer, query-time glossary/repository scan, or unmanaged background loop is not an acceptable synchronization mechanism.
 
 ### 5.2 Worktree Iteration
 
@@ -101,9 +104,11 @@ A map mutation changes the worktree. If the current spec or coding decision must
 
 Before writing a specification, an agent reads at least:
 
+- `map route business-knowledge` and same-ref `repo business --kind all`;
 - the relevant `map route`, including architecture, build, deployment, or repository-specific topics;
 - `repo software --kind all` at a pinned ref, with particular attention to `design`, `build`, `iac`, and `relationships`;
 - `repo view --kind architecture-layers`;
+- `repo view --kind business-domains`, distinguishing authored from inferred evidence kinds;
 - a requirement-specific `repo context` or definition/references/callers/callees query;
 - freshness, unresolved-edge, direct-source-read, and degraded diagnostics.
 
@@ -128,7 +133,7 @@ Missing external dependency source remains unresolved metadata, not repository d
 
 - Every index/update preserves bounded queues, leases, checkpoints, backoff, dead letters, and one active repository writer.
 - The skill does not kill competing processes, increase an unbounded busy timeout, or delete runtime state to manufacture success.
-- `repo software`, `repo view`, and `repo context` read committed projection/graph facts and do not recursively scan the repository on query hot paths.
+- `repo business`, `repo software`, `repo view`, and `repo context` read committed projection/graph facts and do not read glossary YAML or recursively scan the repository on query hot paths.
 - Map mutation uses a file lock, atomic rename, contiguous history versions, and CLI validation. YAML is edited manually only when the CLI is unavailable and the user explicitly requests repair.
 - Silent background updates remain hosted by a platform service manager and remain pausable, observable, and recoverable.
 
@@ -145,6 +150,7 @@ Missing external dependency source remains unresolved metadata, not repository d
 | KDL-07 | Spec/coding entry consumes map, model, impact, and context | Skill default prompt, reference workflow, and package validation |
 | KDL-08 | Documentation and release packages cannot regress to the old prompt | Shared skill policy self-test, PR gate, and release bundle gate |
 | KDL-09 | Repository delivery passes complete quality gates | fmt, clippy, all-target tests, coverage, package, publish dry-run, and relevant self-iteration cases |
+| KDL-10 | Business and code/software models share one publication identity | End-to-end coverage chains the business route, glossary authoring, index, business/view/context reads and asserts identical commit, scope, freshness, evidence, and publication fence |
 
 ---
 

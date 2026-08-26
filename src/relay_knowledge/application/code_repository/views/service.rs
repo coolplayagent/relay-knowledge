@@ -7,8 +7,9 @@ use crate::{
     },
     application::service::RelayKnowledgeService,
     domain::{
-        CodeRepositorySelector, CodeRepositoryStatus, CodebaseViewKind, CodebaseViewRequest,
-        CodebaseViewSnapshot, FreshnessPolicy,
+        BusinessKnowledgeQueryKind, BusinessKnowledgeQueryRequest, CodeRepositorySelector,
+        CodeRepositoryStatus, CodebaseViewDeclaredBusinessDomain, CodebaseViewKind,
+        CodebaseViewRequest, CodebaseViewSnapshot, FreshnessPolicy,
     },
 };
 
@@ -99,10 +100,35 @@ impl RelayKnowledgeService {
             .limit
             .saturating_mul(SNAPSHOT_LIMIT_MULTIPLIER)
             .min(SNAPSHOT_LIMIT_MAX);
-        let snapshot = store
-            .codebase_view_snapshot(source_scope, request.clone(), row_limit)
+        let mut snapshot = store
+            .codebase_view_snapshot(source_scope.clone(), request.clone(), row_limit)
             .await
             .map_err(storage_api_error)?;
+        if request.view_kind == CodebaseViewKind::BusinessDomains {
+            let business_request = BusinessKnowledgeQueryRequest::new(
+                request.repository.clone(),
+                None,
+                None,
+                BusinessKnowledgeQueryKind::Terms,
+                request.freshness_policy,
+                request.limit,
+            )
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+            let business = store
+                .business_knowledge_projection_for_scope(source_scope, business_request)
+                .await
+                .map_err(storage_api_error)?;
+            snapshot.declared_business_domains = business
+                .domains
+                .into_iter()
+                .map(|domain| CodebaseViewDeclaredBusinessDomain {
+                    id: domain.id,
+                    name: domain.name,
+                    source_path: domain.evidence.source_path,
+                    evidence_id: domain.evidence.evidence_id,
+                })
+                .collect();
+        }
         let derived = derive_view(&request, snapshot, row_limit);
         let direct_source_read_paths = view_source_read_paths(&request, &derived);
         let degraded_reason = scoped_status

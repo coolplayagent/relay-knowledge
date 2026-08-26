@@ -1,5 +1,6 @@
 use super::{
-    repo_context, repo_feature_flags, repo_graph, repo_impact, repo_query, repo_software, repo_view,
+    repo_business, repo_context, repo_feature_flags, repo_graph, repo_impact, repo_query,
+    repo_software, repo_view,
 };
 
 #[test]
@@ -12,6 +13,7 @@ fn retrieval_specs_expose_each_read_surface_with_bounded_result_options() {
         repo_impact(),
         repo_view(),
         repo_software(),
+        repo_business(),
     ];
     assert_eq!(
         specs
@@ -26,6 +28,7 @@ fn retrieval_specs_expose_each_read_surface_with_bounded_result_options() {
             Some("impact"),
             Some("view"),
             Some("software"),
+            Some("business"),
         ]
     );
     for spec in specs {

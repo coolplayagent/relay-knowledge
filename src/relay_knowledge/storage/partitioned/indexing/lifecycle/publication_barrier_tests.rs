@@ -55,13 +55,24 @@ async fn takeover_fences_stale_shard_and_control_publication() {
         .import_control_repository_metadata(Arc::clone(&shard), "repo".to_owned())
         .await
         .expect("control repository should import into the shard");
+    let first_fence = publication_fence(&first, "worker-old");
     shard
-        .apply_code_index_snapshot_with_fence(
-            snapshot(&source_scope),
-            publication_fence(&first, "worker-old"),
-        )
+        .apply_code_index_snapshot_with_fence(snapshot(&source_scope), first_fence.clone())
         .await
         .expect("first attempt should commit its shard while its lease is live");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        shard.as_ref(),
+        first.repository_id.clone(),
+        source_scope.clone(),
+        first.resolved_commit_sha.clone(),
+        first_fence.clone(),
+    )
+    .await
+    .expect("first attempt should stage its business projection");
+    shard
+        .refresh_software_global_projection_with_fence(source_scope.clone(), first_fence)
+        .await
+        .expect("first attempt should durably publish the shard scope");
     store
         .catalog
         .stage_scope_with_fence(
@@ -224,6 +235,15 @@ async fn staged_replacement_keeps_the_previous_active_scope_queryable() {
         .await
         .expect("replacement shard should resolve")
         .expect("replacement shard should exist");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        shard.as_ref(),
+        claimed.repository_id.clone(),
+        claimed.source_scope.clone(),
+        claimed.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("replacement business projection should stage");
     shard
         .refresh_software_global_projection_with_fence("scope-new-staged".to_owned(), fence)
         .await
@@ -432,6 +452,15 @@ async fn same_tree_commit_adoption_clears_the_previous_shard_incremental_receipt
         .finalize_code_index_session_with_fence(initial_session, initial_fence.clone())
         .await
         .expect("initial fenced full facts should finalize");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        initial_task.repository_id.clone(),
+        source_scope.to_owned(),
+        initial_task.resolved_commit_sha.clone(),
+        initial_fence.clone(),
+    )
+    .await
+    .expect("initial business projection should stage");
     store
         .refresh_software_global_projection_with_fence(source_scope.to_owned(), initial_fence)
         .await
@@ -642,6 +671,15 @@ async fn exact_completed_content_checkpoint_restarts_a_retained_partition_for_a_
         .finalize_code_index_session_with_fence(retained_session.clone(), retained_fence.clone())
         .await
         .expect("retained checkpointed session should complete");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        retained_claimed.repository_id.clone(),
+        retained_scope.to_owned(),
+        retained_claimed.resolved_commit_sha.clone(),
+        retained_fence.clone(),
+    )
+    .await
+    .expect("retained business projection should stage");
     store
         .refresh_software_global_projection_with_fence(retained_scope.to_owned(), retained_fence)
         .await

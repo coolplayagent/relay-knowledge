@@ -98,6 +98,18 @@ pub(super) fn persist_published_task_target(
          ) VALUES (?1, ?2, 1, 0, 0, 0)",
         params![task.source_scope, task.repository_id,],
     )?;
+    transaction.execute(
+        "INSERT OR REPLACE INTO business_knowledge_status (
+             source_scope, repository_id, resolved_commit_sha,
+             projected_graph_version, stale, source_count, domain_count,
+             term_count, mapping_count, projection_schema_version, last_error
+         ) VALUES (?1, ?2, ?3, 1, 0, 0, 0, 0, 0, 1, NULL)",
+        params![
+            task.source_scope,
+            task.repository_id,
+            task.resolved_commit_sha
+        ],
+    )?;
     crate::storage::sqlite::code::record_receipt_from_active_fence(
         &transaction,
         &task.source_scope,

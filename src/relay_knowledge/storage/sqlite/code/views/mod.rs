@@ -58,6 +58,7 @@ pub(super) fn snapshot(
     );
 
     Ok(CodebaseViewSnapshot {
+        declared_business_domains: Vec::new(),
         files,
         symbols,
         imports,

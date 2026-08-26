@@ -40,6 +40,11 @@ const SCOPE_TABLES: &[&str] = &[
     "software_build_targets",
     "software_iac_resources",
     "software_design_elements",
+    "business_domains",
+    "business_terms",
+    "business_term_aliases",
+    "business_mappings",
+    "business_knowledge_status",
 ];
 
 #[test]

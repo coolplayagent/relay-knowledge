@@ -12,9 +12,10 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{
-        CodeGraphCodeExcerpt, CodeGraphContextBudget, CodeGraphContextPack,
-        CodeGraphContextProvenance, CodeGraphContextRequest, CodeGraphImpactHint, CodeQueryKind,
-        CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest,
+        BusinessKnowledgeQueryKind, BusinessKnowledgeQueryRequest, CodeGraphCodeExcerpt,
+        CodeGraphContextBudget, CodeGraphContextPack, CodeGraphContextProvenance,
+        CodeGraphContextRequest, CodeGraphImpactHint, CodeQueryKind, CodeRetrievalHit,
+        CodeRetrievalLayer, CodeRetrievalRequest,
     },
 };
 
@@ -68,6 +69,44 @@ impl RelayKnowledgeService {
         }
 
         let primary = primary.expect("hybrid entry query always runs");
+        let business_response = self
+            .business_knowledge_query(
+                BusinessKnowledgeQueryRequest::new(
+                    context_request.repository.clone(),
+                    None,
+                    Some(request.query.clone()),
+                    BusinessKnowledgeQueryKind::All,
+                    request.freshness_policy,
+                    request.limit,
+                )
+                .map_err(|error| ApiError::invalid_argument(error.to_string()))?,
+                context.clone(),
+            )
+            .await?;
+        if business_response.scope.scope_id != primary.scope.scope_id
+            || business_response.scope.resolved_commit_sha != primary.scope.resolved_commit_sha
+        {
+            return Err(ApiError::internal(
+                "business and code context projections resolved to different repository snapshots",
+            ));
+        }
+        let mut business_context = business_response.terms;
+        candidate_count = candidate_count.saturating_add(business_context.len());
+        for seed in business_mapping_seeds(&business_context) {
+            let response = self
+                .run_context_query(
+                    &context_request,
+                    CodeQueryKind::Hybrid,
+                    seed,
+                    request.limit.min(MAX_EXPANSION_LIMIT),
+                    &context,
+                    None,
+                )
+                .await?;
+            candidate_count = candidate_count.saturating_add(response.results.len());
+            push_unique_hits(&mut entry_points, response.results);
+            freshness_parts.push(response.freshness);
+        }
         let expansion_constraints = context_query_constraints(&context_request)
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let seeds = context_seeds(&entry_points);
@@ -103,11 +142,14 @@ impl RelayKnowledgeService {
         let count_truncated = truncate_hits(&mut entry_points, request.limit)
             | truncate_hits(&mut related_symbols, request.limit)
             | truncate_hits(&mut graph_paths, request.limit);
+        let business_truncated = business_context.len() > request.limit;
+        business_context.truncate(request.limit);
         apply_code_visibility(&mut entry_points, request.include_code);
         apply_code_visibility(&mut related_symbols, request.include_code);
         apply_code_visibility(&mut graph_paths, request.include_code);
 
         let mut pack = CodeGraphContextPack {
+            business_context,
             code_excerpts: code_excerpts(
                 request.include_code,
                 &entry_points,
@@ -121,7 +163,7 @@ impl RelayKnowledgeService {
             graph_paths,
         };
         let byte_truncated = pack_to_budget(&mut pack, request.max_context_bytes, &context_roles);
-        let mut truncated = count_truncated | byte_truncated;
+        let mut truncated = count_truncated | business_truncated | byte_truncated;
         let context_bytes = serialized_context_bytes(&pack);
         truncated |= primary.results.len() > request.limit;
         let retrieval_layers = retrieval_layers(&pack);
@@ -130,12 +172,13 @@ impl RelayKnowledgeService {
         let returned_count = pack.entry_points.len()
             + pack.related_symbols.len()
             + pack.graph_paths.len()
-            + pack.code_excerpts.len();
+            + pack.code_excerpts.len()
+            + pack.business_context.len();
         let mut diagnostics = vec![format!(
             "Expanded {} seed(s) through references, callers, callees, and imports with bounded limits.",
             seeds.len()
         )];
-        if count_truncated {
+        if count_truncated || business_truncated {
             diagnostics.push("Context pack was truncated to fit the requested limit.".to_owned());
         }
         if byte_truncated {
@@ -492,7 +535,10 @@ fn pack_to_budget(
         let removed_code_excerpt = pack.code_excerpts.pop().is_some();
         let cleared_expansion_excerpts =
             !removed_code_excerpt && clear_expansion_hit_excerpts(pack);
-        if removed_code_excerpt || cleared_expansion_excerpts {
+        if removed_code_excerpt
+            || cleared_expansion_excerpts
+            || pack.business_context.pop().is_some()
+        {
             truncated = true;
         } else if pack.graph_paths.pop().is_some() {
             pack.impact_hints = impact_hints(&pack.graph_paths, context_roles);
@@ -516,6 +562,20 @@ fn clear_hit_excerpts(pack: &mut CodeGraphContextPack) {
     clear_entry_hit_excerpts(pack);
     pack.code_excerpts.clear();
     pack.impact_hints.clear();
+}
+
+fn business_mapping_seeds(terms: &[crate::domain::BusinessTerm]) -> Vec<String> {
+    let mut seeds = BTreeSet::new();
+    for mapping in terms.iter().flat_map(|term| &term.mappings) {
+        if let Some(resolved_id) = mapping.resolved_id.as_ref() {
+            seeds.insert(resolved_id.clone());
+        }
+        seeds.insert(mapping.target_hint.clone());
+        if seeds.len() >= MAX_CONTEXT_SEEDS {
+            break;
+        }
+    }
+    seeds.into_iter().take(MAX_CONTEXT_SEEDS).collect()
 }
 
 fn clear_expansion_hit_excerpts(pack: &mut CodeGraphContextPack) -> bool {
@@ -578,14 +638,22 @@ fn serialized_context_bytes<T: serde::Serialize>(value: &T) -> usize {
 }
 
 fn context_paths(pack: &CodeGraphContextPack) -> Vec<String> {
-    pack.entry_points
+    let mut paths = pack
+        .entry_points
         .iter()
         .chain(&pack.related_symbols)
         .chain(&pack.graph_paths)
         .map(|hit| hit.path.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+        .collect::<BTreeSet<_>>();
+    for mapping in pack.business_context.iter().flat_map(|term| &term.mappings) {
+        if mapping.target_kind() == crate::domain::TechnicalTargetKind::File {
+            paths.insert(mapping.target_hint.clone());
+        }
+        if let Some(path) = mapping.definition.path.as_ref() {
+            paths.insert(path.clone());
+        }
+    }
+    paths.into_iter().collect()
 }
 
 #[cfg(test)]

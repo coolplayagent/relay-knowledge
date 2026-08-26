@@ -1,3 +1,4 @@
+mod business_projection;
 mod durable_incremental;
 mod fast_path;
 mod queue;
@@ -28,6 +29,7 @@ use crate::{
 use crate::application::service::RelayKnowledgeService;
 
 use self::{
+    business_projection::refresh_business_projection,
     durable_incremental::{
         IncrementalSnapshotApply, checkpoint_skips_parser,
         resume_finalization as resume_durable_incremental_finalization, should_resume_staged_full,
@@ -173,7 +175,7 @@ impl RelayKnowledgeService {
                 .unwrap_or_default();
             self.apply_full_code_index(
                 &store,
-                registration,
+                registration.clone(),
                 selector,
                 request.workspace_detection.clone(),
                 resource_budget,
@@ -342,7 +344,7 @@ impl RelayKnowledgeService {
                         .unwrap_or_default();
                     self.apply_full_code_index(
                         &store,
-                        registration,
+                        registration.clone(),
                         selector,
                         request.workspace_detection.clone(),
                         resource_budget,
@@ -415,7 +417,7 @@ impl RelayKnowledgeService {
             })
             .await?;
         }
-        refresh_code_index_task_lease(&store, task_lease.as_ref()).await?;
+        refresh_business_projection(&store, registration, &summary, task_lease.as_ref()).await?;
         let software_projection =
             await_with_code_index_task_lease(&store, task_lease.as_ref(), async {
                 match task_lease.as_ref() {

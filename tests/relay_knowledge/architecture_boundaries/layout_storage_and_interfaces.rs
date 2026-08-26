@@ -23,6 +23,7 @@ fn sqlite_root_contains_only_the_facade_tests_and_named_subdomains() {
     assert_eq!(
         directory_entry_names(&sqlite_root),
         [
+            "business",
             "canvas",
             "code",
             "code_graph",
@@ -160,6 +161,7 @@ fn sqlite_code_batch_session_root_contains_only_named_direct_contract_tests() {
             "mod.rs",
             "mod_tests.rs",
             "phase_resume_tests.rs",
+            "publication_barrier_business_tests.rs",
             "publication_barrier_tests.rs",
             "query_index_policy_tests.rs",
             "reference_resolution.rs",

@@ -8,6 +8,10 @@ const SOFTWARE_MODEL_TOPIC_ID: &str = "software-model";
 const SOFTWARE_MODEL_SOURCE_ID: &str = "repository-software-model";
 const SOFTWARE_MODEL_SOURCE_URI: &str = ".";
 const SOFTWARE_MODEL_SOURCE_SCOPE: &str = "repo";
+const BUSINESS_KNOWLEDGE_TOPIC_ID: &str = "business-knowledge";
+const BUSINESS_KNOWLEDGE_SOURCE_ID: &str = "repository-business-glossary";
+const BUSINESS_KNOWLEDGE_SOURCE_URI: &str = ".knowledge/business-glossary.yaml";
+const BUSINESS_KNOWLEDGE_SOURCE_SCOPE: &str = "repo";
 
 /// Assembled inline map used by domain workflows and API responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,7 +33,7 @@ impl KnowledgeMap {
     /// Schema identity for the assembled, inline map representation.
     pub const SCHEMA_VERSION: u16 = 1;
 
-    /// Creates the default shared contract with a code-map-backed software-model route.
+    /// Creates the default shared contract with software and authored business routes.
     pub fn initial(updated_at: String) -> Self {
         let mut map = Self {
             schema_version: Self::SCHEMA_VERSION,
@@ -47,6 +51,8 @@ impl KnowledgeMap {
         };
         map.ensure_software_model_route()
             .expect("built-in software-model route must remain valid");
+        map.ensure_business_knowledge_route()
+            .expect("built-in business-knowledge route must remain valid");
         map
     }
 
@@ -104,6 +110,59 @@ impl KnowledgeMap {
         Ok(true)
     }
 
+    /// Ensures the stable authored repository glossary route.
+    pub fn ensure_business_knowledge_route(&mut self) -> Result<bool, DomainError> {
+        self.validate()?;
+        let changed = self.ensure_business_knowledge_route_state()?;
+        self.validate()?;
+        Ok(changed)
+    }
+
+    pub(crate) fn ensure_business_knowledge_route_snapshot(
+        &mut self,
+        archived_through: u64,
+    ) -> Result<bool, DomainError> {
+        self.validate_snapshot(archived_through)?;
+        let changed = self.ensure_business_knowledge_route_state()?;
+        self.validate_snapshot(archived_through)?;
+        Ok(changed)
+    }
+
+    fn ensure_business_knowledge_route_state(&mut self) -> Result<bool, DomainError> {
+        if let Some(source) = self
+            .sources
+            .iter()
+            .find(|source| source.id == BUSINESS_KNOWLEDGE_SOURCE_ID)
+        {
+            validate_business_knowledge_source(source)?;
+            return Ok(false);
+        }
+        if !self
+            .topics
+            .iter()
+            .any(|topic| topic.id == BUSINESS_KNOWLEDGE_TOPIC_ID)
+        {
+            self.topics.push(KnowledgeMapTopic::new(
+                BUSINESS_KNOWLEDGE_TOPIC_ID.to_owned(),
+                "Business knowledge".to_owned(),
+                "Version-controlled business domains, terminology, aliases, semantics, and technical mappings."
+                    .to_owned(),
+            )?);
+        }
+        self.add_source_state(KnowledgeMapSource::new(
+            BUSINESS_KNOWLEDGE_SOURCE_ID.to_owned(),
+            BUSINESS_KNOWLEDGE_TOPIC_ID.to_owned(),
+            KnowledgeMapSourceKind::File,
+            BUSINESS_KNOWLEDGE_SOURCE_URI.to_owned(),
+            Some(BUSINESS_KNOWLEDGE_SOURCE_SCOPE.to_owned()),
+            Some(
+                "Authored business glossary projected by the repository index writer at an immutable commit."
+                    .to_owned(),
+            ),
+        )?)?;
+        Ok(true)
+    }
+
     /// Validates the cross-reference invariants that keep the map navigable.
     pub fn validate(&self) -> Result<(), DomainError> {
         self.validate_state()?;
@@ -149,6 +208,9 @@ impl KnowledgeMap {
             source.validate()?;
             if source.id == SOFTWARE_MODEL_SOURCE_ID {
                 validate_software_model_source(source)?;
+            }
+            if source.id == BUSINESS_KNOWLEDGE_SOURCE_ID {
+                validate_business_knowledge_source(source)?;
             }
             if !topic_ids.contains(source.topic.as_str()) {
                 return Err(DomainError::invalid(
@@ -438,6 +500,22 @@ fn validate_software_model_source(source: &KnowledgeMapSource) -> Result<(), Dom
         "sources",
         format!(
             "reserved source '{SOFTWARE_MODEL_SOURCE_ID}' must use topic '{SOFTWARE_MODEL_TOPIC_ID}', kind 'repo', uri '{SOFTWARE_MODEL_SOURCE_URI}', and scope '{SOFTWARE_MODEL_SOURCE_SCOPE}'"
+        ),
+    ))
+}
+
+fn validate_business_knowledge_source(source: &KnowledgeMapSource) -> Result<(), DomainError> {
+    let compatible = source.topic == BUSINESS_KNOWLEDGE_TOPIC_ID
+        && source.kind == KnowledgeMapSourceKind::File
+        && source.uri == BUSINESS_KNOWLEDGE_SOURCE_URI
+        && source.source_scope.as_deref() == Some(BUSINESS_KNOWLEDGE_SOURCE_SCOPE);
+    if compatible {
+        return Ok(());
+    }
+    Err(DomainError::invalid(
+        "sources",
+        format!(
+            "reserved source '{BUSINESS_KNOWLEDGE_SOURCE_ID}' must use topic '{BUSINESS_KNOWLEDGE_TOPIC_ID}', kind 'file', uri '{BUSINESS_KNOWLEDGE_SOURCE_URI}', and scope '{BUSINESS_KNOWLEDGE_SOURCE_SCOPE}'"
         ),
     ))
 }

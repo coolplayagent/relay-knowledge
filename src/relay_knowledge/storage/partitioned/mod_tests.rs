@@ -263,6 +263,15 @@ async fn partitioned_workspace_state_probe_reads_the_repository_shard() {
         .finalize_code_index_session_with_fence(session, fence.clone())
         .await
         .expect("workspace session should finalize");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        summary.repository_id.clone(),
+        summary.source_scope.clone(),
+        summary.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("workspace business projection should stage");
     store
         .refresh_software_global_projection_with_fence(summary.source_scope, fence)
         .await

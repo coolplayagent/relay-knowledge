@@ -5,16 +5,16 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     api::{
-        ApiError, CodeGraphContextResponse, CodeRepositoryFeatureFlagsResponse,
-        CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse, CodeRepositoryListResponse,
-        CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
-        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
-        CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
+        ApiError, BusinessKnowledgeQueryResponse, CodeGraphContextResponse,
+        CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
+        CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
+        CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
+        CodeRepositoryStatusResponse, CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
         RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalResponse,
     },
     domain::{
-        CodeFeatureFlagRequest, CodeGraphContextRequest, CodeImpactRequest, CodeIndexMode,
-        CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
+        BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
         RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
     },
     env::NetworkEnvOverrides,
@@ -46,6 +46,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::Impact { .. }
                 | RepoCommand::Report { .. }
                 | RepoCommand::Software { .. }
+                | RepoCommand::Business { .. }
                 | RepoCommand::View(_)
                 | RepoCommand::Status { .. }
         )
@@ -409,6 +410,41 @@ pub(super) async fn run_remote(
 
             render_response(
                 "code.repo.software",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::Business {
+            alias,
+            ref_selector,
+            domain,
+            query,
+            kind,
+            freshness,
+            limit,
+        } => {
+            let request = BusinessKnowledgeQueryRequest::new(
+                repo::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    format,
+                )?,
+                domain.clone(),
+                query.clone(),
+                *kind,
+                *freshness,
+                *limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, BusinessKnowledgeQueryResponse>(alias, "business", &request)
+                .await?;
+            render_response(
+                "code.repo.business",
                 response.metadata.clone(),
                 &response,
                 format,

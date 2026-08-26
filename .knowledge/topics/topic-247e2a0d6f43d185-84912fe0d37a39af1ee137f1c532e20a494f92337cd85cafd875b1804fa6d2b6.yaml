@@ -1,0 +1,20 @@
+schema_version: 2
+topic:
+  id: software-model
+  title: Whole-software model
+  description: Code-map-backed architecture, build, deployment, dependency, configuration, and design knowledge.
+sources:
+- id: repository-software-model
+  topic: software-model
+  kind: repo
+  uri: .
+  source_scope: repo
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Primary repository code map; consume snapshot-bound repo software and repo view projections with freshness and evidence.
+route:
+  topic: software-model
+  source_order:
+  - repository-software-model

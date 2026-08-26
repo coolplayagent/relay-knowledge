@@ -161,7 +161,7 @@ async fn same_tree_commit_alias_keeps_the_previous_commit_queryable() {
         .apply_code_index_snapshot(first)
         .await
         .expect("first commit should persist");
-    adopt_same_tree_commit(&store, &expected_scope, &tree_hash, "commit-b").await;
+    adopt_same_tree_commit(&store, &expected_scope, &tree_hash, "commit-a", "commit-b").await;
 
     for commit in ["commit-a", "commit-b"] {
         let status = store
@@ -194,7 +194,7 @@ async fn same_tree_commit_alias_remains_a_valid_incremental_base() {
         .apply_code_index_snapshot(first)
         .await
         .expect("first commit should persist");
-    adopt_same_tree_commit(&store, &source_scope, &tree_hash, "commit-b").await;
+    adopt_same_tree_commit(&store, &source_scope, &tree_hash, "commit-a", "commit-b").await;
 
     let mut incremental = incremental_snapshot_for_parsed_file();
     incremental.base_resolved_commit_sha = Some("commit-a".to_owned());
@@ -218,8 +218,17 @@ async fn adopt_same_tree_commit(
     store: &SqliteGraphStore,
     source_scope: &str,
     tree_hash: &str,
+    active_commit_sha: &str,
     resolved_commit_sha: &str,
 ) {
+    crate::storage::publish_empty_business_projection_for_test(
+        store,
+        "repo",
+        source_scope,
+        active_commit_sha,
+    )
+    .await
+    .expect("active content scope should receive its business projection");
     store
         .refresh_software_global_projection(source_scope.to_owned())
         .await

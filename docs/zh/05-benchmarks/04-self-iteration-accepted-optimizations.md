@@ -650,6 +650,13 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - Kubernetes phase 诊断：另一次 fresh-home 运行约每 10 秒轮询只读 status，并在 612.08 秒完成。轮询污染了总耗时，因此它不是采纳样本。粗粒度观测把 base ingest 归在约 158 秒、query-index 加普通 reference 归在随后约 100 秒、grouped discovery/build 归在约 107/109 秒、call rebuild 归在约 30 秒、software projection 归在约 67 秒。该 cadence 不能给出精确 phase timing，但足以把 reference-wide finalization 作为受界优化目标，不允许跳过阶段或放宽预算。
 - 当前候选复核：报告 `manual-evaluate-1787657485515273930-0-3038475.json` 的 346 个 gate、119 个 case 与 293 个 command 全部通过，score 1.0、`score_accepted=true`、`adoption_status=would_accept`；手工 evaluation 未创建 commit。1,024-file 产品 rail 为冷索引 382/12,000 ms、register 加冷索引 453/13,000 ms、incremental 423/3,000 ms；release build 为 321/180,000 ms，named persistence suite 为 739/30,000 ms。它关闭前一轮 focused-fast release-build 拒绝，exhaustive 与失败的 Kubernetes rail 仍相互独立。
 
+## 2026-08-26 候选：业务知识图谱 fast 回归门禁
+
+- 算法与架构：新增 `business_knowledge_regression_cases` fast quality gate，以真实产品单元/存储边界覆盖 glossary acronym/alias、跨 domain homonym、竞争 definition、技术 mapping resolved/unresolved hint、Knowledge Map route 授权和同 lease/publication-fence 的 business barrier。门禁按行为模块过滤，不枚举仓库、query、path、symbol 或 fixture id。
+- 不变量：不改变 self-iteration workload 排序、case 评分、性能预算、durable task ownership 或产品查询热路径；产品仍只在索引阶段读取授权 glossary，业务与 code/software projection 保持同 task/attempt/fence，外部目标只生成 unresolved metadata。
+- 预期影响：后续候选若删除 ambiguity、错误覆盖冲突定义、把 alias 建成重复实体、丢失 target hint、绕过 route/digest/scope 或在 business projection 未完成时发布，会在默认 fast profile 失败。
+- 风险：fast 增加一次已预编译的有界 library test filter，诊断预算为 30 秒、硬 timeout 为 180 秒；冷链接仍由前置 `bm25_hierarchy_build` 承担，不把该门禁耗时解释为业务查询性能指标。
+
 ## 2026-08-13 候选：统一 release 产品二进制评测口径
 
 - 算法与架构：由 self-iteration config 的 `ProductBinaryProfile` 单独决定产品 binary profile 与路径；所有非 smoke workload 与其 product build gate 共同选择 `target/release/relay-knowledge`，harness 自身仍可用 debug binary 编排。smoke 继续只执行格式门禁，不构建或运行产品 workload。

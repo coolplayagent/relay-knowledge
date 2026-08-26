@@ -1,4 +1,7 @@
-use crate::domain::{CodeQueryKind, CodeRepositorySelector, FreshnessPolicy, SoftwareGlobalKind};
+use crate::domain::{
+    BusinessKnowledgeQueryKind, CodeQueryKind, CodeRepositorySelector, FreshnessPolicy,
+    SoftwareGlobalKind,
+};
 
 use super::{
     CliError, OutputFormat,
@@ -108,6 +111,15 @@ pub enum RepoCommand {
         alias: String,
         ref_selector: String,
         kind: SoftwareGlobalKind,
+        freshness: FreshnessPolicy,
+        limit: usize,
+    },
+    Business {
+        alias: String,
+        ref_selector: String,
+        domain: Option<String>,
+        query: Option<String>,
+        kind: BusinessKnowledgeQueryKind,
         freshness: FreshnessPolicy,
         limit: usize,
     },

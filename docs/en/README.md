@@ -87,6 +87,7 @@ records that are intentionally listed below as Chinese-only until translated.
 - [Chapter 21: Software Global Domain Modeling Architecture](03-architecture-specs/21-software-global-domain-modeling.md)
 - [Chapter 22: Service Deployment, Control Plane, and Data Plane](03-architecture-specs/22-service-deployment-control-data-plane.md)
 - [Chapter 24: Code-Map-Backed Knowledge Development Loop](03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
+- [Chapter 27: Business Knowledge to Technical Graph Mapping](03-architecture-specs/27-business-knowledge-technical-mapping.md)
 - [Chapter 26: Git Commit + Knowledge Development Philosophy and Iteration Loop](03-architecture-specs/26-git-commit-knowledge-development-loop.md)
 
 ## Book 4: Research

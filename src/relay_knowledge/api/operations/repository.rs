@@ -3,14 +3,16 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::{ApiMetadata, CodeRepositoryFreshnessDiagnostics, CodeRepositoryScopeMetadata},
     domain::{
-        CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactPathGroups, CodeImpactRequest,
-        CodeIndexCheckpoint, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryRegistration,
-        CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositoryScopePreview,
-        CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
-        RepositoryGraphEdge, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
-        SoftwareBuildTarget, SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement,
-        SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
-        SoftwareRelationship, SoftwareSdkUsage, SoftwareTopic,
+        BusinessDomain, BusinessKnowledgeQueryRequest, BusinessKnowledgeResolution,
+        BusinessKnowledgeStatus, BusinessTerm, CodeFeatureFlagGraph, CodeFeatureFlagRequest,
+        CodeImpactPathGroups, CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSummary,
+        CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
+        CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositoryStatus, CodeRetrievalHit,
+        CodeRetrievalRequest, CodeScopeRetentionSummary, RepositoryGraphEdge,
+        RepositoryGraphNeighborhoodRequest, RepositoryGraphNode, SoftwareBuildTarget,
+        SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile,
+        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship,
+        SoftwareSdkUsage, SoftwareTopic,
     },
 };
 
@@ -193,4 +195,16 @@ pub struct SoftwareGlobalResponse {
     pub build_targets: Vec<SoftwareBuildTarget>,
     pub iac_resources: Vec<SoftwareIacResource>,
     pub design_elements: Vec<SoftwareDesignElement>,
+}
+
+/// Repository-scoped authored business knowledge projection response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BusinessKnowledgeQueryResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub request: BusinessKnowledgeQueryRequest,
+    pub status: BusinessKnowledgeStatus,
+    pub resolution: BusinessKnowledgeResolution,
+    pub domains: Vec<BusinessDomain>,
+    pub terms: Vec<BusinessTerm>,
 }

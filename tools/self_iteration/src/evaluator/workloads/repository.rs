@@ -544,6 +544,20 @@ fn evaluate_repository_in_runtime(
     Ok(report)
 }
 
+fn historical_reuse_index_command(binary: &Path, alias: &str, head_ref: &str) -> Vec<String> {
+    vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "index".to_owned(),
+        alias.to_owned(),
+        "--ref".to_owned(),
+        head_ref.to_owned(),
+        "--reuse-historical".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+    ]
+}
+
 fn elastic_timeout_seconds(default_seconds: u64, config: &Value, budget_name: &str) -> u64 {
     let Some(budget_ms) = budget(config, budget_name) else {
         return default_seconds;

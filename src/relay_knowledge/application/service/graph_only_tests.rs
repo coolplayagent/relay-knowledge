@@ -17,12 +17,12 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
-        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
-        CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
-        GraphStore, IndexCursor, IndexRefreshDiagnostics, IndexStore, KnowledgeStore,
-        MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
+        BusinessKnowledgeStore, CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges,
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
+        CodeIndexTaskSeed, CodeReferenceSearchRequest, CodeRepositoryStore,
+        CodeScopeRetentionRequest, CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome,
+        GraphSearchRequest, GraphStore, IndexCursor, IndexRefreshDiagnostics, IndexStore,
+        KnowledgeStore, MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
     },
 };
 
@@ -119,6 +119,8 @@ async fn service_definition_write_metadata_uses_current_graph_version() {
 }
 
 struct GraphOnlySearchStore;
+
+impl BusinessKnowledgeStore for GraphOnlySearchStore {}
 
 impl GraphStore for GraphOnlySearchStore {
     fn commit_mutation_batch(
@@ -269,6 +271,8 @@ impl CodeRepositoryStore for GraphOnlySearchStore {
 }
 
 struct SlowLegacyHealthStore;
+
+impl BusinessKnowledgeStore for SlowLegacyHealthStore {}
 
 impl GraphStore for SlowLegacyHealthStore {
     fn commit_mutation_batch(

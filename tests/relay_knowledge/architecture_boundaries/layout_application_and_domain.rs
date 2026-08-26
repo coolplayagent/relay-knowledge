@@ -34,6 +34,7 @@ fn code_repository_application_root_contains_only_the_facade_and_named_subdomain
         directory_entry_names(&code_repository_root),
         [
             "blocking",
+            "business_knowledge.rs",
             "clock",
             "context",
             "errors",
@@ -62,6 +63,7 @@ fn code_repository_indexing_root_contains_only_exact_workflow_owners() {
     assert_eq!(
         directory_entry_names(&indexing_root),
         [
+            "business_projection.rs",
             "durable_incremental.rs",
             "fast_path.rs",
             "fast_path_tests.rs",
@@ -280,6 +282,7 @@ fn code_root_contains_only_the_facade_tests_and_named_subdomains() {
     assert_eq!(
         directory_entry_names(&code_root),
         [
+            "business_glossary",
             "config_files",
             "content_identity",
             "error",

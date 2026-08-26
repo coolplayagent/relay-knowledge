@@ -6,9 +6,10 @@ mod operations;
 pub(crate) use contracts::CodeRepositoryFreshnessInput;
 pub use contracts::*;
 pub use operations::{
-    AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeIndexWorkerRunRequest,
-    CodeIndexWorkerRunResponse, CodeIndexWorkerStatus, CodeRepositoryFeatureFlagsResponse,
-    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, BusinessKnowledgeQueryResponse,
+    CodeIndexWorkerRunRequest, CodeIndexWorkerRunResponse, CodeIndexWorkerStatus,
+    CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
+    CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse,
     CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,

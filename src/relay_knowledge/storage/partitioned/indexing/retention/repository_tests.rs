@@ -419,6 +419,15 @@ async fn publish_snapshot(store: &PartitionedSqliteKnowledgeStore, source_scope:
         .apply_code_index_snapshot_with_fence(publication, fence.clone())
         .await
         .expect("partitioned retention fixture snapshot should publish");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        store,
+        summary.repository_id.clone(),
+        summary.source_scope.clone(),
+        summary.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("partitioned retention fixture business projection should stage");
     store
         .refresh_software_global_projection_with_fence(summary.source_scope, fence)
         .await

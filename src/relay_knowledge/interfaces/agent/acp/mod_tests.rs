@@ -13,12 +13,12 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
-        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
-        CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
-        GraphStore, IndexStore, MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError,
-        StorageFuture,
+        BusinessKnowledgeStore, CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges,
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
+        CodeIndexTaskSeed, CodeReferenceSearchRequest, CodeRepositoryStore,
+        CodeScopeRetentionRequest, CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome,
+        GraphSearchRequest, GraphStore, IndexStore, MutationLogEntry, MutationLogStore,
+        SqliteGraphStore, StorageError, StorageFuture,
     },
 };
 
@@ -466,6 +466,8 @@ fn scoped_prompt(request_id: &str, source_scope: &str, query: &str) -> AcpPrompt
 
 struct SlowSearchStore;
 
+impl BusinessKnowledgeStore for SlowSearchStore {}
+
 impl GraphStore for SlowSearchStore {
     fn commit_mutation_batch(
         &self,
@@ -601,6 +603,8 @@ impl CodeRepositoryStore for SlowSearchStore {
 }
 
 struct SearchFailStore;
+
+impl BusinessKnowledgeStore for SearchFailStore {}
 
 impl GraphStore for SearchFailStore {
     fn commit_mutation_batch(

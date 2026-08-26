@@ -11,15 +11,18 @@ use crate::{
         CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
     },
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
-        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
-        CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
-        GraphStore, IndexStore, MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
+        BusinessKnowledgeStore, CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges,
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
+        CodeIndexTaskSeed, CodeReferenceSearchRequest, CodeRepositoryStore,
+        CodeScopeRetentionRequest, CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome,
+        GraphSearchRequest, GraphStore, IndexStore, MutationLogEntry, MutationLogStore,
+        StorageError, StorageFuture,
     },
 };
 
 pub(super) struct SlowSearchStore;
+
+impl BusinessKnowledgeStore for SlowSearchStore {}
 
 impl GraphStore for SlowSearchStore {
     fn commit_mutation_batch(

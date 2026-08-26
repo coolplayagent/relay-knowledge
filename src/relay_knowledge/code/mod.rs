@@ -1,5 +1,6 @@
 //! Code repository indexing, parsing, identity, and source discovery boundaries.
 
+mod business_glossary;
 mod config_files;
 mod content_identity;
 mod error;
@@ -47,6 +48,7 @@ mod worktree_overlay_review_tests;
 #[path = "tests/source/worktree_overlay.rs"]
 mod worktree_overlay_tests;
 
+pub(crate) use business_glossary::load_business_knowledge_projection;
 pub use error::CodeIndexError;
 pub(crate) use index::CodeIndexPlanRecovery;
 pub use index::{

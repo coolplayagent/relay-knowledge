@@ -143,6 +143,11 @@ fn legacy_core_schema() -> Connection {
     connection
         .execute_batch(
             "
+            CREATE TABLE entities (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                created_graph_version INTEGER NOT NULL
+            );
             CREATE TABLE evidence (
                 id TEXT PRIMARY KEY,
                 source_scope TEXT NOT NULL,

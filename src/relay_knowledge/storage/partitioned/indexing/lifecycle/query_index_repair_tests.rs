@@ -56,6 +56,15 @@ async fn partitioned_publish_repairs_missing_query_index_before_catalog_handoff(
         .finalize_code_index_session_with_fence(session.clone(), fence.clone())
         .await
         .expect("fenced facts should finalize");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        task.repository_id.clone(),
+        source_scope.to_owned(),
+        task.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("business projection should stage before software handoff");
     store
         .refresh_software_global_projection_with_fence(source_scope.to_owned(), fence.clone())
         .await
@@ -195,6 +204,15 @@ async fn unfinished_partitioned_receipt_requires_fresh_projection_and_skips_repu
         .finalize_code_index_session_with_fence(session.clone(), fence.clone())
         .await
         .expect("fenced facts should finalize");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        task.repository_id.clone(),
+        source_scope.to_owned(),
+        task.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("initial business projection should stage");
     store
         .refresh_software_global_projection_with_fence(source_scope.to_owned(), fence.clone())
         .await
@@ -313,6 +331,15 @@ async fn unfinished_partitioned_receipt_requires_fresh_projection_and_skips_repu
         Some(task.repository_id.as_str()),
         "exact begin must preserve the already active repair route"
     );
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        task.repository_id.clone(),
+        source_scope.to_owned(),
+        task.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("business projection should restage for repair");
     let repaired = store
         .refresh_software_global_projection_with_fence(source_scope.to_owned(), fence.clone())
         .await
@@ -490,6 +517,15 @@ async fn inactive_completed_shard_reopens_exactly_for_repair_before_catalog_publ
         .await
         .expect("staged shard should resolve")
         .expect("staged shard should exist");
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        shard.as_ref(),
+        task.repository_id.clone(),
+        source_scope.to_owned(),
+        task.resolved_commit_sha.clone(),
+        fence.clone(),
+    )
+    .await
+    .expect("shard business projection should stage");
     shard
         .refresh_software_global_projection_with_fence(source_scope.to_owned(), fence.clone())
         .await

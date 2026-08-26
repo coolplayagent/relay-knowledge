@@ -10,8 +10,8 @@ use serde_json::Value;
 const ALIAS: &str = "knowledge-loop-fixture";
 
 #[test]
-fn bootstrap_binds_map_software_and_architecture_to_one_indexed_commit() {
-    let fixture = AcceptanceFixture::create();
+fn bootstrap_binds_business_software_and_context_to_one_indexed_commit() {
+    let mut fixture = AcceptanceFixture::create();
 
     let initialized = fixture.cli(["map", "init", "--format", "json"]);
     let initial_version = initialized["map_version"]
@@ -19,6 +19,41 @@ fn bootstrap_binds_map_software_and_architecture_to_one_indexed_commit() {
         .expect("map init should report its version");
     let repeated = fixture.cli(["map", "init", "--format", "json"]);
     assert_eq!(repeated["map_version"], initial_version);
+    write(
+        &fixture.repository,
+        ".knowledge/business-glossary.yaml",
+        r#"schema_version: 1
+domains:
+  - id: revenue
+    name: Revenue
+    description: Subscription revenue concepts.
+terms:
+  - id: monthly-recurring-revenue
+    domain: revenue
+    canonical_name: Monthly Recurring Revenue
+    definition: Recurring subscription revenue normalized to one month.
+    language: en
+    aliases:
+      - value: MRR
+        kind: abbreviation
+        language: en
+    semantics:
+      aggregation: sum
+      unit: USD
+      grain: subscription
+      time_basis: month
+    mappings:
+      - relation: calculated_from
+        target_kind: file
+        target: src/lib.rs
+"#,
+    );
+    git(&fixture.repository, ["add", ".knowledge"]);
+    git(
+        &fixture.repository,
+        ["commit", "-m", "author business glossary"],
+    );
+    fixture.commit = git_text(&fixture.repository, ["rev-parse", "HEAD"]);
 
     let route = fixture.cli(["map", "route", "software-model", "--format", "json"]);
     assert_eq!(
@@ -28,6 +63,11 @@ fn bootstrap_binds_map_software_and_architecture_to_one_indexed_commit() {
     assert_eq!(route["sources"][0]["kind"], "repo");
     assert_eq!(route["sources"][0]["uri"], ".");
     assert_eq!(route["sources"][0]["source_scope"], "repo");
+    let business_route = fixture.cli(["map", "route", "business-knowledge", "--format", "json"]);
+    assert_eq!(
+        business_route["route"]["source_order"],
+        serde_json::json!(["repository-business-glossary"])
+    );
 
     fixture.cli([
         "repo",
@@ -69,17 +109,92 @@ fn bootstrap_binds_map_software_and_architecture_to_one_indexed_commit() {
         "--format",
         "json",
     ]);
+    let business = fixture.cli([
+        "repo",
+        "business",
+        ALIAS,
+        "--kind",
+        "all",
+        "--query",
+        "MRR",
+        "--ref",
+        &fixture.commit,
+        "--freshness",
+        "wait-until-fresh",
+        "--format",
+        "json",
+    ]);
+    let business_domains = fixture.cli([
+        "repo",
+        "view",
+        ALIAS,
+        "--kind",
+        "business-domains",
+        "--ref",
+        &fixture.commit,
+        "--freshness",
+        "wait-until-fresh",
+        "--format",
+        "json",
+    ]);
+    let context = fixture.cli([
+        "repo",
+        "context",
+        ALIAS,
+        "--query",
+        "MRR",
+        "--ref",
+        &fixture.commit,
+        "--freshness",
+        "wait-until-fresh",
+        "--format",
+        "json",
+    ]);
 
     let indexed_scope = indexed["scope"]["scope_id"]
         .as_str()
         .expect("index should report a source scope");
-    for response in [&software, &architecture] {
+    for response in [&software, &architecture, &business, &business_domains] {
         assert_eq!(response["scope"]["scope_id"], indexed_scope);
         assert_eq!(response["scope"]["resolved_commit_sha"], fixture.commit);
         assert_eq!(response["scope"]["stale"], false);
     }
+    assert_eq!(context["repository_scope"]["scope_id"], indexed_scope);
+    assert_eq!(
+        context["repository_scope"]["resolved_commit_sha"],
+        fixture.commit
+    );
+    assert_eq!(context["repository_scope"]["stale"], false);
     assert_eq!(software["status"]["source_scope"], indexed_scope);
     assert_eq!(software["status"]["stale"], false);
+    assert_eq!(business["status"]["source_scope"], indexed_scope);
+    assert_eq!(business["status"]["resolved_commit_sha"], fixture.commit);
+    assert_eq!(business["resolution"], "exact");
+    assert_eq!(
+        business["terms"][0]["canonical_name"],
+        "Monthly Recurring Revenue"
+    );
+    assert_eq!(
+        business["terms"][0]["mappings"][0]["resolution_state"],
+        "resolved"
+    );
+    assert_eq!(
+        business["terms"][0]["definitions"][0]["evidence"]["resolved_commit_sha"],
+        fixture.commit
+    );
+    assert_eq!(
+        context["business_context"][0]["id"],
+        "monthly-recurring-revenue"
+    );
+    assert!(
+        business_domains["evidence"]
+            .as_array()
+            .is_some_and(|evidence| {
+                evidence
+                    .iter()
+                    .any(|item| item["evidence_kind"] == "business_glossary")
+            })
+    );
     assert!(
         software["files"]
             .as_array()

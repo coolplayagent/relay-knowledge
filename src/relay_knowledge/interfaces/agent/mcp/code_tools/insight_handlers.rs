@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 
 use crate::{
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeRepositorySelector, SoftwareGlobalRequest,
+        BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeImpactRequest,
+        CodeRepositorySelector, SoftwareGlobalRequest,
     },
     interfaces::agent::{
         AgentAdapterError, AgentAdapterErrorKind, authorize_limit, validate_optional_query_text,
@@ -20,8 +21,89 @@ use super::super::{
     },
 };
 use super::request_contracts::{
-    CodeFeatureFlagsArgs, CodeImpactArgs, CodeSoftwareQueryArgs, parse_software_query_kind,
+    CodeBusinessQueryArgs, CodeFeatureFlagsArgs, CodeImpactArgs, CodeSoftwareQueryArgs,
+    parse_business_query_kind, parse_software_query_kind,
 };
+
+pub(super) async fn code_business_query_tool(
+    server: &McpServer,
+    arguments: Value,
+    request_id: String,
+) -> Value {
+    let args = match serde_json::from_value::<CodeBusinessQueryArgs>(arguments) {
+        Ok(args) => args,
+        Err(error) => return tool_error_result(invalid_arguments(error)),
+    };
+    if let Err(error) = validate_optional_query_text("query", args.query.as_deref())
+        .and_then(|_| validate_optional_query_text("domain", args.domain.as_deref()))
+    {
+        return tool_error_result(error);
+    }
+    let repository = match server
+        .scope_authorizer
+        .authorize_scope(
+            &server.service,
+            &server.agent.access_policy,
+            Some(args.repository),
+        )
+        .await
+    {
+        Ok(Some(repository)) => repository,
+        Ok(None) => {
+            return tool_error_result(AgentAdapterError::new(
+                AgentAdapterErrorKind::InvalidScope,
+                "repository is required for relay_business_query",
+            ));
+        }
+        Err(error) => return tool_error_result(error),
+    };
+    let limit = match authorize_limit(args.limit, &server.agent.access_policy) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
+    let kind = match parse_business_query_kind(args.kind.as_deref().unwrap_or("all")) {
+        Ok(kind) => kind,
+        Err(error) => return tool_error_result(error),
+    };
+    let freshness = match parse_freshness(args.freshness.as_deref()) {
+        Ok(freshness) => freshness,
+        Err(error) => return tool_error_result(error),
+    };
+    let selector = match CodeRepositorySelector::new(
+        repository,
+        args.ref_selector.unwrap_or_else(|| "HEAD".to_owned()),
+        Vec::new(),
+        Vec::new(),
+    ) {
+        Ok(selector) => selector,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+    let request = match BusinessKnowledgeQueryRequest::new(
+        selector,
+        args.domain,
+        args.query,
+        kind,
+        freshness,
+        limit,
+    ) {
+        Ok(request) => request,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+    match server
+        .service
+        .business_knowledge_query(request, request_context(request_id))
+        .await
+    {
+        Ok(response) => tool_success_result(
+            format!(
+                "business knowledge query returned {} term(s)",
+                response.terms.len()
+            ),
+            json!(response),
+        ),
+        Err(error) => api_error_result(error),
+    }
+}
 
 pub(super) async fn code_software_query_tool(
     server: &McpServer,

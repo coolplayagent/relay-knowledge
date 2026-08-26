@@ -1,11 +1,23 @@
 //! Pure domain model types.
 
+mod business;
 mod code;
 mod core;
 mod graph;
 mod knowledge;
 mod operations;
 
+pub use business::{
+    BUSINESS_GLOSSARY_MAX_BYTES, BUSINESS_GLOSSARY_MAX_DOMAINS, BUSINESS_GLOSSARY_MAX_TERMS,
+    BUSINESS_GLOSSARY_SCHEMA_VERSION, BUSINESS_TERM_MAX_ALIASES, BUSINESS_TERM_MAX_MAPPINGS,
+    BusinessAlias, BusinessAliasKind, BusinessDefinitionFact, BusinessDomain,
+    BusinessDomainDefinition, BusinessEvidence, BusinessGlossary, BusinessKnowledgeConflict,
+    BusinessKnowledgeProjection, BusinessKnowledgeProjectionInput, BusinessKnowledgeQueryKind,
+    BusinessKnowledgeQueryRequest, BusinessKnowledgeResolution, BusinessKnowledgeSource,
+    BusinessKnowledgeStatus, BusinessMappingRelation, BusinessSemantics, BusinessTechnicalMapping,
+    BusinessTechnicalMappingDefinition, BusinessTerm, BusinessTermDefinition, BusinessTermStatus,
+    OntologyEntityKind, OntologyIdentity, TechnicalTargetKind,
+};
 pub(crate) use code::call_targets as code_call_targets;
 pub(crate) use code::{
     CODE_QUERY_INDEX_PLAN_UNIT_COUNT, CodeIncrementalClonePhase, CodeQueryIndexRepair,
@@ -47,18 +59,19 @@ pub use code::{
     CodeRetrievalRequest, CodeRouteRecord, CodeScopeRetentionSummary, CodeScopeRetirementJobStatus,
     CodeSymbolGenerationCounts, CodeSymbolKind, CodeSymbolRecord, CodeWorkspaceDetectionConfig,
     CodeWorkspaceMember, CodeWorkspacePackageMapping, CodebaseViewBudget, CodebaseViewCall,
-    CodebaseViewDependency, CodebaseViewEdge, CodebaseViewEvidence, CodebaseViewFile,
-    CodebaseViewKind, CodebaseViewNode, CodebaseViewRequest, CodebaseViewSection,
-    CodebaseViewSnapshot, CodebaseViewSymbol, IndexedRepositoryDocument,
-    REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT, REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT,
-    REPOSITORY_GRAPH_MAX_DEPTH, REPOSITORY_GRAPH_MAX_EDGE_LIMIT, REPOSITORY_GRAPH_MAX_NODE_LIMIT,
-    RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, RepositoryGraphEdge,
-    RepositoryGraphNeighborhood, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
-    RouteHandlerRole, StalenessHint, SymbolRole, clean_git_commit_from_snapshot_identity,
-    code_snapshot_scope_id, code_snapshot_scope_id_with_workspace_detection,
-    code_snapshot_scope_is_fact_versioned, code_snapshot_scope_matches_identity,
-    code_snapshot_scope_workspace_semantic, project_okf_neighborhood,
+    CodebaseViewDeclaredBusinessDomain, CodebaseViewDependency, CodebaseViewEdge,
+    CodebaseViewEvidence, CodebaseViewFile, CodebaseViewKind, CodebaseViewNode,
+    CodebaseViewRequest, CodebaseViewSection, CodebaseViewSnapshot, CodebaseViewSymbol,
+    IndexedRepositoryDocument, REPOSITORY_GRAPH_DEFAULT_EDGE_LIMIT,
+    REPOSITORY_GRAPH_DEFAULT_NODE_LIMIT, REPOSITORY_GRAPH_MAX_DEPTH,
+    REPOSITORY_GRAPH_MAX_EDGE_LIMIT, REPOSITORY_GRAPH_MAX_NODE_LIMIT, RepositoryCodeChunkRecord,
+    RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord, RepositoryGraphEdge, RepositoryGraphNeighborhood,
+    RepositoryGraphNeighborhoodRequest, RepositoryGraphNode, RouteHandlerRole, StalenessHint,
+    SymbolRole, clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
+    code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
+    code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
+    project_okf_neighborhood,
 };
 pub use core::{
     DomainError, GraphVersion, IndexKind, IndexModality, IndexState, IndexStatus, KnowledgeEntity,

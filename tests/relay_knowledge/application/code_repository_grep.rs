@@ -20,12 +20,12 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeIndexTaskClaimRequest,
-        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed,
-        CodeReferenceSearchRequest, CodeRepositoryStore, CodeScopeRetentionRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
-        GraphStore, IndexStore, KnowledgeStore, MutationLogEntry, MutationLogStore,
-        SqliteGraphStore, StorageError, StorageFuture,
+        BusinessKnowledgeStore, CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges,
+        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
+        CodeIndexTaskSeed, CodeReferenceSearchRequest, CodeRepositoryStore,
+        CodeScopeRetentionRequest, CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome,
+        GraphSearchRequest, GraphStore, IndexStore, KnowledgeStore, MutationLogEntry,
+        MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
     },
 };
 
@@ -566,6 +566,8 @@ macro_rules! unsupported_code_repository_method {
         }
     };
 }
+
+impl BusinessKnowledgeStore for CandidatePathUnavailableStore {}
 
 impl CodeRepositoryStore for CandidatePathUnavailableStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);

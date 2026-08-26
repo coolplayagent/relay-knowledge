@@ -143,7 +143,11 @@
 
 ### 6.3.2 POST /api/v1/code/repositories/{alias}/context
 
-构建一次有界 codegraph context pack。请求包含 `repository`、`query`、`limit`（1–20）、`freshness_policy`、`max_context_bytes`（1024–262144）、`include_code` 与 `exclude_generated`；响应返回 entry points、related symbols、graph paths、impact hints、code excerpts、freshness 与实际 budget。
+构建一次有界 codegraph context pack。请求包含 `repository`、`query`、`limit`（1–20）、`freshness_policy`、`max_context_bytes`（1024–262144）、`include_code` 与 `exclude_generated`；响应返回 `business_context`、entry points、related symbols、graph paths、impact hints、code excerpts、freshness 与实际 budget。业务术语和 mapping seed 与代码结果严格绑定同一 resolved commit/source scope。
+
+### 6.3.3 POST /api/v1/code/repositories/{alias}/business
+
+读取索引阶段写入的 authored business projection，不在请求路径读取 YAML。请求为共享的 `BusinessKnowledgeQueryRequest`：`repository` 选择器、可选 `domain`/`query`、`kind`（`terms`、`mappings` 或 `all`）、`freshness_policy` 与 `limit`（1–500）。响应返回 resolution（包含 `ambiguous`）、domain、canonical term、definitions、aliases、semantics、conflicts、technical mappings、`resolution_state`、`target_hint`、evidence 和 repository scope。
 
 `code_query_kind` 枚举：`hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`、`impact`
 

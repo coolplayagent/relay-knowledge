@@ -17,8 +17,8 @@ acceptance evidence that implementation changes must preserve.
   recovery, observability, and SLOs.
 - Chapters 19–22 cover installation, multi-repository overlays, software-global
   modeling, and service deployment.
-- Chapters 24–25 pair an executable knowledge-development contract with its
-  Git-commit-centered mental model.
+- Chapters 24–27 cover the executable knowledge-development contract, code
+  index retention, the Git-commit mental model, and business-to-technical mapping.
 
 ## Chapter Index
 
@@ -47,6 +47,7 @@ acceptance evidence that implementation changes must preserve.
 24. [Code-Map-Backed Knowledge Development Loop](24-code-map-backed-knowledge-development-loop.md)
 25. [Code Index Retention](25-code-index-retention.md)
 26. [Git Commit + Knowledge: Development Philosophy and Iteration Loop](26-git-commit-knowledge-development-loop.md)
+27. [Business Knowledge to Technical Graph Mapping](27-business-knowledge-technical-mapping.md)
 
 Chapter 23 currently has a Chinese-only
 [API Reference](../../zh/03-architecture-specs/23-api-reference.md), with

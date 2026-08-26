@@ -77,9 +77,10 @@ pub use repository_set::{
 };
 pub use staleness::StalenessHint;
 pub use views::{
-    CodebaseViewBudget, CodebaseViewCall, CodebaseViewDependency, CodebaseViewEdge,
-    CodebaseViewEvidence, CodebaseViewFile, CodebaseViewKind, CodebaseViewNode,
-    CodebaseViewRequest, CodebaseViewSection, CodebaseViewSnapshot, CodebaseViewSymbol,
+    CodebaseViewBudget, CodebaseViewCall, CodebaseViewDeclaredBusinessDomain,
+    CodebaseViewDependency, CodebaseViewEdge, CodebaseViewEvidence, CodebaseViewFile,
+    CodebaseViewKind, CodebaseViewNode, CodebaseViewRequest, CodebaseViewSection,
+    CodebaseViewSnapshot, CodebaseViewSymbol,
 };
 pub use workspace::{
     CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,

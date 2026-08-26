@@ -591,6 +591,84 @@ pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
     )
 }
 
+pub(in crate::interfaces::cli::spec) fn repo_business() -> CliCommandSpec {
+    command!(
+        &["repo", "business"],
+        "relay-knowledge repo business <alias> [--kind terms|mappings|all] [--query <text>] [--domain <id>] [--ref <ref>] [--freshness <policy>] [--limit <n>]",
+        "Read authored business terms and their declared technical mappings from an indexed repository scope.",
+        "code.repo.business",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[]
+        )],
+        &[
+            opt(
+                "--kind",
+                Some("kind"),
+                false,
+                false,
+                "Business projection slice.",
+                Some("all"),
+                &["terms", "mappings", "all"]
+            ),
+            opt(
+                "--query",
+                Some("text"),
+                false,
+                false,
+                "Canonical name, alias, definition, or mapping hint.",
+                None,
+                &[]
+            ),
+            opt(
+                "--domain",
+                Some("id"),
+                false,
+                false,
+                "Domain id or declared domain name used for disambiguation.",
+                None,
+                &[]
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed immutable Git ref.",
+                Some("HEAD"),
+                &[]
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls projection freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"]
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum returned terms.",
+                Some("100"),
+                &[]
+            ),
+        ],
+        &["relay-knowledge repo business core --kind all --query MRR --format json"],
+        &[
+            "The command reads the fenced business projection; it never scans glossary YAML at query time."
+        ],
+    )
+}
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

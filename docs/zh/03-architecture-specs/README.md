@@ -10,7 +10,7 @@
 - 第 5–13 章规定证据、图事实、存储、派生索引、检索、Provider、代码图、索引、排序和影响分析。
 - 第 14–18 章规定 Agent Adapter、统一接口、后台恢复、可观测性和 SLO。
 - 第 19–23 章规定安装发布、多仓覆盖、软件全域建模、服务部署和 HTTP API。
-- 第 24–25 章分别给出 Knowledge 开发闭环的落地契约和以 Git commit 为中心的心智模型。
+- 第 24–27 章给出 Knowledge 开发闭环、索引保留、Git commit 心智模型，以及业务知识到技术图谱映射合同。
 
 ## 章节目录
 
@@ -40,6 +40,7 @@
 24. [代码地图驱动的 Knowledge 开发闭环](24-code-map-backed-knowledge-development-loop.md)
 25. [代码索引保留策略](25-code-index-retention.md)
 26. [Git Commit + Knowledge：开发迭代理念与 Loop](26-git-commit-knowledge-development-loop.md)
+27. [业务知识与技术图谱映射](27-business-knowledge-technical-mapping.md)
 
 API 专题页收在[参考资料索引](reference/README.md)，不重复占用章节编号。
 

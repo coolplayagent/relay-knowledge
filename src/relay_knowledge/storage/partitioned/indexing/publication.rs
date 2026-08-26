@@ -75,7 +75,7 @@ pub(in crate::storage::partitioned) fn reconcile(
         if !active_target && !owned_staged_target && !adopted {
             return Ok(false);
         }
-        if raw_checkpoint.is_none() && !active_target {
+        if raw_checkpoint.is_none() && !active_target && !adopted {
             match shard
                 .refresh_software_global_projection_with_fence(
                     target.source_scope.clone(),
