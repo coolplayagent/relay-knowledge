@@ -11,5 +11,6 @@ mod code_repository_views;
 mod code_repository_workspace_cross_resolution;
 mod codegraph_context;
 mod graphrag_evaluation;
+mod knowledge_development_loop;
 mod local_files;
 mod unified_api;

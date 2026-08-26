@@ -137,7 +137,7 @@ Agent 在验收时必须给出“requirement → authoritative evidence → test
 | KDL-03 | 保留 source id 冲突不被覆盖 | domain UT 断言明确冲突错误 |
 | KDL-04 | Skill bootstrap 同时覆盖 map 与 code map | skill contract gate 校验有序的 validate/init/list/register/index/status/model/view/validate 工作流 |
 | KDL-05 | 增量 loop 固定 base/head 并刷新模型 | skill contract gate 与现有 update/index integration tests |
-| KDL-06 | 架构、构建、部署模型来自同一 code scope | `repo software all`/`repo view` 响应中的 scope、freshness、evidence，以及 software projection tests |
+| KDL-06 | 架构、构建、部署模型来自同一 code scope | 隔离 runtime 的 CLI 端到端测试串联 `map init`、register/index、`repo software all`、architecture view 与最终 validate，并断言 resolved commit、source scope、freshness 和 evidence；software projection tests 补充局部边界覆盖 |
 | KDL-07 | Spec/编码入口消费 map、model、impact/context | skill 默认 prompt、reference workflow 和 package validation |
 | KDL-08 | 文档与发布包不会回退到旧提示词 | shared skill metadata/policy self-test、PR gate、release bundle gate |
 | KDL-09 | 仓库交付通过全量质量门禁 | fmt、clippy、all-target tests、coverage、package、publish dry-run 和相关 self-iteration cases |

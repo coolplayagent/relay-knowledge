@@ -141,7 +141,7 @@ Missing external dependency source remains unresolved metadata, not repository d
 | KDL-03 | A reserved source-id conflict is not overwritten | Domain unit test asserts an explicit conflict error |
 | KDL-04 | Skill bootstrap covers both map and code map | Skill contract gate checks ordered validate/init/list/register/index/status/model/view/validate workflow |
 | KDL-05 | Incremental loop pins base/head and refreshes the model | Skill contract gate and existing update/index integration tests |
-| KDL-06 | Architecture, build, and deployment model share the code scope | `repo software all`/`repo view` scope, freshness, evidence, and software projection tests |
+| KDL-06 | Architecture, build, and deployment model share the code scope | An isolated-runtime CLI end-to-end test chains `map init`, register/index, `repo software all`, the architecture view, and final validation while asserting the resolved commit, source scope, freshness, and evidence; software projection tests retain focused boundary coverage |
 | KDL-07 | Spec/coding entry consumes map, model, impact, and context | Skill default prompt, reference workflow, and package validation |
 | KDL-08 | Documentation and release packages cannot regress to the old prompt | Shared skill policy self-test, PR gate, and release bundle gate |
 | KDL-09 | Repository delivery passes complete quality gates | fmt, clippy, all-target tests, coverage, package, publish dry-run, and relevant self-iteration cases |
