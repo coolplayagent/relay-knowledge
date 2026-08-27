@@ -26,9 +26,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
+        uses: actions/configure-pages@v6
 
       - name: Build static Pages site
         run: |
@@ -36,10 +34,10 @@ jobs:
           cp -R pages/. _site/
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
       - name: Deploy Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
