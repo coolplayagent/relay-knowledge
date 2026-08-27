@@ -653,6 +653,9 @@ async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
     );
 }
 
+// Exercise the stable 1.x service signature directly; boxing its public `ApiError` here would
+// make this integration helper diverge from the production contract it is intended to cover.
+#[allow(clippy::result_large_err)]
 async fn software_projection(
     service: &RelayKnowledgeService,
     ref_selector: &str,
