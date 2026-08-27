@@ -755,6 +755,8 @@ fn snapshot_for_scope(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![RepositoryCodeChunkRecord {
             repository_id: repository_id.to_owned(),

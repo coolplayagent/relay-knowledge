@@ -4,6 +4,7 @@ mod canvas;
 mod code;
 mod code_graph;
 mod file_index;
+mod framework;
 mod graph;
 mod health;
 mod index;
@@ -38,6 +39,7 @@ pub use file_index::{
     FileIndexRootStatus, FileIndexRootUpdate, FileIndexScanSummary, FileKnowledgeFactCandidate,
     FileSearchHit, FileSearchRequest,
 };
+pub use framework::FrameworkGraphStore;
 pub use graph::{GraphStore, MutationLogEntry, MutationLogStore};
 pub use health::{GraphInspection, HealthStorageSnapshot, SqliteStorageDiagnostics, StorageHealth};
 pub use index::{

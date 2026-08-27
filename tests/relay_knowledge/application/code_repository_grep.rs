@@ -569,6 +569,8 @@ macro_rules! unsupported_code_repository_method {
 
 impl BusinessKnowledgeStore for CandidatePathUnavailableStore {}
 
+impl relay_knowledge::storage::FrameworkGraphStore for CandidatePathUnavailableStore {}
+
 impl CodeRepositoryStore for CandidatePathUnavailableStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
 

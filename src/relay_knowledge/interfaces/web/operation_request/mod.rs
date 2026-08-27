@@ -1,3 +1,4 @@
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::{
@@ -11,8 +12,8 @@ use crate::{
         CodeGraphContextRequest, CodeImpactRequest, CodeQueryKind, CodeRepositorySelector,
         CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
         CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
-        FreshnessPolicy, IndexKind, ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest,
-        WorkerKind,
+        FrameworkGraphRequest, FrameworkKind, FrameworkNodeKind, FreshnessPolicy, IndexKind,
+        ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest, WorkerKind,
     },
 };
 
@@ -146,6 +147,20 @@ pub(super) fn code_feature_flag_request(
     CodeFeatureFlagRequest::new(
         optional_string_field(payload, "query"),
         code_selector(payload)?,
+        usize_field(payload, "limit")?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+pub(super) fn code_framework_graph_request(
+    payload: &Value,
+) -> Result<FrameworkGraphRequest, WebError> {
+    FrameworkGraphRequest::new(
+        optional_string_field(payload, "query"),
+        code_selector(payload)?,
+        optional_enum_array_field::<FrameworkKind>(payload, "frameworks")?,
+        optional_enum_array_field::<FrameworkNodeKind>(payload, "kinds")?,
         usize_field(payload, "limit")?,
         parse_freshness(string_field(payload, "freshness")?)?,
     )
@@ -295,6 +310,21 @@ pub(super) fn optional_string_array_field(
     }
 
     string_array_field(payload, field)
+}
+
+fn optional_enum_array_field<T>(payload: &Value, field: &'static str) -> Result<Vec<T>, WebError>
+where
+    T: DeserializeOwned,
+{
+    let Some(value) = payload.get(field) else {
+        return Ok(Vec::new());
+    };
+    if !value.is_array() {
+        return Err(WebError::bad_request(format!("{field} must be an array")));
+    }
+
+    serde_json::from_value(value.clone())
+        .map_err(|_| WebError::bad_request(format!("{field} contains an unsupported value")))
 }
 
 pub(super) fn usize_field(payload: &Value, field: &'static str) -> Result<usize, WebError> {

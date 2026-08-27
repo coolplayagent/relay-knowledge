@@ -8,6 +8,7 @@ mod batch;
 mod checkpoint_receipt;
 mod documents;
 mod feature_flags;
+mod frameworks;
 mod generated;
 mod impact;
 pub(in crate::storage) mod lifecycle;
@@ -80,8 +81,6 @@ pub(in crate::storage) use publication::record_receipt_from_active_fence;
 pub(super) use search::SearchDocumentInserter;
 #[cfg(test)]
 pub(in crate::storage) use tasks::MAX_SCOPE_SLOTS_PER_REPOSITORY;
-
-const MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT: usize = 500;
 
 impl SqliteGraphStore {
     pub(in crate::storage) fn code_query_indexes_ready_for_publication(

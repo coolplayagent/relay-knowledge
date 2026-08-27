@@ -2,8 +2,8 @@
 
 [English](./13-agent-access-capabilities.md) | [中文](../../zh/02-capabilities/13-agent-access-capabilities.md)
 
-> Document version: 2.0
-> Date: 2026-05-17
+> Document version: 2.1
+> Date: 2026-08-27
 > Scope: Book 2 capability guide
 
 ## Capability Positioning
@@ -20,11 +20,11 @@ The default MCP address is `http://127.0.0.1:8791/mcp`. Clients initialize, stor
 
 ## Competitive Features
 
-MCP tools expose retrieve context, inspect graph, health, service status, index status, authorized code graph query, one-call codegraph context packs, and authorized code impact. MCP resources expose service, health, index, and metrics read-only context; prompts provide retrieval and code-impact templates.
+MCP tools expose retrieve context, inspect graph, health, service status, index status, authorized code graph query, authorized Angular/Vue framework graph query, one-call codegraph context packs, and authorized code impact. MCP resources expose service, health, index, and metrics read-only context; prompts provide retrieval and code-impact templates.
 
 ## Command/API Entry Points
 
-MCP does not expose arbitrary repository indexing and never starts it from a tool request. Users can run `repo index` or `repo update`; an enabled managed watcher can independently publish checked-out commits through durable reconciliation. `relay_codegraph_context` shares `relay_code_query` scope authorization, limit authorization, freshness parsing, and audit behavior, but only reports stale, pending, or degraded state instead of starting indexing. The local ACP session adapter reuses the same retrieval contract; repository-scoped prompts call the shared codegraph context service and return context artifacts with progress, cancellation, QoS admission, and audit.
+MCP does not expose arbitrary repository indexing and never starts it from a tool request. Users can run `repo index` or `repo update`; an enabled managed watcher can independently publish checked-out commits through durable reconciliation. `relay_code_framework` returns the same independent, bounded Angular/Vue graph exposed by CLI and Web, subject to repository-scope authorization, path authorization, result limits, freshness parsing, and audit. `relay_codegraph_context` shares `relay_code_query` scope authorization, limit authorization, freshness parsing, and audit behavior, but only reports stale, pending, or degraded state instead of starting indexing. The local ACP session adapter reuses the same retrieval contract; repository-scoped prompts call the shared codegraph context service and return context artifacts with progress, cancellation, QoS admission, and audit.
 
 ## Degradation and Diagnostics
 

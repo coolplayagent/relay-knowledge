@@ -235,6 +235,13 @@ where
             value["flags"].as_array().map_or(0, Vec::len),
             value["degraded_reason"].as_str().unwrap_or("none")
         ),
+        "code.repo.framework_graph" => format!(
+            "framework_nodes={} framework_edges={} truncated={} degraded={}",
+            value["graph"]["nodes"].as_array().map_or(0, Vec::len),
+            value["graph"]["edges"].as_array().map_or(0, Vec::len),
+            value["graph"]["truncated"].as_bool().unwrap_or(false),
+            value["degraded_reason"].as_str().unwrap_or("none")
+        ),
         "code.repo.impact" => format!(
             "changed_in_scope={} results={}",
             value["path_groups"]["in_scope_changed_paths"]

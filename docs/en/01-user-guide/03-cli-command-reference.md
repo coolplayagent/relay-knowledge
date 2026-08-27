@@ -6,7 +6,7 @@ This chapter is an executable command index. Workflow details live in later chap
 
 When `--format json` or `--format streaming-json` is requested, parse diagnostics and runtime API failures written to stderr are JSON. Runtime API failures use the stable API error shape with `error_kind`, `message`, and optional `metadata`; text and markdown formats keep human-readable stderr messages.
 
-To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode covers `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo graph`, `repo context`, `repo feature-flags`, `repo impact`, `repo report`, `repo software`, and `repo view` for repositories already registered on the service host. `repo index --reset` and `repo index-worker` are rejected while remote mode is selected and must be run on the service host; unrelated local commands such as `status` and `health` keep using local runtime state when only the environment variable is set.
+To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode covers `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo graph`, `repo context`, `repo framework`, `repo feature-flags`, `repo impact`, `repo report`, `repo software`, and `repo view` for repositories already registered on the service host. `repo index --reset` and `repo index-worker` are rejected while remote mode is selected and must be run on the service host; unrelated local commands such as `status` and `health` keep using local runtime state when only the environment variable is set.
 
 ## 3.1 Common Status Commands
 
@@ -108,6 +108,7 @@ relay-knowledge repo update <alias> [--base <ref>] [--head <ref>]
 relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports|sbom] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
+relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue] [--kind component|directive|pipe|template|input|output|prop|emit|model|slot|template-variable|control-flow] [--ref <ref>] [--path <filter>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
@@ -142,6 +143,9 @@ Kind values are scoped to their command family:
 
 - `repo query --kind` and `repo-set query --kind`: `hybrid`, `symbol`,
   `definition`, `references`, `callers`, `callees`, `imports`, `sbom`.
+- `repo framework --kind`: `component`, `directive`, `pipe`, `template`,
+  `input`, `output`, `prop`, `emit`, `model`, `slot`, `template-variable`,
+  `control-flow`.
 - `repo software --kind`: `dependencies`, `sdks`, `files`, `topics`,
   `relationships`, `build`, `iac`, `design`, `all`.
 - `repo business --kind`: `terms`, `mappings`, `all`.
@@ -154,11 +158,12 @@ Kind values are scoped to their command family:
   `ci`, `runtime`, `wiki`, `monitoring`.
 
 Do not pass kind values across command families. Use `repo impact` for impact
-analysis and `repo feature-flags` for feature flags; they are not
+analysis, `repo framework` for Angular/Vue template semantics, and
+`repo feature-flags` for feature flags; they are not
 `repo query --kind` values.
 
 `--path` is the CLI flag for a path filter. `repo register --path` stores the
-indexed scope, while `repo query --path` and `repo feature-flags --path` narrow
+indexed scope, while `repo query --path`, `repo framework --path`, and `repo feature-flags --path` narrow
 reads inside that indexed scope. `repo index` does not accept `--path`; it uses
 the registered scope and the selected `--ref`. Non-Git source directories use
 `HEAD` for the normal moving filesystem snapshot, and status records the
@@ -188,6 +193,8 @@ After a bulk code-index snapshot apply or checkpointed finalize succeeds, SQLite
 `repo query --query` accepts inline filters such as `kind:function`, `lang:rust` or `language:rust`, `path:storage`, and `name:query`. Unknown `prefix:value` tokens remain ordinary search text. Inline language filters intersect explicit `--language`; `kind` and language narrow SQL candidates, while `path` and `name` filter scored hits before truncation. `name:` matches symbol identities and SBOM package identities, not arbitrary excerpt text.
 
 `repo feature-flags` reads configuration-driven feature-flag graph facts written during indexing. By default it lists flags, configuration sources, and code-usage edges in the selected repository scope; `--query` filters by flag name, config key, path, or excerpt. Its JSON response includes the same `freshness` object as `repo query`, including pending task, checkpoint cursor, index lag, stale/degraded reason, and direct-source-read paths for returned feature-flag usage files. The extractor recognizes environment variables, config/settings keys, boolean config declarations, and common SDK evaluation calls such as OpenFeature, LaunchDarkly, and Unleash clients. It does not sync provider control-plane state, strategies, segments, or rollout variants. The command does not scan the whole source tree at query time; after extractor changes or newly added flags, run `repo index` or `repo update` before expecting new facts.
+
+`repo framework` reads the independent Angular/Vue component-template graph written during indexing. Repeat `--framework`, `--kind`, or `--path` to intersect filters; omit them to enumerate the bounded selected scope. The graph includes typed nodes for components, templates, bindings, slots, template variables, and control flow, plus ownership, render, binding, event, read/write, directive, and slot edges. Vue SFC script symbols and imports remain available through ordinary `repo query`. The command never scans source at query time and never starts indexing; `wait-until-fresh` requires the durable indexed snapshot to include current framework facts.
 
 `repo software` reads the software global-model projection for the selected repository scope. `--kind dependencies` returns package components derived from manifests and lockfiles plus `dependency_usages` that link declared packages to matching code/config import evidence. Repeated lockfile rows for the same repository-level package/version coordinate appear as one derived locked component with deterministic representative evidence, while declared components and raw `repo query --kind sbom` evidence remain evidence-specific. `--kind sdks` returns unresolved external import/include targets as SDK or API-surface usage candidates; `--kind files` returns whole-file nodes for code, config, docs, build manifests, deployments, tests, and templates; `--kind topics` returns topics extracted from Markdown/spec headings and `.knowledge/knowledge-map.yaml`; `--kind relationships` returns cross-domain edges such as `documents`, `depends_on`, `uses_sdk`, and `configures`. `--kind build` returns package, script, target, feature, module, profile, plugin, goal, and job entries extracted from Cargo, npm, Python, Go, Maven effective `pom.xml`, Gradle, CMake, Makefile, and CI workflow evidence. `--kind iac` returns deployment and infrastructure resources extracted from Dockerfile, Compose, Kubernetes YAML, Helm charts, Terraform, systemd, launchd, and CI workflow evidence. `--kind design` returns evidence-backed software systems, modules, components, interfaces, and capabilities from README files, architecture/design Markdown, and package/module manifests. The command does not execute build tools, scan package caches, SDK directories, cloud APIs, unindexed external source, or whole-repository docs at query time; rerun `repo index` or `repo update` to refresh the projection after source-scope changes.
 

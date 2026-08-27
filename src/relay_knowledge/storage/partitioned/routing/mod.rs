@@ -6,10 +6,11 @@ use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactRequest, CodeRepositoryReport,
         CodeRepositorySelector, CodeRetrievalHit, CodeRetrievalRequest, CodebaseViewRequest,
-        CodebaseViewSnapshot, IndexedRepositoryDocument,
+        CodebaseViewSnapshot, FrameworkGraph, FrameworkGraphRequest, IndexedRepositoryDocument,
     },
     storage::{
-        CodeImpactChanges, CodeRepositoryStore, SqliteGraphStore, StorageError, StorageFuture,
+        CodeImpactChanges, CodeRepositoryStore, FrameworkGraphStore, SqliteGraphStore,
+        StorageError, StorageFuture,
     },
 };
 
@@ -177,6 +178,24 @@ pub(super) fn search_code_feature_flags_scope(
         store
             .control
             .search_code_feature_flags_scope(source_scope, request)
+            .await
+    })
+}
+
+pub(super) fn search_framework_graph_scope(
+    store: PartitionedSqliteKnowledgeStore,
+    source_scope: String,
+    request: FrameworkGraphRequest,
+) -> StorageFuture<'static, FrameworkGraph> {
+    Box::pin(async move {
+        if let Some(shard) = source_scope_store(&store.catalog, source_scope.clone()).await? {
+            return shard
+                .search_framework_graph_scope(source_scope, request)
+                .await;
+        }
+        store
+            .control
+            .search_framework_graph_scope(source_scope, request)
             .await
     })
 }

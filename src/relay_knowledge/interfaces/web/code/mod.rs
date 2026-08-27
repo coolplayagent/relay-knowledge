@@ -14,8 +14,8 @@ use crate::{
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositorySelector,
-        CodeRetrievalRequest, CodebaseViewRequest, RepositoryGraphNeighborhoodRequest,
-        SoftwareGlobalRequest,
+        CodeRetrievalRequest, CodebaseViewRequest, FrameworkGraphRequest,
+        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::normalize_index_request,
 };
@@ -58,6 +58,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/feature-flags",
             post(code_repository_feature_flags),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/framework-graph",
+            post(code_repository_framework_graph),
         )
         .route(
             "/api/v1/code/repositories/{alias}/impact",
@@ -254,6 +258,28 @@ async fn code_repository_feature_flags(
     match state
         .service
         .query_code_repository_feature_flags(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_framework_graph(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<FrameworkGraphRequest>,
+) -> Response {
+    if let Some(error) = normalize_framework_graph_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .query_code_repository_framework_graph(request, api_context(&headers))
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -487,6 +513,26 @@ fn normalize_feature_flag_request(request: &mut CodeFeatureFlagRequest) -> Optio
     match CodeFeatureFlagRequest::new(
         request.query.take(),
         request.repository.clone(),
+        request.limit,
+        request.freshness_policy,
+    ) {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_framework_graph_request(request: &mut FrameworkGraphRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match FrameworkGraphRequest::new(
+        request.query.take(),
+        request.repository.clone(),
+        std::mem::take(&mut request.frameworks),
+        std::mem::take(&mut request.kinds),
         request.limit,
         request.freshness_policy,
     ) {

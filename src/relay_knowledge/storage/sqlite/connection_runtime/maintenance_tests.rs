@@ -355,6 +355,8 @@ fn empty_snapshot(source_scope: &str) -> CodeIndexSnapshot {
         files: Vec::new(),
         symbols: Vec::new(),
         references: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),

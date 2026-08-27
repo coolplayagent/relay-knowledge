@@ -127,6 +127,10 @@ fn import_code_scope(
             transaction,
             super::super::schema::GENERATED_DETECTION_REINDEX_MIGRATION,
         )?;
+    let imported_framework_graph_is_current = import_compat::attached_framework_graph_is_current(
+        transaction,
+        super::super::schema::FRAMEWORK_GRAPH_REINDEX_MIGRATION,
+    )?;
     let imported_search_owner_is_current = import_compat::attached_search_owner_is_current(
         transaction,
         crate::storage::sqlite::schema::marker::SEARCH_OWNER_V2_MIGRATION,
@@ -178,6 +182,9 @@ fn import_code_scope(
     super::super::generated::backfill_scope_path_generated_flags(transaction, source_scope)?;
     if !imported_generated_detection_is_current {
         super::super::generated::mark_scope_generated_detection_stale(transaction, source_scope)?;
+    }
+    if !imported_framework_graph_is_current {
+        mark_imported_framework_graph_scope_stale(transaction, source_scope)?;
     }
     if !imported_search_owner_is_current {
         mark_imported_search_owner_scope_stale(transaction, source_scope)?;
@@ -364,6 +371,21 @@ fn mark_imported_search_owner_scope_stale(
 ) -> Result<(), StorageError> {
     const REASON: &str =
         "import source lacks the complete search-owner-v2 capability; full reindex required";
+    mark_imported_scope_stale(transaction, source_scope, REASON)?;
+    tracing::warn!(
+        source_scope,
+        reason = REASON,
+        "imported code scope is retained as stale"
+    );
+
+    Ok(())
+}
+
+fn mark_imported_framework_graph_scope_stale(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    const REASON: &str = "import source lacks framework graph facts; full reindex required";
     mark_imported_scope_stale(transaction, source_scope, REASON)?;
     tracing::warn!(
         source_scope,

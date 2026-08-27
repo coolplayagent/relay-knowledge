@@ -27,7 +27,8 @@ pub use proposal::{
 };
 pub use repository::{
     BusinessKnowledgeQueryResponse, CodeRepositoryFeatureFlagsResponse,
-    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    CodeRepositoryFrameworkGraphResponse, CodeRepositoryImpactResponse,
+    CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse,
     CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,

@@ -70,7 +70,7 @@ relay-knowledge repo index repo --ref <commit-sha> --format json
 
 CLI-shaped Web 索引请求接受可选布尔字段 `reuse_historical`；省略或传 `null` 时保持默认 full-index 行为。100-path 复用预算会分别统计 rename/copy 的 old/new path；历史基线若在 task admission 前被 retention 标为 retiring，则安全回退 full task。
 
-远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 和 `repo update` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
+远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 和 `repo update` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
@@ -145,6 +145,17 @@ Workspace import resolution 是显式启用的索引期能力。API 调用方可
 `definition`、`references` 和 `hybrid` 查询采用 AST/FTS 优先、内部 exact-text source fallback 兜底的顺序。兜底会在当前结构化结果没有覆盖具体身份或引用、hybrid 结果窗口仍有空位，或 fresh scope 报告 parser-degraded 文件时触发；最后一种情况防止健康文件已经产生的结构化引用命中遮蔽降级文件中缺失的引用事实。它搜索已索引 commit 中经过 path/language/scope 过滤并物化的候选文件，而不是直接扫当前脏工作树。对非 Git `filesystem:` commit，兜底会先确认当前 live tree 仍解析到同一个 synthetic snapshot；如果已经变化，则报告降级而不是读取另一个快照的 live 文件。兜底命中的 `retrieval_layers` 至少包含 `lexical` 和 `text_fallback`，definition 兜底还可以包含 `definition`；这些命中没有 resolved edge confidence，因为它们只是源码文本证据。
 
 如果候选路径查询不可用、候选文件数、物化字节或单行长度预算耗尽，查询仍返回已有代码图结果，并在 `degraded_reason` 中说明 source fallback 预算或候选路径原因。缩小 `--path`、`--language` 或先确认目标 ref 已 fresh，通常比扩大 `--limit` 更有效。
+
+### Angular/Vue Framework Graph 查询
+
+`repo framework` 把 component/template 语义作为独立 graph 暴露，而不是混入普通 symbol 命中：
+
+```bash
+relay-knowledge repo framework repo --framework angular --kind component --path src/app --format json
+relay-knowledge repo framework repo --framework vue --kind prop --query modelValue --limit 20 --format json
+```
+
+Angular 索引会读取 decorator 以及 inline/external HTML template。Vue SFC 索引会记录 prop、emit、model、slot、template variable 和 control flow，同时仍把 embedded script 交给普通 TypeScript/JavaScript 抽取。响应分开返回类型化 `nodes`/`edges`，携带 resolution state 与 target hint，并显式标记结果截断。查询只读取已提交的受界 framework table，不会即时解析 template 或读取 worktree。
 
 ### 特性开关图查询
 

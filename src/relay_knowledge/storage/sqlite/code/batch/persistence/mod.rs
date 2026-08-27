@@ -9,7 +9,7 @@ use rusqlite::{
 use super::super::{
     SearchDocumentInserter,
     cleanup::{delete_path_indexes, path_indexes_exist},
-    feature_flags, routes, symbols,
+    feature_flags, frameworks, routes, symbols,
 };
 use super::{checkpoint, dependencies};
 use crate::{
@@ -104,6 +104,7 @@ fn apply_batch_once(
     insert_imports(&transaction, batch, edge_search_languages.as_ref())?;
     dependencies::insert_dependencies(&transaction, batch)?;
     feature_flags::insert_records(&transaction, &batch.feature_flags)?;
+    frameworks::insert_records(&transaction, &batch.framework_nodes, &batch.framework_edges)?;
     routes::insert_records(&transaction, &batch.routes)?;
     insert_chunks(&transaction, batch)?;
     insert_diagnostics(&transaction, batch)?;
@@ -733,6 +734,8 @@ fn checked_fact_row_count(batch: &CodeIndexBatch) -> Result<usize, StorageError>
         batch.imports.len(),
         batch.dependencies.len(),
         batch.feature_flags.len(),
+        batch.framework_nodes.len(),
+        batch.framework_edges.len(),
         batch.routes.len(),
         batch.chunks.len(),
         batch.diagnostics.len(),

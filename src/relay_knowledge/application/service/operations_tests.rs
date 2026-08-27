@@ -140,6 +140,8 @@ async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_acti
                 imports: Vec::new(),
                 dependencies: Vec::new(),
                 feature_flags: Vec::new(),
+                framework_nodes: Vec::new(),
+                framework_edges: Vec::new(),
                 routes: Vec::new(),
                 chunks: Vec::new(),
                 diagnostics: Vec::new(),

@@ -229,6 +229,46 @@ fn parses_repo_feature_flags_with_optional_filter_and_scope() {
 }
 
 #[test]
+fn parses_repo_framework_graph_filters() {
+    let command = parse_repo(&[
+        "framework".to_owned(),
+        "frontend".to_owned(),
+        "--query".to_owned(),
+        "version select".to_owned(),
+        "--framework".to_owned(),
+        "vue".to_owned(),
+        "--kind".to_owned(),
+        "component".to_owned(),
+        "--kind".to_owned(),
+        "template-variable".to_owned(),
+        "--path".to_owned(),
+        "src".to_owned(),
+        "--freshness".to_owned(),
+        "wait-until-fresh".to_owned(),
+        "--limit".to_owned(),
+        "25".to_owned(),
+    ])
+    .expect("framework graph command should parse");
+
+    assert_eq!(
+        command,
+        RepoCommand::FrameworkGraph {
+            alias: "frontend".to_owned(),
+            query: Some("version select".to_owned()),
+            frameworks: vec![crate::domain::FrameworkKind::Vue],
+            kinds: vec![
+                crate::domain::FrameworkNodeKind::Component,
+                crate::domain::FrameworkNodeKind::TemplateVariable,
+            ],
+            limit: 25,
+            ref_selector: "HEAD".to_owned(),
+            path_filters: vec!["src".to_owned()],
+            freshness: FreshnessPolicy::WaitUntilFresh,
+        }
+    );
+}
+
+#[test]
 fn parses_repo_command_forms_and_validation_errors() {
     assert_eq!(
         parse_repo(&["list".to_owned()]).expect("list command should parse"),

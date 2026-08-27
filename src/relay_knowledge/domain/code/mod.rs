@@ -1,6 +1,7 @@
 pub(crate) mod call_targets;
 mod context;
 mod dependencies;
+mod framework;
 mod graph_records;
 mod repository;
 mod repository_graph;
@@ -20,6 +21,10 @@ pub use context::{
     CodeGraphContextRequest, CodeGraphImpactHint,
 };
 pub use dependencies::CodeDependencyRecord;
+pub use framework::{
+    CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord, FrameworkEdgeKind, FrameworkGraph,
+    FrameworkGraphRequest, FrameworkKind, FrameworkNodeKind,
+};
 pub use graph_records::{
     CodeChunkRecord, CodeExtractionMetadata, CodeFileFields, CodeFileRecord, CodeGraphBatch,
     CodeGraphCommitReceipt, CodeParseStatus, CodeParseStatusCounts, CodeRange, CodeReferenceFields,

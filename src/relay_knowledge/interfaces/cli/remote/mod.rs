@@ -6,16 +6,18 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::{
     api::{
         ApiError, BusinessKnowledgeQueryResponse, CodeGraphContextResponse,
-        CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
-        CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
-        CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
-        CodeRepositoryStatusResponse, CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
+        CodeRepositoryFeatureFlagsResponse, CodeRepositoryFrameworkGraphResponse,
+        CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse, CodeRepositoryListResponse,
+        CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
+        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
+        CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
         RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalResponse,
     },
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
-        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest,
+        FrameworkGraphRequest, FreshnessPolicy, RepositoryGraphNeighborhoodRequest,
+        SoftwareGlobalRequest,
     },
     env::NetworkEnvOverrides,
     net::{
@@ -43,6 +45,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::Graph { .. }
                 | RepoCommand::Context { .. }
                 | RepoCommand::FeatureFlags { .. }
+                | RepoCommand::FrameworkGraph { .. }
                 | RepoCommand::Impact { .. }
                 | RepoCommand::Report { .. }
                 | RepoCommand::Software { .. }
@@ -340,6 +343,47 @@ pub(super) async fn run_remote(
 
             render_response(
                 "code.repo.feature_flags",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::FrameworkGraph {
+            alias,
+            query,
+            frameworks,
+            kinds,
+            limit,
+            ref_selector,
+            path_filters,
+            freshness,
+        } => {
+            let request = FrameworkGraphRequest::new(
+                query.clone(),
+                repo::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    path_filters.clone(),
+                    Vec::new(),
+                    format,
+                )?,
+                frameworks.clone(),
+                kinds.clone(),
+                *limit,
+                *freshness,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, CodeRepositoryFrameworkGraphResponse>(
+                    alias,
+                    "framework-graph",
+                    &request,
+                )
+                .await?;
+
+            render_response(
+                "code.repo.framework_graph",
                 response.metadata.clone(),
                 &response,
                 format,

@@ -7,8 +7,8 @@ use crate::{
     domain::{
         BusinessKnowledgeQueryKind, CODEGRAPH_CONTEXT_DEFAULT_LIMIT,
         CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_BYTES,
-        CODEGRAPH_CONTEXT_MAX_LIMIT, CODEGRAPH_CONTEXT_MIN_BYTES, CodeQueryKind,
-        SoftwareGlobalKind,
+        CODEGRAPH_CONTEXT_MAX_LIMIT, CODEGRAPH_CONTEXT_MIN_BYTES, CodeQueryKind, FrameworkKind,
+        FrameworkNodeKind, SoftwareGlobalKind,
     },
     interfaces::agent::{AgentAdapterError, AgentAdapterErrorKind, authorize_limit},
 };
@@ -99,6 +99,25 @@ pub(super) struct CodeFeatureFlagsArgs {
     pub(super) path_filters: Vec<String>,
     #[serde(default)]
     pub(super) language_filters: Vec<String>,
+    #[serde(default)]
+    pub(super) freshness: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CodeFrameworkGraphArgs {
+    pub(super) repository: String,
+    #[serde(default)]
+    pub(super) query: Option<String>,
+    #[serde(default)]
+    pub(super) frameworks: Vec<FrameworkKind>,
+    #[serde(default)]
+    pub(super) kinds: Vec<FrameworkNodeKind>,
+    #[serde(default)]
+    pub(super) limit: Option<usize>,
+    #[serde(default)]
+    pub(super) ref_selector: Option<String>,
+    #[serde(default)]
+    pub(super) path_filters: Vec<String>,
     #[serde(default)]
     pub(super) freshness: Option<String>,
 }

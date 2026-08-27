@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use super::{
-    register_command, score_cli_contract_case, score_registration_case,
+    framework_query_command, register_command, score_cli_contract_case, score_registration_case,
     select_cli_contract_cases_for_profile, select_registration_cases_for_profile,
 };
 use crate::{cases::string_or, command::CommandResult};
@@ -140,6 +140,50 @@ fn register_command_can_omit_alias_for_default_project_name() {
             "stable",
             "--format",
             "json"
+        ]
+    );
+}
+
+#[test]
+fn framework_query_command_preserves_framework_filters() {
+    let case = serde_json::json!({
+        "query": "VersionSelect",
+        "frameworks": ["vue"],
+        "kinds": ["component", "prop"],
+        "path_filters": ["packages/playground"],
+        "limit": 25
+    });
+
+    assert_eq!(
+        framework_query_command(
+            std::path::Path::new("relay-knowledge"),
+            "vue",
+            "HEAD",
+            &case,
+        ),
+        vec![
+            "relay-knowledge",
+            "repo",
+            "framework",
+            "vue",
+            "--ref",
+            "HEAD",
+            "--freshness",
+            "wait-until-fresh",
+            "--limit",
+            "25",
+            "--query",
+            "VersionSelect",
+            "--framework",
+            "vue",
+            "--kind",
+            "component",
+            "--kind",
+            "prop",
+            "--path",
+            "packages/playground",
+            "--format",
+            "json",
         ]
     );
 }

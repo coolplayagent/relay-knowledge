@@ -7,7 +7,7 @@ use crate::{
     code::{repository_uses_filesystem_source, resolve_repository_ref_with_filters},
     domain::{
         CodeFeatureFlagRequest, CodeIndexTaskRecord, CodeRepositorySelector, CodeRepositoryStatus,
-        CodeRetrievalRequest, code_snapshot_scope_is_fact_versioned,
+        CodeRetrievalRequest, FrameworkGraphRequest, code_snapshot_scope_is_fact_versioned,
         code_snapshot_scope_matches_identity,
     },
 };
@@ -32,6 +32,20 @@ pub(super) async fn feature_flag_request_at_indexed_ref(
     mut request: CodeFeatureFlagRequest,
     status: &CodeRepositoryStatus,
 ) -> Result<CodeFeatureFlagRequest, ApiError> {
+    request.repository.ref_selector = indexed_commit_for_selector(
+        status,
+        &request.repository,
+        request.repository.ref_selector.clone(),
+    )
+    .await?;
+
+    Ok(request)
+}
+
+pub(super) async fn framework_graph_request_at_indexed_ref(
+    mut request: FrameworkGraphRequest,
+    status: &CodeRepositoryStatus,
+) -> Result<FrameworkGraphRequest, ApiError> {
     request.repository.ref_selector = indexed_commit_for_selector(
         status,
         &request.repository,

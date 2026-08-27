@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::{
-    MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT, SearchDocumentInserter,
+    SearchDocumentInserter,
     cleanup::{count_code_rows, delete_path_indexes},
     report,
 };
@@ -34,6 +34,8 @@ pub(super) use fingerprints::{
 pub(super) use repository_import::import_repository_from_database;
 
 use self::scope_tables::{CODE_SCOPE_TABLES, CodeScopeTable, REFERENCE_SEARCH_SCOPE_TABLES};
+
+const MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT: usize = 500;
 
 #[cfg(test)]
 #[path = "progress_tests.rs"]

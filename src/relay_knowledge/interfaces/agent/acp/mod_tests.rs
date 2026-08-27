@@ -583,6 +583,8 @@ macro_rules! unsupported_code_repository_method {
     };
 }
 
+impl crate::storage::FrameworkGraphStore for SlowSearchStore {}
+
 impl CodeRepositoryStore for SlowSearchStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     unsupported_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
@@ -708,6 +710,8 @@ impl CodeGraphStore for SearchFailStore {
         Box::pin(async { Ok(Vec::new()) })
     }
 }
+
+impl crate::storage::FrameworkGraphStore for SearchFailStore {}
 
 impl CodeRepositoryStore for SearchFailStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);

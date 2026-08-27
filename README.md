@@ -126,6 +126,8 @@ relay-knowledge repo status repository --format json
 relay-knowledge repo query repository --query retry_policy \
   --kind definition --ref HEAD --path src --freshness wait-until-fresh \
   --limit 10 --format json
+relay-knowledge repo framework repository --framework vue --kind component \
+  --ref HEAD --path src --freshness wait-until-fresh --format json
 relay-knowledge repo software repository --kind relationships \
   --ref HEAD --format json
 ```

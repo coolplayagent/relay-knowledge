@@ -277,6 +277,8 @@ impl CodeIndexPlan {
             imports: build.imports,
             dependencies: build.dependencies,
             feature_flags: build.feature_flags,
+            framework_nodes: build.framework_nodes,
+            framework_edges: build.framework_edges,
             routes: build.routes,
             chunks: build.chunks,
             diagnostics: build.diagnostics,

@@ -1,4 +1,7 @@
-use crate::domain::{BusinessKnowledgeQueryKind, FreshnessPolicy, SoftwareGlobalKind};
+use crate::domain::{
+    BusinessKnowledgeQueryKind, FrameworkKind, FrameworkNodeKind, FreshnessPolicy,
+    SoftwareGlobalKind,
+};
 
 #[cfg(test)]
 use super::query::parse_query_kind;
@@ -22,6 +25,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("graph") => parse_graph(&tokens[1..]),
         Some("context") => parse_context(&tokens[1..]),
         Some("feature-flags") => parse_feature_flags(&tokens[1..]),
+        Some("framework") => parse_framework_graph(&tokens[1..]),
         Some("impact") => parse_impact(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
@@ -335,6 +339,99 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
         language_filters,
         freshness,
     })
+}
+
+fn parse_framework_graph(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut query = None;
+    let mut frameworks = Vec::new();
+    let mut kinds = Vec::new();
+    let mut limit = 50;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut path_filters = Vec::new();
+    let mut freshness = FreshnessPolicy::AllowStale;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--query" => {
+                let (value, next_index) = collect_query_value(tokens, index, "--query")?;
+                query = Some(value);
+                index = next_index;
+            }
+            "--framework" => {
+                let value = value_after(tokens, index, "--framework")?;
+                frameworks.push(parse_framework_kind(&value)?);
+                index += 2;
+            }
+            "--kind" => {
+                let value = value_after(tokens, index, "--kind")?;
+                kinds.push(parse_framework_node_kind(&value)?);
+                index += 2;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--path" => {
+                path_filters.push(value_after(tokens, index, "--path")?);
+                index += 2;
+            }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
+            other if !other.starts_with('-') && query.is_none() => {
+                let (value, next_index) = collect_positional_query(tokens, index);
+                query = Some(value);
+                index = next_index;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::FrameworkGraph {
+        alias,
+        query,
+        frameworks,
+        kinds,
+        limit,
+        ref_selector,
+        path_filters,
+        freshness,
+    })
+}
+
+fn parse_framework_kind(value: &str) -> Result<FrameworkKind, CliError> {
+    match value {
+        "angular" => Ok(FrameworkKind::Angular),
+        "vue" => Ok(FrameworkKind::Vue),
+        other => Err(CliError::UnexpectedArgument(other.to_owned())),
+    }
+}
+
+fn parse_framework_node_kind(value: &str) -> Result<FrameworkNodeKind, CliError> {
+    match value {
+        "component" => Ok(FrameworkNodeKind::Component),
+        "directive" => Ok(FrameworkNodeKind::Directive),
+        "pipe" => Ok(FrameworkNodeKind::Pipe),
+        "template" => Ok(FrameworkNodeKind::Template),
+        "input" => Ok(FrameworkNodeKind::Input),
+        "output" => Ok(FrameworkNodeKind::Output),
+        "prop" => Ok(FrameworkNodeKind::Prop),
+        "emit" => Ok(FrameworkNodeKind::Emit),
+        "model" => Ok(FrameworkNodeKind::Model),
+        "slot" => Ok(FrameworkNodeKind::Slot),
+        "template-variable" => Ok(FrameworkNodeKind::TemplateVariable),
+        "control-flow" => Ok(FrameworkNodeKind::ControlFlow),
+        other => Err(CliError::UnexpectedArgument(other.to_owned())),
+    }
 }
 
 fn parse_impact(tokens: &[String]) -> Result<RepoCommand, CliError> {

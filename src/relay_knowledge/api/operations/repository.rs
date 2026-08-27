@@ -8,11 +8,11 @@ use crate::{
         CodeImpactPathGroups, CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSummary,
         CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
         CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositoryStatus, CodeRetrievalHit,
-        CodeRetrievalRequest, CodeScopeRetentionSummary, RepositoryGraphEdge,
-        RepositoryGraphNeighborhoodRequest, RepositoryGraphNode, SoftwareBuildTarget,
-        SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile,
-        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship,
-        SoftwareSdkUsage, SoftwareTopic,
+        CodeRetrievalRequest, CodeScopeRetentionSummary, FrameworkGraph, FrameworkGraphRequest,
+        RepositoryGraphEdge, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
+        SoftwareBuildTarget, SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement,
+        SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
+        SoftwareRelationship, SoftwareSdkUsage, SoftwareTopic,
     },
 };
 
@@ -145,6 +145,19 @@ pub struct CodeRepositoryFeatureFlagsResponse {
     pub freshness: CodeRepositoryFreshnessDiagnostics,
     pub request: CodeFeatureFlagRequest,
     pub flags: Vec<CodeFeatureFlagGraph>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
+/// Framework-aware component and template graph response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryFrameworkGraphResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    #[serde(default = "CodeRepositoryFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: CodeRepositoryFreshnessDiagnostics,
+    pub request: FrameworkGraphRequest,
+    pub graph: FrameworkGraph,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
 }

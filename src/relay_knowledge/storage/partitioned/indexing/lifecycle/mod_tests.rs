@@ -538,6 +538,8 @@ fn empty_snapshot(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

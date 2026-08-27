@@ -375,6 +375,106 @@ pub(in crate::interfaces::cli::spec) fn repo_feature_flags() -> CliCommandSpec {
     )
 }
 
+pub(in crate::interfaces::cli::spec) fn repo_framework() -> CliCommandSpec {
+    command!(
+        &["repo", "framework"],
+        "relay-knowledge repo framework <alias> [--query <text>] [--framework <angular|vue>] [--kind <kind>] [--ref <ref>] [--path <filter>] [--freshness <policy>] [--limit <n>]",
+        "Read the bounded Angular/Vue component and template graph from a repository index.",
+        "code.repo.framework_graph",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[],
+        )],
+        &[
+            opt(
+                "--query",
+                Some("text"),
+                false,
+                false,
+                "Optional filter over names, targets, details, and paths.",
+                None,
+                &[],
+            ),
+            opt(
+                "--framework",
+                Some("framework"),
+                false,
+                true,
+                "Restricts results to a framework family.",
+                None,
+                &["angular", "vue"],
+            ),
+            opt(
+                "--kind",
+                Some("kind"),
+                false,
+                true,
+                "Restricts node results to a framework construct kind.",
+                None,
+                &[
+                    "component",
+                    "directive",
+                    "pipe",
+                    "template",
+                    "input",
+                    "output",
+                    "prop",
+                    "emit",
+                    "model",
+                    "slot",
+                    "template-variable",
+                    "control-flow",
+                ],
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed Git ref or worktree selector.",
+                Some("HEAD"),
+                &[],
+            ),
+            opt(
+                "--path",
+                Some("filter"),
+                false,
+                true,
+                "Restricts query to an indexed path prefix.",
+                None,
+                &[],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls index freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum nodes and maximum edges requested from the API.",
+                Some("50"),
+                &[],
+            ),
+        ],
+        &["relay-knowledge repo framework frontend --framework vue --kind component --format json"],
+        &[
+            "Framework facts are extracted during durable indexing; this command does not scan source files at query time."
+        ],
+    )
+}
+
 pub(in crate::interfaces::cli::spec) fn repo_impact() -> CliCommandSpec {
     command!(
         &["repo", "impact"],

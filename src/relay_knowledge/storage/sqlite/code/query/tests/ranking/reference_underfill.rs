@@ -42,6 +42,8 @@ async fn underfilled_reference_edges_are_completed_from_indexed_source_chunks() 
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -124,6 +126,8 @@ async fn reference_chunk_completion_reserves_candidates_for_code_usage() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),
@@ -203,6 +207,8 @@ async fn repeated_structured_reference_groups_receive_candidate_recall_priority(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),
@@ -248,6 +254,8 @@ async fn exact_reference_chunk_completion_excludes_macro_definition_evidence() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(

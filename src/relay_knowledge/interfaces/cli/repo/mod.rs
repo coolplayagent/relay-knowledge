@@ -1,6 +1,6 @@
 use crate::domain::{
-    BusinessKnowledgeQueryKind, CodeQueryKind, CodeRepositorySelector, FreshnessPolicy,
-    SoftwareGlobalKind,
+    BusinessKnowledgeQueryKind, CodeQueryKind, CodeRepositorySelector, FrameworkKind,
+    FrameworkNodeKind, FreshnessPolicy, SoftwareGlobalKind,
 };
 
 use super::{
@@ -93,6 +93,16 @@ pub enum RepoCommand {
         ref_selector: String,
         path_filters: Vec<String>,
         language_filters: Vec<String>,
+        freshness: FreshnessPolicy,
+    },
+    FrameworkGraph {
+        alias: String,
+        query: Option<String>,
+        frameworks: Vec<FrameworkKind>,
+        kinds: Vec<FrameworkNodeKind>,
+        limit: usize,
+        ref_selector: String,
+        path_filters: Vec<String>,
         freshness: FreshnessPolicy,
     },
     Impact {

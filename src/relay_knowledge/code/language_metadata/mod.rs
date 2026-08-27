@@ -271,6 +271,11 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
             language: || tree_sitter_javascript::LANGUAGE.into(),
             tags_query: tree_sitter_javascript::TAGS_QUERY,
         }),
+        "html" | "htm" => Some(LanguageSpec {
+            id: "html",
+            language: || tree_sitter_html::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
+        }),
         "ts" | "mts" | "cts" => Some(LanguageSpec {
             id: "typescript",
             language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
@@ -280,6 +285,11 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
             id: "tsx",
             language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
             tags_query: tree_sitter_typescript::TAGS_QUERY,
+        }),
+        "vue" => Some(LanguageSpec {
+            id: "vue",
+            language: || tree_sitter_html::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
         }),
         "go" => Some(LanguageSpec {
             id: "go",

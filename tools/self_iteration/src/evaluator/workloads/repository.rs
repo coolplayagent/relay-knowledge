@@ -21,9 +21,10 @@ use super::super::{
 };
 use super::{
     cli_cases::{
-        incremental_update_command, query_command, register_command, software_query_command,
+        framework_query_command, incremental_update_command, query_command, register_command,
+        software_query_command,
     },
-    repository_scoring::{score_query_case, score_software_case},
+    repository_scoring::{score_framework_case, score_query_case, score_software_case},
     selection::guardrail_gate_from_case,
 };
 
@@ -35,6 +36,21 @@ use expectation::{
     observed_git_file_count, scope_preview_command,
 };
 use isolation::RepositoryIsolation;
+
+fn scoped_register_command(
+    binary: &Path,
+    path: &Path,
+    alias: Option<&str>,
+    repo_config: &Value,
+) -> Vec<String> {
+    let mut command = register_command(binary, path, alias);
+    let format = command.split_off(command.len().saturating_sub(2));
+    for path_filter in string_vec(repo_config, "registration_path_filters") {
+        command.extend(["--path".to_owned(), path_filter]);
+    }
+    command.extend(format);
+    command
+}
 
 pub(in crate::evaluator) fn evaluate_repository(
     runtime: &EvalRuntime,
@@ -176,14 +192,15 @@ fn evaluate_repository_in_runtime(
         runtime,
         CommandSpec::new(
             format!("{repo_name}_register"),
-            register_command(
+            scoped_register_command(
                 &runtime.binary,
                 &path,
                 (!repo_config
                     .get("register_without_alias")
                     .and_then(Value::as_bool)
                     .unwrap_or(false))
-                .then_some(alias),
+                    .then_some(alias),
+                repo_config,
             ),
             &runtime.workspace,
             Some(runtime.env.clone()),
@@ -210,7 +227,12 @@ fn evaluate_repository_in_runtime(
             runtime,
             CommandSpec::new(
                 format!("{repo_name}_register_alias_{additional_alias}"),
-                register_command(&runtime.binary, &path, Some(&additional_alias)),
+                scoped_register_command(
+                    &runtime.binary,
+                    &path,
+                    Some(&additional_alias),
+                    repo_config,
+                ),
                 &runtime.workspace,
                 Some(runtime.env.clone()),
                 runtime.timeout,
@@ -466,18 +488,28 @@ fn evaluate_repository_in_runtime(
         let repo_name = repo_name.to_owned();
         move |case| {
             let query_alias = string_or(&case, "repository_alias", &alias).to_owned();
+            let framework_surface = string_or(&case, "surface", "query") == "framework";
+            let command = if framework_surface {
+                framework_query_command(&runtime.binary, &query_alias, &ref_selector, &case)
+            } else {
+                query_command(&runtime.binary, &query_alias, &ref_selector, &case)
+            };
             let query = run_limited(
                 &runtime.limiter,
                 CommandSpec::new(
                     format!("{}_{}", repo_name, string_or(&case, "id", "case")),
-                    query_command(&runtime.binary, &query_alias, &ref_selector, &case),
+                    command,
                     &runtime.workspace,
                     Some(runtime.env.clone()),
                     runtime.timeout,
                 ),
             );
             let duration_ms = query.duration_ms;
-            let observation = score_query_case(&repo_name, &case, &query);
+            let observation = if framework_surface {
+                score_framework_case(&repo_name, &case, &query)
+            } else {
+                score_query_case(&repo_name, &case, &query)
+            };
             let guardrail_gate = guardrail_gate_from_case(&observation, duration_ms);
             (query, observation, guardrail_gate)
         }

@@ -48,6 +48,16 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
         cursor: CodeScopeCursor::Key("usage_id"),
     },
     CodeScopeTable {
+        table: "code_repository_framework_nodes",
+        columns: "repository_id, source_scope, node_id, file_id, path, framework, kind, name, detail, symbol_snapshot_id, byte_start, byte_end, line_start, line_end",
+        cursor: CodeScopeCursor::Key("node_id"),
+    },
+    CodeScopeTable {
+        table: "code_repository_framework_edges",
+        columns: "repository_id, source_scope, edge_id, file_id, path, framework, kind, source_node_id, target_node_id, target_hint, resolution_state, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end",
+        cursor: CodeScopeCursor::Key("edge_id"),
+    },
+    CodeScopeTable {
         table: "code_repository_routes",
         columns: "repository_id, source_scope, route_id, file_id, path, language_id, url, http_method, handler_name, handler_symbol_snapshot_id, framework, line_start, line_end",
         cursor: CodeScopeCursor::Key("route_id"),

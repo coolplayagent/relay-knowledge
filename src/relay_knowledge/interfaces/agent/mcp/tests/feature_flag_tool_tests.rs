@@ -16,7 +16,7 @@ use crate::{
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, FreshnessPolicy},
     env::{EnvironmentConfig, PlatformKind},
-    interfaces::agent::AgentAuditStatus,
+    interfaces::agent::{AgentAuditStatus, mcp::tool_registry::CODE_FRAMEWORK_TOOL},
     storage::SqliteGraphStore,
 };
 
@@ -61,7 +61,11 @@ pub fn checkout_enabled() -> bool {
     .await;
 
     let structured = &outcome.result["structuredContent"];
-    assert_eq!(outcome.result["isError"], false);
+    assert_eq!(
+        outcome.result["isError"], false,
+        "unexpected MCP response: {}",
+        outcome.result
+    );
     assert_eq!(structured["flags"][0]["source_key"], "CHECKOUT_V2");
 
     let audit = server.audit_snapshot();
@@ -70,6 +74,58 @@ pub fn checkout_enabled() -> bool {
     assert_eq!(event.source_scope.as_deref(), Some("fixture"));
     assert_eq!(event.result_count, Some(1));
     assert_eq!(event.status, AgentAuditStatus::Completed);
+}
+
+#[tokio::test]
+async fn code_framework_tool_routes_vue_graph_through_mcp_dispatcher() {
+    let repo = FixtureRepo::create("mcp-code-framework");
+    repo.write(
+        "src/App.vue",
+        r#"<script setup lang="ts">
+const props = defineProps<{ title: string }>()
+const emit = defineEmits<{ change: [value: string] }>()
+</script>
+<template><CopyIcon/></template>"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let (server, service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
+    register_and_index_fixture(&service, &repo, "fixture").await;
+
+    let outcome = run_cancellable_tool_call(
+        &server,
+        ToolCallParams {
+            name: CODE_FRAMEWORK_TOOL.to_owned(),
+            arguments: json!({
+                "repository": "fixture",
+                "frameworks": ["vue"],
+                "limit": 10,
+                "freshness": "wait-until-fresh"
+            }),
+        },
+        "code-framework".to_owned(),
+    )
+    .await;
+
+    let structured = &outcome.result["structuredContent"];
+    assert_eq!(
+        outcome.result["isError"], false,
+        "unexpected MCP response: {}",
+        outcome.result
+    );
+    assert!(
+        structured["graph"]["nodes"]
+            .as_array()
+            .is_some_and(|nodes| nodes.iter().any(|node| node["name"] == "App"))
+    );
+    assert!(
+        structured["graph"]["edges"]
+            .as_array()
+            .is_some_and(|edges| edges.iter().any(|edge| edge["kind"] == "renders")),
+        "unexpected MCP response: {}",
+        outcome.result
+    );
 }
 
 async fn register_and_index_fixture(

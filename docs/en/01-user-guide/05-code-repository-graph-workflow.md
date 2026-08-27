@@ -70,7 +70,7 @@ When the requested full scope is not already fresh, `repo index` queues a durabl
 
 The CLI-shaped Web index request accepts the optional boolean `reuse_historical`; omission and `null` keep the default full-index behavior. The 100-path reuse budget counts both the old and new path of each rename or copy, and a historical base retired before task admission safely falls back to a full task.
 
-In remote service mode, register the repository on the service host, start `service run --web`, and point the local CLI at the resident HTTP API with `--remote http://host:8791` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote `repo index` and `repo update` only submit durable tasks and return task/status/checkpoint data; they do not run `repo index-worker` in the local CLI process. The remote resident master drains the task through its code-index worker pool. Remote mode supports `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo context`, `repo feature-flags`, `repo impact`, `repo report`, `repo software`, and `repo view`; it does not register local paths into a remote service. Run `repo index --reset` and `repo index-worker` on the service host because remote-selected CLIs reject those maintenance commands instead of falling back to local state.
+In remote service mode, register the repository on the service host, start `service run --web`, and point the local CLI at the resident HTTP API with `--remote http://host:8791` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote `repo index` and `repo update` only submit durable tasks and return task/status/checkpoint data; they do not run `repo index-worker` in the local CLI process. The remote resident master drains the task through its code-index worker pool. Remote mode supports `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo context`, `repo framework`, `repo feature-flags`, `repo impact`, `repo report`, `repo software`, and `repo view`; it does not register local paths into a remote service. Run `repo index --reset` and `repo index-worker` on the service host because remote-selected CLIs reject those maintenance commands instead of falling back to local state.
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
@@ -147,6 +147,17 @@ Symbol hits also include `canonical_symbol_id` for expressing logical symbol ide
 `definition`, `references`, and `hybrid` queries run AST/FTS first and bounded internal exact-text source fallback last. The fallback starts when the current structured results do not cover the requested identity or reference, when a hybrid result window still has room, or when a fresh scope reports parser-degraded files whose missing reference facts must not be hidden by healthy files that did produce structured hits. It searches materialized candidate files from the indexed commit after path, language, and scope filtering; it does not directly scan the current dirty worktree. For non-Git `filesystem:` commits, fallback first verifies that the live tree still resolves to the same synthetic snapshot and reports degradation instead of reading changed live files. Fallback hits include at least `lexical` and `text_fallback` in `retrieval_layers`, and definition fallback may also include `definition`. They do not carry resolved edge confidence because they are source-text evidence only.
 
 If candidate-path lookup is unavailable, or if candidate-file, materialized-byte, or line-length budgets are exhausted, the query still returns existing code graph results and reports the source fallback diagnostic through `degraded_reason`. Narrowing `--path` or `--language`, and confirming that the target ref is fresh, is usually more useful than raising `--limit`.
+
+### Angular and Vue Framework Graph Queries
+
+`repo framework` exposes component/template semantics as an independent graph instead of mixing framework facts into ordinary symbol hits:
+
+```bash
+relay-knowledge repo framework repo --framework angular --kind component --path src/app --format json
+relay-knowledge repo framework repo --framework vue --kind prop --query modelValue --limit 20 --format json
+```
+
+Angular indexing reads decorators plus inline or external HTML templates. Vue SFC indexing records props, emits, models, slots, template variables, and control flow while still sending embedded script content through ordinary TypeScript/JavaScript extraction. The response separates typed `nodes` and `edges`, carries resolution state and target hints, and marks result truncation explicitly. Queries use only committed, bounded framework tables; they do not parse templates or read the worktree on demand.
 
 ### Feature-Flag Graph Queries
 

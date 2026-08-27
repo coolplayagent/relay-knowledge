@@ -30,6 +30,8 @@ const PHASES: &[&str] = &[
     "calls",
     "routes",
     "feature_flags",
+    "framework_edges",
+    "framework_nodes",
     "dependencies",
     "imports",
     "references",
@@ -294,6 +296,12 @@ fn delete_phase_batch(
         "routes" => delete_scope_table(transaction, "code_repository_routes", source_scope),
         "feature_flags" => {
             delete_scope_table(transaction, "code_repository_feature_flags", source_scope)
+        }
+        "framework_edges" => {
+            delete_scope_table(transaction, "code_repository_framework_edges", source_scope)
+        }
+        "framework_nodes" => {
+            delete_scope_table(transaction, "code_repository_framework_nodes", source_scope)
         }
         "dependencies" => {
             delete_scope_table(transaction, "code_repository_dependencies", source_scope)

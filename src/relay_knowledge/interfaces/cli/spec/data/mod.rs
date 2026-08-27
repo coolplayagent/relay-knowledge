@@ -24,6 +24,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         repo::repo_graph(),
         repo::repo_context(),
         repo::repo_feature_flags(),
+        repo::repo_framework(),
         repo::repo_impact(),
         repo::repo_view(),
         repo::repo_status(),

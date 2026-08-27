@@ -556,6 +556,8 @@ macro_rules! unsupported_code_method {
 
 impl BusinessKnowledgeStore for RefreshFailStore {}
 
+impl relay_knowledge::storage::FrameworkGraphStore for RefreshFailStore {}
+
 impl CodeRepositoryStore for RefreshFailStore {
     unsupported_code_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     unsupported_code_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);

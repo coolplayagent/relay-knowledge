@@ -430,6 +430,8 @@ fn batch(source_scope: &str, references: Vec<RepositoryCodeReferenceRecord>) -> 
         imports: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),

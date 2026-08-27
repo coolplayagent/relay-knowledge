@@ -86,6 +86,7 @@ General knowledge retrieval uses the current implementation default. Code reposi
 - `index refresh`: `bm25`, `semantic`, `vector`.
 - `worker`: `embedding`, `ocr`, `vision`, `extractor`.
 - `repo query`: `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, `sbom`.
+- `repo framework`: `component`, `directive`, `pipe`, `template`, `input`, `output`, `prop`, `emit`, `model`, `slot`, `template-variable`, `control-flow`.
 - `repo software`: `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, `all`.
 
 When query text or a reason contains words beginning with `-`, use `--` or quoting so they are not parsed as options.

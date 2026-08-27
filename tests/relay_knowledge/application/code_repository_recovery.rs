@@ -212,6 +212,8 @@ async fn full_index_worker_rejects_a_bad_last_path_before_begin_mutates_reposito
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            framework_nodes: Vec::new(),
+            framework_edges: Vec::new(),
             routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),

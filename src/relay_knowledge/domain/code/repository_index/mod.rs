@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
+    CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord,
     dependencies::CodeDependencyRecord,
     error::DomainError,
     repository::{
@@ -49,6 +50,10 @@ pub struct CodeIndexSnapshot {
     pub calls: Vec<CodeCallRecord>,
     pub dependencies: Vec<CodeDependencyRecord>,
     pub feature_flags: Vec<CodeFeatureFlagRecord>,
+    #[serde(default)]
+    pub framework_nodes: Vec<CodeFrameworkNodeRecord>,
+    #[serde(default)]
+    pub framework_edges: Vec<CodeFrameworkEdgeRecord>,
     pub routes: Vec<CodeRouteRecord>,
     pub chunks: Vec<RepositoryCodeChunkRecord>,
     #[serde(default)]
@@ -153,6 +158,10 @@ pub struct CodeIndexBatch {
     pub imports: Vec<CodeImportRecord>,
     pub dependencies: Vec<CodeDependencyRecord>,
     pub feature_flags: Vec<CodeFeatureFlagRecord>,
+    #[serde(default)]
+    pub framework_nodes: Vec<CodeFrameworkNodeRecord>,
+    #[serde(default)]
+    pub framework_edges: Vec<CodeFrameworkEdgeRecord>,
     pub routes: Vec<CodeRouteRecord>,
     pub chunks: Vec<RepositoryCodeChunkRecord>,
     pub diagnostics: Vec<CodeFileDiagnostic>,
@@ -167,6 +176,8 @@ impl CodeIndexBatch {
             .saturating_add(self.imports.len())
             .saturating_add(self.dependencies.len())
             .saturating_add(self.feature_flags.len())
+            .saturating_add(self.framework_nodes.len())
+            .saturating_add(self.framework_edges.len())
             .saturating_add(self.routes.len())
             .saturating_add(self.chunks.len())
             .saturating_add(self.diagnostics.len())

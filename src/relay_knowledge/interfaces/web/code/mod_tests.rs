@@ -18,7 +18,7 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{
         CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
-        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
+        CodeRepositorySelector, CodeRetrievalRequest, FrameworkGraphRequest, FreshnessPolicy,
         RepositoryGraphNeighborhoodRequest, SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     env::{EnvironmentConfig, PlatformKind},
@@ -358,6 +358,27 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
         0
     );
     assert_eq!(feature_flags["freshness"]["state"], "fresh");
+
+    let framework_request = FrameworkGraphRequest::new(
+        None,
+        selector.clone(),
+        Vec::new(),
+        Vec::new(),
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("framework request should validate");
+    let framework = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/framework-graph",
+        Some(json!(framework_request)),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(framework["graph"]["nodes"], json!([]));
+    assert_eq!(framework["graph"]["edges"], json!([]));
+    assert_eq!(framework["freshness"]["state"], "fresh");
 
     let zero_impact_limit = request_json(
         router.clone(),

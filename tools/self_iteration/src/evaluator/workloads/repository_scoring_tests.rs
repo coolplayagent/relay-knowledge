@@ -1,4 +1,4 @@
-use super::score_query_case;
+use super::{score_framework_case, score_query_case};
 use crate::command::CommandResult;
 
 #[test]
@@ -55,4 +55,36 @@ fn repository_case_expect_empty_preserves_payload_constraint_failures() {
 
     assert!(!observation.passed);
     assert!(observation.message.contains("missing=budget"));
+}
+
+#[test]
+fn framework_case_scores_nodes_and_edges_as_ranked_hits() {
+    let case = serde_json::json!({
+        "id": "framework_graph",
+        "expected": [
+            {"kind": "component", "name": "VersionSelect"},
+            {"kind": "renders", "target_hint": "Copy"}
+        ],
+        "max_rank": 2
+    });
+    let result = CommandResult {
+        name: "repo_framework".to_owned(),
+        command: vec!["relay-knowledge".to_owned()],
+        exit_code: 0,
+        duration_ms: 1,
+        stdout: serde_json::json!({
+            "graph": {
+                "nodes": [{"kind": "component", "name": "VersionSelect"}],
+                "edges": [{"kind": "renders", "target_hint": "Copy"}]
+            },
+            "degraded_reason": null
+        })
+        .to_string(),
+        stderr: String::new(),
+    };
+
+    let observation = score_framework_case("vue", &case, &result);
+
+    assert!(observation.passed, "{}", observation.message);
+    assert_eq!(observation.rank, Some(1));
 }

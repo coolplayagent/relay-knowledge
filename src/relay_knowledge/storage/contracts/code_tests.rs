@@ -19,6 +19,8 @@ macro_rules! required_code_repository_method {
     };
 }
 
+impl FrameworkGraphStore for MinimalCodeRepositoryStore {}
+
 impl CodeRepositoryStore for MinimalCodeRepositoryStore {
     required_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     required_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
@@ -509,6 +511,8 @@ fn code_index_batch() -> CodeIndexBatch {
         imports: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),

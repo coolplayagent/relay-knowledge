@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use crate::{
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeImpactRequest,
-        CodeRepositorySelector, SoftwareGlobalRequest,
+        CodeRepositorySelector, FrameworkGraphRequest, SoftwareGlobalRequest,
     },
     interfaces::agent::{
         AgentAdapterError, AgentAdapterErrorKind, authorize_limit, validate_optional_query_text,
@@ -21,8 +21,8 @@ use super::super::{
     },
 };
 use super::request_contracts::{
-    CodeBusinessQueryArgs, CodeFeatureFlagsArgs, CodeImpactArgs, CodeSoftwareQueryArgs,
-    parse_business_query_kind, parse_software_query_kind,
+    CodeBusinessQueryArgs, CodeFeatureFlagsArgs, CodeFrameworkGraphArgs, CodeImpactArgs,
+    CodeSoftwareQueryArgs, parse_business_query_kind, parse_software_query_kind,
 };
 
 pub(super) async fn code_business_query_tool(
@@ -240,6 +240,84 @@ pub(super) async fn code_feature_flags_tool(
             format!(
                 "feature flag query returned {} flag group(s)",
                 response.flags.len()
+            ),
+            json!(response),
+        ),
+        Err(error) => api_error_result(error),
+    }
+}
+
+pub(super) async fn code_framework_graph_tool(
+    server: &McpServer,
+    arguments: Value,
+    request_id: String,
+) -> Value {
+    let args = match serde_json::from_value::<CodeFrameworkGraphArgs>(arguments) {
+        Ok(args) => args,
+        Err(error) => return tool_error_result(invalid_arguments(error)),
+    };
+    if let Err(error) = validate_optional_query_text("query", args.query.as_deref())
+        .and_then(|_| validate_path_texts("path_filters", &args.path_filters))
+    {
+        return tool_error_result(error);
+    }
+    let repository = match server
+        .scope_authorizer
+        .authorize_scope(
+            &server.service,
+            &server.agent.access_policy,
+            Some(args.repository),
+        )
+        .await
+    {
+        Ok(Some(repository)) => repository,
+        Ok(None) => {
+            return tool_error_result(AgentAdapterError::new(
+                AgentAdapterErrorKind::InvalidScope,
+                "repository is required for relay_code_framework",
+            ));
+        }
+        Err(error) => return tool_error_result(error),
+    };
+    let limit = match authorize_limit(args.limit, &server.agent.access_policy) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
+    let freshness = match parse_freshness(args.freshness.as_deref()) {
+        Ok(freshness) => freshness,
+        Err(error) => return tool_error_result(error),
+    };
+    let selector = match CodeRepositorySelector::new(
+        repository,
+        args.ref_selector.unwrap_or_else(|| "HEAD".to_owned()),
+        args.path_filters,
+        Vec::new(),
+    ) {
+        Ok(selector) => selector,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+    let request = match FrameworkGraphRequest::new(
+        args.query,
+        selector,
+        args.frameworks,
+        args.kinds,
+        limit,
+        freshness,
+    ) {
+        Ok(request) => request,
+        Err(error) => return tool_error_result(domain_argument_error(error)),
+    };
+
+    match server
+        .service
+        .query_code_repository_framework_graph(request, request_context(request_id))
+        .await
+    {
+        Ok(response) => tool_success_result(
+            format!(
+                "framework graph returned {} node(s) and {} edge(s)",
+                response.graph.nodes.len(),
+                response.graph.edges.len()
             ),
             json!(response),
         ),

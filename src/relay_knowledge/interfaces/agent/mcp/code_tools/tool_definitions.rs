@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::super::tool_registry::{
-    CODE_BUSINESS_QUERY_TOOL, CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL,
-    CODE_QUERY_TOOL, CODE_REPOSITORY_GRAPH_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
+    CODE_BUSINESS_QUERY_TOOL, CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_FRAMEWORK_TOOL,
+    CODE_IMPACT_TOOL, CODE_QUERY_TOOL, CODE_REPOSITORY_GRAPH_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
     CODE_SOFTWARE_QUERY_TOOL,
 };
 
@@ -122,6 +122,27 @@ pub(in crate::interfaces::agent::mcp) fn code_feature_flags_tool_definition() ->
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
                 }
+            },
+            "required": ["repository"]
+        }
+    })
+}
+
+pub(in crate::interfaces::agent::mcp) fn code_framework_tool_definition() -> Value {
+    json!({
+        "name": CODE_FRAMEWORK_TOOL,
+        "description": "Read a bounded Angular/Vue component and template graph from an authorized indexed repository. This tool does not scan the live worktree or trigger indexing.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repository": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "maxLength": MAX_AGENT_QUERY_CHARS},
+                "frameworks": {"type": "array", "maxItems": 2, "items": {"type": "string", "enum": ["angular", "vue"]}},
+                "kinds": {"type": "array", "maxItems": 16, "items": {"type": "string", "enum": ["component", "directive", "pipe", "template", "input", "output", "prop", "emit", "model", "slot", "template_variable", "control_flow"]}},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                "ref_selector": {"type": "string"},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
+                "freshness": {"type": "string", "enum": ["allow-stale", "wait-until-fresh", "graph-only"]}
             },
             "required": ["repository"]
         }

@@ -7,6 +7,7 @@ use std::{
 mod catalog;
 mod control_plane;
 mod diagnostics;
+mod framework;
 mod indexing;
 mod repository;
 mod routing;
@@ -36,10 +37,7 @@ use crate::{
 };
 
 use catalog::{SqliteShardCatalog, initialize_catalog_schema};
-use routing::{
-    is_missing_code_scope_error, report_matches_active_control, repository_store_for_report,
-    repository_store_for_selector, source_scope_store,
-};
+use routing::{report_matches_active_control, repository_store_for_report, source_scope_store};
 
 /// SQLite topology that keeps global control state in one DB and code facts in
 /// one DB per registered repository.
@@ -461,7 +459,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
         let this = self.clone();
         Box::pin(async move {
-            if let Some(shard) = repository_store_for_selector(
+            if let Some(shard) = routing::repository_store_for_selector(
                 &this.control,
                 &this.catalog,
                 request.repository.clone(),
@@ -470,7 +468,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             {
                 return match shard.search_code(request.clone()).await {
                     Ok(hits) => Ok(hits),
-                    Err(error) if is_missing_code_scope_error(&error) => {
+                    Err(error) if routing::is_missing_code_scope_error(&error) => {
                         this.control.search_code(request).await
                     }
                     Err(error) => Err(error),
@@ -486,7 +484,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
         let this = self.clone();
         Box::pin(async move {
-            if let Some(shard) = repository_store_for_selector(
+            if let Some(shard) = routing::repository_store_for_selector(
                 &this.control,
                 &this.catalog,
                 request.repository.clone(),
@@ -495,7 +493,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             {
                 return match shard.search_code_feature_flags(request.clone()).await {
                     Ok(flags) => Ok(flags),
-                    Err(error) if is_missing_code_scope_error(&error) => {
+                    Err(error) if routing::is_missing_code_scope_error(&error) => {
                         this.control.search_code_feature_flags(request).await
                     }
                     Err(error) => Err(error),
@@ -528,7 +526,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
         let this = self.clone();
         Box::pin(async move {
-            if let Some(shard) = repository_store_for_selector(
+            if let Some(shard) = routing::repository_store_for_selector(
                 &this.control,
                 &this.catalog,
                 request.repository.clone(),
@@ -540,7 +538,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
                     .await
                 {
                     Ok(hits) => Ok(hits),
-                    Err(error) if is_missing_code_scope_error(&error) => {
+                    Err(error) if routing::is_missing_code_scope_error(&error) => {
                         this.control.analyze_code_impact(request, changes).await
                     }
                     Err(error) => Err(error),
@@ -687,7 +685,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, SoftwareGlobalProjection> {
         let this = self.clone();
         Box::pin(async move {
-            if let Some(shard) = repository_store_for_selector(
+            if let Some(shard) = routing::repository_store_for_selector(
                 &this.control,
                 &this.catalog,
                 request.repository.clone(),
@@ -696,7 +694,7 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             {
                 return match shard.software_global_projection(request.clone()).await {
                     Ok(projection) => Ok(projection),
-                    Err(error) if is_missing_code_scope_error(&error) => {
+                    Err(error) if routing::is_missing_code_scope_error(&error) => {
                         this.control.software_global_projection(request).await
                     }
                     Err(error) => Err(error),

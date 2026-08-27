@@ -251,6 +251,8 @@ macro_rules! unsupported_code_repository_method {
     };
 }
 
+impl crate::storage::FrameworkGraphStore for GraphOnlySearchStore {}
+
 impl CodeRepositoryStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     unsupported_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
@@ -362,6 +364,8 @@ impl CodeGraphStore for SlowLegacyHealthStore {
         unsupported("slow health fixture does not search code chunks")
     }
 }
+
+impl crate::storage::FrameworkGraphStore for SlowLegacyHealthStore {}
 
 impl CodeRepositoryStore for SlowLegacyHealthStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);

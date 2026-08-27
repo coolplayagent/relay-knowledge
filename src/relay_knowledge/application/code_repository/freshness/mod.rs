@@ -9,7 +9,7 @@ use crate::{
     },
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeRepositorySelector, CodeRepositoryStatus,
-        CodeRetrievalHit, CodeRetrievalRequest,
+        CodeRetrievalHit, CodeRetrievalRequest, FrameworkGraph, FrameworkGraphRequest,
     },
     storage::KnowledgeStore,
 };
@@ -43,6 +43,19 @@ pub(super) struct CodeFeatureFlagFreshnessContext<'a> {
     pub(super) stale_reason: Option<String>,
     pub(super) degraded_reason: Option<String>,
     pub(super) flags: &'a [CodeFeatureFlagGraph],
+    pub(super) graph_version: u64,
+}
+
+pub(super) struct FrameworkGraphFreshnessContext<'a> {
+    pub(super) base_status: &'a CodeRepositoryStatus,
+    pub(super) scoped_status: &'a CodeRepositoryStatus,
+    pub(super) request: &'a FrameworkGraphRequest,
+    pub(super) requested_ref: String,
+    pub(super) requested_resolved_ref: String,
+    pub(super) freshness_target: CodeRepositorySelector,
+    pub(super) stale_reason: Option<String>,
+    pub(super) degraded_reason: Option<String>,
+    pub(super) graph: &'a FrameworkGraph,
     pub(super) graph_version: u64,
 }
 
@@ -104,6 +117,36 @@ pub(super) async fn code_feature_flag_freshness_diagnostics(
             pending,
             cursor: checkpoint,
             direct_source_read_paths: feature_flag_paths(context.flags),
+        },
+    ))
+}
+
+pub(super) async fn framework_graph_freshness_diagnostics(
+    store: &Arc<dyn KnowledgeStore>,
+    context: FrameworkGraphFreshnessContext<'_>,
+) -> Result<CodeRepositoryFreshnessDiagnostics, ApiError> {
+    let (pending, checkpoint) = pending_work_and_checkpoint(
+        store,
+        context.base_status,
+        context.scoped_status,
+        &context.freshness_target,
+    )
+    .await?;
+
+    Ok(CodeRepositoryFreshnessDiagnostics::code_query(
+        CodeRepositoryFreshnessInput {
+            graph_version: context.graph_version,
+            freshness_policy: context.request.freshness_policy,
+            source_scope: indexed_source_scope(context.scoped_status),
+            requested_ref: context.requested_ref,
+            requested_resolved_ref: context.requested_resolved_ref,
+            served_ref: context.request.repository.ref_selector.clone(),
+            scope_stale: context.scoped_status.stale || context.stale_reason.is_some(),
+            stale_reason: context.stale_reason,
+            degraded_reason: context.degraded_reason,
+            pending,
+            cursor: checkpoint,
+            direct_source_read_paths: framework_graph_paths(context.graph),
         },
     ))
 }
@@ -181,6 +224,17 @@ fn feature_flag_paths(flags: &[CodeFeatureFlagGraph]) -> Vec<String> {
     flags
         .iter()
         .flat_map(|flag| flag.usages.iter().map(|usage| usage.path.clone()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn framework_graph_paths(graph: &FrameworkGraph) -> Vec<String> {
+    graph
+        .nodes
+        .iter()
+        .map(|node| node.path.clone())
+        .chain(graph.edges.iter().map(|edge| edge.path.clone()))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()

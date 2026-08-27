@@ -497,6 +497,8 @@ async fn fenced_snapshot_and_session_cannot_rewrite_an_active_scope() {
                 calls: Vec::new(),
                 dependencies: Vec::new(),
                 feature_flags: Vec::new(),
+                framework_nodes: Vec::new(),
+                framework_edges: Vec::new(),
                 routes: Vec::new(),
                 chunks: Vec::new(),
                 workspaces: Vec::new(),

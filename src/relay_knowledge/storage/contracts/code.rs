@@ -13,7 +13,7 @@ use crate::domain::{
     SoftwareGlobalRequest,
 };
 
-use super::{StorageError, StorageFuture};
+use super::{FrameworkGraphStore, StorageError, StorageFuture};
 
 /// Default error text for stores that do not support code task lease recovery.
 pub const CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE: &str =
@@ -274,7 +274,7 @@ pub struct CodeRepositorySetRefreshTaskFailure {
 }
 
 /// Persisted code repository graph and retrieval contract.
-pub trait CodeRepositoryStore: Send + Sync {
+pub trait CodeRepositoryStore: FrameworkGraphStore + Send + Sync {
     fn upsert_code_repository(
         &self,
         registration: CodeRepositoryRegistration,

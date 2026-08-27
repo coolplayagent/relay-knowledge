@@ -658,6 +658,8 @@ async fn a_new_worktree_task_adopts_an_exact_config_aware_publication_without_mu
             calls: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            framework_nodes: Vec::new(),
+            framework_edges: Vec::new(),
             routes: Vec::new(),
             chunks: Vec::new(),
             workspaces: Vec::new(),

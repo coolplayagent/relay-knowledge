@@ -2,8 +2,8 @@
 
 [中文](./08-code-repository-basics.md) | [English](../../en/02-capabilities/08-code-repository-basics.md)
 
-> 文档版本: 2.1
-> 编制日期: 2026-08-11
+> 文档版本: 2.2
+> 编制日期: 2026-08-27
 > 适用范围: 第二卷能力说明
 
 ## 能力定位
@@ -18,6 +18,7 @@ relay-knowledge repo index relay-knowledge --ref HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query relay-knowledge --query RetryPolicy --kind symbol --exclude-generated --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo framework frontend --framework angular --kind component --path src/app --freshness wait-until-fresh --limit 50 --format json
 relay-knowledge repo graph stone-star --focus knowledge/investment-research/rates.md --path knowledge/investment-research --ref HEAD --format json
 relay-knowledge repo update relay-knowledge --format json
 relay-knowledge repo status relay-knowledge --format json
@@ -78,6 +79,10 @@ scope 之外，直到用户显式放宽 path filter。
 Rust enum variant 和 C/C++ enumerator 会作为挂在 enum owner 下的结构化 `enum_member` symbol 写入索引，因此 `--kind symbol` 和 `--kind definition` 可以解析 `Color.Red` 或 `Direction.kForward` 这类身份，而不依赖 text fallback。其他语言的 enum case 形态应按语言补充 parser fixture 后再纳入结构化 enum-member 覆盖范围。
 
 `repo feature-flags` 是独立只读入口，用于枚举或过滤 indexed scope 内的配置驱动特性开关图。它返回按开关分组的配置来源和 `defines_config`、`reads_config`、`guards_code` 关系，而不是把 feature flag 作为普通 `repo query --kind` 值。
+
+`repo framework` 是对应的 Angular/Vue component-template 语义独立图视图。Angular 抽取会从 decorator 与 HTML template 记录 component、directive、pipe、template、input 和 output node。Vue 单文件组件保留普通 TypeScript/JavaScript symbol 与 import，同时记录 prop、emit、model、slot、template variable 和 control-flow node。类型化 edge 覆盖 template ownership、declaration、component render、input binding、output handling、read/write、directive use 与 slot provision。可重复的 `--framework`、`--kind`、`--path` filter 会下推到有界 storage query；响应独立返回 graph node/edge 并显式标记 truncation，不把这些 fact 塞进普通 `repo query --kind` 结果。
+
+Framework fact 是普通代码图所在 durable repository snapshot 与 publication fence 内的派生状态。索引会限制每文件的 framework node/edge 数量，查询期 target resolution 也保持受界；授权 indexed scope 外的 package 或 component 保持 unresolved metadata。旧索引升级后会幂等创建增量表，并把尚未包含 framework fact 的 legacy code scope 标为 stale；需要 fresh framework 结果前，应通过普通 full `repo index` 重建。
 
 通用配置和文档文件会进入同一代码图，而不是单独的文档索引。`.conf` 复用 INI/key-value 语法面，输出 section、config 和布尔 feature-flag facts；Markdown 输出 heading symbol，并把本地 inline link、图片链接和引用式链接定义写为 import facts；JSON 输出稳定点分配置路径，数组统一使用 `[]`。这些文件仍保留文件级 chunk，因此正文、配置值和局部 partial parse 内容可被 `hybrid` 与 BM25 召回。
 

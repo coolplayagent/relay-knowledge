@@ -39,6 +39,8 @@ async fn pure_hybrid_symbol_identity_uses_symbol_only_plan() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "connector-chunk",
@@ -91,6 +93,8 @@ async fn hybrid_symbol_plan_keeps_multi_term_flow_retrieval() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "connector-chunk",
@@ -151,6 +155,8 @@ async fn dense_hybrid_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -391,6 +397,8 @@ async fn rust_workflow_identifier_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk_with_language(
@@ -468,6 +476,8 @@ async fn language_scoped_workflow_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -558,6 +568,8 @@ async fn query_language_scope_filters_chunk_candidates_before_fts_limit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),
@@ -621,6 +633,8 @@ async fn dense_structured_hybrid_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -704,6 +718,8 @@ async fn multi_api_symbol_query_keeps_direct_identity_facets() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -774,6 +790,8 @@ async fn covered_multi_api_symbol_query_elides_fts_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

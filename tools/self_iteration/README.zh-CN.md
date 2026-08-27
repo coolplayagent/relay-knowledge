@@ -365,6 +365,7 @@ and (
 | 冷索引与增量索引性能 targets | `repository_index_performance_targets.json` 配置冷索引 `index_budget_ms`/`register_index_budget_ms`、增量 `incremental_index_budget_ms`、完成性证据和 delta 读/解析上限；默认 fast 包含 1024 文件 fixture，`full`/`exhaustive` 还包含 2048 文件 wide fixture。 |
 | Hierarchical BM25 算法 gate | `fast`、`full`、`exhaustive` 先运行不带指标预算的 `bm25_hierarchy_build` preparation gate，以 1,200 秒有界超时覆盖冷构建；随后独占运行 `bm25_hierarchy_suite`，保留原有 120 秒超时与 30 秒 non-key 诊断预算。固定 SQLite fixture 校验 v4 fingerprint/scope partition、同 schema flat parity、synthetic production-write/query-path Recall@10 >= 0.9 floor、planned-MATCH result-domain reduction、hard SQL authorization、single-FTS hidden-rank/rowid-hydrate shape、persisted-DF 与 65,536-posting admission bound、route-document `fts_rowid`/version/label-state invariant、version-leading global fallback index、可观察 oversized-label degradation 与 8,192-posting exhaustion、durable checkpoint takeover、全部四类 rebuild work budget、oversize-document isolation 与 bounded warning identity、当前 writer fence、companion-read pause、complete-reader activation 与 swap rollback。报告把 build preparation 与 whole-suite duration、捕获的 `BM25_WORK` 分开保留；这些都不是 query latency 或 FTS posting/VM-step work，equal-score cutoff membership、自然语料和整个 pipeline 的结论不属于该 synthetic gate。 |
 | 软件全域投影 targets | `repository_software_global_targets.json` 运行 `repo software`，覆盖 dependencies、sdks、files、topics、relationships、build、iac、design 和 all 投影 kind，且事实只能来自已索引证据。 |
+| Framework graph targets | `repository_framework_targets.json` 在锁定的 Angular/Vue 官方仓库上运行独立 `repo framework` surface。Case 同时评分 graph node/edge，并执行声明的冷索引、p50 与 p95 预算。 |
 | CLI contract cases | 直接运行产品 CLI，不需要大仓；默认 fast 覆盖 `repo index-worker` help、idle JSON 和 streaming JSON。 |
 | semantic/vector suite | 写入小型 evidence，刷新 semantic/vector 索引，验证 query 命中 `retriever_sources`、`backend_statuses` 和相关排序；外部 provider 只从运行时环境继承。 |
 | research_judge_suite | 把候选 diff、确定性评估摘要、文档片段、竞争力目标和实现护栏交给 LLM 或 coding-agent judge；它不替代确定性 gate。 |
@@ -382,6 +383,7 @@ and (
 | `/opt/workspace/leveldb` | 默认 | C/C++ 类方法、自由函数、头文件、table cache、recovery、callers、hybrid lookup 和 filters。 |
 | `/opt/workspace/temporal-samples-go`、`/opt/workspace/temporal-sdk-go` | 默认 | Go 全仓索引和 Temporal sample 到 SDK 的 repository-set API 使用关系。 |
 | `/opt/workspace/opentelemetry-collector-contrib`、`/opt/workspace/opentelemetry-collector` | 默认 | Go 全仓索引和 contrib 到 core 的 receiver factory、component type 使用关系。 |
+| `/opt/workspace/angular`、`/opt/workspace/vue` | 默认 | 锁定官方 Angular layout 与 Vue SFC playground scope，通过 framework graph 覆盖 component、rendered selector、prop 与 template variable。 |
 | `/opt/workspace/linux` | `exhaustive` | C 大仓 symbol、函数、syscall 风格宏、导出符号、include、references、callers、callees、mmap flow、epoll/eventfd；`linux_full` 重复测量完整初始索引时间。 |
 | `/opt/workspace/kubernetes` | `exhaustive` | Go command constructor、kubelet flow、API types、clientset/generic client、authorizer、informer imports、callers、hybrid lookup 和 filters。 |
 | `/opt/workspace/spring-framework` | `exhaustive` | Java context、bean factory、webmvc servlet/handler mapping、imports 和 filtered lookup。 |
@@ -420,6 +422,8 @@ clone_pinned_repository https://github.com/temporalio/samples-go.git /opt/worksp
 clone_pinned_repository https://github.com/temporalio/sdk-go.git /opt/workspace/temporal-sdk-go ff47f19909ac85aacff89645360de0dba6f6f898
 clone_pinned_repository https://github.com/open-telemetry/opentelemetry-collector-contrib.git /opt/workspace/opentelemetry-collector-contrib 84fe8df16c34efbb7e929310c955df8f4861d2f4
 clone_pinned_repository https://github.com/open-telemetry/opentelemetry-collector.git /opt/workspace/opentelemetry-collector 31e51520f30fc5c4362949e41307ea57b7b45a9d
+clone_pinned_repository https://github.com/angular/angular.git /opt/workspace/angular 133cafda42028fbd8efd7840d6ff3fea25223166
+clone_pinned_repository https://github.com/vuejs/core.git /opt/workspace/vue d63616ca17de965ed32dcb449a4c5cd9982f15d2
 
 # exhaustive profile 的 tree-sitter 语言真实仓库。
 clone_pinned_repository https://github.com/nvm-sh/nvm.git /opt/workspace/nvm 53855417eb66b9c35b732ac39358f1aae3ee1977
@@ -431,4 +435,4 @@ clone_pinned_repository https://github.com/scala/scala3.git /opt/workspace/scala
 clone_pinned_repository https://github.com/Alamofire/Alamofire.git /opt/workspace/alamofire 7595cbcf59809f9977c5f6378500de2ad73b7ddb
 ```
 
-所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，full-scope 注册不会向 `repo register` 传递 path 或 language filter，并且默认 guardrail 会验证产品注册拒绝 `--language`；case 级 filter 只用于验证查询端过滤能力。缺失外部 dependency source 不是 parser、index、file、scope 或 response degradation，应暴露为 unresolved edge metadata，例如 `resolution_state` 和 `target_hint`，不能用 source/text fallback 掩盖授权范围、依赖覆盖或 parser 恢复问题。
+所有 repository target 都必须使用 `scope=all`，评估器会拒绝其他值。普通 full-scope 注册不会把 repository `path_filters` 或 `language_filters` 传给 `repo register`，默认 guardrail 会验证产品注册拒绝 `--language`；case 级 filter 继续用于验证查询端过滤能力。两个官方 framework target 使用独立 `registration_path_filters` 字段，只授权锁定的 Angular layout 与 Vue SFC playground 源码范围，同时在这些 scope 内保留全部索引阶段。缺失外部 dependency source 不是 parser、index、file、scope 或 response degradation，应暴露为 unresolved edge metadata，例如 `resolution_state` 和 `target_hint`，不能用 source/text fallback 掩盖授权范围、依赖覆盖或 parser 恢复问题。

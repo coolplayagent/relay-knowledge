@@ -8,7 +8,11 @@ use super::scope_tables::CodeScopeTable;
 
 pub(super) const IMPORT_SCHEMA: &str = "relay_import";
 
-const OPTIONAL_LEGACY_IMPORT_TABLES: &[&str] = &["code_repository_routes"];
+const OPTIONAL_LEGACY_IMPORT_TABLES: &[&str] = &[
+    "code_repository_routes",
+    "code_repository_framework_nodes",
+    "code_repository_framework_edges",
+];
 const LEGACY_IMPORT_COLUMN_DEFAULTS: &[(&str, &str, &str)] = &[
     ("code_repository_files", "is_generated", "0"),
     ("code_repository_symbols", "symbol_role_json", "NULL"),

@@ -3,6 +3,7 @@
 mod chunks;
 mod dependencies;
 mod file;
+mod frameworks;
 mod imports;
 mod languages;
 mod manual;
