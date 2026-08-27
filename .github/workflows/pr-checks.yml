@@ -71,11 +71,91 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
 
-      - name: Unit and integration test suite
-        run: cargo test --all-targets --all-features
+      - name: Rust unit test gate
+        run: cargo test --lib --bins --all-features
+
+  rust-integration:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Rust integration test gate
+        run: cargo test --test relay_knowledge --all-features
 
       - name: GraphRAG evaluation fixture gate
         run: cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
+
+  benchmark:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Deterministic benchmark gate
+        run: cargo test --test benchmarks --all-features
+
+  architecture:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Rust syntax dependency graph and architecture gate
+        run: cargo test --test relay_knowledge architecture_boundaries --all-features
+
+      - name: Upload architecture graph and violations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-module-graph
+          path: target/architecture
+          if-no-files-found: error
+
+  knowledge-map-compatibility:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Compatibility checker self-test
+        run: python3 tools/knowledge_map/check_compatibility.py --self-test
+
+      - name: Build current source CLI
+        run: cargo build --bin relay-knowledge
+
+      - name: Install latest stable CLI from crates.io
+        run: cargo install relay-knowledge --locked --root "${RUNNER_TEMP}/relay-knowledge-stable"
+
+      - name: Current and stable Knowledge Map compatibility gate
+        run: |
+          python3 tools/knowledge_map/check_compatibility.py \
+            --current target/debug/relay-knowledge \
+            --stable "${RUNNER_TEMP}/relay-knowledge-stable/bin/relay-knowledge"
+
+      - name: Upload Knowledge Map compatibility diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-map-compatibility
+          path: target/knowledge-map
+          if-no-files-found: error
 
   skill-metadata:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false

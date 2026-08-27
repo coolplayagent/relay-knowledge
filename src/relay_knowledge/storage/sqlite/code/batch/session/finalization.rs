@@ -20,8 +20,7 @@ use super::super::super::{
     workspace,
 };
 
-#[path = "reference_resolution.rs"]
-mod reference_resolution;
+use super::reference_resolution;
 
 #[derive(Debug)]
 pub(in crate::storage::sqlite::code) enum CodeIndexFinalizationAdvance {
@@ -166,7 +165,7 @@ fn require_incremental_receipt_owner(
     Ok(())
 }
 
-enum TransactionAdvance {
+pub(super) enum TransactionAdvance {
     Pending(String),
     Ready,
 }

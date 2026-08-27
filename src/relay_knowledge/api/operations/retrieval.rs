@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::ApiMetadata,
     domain::{
-        FreshnessPolicy, FusionDiagnostics, IndexStatus, RerankDiagnostics, RetrievalBackendStatus,
-        RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack,
+        FreshnessPolicy, FusionDiagnostics, IndexCursor, IndexRefreshDiagnostics, IndexStatus,
+        RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
+        RetrievalMode, RetrievedContextPack,
     },
-    storage::{IndexCursor, IndexRefreshDiagnostics},
 };
 
 /// Hybrid retrieval request over graph facts and derived indexes.

@@ -4,6 +4,8 @@
 //! metadata, and health snapshots. Domain and interface modules must not depend
 //! on SQL or concrete database types.
 
+use std::{future::Future, pin::Pin, sync::Arc};
+
 mod contracts;
 mod partitioned;
 mod sqlite;
@@ -11,6 +13,20 @@ mod sqlite;
 pub use contracts::*;
 pub use partitioned::PartitionedSqliteKnowledgeStore;
 pub use sqlite::SqliteGraphStore;
+
+/// Async result returned by a configured storage factory.
+pub type KnowledgeStoreFactoryFuture<'a, T> =
+    Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 'a>>;
+
+/// Configured outer-layer factory used for lazy storage initialization.
+///
+/// Application workflows depend on this contract and never construct a
+/// concrete database or probe a storage topology themselves.
+pub trait KnowledgeStoreFactory: Send + Sync {
+    fn open(&self) -> KnowledgeStoreFactoryFuture<'_, Arc<dyn KnowledgeStore>>;
+
+    fn topology_snapshot(&self) -> KnowledgeStoreFactoryFuture<'_, StorageTopologySnapshot>;
+}
 
 #[cfg(test)]
 pub(crate) async fn stage_empty_business_projection_with_fence_for_test<S>(

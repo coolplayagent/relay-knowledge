@@ -18,14 +18,17 @@ use crate::{
     env::EnvironmentConfig,
     model_provider::ModelProviderConfigService,
     observability::ObservabilityRuntime,
+    ports::{
+        embedding::{EmbeddingProvider, EmbeddingRequest, ProviderRetryClass},
+        worker_outbound::WorkerOutboundPort,
+    },
     project::{
         LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME, PROJECT_NAME,
         WINDOWS_SERVICE_DEFINITION_FILE_NAME,
     },
-    retrieval::provider::{EmbeddingRequest, ProviderRetryClass, embedding_provider_with_qos},
     storage::{
         FileIndexDiagnostics, GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection,
-        KnowledgeStore, NewAuditEvent, StorageError,
+        KnowledgeStore, KnowledgeStoreFactory, NewAuditEvent, StorageError,
     },
 };
 
@@ -52,45 +55,45 @@ pub struct RelayKnowledgeService {
     pub(super) health_cache: Arc<tokio::sync::RwLock<Option<HealthResponse>>>,
     pub(super) watcher: Arc<tokio::sync::RwLock<Option<crate::watcher::WatcherHandle>>>,
     pub(super) code_retention_cursor: Arc<AtomicUsize>,
+    pub(super) embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+    pub(super) worker_outbound: Option<Arc<dyn WorkerOutboundPort>>,
 }
 
 impl RelayKnowledgeService {
-    /// Creates a service from already validated foundational configuration.
-    pub fn new(runtime: RuntimeConfiguration) -> Self {
+    /// Creates a service from validated configuration and injected runtime adapters.
+    pub fn with_runtime_adapters(
+        runtime: RuntimeConfiguration,
+        factory: Arc<dyn KnowledgeStoreFactory>,
+        embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+        worker_outbound: Option<Arc<dyn WorkerOutboundPort>>,
+    ) -> Self {
         Self {
-            storage: StorageProvider::configured(&runtime),
+            storage: StorageProvider::configured(factory),
             runtime,
             health_cache: Arc::new(tokio::sync::RwLock::new(None)),
             watcher: Arc::new(tokio::sync::RwLock::new(None)),
             code_retention_cursor: Arc::new(AtomicUsize::new(0)),
+            embedding_provider,
+            worker_outbound,
         }
     }
 
-    /// Creates a service backed by an explicit store for deterministic tests.
-    pub fn with_store(runtime: RuntimeConfiguration, store: Arc<dyn KnowledgeStore>) -> Self {
+    /// Creates a service backed by an explicit store and injected runtime adapters.
+    pub fn with_store_and_runtime_adapters(
+        runtime: RuntimeConfiguration,
+        store: Arc<dyn KnowledgeStore>,
+        embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+        worker_outbound: Option<Arc<dyn WorkerOutboundPort>>,
+    ) -> Self {
         Self {
             runtime,
             storage: StorageProvider::ready(store),
             health_cache: Arc::new(tokio::sync::RwLock::new(None)),
             watcher: Arc::new(tokio::sync::RwLock::new(None)),
             code_retention_cursor: Arc::new(AtomicUsize::new(0)),
+            embedding_provider,
+            worker_outbound,
         }
-    }
-
-    /// Creates a service by reading the current process environment once.
-    pub async fn from_process_environment() -> Result<Self, RuntimeConfigurationError> {
-        RuntimeConfiguration::from_process_environment()
-            .await
-            .map(Self::new)
-    }
-
-    /// Creates a service from a deterministic environment snapshot.
-    pub async fn from_environment(
-        environment: &EnvironmentConfig,
-    ) -> Result<Self, RuntimeConfigurationError> {
-        RuntimeConfiguration::from_environment(environment)
-            .await
-            .map(Self::new)
     }
 
     /// Applies network-related settings from a typed environment snapshot.
@@ -403,17 +406,12 @@ impl RelayKnowledgeService {
                 retryable: Some(false),
             });
         };
-        let network = self.runtime.network.current();
-        let client = crate::net::http::outbound_json_client(&network.http).map_err(|error| {
-            ApiError::invalid_argument(format!("failed to build HTTP client: {error}"))
-        })?;
         let provider_name = remote.provider.as_str().to_owned();
-        let provider = embedding_provider_with_qos(
-            remote,
-            client,
-            self.runtime.network.qos_runtime(),
-            network.qos,
-        );
+        let provider = self.embedding_provider.as_ref().ok_or_else(|| {
+            ApiError::invalid_argument(
+                "remote embedding provider is configured without an embedding adapter",
+            )
+        })?;
         let started = Instant::now();
         let result = provider
             .embed(EmbeddingRequest {

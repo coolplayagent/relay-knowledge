@@ -2,7 +2,7 @@
 name: relay-knowledge-cli
 description: "Use relay-knowledge local CLI for repository knowledge bootstrap and GraphRAG: initialize/validate .knowledge/knowledge-map.yaml plus code and authored business maps; read snapshot-bound repo business/software/view/context models for specs and coding; run durable update/status/impact loops after commits. Use for 知识地图初始化, 业务术语与技术映射, git commit知识库增量更新, 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, SDK/API, 代码地图, definitions, references, usage, impact. Recover durable single-writer index tasks through repo status, a managed service, or bounded local index-worker attempts. Pin immutable refs. Prefer graph CLI before grep/rg unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP/ACP setup or protocol access."
 metadata:
-  version: 1.1.13
+  version: 1.1.14
   openclaw:
     skillKey: relay-knowledge-cli
     homepage: https://github.com/coolplayagent/relay-knowledge

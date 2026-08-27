@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod finalization;
+mod reference_resolution;
 
 #[cfg(test)]
 use finalization::finalization_phase_pending;

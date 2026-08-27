@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/02-engineering-hard-constraints.md) | [English](../../en/03-architecture-specs/02-engineering-hard-constraints.md)
 
-> 文档版本: 2.3
-> 编制日期: 2026-08-17
+> 文档版本: 2.4
+> 编制日期: 2026-08-26
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -21,6 +21,10 @@
 - **无环依赖**：crate、module、trait、service、adapter 和 config object 之间不得形成循环依赖。
 - **代码源目录权威清晰**：Git 管理的代码仓库必须以 tracked tree 作为索引目录权威，不能只因 `build/`、`dist/`、`vendor/` 或 `third_party/` 等目录名跳过已跟踪源码；非 Git source directory 默认必须使用源码/配置/文档白名单扫描，避免把构建产物、缓存和依赖副本纳入索引，宽泛目录只能通过显式 path opt in 进入对应目录。非 Git `src` 这类窄 path 不能顺带 opt in 兄弟级宽泛目录，也不能在选择前遍历无关 filtered sibling；未带 path filter 的非 Git 扫描不能遍历不会贡献默认白名单内容的目录；`--path .` 是宽泛目录 whole-root opt in。真实 Git metadata 上的探测失败不能静默回退为 filesystem indexing，source fallback 不能为 stale scoped `filesystem:` commit 读取 live 文件。非 Git synthetic hash 必须来自 source-layout discovery 后的有效 indexed scope，非 Git pre-scope hash 不能读取 file preset 排除的文件，除非显式 path filter opt in 到该文件；非 Git ref resolution、source fallback 校验和 impact path collection 必须包含有效 path 和 language filters，排队 synthetic ref、同步 full-snapshot read、full-index batch 以及 delta 读取 live bytes 前都必须校验，非 Git 文件 byte/hash/metadata materialization 必须拒绝最终路径和祖先目录 symlink 替换，显式已存储 `filesystem:` ref 及其 source fallback 校验、impact collection、impact partition 和 deleted-symbol extraction 必须先于动态 source-kind 或 Git 探测走 filesystem scope 身份解析，repository-set 的更窄 filter 成员和 freshness check 必须复用兼容的更宽非 Git scope，显式非 Git incremental `base_ref` 必须加载该已存储 base scope，增量删除必须覆盖上一版 discovered root，active non-Git task matching 必须用 task 的有效 filters 比较更窄 stale read，非 Git impact path 在 scoped base/head ref 相同时必须返回空 changeset，Git ref normalization 和 fresh full-index check 都不能执行 full tree walk。
 - **高性能必须泛化**：优化必须来自数据结构、ranking signal、索引策略、query planning、batching、并发边界或存储布局，不能枚举已知 query、path、symbol 或 fixture。
+
+无环依赖由 Rust syntax architecture gate 执行：门禁用 AST 展开 grouped import 与 qualified `crate::` path，生成顶层 module graph，对全部节点运行 SCC 检测，并按 layer policy 报告引用文件和行号。`bootstrap -> interfaces -> application` 是唯一允许的 CLI 生产方向，`interfaces` 不得反向调用 `bootstrap`；1.x 的 `interfaces::cli::{run,run_process}` 只作为 deprecated 兼容入口保留，并使用无反向依赖的实现。`api` 不得依赖 `storage`，公开 cursor、index refresh、file hit/summary 和 health diagnostics contract 归 `domain` 所有，旧 `storage::*` 路径只通过兼容 re-export 保持。Architecture job 必须上传 JSON 与 DOT graph artifact；字符串 token 搜索和 grouped-import 不可见的 substring baseline 不能再作为依赖门禁。
+
+Application 基础设施迁移预算按“文件、目标 module、AST 引用数”精确冻结，只能递减，不能增加。SQLite store 创建、catalog topology probe 与 lazy open 通过 bootstrap 注入的 async `KnowledgeStoreFactory` 完成；embedding 与 external worker outbound HTTP 通过 `ports` 的 async contract 完成，具体 reqwest/QoS adapter 位于外层。Application 不得构造 SQLite、HTTP client 或直接调用 network transport。大规模目录精确枚举不再承担架构证明；layout gate 验证 foundational owner、1000 行上限、非空生产文件和禁止 production `#[path]` redirect，依赖方向由 syntax graph 证明。
 
 ## 3. 基础模块所有权
 
@@ -362,10 +366,11 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 ## 6. 文档与测试硬约束
 
 - 任何代码、配置、行为、测试、workflow、benchmark、安装或运维变更都必须同时刷新对应文档。
-- Unit test 与 integration test gate 分离。
+- Unit test、Rust integration、benchmark、browser integration 与 architecture gate 分离；architecture gate 的 graph/report artifact 在失败时也必须保留用于定位。
 - Rust 行覆盖率必须保持 90% 以上，覆盖 invariant、错误分支、边界值、async cancellation 和 backpressure。
 - Browser integration gate 必须安装 Playwright Chromium，例如 `uv run --extra dev python -m playwright install --with-deps chromium`。
 - 文档本身需要检查链接、编号、行数上限和过期状态。
+- Knowledge Map writer schema 采用 staged rollout：CI 总是要求当前源码 CLI 通过 `.knowledge/knowledge-map.yaml`，并安装 crates.io 最新 stable CLI 复验。若 stable 低于声明的最小 v2 reader `1.1.14`，只有源码版本更高时，不兼容结果才可报告为 `staged_pending_reader_release` artifact；源码与 stable 同版本却不兼容必须以 `incompatible_same_version` 硬失败。stable 达到最小 reader 版本后，任何不兼容都必须使门禁失败。不得在没有兼容 reader release 的情况下继续提升默认 writer schema。
 
 ## 7. 验收标准
 

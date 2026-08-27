@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::{AgentProtocolStatus, ApiMetadata, RuntimeStatus, WatcherDiagnostics},
     domain::{
-        CodeRepositoryTotals, IndexKind, IndexStatus, ServiceDefinitionPlan, ServiceOperatorStatus,
+        CodeRepositoryTotals, FileIndexDiagnostics, GraphInspection, IndexCursor, IndexKind,
+        IndexRefreshDiagnostics, IndexStatus, ServiceDefinitionPlan, ServiceOperatorStatus,
         WorkerStatus,
     },
-    storage::{FileIndexDiagnostics, GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
 
 use super::{AuditSinkStatus, CodeIndexWorkerStatus};

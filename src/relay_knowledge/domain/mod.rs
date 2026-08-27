@@ -74,7 +74,8 @@ pub use code::{
     project_okf_neighborhood,
 };
 pub use core::{
-    DomainError, GraphVersion, IndexKind, IndexModality, IndexState, IndexStatus, KnowledgeEntity,
+    DomainError, GraphVersion, IndexCursor, IndexKind, IndexLag, IndexModality,
+    IndexRefreshDiagnostics, IndexStalenessReason, IndexState, IndexStatus, KnowledgeEntity,
     SourceScope,
 };
 pub use graph::{
@@ -90,19 +91,23 @@ pub use graph::{
     TraversalTraceNodeKind, TraversalTraceRedaction,
 };
 pub use knowledge::{
-    KnowledgeMap, KnowledgeMapChange, KnowledgeMapHistoryEntry, KnowledgeMapRoute,
-    KnowledgeMapSource, KnowledgeMapSourceKind, KnowledgeMapTopic,
+    FileContentChunk, FileContentEntry, FileContentReadModelCursor, FileContentSearchHit,
+    FileContentSearchRequest, FileIndexDiagnostics, FileIndexEntry, FileIndexRoot,
+    FileIndexRootStatus, FileIndexRootUpdate, FileIndexScanSummary, FileKnowledgeFactCandidate,
+    FileSearchHit, FileSearchRequest, KnowledgeMap, KnowledgeMapChange, KnowledgeMapHistoryEntry,
+    KnowledgeMapRoute, KnowledgeMapSource, KnowledgeMapSourceKind, KnowledgeMapTopic,
 };
 pub use operations::{
-    AuditEventRecord, AuditStatus, ProposalConflictRecord, ProposalConflictSeverity, ProposalKind,
-    ProposalProvenance, ProposalRecord, ProposalState, ServiceDefinitionPlan,
-    ServiceLifecycleExecutionReport, ServiceLifecycleStep, ServiceLifecycleStepResult,
-    ServiceManagerAction, ServiceOperatorState, ServiceOperatorStatus, ServicePackageManifestCheck,
-    ServicePermissionRequirement, SoftwareBuildTarget, SoftwareBuildTargetInput, SoftwareComponent,
-    SoftwareComponentInput, SoftwareDependencyUsage, SoftwareDependencyUsageInput,
-    SoftwareDesignElement, SoftwareDesignElementInput, SoftwareFile, SoftwareFileInput,
-    SoftwareGlobalKind, SoftwareGlobalProjection, SoftwareGlobalRequest, SoftwareGlobalStatus,
-    SoftwareIacResource, SoftwareIacResourceInput, SoftwareRelationship, SoftwareRelationshipInput,
-    SoftwareSdkUsage, SoftwareSdkUsageInput, SoftwareTopic, SoftwareTopicInput, WorkerBackendState,
-    WorkerKind, WorkerStatus, WorkerTaskRecord, WorkerTaskState, normalize_actor,
+    AuditEventRecord, AuditStatus, GraphInspection, HealthStorageSnapshot, ProposalConflictRecord,
+    ProposalConflictSeverity, ProposalKind, ProposalProvenance, ProposalRecord, ProposalState,
+    ServiceDefinitionPlan, ServiceLifecycleExecutionReport, ServiceLifecycleStep,
+    ServiceLifecycleStepResult, ServiceManagerAction, ServiceOperatorState, ServiceOperatorStatus,
+    ServicePackageManifestCheck, ServicePermissionRequirement, SoftwareBuildTarget,
+    SoftwareBuildTargetInput, SoftwareComponent, SoftwareComponentInput, SoftwareDependencyUsage,
+    SoftwareDependencyUsageInput, SoftwareDesignElement, SoftwareDesignElementInput, SoftwareFile,
+    SoftwareFileInput, SoftwareGlobalKind, SoftwareGlobalProjection, SoftwareGlobalRequest,
+    SoftwareGlobalStatus, SoftwareIacResource, SoftwareIacResourceInput, SoftwareRelationship,
+    SoftwareRelationshipInput, SoftwareSdkUsage, SoftwareSdkUsageInput, SoftwareTopic,
+    SoftwareTopicInput, SqliteStorageDiagnostics, StorageHealth, WorkerBackendState, WorkerKind,
+    WorkerStatus, WorkerTaskRecord, WorkerTaskState, normalize_actor,
 };

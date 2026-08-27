@@ -185,7 +185,10 @@ The principal local quality gates are:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo test --lib --bins --all-features
+cargo test --test relay_knowledge --all-features
+cargo test --test benchmarks --all-features
+cargo test --test relay_knowledge architecture_boundaries --all-features
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 python3 tools/docs/check_docs.py --self-test-and-check
 ```

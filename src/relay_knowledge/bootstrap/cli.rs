@@ -46,7 +46,7 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    crate::interfaces::cli::process_update_notice(args, interactive_text_output).await
+    crate::interfaces::cli::update_notice_for_process(args, interactive_text_output).await
 }
 
 async fn run_command(
@@ -82,5 +82,6 @@ fn knowledge_map_service(format: OutputFormat) -> Result<KnowledgeMapService, Cl
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 #[path = "cli_tests.rs"]
 mod tests;

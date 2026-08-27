@@ -41,10 +41,12 @@ pub use file_index::{
 pub use graph::{GraphStore, MutationLogEntry, MutationLogStore};
 pub use health::{GraphInspection, HealthStorageSnapshot, SqliteStorageDiagnostics, StorageHealth};
 pub use index::{
-    DEFAULT_INDEX_SOURCE_SCOPE, IndexCursor, IndexLag, IndexRefreshClaimRequest,
-    IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure, IndexRefreshQueueRequest,
-    IndexRefreshTask, IndexRefreshTaskState, IndexStalenessReason, IndexStore,
+    DEFAULT_INDEX_SOURCE_SCOPE, IndexRefreshClaimRequest, IndexRefreshCompletion,
+    IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexRefreshTaskState,
+    IndexStore,
 };
+// Compatibility re-exports retained for the 1.x `storage::*` public surface.
+pub use crate::domain::{IndexCursor, IndexLag, IndexRefreshDiagnostics, IndexStalenessReason};
 pub use operations::{
     AuditQueryRequest, NewAuditEvent, NewProposal, NewProposalConflict, ProposalDecision,
     ProposalListRequest, ServiceOperatorUpdate, WorkerTaskClaimRequest, WorkerTaskCompletion,

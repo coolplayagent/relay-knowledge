@@ -489,9 +489,15 @@ impl RelayKnowledgeService {
         let Some(endpoint) = self.runtime.workers.endpoint_for(task.kind) else {
             return Ok((fallback, None));
         };
-        let network = self.runtime.network.current();
-        let timeout_ms =
-            u64::try_from(network.http.request_timeout.as_millis()).unwrap_or(u64::MAX);
+        let timeout_ms = u64::try_from(
+            self.runtime
+                .network
+                .current()
+                .http
+                .request_timeout
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX);
         let payload = worker_request_payload(
             task,
             timeout_ms,
@@ -499,14 +505,12 @@ impl RelayKnowledgeService {
             WORKER_MAX_ATTEMPTS,
             self.runtime.workers.max_in_flight,
         );
-        let response = crate::net::http::post_json_with_qos(
-            &network.http,
-            &self.runtime.network.qos_runtime(),
-            &network.qos,
-            endpoint,
-            &payload,
-        )
-        .await;
+        let response = match &self.worker_outbound {
+            Some(outbound) => outbound.post_json(endpoint, &payload).await,
+            None => Err(crate::ports::worker_outbound::WorkerOutboundError {
+                message: "external worker adapter is unavailable".to_owned(),
+            }),
+        };
         match response {
             Ok(value) => match proposal_from_worker_response(
                 task,

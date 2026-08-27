@@ -9,3 +9,4 @@
 //! entry points move to the outer layer.
 
 pub mod cli;
+mod service;

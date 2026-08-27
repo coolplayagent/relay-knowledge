@@ -2,8 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::ApiMetadata,
-    domain::{CodeRepositoryTotals, IndexKind, IndexStatus},
-    storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
+    domain::{
+        CodeRepositoryTotals, GraphInspection, IndexCursor, IndexKind, IndexRefreshDiagnostics,
+        IndexStatus,
+    },
 };
 
 /// Graph inspection request with optional scope filtering reserved for adapters.

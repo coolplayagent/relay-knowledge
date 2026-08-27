@@ -3,11 +3,10 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexStatus, RetrievalBackendStatus,
-    RetrievalHit, RetrievalMode, RetrievedContextPack,
+    ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexCursor, IndexRefreshDiagnostics,
+    IndexStatus, RetrievalBackendStatus, RetrievalHit, RetrievalMode, RetrievedContextPack,
 };
 use crate::project::{ACP_LOCAL_ADAPTER_NAME, MCP_ADAPTER_NAME};
-use crate::storage::{IndexCursor, IndexRefreshDiagnostics};
 
 use super::{ApiMetadata, RequestContext};
 

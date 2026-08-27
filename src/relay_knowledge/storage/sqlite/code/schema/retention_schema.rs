@@ -5,10 +5,10 @@ use crate::storage::sqlite::schema::marker::{
     REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION, SEARCH_ORPHAN_GC_PHASE_MIGRATION,
 };
 
-use super::migrations::{code_schema_migration_applied, mark_code_schema_migration};
-
-#[path = "retention_activity_trigger_schema.rs"]
-mod retention_activity_trigger_schema;
+use super::{
+    migrations::{code_schema_migration_applied, mark_code_schema_migration},
+    retention_activity_trigger_schema,
+};
 
 pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(), StorageError> {
     super::super::super::schema::columns::ensure_column(

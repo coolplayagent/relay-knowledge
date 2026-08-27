@@ -18,7 +18,10 @@ mod version;
 
 use crate::{
     api::ServicePlanRequest,
+    application::KnowledgeMapService,
     domain::{FreshnessPolicy, IndexKind, ProposalState, WorkerKind},
+    paths::discover_repository_root,
+    project::KNOWLEDGE_MAP_RELATIVE_PATH,
 };
 
 pub use command::{CliDiagnostic, CliError};
@@ -166,12 +169,13 @@ pub enum ServiceMcpTransport {
 }
 
 /// Runs the CLI command and renders its response.
+#[deprecated(since = "1.1.14", note = "use bootstrap::cli::run_process")]
 pub async fn run<I, S>(args: I) -> Result<String, CliError>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    let output = crate::bootstrap::cli::run_process(args, false).await?;
+    let output = legacy_run_process(args, false).await?;
     Ok(output.stdout)
 }
 
@@ -183,6 +187,7 @@ pub struct CliProcessOutput {
 }
 
 /// Runs the CLI command and renders only the command result.
+#[deprecated(since = "1.1.14", note = "use bootstrap::cli::run_process")]
 pub async fn run_process<I, S>(
     args: I,
     interactive_text_output: bool,
@@ -191,11 +196,62 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    crate::bootstrap::cli::run_process(args, interactive_text_output).await
+    legacy_run_process(args, interactive_text_output).await
+}
+
+async fn legacy_run_process<I, S>(
+    args: I,
+    _interactive_text_output: bool,
+) -> Result<CliProcessOutput, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let command = CliCommand::parse(args)?;
+    let service = match &command.action {
+        CliAction::Map(map_command) if map_command.needs_repository_root() => {
+            Some(legacy_knowledge_map_service(command.format)?)
+        }
+        _ => None,
+    };
+    let stdout = run_command(command, service.as_ref()).await?;
+    Ok(CliProcessOutput {
+        stdout,
+        stderr: String::new(),
+    })
+}
+
+fn legacy_knowledge_map_service(format: OutputFormat) -> Result<KnowledgeMapService, CliError> {
+    let current = std::env::current_dir().map_err(|error| {
+        CliError::invalid_api_argument(
+            format!("failed to resolve current directory: {error}"),
+            format,
+        )
+    })?;
+    let root = discover_repository_root(&current)
+        .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?
+        .ok_or_else(|| {
+            CliError::invalid_api_argument(
+                format!("failed to find repository root for {KNOWLEDGE_MAP_RELATIVE_PATH}"),
+                format,
+            )
+        })?;
+    Ok(KnowledgeMapService::new(root))
 }
 
 /// Renders best-effort process-only notices after primary command output is emitted.
 pub async fn process_update_notice<I, S>(args: I, interactive_text_output: bool) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    update_notice_for_process(args, interactive_text_output).await
+}
+
+pub(crate) async fn update_notice_for_process<I, S>(
+    args: I,
+    interactive_text_output: bool,
+) -> Option<String>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
@@ -232,5 +288,6 @@ mod cli_map_tests;
 mod cli_service_tests;
 
 #[cfg(test)]
+#[allow(deprecated)]
 #[path = "tests/version.rs"]
 mod cli_version_tests;

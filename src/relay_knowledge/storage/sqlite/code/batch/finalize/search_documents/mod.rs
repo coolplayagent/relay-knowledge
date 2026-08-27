@@ -20,6 +20,7 @@ mod tests;
 mod unfenced_tests;
 
 mod grouped;
+mod grouped_sql;
 mod legacy;
 
 pub(in crate::storage::sqlite::code::batch) use grouped::{

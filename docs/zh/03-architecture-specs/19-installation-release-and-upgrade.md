@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 3.7
-> 编制日期: 2026-08-17
+> 文档版本: 3.8
+> 编制日期: 2026-08-27
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -16,7 +16,7 @@
 - crates.io 保持 `cargo install relay-knowledge` 可用。
 - Homebrew、Scoop、winget 或发行版包应引用同一 release tag 产物，不重建分叉快照。
 - Release tag 使用 `vX.Y.Z`、`X.Y.Z` 或 `vX.Y.Z-rc.1` 这类 prerelease 形式；数字版本必须在推送 tag 前与 `Cargo.toml` 和 `Cargo.lock` 保持一致。手动 dry-run dispatch 复用同一版本契约，但不会发布 crates.io 或 GitHub release 产物；workflow 默认 dry-run tag 必须随每次 release 版本提升同步更新。
-- v1.1.13 release 准备将 `Cargo.toml`、`Cargo.lock`、CLI skill metadata 和 release workflow dry-run 默认值统一固定到 `1.1.13`；发布仍由 tag 驱动，只有推送 `v1.1.13` 或 `1.1.13` 到 GitHub 后才会开始。
+- v1.1.14 兼容 reader release 准备将 `Cargo.toml`、`Cargo.lock`、CLI skill metadata 和 release workflow dry-run 默认值统一固定到 `1.1.14`；发布仍由 tag 驱动，只有推送 `v1.1.14` 或 `1.1.14` 到 GitHub 后才会开始。源码开发版本必须领先于 crates.io stable，禁止未发布的持久契约 reader 与不兼容的已发布 binary 共用版本号。
 - macOS x64 release job 必须使用仍可用的 Intel runner label，例如 `macos-15-intel`，不能继续依赖已退休的 `macos-13` 镜像。Artifact upload/download 和 attestation action 必须保持在兼容 Node 24 的版本，确保 GitHub-hosted runner runtime 迁移后 release workflow 仍可运行。
 - Linux GNU release job 必须在 glibc 2.31 baseline 上构建 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu` 产物；如果产出的 ELF 需要任何高于 2.31 的 `GLIBC_*` 符号，release 必须失败。CLI skill 内置的 Linux x64 asset 打包后也必须通过同一 ABI 检查。
 - OpenTelemetry 依赖构成一个发版兼容族：`opentelemetry`、`opentelemetry_sdk` 与 `opentelemetry-otlp` 使用相同 minor 版本，`tracing-opentelemetry` 使用对应的集成版本。依赖自动化必须整体升级并验证该兼容族；发版候选不能同时包含多条 OpenTelemetry core 或 SDK major/minor 版本线。当前安全基线为 `opentelemetry_sdk` 0.32.1；它按照 GHSA-w9wp-h8wv-79jx / CVE-2026-48504 拒绝超过 8,192 byte 的 W3C Baggage，并最多解析 64 个 list member。
@@ -25,6 +25,8 @@
 - CLI 新版本发现使用可配置双源：GitHub Releases 和 crates.io。检测必须走 `env`、`paths`、`net::http` 边界，继承代理、TLS、timeout 和 runtime cache 策略；普通命令只能提示稳定新版，不能静默替换二进制。
 - GitHub Releases 包含从 `skills/relay-knowledge-cli` 构建的 `relay-knowledge-cli-skill-<tag>.tar.gz` skill 产物；其版本跟随 `Cargo.toml`，并会以数字 semver 写入生成后的 `SKILL.md` metadata。skill 产物包含根目录 `README.md`，并在 `assets/` 下内置 Linux x64 和 Windows x64 二进制，要求 agent 在匹配平台的内置二进制通过 `version --format json` 校验时优先使用它。只有内置二进制不可用、宿主 Linux glibc 低于内置 asset baseline，或用户明确要求系统安装版本时，agent 才回退到 `PATH`。配置 `CLAWHUB_TOKEN` 时，release workflow 还可以用 `clawhub publish` 把同一个生成后的 skill 布局发布到 ClawHub。该 skill-over-CLI 产物与 MCP 协议打包分离。
 - Skill 产物包含 `references/knowledge-map-workflows.md`，并通过 policy gate 固化 knowledge-map/code-map 联合 bootstrap 与固定 ref 的 spec 开发默认提示词。升级 skill 只更新 agent 指令；只有获得授权的 agent 显式执行文档中的 CLI 工作流后，才会修改仓库 YAML 或 runtime index state。
+
+Knowledge Map schema rollout 受 release gate 约束。PR CI 同时使用当前源码 binary 与 crates.io 最新 stable binary 校验仓库 map，并把完整结果发布为 artifact。低于 `1.1.14` 的 stable reader 无法读取 v2 且源码版本更高时记录为 `staged_pending_reader_release`；源码与 stable 同版本不兼容时以 `incompatible_same_version` 硬失败。stable 达到 `1.1.14` 后，任何不兼容都必须使门禁失败。后续 writer schema 只有在上一 stable reader 已能接受时才可成为默认格式。该门禁只诊断，不会重写仓库 map，也不会静默升级已安装 binary。
 
 Knowledge Map v2 是仓库拥有的版本化 contract，不是平台 runtime state。首次由新版执行 `map init` 或任一受控 mutation 时，单文件 `.knowledge/knowledge-map.yaml` v1 会在仓库 writer lock 下迁移为 v2 根 manifest，并创建内容寻址的 `.knowledge/topics/` 与 `.knowledge/history/`；`.knowledge/knowledge-map.yaml.previous` 保留上一代有效 root 作为恢复边界。当前 writer 会在被忽略的 `.knowledge/knowledge-map.yaml.lock` inode 中写入协议 marker，并只把该 inode 作为 OS advisory lock 目标，因此进程崩溃会自动释放 owner。在发布 canonical 或 prepared lock 之前，每个 target repository 都会先持久建立仓库自有的 `.knowledge/.gitignore` contract，其中包含限定在该目录内的 canonical 与 prepared lock pattern；已有条目会保留，普通 Git repository 与 linked worktree 使用相同的 nested contract，非 Git source directory 也无需发现 Git metadata。重新打开这两类 contract 时都会使用平台 no-follow 语义并且只接受普通文件；符号链接与 Windows reparse point 会被拒绝，而不会被跟随到自有 contract 目录之外。新 lock 会先在唯一且被忽略的 `.knowledge/knowledge-map.yaml.lock.prepared.<pid>.<startup-id>.<nonce>` staging inode 上取得独占 OS lock；随机 startup id 防止进程快速重启、PID 复用且 nonce 归零时撞上年轻残留。staging 完整写入并持久化 marker 后，再通过同目录 hard link 原子发布 canonical 路径。因此 canonical lock 只会处于不存在或 marker 完整两种状态。崩溃可能留下 staging 名称，但不会阻塞另一条唯一 staging 的发布；每次尝试对目录项执行最多 64 项的有界扫描，并且只有名称严格匹配、已超过 60 秒、通过 no-follow 打开且成功取得已释放 OS lock 的候选项才会删除。cleanup 会严格识别当前 `<pid>.<startup-id>.<nonce>` 与上一版 `<pid>.<nonce>` 两种 suffix，使早期 binary 的 crash residue 在升级后仍可回收；新 writer 只创建具备 restart uniqueness 的新格式。活跃、非普通文件、reparse、symlink 与无关名称都会保留。canonical lock 无 marker 时仍会被视为旧 binary 可能持有的 create-new lock，绝不会被新版抢占。首次启动升级 writer 前必须停止 managed 与临时旧 writer；确认已经独占仓库后，operator 才能删除由已崩溃旧进程遗留的无 marker lock。原子 marker 发布之前的 binary 若已留下 canonical 空文件或 partial 文件，它与 legacy lock 无法安全区分，仍必须采用相同的停机确认与 operator 清理流程。生成的 `.knowledge/.gitignore` 应随 Knowledge Map contract 一起提交；升级完成后，lock 排除不再依赖仓库根 `.gitignore`。回滚前必须停止全部当前 writer，并删除带 marker 的 advisory-lock inode 与所有 prepared staging 名称，使旧 create-new 协议能够获得 canonical 路径。只要任一版本 writer 仍可能存活，就不得删除任一种 lock。升级前应与其他仓库源文件一起备份或提交 `.knowledge/`。回滚到只理解 v1 的 binary 还必须恢复迁移前的单文件 map，并移走 v2 分片、归档、previous 文件与 nested ignore contract；旧 binary 不得编辑 v2 contract。正常分片清理保留上一代 root 引用并给更旧 shard 至少 60 秒宽限期。卸载 binary 或 service 不会删除任何仓库拥有的 `.knowledge/` 内容；显式清理仓库文件应使用版本控制或用户备份恢复。
 

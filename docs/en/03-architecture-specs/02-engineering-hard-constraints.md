@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/02-engineering-hard-constraints.md) | [中文](../../zh/03-architecture-specs/02-engineering-hard-constraints.md)
 
-> Document version: 2.3
-> Date: 2026-08-17
+> Document version: 2.4
+> Date: 2026-08-26
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -22,6 +22,10 @@ Advanced architecture is earned through clear boundaries, acyclic dependencies, 
 - **Acyclic dependencies**: crates, modules, traits, services, adapters, and configuration objects do not form cycles.
 - **Clear code-source directory authority**: Git-managed code repositories use the tracked tree as the indexing directory authority, so tracked source must not be skipped only because it lives under names such as `build/`, `dist/`, `vendor/`, or `third_party/`; non-Git source directories default to source/config/documentation whitelist scanning so build products, caches, and dependency copies do not enter the index unless an explicit path opts into that broad directory. A narrow non-Git path such as `src` must not opt into sibling broad directories or walk unrelated filtered siblings before selection; an unfiltered non-Git scan must not walk directories that cannot contribute to the default whitelist; `--path .` is the explicit whole-root opt-in for broad directories. Git probe failures on real Git metadata must not silently fall back to filesystem indexing, and source fallback must not read live files for a stale scoped `filesystem:` commit. Non-Git synthetic hashes must be derived from the effective indexed scope after source-layout discovery, non-Git pre-scope hashing must not read files excluded by the file preset unless an explicit path filter opts into that file, non-Git ref resolution, source fallback verification, and impact path collection must include effective path and language filters, queued synthetic refs, synchronous full-snapshot reads, and full-index or delta live-byte reads must be verified before accepting bytes, non-Git file byte/hash/metadata materialization must reject final-path and ancestor-directory symlink replacements, explicit stored `filesystem:` refs plus source fallback verification, impact collection, impact partitioning, and deleted-symbol extraction must resolve through filesystem scope identity before dynamic source-kind or Git probes, repository-set members and freshness checks with narrower filters must reuse compatible broader non-Git scopes, incremental deletion must account for previous discovered roots, explicit non-Git incremental `base_ref` values must load that stored base scope, active non-Git task matching must compare with the task's effective filters for narrower stale reads, non-Git impact paths must return no changes when scoped base/head refs match, and Git ref normalization and fresh full-index checks must not perform full tree walks.
 - **Performance must generalize**: improvements come from data structures, ranking signals, indexing strategy, query planning, batching, concurrency boundaries, or storage layout, not enumerated fixture cases.
+
+A Rust-syntax architecture gate enforces acyclic dependencies. It expands grouped imports and qualified `crate::` paths into a top-level module graph, runs SCC detection across every node, and reports each layer violation with its source file and line. `bootstrap -> interfaces -> application` is the only CLI production direction; `interfaces` must not call back into `bootstrap`. The 1.x `interfaces::cli::{run,run_process}` functions remain only as deprecated compatibility entries implemented without that reverse dependency. `api` must not depend on `storage`: public cursor, index-refresh, file hit/summary, and health-diagnostic contracts belong to `domain`, while old `storage::*` paths remain compatibility re-exports. The architecture job uploads JSON and DOT graph artifacts; substring token checks that miss grouped imports are not dependency gates.
+
+The application infrastructure migration budget is frozen by exact file, target module, and AST reference count and can only decrease. SQLite store construction, catalog topology probes, and lazy open run through an async `KnowledgeStoreFactory` injected by bootstrap. Embedding and external-worker outbound HTTP run through async `ports` contracts, with concrete reqwest/QoS adapters outside application. Application must not construct SQLite stores or HTTP clients or invoke network transports directly. Large exact directory listings are not architecture evidence; the layout gate checks foundational ownership, the 1000-line limit, nonempty production files, and the prohibition on production `#[path]` redirects, while the syntax graph proves dependency direction.
 
 ## 3. Foundational Ownership
 
@@ -347,10 +351,11 @@ Network entry points support connection budgets, request budgets, body limits, t
 ## 6. Documentation and Test Constraints
 
 - Code, configuration, behavior, tests, workflows, benchmarks, installation, and operations changes include matching documentation refreshes.
-- Unit-test and integration-test gates remain distinct.
+- Unit-test, Rust-integration, benchmark, browser-integration, and architecture gates remain distinct; the architecture graph/report artifact is retained for failure diagnosis.
 - Rust line coverage stays above 90%, including invariants, error branches, boundaries, async cancellation, and backpressure.
 - Browser integration gates install Playwright Chromium, for example `uv run --extra dev python -m playwright install --with-deps chromium`.
 - Documentation changes check links, numbering, line limits, and stale state.
+- Knowledge Map writer schemas use staged rollout. CI always validates `.knowledge/knowledge-map.yaml` with the current source CLI and installs the latest stable crates.io CLI for a second validation. When stable is older than the declared minimum v2 reader, `1.1.14`, incompatibility is emitted as a `staged_pending_reader_release` artifact only when the source version is newer; the same-version mismatch is an `incompatible_same_version` hard failure. Once stable reaches the minimum reader version, any incompatibility fails the gate. The default writer schema must not advance again before a compatible reader release exists.
 
 ## 7. Acceptance Criteria
 

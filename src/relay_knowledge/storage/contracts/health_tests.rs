@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::{CodeParseStatusCounts, GraphVersion};
 
 #[test]
 fn default_graph_inspection_is_an_empty_non_sqlite_snapshot() {

@@ -6,6 +6,7 @@ mod index_task_schema;
 mod migrations;
 mod repository_schema;
 mod repository_set_schema;
+mod retention_activity_trigger_schema;
 pub(in crate::storage::sqlite) mod retention_schema;
 mod route_schema;
 mod search_schema;

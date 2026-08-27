@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::FreshnessPolicy;
+use crate::domain::{
+    FileContentReadModelCursor, FileContentSearchHit, FileIndexScanSummary, FileSearchHit,
+    FreshnessPolicy,
+};
 
 use super::ApiMetadata;
-
-use crate::storage::FileContentReadModelCursor;
 
 /// Freshness state for local file-index answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,7 +108,7 @@ pub struct FileIndexRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileIndexResponse {
     pub metadata: ApiMetadata,
-    pub summary: crate::storage::FileIndexScanSummary,
+    pub summary: FileIndexScanSummary,
 }
 
 /// Bounded local file-location query request.
@@ -134,7 +135,7 @@ pub struct FileQueryResponse {
     pub root_id: Option<String>,
     #[serde(default = "FileIndexFreshnessDiagnostics::legacy_unknown")]
     pub freshness: FileIndexFreshnessDiagnostics,
-    pub results: Vec<crate::storage::FileSearchHit>,
+    pub results: Vec<FileSearchHit>,
     pub truncated: bool,
     pub duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,7 +166,7 @@ pub struct FileContentQueryResponse {
     pub root_id: Option<String>,
     #[serde(default = "FileIndexFreshnessDiagnostics::legacy_unknown")]
     pub freshness: FileIndexFreshnessDiagnostics,
-    pub results: Vec<crate::storage::FileContentSearchHit>,
+    pub results: Vec<FileContentSearchHit>,
     pub truncated: bool,
     pub duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

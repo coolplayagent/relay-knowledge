@@ -1,3 +1,4 @@
+mod diagnostics;
 mod runtime;
 mod software;
 
@@ -5,6 +6,9 @@ use super::code::{CodeRepositorySelector, RepositoryCodeRange};
 use super::core::{DomainError, GraphVersion, error};
 use super::graph::FreshnessPolicy;
 
+pub use diagnostics::{
+    GraphInspection, HealthStorageSnapshot, SqliteStorageDiagnostics, StorageHealth,
+};
 pub use runtime::{
     AuditEventRecord, AuditStatus, ProposalConflictRecord, ProposalConflictSeverity, ProposalKind,
     ProposalProvenance, ProposalRecord, ProposalState, ServiceDefinitionPlan,
