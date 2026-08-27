@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="relay-knowledge 1.1.14 新特性：Knowledge Map v2、业务知识映射、commit 驱动开发闭环、可恢复代码索引与分层检索。"
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.14 新特性</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.14">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.14 新特性</h1>
+        <p>
+          1.1.14 把“仓库里的知识、代码图和 Git 历史”收敛为一个可验证的开发闭环。
+          这一版重点升级 Knowledge Map 的存储与兼容能力，引入业务知识到技术实现的映射，
+          并让大型仓库索引更快、更稳定、更容易恢复。
+        </p>
+        <p>发布日期：2026 年 8 月 27 日。CLI、JSON、HTTP、MCP、数据库目录和服务管理方式保持兼容。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.14">查看发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.14">crates.io</a>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>快速升级</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.14 --locked
+relay-knowledge version --format json
+relay-knowledge map init --format json
+relay-knowledge map validate --format json</code></pre>
+        <p class="notice">
+          如果仓库已经写入 Knowledge Map v2，请先把所有读写该仓库的 CLI 升级到 1.1.14。
+          1.1.13 及更早版本不能读取 v2；较早的 v2 归档若还没有历史索引，运行
+          <code>map init</code> 会在 writer lock 保护下补齐索引，不会覆盖已有知识内容。
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Knowledge Map v2：知识按需加载，历史有界读取</h2>
+        <p>
+          Knowledge Map 从单文件演进为根 manifest 加内容寻址分片的结构。
+          根文件只保留稳定导航、当前 topic 摘要和最近 16 条变更；topic 内容位于
+          <code>.knowledge/topics/</code>，更早历史位于 <code>.knowledge/history/</code>。
+        </p>
+        <ul>
+          <li><code>map route &lt;topic&gt;</code> 只读取根文件和目标分片，agent 不必加载整张知识地图。</li>
+          <li><code>map history</code> 按页读取历史，单页最多 256 条；B+ tree 索引保证定位成本有界。</li>
+          <li>写入过程先发布不可变 artifact，最后原子切换根 manifest，并提供异常恢复状态。</li>
+          <li>路径穿越、绝对路径和符号链接逃逸会被拒绝，分片与历史内容通过 SHA-256 校验。</li>
+        </ul>
+        <pre><code>relay-knowledge map route business-knowledge --format json
+relay-knowledge map history --from 1 --limit 64 --format json
+relay-knowledge map validate --format json</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>业务知识与代码实现进入同一张图</h2>
+        <p>
+          新增 Git 管理的 <code>.knowledge/business-glossary.yaml</code>，用于声明规范业务术语、
+          别名、缩写、语义冲突，以及术语到代码符号、文件和配置的技术映射。
+          查询读取已经提交的投影，不会在热路径扫描 YAML，也不会猜测歧义术语。
+        </p>
+        <ul>
+          <li>CLI 新增 <code>repo business</code>，可查询术语、映射或两者。</li>
+          <li><code>repo context</code> 会把业务术语解析结果作为有界技术检索 seed，并返回 <code>business_context</code>。</li>
+          <li>HTTP、MCP 与 Web 共用同一服务；MCP 工具名为 <code>relay_business_query</code>。</li>
+          <li>授权范围外的技术目标保留为 unresolved metadata，不会错误地把仓库标记为 degraded。</li>
+        </ul>
+        <pre><code>relay-knowledge repo business &lt;alias&gt; \
+  --kind all --query MRR --domain revenue \
+  --ref &lt;commit&gt; --freshness wait-until-fresh --format json
+
+relay-knowledge repo context &lt;alias&gt; \
+  --query "MRR 的计算与调用链" --ref &lt;commit&gt; --format json</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>以 Git commit 为事实锚的开发闭环</h2>
+        <p>
+          1.1.14 将业务知识、软件投影、代码图、影响分析和 context pack 固定到同一个 resolved commit。
+          从理解需求到检查变更，不同接口不再各自读取漂移中的工作区状态。
+        </p>
+        <ol>
+          <li>用 Knowledge Map 找到权威业务、架构和运行文档。</li>
+          <li>在指定 commit 上完成或复用代码索引。</li>
+          <li>读取同一 ref 的 business、software、view 和 context 结果。</li>
+          <li>用 base/head 影响分析检查变更，再验证 Knowledge Map 与索引 freshness。</li>
+        </ol>
+        <pre><code>relay-knowledge repo update &lt;alias&gt; --base &lt;base&gt; --head &lt;head&gt; --format json
+relay-knowledge repo impact &lt;alias&gt; --base &lt;base&gt; --head &lt;head&gt; --format json</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>大型仓库索引：历史复用、持久任务与分阶段回收</h2>
+        <p>
+          代码索引继续遵守单仓库最多一个 active writer 的约束，并强化了 durable task、lease、checkpoint、
+          重试退避和发布 fence。初始化索引现在可以显式复用兼容的历史 commit scope，
+          进程退出后也能从持久 checkpoint 恢复，而不是重新开始。
+        </p>
+        <ul>
+          <li><code>repo index --reuse-historical</code> 最多检查目标 commit 的 10 个第一父链祖先。</li>
+          <li>兼容基线且 diff 不超过 100 个 changed path 时转为增量任务，否则安全回退到 full index。</li>
+          <li>active、最近使用、增量前驱、worktree base、未完成任务和 repo-set pin 会被保留。</li>
+          <li>旧 scope 先进入 retiring，再由有界 maintenance 分批删除，避免无界清理阻塞查询。</li>
+          <li>大规模 impact seed 改为分批处理，降低 SQLite 变量上限与内存峰值风险。</li>
+        </ul>
+        <pre><code>relay-knowledge repo index &lt;alias&gt; --reuse-historical --format json
+relay-knowledge repo status &lt;alias&gt; --format json</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>检索升级：有界 OKF 图与分层 BM25 路由</h2>
+        <p>
+          新版检索为大型候选集加入有界 OKF repository graph，并使用 SimHash 分组进行分层 BM25 路由。
+          近似只用于选择候选分组，最终排序仍使用现有检索信号；当数据规模、召回门槛或路由条件不满足时，
+          系统自动回退到 flat BM25，避免以性能换取不可见的准确率下降。
+        </p>
+        <ul>
+          <li>关键词 BM25、semantic 与 vector 三层检索继续共享最新图状态和 provenance。</li>
+          <li>所有候选窗口、队列、批次与上下文字节数保持有界。</li>
+          <li>索引 freshness、stale、degraded 和失败状态继续显式暴露，不用文本 fallback 掩盖缺失依赖。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>架构、质量与发布</h2>
+        <ul>
+          <li>架构门禁改用 Rust 语法生成 module/import graph，并通过 SCC 检测环依赖和分层违规。</li>
+          <li>CLI 生产路径收敛为 <code>bootstrap → interfaces → application</code>，存储和出站网络通过 ports 注入。</li>
+          <li>API DTO 与存储类型解耦，旧公开路径通过 re-export 保持 1.x 兼容。</li>
+          <li>修复 telemetry 与 XML 依赖中的安全问题，并保持 Rust 1.98 Clippy 检查通过。</li>
+          <li>GitHub Release 提供跨平台预编译产物、校验和与构建证明；<code>cargo install</code> 路径保持可用。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>兼容性说明</h2>
+        <ul>
+          <li>没有改变 CLI 命令结构、JSON/streaming JSON、HTTP、MCP、数据库位置或服务定义。</li>
+          <li>Knowledge Map v1 可由 1.1.14 的 <code>map init</code> 幂等迁移到 v2。</li>
+          <li>一旦默认 writer 已写出 v2，旧于 1.1.14 的 reader 必须升级后再访问该仓库。</li>
+          <li>历史索引复用是显式 opt-in；不传 <code>--reuse-historical</code> 时仍执行原有 full index。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.14/docs/zh/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md">Knowledge 开发闭环</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.14/docs/zh/03-architecture-specs/25-code-index-retention.md">代码索引保留策略</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.14/docs/zh/03-architecture-specs/26-git-commit-knowledge-development-loop.md">Git commit 知识闭环</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.14/docs/zh/03-architecture-specs/27-business-knowledge-technical-mapping.md">业务知识技术映射</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.14/docs/zh/04-research/12-hierarchical-bm25-analysis-2026.md">分层 BM25 分析</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.14/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
