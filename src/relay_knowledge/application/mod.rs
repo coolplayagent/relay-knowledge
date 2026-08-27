@@ -1,5 +1,10 @@
 //! Application services that orchestrate domain behavior behind stable API types.
 
+// `ApiError` is a stable 1.x public DTO whose optional metadata keeps the JSON and Rust API
+// layouts compatible. Boxing that field would be a breaking Rust API change, so application
+// boundary methods intentionally return the existing error shape until the 2.0 contract cleanup.
+#![allow(clippy::result_large_err)]
+
 mod code_repository;
 mod knowledge;
 mod model_provider;

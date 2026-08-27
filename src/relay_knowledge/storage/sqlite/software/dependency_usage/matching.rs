@@ -269,7 +269,7 @@ fn manifest_directory(component: &SoftwareComponent) -> &str {
 }
 
 fn python_requirements_owner_directory(path: &str) -> Option<&str> {
-    let (directory, file_name) = path.rsplit_once('/').map_or(("", path), |parts| parts);
+    let (directory, file_name) = path.rsplit_once('/').unwrap_or(("", path));
     if file_name.starts_with("requirements") {
         return Some(directory);
     }
