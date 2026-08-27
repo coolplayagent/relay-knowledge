@@ -465,7 +465,10 @@ jobs:
 
           This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes root-level `README.md` guidance plus Linux x64 and Windows x64 binaries under `assets/`; agents prefer the matching bundled asset for the current operating system, CPU, and active command runner when `version --format json` succeeds, and use PATH only as a fallback or when explicitly requested. Windows `.exe` asset examples stay in PowerShell or cmd.exe instructions, not bash/POSIX command blocks. It is intentionally separate from MCP protocol access.
 
-          Registry maintainers can publish the same generated skill layout with:
+          ClawHub receives the same versioned agent instructions without embedded binaries because
+          the registry enforces a 10 MB per-file limit. Its runtime selection falls back to a
+          verified GitHub Release or crates.io installation when no bundled asset is present.
+          Registry maintainers can publish that lightweight layout with:
 
           ```bash
           clawhub publish skills/relay-knowledge-cli --slug relay-knowledge-cli --name "Relay Knowledge CLI" --version ${{ needs.verify.outputs.version }}
@@ -558,54 +561,25 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Download Linux x64 release archive
-        if: steps.clawhub-token.outputs.publish == 'true'
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu
-          path: skill-artifacts/linux-x86_64
-
-      - name: Download Windows x64 release archive
-        if: steps.clawhub-token.outputs.publish == 'true'
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc
-          path: skill-artifacts/windows-x86_64
-
-      - name: Install CLI skill asset binaries and verify Linux glibc compatibility
+      - name: Prepare lightweight registry skill
         if: steps.clawhub-token.outputs.publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          linux_archive="skill-artifacts/linux-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu.tar.gz"
-          windows_archive="skill-artifacts/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc.zip"
-          mkdir -p "skills/relay-knowledge-cli/assets/linux-x86_64" "skills/relay-knowledge-cli/assets/windows-x86_64"
-
-          tar -xzf "$linux_archive" -C skill-artifacts/linux-x86_64
-          cp "skill-artifacts/linux-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu/${BIN_NAME}" \
-            "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
-
-          python3 - "$windows_archive" "skill-artifacts/windows-x86_64" <<'PY'
-          import sys
-          import zipfile
-
-          with zipfile.ZipFile(sys.argv[1]) as archive:
-              archive.extractall(sys.argv[2])
-          PY
-          cp "skill-artifacts/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc/${BIN_NAME}.exe" \
-            "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
-
-          chmod 0755 "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
-          chmod 0755 "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
-          test -x "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
-          test -f "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
-          python3 tools/release/check_linux_glibc_compat.py \
-            --max 2.31 \
-            "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
           python3 tools/release/update_skill_metadata_version.py \
             skills/relay-knowledge-cli/SKILL.md "${{ needs.verify.outputs.version }}"
           python3 tools/release/update_skill_metadata_version.py --check \
             skills/relay-knowledge-cli/SKILL.md "${{ needs.verify.outputs.version }}"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("skills/relay-knowledge-cli")
+          limit = 10_000_000
+          oversized = [path for path in root.rglob("*") if path.is_file() and path.stat().st_size >= limit]
+          if oversized:
+              rendered = ", ".join(str(path) for path in oversized)
+              raise SystemExit(f"ClawHub files must stay below 10 MB: {rendered}")
+          PY
 
       - name: Install ClawHub CLI
         if: steps.clawhub-token.outputs.publish == 'true'

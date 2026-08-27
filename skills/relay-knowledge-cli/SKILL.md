@@ -34,14 +34,15 @@ json` attempts before re-checking status. Do not replace leases with loops.
 
 Prefer the bundled `assets` binary for the current operating system, CPU, and
 active command runner whenever it exists and `version --format json` succeeds.
-Released skill packages include Linux x64 and Windows x64 binaries at
+GitHub Release skill archives include Linux x64 and Windows x64 binaries at
 `assets/linux-x86_64/relay-knowledge` and
-`assets/windows-x86_64/relay-knowledge.exe`. Use the published `PATH` install
-only when the bundled asset is missing, not executable, fails its version check,
-has no matching OS or CPU architecture, has no matching shell boundary, the
-Linux host is older than the glibc 2.31 baseline, or the user explicitly asks
-for the system-installed binary. Version comparisons are diagnostic only; do
-not choose a newer `PATH` binary over a working bundled asset by default.
+`assets/windows-x86_64/relay-knowledge.exe`. Registry distributions such as
+ClawHub omit these binaries to satisfy per-file limits. Use the published `PATH`
+install when the bundled asset is missing, not executable, fails its version
+check, has no matching OS or CPU architecture, has no matching shell boundary,
+the Linux host is older than the glibc 2.31 baseline, or the user explicitly
+asks for the system-installed binary. Version comparisons are diagnostic only;
+do not choose a newer `PATH` binary over a working bundled asset by default.
 
 The command examples below use `relay-knowledge` as readable shorthand for the
 resolved executable. When the bundled asset is selected, substitute that asset

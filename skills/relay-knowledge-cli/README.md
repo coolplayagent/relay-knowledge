@@ -116,9 +116,13 @@ bounded by an explicit cap.
   on the `.knowledge/knowledge-map.yaml` navigation contract plus repository
   bootstrap and spec-grounded incremental development.
 - `assets/linux-x86_64/relay-knowledge`: Linux x64 release binary in generated
-  release packages, built and checked against the glibc 2.31 baseline.
+  GitHub Release packages, built and checked against the glibc 2.31 baseline.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in
-  generated release packages.
+  generated GitHub Release packages.
+
+ClawHub receives the instruction and reference files without embedded binaries
+because the registry limits individual files to 10 MB. The runtime-selection
+rules therefore use a published `PATH` install when those assets are absent.
 
 Keep the `SKILL.md` frontmatter `description` at or below 1024 Unicode
 characters. Local checks, pre-commit, PR CI, release packaging, and ClawHub
