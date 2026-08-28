@@ -10,8 +10,17 @@ small root manifest: topic sources/routes live in content-addressed
 lives in a verified `.knowledge/history/` archive. `map route <topic>` loads one
 shard; `map show` loads current shards and returns only the bounded recent-history
 window. Use `map history --from <version> --limit <count>` for explicit pages of
-at most 256 entries. Never edit shard refs or archive files directly. Mutations
-append only newly completed history chunks and
+at most 256 entries. The bundled Draft 2020-12 schema at
+`knowledge-map.schema.json` describes the root manifest, topic shard, history
+archive, and history index node shapes for machine-readable discovery and
+structural validation. It deliberately accepts unknown fields to remain
+compatible with current Serde readers. It cannot prove that digests match file
+content, source ids are globally unique, routes are complete, history is
+contiguous, index ranges/heights agree, or reserved sources remain intact;
+`map validate` remains authoritative for those cross-file and semantic checks.
+The schema does not authorize direct edits to generated topic shards, history
+archives, or history index nodes. Never edit shard refs or archive files
+directly. Mutations append only newly completed history chunks and
 clean superseded topic shards after committing the root while protecting any
 recovery-manifest refs. The code map is the primary source of truth for
 repository facts. The map stores stable navigation and repository-model entry
@@ -42,6 +51,15 @@ authored, version-controlled business surface; edit it directly and review it
 as source code. `map init` creates only a missing minimal valid glossary and
 must never overwrite an existing one.
 
+The bundled Draft 2020-12 schema at `business-glossary.schema.json` describes
+the authored glossary v1 domains, terms, aliases, semantics, and technical
+mappings. It deliberately accepts unknown fields for Serde reader compatibility.
+Its character-count limits are structural approximations of the runtime's UTF-8
+byte limits, and it cannot prove domain/term identity, domain references, or
+case-insensitive alias uniqueness; `map validate` remains authoritative. Unlike
+the generated Knowledge Map shards and history assets, this intentionally
+authored glossary may be edited directly with normal source review.
+
 If that reserved source id has incompatible fields, stop and report the
 conflict. Do not overwrite it.
 
@@ -59,6 +77,12 @@ conflict. Do not overwrite it.
   is relevant.
 - Use only `map source add`, `map source update`, or `map source remove` for
   normal mutations, then validate again.
+- Use `knowledge-map.schema.json` only for v2 structural discovery or tooling;
+  never treat schema acceptance as a replacement for `map validate` or as
+  permission to edit CLI-generated artifacts.
+- Use `business-glossary.schema.json` for authored glossary v1 field discovery
+  and structural checks, edit that source under normal review, and run
+  `map validate` afterward for runtime and semantic validation.
 - Do not copy the YAML into `AGENTS.md`; keep only
   `Knowledge map: .knowledge/knowledge-map.yaml`.
 - Read `map route business-knowledge --format json` before business/spec/coding
@@ -69,8 +93,9 @@ conflict. Do not overwrite it.
 - If a map mutation must affect the current uncommitted coding decision,
   refresh a `worktree` overlay after a clean `HEAD` base exists. Otherwise
   commit the map with its related sources and publish it in the next update.
-- Edit YAML directly only when the CLI is unavailable and the user explicitly
-  requests manual repair.
+- Edit generated Knowledge Map YAML directly only when the CLI is unavailable
+  and the user explicitly requests manual repair; this restriction does not
+  apply to the intentionally authored business glossary.
 
 ## Repository Knowledge Bootstrap
 

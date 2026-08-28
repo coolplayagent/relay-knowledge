@@ -2,7 +2,7 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 3.8
+> Document version: 3.9
 > Date: 2026-08-27
 > Scope: Book 3 architecture and algorithm whitepaper
 
@@ -25,7 +25,7 @@ Installation and release are part of product architecture. Stable releases are v
 - Release archive attestations use the generated `checksums.txt` as their subject manifest, so GitHub artifact attestations cover the same archive digests that users verify locally.
 - CLI version discovery uses configurable dual sources: GitHub Releases and crates.io. Detection must go through the `env`, `paths`, and `net::http` boundaries, inherit proxy, TLS, timeout, and runtime-cache policy, and ordinary commands may only notify about newer stable versions rather than silently replacing binaries.
 - GitHub Releases include a `relay-knowledge-cli-skill-<tag>.tar.gz` skill artifact built from `skills/relay-knowledge-cli`; its version follows `Cargo.toml` and is written into generated `SKILL.md` metadata as numeric semver. The GitHub Release artifact includes a root-level `README.md`, Linux x64 and Windows x64 binaries under `assets/`, and the skill instructs agents to prefer the matching bundled asset whenever `version --format json` succeeds. Agents use `PATH` only as a fallback, when the host Linux glibc is older than the bundled asset baseline, or when the user explicitly requests the system install. When `CLAWHUB_TOKEN` is configured, the workflow publishes the same versioned instructions and references to ClawHub without embedded binaries because ClawHub limits individual files to 10 MB; the missing-asset path deliberately resolves a verified GitHub Release or crates.io installation. This skill-over-CLI artifact is separate from MCP protocol packaging.
-- The skill artifact includes `references/knowledge-map-workflows.md` and a policy-gated default prompt for joint knowledge-map/code-map bootstrap and pinned-ref spec development. Upgrading the skill changes agent instructions only; it does not mutate repository YAML or runtime index state until an authorized agent invokes the documented CLI workflow.
+- The skill artifact includes `references/knowledge-map-workflows.md`, the Draft 2020-12 `references/knowledge-map.schema.json`, the Draft 2020-12 `references/business-glossary.schema.json`, and a policy-gated default prompt for joint knowledge-map/code-map bootstrap and pinned-ref spec development. The metadata gate parses both schemas, protects the four Knowledge Map v2 artifact branches, Business Glossary v1 definitions/enums/bounds, and their unknown-field compatibility policy, and exercises representative valid and invalid instances. The release job must explicitly verify that both schemas exist in the generated GitHub Release skill archive; directory-based ClawHub publication includes the same references automatically. Upgrading the skill changes instructions and structural tooling only; it does not mutate repository YAML or runtime index state until an authorized agent invokes the documented CLI workflow. Neither schema replaces `map validate` for runtime, cross-file, or semantic integrity. The Knowledge Map schema never authorizes direct edits to generated shards, archives, or index nodes, while the glossary schema describes an intentionally authored, version-controlled source.
 
 Knowledge Map schema rollout is release-gated. PR CI validates the repository map with the current source binary and the latest stable crates.io binary, publishing the complete result as an artifact. Stable releases before `1.1.14` are recorded as `staged_pending_reader_release` when they cannot read v2 and the source version is newer; a same-version mismatch is an `incompatible_same_version` hard failure. Once stable reaches `1.1.14`, any incompatibility is a hard failure. A later writer schema may become the default only after the preceding stable reader accepts it. This gate is diagnostic and never rewrites the repository map or silently upgrades an installed binary.
 
@@ -197,7 +197,7 @@ automatic silent upgrades.
 
 - Release artifacts, checksums, versions, and documentation match each other.
 - Linux GNU release binaries and the skill Linux x64 bundled asset require no `GLIBC_*` symbol newer than 2.31.
-- The GitHub Release includes the CLI skill archive in `checksums.txt`, and the archive contains the skill `README.md` plus Linux x64 and Windows x64 asset binaries. ClawHub publication uses the same crate version and agent instructions without files at or above its 10 MB per-file limit.
+- The GitHub Release includes the CLI skill archive in `checksums.txt`, and the archive contains the skill `README.md`, `references/knowledge-map.schema.json`, `references/business-glossary.schema.json`, plus Linux x64 and Windows x64 asset binaries. ClawHub publication uses the same crate version, agent instructions, and schema references without files at or above its 10 MB per-file limit.
 - The CLI can explain when a newer stable version is available, JSON output remains machine-readable, and ordinary commands never auto-install an update.
 - Release-facing documentation has a dated `06-verification` audit covering
   navigation, inventory, link checks, and documentation-only change boundaries.

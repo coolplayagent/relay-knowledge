@@ -2,7 +2,7 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 3.8
+> 文档版本: 3.9
 > 编制日期: 2026-08-27
 > 适用范围: 第三卷架构与算法白皮书
 
@@ -25,7 +25,7 @@
 - Release archive attestation 使用生成的 `checksums.txt` 作为 subject manifest，使 GitHub artifact attestation 覆盖用户本地校验的同一批 archive digest。
 - CLI 新版本发现使用可配置双源：GitHub Releases 和 crates.io。检测必须走 `env`、`paths`、`net::http` 边界，继承代理、TLS、timeout 和 runtime cache 策略；普通命令只能提示稳定新版，不能静默替换二进制。
 - GitHub Releases 包含从 `skills/relay-knowledge-cli` 构建的 `relay-knowledge-cli-skill-<tag>.tar.gz` skill 产物；其版本跟随 `Cargo.toml`，并会以数字 semver 写入生成后的 `SKILL.md` metadata。GitHub Release 产物包含根目录 `README.md`，并在 `assets/` 下内置 Linux x64 和 Windows x64 二进制，要求 agent 在匹配平台的内置二进制通过 `version --format json` 校验时优先使用它。只有内置二进制不可用、宿主 Linux glibc 低于内置 asset baseline，或用户明确要求系统安装版本时，agent 才回退到 `PATH`。配置 `CLAWHUB_TOKEN` 时，workflow 会向 ClawHub 发布相同版本的指令与 references，但不嵌入二进制，因为 ClawHub 要求单文件小于 10 MB；缺少 asset 时会按既有路径解析已校验的 GitHub Release 或 crates.io 安装。该 skill-over-CLI 产物与 MCP 协议打包分离。
-- Skill 产物包含 `references/knowledge-map-workflows.md`，并通过 policy gate 固化 knowledge-map/code-map 联合 bootstrap 与固定 ref 的 spec 开发默认提示词。升级 skill 只更新 agent 指令；只有获得授权的 agent 显式执行文档中的 CLI 工作流后，才会修改仓库 YAML 或 runtime index state。
+- Skill 产物包含 `references/knowledge-map-workflows.md`、Draft 2020-12 的 `references/knowledge-map.schema.json`、Draft 2020-12 的 `references/business-glossary.schema.json`，并通过 policy gate 固化 knowledge-map/code-map 联合 bootstrap 与固定 ref 的 spec 开发默认提示词。Metadata gate 会解析两个 schema，保护四类 Knowledge Map v2 artifact branch、Business Glossary v1 的 definition/enum/bound 和未知字段兼容策略，并运行有代表性的有效与无效样例。Release job 必须显式确认两个 schema 都存在于生成的 GitHub Release skill archive；基于目录的 ClawHub 发布会自动包含相同 reference。升级 skill 只更新 agent 指令和结构化工具；只有获得授权的 agent 显式执行文档中的 CLI 工作流后，才会修改仓库 YAML 或 runtime index state。两个 schema 都不能替代 `map validate` 的 runtime、跨文件和语义完整性校验。Knowledge Map schema 不授权直接编辑生成的 shard、archive 或 index node；glossary schema 描述的是 intentionally authored、受版本控制的 source。
 
 Knowledge Map schema rollout 受 release gate 约束。PR CI 同时使用当前源码 binary 与 crates.io 最新 stable binary 校验仓库 map，并把完整结果发布为 artifact。低于 `1.1.14` 的 stable reader 无法读取 v2 且源码版本更高时记录为 `staged_pending_reader_release`；源码与 stable 同版本不兼容时以 `incompatible_same_version` 硬失败。stable 达到 `1.1.14` 后，任何不兼容都必须使门禁失败。后续 writer schema 只有在上一 stable reader 已能接受时才可成为默认格式。该门禁只诊断，不会重写仓库 map，也不会静默升级已安装 binary。
 
@@ -149,7 +149,7 @@ preflight doctor
 
 - Release artifact、checksum、版本号和文档能互相对应。
 - Linux GNU release 二进制和 skill Linux x64 内置 asset 不得依赖高于 2.31 的 `GLIBC_*` 符号。
-- GitHub Release 将 CLI skill archive 纳入 `checksums.txt`，archive 内含 skill `README.md`、Linux x64 和 Windows x64 asset 二进制；启用 ClawHub 发布时使用同一个 crate 版本和 agent 指令，并禁止包含达到或超过单文件 10 MB 限制的文件。
+- GitHub Release 将 CLI skill archive 纳入 `checksums.txt`，archive 内含 skill `README.md`、`references/knowledge-map.schema.json`、`references/business-glossary.schema.json`、Linux x64 和 Windows x64 asset 二进制；启用 ClawHub 发布时使用同一个 crate 版本、agent 指令和 schema reference，并禁止包含达到或超过单文件 10 MB 限制的文件。
 - CLI 能说明稳定新版本可用，JSON 输出保持机器可读且普通命令不会自动安装新版。
 - 面向 release 的文档有带日期的 `06-verification` 审计，覆盖导航、清单、链接检查和 documentation-only 改动边界。
 - Release workflow 必须运行 `python3 tools/docs/check_docs.py`，拦截文档结构、本地链接与 anchor、卷首导航、章节编号、代码块语言标签和英文版翻译卫生回归。

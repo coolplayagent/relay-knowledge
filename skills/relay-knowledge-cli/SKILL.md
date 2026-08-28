@@ -104,8 +104,25 @@ For repository knowledge navigation contracts, use
 to create, read, update, delete, validate, and route the shared
 `.knowledge/knowledge-map.yaml` contract. Read that reference for repository
 bootstrap, spec work, coding work, commit refresh, or source reconciliation.
-Do not hand-edit the YAML unless the CLI is unavailable and the user explicitly
-asks for manual repair.
+When an editor, validator, or agent needs the machine-readable v2 artifact
+shape, load the Draft 2020-12 schema at
+`references/knowledge-map.schema.json`. It covers the root manifest, topic
+shards, history archives, and history index nodes while allowing unknown fields
+for Serde reader compatibility. The schema is structural guidance only:
+`relay-knowledge map validate` remains authoritative for digests, cross-file
+identity, route and history completeness, index relationships, and reserved
+sources. It does not grant permission to edit generated topic shards, history
+archives, or history index nodes directly.
+For the intentionally authored `.knowledge/business-glossary.yaml`, load
+`references/business-glossary.schema.json`. This separate Draft 2020-12 schema
+describes glossary schema v1 domains, terms, aliases, semantics, and technical
+mappings while allowing unknown fields for Serde reader compatibility. It is
+structural guidance: `relay-knowledge map validate` remains authoritative for
+the document byte limit, UTF-8 byte-sized fields, identity and domain-reference
+rules, and case-insensitive alias uniqueness. The authored glossary may be
+edited directly with normal source review. Do not hand-edit generated Knowledge
+Map YAML unless the CLI is unavailable and the user explicitly asks for manual
+repair.
 
 When the user asks for a test, smoke check, or reproduction that should not
 touch existing runtime state, set an explicit temporary `RELAY_KNOWLEDGE_HOME`

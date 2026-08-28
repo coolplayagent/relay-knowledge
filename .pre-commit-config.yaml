@@ -34,4 +34,4 @@ repos:
     entry: sh -c 'version="$(cargo metadata --no-deps --format-version 1 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"packages\"][0][\"version\"])")"; python3 tools/release/update_skill_metadata_version.py --self-test --check skills/relay-knowledge-cli/SKILL.md "$version"'
     language: system
     pass_filenames: false
-    files: ^(Cargo\.toml|skills/relay-knowledge-cli/SKILL\.md|tools/release/update_skill_metadata_version\.py)$
+    files: ^(Cargo\.toml|skills/relay-knowledge-cli/|tools/release/(update_skill_metadata_version|skill_schema_contracts)\.py)$

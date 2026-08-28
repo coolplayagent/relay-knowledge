@@ -21,6 +21,15 @@ agents pin one ref and combine those models with business/domain views and code
 context. After a commit, they refresh the durable code task, impact/context
 evidence, and final map validation together.
 
+The bundle includes Draft 2020-12 JSON Schemas for all four persisted Knowledge
+Map v2 artifact classes and for the authored Business Glossary v1 document.
+They support machine-readable field discovery and structural checks without
+replacing the CLI's runtime and semantic validation. Unknown fields remain
+accepted to match current Serde readers. The Knowledge Map schema does not make
+generated shards, archives, or index nodes agent-editable; the separate glossary
+schema describes a version-controlled source that is intentionally edited under
+normal review.
+
 For code-structure questions such as function definitions, symbol locations,
 references, callers, callees, call graphs, and call chains, agents should use
 this skill before `grep`, `ripgrep`, `rg`, or plain text search. Fall back to
@@ -115,6 +124,14 @@ bounded by an explicit cap.
 - `references/knowledge-map-workflows.md`: agent workflow for CRUD operations
   on the `.knowledge/knowledge-map.yaml` navigation contract plus repository
   bootstrap and spec-grounded incremental development.
+- `references/knowledge-map.schema.json`: Draft 2020-12 structural schema for
+  the v2 root manifest, topic shards, history archives, and history index nodes;
+  `relay-knowledge map validate` remains authoritative for cross-file and
+  semantic integrity.
+- `references/business-glossary.schema.json`: Draft 2020-12 structural schema
+  for authored Business Glossary v1 domains, terms, aliases, semantics, and
+  technical mappings; `relay-knowledge map validate` remains authoritative for
+  runtime byte bounds and semantic integrity.
 - `assets/linux-x86_64/relay-knowledge`: Linux x64 release binary in generated
   GitHub Release packages, built and checked against the glibc 2.31 baseline.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in

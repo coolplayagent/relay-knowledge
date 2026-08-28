@@ -195,6 +195,10 @@ Kind 取值按命令家族隔离：
 
 `map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。`map init` 会创建 Knowledge Map v2 根 manifest，或把有效的 v1 单文件 map 幂等迁移为 v2，同时确保保留的 `software-model` route 与 `repository-software-model` repository source；保留 source 不兼容时会拒绝覆盖。V2 把各 topic 的 source 与 route 写入 `.knowledge/topics/` 下的内容寻址分片；`map route <topic>` 只读取根文件和目标分片。`map show` 读取全部当前分片，但只返回根文件内有界的 recent history，并通过 `archived_through` 与 `complete` 明确说明被省略的历史。Text 与 Markdown 输出会显示 `history_complete`、`history_archived_through` 和 recent 条目数；窗口不完整时还会明确提示使用 `map history` 开始分页读取归档历史。根文件最多保留 16 条最近变更，更早历史位于 `.knowledge/history/` 下的 SHA-256 校验不可变归档。内容寻址的有界深度 B+ tree index 让 `map history --from <version> --limit <count>` 直接定位旧归档：每个归档最多读取 11 个 index node 和一个 archive，单页上限为 256。早期 v2 归档链缺少 `history.index` 时，分页会提示先运行 `relay-knowledge map init`；该命令在 writer lock 下原子发布 index root，不会让读取请求回退为线性链扫描。`map validate` 会完整校验归档、index 和全部分片。
 
+CLI skill 随附 `references/knowledge-map.schema.json`，它是覆盖 v2 根 manifest、topic shard、history archive 和 history index node 的 JSON Schema Draft 2020-12 文档。Editor 或 agent 可在把 YAML 解析成 JSON-compatible value 后，用它发现字段并执行结构检查。Schema 会有意允许未知字段，以保持与当前 Serde reader 一致。Schema 通过不代表 digest 与内容一致、跨 topic source-id 全局唯一、route 完整、history 连续、index range/height 关系正确或保留 source 合法；`relay-knowledge map validate` 仍是权威检查。Schema 也不授权 agent 直接编辑 CLI 生成的 shard、archive 或 index node。
+
+Skill 还随附独立的 `references/business-glossary.schema.json`，作为 authored Business Glossary v1 文档的 Draft 2020-12 schema。它覆盖 domain、term、alias、声明式 semantics、技术 mapping、枚举和集合上限，并采用相同的未知字段兼容策略。JSON Schema 的 `maxLength` 只提供按字符计数的结构近似；4 MiB 文件上限、按 UTF-8 byte 计算的字段边界、identity/domain reference 规则和 alias 大小写不敏感唯一性仍以 `relay-knowledge map validate` 为权威。与生成的 Knowledge Map artifact 不同，`.knowledge/business-glossary.yaml` 应在版本控制和正常代码评审下直接维护。
+
 该契约只保存稳定导航和模型入口元数据，不复制文档、代码、配置、CI、运行态系统、外部知识源中的真实知识，也不复制与 snapshot 绑定的架构/构建/部署 projection row。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。所有 ref 必须是仓库受控相对路径；绝对路径、父目录穿越和符号链接逃逸会被拒绝。mutation 共用跨平台 OS advisory writer lock，先发布不可变 artifact，最后替换根 manifest；活跃 writer 保持独占，进程异常退出后 owner 自动释放，无需删除持久 `.lock` inode。首次 mutation 还会创建或扩展 target repository 的 `.knowledge/.gitignore`；应把这个 nested contract 与 map 一起提交，使普通 Git repository 与 linked worktree 都能排除 canonical/prepared lock inode，而不依赖本项目根 `.gitignore`。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
 
 ## 3.5 读写影响
@@ -210,6 +214,10 @@ LLM agent 通过本地 CLI 调用 relay-knowledge，并解析 JSON 输出。它�
 `version check`、setup/health 诊断、知识图谱 ingest/query，以及代码仓库注册、索引、查询、增量更新、影响分析和报告工作流。Repository bootstrap 会同时初始化/校验
 knowledge map 与 code map；spec-grounded commit loop 会固定一个 ref，并组合 map route、
 software/architecture model、impact 和 code context 证据。
+
+同一 skill package 还包含用于结构化工具的 Knowledge Map v2 schema。Metadata gate
+会在 release 打包前检查 Draft 标识、四类 artifact branch、关键复用定义、开放字段兼容策略，
+以及有代表性的正例和反例。
 
 该 skill 不配置 MCP、不调用 MCP 工具，也不管理 ACP session。协议级 agent 接入请使用
 MCP/ACP 对应章节。
