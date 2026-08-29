@@ -135,7 +135,7 @@ bounded by an explicit cap.
   technical mappings; `relay-knowledge map validate` remains authoritative for
   runtime byte bounds and semantic integrity.
 - `assets/linux-x86_64/relay-knowledge`: Linux x64 release binary in generated
-  GitHub Release packages, built and checked against the glibc 2.31 baseline.
+  GitHub Release packages, built and checked against the glibc 2.28 baseline.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in
   generated GitHub Release packages.
 

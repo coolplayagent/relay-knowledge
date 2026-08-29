@@ -37,7 +37,7 @@ target/debug/relay-knowledge help --format json
 provide prebuilt archives for Linux x64/ARM64, macOS Intel/Apple Silicon, and
 Windows x64/ARM64. Verify the selected archive with `checksums.txt` before
 putting the binary on `PATH`; GitHub artifact attestations cover the same
-archive digests. Linux GNU archives target a glibc 2.31 baseline.
+archive digests. Linux GNU archives target a glibc 2.28 baseline.
 
 Rust users can install from crates.io:
 

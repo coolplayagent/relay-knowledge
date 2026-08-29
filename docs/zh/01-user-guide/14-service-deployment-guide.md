@@ -36,7 +36,7 @@ relay-knowledge 的常驻服务是一个异步优先、有界资源的后台进�
 
 ### 14.2.1 系统要求
 
-- **操作系统**：Linux（glibc ≥ 2.31）、macOS（Apple Silicon / Intel）、Windows（x86_64 / ARM64）
+- **操作系统**：Linux（glibc ≥ 2.28）、macOS（Apple Silicon / Intel）、Windows（x86_64 / ARM64）
 - **无需另行管理应用运行时**：relay-knowledge 为单二进制，SQLite 已内置（bundled + FTS5）；仍依赖目标平台的系统库和 service manager
 - **磁盘空间**：二进制约 50 MB，运行时数据取决于知识图谱和代码仓库规模，建议预留 ≥ 2 GB
 - **内存**：建议 ≥ 512 MB（含 worker pool、HTTP 服务、SQLite 缓存）

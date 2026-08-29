@@ -35,7 +35,7 @@ target/debug/relay-knowledge help --format json
 提供 Linux x64/ARM64、macOS Intel/Apple Silicon 和 Windows x64/ARM64
 预构建压缩包。将二进制放入 `PATH` 前，应使用 `checksums.txt` 校验所选压缩包；
 GitHub artifact attestation 覆盖同一组压缩包摘要。Linux GNU 压缩包以
-glibc 2.31 为 baseline。
+glibc 2.28 为 baseline。
 
 Rust 用户也可以从 crates.io 安装：
 

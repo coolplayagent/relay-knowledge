@@ -200,7 +200,7 @@ The prompt injects only bounded summaries, so long-running iteration does not gr
 
 | Group | Coverage |
 | --- | --- |
-| Basic gates | Product and harness `fmt --check`, Linux GNU glibc 2.31 baseline policy gate, `cargo build --release --bin relay-knowledge`, and harness `cargo check`. |
+| Basic gates | Product and harness `fmt --check`, Linux GNU glibc 2.28 baseline policy gate, `cargo build --release --bin relay-knowledge`, and harness `cargo check`. |
 | Product gates | `skill_metadata_policy_cases`, `business_knowledge_regression_cases`, `code_index_recovery_cases`, `code_index_health_isolation_cases`, `code_index_sqlite_lock_cases`, and CLI contract cases. |
 | Default repositories | `index_performance_many_files`, `index_performance_c_fragment`, `c_syntax_fixture`, `cpp_syntax_fixture`, `cross_language_syntax_fixture`, `typescript_syntax_fixture`, `nonstandard_layout_fixture`, `software_global_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`, `temporal_samples_go`, and `temporal_sdk_go`. |
 | Default sampling | First 8 normal query cases per repository, while always preserving explicit `guardrail=true` cases. |

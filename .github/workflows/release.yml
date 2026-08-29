@@ -136,6 +136,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs: verify
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -144,14 +145,14 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
             linux_gnu: true
-            linux_glibc_max: '2.31'
-            linux_linker: ''
+            linux_glibc_max: '2.28'
+            linux_builder: quay.io/pypa/manylinux_2_28_x86_64@sha256:41abc24b9e23d18f6aa8dfe5dd0baed8036d158e35bd03c575d9e68bfbe194a9
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             archive: tar.gz
             linux_gnu: true
-            linux_glibc_max: '2.31'
-            linux_linker: aarch64-linux-gnu-gcc
+            linux_glibc_max: '2.28'
+            linux_builder: quay.io/pypa/manylinux_2_28_aarch64@sha256:15ac47b9d4ff96443e73bd2165e26fa412c3044a962e96bc1593bd5798b1dc65
           - target: x86_64-apple-darwin
             os: macos-15-intel
             archive: tar.gz
@@ -185,39 +186,66 @@ jobs:
         if: matrix.linux_gnu != true
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: Build Linux GNU release binary on glibc 2.31
+      - name: Build and smoke test Linux GNU release binary on glibc 2.28
         if: matrix.linux_gnu == true
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
-          LINKER: ${{ matrix.linux_linker }}
+          MAX_GLIBC: ${{ matrix.linux_glibc_max }}
+          LINUX_BUILDER: ${{ matrix.linux_builder }}
         run: |
           set -euo pipefail
           docker run --rm \
             -v "$PWD:/workspace" \
             -w /workspace \
+            -e BIN_NAME \
             -e CARGO_TERM_COLOR \
             -e TARGET \
-            -e LINKER \
-            ubuntu:20.04 \
+            -e MAX_GLIBC \
+            "$LINUX_BUILDER" \
             bash -lc '
               set -euo pipefail
-              export DEBIAN_FRONTEND=noninteractive
-              apt-get update
-              apt-get install -y --no-install-recommends \
-                build-essential ca-certificates curl git pkg-config
-              if [[ -n "${LINKER:-}" ]]; then
-                apt-get install -y --no-install-recommends \
-                  gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+              actual_glibc="$(getconf GNU_LIBC_VERSION)"
+              expected_glibc="glibc ${MAX_GLIBC}"
+              if [[ "$actual_glibc" != "$expected_glibc" ]]; then
+                echo "Linux builder glibc drifted: expected $expected_glibc, got $actual_glibc" >&2
+                exit 1
               fi
-              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
-                | sh -s -- -y --profile minimal --default-toolchain stable
+              download_with_retry() {
+                local url="$1"
+                local output="$2"
+                for attempt in 1 2 3 4 5; do
+                  if curl --proto "=https" --tlsv1.2 -sSf \
+                    --connect-timeout 15 --max-time 120 --continue-at - \
+                    -o "$output" "$url"; then
+                    return 0
+                  fi
+                  if [[ "$attempt" == 5 ]]; then
+                    echo "Failed to download $url after $attempt attempts" >&2
+                    return 1
+                  fi
+                  sleep 2
+                done
+              }
+              rustup_url="https://static.rust-lang.org/rustup/dist/${TARGET}/rustup-init"
+              rustup_installer=/tmp/rustup-init
+              rustup_checksum=/tmp/rustup-init.sha256
+              download_with_retry "$rustup_url" "$rustup_installer"
+              download_with_retry "${rustup_url}.sha256" "$rustup_checksum"
+              expected_checksum="$(awk "{print \$1}" "$rustup_checksum")"
+              actual_checksum="$(sha256sum "$rustup_installer" | awk "{print \$1}")"
+              if [[ ! "$expected_checksum" =~ ^[0-9a-f]{64}$ ]] \
+                || [[ "$actual_checksum" != "$expected_checksum" ]]; then
+                echo "rustup-init checksum verification failed for $TARGET" >&2
+                exit 1
+              fi
+              chmod 0755 "$rustup_installer"
+              timeout 900 env RUSTUP_MAX_RETRIES=5 \
+                "$rustup_installer" -y --profile minimal --default-toolchain stable
               . "$HOME/.cargo/env"
-              rustup target add "$TARGET"
-              if [[ -n "${LINKER:-}" ]]; then
-                export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="$LINKER"
-              fi
+              timeout 300 env RUSTUP_MAX_RETRIES=5 rustup target add "$TARGET"
               cargo build --release --locked --target "$TARGET"
+              "target/${TARGET}/release/${BIN_NAME}" --version
               chown -R "$(stat -c "%u:%g" /workspace)" /workspace/target
             '
 
@@ -231,7 +259,7 @@ jobs:
             "target/${{ matrix.target }}/release/${BIN_NAME}"
 
       - name: Smoke test release binary
-        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin'
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin'
         shell: bash
         run: |
           set -euo pipefail
@@ -357,7 +385,7 @@ jobs:
           test -x "dist/$package/assets/linux-x86_64/${BIN_NAME}"
           test -f "dist/$package/assets/windows-x86_64/${BIN_NAME}.exe"
           python3 tools/release/check_linux_glibc_compat.py \
-            --max 2.31 \
+            --max 2.28 \
             "dist/$package/assets/linux-x86_64/${BIN_NAME}"
           python3 tools/release/update_skill_metadata_version.py --check \
             "dist/$package/SKILL.md" "${{ needs.verify.outputs.version }}"
@@ -498,8 +526,8 @@ jobs:
 
           ## Platform Artifacts
 
-          - Linux x64: `x86_64-unknown-linux-gnu` built on the glibc 2.31 baseline
-          - Linux ARM64: `aarch64-unknown-linux-gnu` built on the glibc 2.31 baseline
+          - Linux x64: `x86_64-unknown-linux-gnu` built on the glibc 2.28 baseline
+          - Linux ARM64: `aarch64-unknown-linux-gnu` built on the glibc 2.28 baseline
           - macOS Intel: `x86_64-apple-darwin`
           - macOS Apple Silicon: `aarch64-apple-darwin`
           - Windows x64: `x86_64-pc-windows-msvc`

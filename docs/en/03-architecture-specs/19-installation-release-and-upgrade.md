@@ -2,7 +2,7 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 3.12
+> Document version: 3.13
 > Date: 2026-08-29
 > Scope: Book 3 architecture and algorithm whitepaper
 
@@ -19,7 +19,7 @@ Installation and release are part of product architecture. Stable releases are v
 - The v1.1.16 maintenance release preparation pins `Cargo.toml`, `Cargo.lock`, CLI skill metadata, and the release workflow dry-run default to `1.1.16`; publishing remains tag-driven and starts only after pushing `v1.1.16` or `1.1.16` to GitHub. Its lockfile refresh replaces the yanked transitive `chacha20` 0.10.1 package with compatible 0.10.2 without changing the declared dependency surface. Keeping source development ahead of crates.io stable prevents unreleased behavior from sharing a version number with an incompatible published binary.
 - macOS x64 release jobs must use an active Intel runner label, such as `macos-15-intel`, rather than retired `macos-13` images. Artifact upload/download and attestation actions must stay on Node 24-compatible releases so the release workflow remains runnable after GitHub-hosted runner runtime migrations.
 - The repository Pages site must be enabled once with `build_type=workflow` by an administrator. The Pages workflow uses Node 24-compatible `configure-pages`, `upload-pages-artifact`, and `deploy-pages` releases and must not ask its scoped `GITHUB_TOKEN` to create or enable the site on every push.
-- Linux GNU release jobs must build `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` artifacts on a glibc 2.31 baseline and fail the release if the resulting ELF requires any `GLIBC_*` symbol newer than 2.31. The CLI skill Linux x64 bundled asset must pass the same ABI check after packaging.
+- Linux GNU release jobs must build `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` artifacts natively on architecture-matched GitHub-hosted runners in digest-pinned manylinux 2.28 x64 and ARM64 containers. Each container must assert its actual glibc is 2.28 before building and start the new binary in-container; the release fails if the resulting ELF requires any `GLIBC_*` symbol newer than 2.28. The CLI skill Linux x64 bundled asset must pass the same ABI check after packaging.
 - OpenTelemetry dependencies form one release compatibility family: `opentelemetry`, `opentelemetry_sdk`, and `opentelemetry-otlp` use the same minor release, and `tracing-opentelemetry` uses the corresponding integration release. Dependency automation must update and validate the family together; a release candidate must not contain duplicate OpenTelemetry core or SDK major/minor lines. The current security floor is `opentelemetry_sdk` 0.32.1, which rejects W3C Baggage values above 8,192 bytes and stops after 64 list members as required by GHSA-w9wp-h8wv-79jx / CVE-2026-48504.
 - The XML parser security floor is `quick-xml` 0.41.0, which keeps duplicate-attribute checking linear and caps namespace declarations per element as required by RUSTSEC-2026-0194 and RUSTSEC-2026-0195. Informational unsoundness warnings with an available patch are upgraded in the lockfile rather than ignored.
 - Release archive attestations use the generated `checksums.txt` as their subject manifest, so GitHub artifact attestations cover the same archive digests that users verify locally.
@@ -200,7 +200,7 @@ automatic silent upgrades.
 ## 7. Acceptance Criteria
 
 - Release artifacts, checksums, versions, and documentation match each other.
-- Linux GNU release binaries and the skill Linux x64 bundled asset require no `GLIBC_*` symbol newer than 2.31.
+- Linux GNU release binaries and the skill Linux x64 bundled asset require no `GLIBC_*` symbol newer than 2.28; both x64 and ARM64 artifacts complete a startup smoke test in a verified glibc 2.28 container.
 - The GitHub Release includes the CLI skill archive in `checksums.txt`, and the archive contains the skill `README.md`, `references/knowledge-map.schema.json`, `references/business-glossary.schema.json`, plus Linux x64 and Windows x64 asset binaries. ClawHub publication uses the same crate version, agent instructions, and schema references without files at or above its 10 MB per-file limit.
 - The CLI can explain when a newer stable version is available, JSON output remains machine-readable, and ordinary commands never auto-install an update.
 - Release-facing documentation has a dated `06-verification` audit covering

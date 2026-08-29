@@ -200,7 +200,7 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 
 | 分组 | 覆盖内容 |
 | --- | --- |
-| 基础质量门禁 | 产品与 harness 的 `fmt --check`、Linux GNU glibc 2.31 baseline 策略门禁、`cargo build --release --bin relay-knowledge`、harness `cargo check`。 |
+| 基础质量门禁 | 产品与 harness 的 `fmt --check`、Linux GNU glibc 2.28 baseline 策略门禁、`cargo build --release --bin relay-knowledge`、harness `cargo check`。 |
 | 产品 gate | `skill_metadata_policy_cases`、`business_knowledge_regression_cases`、`code_index_recovery_cases`、`code_index_health_isolation_cases`、`code_index_sqlite_lock_cases`、CLI contract case。 |
 | 默认仓库 | `index_performance_many_files`、`index_performance_c_fragment`、`c_syntax_fixture`、`cpp_syntax_fixture`、`cross_language_syntax_fixture`、`typescript_syntax_fixture`、`nonstandard_layout_fixture`、`software_global_fixture`、`project_alias_fixture`、`relay_teams`、`leveldb_cpp`、`temporal_samples_go`、`temporal_sdk_go`。 |
 | 默认取样 | 普通仓库默认取前 8 条 query case，并始终保留显式 `guardrail=true` case。 |

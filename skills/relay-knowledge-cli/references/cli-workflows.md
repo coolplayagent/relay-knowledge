@@ -17,7 +17,7 @@ active command runner. GitHub Release skill archives include
 `assets/linux-x86_64/relay-knowledge` and
 `assets/windows-x86_64/relay-knowledge.exe`; ClawHub packages omit them to stay
 within the registry's per-file limit. The Linux x64 asset is built and checked
-against a glibc 2.31 baseline. If that asset exists, is executable, and `version
+against a glibc 2.28 baseline. If that asset exists, is executable, and `version
 --format json` succeeds, run the workflow commands through that resolved
 executable. The examples below keep the command as `relay-knowledge` for
 readability; when executing them, substitute the bundled asset path if it was

@@ -40,7 +40,7 @@ GitHub Release skill archives include Linux x64 and Windows x64 binaries at
 ClawHub omit these binaries to satisfy per-file limits. Use the published `PATH`
 install when the bundled asset is missing, not executable, fails its version
 check, has no matching OS or CPU architecture, has no matching shell boundary,
-the Linux host is older than the glibc 2.31 baseline, or the user explicitly
+the Linux host is older than the glibc 2.28 baseline, or the user explicitly
 asks for the system-installed binary. Version comparisons are diagnostic only;
 do not choose a newer `PATH` binary over a working bundled asset by default.
 
