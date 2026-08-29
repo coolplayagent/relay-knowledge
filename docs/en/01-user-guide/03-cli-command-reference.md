@@ -56,6 +56,8 @@ relay-knowledge provider probe --format json
 
 The OpenAI-compatible embedding base URL may be a host root, a versioned API root such as `/v1` or `/v4`, or a full `/embeddings` endpoint. Non-version path prefixes keep resolving as `<prefix>/v1/embeddings`, and query or fragment suffixes are ignored during endpoint construction.
 
+All remote embedding and provider HTTP uses the shared QoS runtime. Admission rejection occurs before network I/O, and timeout/cancellation diagnostics remain visible; the deprecated library constructor without QoS refuses remote providers.
+
 Endpoint host, batch, timeout, concurrency, and cursor metadata belong to runtime diagnostics in `status`, `health`, or the Web Providers panel.
 
 ## 3.3 Setup Doctor and Profiles

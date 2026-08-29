@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::identity::StableHasher64;
+
 use super::WatchedRepository;
 
 /// Builds the single durable reconciliation slot for a repository's checked-out ref.
@@ -253,38 +255,23 @@ fn path_label(path: &Path) -> Option<String> {
 }
 
 fn stable_path_fingerprint(paths: &[String]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
+    let mut hasher = StableHasher64::new();
     for path in paths {
-        for byte in path.as_bytes().iter().copied().chain([0]) {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
+        hasher.update(path.as_bytes());
+        hasher.update(&[0]);
     }
-    hash
+    hasher.finish()
 }
 
 fn stable_content_fingerprint(entries: &[(String, u64)]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
+    let mut hasher = StableHasher64::new();
     for (path, content_hash) in entries {
-        for byte in path
-            .as_bytes()
-            .iter()
-            .copied()
-            .chain([0])
-            .chain(content_hash.to_le_bytes())
-            .chain([0])
-        {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
+        hasher.update(path.as_bytes());
+        hasher.update(&[0]);
+        hasher.update(&content_hash.to_le_bytes());
+        hasher.update(&[0]);
     }
-    hash
+    hasher.finish()
 }
 
 #[cfg(test)]

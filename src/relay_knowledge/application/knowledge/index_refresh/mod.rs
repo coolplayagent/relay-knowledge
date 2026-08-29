@@ -1,10 +1,8 @@
-use std::{
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::Arc;
 
 use crate::{
     api::{ApiError, ApiMetadata, RequestContext},
+    clock::system_now_millis_or_zero as now_millis,
     domain::{GraphVersion, IndexKind, IndexStatus},
     indexing::IndexRefreshPlan,
     retrieval::ReadModelBackendConfig,
@@ -448,15 +446,6 @@ fn task_matches_entry(task: &IndexRefreshTask, entry: &MutationLogEntry) -> bool
     }
 
     false
-}
-
-fn now_millis() -> u64 {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0);
-
-    u64::try_from(millis).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

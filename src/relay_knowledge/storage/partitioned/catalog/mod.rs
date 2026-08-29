@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
@@ -13,6 +13,7 @@ use crate::storage::sqlite::code::lifecycle::publication_fence::{
     PartitionedPublicationTarget, prepare_partitioned_target,
 };
 use crate::{
+    clock::system_now_millis_or_zero as now_millis,
     domain::{CodeIndexPublicationFence, CodeRepositoryStatus},
     paths::RuntimePaths,
     storage::{
@@ -936,14 +937,6 @@ pub(super) fn mirror_repository_status(
 
 fn json<T: serde::Serialize>(value: &T) -> Result<String, StorageError> {
     serde_json::to_string(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 #[cfg(test)]

@@ -1,3 +1,5 @@
+use crate::identity::stable_hash64;
+
 const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1-generated-files-v1-web-routes-v1-syntax-failure-chunks-v1-bounded-config-chunks-v1-dense-source-windows-v1-c-composite-tags-v1-doc-block-owner-anchor-v2-bounded-type-doc-summary-v1-search-owner-v2-reference-search-groups-v2";
 
 /// Builds the stable source scope id for a Git snapshot partition.
@@ -151,19 +153,6 @@ fn append_hash_list(input: &mut Vec<u8>, values: &[String]) {
 fn append_hash_part(input: &mut Vec<u8>, value: &str) {
     input.extend_from_slice(&(value.len() as u64).to_le_bytes());
     input.extend_from_slice(value.as_bytes());
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
 
 #[cfg(test)]

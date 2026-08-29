@@ -5,10 +5,11 @@
 //! interface layer after process-local contracts are resolved.
 
 use crate::{
-    application::KnowledgeMapService,
+    application::{KnowledgeMapService, ProcessRuntimeConfig},
+    env::windows_system_root_from_process,
     interfaces::cli::{CliAction, CliCommand, OutputFormat},
     paths::discover_repository_root,
-    project::KNOWLEDGE_MAP_RELATIVE_PATH,
+    project::{KNOWLEDGE_MAP_RELATIVE_PATH, PROJECT_NAME},
 };
 
 pub use crate::interfaces::cli::{CliError, CliProcessOutput};
@@ -59,7 +60,16 @@ async fn run_command(
         }
         _ => None,
     };
-    crate::interfaces::cli::run_command(command, service.as_ref()).await
+    crate::interfaces::cli::run_command(command, service.as_ref(), process_context()).await
+}
+
+fn process_context() -> ProcessRuntimeConfig {
+    let current_executable =
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(PROJECT_NAME));
+    ProcessRuntimeConfig::from_bootstrap_inputs(
+        current_executable,
+        windows_system_root_from_process(),
+    )
 }
 
 fn knowledge_map_service(format: OutputFormat) -> Result<KnowledgeMapService, CliError> {

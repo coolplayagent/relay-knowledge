@@ -113,6 +113,9 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
 
+      - name: Tracked text file line-count gate
+        run: cargo test --test relay_knowledge all_tracked_text_files_stay_within_line_budget --all-features
+
       - name: Rust syntax dependency graph and architecture gate
         run: cargo test --test relay_knowledge architecture_boundaries --all-features
 

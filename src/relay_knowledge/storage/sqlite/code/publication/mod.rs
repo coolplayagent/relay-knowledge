@@ -3,11 +3,12 @@
 //! This code-owned boundary is called by software projection in the existing
 //! software-to-code dependency direction.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::storage::{CodeIndexPublicationTarget, StorageError};
+use crate::{
+    clock::system_now_millis_or_zero as now_millis,
+    storage::{CodeIndexPublicationTarget, StorageError},
+};
 
 use super::lifecycle::commit_scope;
 
@@ -659,13 +660,6 @@ struct PersistedScope {
     reference_count: usize,
     chunk_count: usize,
     degraded_reason: Option<String>,
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

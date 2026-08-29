@@ -1,7 +1,4 @@
-use std::{
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::Arc;
 
 use serde_json::json;
 
@@ -14,6 +11,7 @@ use crate::{
         ServicePlanResponse, WorkerRunRequest, WorkerRunResponse, WorkerStatusRequest,
         WorkerStatusResponse,
     },
+    clock::system_now_millis_or_zero as now_millis,
     domain::{
         AuditStatus, EvidenceModality, EvidenceRecord, GraphVersion, ProposalState,
         ServiceManagerAction, ServiceOperatorState, WorkerBackendState, WorkerKind, WorkerStatus,
@@ -653,12 +651,4 @@ fn interface_label(interface: InterfaceKind) -> &'static str {
         InterfaceKind::Mcp => "mcp",
         InterfaceKind::Acp => "acp",
     }
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
 }

@@ -2,7 +2,10 @@
 
 use std::io::{self, Write};
 
-use crate::domain::EvidenceExtractionMetadata;
+use crate::{
+    domain::EvidenceExtractionMetadata,
+    identity::{StableHasher64, stable_hash64},
+};
 
 use super::indexing;
 
@@ -34,48 +37,32 @@ pub(super) fn stable_bytes_id(prefix: &str, value: &[u8]) -> String {
 
 /// Incrementally hashes serialized evidence without materializing an unbounded buffer.
 pub(super) struct StableIdWriter {
-    hash: u64,
+    hasher: StableHasher64,
 }
 
 impl StableIdWriter {
     pub(super) const fn new() -> Self {
         Self {
-            hash: FNV_OFFSET_BASIS,
+            hasher: StableHasher64::new(),
         }
     }
 
     pub(super) fn finish(&self, prefix: &str) -> String {
-        format!("{prefix}:{:016x}", self.hash)
+        format!("{prefix}:{:016x}", self.hasher.finish())
     }
 
     pub(super) fn finish_hex(&self) -> String {
-        format!("{:016x}", self.hash)
+        format!("{:016x}", self.hasher.finish())
     }
 }
 
 impl Write for StableIdWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        for byte in buffer {
-            self.hash ^= u64::from(*byte);
-            self.hash = self.hash.wrapping_mul(FNV_PRIME);
-        }
+        self.hasher.update(buffer);
         Ok(buffer.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
-
-const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-const FNV_PRIME: u64 = 0x100000001b3;
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }

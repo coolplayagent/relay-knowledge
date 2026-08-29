@@ -1,6 +1,9 @@
 //! Lifecycle step execution, rollback admission, and runner dispatch.
 
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use crate::domain::{
     ServiceDefinitionPlan, ServiceLifecycleExecutionReport, ServiceLifecycleStep,
@@ -275,7 +278,15 @@ pub(super) trait StepRunner {
     ) -> Result<String, String>;
 }
 
-pub(super) struct ProcessStepRunner;
+pub(super) struct ProcessStepRunner {
+    current_executable: PathBuf,
+}
+
+impl ProcessStepRunner {
+    pub(super) fn new(current_executable: PathBuf) -> Self {
+        Self { current_executable }
+    }
+}
 
 impl StepRunner for ProcessStepRunner {
     fn run(
@@ -305,7 +316,7 @@ impl StepRunner for ProcessStepRunner {
                 Ok(format!("validated {}", plan.checkpoint_path))
             }
             "copy-binary" => {
-                copy_current_binary(plan)?;
+                copy_current_binary(plan, &self.current_executable)?;
                 Ok(format!("wrote {}", plan.binary_path))
             }
             "verify-install-target" => {

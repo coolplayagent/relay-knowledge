@@ -1,10 +1,11 @@
 //! Enforces attempt-scoped publication ownership at SQLite commit boundaries.
 
-use std::{path::Path, time::SystemTime};
+use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::{
+    clock::system_now_millis,
     domain::{
         CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget,
         code_snapshot_scope_is_fact_versioned, code_snapshot_scope_matches_identity,
@@ -783,18 +784,7 @@ fn attach_authority(connection: &Connection, authority_path: &Path) -> Result<()
 }
 
 fn now_millis() -> Result<u64, StorageError> {
-    system_time_millis(SystemTime::now())
-}
-
-fn system_time_millis(now: SystemTime) -> Result<u64, StorageError> {
-    let elapsed = now
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|error| {
-            StorageError::Invariant(format!("system clock is before Unix epoch: {error}"))
-        })?;
-    u64::try_from(elapsed.as_millis()).map_err(|_| {
-        StorageError::Invariant("system clock milliseconds exceed u64 range".to_owned())
-    })
+    system_now_millis().map_err(|error| StorageError::Invariant(error.to_string()))
 }
 
 #[cfg(test)]

@@ -1,9 +1,6 @@
 use rusqlite::Connection;
 
-use super::{
-    PendingWorktreeTarget, PublicationFenceGuard, WorktreeScopeIdentity, prepare_guard,
-    system_time_millis,
-};
+use super::{PendingWorktreeTarget, PublicationFenceGuard, WorktreeScopeIdentity, prepare_guard};
 use crate::{
     domain::{
         CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget,
@@ -219,20 +216,6 @@ fn code_index_task_publication_fence_propagates_authoritative_clock_failure() {
         })
         .expect("publication fact should load");
     assert_eq!(value, "before");
-}
-
-#[test]
-fn publication_clock_rejects_time_before_unix_epoch() {
-    let before_epoch = std::time::SystemTime::UNIX_EPOCH
-        .checked_sub(std::time::Duration::from_millis(1))
-        .expect("test clock should represent pre-epoch time");
-
-    let error = system_time_millis(before_epoch)
-        .expect_err("pre-epoch publication time must not fall back to epoch zero");
-
-    assert!(
-        matches!(error, StorageError::Invariant(message) if message.contains("before Unix epoch"))
-    );
 }
 
 #[test]

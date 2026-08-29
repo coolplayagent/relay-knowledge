@@ -15,6 +15,7 @@ use std::{
 use std::sync::Mutex;
 
 use super::CodeIndexError;
+use crate::identity::StableHasher64;
 
 pub(in crate::code) use bounded::{
     GitNameStatusBudget, GitNulRecordBudget, GitSmallOutputBudget, git_name_status_z_bounded,
@@ -280,24 +281,20 @@ pub(crate) fn repository_worktree_observation_bounded(
     Ok(Some(identity.finish()))
 }
 
-struct WorktreeObservationHash(u64);
+struct WorktreeObservationHash(StableHasher64);
 
 impl WorktreeObservationHash {
     const fn new() -> Self {
-        Self(0xcbf29ce484222325)
+        Self(StableHasher64::new())
     }
 
     fn update(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.0 ^= u64::from(*byte);
-            self.0 = self.0.wrapping_mul(0x100000001b3);
-        }
-        self.0 ^= 0xff;
-        self.0 = self.0.wrapping_mul(0x100000001b3);
+        self.0.update(bytes);
+        self.0.update(&[0xff]);
     }
 
     const fn finish(self) -> u64 {
-        self.0
+        self.0.finish()
     }
 }
 

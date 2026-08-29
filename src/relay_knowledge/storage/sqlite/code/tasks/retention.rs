@@ -2,11 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{
+    clock::system_now_millis_or_zero,
     domain::{CodeIndexMode, CodeRepositoryRetentionJobStatus, CodeScopeRetentionSummary},
     storage::{CodeScopeRetentionRequest, StorageError},
 };
@@ -280,7 +279,7 @@ fn run_retention_pass(
         extra_retained_scopes,
         repository_retention.as_ref(),
     )?;
-    let now_ms = current_timestamp_ms();
+    let now_ms = system_now_millis_or_zero();
     let had_job = !retention_gc::jobs(&transaction, repository_id)?.is_empty();
     let mut pruned = Vec::new();
     if had_job {
@@ -915,13 +914,6 @@ fn finished_task_history_pending(
         .optional()
         .map(|row| row.is_some())
         .map_err(StorageError::from)
-}
-
-fn current_timestamp_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 fn user_repository_set_member_scopes(

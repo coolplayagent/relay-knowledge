@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 3.10
-> Date: 2026-08-28
+> Document version: 3.12
+> Date: 2026-08-29
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -16,7 +16,7 @@ Installation and release are part of product architecture. Stable releases are v
 - crates.io keeps `cargo install relay-knowledge` working.
 - Homebrew, Scoop, winget, or distro packages reference artifacts from the same release tag instead of rebuilding divergent snapshots.
 - Release tags use `vX.Y.Z`, `X.Y.Z`, or matching prerelease forms such as `vX.Y.Z-rc.1`; the numeric version must match `Cargo.toml` and `Cargo.lock` before the tag is pushed. Manual dry-run dispatches validate the same version contract without publishing crates.io or GitHub release artifacts, and the workflow default dry-run tag must be updated with each release version bump.
-- The v1.1.15 Repository Map v3 reader release preparation pins `Cargo.toml`, `Cargo.lock`, CLI skill metadata, and the release workflow dry-run default to `1.1.15`; publishing remains tag-driven and starts only after pushing `v1.1.15` or `1.1.15` to GitHub. Keeping source development ahead of crates.io stable prevents an unreleased persistent-contract reader from sharing a version number with an incompatible published binary.
+- The v1.1.16 maintenance release preparation pins `Cargo.toml`, `Cargo.lock`, CLI skill metadata, and the release workflow dry-run default to `1.1.16`; publishing remains tag-driven and starts only after pushing `v1.1.16` or `1.1.16` to GitHub. Its lockfile refresh replaces the yanked transitive `chacha20` 0.10.1 package with compatible 0.10.2 without changing the declared dependency surface. Keeping source development ahead of crates.io stable prevents unreleased behavior from sharing a version number with an incompatible published binary.
 - macOS x64 release jobs must use an active Intel runner label, such as `macos-15-intel`, rather than retired `macos-13` images. Artifact upload/download and attestation actions must stay on Node 24-compatible releases so the release workflow remains runnable after GitHub-hosted runner runtime migrations.
 - The repository Pages site must be enabled once with `build_type=workflow` by an administrator. The Pages workflow uses Node 24-compatible `configure-pages`, `upload-pages-artifact`, and `deploy-pages` releases and must not ask its scoped `GITHUB_TOKEN` to create or enable the site on every push.
 - Linux GNU release jobs must build `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` artifacts on a glibc 2.31 baseline and fail the release if the resulting ELF requires any `GLIBC_*` symbol newer than 2.31. The CLI skill Linux x64 bundled asset must pass the same ABI check after packaging.
@@ -45,7 +45,7 @@ Installed resident services must also make the commit-loop policy explicit. `REL
 
 Web Knowledge Map requests name a registered repository explicitly. The installed service resolves that identity from managed repository state and never uses its process working directory as an implicit repository. Upgrading from the earlier cwd-bound behavior requires registering each repository that the Web workspace will query; no repository files are moved, and rollback only restores the earlier selection behavior.
 
-The implementation keeps this contract auditable through explicit ownership: lifecycle step policy remains in `application::service::lifecycle_plan`, while service-definition rendering, platform permissions, and systemd/launchd/Windows Service commands live in `lifecycle_plan::platform_service`. Changes to either boundary must preserve the same dry-run plan and execution contract across all supported platforms.
+The implementation keeps this contract auditable through explicit ownership: lifecycle step policy remains in `application::service::lifecycle_plan`, while service-definition rendering, platform permissions, and systemd/launchd/Windows Service commands live in `lifecycle_plan::platform_service`. CLI and resident-service bootstrap capture the running executable path once and inject it through typed `ProcessRuntimeConfig`; preflight, copy, upgrade, rollback, and checkpoint recovery must reuse that value instead of looking up process state again. Changes to either boundary must preserve the same dry-run plan and execution contract across all supported platforms.
 
 Exact code-source fallback is implemented inside the product and must not require `rg` at runtime. Agent-facing setup notes may mention bounded `rg` or `grep -RIn` as manual inspection tools, but installers must not make recursive grep a service dependency or a replacement for indexed query behavior.
 
@@ -155,6 +155,8 @@ preflight doctor
   -> post-upgrade doctor
 ```
 
+Plan rendering and execution use the exact source executable captured at bootstrap. Preflight, binary copy, upgrade, rollback, and checkpoint recovery must reuse that typed process input; they must not perform a later `current_exe` lookup that could select a different binary.
+
 Stopping ad hoc CLI writers and creating a transactionally consistent runtime-database backup are operator preconditions. A successful lifecycle stop of the managed service, combined with the absence of ad hoc writers, establishes the exclusive database access required by migration. The lifecycle executor does not independently probe for exclusive access and does not create a runtime-database checkpoint; its rollback checkpoint covers only the binary and service definition. Operators that require an independent exclusive-access check must execute the documented stages through an external maintenance procedure rather than treating one-shot `--execute` as that verification.
 
 On failure, the lifecycle executor rolls back the binary and service definition. Database rollback uses the operator-created runtime checkpoint; without that checkpoint, the v4 derived-index migration is forward-only as documented below.
@@ -204,7 +206,7 @@ automatic silent upgrades.
 - Release-facing documentation has a dated `06-verification` audit covering
   navigation, inventory, link checks, and documentation-only change boundaries.
 - Service installation uses systemd, launchd, or Windows Service instead of unmanaged loops.
-- `service lifecycle <action> --dry-run` reports the service name, definition path, install directory, runtime paths, permission requirements, rollback plan, and package-manifest verification chain; `--execute` runs only when explicitly requested, executes rollback steps on failure, and returns an operation error for failed executions.
+- `service lifecycle <action> --dry-run` reports the service name, definition path, install directory, runtime paths, permission requirements, rollback plan, and package-manifest verification chain; its preflight/copy/checkpoint steps use the executable path captured by bootstrap; `--execute` runs only when explicitly requested, executes rollback steps on failure, and returns an operation error for failed executions.
 - Uninstall removes service registration and service definitions while preserving runtime data unless the user explicitly confirms removal.
 - Uninstalling the service stops commit reconciliation; preserving runtime data also preserves active/recent scopes, protected pins, bounded task history, and future full-reindex capability. Explicit data removal must include every code shard and cannot be described as reversible without a backup.
 - Partitioned SQLite shard directories participate in backup, migration, doctor, and uninstall confirmation.

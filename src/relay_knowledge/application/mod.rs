@@ -19,8 +19,9 @@ pub(crate) use knowledge::map::{
     KnowledgeMapService, KnowledgeMapServiceError, MAX_HISTORY_PAGE_SIZE,
 };
 pub use runtime::{
-    AgentRuntimeConfig, FileIndexRootConfig, FileIndexRuntimeConfig, RetrievalRuntimeConfigError,
-    RuntimeConfiguration, RuntimeConfigurationError, WorkerRuntimeConfig,
+    AgentRuntimeConfig, FileIndexRootConfig, FileIndexRuntimeConfig, ProcessRuntimeConfig,
+    RetrievalRuntimeConfigError, RuntimeConfiguration, RuntimeConfigurationError,
+    WorkerRuntimeConfig,
 };
 pub use service::{AgentDurableAuditInput, RelayKnowledgeService};
 pub use update::{

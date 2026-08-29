@@ -8,6 +8,7 @@ use crate::{
         ServiceDefinitionPlan, ServiceLifecycleExecutionReport, ServiceManagerAction,
         ServicePackageManifestCheck,
     },
+    identity::stable_hash64,
     paths::RuntimePaths,
     project::{PROJECT_NAME, SERVICE_LIFECYCLE_CHECKPOINT_FILE_NAME},
     storage::StorageTopology,
@@ -53,13 +54,12 @@ impl RelayKnowledgeService {
         if !request.execute && !request.dry_run {
             return Err("service lifecycle requests must choose dry-run or --execute".to_owned());
         }
-        let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from(PROJECT_NAME));
         render_service_plan_for_platform(
             &self.runtime.paths,
             self.runtime.storage.topology,
             request,
             current_platform(),
-            current_exe,
+            self.runtime.process.current_executable.clone(),
         )
     }
 
@@ -80,8 +80,9 @@ impl RelayKnowledgeService {
         plan: &ServiceDefinitionPlan,
     ) -> Result<ServiceLifecycleExecutionReport, ApiError> {
         let plan = plan.clone();
+        let current_executable = self.runtime.process.current_executable.clone();
         let report = tokio::task::spawn_blocking(move || {
-            let mut runner = ProcessStepRunner;
+            let mut runner = ProcessStepRunner::new(current_executable);
             execute_service_plan_blocking(&plan, &mut runner)
         })
         .await
@@ -264,15 +265,6 @@ fn normalized_install_dir(value: Option<&str>) -> Result<Option<PathBuf>, String
             Ok(path)
         })
         .transpose()
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
 }
 
 #[cfg(test)]

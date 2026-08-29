@@ -1,11 +1,10 @@
 //! Public request/response contracts and typed Knowledge Map mutation state.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde::Serialize;
 
 use crate::{
     api::{ApiMetadata, RequestContext},
+    clock::system_now_millis_or_zero,
     domain::{
         DirectoryLoadHint, DirectoryUpdateRule, KnowledgeMap, KnowledgeMapHistoryEntry,
         KnowledgeMapRoute, KnowledgeMapSource, KnowledgeMapSourceKind, KnowledgeMapTopic,
@@ -87,10 +86,7 @@ pub(super) fn metadata(context: &RequestContext) -> ApiMetadata {
 }
 
 pub(super) fn now_stamp() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
+    let seconds = system_now_millis_or_zero() / 1_000;
     format!("unix:{seconds}")
 }
 

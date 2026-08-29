@@ -203,6 +203,13 @@ fn layer_policy_rejects_api_storage_dependency() {
     );
 }
 
+#[test]
+fn layer_policy_treats_identity_as_an_inner_primitive() {
+    let graph = ModuleGraph::from_references(vec![reference("domain", "identity")]);
+
+    assert!(graph.layer_violations().is_empty());
+}
+
 struct ModuleGraph {
     references: Vec<DependencyReference>,
 }
@@ -428,6 +435,7 @@ impl ModuleGraph {
 
 fn forbidden_edge_reason(source: &str, target: &str) -> Option<&'static str> {
     match (source, target) {
+        ("domain", "identity") => None,
         ("domain", _) => Some("domain must not depend on an outer crate module"),
         (
             "ports",

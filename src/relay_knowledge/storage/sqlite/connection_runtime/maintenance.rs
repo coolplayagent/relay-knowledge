@@ -1,12 +1,15 @@
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
-use crate::storage::{SqliteStorageDiagnostics, StorageError};
+use crate::{
+    clock::system_now_millis_or_zero,
+    storage::{SqliteStorageDiagnostics, StorageError},
+};
 
 pub(super) const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -69,7 +72,7 @@ pub(in crate::storage::sqlite) fn run_post_index_maintenance(
     connection: &Connection,
     state: &Arc<Mutex<SqliteMaintenanceState>>,
 ) {
-    let attempted_at_ms = current_time_millis();
+    let attempted_at_ms = system_now_millis_or_zero();
     let maintenance_error = run_post_index_maintenance_once(connection)
         .err()
         .map(|error| error.to_string());
@@ -301,13 +304,6 @@ fn wal_path(database_path: &Path) -> PathBuf {
     let mut path = database_path.as_os_str().to_owned();
     path.push("-wal");
     PathBuf::from(path)
-}
-
-fn current_time_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

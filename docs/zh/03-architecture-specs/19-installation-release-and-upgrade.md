@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 3.10
-> 编制日期: 2026-08-28
+> 文档版本: 3.12
+> 编制日期: 2026-08-29
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -16,7 +16,7 @@
 - crates.io 保持 `cargo install relay-knowledge` 可用。
 - Homebrew、Scoop、winget 或发行版包应引用同一 release tag 产物，不重建分叉快照。
 - Release tag 使用 `vX.Y.Z`、`X.Y.Z` 或 `vX.Y.Z-rc.1` 这类 prerelease 形式；数字版本必须在推送 tag 前与 `Cargo.toml` 和 `Cargo.lock` 保持一致。手动 dry-run dispatch 复用同一版本契约，但不会发布 crates.io 或 GitHub release 产物；workflow 默认 dry-run tag 必须随每次 release 版本提升同步更新。
-- v1.1.15 Repository Map v3 reader release 准备将 `Cargo.toml`、`Cargo.lock`、CLI skill metadata 和 release workflow dry-run 默认值统一固定到 `1.1.15`；发布仍由 tag 驱动，只有推送 `v1.1.15` 或 `1.1.15` 到 GitHub 后才会开始。源码开发版本必须领先于 crates.io stable，禁止未发布的持久契约 reader 与不兼容的已发布 binary 共用版本号。
+- v1.1.16 maintenance release 准备将 `Cargo.toml`、`Cargo.lock`、CLI skill metadata 和 release workflow dry-run 默认值统一固定到 `1.1.16`；发布仍由 tag 驱动，只有推送 `v1.1.16` 或 `1.1.16` 到 GitHub 后才会开始。该版本刷新 lockfile，将已被 yanked 的传递依赖 `chacha20` 0.10.1 兼容升级到 0.10.2，不改变直接依赖声明面。源码开发版本必须领先于 crates.io stable，禁止未发布行为与不兼容的已发布 binary 共用版本号。
 - macOS x64 release job 必须使用仍可用的 Intel runner label，例如 `macos-15-intel`，不能继续依赖已退休的 `macos-13` 镜像。Artifact upload/download 和 attestation action 必须保持在兼容 Node 24 的版本，确保 GitHub-hosted runner runtime 迁移后 release workflow 仍可运行。
 - 仓库 Pages 站点必须由管理员一次性启用并设置 `build_type=workflow`。Pages workflow 使用兼容 Node 24 的 `configure-pages`、`upload-pages-artifact` 与 `deploy-pages` release，不得让权限受限的 `GITHUB_TOKEN` 在每次 push 时重复创建或启用站点。
 - Linux GNU release job 必须在 glibc 2.31 baseline 上构建 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu` 产物；如果产出的 ELF 需要任何高于 2.31 的 `GLIBC_*` 符号，release 必须失败。CLI skill 内置的 Linux x64 asset 打包后也必须通过同一 ABI 检查。
@@ -45,7 +45,7 @@ Installer 或安装脚本支持：版本选择、安装目录选择、dry run、
 
 Web Knowledge Map 请求必须显式指定已注册仓库。安装后的服务从托管仓库状态解析该身份，绝不把进程工作目录当作隐式仓库。从早期 cwd 绑定行为升级时，需要先注册 Web workspace 将查询的每个仓库；无需移动仓库文件，rollback 只恢复旧版选择行为。
 
-实现必须通过明确所有权保持该合同可审计：生命周期步骤策略留在 `application::service::lifecycle_plan`，服务定义渲染、平台权限以及 systemd/launchd/Windows Service 命令统一放在 `lifecycle_plan::platform_service`。修改任一边界都必须维持所有支持平台一致的 dry-run 计划与执行合同。
+实现必须通过明确所有权保持该合同可审计：生命周期步骤策略留在 `application::service::lifecycle_plan`，服务定义渲染、平台权限以及 systemd/launchd/Windows Service 命令统一放在 `lifecycle_plan::platform_service`。CLI 与 resident-service bootstrap 只捕获一次当前 executable path，并通过 typed `ProcessRuntimeConfig` 注入；preflight、copy、upgrade、rollback 与 checkpoint recovery 必须复用该值，不能重新查找进程状态。修改任一边界都必须维持所有支持平台一致的 dry-run 计划与执行合同。
 
 精确代码源码兜底由产品内部实现，运行时不能依赖 `rg`。面向 agent 的 setup 说明可以提到使用有界 `rg` 或 `grep -RIn` 做人工检查工具，但安装器不能把递归 grep 作为 service 依赖，也不能把它当成已索引查询行为的替代品。
 
@@ -122,6 +122,8 @@ preflight doctor
   -> post-upgrade doctor
 ```
 
+Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source executable。Preflight、binary copy、upgrade、rollback 与 checkpoint recovery 必须复用该 typed process input；不得稍后调用 `current_exe` 而选择到另一个 binary。
+
 停止 ad hoc CLI writer 并创建事务一致的 runtime-database backup 是 operator precondition。Lifecycle 成功停止 managed service 后，结合不存在 ad hoc writer，才建立 migration 所需的 database 独占访问。Lifecycle executor 不会独立探测 exclusive access，也不会创建 runtime-database checkpoint；它的 rollback checkpoint 只覆盖 binary 和 service definition。如果 operator 要求独立的 exclusive-access 检查，必须用外部 maintenance procedure 分阶段执行文档化步骤，不能把一次性 `--execute` 当作该验证。
 
 失败时 lifecycle executor 回滚 binary 和 service definition。Database rollback 使用 operator 创建的 runtime checkpoint；如果没有该 checkpoint，v4 derived-index migration 将按下文说明保持 forward-only。
@@ -156,7 +158,7 @@ preflight doctor
 - 面向 release 的文档有带日期的 `06-verification` 审计，覆盖导航、清单、链接检查和 documentation-only 改动边界。
 - Release workflow 必须运行 `python3 tools/docs/check_docs.py`，拦截文档结构、本地链接与 anchor、卷首导航、章节编号、代码块语言标签和英文版翻译卫生回归。
 - service install 使用 systemd、launchd 或 Windows Service，而非 unmanaged loop。
-- `service lifecycle <action> --dry-run` 输出 service 名称、definition 路径、安装目录、运行时路径、权限要求、rollback 计划和 package manifest 校验链路；`--execute` 只在显式请求时运行，并在失败时执行 rollback steps 且返回操作错误。
+- `service lifecycle <action> --dry-run` 输出 service 名称、definition 路径、安装目录、运行时路径、权限要求、rollback 计划和 package manifest 校验链路；其 preflight/copy/checkpoint 步骤使用 bootstrap 捕获的 executable path；`--execute` 只在显式请求时运行，并在失败时执行 rollback steps 且返回操作错误。
 - uninstall 清理服务注册和服务定义，但保留或按用户确认处理 runtime data。
 - 卸载 service 会停止 commit reconciliation；保留 runtime data 也会保留 active/recent scope、protected pin、有界 task history 与后续 full-reindex 能力。显式删除数据时必须覆盖每个 code shard，且没有备份时不能宣称可逆。
 - 分片 SQLite 拓扑的 shard 目录参与 backup、migration、doctor 和 uninstall 确认。

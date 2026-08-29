@@ -4,9 +4,13 @@ use std::sync::Arc;
 
 use crate::{
     adapters::{NetworkEmbeddingProvider, NetworkWorkerOutbound, SqliteKnowledgeStoreFactory},
-    application::{RelayKnowledgeService, RuntimeConfiguration, RuntimeConfigurationError},
-    env::EnvironmentConfig,
+    application::{
+        ProcessRuntimeConfig, RelayKnowledgeService, RuntimeConfiguration,
+        RuntimeConfigurationError,
+    },
+    env::{EnvironmentConfig, windows_system_root_from_process},
     ports::{embedding::EmbeddingProvider, worker_outbound::WorkerOutboundPort},
+    project::PROJECT_NAME,
     storage::{KnowledgeStore, KnowledgeStoreFactory},
 };
 
@@ -29,9 +33,19 @@ impl RelayKnowledgeService {
 
     /// Creates a service by reading the current process environment once.
     pub async fn from_process_environment() -> Result<Self, RuntimeConfigurationError> {
-        RuntimeConfiguration::from_process_environment()
-            .await
-            .map(Self::new)
+        let environment =
+            EnvironmentConfig::from_process().map_err(RuntimeConfigurationError::Environment)?;
+        let current_executable =
+            std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(PROJECT_NAME));
+        RuntimeConfiguration::from_environment_with_process(
+            &environment,
+            ProcessRuntimeConfig::from_bootstrap_inputs(
+                current_executable,
+                windows_system_root_from_process(),
+            ),
+        )
+        .await
+        .map(Self::new)
     }
 
     /// Creates a service from a deterministic environment snapshot.
@@ -39,6 +53,16 @@ impl RelayKnowledgeService {
         environment: &EnvironmentConfig,
     ) -> Result<Self, RuntimeConfigurationError> {
         RuntimeConfiguration::from_environment(environment)
+            .await
+            .map(Self::new)
+    }
+
+    /// Creates a service from deterministic environment and process snapshots.
+    pub async fn from_environment_with_process(
+        environment: &EnvironmentConfig,
+        process: ProcessRuntimeConfig,
+    ) -> Result<Self, RuntimeConfigurationError> {
+        RuntimeConfiguration::from_environment_with_process(environment, process)
             .await
             .map(Self::new)
     }
@@ -62,3 +86,7 @@ fn network_adapters(runtime: &RuntimeConfiguration) -> RuntimeNetworkAdapters {
     );
     RuntimeNetworkAdapters { embedding, worker }
 }
+
+#[cfg(test)]
+#[path = "service_tests.rs"]
+mod tests;

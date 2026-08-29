@@ -452,7 +452,7 @@ fn failed_install_target_verification_preserves_existing_binary() {
     .expect("plan should render");
     plan.lifecycle_steps
         .retain(|step| step.id == "verify-install-target");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -672,7 +672,7 @@ fn explicit_rollback_validates_checkpoint_before_stopping_service() {
         .iter()
         .map(|step| step.id.as_str())
         .collect();
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -731,7 +731,7 @@ fn explicit_rollback_fails_when_checkpoint_backup_is_missing() {
     .expect("plan should render");
     plan.lifecycle_steps
         .retain(|step| step.id == "restore-service-definition");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -772,7 +772,7 @@ fn capture_checkpoint_uses_distinct_backup_names_for_definition_and_binary() {
     .expect("plan should render");
     plan.lifecycle_steps
         .retain(|step| step.id == "capture-rollback-checkpoint");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -862,7 +862,7 @@ fn upgrade_rollback_removes_copied_binary_when_checkpoint_has_no_backup() {
     .expect("plan should render");
     plan.lifecycle_steps
         .retain(|step| step.id == "restore-binary");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -899,6 +899,10 @@ fn runtime_paths_at(root: &Path) -> RuntimePaths {
     )
     .expect("environment should parse");
     RuntimePaths::resolve(&environment.platform, &environment.paths).expect("paths should resolve")
+}
+
+fn process_step_runner() -> ProcessStepRunner {
+    ProcessStepRunner::new(std::env::current_exe().expect("test executable should resolve"))
 }
 
 fn unique_root(name: &str) -> PathBuf {

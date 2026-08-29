@@ -1,13 +1,13 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde_json::json;
 
 use crate::{
     api::{IngestEvidence, IngestEvidenceExtraction, IngestRequest},
+    clock::system_now_millis_or_zero as now_millis,
     domain::{
         EvidenceModality, ExtractionDiagnostic, ExtractionStatus, FactStatus, ProposalKind,
         ProposalProvenance, WorkerKind, WorkerTaskRecord,
     },
+    identity::stable_hash64,
     storage::NewProposal,
 };
 
@@ -277,25 +277,4 @@ fn classify_proposal_kind(ingest: &IngestRequest) -> ProposalKind {
     } else {
         ProposalKind::Evidence
     }
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }

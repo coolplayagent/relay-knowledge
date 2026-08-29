@@ -8,7 +8,7 @@ use super::{
     search_documents,
     symbols::{self, SymbolKey},
 };
-use crate::storage::StorageError;
+use crate::{identity::stable_hash64, storage::StorageError};
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
@@ -151,17 +151,4 @@ fn stable_id<'a>(prefix: &str, parts: impl IntoIterator<Item = &'a str>) -> Stri
     }
 
     format!("{prefix}:{:016x}", stable_hash64(&bytes))
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }

@@ -67,6 +67,8 @@ and uninstall behavior.
   context, impact, feature flags, SBOM evidence, and multi-repository sets.
 - Durable bounded queues, leases, checkpoints, backpressure, recovery, and
   observable maintenance protect long-running indexing and background work.
+- Remote embedding and provider HTTP always pass through shared QoS admission;
+  rejection, timeout, cancellation, and permit release remain observable.
 - Software-wide projections and authorized local-file indexing expose
   dependencies, SDKs, files, topics, build/IaC/design evidence, and
   relationships without query-time repository scans.

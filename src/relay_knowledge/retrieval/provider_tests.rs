@@ -200,7 +200,8 @@ async fn openai_provider_posts_and_parses_embeddings() {
             std::time::Duration::from_secs(5),
         ),
         client: reqwest::Client::new(),
-        qos: None,
+        qos: QosRuntime::default(),
+        policy: test_qos_policy(),
     };
 
     let vectors = provider
@@ -287,7 +288,8 @@ async fn applies_configured_embedding_timeout() {
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .expect("client should build"),
-        qos: None,
+        qos: QosRuntime::default(),
+        policy: test_qos_policy(),
     };
 
     let error = provider
@@ -301,6 +303,102 @@ async fn applies_configured_embedding_timeout() {
 
     assert_eq!(error.code, "network_timeout");
     server.abort();
+}
+
+#[tokio::test]
+async fn rejects_remote_embedding_before_network_io_when_qos_is_exhausted() {
+    let qos = QosRuntime::default();
+    let policy = test_qos_policy();
+    let _held = qos
+        .admit_request(&policy)
+        .expect("first request should consume the budget");
+    let provider = OpenAiCompatibleEmbeddingProvider {
+        config: remote_config("http://127.0.0.1:9/v1", std::time::Duration::from_secs(1)),
+        client: reqwest::Client::new(),
+        qos: qos.clone(),
+        policy,
+    };
+
+    let error = provider
+        .embed(EmbeddingRequest {
+            inputs: vec!["probe".to_owned()],
+            model: "model".to_owned(),
+            dimension: 1,
+        })
+        .await
+        .expect_err("exhausted QoS must reject before connecting");
+
+    assert_eq!(error.code, "qos_rejected");
+    assert_eq!(qos.diagnostics_snapshot().rejected_total, 1);
+}
+
+#[tokio::test]
+async fn cancelled_remote_embedding_releases_qos_permit() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let (accepted_sender, accepted_receiver) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (_stream, _) = listener.accept().await.expect("request should connect");
+        let _ = accepted_sender.send(());
+        std::future::pending::<()>().await;
+    });
+    let qos = QosRuntime::default();
+    let provider = OpenAiCompatibleEmbeddingProvider {
+        config: remote_config(
+            format!("http://{addr}/v1"),
+            std::time::Duration::from_secs(5),
+        ),
+        client: reqwest::Client::new(),
+        qos: qos.clone(),
+        policy: test_qos_policy(),
+    };
+    let request = tokio::spawn(async move {
+        provider
+            .embed(EmbeddingRequest {
+                inputs: vec!["probe".to_owned()],
+                model: "model".to_owned(),
+                dimension: 1,
+            })
+            .await
+    });
+
+    accepted_receiver
+        .await
+        .expect("server should observe the admitted request");
+    request.abort();
+    let _ = request.await;
+    tokio::task::yield_now().await;
+
+    let diagnostics = qos.diagnostics_snapshot();
+    assert_eq!(diagnostics.cancelled_total, 1);
+    assert_eq!(diagnostics.usage.in_flight_requests, 0);
+    server.abort();
+}
+
+#[tokio::test]
+#[allow(deprecated)]
+async fn compatibility_constructor_refuses_remote_network_provider() {
+    let provider = embedding_provider(
+        remote_config("http://127.0.0.1:9/v1", std::time::Duration::from_secs(1)),
+        reqwest::Client::new(),
+    );
+
+    let error = provider
+        .embed(EmbeddingRequest {
+            inputs: vec!["probe".to_owned()],
+            model: "model".to_owned(),
+            dimension: 1,
+        })
+        .await
+        .expect_err("compatibility constructor must not bypass QoS");
+
+    assert_eq!(error.code, "qos_required");
+}
+
+fn test_qos_policy() -> QosPolicy {
+    QosPolicy::new(8, 1, 8).expect("test QoS policy should build")
 }
 
 fn remote_config(

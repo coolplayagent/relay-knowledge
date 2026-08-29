@@ -7,6 +7,8 @@ use crate::{
     storage::{IndexRefreshTaskState, StorageError},
 };
 
+pub(super) use crate::identity::stable_hash64;
+
 pub(crate) fn parse_json_array(value: String) -> Result<Vec<String>, StorageError> {
     serde_json::from_str(&value).map_err(|error| {
         StorageError::InvalidInput(format!("invalid mutation log JSON array: {error}"))
@@ -103,19 +105,6 @@ pub(super) fn invalid_to_sqlite(error: StorageError) -> rusqlite::Error {
 pub(super) fn append_hash_part(input: &mut Vec<u8>, value: &str) {
     input.extend_from_slice(&(value.len() as u64).to_le_bytes());
     input.extend_from_slice(value.as_bytes());
-}
-
-pub(super) fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
 
 #[cfg(test)]

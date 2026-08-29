@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     env::{EnvironmentConfig, PlatformKind},
+    identity::stable_hash64,
     paths::{PathError, default_user_document_roots},
 };
 
@@ -224,19 +225,6 @@ fn is_absolute_windows_path(root: &str) -> bool {
         .take(2)
         .count()
         == 2
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
 
 fn duration_millis(duration: Duration) -> u64 {

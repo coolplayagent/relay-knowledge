@@ -14,6 +14,7 @@ use crate::{
         MultimodalExtractionRequest, MultimodalExtractionResponse, ProjectStatusResponse,
         RequestContext, ServiceRecoveryReport,
     },
+    clock::system_now_millis_or_zero as current_time_millis,
     domain::{AuditStatus, CodeParseStatusCounts, CodeRepositoryTotals, IndexKind},
     env::EnvironmentConfig,
     model_provider::ModelProviderConfigService,
@@ -567,14 +568,6 @@ pub struct AgentDurableAuditInput {
     pub graph_version: u64,
     pub detail_json: String,
     pub message: Option<String>,
-}
-
-pub(super) fn current_time_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 pub(super) fn storage_api_error(error: StorageError) -> ApiError {

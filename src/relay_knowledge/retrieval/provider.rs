@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 use super::{EmbeddingProviderKind, RemoteEmbeddingConfig};
@@ -15,12 +13,26 @@ pub use crate::ports::embedding::{
 
 const PROVIDER_ERROR_MESSAGE_LIMIT: usize = 240;
 
-/// Builds the configured remote embedding provider.
+/// Builds a local embedding provider without network capabilities.
+///
+/// Remote providers created through this compatibility entry point fail with
+/// `qos_required` before attempting any network I/O. Use
+/// [`embedding_provider_with_qos`] for remote embeddings.
+#[deprecated(
+    since = "1.1.16",
+    note = "remote embedding providers require embedding_provider_with_qos; this compatibility entry point will be removed in the next major version"
+)]
 pub fn embedding_provider(
     config: RemoteEmbeddingConfig,
     client: reqwest::Client,
 ) -> Box<dyn EmbeddingProvider> {
-    embedding_provider_with_optional_qos(config, client, None)
+    match config.provider {
+        EmbeddingProviderKind::OpenAiCompatible => {
+            let _ = (config, client);
+            Box::new(QosRequiredEmbeddingProvider)
+        }
+        EmbeddingProviderKind::Echo => Box::new(EchoEmbeddingProvider { config }),
+    }
 }
 
 /// Builds the configured remote embedding provider with outbound QoS admission.
@@ -30,19 +42,12 @@ pub fn embedding_provider_with_qos(
     qos: QosRuntime,
     policy: QosPolicy,
 ) -> Box<dyn EmbeddingProvider> {
-    embedding_provider_with_optional_qos(config, client, Some((qos, policy)))
-}
-
-fn embedding_provider_with_optional_qos(
-    config: RemoteEmbeddingConfig,
-    client: reqwest::Client,
-    qos: Option<(QosRuntime, QosPolicy)>,
-) -> Box<dyn EmbeddingProvider> {
     match config.provider {
         EmbeddingProviderKind::OpenAiCompatible => Box::new(OpenAiCompatibleEmbeddingProvider {
             config,
             client,
             qos,
+            policy,
         }),
         EmbeddingProviderKind::Echo => Box::new(EchoEmbeddingProvider { config }),
     }
@@ -51,7 +56,8 @@ fn embedding_provider_with_optional_qos(
 struct OpenAiCompatibleEmbeddingProvider {
     config: RemoteEmbeddingConfig,
     client: reqwest::Client,
-    qos: Option<(QosRuntime, QosPolicy)>,
+    qos: QosRuntime,
+    policy: QosPolicy,
 }
 
 impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
@@ -70,7 +76,7 @@ impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
                     model: &request.model,
                     input: &request.inputs,
                 });
-            let response = send_embedding_request(&self.qos, request_builder)
+            let response = send_embedding_request(&self.qos, &self.policy, request_builder)
                 .await
                 .map_err(transport_error)?;
             let status = response.status();
@@ -88,24 +94,24 @@ impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
 }
 
 async fn send_embedding_request(
-    qos: &Option<(QosRuntime, QosPolicy)>,
+    qos: &QosRuntime,
+    policy: &QosPolicy,
     request: reqwest::RequestBuilder,
-) -> Result<QosHttpResponse, EmbeddingTransportError> {
-    match qos {
-        Some((qos, policy)) => send_request_with_qos(qos, policy, request)
-            .await
-            .map_err(EmbeddingTransportError::Qos),
-        None => request
-            .send()
-            .await
-            .map(QosHttpResponse::unmetered)
-            .map_err(EmbeddingTransportError::Reqwest),
-    }
+) -> Result<QosHttpResponse, QosHttpClientError> {
+    send_request_with_qos(qos, policy, request).await
 }
 
-enum EmbeddingTransportError {
-    Reqwest(reqwest::Error),
-    Qos(QosHttpClientError),
+struct QosRequiredEmbeddingProvider;
+
+impl EmbeddingProvider for QosRequiredEmbeddingProvider {
+    fn embed(&self, _request: EmbeddingRequest) -> EmbeddingFuture<'_, Vec<EmbeddingVector>> {
+        Box::pin(async {
+            Err(permanent_error(
+                "qos_required",
+                "remote embedding providers require shared outbound QoS",
+            ))
+        })
+    }
 }
 
 struct EchoEmbeddingProvider {
@@ -291,8 +297,10 @@ fn status_error(status_code: u16, body: Option<String>) -> EmbeddingProviderErro
     }
 }
 
-fn transport_error(error: EmbeddingTransportError) -> EmbeddingProviderError {
-    let code = if error.is_timeout() {
+fn transport_error(error: QosHttpClientError) -> EmbeddingProviderError {
+    let code = if error.is_qos_rejected() {
+        "qos_rejected"
+    } else if error.is_timeout() {
         "network_timeout"
     } else {
         "network_error"
@@ -300,34 +308,9 @@ fn transport_error(error: EmbeddingTransportError) -> EmbeddingProviderError {
 
     EmbeddingProviderError {
         retry: ProviderRetryClass::Retryable,
-        status_code: error.status_code(),
+        status_code: None,
         code: code.to_owned(),
         message: error.to_string(),
-    }
-}
-
-impl EmbeddingTransportError {
-    fn is_timeout(&self) -> bool {
-        match self {
-            Self::Reqwest(error) => error.is_timeout(),
-            Self::Qos(error) => error.is_timeout(),
-        }
-    }
-
-    fn status_code(&self) -> Option<u16> {
-        match self {
-            Self::Reqwest(error) => error.status().map(|status| status.as_u16()),
-            Self::Qos(_) => None,
-        }
-    }
-}
-
-impl fmt::Display for EmbeddingTransportError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Reqwest(error) => error.fmt(formatter),
-            Self::Qos(error) => error.fmt(formatter),
-        }
     }
 }
 

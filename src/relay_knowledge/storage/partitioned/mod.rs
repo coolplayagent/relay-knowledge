@@ -1,8 +1,4 @@
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{path::Path, sync::Arc};
 
 mod catalog;
 mod control_plane;
@@ -15,6 +11,7 @@ mod status;
 mod totals;
 
 use crate::{
+    clock::system_now_millis_or_zero as now_millis,
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeIndexBatch, CodeIndexCheckpoint,
         CodeIndexPublicationFence, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
@@ -893,14 +890,6 @@ impl BusinessKnowledgeStore for PartitionedSqliteKnowledgeStore {
             this.control.business_knowledge_status(source_scope).await
         })
     }
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 #[cfg(test)]

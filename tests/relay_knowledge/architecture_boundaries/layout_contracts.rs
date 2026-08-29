@@ -2,7 +2,7 @@ use super::*;
 use syn::{Attribute, Item};
 
 const MAX_TRACKED_FILE_LINES: usize = 1_000;
-const FOUNDATIONAL_MODULES: &[&str] = &["env", "paths", "net"];
+const FOUNDATIONAL_MODULES: &[&str] = &["clock", "env", "identity", "net", "paths"];
 const LARGE_OWNER_BASELINE: &[(&str, usize)] = &[
     ("src/relay_knowledge/storage/sqlite/code/mod.rs", 992),
     (
@@ -11,15 +11,15 @@ const LARGE_OWNER_BASELINE: &[(&str, usize)] = &[
     ),
     (
         "src/relay_knowledge/application/code_repository/indexing/mod.rs",
-        986,
+        79,
     ),
     (
         "src/relay_knowledge/storage/sqlite/code/snapshot/durable_clone/mod.rs",
-        979,
+        971,
     ),
     ("src/relay_knowledge/storage/contracts/code.rs", 978),
     ("src/relay_knowledge/storage/sqlite/schema/marker.rs", 970),
-    ("src/relay_knowledge/storage/sqlite/business/mod.rs", 964),
+    ("src/relay_knowledge/storage/sqlite/business/mod.rs", 19),
     (
         "src/relay_knowledge/storage/sqlite/code/tasks/retention.rs",
         961,
@@ -30,7 +30,7 @@ const LARGE_OWNER_BASELINE: &[(&str, usize)] = &[
     ),
     (
         "src/relay_knowledge/storage/partitioned/catalog/mod.rs",
-        951,
+        944,
     ),
     (
         "src/relay_knowledge/storage/sqlite/code/batch/finalize/search_documents/grouped.rs",
@@ -41,7 +41,7 @@ const LARGE_OWNER_BASELINE: &[(&str, usize)] = &[
         "src/relay_knowledge/storage/sqlite/code/batch/session/finalization.rs",
         914,
     ),
-    ("src/relay_knowledge/storage/partitioned/mod.rs", 914),
+    ("src/relay_knowledge/storage/partitioned/mod.rs", 901),
 ];
 
 #[test]
@@ -107,6 +107,66 @@ fn production_modules_are_real_bounded_owners() {
     assert!(
         violations.is_empty(),
         "production module ownership violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn all_tracked_text_files_stay_within_line_budget() {
+    let repository_root = source_root()
+        .parent()
+        .and_then(Path::parent)
+        .expect("source root has repository ancestors")
+        .to_path_buf();
+    let output = Command::new("git")
+        .args([
+            "-C",
+            repository_root
+                .to_str()
+                .expect("repository path should be valid UTF-8"),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .output()
+        .expect("git ls-files should execute");
+    assert!(
+        output.status.success(),
+        "git ls-files failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut violations = Vec::new();
+    for path_bytes in output.stdout.split(|byte| *byte == 0) {
+        if path_bytes.is_empty() {
+            continue;
+        }
+        let relative = String::from_utf8(path_bytes.to_vec())
+            .expect("tracked repository paths should be valid UTF-8");
+        if relative == "Cargo.lock" {
+            continue;
+        }
+        let bytes = fs::read(repository_root.join(&relative))
+            .unwrap_or_else(|error| panic!("read tracked file {relative}: {error}"));
+        if bytes.contains(&0) {
+            continue;
+        }
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        let line_count = text.lines().count();
+        if line_count > MAX_TRACKED_FILE_LINES {
+            violations.push(format!(
+                "{relative} has {line_count} lines; tracked text files may have at most {MAX_TRACKED_FILE_LINES}"
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "tracked text file line-budget violations:\n{}",
         violations.join("\n")
     );
 }

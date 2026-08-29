@@ -1,13 +1,11 @@
 //! Owns the atomic durable-clone delta-to-finalization handoff.
 
-use std::{
-    collections::BTreeSet,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::BTreeSet;
 
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::{
+    clock::system_now_millis,
     domain::{CodeIncrementalSummaryReceipt, CodeIndexResourceBudget, CodeIndexSnapshot},
     storage::StorageError,
 };
@@ -185,18 +183,7 @@ fn handoff_capacity_error(source_scope: &str) -> StorageError {
 }
 
 fn now_millis() -> Result<u64, StorageError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| {
-            StorageError::Invariant(
-                "system clock is before Unix epoch during incremental handoff".to_owned(),
-            )
-        })?
-        .as_millis()
-        .try_into()
-        .map_err(|_| {
-            StorageError::Invariant(
-                "system clock exceeds durable incremental handoff range".to_owned(),
-            )
-        })
+    system_now_millis().map_err(|error| {
+        StorageError::Invariant(format!("incremental handoff clock is invalid: {error}"))
+    })
 }

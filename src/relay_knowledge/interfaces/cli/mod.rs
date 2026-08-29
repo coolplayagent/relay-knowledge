@@ -18,7 +18,7 @@ mod version;
 
 use crate::{
     api::ServicePlanRequest,
-    application::KnowledgeMapService,
+    application::{KnowledgeMapService, ProcessRuntimeConfig},
     domain::{FreshnessPolicy, IndexKind, ProposalState, WorkerKind},
     paths::discover_repository_root,
     project::KNOWLEDGE_MAP_RELATIVE_PATH,
@@ -214,7 +214,7 @@ where
         }
         _ => None,
     };
-    let stdout = run_command(command, service.as_ref()).await?;
+    let stdout = run_command(command, service.as_ref(), ProcessRuntimeConfig::default()).await?;
     Ok(CliProcessOutput {
         stdout,
         stderr: String::new(),

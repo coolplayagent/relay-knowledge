@@ -2,7 +2,7 @@
 
 use crate::{
     api::{InterfaceKind, RequestContext},
-    application::{RelayKnowledgeService, RuntimeConfiguration},
+    application::{ProcessRuntimeConfig, RelayKnowledgeService, RuntimeConfiguration},
     interfaces::{agent::mcp::McpServer, web},
 };
 
@@ -11,8 +11,11 @@ use super::{CliError, ServiceMcpTransport, files};
 pub(super) async fn run_service(
     mcp: ServiceMcpTransport,
     web_enabled: bool,
+    process: ProcessRuntimeConfig,
 ) -> Result<String, CliError> {
-    let mut runtime = RuntimeConfiguration::from_process_environment()
+    let environment = crate::env::EnvironmentConfig::from_process()
+        .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
+    let mut runtime = RuntimeConfiguration::from_environment_with_process(&environment, process)
         .await
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
     if mcp == ServiceMcpTransport::StreamableHttp {

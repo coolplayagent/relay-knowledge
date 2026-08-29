@@ -5,6 +5,7 @@ use crate::{
         FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersion, GraphVersionRange,
         SourceScope,
     },
+    identity::stable_hash64,
 };
 
 pub(in crate::application) fn mutation_batch_from_request(
@@ -138,19 +139,6 @@ pub(in crate::application) fn generated_evidence_id(
     }
 
     format!("evidence:{:016x}", stable_hash64(&input))
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
 
 #[cfg(test)]

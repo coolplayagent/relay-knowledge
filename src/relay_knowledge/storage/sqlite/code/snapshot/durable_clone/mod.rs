@@ -1,13 +1,11 @@
 //! Copies a large incremental base into an unpublished target in fenced pages.
 
-use std::{
-    collections::BTreeSet,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::BTreeSet;
 
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::{
+    clock::system_now_millis,
     domain::{
         CodeIncrementalClonePhase, CodeIndexResourceBudget, CodeIndexSnapshot,
         code_incremental_clone, code_incremental_clone_state,
@@ -969,11 +967,5 @@ pub(super) fn clone_capacity_error(source_scope: &str) -> StorageError {
 }
 
 fn now_millis() -> Result<u64, StorageError> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| StorageError::Invariant(error.to_string()))?
-        .as_millis();
-    u64::try_from(millis).map_err(|_| {
-        StorageError::Invariant("system time does not fit u64 milliseconds".to_owned())
-    })
+    system_now_millis().map_err(|error| StorageError::Invariant(error.to_string()))
 }

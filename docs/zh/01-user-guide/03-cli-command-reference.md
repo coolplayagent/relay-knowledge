@@ -53,6 +53,8 @@ relay-knowledge provider probe --format json
 
 OpenAI-compatible embedding base URL 可以配置为 host root、版本化 API root（如 `/v1`、`/v4`）或完整 `/embeddings` endpoint；非版本路径前缀继续按 `<prefix>/v1/embeddings` 解析，query 或 fragment 后缀不参与 endpoint 构造。
 
+所有 remote embedding 与 provider HTTP 都必须使用共享 QoS runtime。Admission rejection 在网络 I/O 前发生，timeout/cancellation diagnostic 保持可见；不接收 QoS 的 deprecated library constructor 会拒绝 remote provider。
+
 endpoint host、batch、timeout、并发和 cursor metadata 属于 `status`、`health` 或 Web Providers 面板的运行时诊断。
 
 ## 3.3 Setup 诊断与配置画像

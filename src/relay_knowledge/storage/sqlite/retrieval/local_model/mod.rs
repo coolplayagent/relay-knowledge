@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+pub(super) use crate::identity::stable_hash64;
 use crate::retrieval::terms::extend_normalized_terms;
 
 pub(super) fn token_signature(
@@ -126,19 +127,6 @@ fn identifier_overlap_score(
 
 fn fuzzy_identifier_part_match(query_term: &str, candidate: &str) -> bool {
     query_term.len() >= 3 && candidate.len() >= 3 && candidate.contains(query_term)
-}
-
-pub(super) fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 #[path = "architecture_boundaries/layout_contracts.rs"]

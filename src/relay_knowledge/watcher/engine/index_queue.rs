@@ -77,10 +77,7 @@ async fn reconcile_commit_heads(
     if repositories.is_empty() {
         return;
     }
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now_ms = crate::clock::system_now_millis_or_zero();
     let mut reconciled = 0u64;
     let mut queued = 0u64;
     let mut failures = 0u64;
@@ -253,10 +250,7 @@ async fn enqueue_repository_tasks(
     task_sink: &TaskQueueSink,
 ) {
     let repositories = state.read().await.repositories.clone();
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now_ms = crate::clock::system_now_millis_or_zero();
     let mut queued_tasks = 0u64;
     let mut queued_paths = HashSet::new();
     let mut deferred_paths = HashSet::new();
