@@ -224,13 +224,15 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                     "stale": false,
                 },
                 "active_task": {
-                    "state": "running",
+                    "state": "retrying",
+                    "last_error_kind": "code_index",
+                    "last_error_message": "publication fence expired while finalizing",
                 },
                 "checkpoint": {
                     "state": "finalizing:rebuild_calls",
                 },
             }),
-            "repo=repo files=2 symbols=3 stale=false task=running checkpoint=finalizing:rebuild_calls\n",
+            "repo=repo files=2 symbols=3 stale=false task=retrying checkpoint=finalizing:rebuild_calls error_kind=code_index error=\"publication fence expired while finalizing\"\n",
         ),
         (
             "code.repo.report",

@@ -157,6 +157,22 @@ fn bounded_worktree_observation_is_stable_and_changes_with_file_bytes() {
 }
 
 #[test]
+fn unreadable_worktree_fingerprints_are_stable_and_preserve_error_identity() {
+    let mut first = super::WorktreeObservationHash::new();
+    first.update_io_error(&std::io::Error::from_raw_os_error(1));
+    let mut same = super::WorktreeObservationHash::new();
+    same.update_io_error(&std::io::Error::from_raw_os_error(1));
+    let mut different = super::WorktreeObservationHash::new();
+    different.update_io_error(&std::io::Error::from_raw_os_error(2));
+
+    let first = first.finish();
+    let same = same.finish();
+    let different = different.finish();
+    assert_eq!(first, same);
+    assert_ne!(same, different);
+}
+
+#[test]
 fn read_only_git_commands_disable_optional_repository_locks() {
     let command = read_only_git_command();
     let optional_locks = command

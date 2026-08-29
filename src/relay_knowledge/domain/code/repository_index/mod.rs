@@ -16,6 +16,7 @@ use super::{
 
 mod incremental_clone;
 mod reference_resolution;
+mod software_projection;
 
 pub(crate) use self::incremental_clone::{
     CodeIncrementalClonePhase, code_incremental_clone, code_incremental_clone_state,
@@ -25,6 +26,9 @@ pub(crate) use self::reference_resolution::{
     code_reference_resolution, code_reference_resolution_cursor_digest,
     code_reference_resolution_query_index_repair,
     code_reference_resolution_query_index_repair_state, code_reference_resolution_state,
+};
+pub(crate) use self::software_projection::{
+    CodeSoftwareProjectionPhase, SOFTWARE_PROJECTION_CHECKPOINT, code_software_projection_phase,
 };
 
 /// Parsed index changes ready to commit into storage.

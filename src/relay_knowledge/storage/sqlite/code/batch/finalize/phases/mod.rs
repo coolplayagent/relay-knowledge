@@ -18,7 +18,7 @@ pub(crate) const REBUILD_REFERENCE_SEARCH: &str = "finalizing:rebuild_reference_
 pub(crate) const REBUILD_CALLS: &str = "finalizing:rebuild_calls";
 pub(crate) const RESOLVE_WORKSPACE_IMPORTS: &str = "finalizing:resolve_workspace_imports";
 pub(crate) const PUBLISH_SCOPE: &str = "finalizing:publish_scope";
-pub(crate) const SOFTWARE_PROJECTION: &str = "finalizing:software_projection";
+pub(crate) const SOFTWARE_PROJECTION: &str = crate::domain::SOFTWARE_PROJECTION_CHECKPOINT;
 pub(crate) const PARTITIONED_PUBLISH: &str = "finalizing:partitioned_publish";
 
 pub(crate) const ORDERED_FINALIZATION_PHASES: [&str; 11] = [

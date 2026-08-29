@@ -278,15 +278,7 @@ where
             value["degraded_reason"].as_str().unwrap_or("none")
         ),
         "code.repo.list" => render_code_repository_list(&value),
-        "code.repo.status" => format!(
-            "repo={} files={} symbols={} stale={} task={} checkpoint={}",
-            value["status"]["alias"].as_str().unwrap_or(""),
-            value["status"]["indexed_file_count"].as_u64().unwrap_or(0),
-            value["status"]["symbol_count"].as_u64().unwrap_or(0),
-            value["status"]["stale"].as_bool().unwrap_or(true),
-            value["active_task"]["state"].as_str().unwrap_or("none"),
-            value["checkpoint"]["state"].as_str().unwrap_or("none")
-        ),
+        "code.repo.status" => render_code_repository_status(&value),
         "code.repo.report" => format!(
             "repo={} files={} freshness={}",
             value["report"]["alias"].as_str().unwrap_or(""),
@@ -351,6 +343,27 @@ where
     };
 
     Ok(format!("{line}\n"))
+}
+
+fn render_code_repository_status(value: &serde_json::Value) -> String {
+    let mut rendered = format!(
+        "repo={} files={} symbols={} stale={} task={} checkpoint={}",
+        value["status"]["alias"].as_str().unwrap_or(""),
+        value["status"]["indexed_file_count"].as_u64().unwrap_or(0),
+        value["status"]["symbol_count"].as_u64().unwrap_or(0),
+        value["status"]["stale"].as_bool().unwrap_or(true),
+        value["active_task"]["state"].as_str().unwrap_or("none"),
+        value["checkpoint"]["state"].as_str().unwrap_or("none")
+    );
+    if let Some(error_kind) = value["active_task"]["last_error_kind"].as_str() {
+        rendered.push_str(" error_kind=");
+        rendered.push_str(error_kind);
+    }
+    if let Some(error_message) = value["active_task"]["last_error_message"].as_str() {
+        rendered.push_str(" error=");
+        rendered.push_str(&serde_json::Value::String(error_message.to_owned()).to_string());
+    }
+    rendered
 }
 
 fn render_knowledge_map_history(value: &serde_json::Value) -> String {

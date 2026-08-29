@@ -247,19 +247,27 @@ pub(crate) fn repository_worktree_observation_bounded(
                         GIT_WORKTREE_OBSERVATION_BYTE_LIMIT
                     )));
                 }
-                let mut file = fs::File::open(path)?;
-                let mut buffer = [0u8; 64 * 1024];
-                loop {
-                    let read = file.read(&mut buffer)?;
-                    if read == 0 {
-                        break;
+                match fs::File::open(path) {
+                    Ok(mut file) => {
+                        let mut buffer = [0u8; 64 * 1024];
+                        loop {
+                            match file.read(&mut buffer) {
+                                Ok(0) => break,
+                                Ok(read) => identity.update(&buffer[..read]),
+                                Err(error) => {
+                                    identity.update_io_error(&error);
+                                    break;
+                                }
+                            }
+                        }
                     }
-                    identity.update(&buffer[..read]);
+                    Err(error) => identity.update_io_error(&error),
                 }
             }
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                identity.update(fs::read_link(path)?.as_os_str().as_encoded_bytes());
-            }
+            Ok(metadata) if metadata.file_type().is_symlink() => match fs::read_link(path) {
+                Ok(target) => identity.update(target.as_os_str().as_encoded_bytes()),
+                Err(error) => identity.update_io_error(&error),
+            },
             Ok(metadata) => {
                 identity.update(&metadata.len().to_le_bytes());
                 identity.update(
@@ -275,7 +283,7 @@ pub(crate) fn repository_worktree_observation_bounded(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 identity.update(b"deleted")
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => identity.update_io_error(&error),
         }
     }
     Ok(Some(identity.finish()))
@@ -291,6 +299,12 @@ impl WorktreeObservationHash {
     fn update(&mut self, bytes: &[u8]) {
         self.0.update(bytes);
         self.0.update(&[0xff]);
+    }
+
+    fn update_io_error(&mut self, error: &std::io::Error) {
+        self.update(b"unreadable");
+        self.update(format!("{:?}", error.kind()).as_bytes());
+        self.update(&error.raw_os_error().unwrap_or_default().to_le_bytes());
     }
 
     const fn finish(self) -> u64 {

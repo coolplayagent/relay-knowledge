@@ -6,6 +6,7 @@ use crate::domain::{
     CodeReferenceSearchRebuild, code_query_index_repair, code_query_index_subphase,
     code_reference_resolution, code_reference_resolution_query_index_repair,
     code_reference_search_query_index_repair, code_reference_search_rebuild,
+    code_software_projection_phase,
 };
 
 use super::super::finalize;
@@ -55,11 +56,12 @@ impl FinalizationCheckpointPhase {
                 ),
             };
         }
+        if code_software_projection_phase(state).is_some() {
+            return Self::ReadyForOuterPublication;
+        }
         match state {
             "completed" => Self::Completed,
-            finalize::phases::SOFTWARE_PROJECTION | finalize::phases::PARTITIONED_PUBLISH => {
-                Self::ReadyForOuterPublication
-            }
+            finalize::phases::PARTITIONED_PUBLISH => Self::ReadyForOuterPublication,
             _ => Self::Unknown,
         }
     }

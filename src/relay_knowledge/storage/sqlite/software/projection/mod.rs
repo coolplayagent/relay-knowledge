@@ -21,6 +21,12 @@ use super::{
     schema::SOFTWARE_PROJECTION_SCHEMA_VERSION,
 };
 
+mod fenced;
+
+pub(in super::super) use fenced::{
+    FencedProjectionAdvance, advance_fenced_projection, refreshed_fenced_projection,
+};
+
 const MAX_DEPENDENCY_COMPONENTS_PER_SCOPE: usize = 65_536;
 const MAX_SDK_USAGES_PER_SCOPE: usize = 131_072;
 
@@ -39,14 +45,6 @@ struct ProjectionSlices {
 pub(in super::super) fn refresh_projection(
     connection: &mut Connection,
     source_scope: &str,
-) -> Result<SoftwareGlobalProjection, StorageError> {
-    refresh_projection_with_fence(connection, source_scope, None)
-}
-
-pub(in super::super) fn refresh_projection_with_fence(
-    connection: &mut Connection,
-    source_scope: &str,
-    fence: Option<&super::super::code::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<SoftwareGlobalProjection, StorageError> {
     let graph_version = current_graph_version(connection)?;
     let transaction = connection.transaction()?;
@@ -98,13 +96,11 @@ pub(in super::super) fn refresh_projection_with_fence(
 
     let repository_id = repository_id_for_scope(&transaction, source_scope)?
         .unwrap_or_else(|| "unknown".to_owned());
-    let mut status = SoftwareGlobalStatus {
+    let status = SoftwareGlobalStatus {
         repository_id,
         source_scope: source_scope.to_owned(),
         projected_graph_version: graph_version,
-        // A fenced projection is fully built here but intentionally withheld
-        // until the code scope and checkpoint can publish in this transaction.
-        stale: fence.is_some(),
+        stale: false,
         component_count: components.len(),
         sdk_usage_count: sdk_usages.len(),
         file_count,
@@ -116,19 +112,6 @@ pub(in super::super) fn refresh_projection_with_fence(
         last_error: None,
     };
     upsert_status(&transaction, &status)?;
-    if let Some(fence) = fence {
-        fence.validate_scope_repository(&transaction, source_scope)?;
-        fence.validate_target_scope(&transaction, source_scope)?;
-        fence.validate(&transaction)?;
-        super::super::code::publication::complete_after_software_projection(
-            &transaction,
-            source_scope,
-            fence,
-        )?;
-        fence.validate_target_scope(&transaction, source_scope)?;
-        fence.validate(&transaction)?;
-        status.stale = false;
-    }
     transaction.commit()?;
 
     Ok(SoftwareGlobalProjection {

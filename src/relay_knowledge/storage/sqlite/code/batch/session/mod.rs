@@ -362,8 +362,9 @@ fn checkpoint_resume(
     }
     if matches!(
         persisted.state.as_str(),
-        finalize::phases::SOFTWARE_PROJECTION | finalize::phases::PARTITIONED_PUBLISH | "completed"
-    ) {
+        finalize::phases::PARTITIONED_PUBLISH | "completed"
+    ) || crate::domain::code_software_projection_phase(&persisted.state).is_some()
+    {
         return Ok(CheckpointResume::Publication);
     }
     if persisted.state == "indexing" {

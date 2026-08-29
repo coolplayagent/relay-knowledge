@@ -21,6 +21,7 @@ mod search;
 mod session_finalization;
 mod set;
 mod snapshot;
+mod software_projection_store;
 mod symbols;
 mod tasks;
 mod views;
@@ -66,12 +67,11 @@ use crate::{
         CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
         CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeSymbolGenerationCounts,
         CodebaseViewRequest, CodebaseViewSnapshot, IndexedRepositoryDocument,
-        SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
     storage::{
         BusinessKnowledgeStore, CodeImpactChanges, CodeIndexPublicationStore, CodeIndexSourceStore,
         CodeIndexTaskStore, CodeQueryReadStore, CodeScopeRetentionStore, RepositoryCatalogStore,
-        SoftwareProjectionStore, StorageError, StorageFuture,
+        StorageError, StorageFuture,
     },
 };
 
@@ -815,52 +815,6 @@ impl CodeQueryReadStore for SqliteGraphStore {
                 handwritten_symbol_count: counts.handwritten,
                 generated_symbol_count: counts.generated,
             })
-        })
-    }
-}
-
-impl SoftwareProjectionStore for SqliteGraphStore {
-    fn refresh_software_global_projection(
-        &self,
-        source_scope: String,
-    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
-        self.run(move |connection| {
-            ensure_queryable_code_scope(connection, &source_scope)?;
-            software::refresh_projection(connection, &source_scope)
-        })
-    }
-
-    fn refresh_software_global_projection_with_fence(
-        &self,
-        source_scope: String,
-        fence: CodeIndexPublicationFence,
-    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
-        let authority_path = self.publication_authority_path.clone();
-        self.run(move |connection| {
-            let guard = lifecycle::publication_fence::prepare_guard(
-                connection,
-                fence,
-                authority_path.as_deref(),
-            )?;
-            software::refresh_projection_with_fence(connection, &source_scope, Some(&guard))
-        })
-    }
-
-    fn software_global_projection(
-        &self,
-        request: SoftwareGlobalRequest,
-    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
-        self.run_read_snapshot(move |connection| software::projection(connection, request))
-    }
-
-    fn software_global_projection_for_scope(
-        &self,
-        source_scope: String,
-        request: SoftwareGlobalRequest,
-    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
-        self.run_read_snapshot(move |connection| {
-            ensure_queryable_code_scope(connection, &source_scope)?;
-            software::projection_for_scope(connection, &source_scope, request)
         })
     }
 }

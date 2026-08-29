@@ -151,6 +151,9 @@ fn durable_query_index_repairs_skip_parser_restart_for_every_resume_phase() {
     assert!(!checkpoint_skips_parser("indexing"));
     assert!(!checkpoint_skips_parser("finalizing:resolve_imports"));
     assert!(checkpoint_skips_parser("finalizing:software_projection"));
+    assert!(checkpoint_skips_parser(
+        "finalizing:software_projection:v1:relationships"
+    ));
     assert!(checkpoint_skips_parser("finalizing:partitioned_publish"));
     assert!(checkpoint_skips_parser("completed"));
     for stage in [
