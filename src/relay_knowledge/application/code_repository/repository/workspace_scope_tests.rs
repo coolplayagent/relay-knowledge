@@ -9,7 +9,7 @@ use crate::{
         CodeIndexMode, CodeIndexRequest, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
         FreshnessPolicy, code_snapshot_scope_id_with_workspace_detection,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeRepositorySetStore as _, SqliteGraphStore},
 };
 
 use super::test_support::*;

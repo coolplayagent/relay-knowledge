@@ -5,7 +5,10 @@ use crate::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
         CodeRepositorySelector, FreshnessPolicy,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "git_snapshot:sbom-query";

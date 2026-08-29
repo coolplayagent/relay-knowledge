@@ -51,6 +51,20 @@ pub(super) struct CloneProgress {
     pub(super) page_byte_limit: usize,
 }
 
+impl CloneProgress {
+    pub(super) fn typed_phase(&self) -> Result<CodeIncrementalClonePhase, StorageError> {
+        match self.phase.as_str() {
+            PHASE_TABLES => Ok(CodeIncrementalClonePhase::Tables),
+            PHASE_SEARCH => Ok(CodeIncrementalClonePhase::Search),
+            PHASE_CLONE_COMPLETE => Ok(CodeIncrementalClonePhase::CloneComplete),
+            phase => Err(StorageError::Invariant(format!(
+                "incremental clone scope '{}' has unknown phase '{phase}'",
+                self.source_scope
+            ))),
+        }
+    }
+}
+
 pub(super) fn load(
     connection: &rusqlite::Connection,
     source_scope: &str,

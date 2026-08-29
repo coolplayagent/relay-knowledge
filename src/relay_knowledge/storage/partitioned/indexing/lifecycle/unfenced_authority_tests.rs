@@ -1,6 +1,9 @@
 //! Product-boundary tests for partitioned unfenced mutation rejection.
 
-use crate::storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, StorageError};
+use crate::storage::{
+    CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskStore as _,
+    RepositoryCatalogStore as _, StorageError,
+};
 
 use super::super::test_support::partitioned_store;
 use super::publication_barrier_tests::{

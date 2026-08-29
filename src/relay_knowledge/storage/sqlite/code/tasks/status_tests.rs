@@ -9,8 +9,8 @@ use super::queue_status;
 use crate::{
     domain::{CodeIndexMode, CodeIndexResourceBudget, CodeRepositoryRegistration},
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore,
-        SqliteGraphStore,
+        CodeIndexTaskClaimRequest, CodeIndexTaskFailure, CodeIndexTaskSeed,
+        RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 

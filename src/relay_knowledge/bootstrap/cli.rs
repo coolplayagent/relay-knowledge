@@ -47,7 +47,11 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    crate::interfaces::cli::update_notice_for_process(args, interactive_text_output).await
+    let _command = crate::interfaces::cli::update_notice_command(args, interactive_text_output)?;
+    let runtime = super::runtime_configuration_from_process_environment()
+        .await
+        .ok()?;
+    crate::interfaces::cli::update_notice_for_runtime(&runtime).await
 }
 
 async fn run_command(

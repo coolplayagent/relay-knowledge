@@ -18,11 +18,13 @@ use crate::{
     env::{EnvironmentConfig, PlatformKind},
     storage::{
         BusinessKnowledgeStore, CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges,
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskSeed, CodeReferenceSearchRequest, CodeRepositoryStore,
-        CodeScopeRetentionRequest, CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome,
-        GraphSearchRequest, GraphStore, IndexCursor, IndexRefreshDiagnostics, IndexStore,
-        KnowledgeStore, MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
+        CodeIndexPublicationStore, CodeIndexSourceStore, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeIndexTaskStore,
+        CodeQueryReadStore, CodeReferenceSearchRequest, CodeRepositorySetStore,
+        CodeScopeRetentionRequest, CodeScopeRetentionStore, CodeSymbolSearchRequest,
+        GraphInspection, GraphSearchOutcome, GraphSearchRequest, GraphStore, IndexCursor,
+        IndexRefreshDiagnostics, IndexStore, KnowledgeStore, MutationLogEntry, MutationLogStore,
+        RepositoryCatalogStore, SoftwareProjectionStore, StorageError, StorageFuture,
     },
 };
 
@@ -253,24 +255,42 @@ macro_rules! unsupported_code_repository_method {
 
 impl crate::storage::FrameworkGraphStore for GraphOnlySearchStore {}
 
-impl CodeRepositoryStore for GraphOnlySearchStore {
+impl RepositoryCatalogStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     unsupported_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
     unsupported_code_repository_method!(code_repository_scope_status(repository: String, resolved_commit_sha: String, path_filters: Vec<String>, language_filters: Vec<String>) -> Option<CodeRepositoryStatus>);
+}
+
+impl CodeIndexTaskStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>);
     unsupported_code_repository_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>);
     unsupported_code_repository_method!(active_code_index_task(repository_id: String) -> Option<CodeIndexTaskRecord>);
+}
+
+impl CodeIndexPublicationStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(code_index_checkpoint(source_scope: String) -> Option<CodeIndexCheckpoint>);
+    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeScopeRetentionStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(code_scope_retention(repository_id: String) -> CodeScopeRetentionSummary);
     unsupported_code_repository_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
+}
+
+impl CodeIndexSourceStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
-    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeQueryReadStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
     unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
+
+impl SoftwareProjectionStore for GraphOnlySearchStore {}
+impl CodeRepositorySetStore for GraphOnlySearchStore {}
 
 struct SlowLegacyHealthStore;
 
@@ -367,24 +387,42 @@ impl CodeGraphStore for SlowLegacyHealthStore {
 
 impl crate::storage::FrameworkGraphStore for SlowLegacyHealthStore {}
 
-impl CodeRepositoryStore for SlowLegacyHealthStore {
+impl RepositoryCatalogStore for SlowLegacyHealthStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     unsupported_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
     unsupported_code_repository_method!(code_repository_scope_status(repository: String, resolved_commit_sha: String, path_filters: Vec<String>, language_filters: Vec<String>) -> Option<CodeRepositoryStatus>);
+}
+
+impl CodeIndexTaskStore for SlowLegacyHealthStore {
     unsupported_code_repository_method!(queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>);
     unsupported_code_repository_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>);
     unsupported_code_repository_method!(active_code_index_task(repository_id: String) -> Option<CodeIndexTaskRecord>);
+}
+
+impl CodeIndexPublicationStore for SlowLegacyHealthStore {
     unsupported_code_repository_method!(code_index_checkpoint(source_scope: String) -> Option<CodeIndexCheckpoint>);
+    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeScopeRetentionStore for SlowLegacyHealthStore {
     unsupported_code_repository_method!(code_scope_retention(repository_id: String) -> CodeScopeRetentionSummary);
     unsupported_code_repository_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
+}
+
+impl CodeIndexSourceStore for SlowLegacyHealthStore {
     unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
-    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeQueryReadStore for SlowLegacyHealthStore {
     unsupported_code_repository_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
     unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
+
+impl SoftwareProjectionStore for SlowLegacyHealthStore {}
+impl CodeRepositorySetStore for SlowLegacyHealthStore {}
 
 fn unsupported<T: Send + 'static>(message: &'static str) -> StorageFuture<'static, T> {
     Box::pin(async move { Err(StorageError::InvalidInput(message.to_owned())) })

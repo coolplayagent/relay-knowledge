@@ -7,8 +7,9 @@ use crate::{
         CodeIndexSnapshot, CodeRepositoryRegistration,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeRepositoryStore,
-        GraphStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, GraphStore, RepositoryCatalogStore as _,
+        SoftwareProjectionStore as _, SqliteGraphStore,
     },
 };
 use rusqlite::OpenFlags;

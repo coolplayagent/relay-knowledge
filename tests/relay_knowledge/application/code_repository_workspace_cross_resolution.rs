@@ -20,9 +20,10 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeRepositorySetMemberSeed, CodeRepositorySetRefreshPublication,
-        CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
-        CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
+        CodeIndexPublicationStore as _, CodeRepositorySetMemberSeed,
+        CodeRepositorySetRefreshPublication, CodeRepositorySetRefreshTaskClaimRequest,
+        CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskSeed,
+        CodeRepositorySetSeed, CodeRepositorySetStore as _, RepositoryCatalogStore as _,
         SqliteGraphStore,
     },
 };

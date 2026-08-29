@@ -4,7 +4,8 @@ use super as tasks;
 use crate::{
     domain::{CodeIndexMode, CodeIndexResourceBudget, CodeRepositoryRegistration},
     storage::{
-        CodeIndexTaskSeed, CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, CodeScopeRetentionRequest,
+        CodeScopeRetentionStore as _, RepositoryCatalogStore as _, SqliteGraphStore,
         sqlite::code::workspace,
     },
 };

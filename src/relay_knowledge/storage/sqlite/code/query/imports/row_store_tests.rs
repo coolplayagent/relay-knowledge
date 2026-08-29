@@ -8,7 +8,7 @@ use crate::{
         CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus,
         CodeRetrievalRequest, FreshnessPolicy,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{RepositoryCatalogStore as _, SqliteGraphStore},
 };
 
 const TEST_SCOPE: &str = "code:test:import-direct-path:commit:tree";

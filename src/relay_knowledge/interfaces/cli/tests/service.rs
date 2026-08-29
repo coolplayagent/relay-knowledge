@@ -9,8 +9,9 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositorySetMemberSeed,
-        CodeRepositorySetSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
+        CodeIndexTaskStore as _, CodeRepositorySetMemberSeed, CodeRepositorySetSeed,
+        CodeRepositorySetStore as _, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 

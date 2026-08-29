@@ -9,7 +9,7 @@ use crate::{
     env::{EnvironmentConfig, PlatformKind},
     paths::RuntimePaths,
     storage::{
-        CodeRepositoryStore, KnowledgeStoreFactory, PartitionedSqliteKnowledgeStore,
+        KnowledgeStoreFactory, PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _,
         StorageTopology,
     },
 };

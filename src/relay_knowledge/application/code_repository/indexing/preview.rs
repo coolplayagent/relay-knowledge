@@ -25,7 +25,8 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositoryScopePreviewResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let status =
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
         let preview =

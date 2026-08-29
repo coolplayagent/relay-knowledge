@@ -6,7 +6,7 @@ use crate::{
         BusinessTechnicalMappingDefinition, BusinessTermDefinition, BusinessTermStatus,
         CodeRepositorySelector, FreshnessPolicy, TechnicalTargetKind,
     },
-    storage::{BusinessKnowledgeStore, CodeRepositoryStore, SqliteGraphStore},
+    storage::{BusinessKnowledgeStore, RepositoryCatalogStore as _, SqliteGraphStore},
 };
 
 #[tokio::test]

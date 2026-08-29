@@ -16,7 +16,11 @@ use crate::{
         SoftwareGlobalKind,
     },
     env::{EnvironmentConfig, PlatformKind},
-    storage::CodeRepositorySetRefreshPublication,
+    storage::{
+        CodeRepositorySetMemberSeed, CodeRepositorySetRefreshPublication,
+        CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
+        CodeRepositorySetRefreshTaskFailure, CodeRepositorySetSeed, CodeRepositorySetStore as _,
+    },
 };
 
 #[path = "indexing/retention/repository_tests.rs"]

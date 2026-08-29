@@ -6,6 +6,7 @@ mod diagnostics;
 mod framework;
 mod indexing;
 mod repository;
+mod repository_set_store;
 mod routing;
 mod status;
 mod totals;
@@ -15,21 +16,19 @@ use crate::{
     domain::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeIndexBatch, CodeIndexCheckpoint,
         CodeIndexPublicationFence, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
-        CodeRepositoryCrossEdge, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
-        CodeRepositoryReport, CodeRepositorySet, CodeRepositorySetMember,
-        CodeRepositorySetRefreshSummary, CodeRepositorySetStatus, CodeRepositoryStatus,
-        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeSymbolGenerationCounts,
-        SoftwareGlobalProjection, SoftwareGlobalRequest,
+        CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
+        CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
+        CodeSymbolGenerationCounts, SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
     paths::RuntimePaths,
     storage::{
-        BusinessKnowledgeStore, CodeImpactChanges, CodeIndexPublicationTarget,
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal,
-        CodeRepositorySetMemberSeed, CodeRepositorySetRefreshTaskClaimRequest,
-        CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskFailure,
-        CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
-        CodeScopeRetentionRequest, SqliteGraphStore, StorageError, StorageFuture,
+        BusinessKnowledgeStore, CodeImpactChanges, CodeIndexPublicationStore,
+        CodeIndexPublicationTarget, CodeIndexSourceStore, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskLeaseRecord,
+        CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal, CodeIndexTaskStore,
+        CodeQueryReadStore, CodeScopeRetentionRequest, CodeScopeRetentionStore,
+        RepositoryCatalogStore, SoftwareProjectionStore, SqliteGraphStore, StorageError,
+        StorageFuture,
     },
 };
 
@@ -57,7 +56,7 @@ impl PartitionedSqliteKnowledgeStore {
     }
 }
 
-impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
+impl RepositoryCatalogStore for PartitionedSqliteKnowledgeStore {
     fn upsert_code_repository(
         &self,
         registration: CodeRepositoryRegistration,
@@ -108,7 +107,9 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
         repository::latest_scope_status(self, repository, path_filters, language_filters)
     }
+}
 
+impl CodeIndexTaskStore for PartitionedSqliteKnowledgeStore {
     fn queue_code_index_task(
         &self,
         task: crate::storage::CodeIndexTaskSeed,
@@ -244,20 +245,9 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, crate::domain::CodeIndexTaskQueueStatus> {
         self.control.code_index_task_queue_status()
     }
-    fn code_index_checkpoint(
-        &self,
-        source_scope: String,
-    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
-        indexing::checkpoint::by_scope(self, source_scope)
-    }
+}
 
-    fn latest_code_index_checkpoint(
-        &self,
-        repository_id: String,
-    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
-        indexing::checkpoint::latest(self, repository_id)
-    }
-
+impl CodeScopeRetentionStore for PartitionedSqliteKnowledgeStore {
     fn code_scope_retention(
         &self,
         repository_id: String,
@@ -284,7 +274,9 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     fn code_repository_retention_scan_pending(&self) -> StorageFuture<'_, bool> {
         self.control.code_repository_retention_scan_pending()
     }
+}
 
+impl CodeIndexSourceStore for PartitionedSqliteKnowledgeStore {
     fn code_file_fingerprints(
         &self,
         repository_id: String,
@@ -335,6 +327,38 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             exclude_generated,
             limit,
         )
+    }
+
+    fn repository_documents_for_scope(
+        &self,
+        source_scope: String,
+        path_filters: Vec<String>,
+        max_files: usize,
+        max_bytes: usize,
+    ) -> StorageFuture<'_, Vec<crate::domain::IndexedRepositoryDocument>> {
+        routing::repository_documents_for_scope(
+            self.clone(),
+            source_scope,
+            path_filters,
+            max_files,
+            max_bytes,
+        )
+    }
+}
+
+impl CodeIndexPublicationStore for PartitionedSqliteKnowledgeStore {
+    fn code_index_checkpoint(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
+        indexing::checkpoint::by_scope(self, source_scope)
+    }
+
+    fn latest_code_index_checkpoint(
+        &self,
+        repository_id: String,
+    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
+        indexing::checkpoint::latest(self, repository_id)
     }
 
     fn apply_code_index_snapshot(
@@ -449,7 +473,9 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
     ) -> StorageFuture<'_, crate::storage::CodeIndexFinalizationStep> {
         indexing::lifecycle::advance_session_with_fence(self, session, fence)
     }
+}
 
+impl CodeQueryReadStore for PartitionedSqliteKnowledgeStore {
     fn search_code(
         &self,
         request: CodeRetrievalRequest,
@@ -563,22 +589,6 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
         routing::codebase_view_snapshot(self.clone(), source_scope, request, row_limit)
     }
 
-    fn repository_documents_for_scope(
-        &self,
-        source_scope: String,
-        path_filters: Vec<String>,
-        max_files: usize,
-        max_bytes: usize,
-    ) -> StorageFuture<'_, Vec<crate::domain::IndexedRepositoryDocument>> {
-        routing::repository_documents_for_scope(
-            self.clone(),
-            source_scope,
-            path_filters,
-            max_files,
-            max_bytes,
-        )
-    }
-
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
         let this = self.clone();
         Box::pin(async move { totals::code_repository_totals(this.control, this.catalog).await })
@@ -619,7 +629,9 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
             totals::scope_symbol_generation_counts(this.control, this.catalog, source_scope).await
         })
     }
+}
 
+impl SoftwareProjectionStore for PartitionedSqliteKnowledgeStore {
     fn refresh_software_global_projection(
         &self,
         source_scope: String,
@@ -717,105 +729,6 @@ impl CodeRepositoryStore for PartitionedSqliteKnowledgeStore {
                 .software_global_projection_for_scope(source_scope, request)
                 .await
         })
-    }
-
-    fn create_code_repository_set(
-        &self,
-        seed: CodeRepositorySetSeed,
-    ) -> StorageFuture<'_, CodeRepositorySet> {
-        self.control.create_code_repository_set(seed)
-    }
-
-    fn add_code_repository_set_member(
-        &self,
-        seed: CodeRepositorySetMemberSeed,
-    ) -> StorageFuture<'_, CodeRepositorySetMember> {
-        self.control.add_code_repository_set_member(seed)
-    }
-
-    fn remove_code_repository_set_member(
-        &self,
-        set_alias: String,
-        repository_alias: String,
-    ) -> StorageFuture<'_, CodeRepositorySetMember> {
-        self.control
-            .remove_code_repository_set_member(set_alias, repository_alias)
-    }
-
-    fn code_repository_set(
-        &self,
-        set_alias: String,
-    ) -> StorageFuture<'_, Option<CodeRepositorySet>> {
-        self.control.code_repository_set(set_alias)
-    }
-
-    fn code_repository_set_status(
-        &self,
-        set_alias: String,
-    ) -> StorageFuture<'_, Option<CodeRepositorySetStatus>> {
-        self.control.code_repository_set_status(set_alias)
-    }
-
-    fn refresh_code_repository_set_overlay(
-        &self,
-        set_alias: String,
-        _publication: crate::storage::CodeRepositorySetRefreshPublication,
-    ) -> StorageFuture<'_, CodeRepositorySetRefreshSummary> {
-        Box::pin(async move {
-            Err(StorageError::InvalidInput(format!(
-                "repository set overlay refresh for '{set_alias}' requires the single_sqlite topology until cross-shard import/export aggregation is implemented"
-            )))
-        })
-    }
-
-    fn code_repository_set_cross_edges(
-        &self,
-        set_id: String,
-    ) -> StorageFuture<'_, Vec<CodeRepositoryCrossEdge>> {
-        self.control.code_repository_set_cross_edges(set_id)
-    }
-
-    fn code_repository_set_cross_edges_for_selector(
-        &self,
-        set_id: String,
-        selector: crate::storage::CodeRepositorySetEdgeSelector,
-    ) -> StorageFuture<'_, Vec<CodeRepositoryCrossEdge>> {
-        self.control
-            .code_repository_set_cross_edges_for_selector(set_id, selector)
-    }
-
-    fn queue_code_repository_set_refresh_task(
-        &self,
-        task: CodeRepositorySetRefreshTaskSeed,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
-        Box::pin(async move {
-            Err(StorageError::InvalidInput(format!(
-                "repository set overlay refresh task for '{}' requires the single_sqlite topology until cross-shard import/export aggregation is implemented",
-                task.set_alias
-            )))
-        })
-    }
-
-    fn claim_code_repository_set_refresh_task(
-        &self,
-        request: CodeRepositorySetRefreshTaskClaimRequest,
-    ) -> StorageFuture<'_, Option<crate::domain::CodeRepositorySetRefreshTaskRecord>> {
-        self.control.claim_code_repository_set_refresh_task(request)
-    }
-
-    fn complete_code_repository_set_refresh_task(
-        &self,
-        request: CodeRepositorySetRefreshTaskCompletion,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
-        self.control
-            .complete_code_repository_set_refresh_task(request)
-    }
-
-    fn fail_code_repository_set_refresh_task(
-        &self,
-        request: CodeRepositorySetRefreshTaskFailure,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
-        self.control.fail_code_repository_set_refresh_task(request)
     }
 }
 

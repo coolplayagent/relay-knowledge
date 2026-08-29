@@ -6,8 +6,9 @@ use crate::{
         RepositoryCodeReferenceRecord, code_reference_search_query_index_repair,
     },
     storage::{
-        CodeIndexFinalizationStep, CodeIndexTaskClaimRequest, CodeRepositoryStore,
-        PartitionedSqliteKnowledgeStore, StorageError,
+        CodeIndexFinalizationStep, CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskStore as _, PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _,
+        SoftwareProjectionStore as _, StorageError,
     },
 };
 use rusqlite::{Connection, params};

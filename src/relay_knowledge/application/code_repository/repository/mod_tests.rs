@@ -13,7 +13,10 @@ use crate::{
         FreshnessPolicy, RepositoryCodeRange, SoftwareGlobalKind, SoftwareGlobalRequest,
         StalenessHint,
     },
-    storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskStore as _,
+        SqliteGraphStore,
+    },
 };
 
 use super::test_support::*;

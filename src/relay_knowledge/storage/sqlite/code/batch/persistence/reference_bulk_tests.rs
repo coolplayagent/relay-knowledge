@@ -7,8 +7,8 @@ use crate::{
         RepositoryCodeRange, RepositoryCodeReferenceRecord,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
-        StorageError,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
     },
 };
 use rusqlite::{limits::Limit, params};

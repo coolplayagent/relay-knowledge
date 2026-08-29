@@ -3,8 +3,11 @@ use std::{fs, path::PathBuf};
 use relay_knowledge::{
     domain::{CodeRepositorySelector, CodebaseViewKind, CodebaseViewRequest, FreshnessPolicy},
     storage::{
-        CodeIndexTaskClaimRequest, CodeRepositorySetRefreshTaskSeed, CodeRepositoryStore,
-        GraphStore, PartitionedSqliteKnowledgeStore, SqliteGraphStore, StorageError,
+        CodeIndexPublicationStore as _, CodeIndexSourceStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskStore as _, CodeQueryReadStore as _, CodeRepositorySetRefreshTaskSeed,
+        CodeRepositorySetStore as _, CodeScopeRetentionStore as _, GraphStore,
+        PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _, SoftwareProjectionStore as _,
+        SqliteGraphStore, StorageError,
     },
 };
 

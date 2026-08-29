@@ -109,17 +109,6 @@ impl RelayKnowledgeService {
             .map_err(RuntimeConfigurationError::Network)
     }
 
-    /// Re-reads process environment variables and applies network changes.
-    pub async fn refresh_network_from_process_environment(
-        &self,
-    ) -> Result<(), RuntimeConfigurationError> {
-        self.runtime
-            .network
-            .refresh_from_process_environment()
-            .map(|_| ())
-            .map_err(RuntimeConfigurationError::NetworkRuntime)
-    }
-
     /// Returns the shared observability runtime for interface adapters.
     pub fn observability(&self) -> ObservabilityRuntime {
         self.runtime.observability.clone()

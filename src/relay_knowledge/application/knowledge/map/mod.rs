@@ -10,8 +10,8 @@ use crate::project::{AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME};
 use crate::{
     api::RequestContext,
     domain::{
-        BusinessGlossary, KnowledgeMap, KnowledgeMapChange, KnowledgeMapRoute, KnowledgeMapSource,
-        KnowledgeMapSourceKind, RepositoryMapType, validate_directory_collection,
+        BusinessGlossary, KnowledgeMap, KnowledgeMapChange, KnowledgeMapSource, RepositoryMapType,
+        validate_directory_collection,
     },
     project::{
         CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
@@ -27,6 +27,8 @@ mod governance;
 mod history;
 mod lock;
 mod migration;
+mod query;
+mod validation;
 
 pub(crate) use history::MAX_HISTORY_PAGE_SIZE;
 #[cfg(test)]
@@ -165,68 +167,6 @@ impl KnowledgeMapService {
         ))
     }
 
-    #[cfg(test)]
-    pub async fn show(
-        &self,
-        context: &RequestContext,
-        topic: Option<String>,
-    ) -> Result<KnowledgeMapShowResponse, KnowledgeMapServiceError> {
-        self.show_filtered(context, topic, None).await
-    }
-
-    pub async fn show_filtered(
-        &self,
-        context: &RequestContext,
-        topic: Option<String>,
-        directory: Option<String>,
-    ) -> Result<KnowledgeMapShowResponse, KnowledgeMapServiceError> {
-        let mut map = self.load_show_view().await?;
-        if let Some(topic) = topic {
-            map.sources.retain(|source| source.topic == topic);
-            map.routes.retain(|route| route.topic == topic);
-            map.topics.retain(|entry| entry.id == topic);
-        }
-        if let Some(directory) = directory {
-            map.directories.retain(|entry| entry.directory == directory);
-        }
-        Ok(KnowledgeMapShowResponse {
-            metadata: metadata(context),
-            path: self.relative_path().to_owned(),
-            map_type: self.map_type,
-            map,
-        })
-    }
-
-    pub async fn route(
-        &self,
-        context: &RequestContext,
-        topic: String,
-    ) -> Result<KnowledgeMapRouteResponse, KnowledgeMapServiceError> {
-        let (route, available_sources) = self.load_topic_route(&topic).await?;
-        let source_order = route
-            .as_ref()
-            .map(|route| route.source_order.as_slice())
-            .unwrap_or(&[]);
-        let sources = source_order
-            .iter()
-            .filter_map(|id| {
-                available_sources
-                    .iter()
-                    .find(|source| &source.id == id)
-                    .cloned()
-            })
-            .collect();
-
-        Ok(KnowledgeMapRouteResponse {
-            metadata: metadata(context),
-            path: self.relative_path().to_owned(),
-            map_type: self.map_type,
-            topic,
-            route,
-            sources,
-        })
-    }
-
     pub async fn add_source(
         &self,
         context: &RequestContext,
@@ -311,48 +251,6 @@ impl KnowledgeMapService {
             snapshot.map.map_version,
             format!("removed source {id}"),
         ))
-    }
-
-    pub async fn validate(
-        &self,
-        context: &RequestContext,
-    ) -> Result<KnowledgeMapValidationResponse, KnowledgeMapServiceError> {
-        let mut diagnostics = Vec::new();
-        match self.validate_map_contract().await {
-            Ok(()) => {}
-            Err(error) => diagnostics.push(error.to_string()),
-        }
-        if self.map_type == RepositoryMapType::Knowledge {
-            match self.validate_business_glossary_route().await {
-                Ok(()) => {}
-                Err(error) => diagnostics.push(error.to_string()),
-            }
-        }
-
-        if let Err(error) = self.validate_directory_files().await {
-            diagnostics.push(error.to_string());
-        }
-        if let Err(error) = self.validate_cross_map_relations().await {
-            diagnostics.push(error.to_string());
-        }
-
-        let agents_path = self.repository_root.join("AGENTS.md");
-        match fs::read_to_string(&agents_path).await {
-            Ok(contents) if contents.contains(self.relative_path()) => {}
-            Ok(_) => diagnostics.push(format!(
-                "AGENTS.md does not reference {}",
-                self.relative_path()
-            )),
-            Err(error) => diagnostics.push(format!("failed to read AGENTS.md: {error}")),
-        }
-
-        Ok(KnowledgeMapValidationResponse {
-            metadata: metadata(context),
-            path: self.relative_path().to_owned(),
-            map_type: self.map_type,
-            valid: diagnostics.is_empty(),
-            diagnostics,
-        })
     }
 
     pub fn agent_snippet(&self, context: &RequestContext) -> KnowledgeMapAgentSnippetResponse {
@@ -441,117 +339,6 @@ impl KnowledgeMapService {
             archive: manifest.history.archive,
             history_index,
             requires_publish,
-        })
-    }
-
-    async fn validate_map_contract(&self) -> Result<(), KnowledgeMapServiceError> {
-        let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
-            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
-            parse_v1_map(&content)?;
-            return Ok(());
-        }
-        if !matches!(
-            probe.schema_version,
-            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
-        ) {
-            return Err(KnowledgeMapServiceError::Yaml(format!(
-                "unsupported schema_version {}",
-                probe.schema_version
-            )));
-        }
-        let manifest = parse_manifest(&content)?;
-        self.validate_manifest_identity(&manifest)?;
-        self.validate_archived_history(&manifest.history).await?;
-        let mut topics = Vec::with_capacity(manifest.topics.len());
-        let mut sources = Vec::new();
-        let mut routes = Vec::new();
-        for topic_ref in &manifest.topics {
-            let shard = self.load_topic_shard(topic_ref).await?;
-            topics.push(shard.topic);
-            sources.extend(shard.sources);
-            routes.extend(shard.route);
-        }
-        KnowledgeMap {
-            schema_version: KnowledgeMap::SCHEMA_VERSION,
-            map_version: manifest.map_version,
-            updated_at: manifest.updated_at,
-            topics,
-            sources,
-            routes,
-            history: manifest.history.recent,
-        }
-        .validate_snapshot(manifest.history.archived_through)?;
-        Ok(())
-    }
-
-    async fn load_show_view(&self) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
-        let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
-            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
-            self.require_knowledge_map("legacy map show")?;
-            let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
-                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-            map.validate()?;
-            let omitted = map.history.len().saturating_sub(RECENT_HISTORY_LIMIT);
-            let recent = map.history.split_off(omitted);
-            let archived_through = recent
-                .first()
-                .map_or(0, |entry| entry.version.saturating_sub(1));
-            return Ok(KnowledgeMapView {
-                artifact_schema_version: KnowledgeMap::SCHEMA_VERSION,
-                map_version: map.map_version,
-                updated_at: map.updated_at,
-                directories: baseline_directories(RepositoryMapType::Knowledge),
-                topics: map.topics,
-                sources: map.sources,
-                routes: map.routes,
-                history: KnowledgeMapHistoryWindow {
-                    archived_through,
-                    complete: omitted == 0,
-                    recent,
-                },
-            });
-        }
-        if !matches!(
-            probe.schema_version,
-            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
-        ) {
-            return Err(KnowledgeMapServiceError::Yaml(format!(
-                "unsupported schema_version {}",
-                probe.schema_version
-            )));
-        }
-        let manifest = parse_manifest(&content)?;
-        self.validate_manifest_identity(&manifest)?;
-        let mut topics = Vec::with_capacity(manifest.topics.len());
-        let mut sources = Vec::new();
-        let mut routes = Vec::new();
-        for topic_ref in &manifest.topics {
-            let shard = self.load_topic_shard(topic_ref).await?;
-            topics.push(shard.topic);
-            sources.extend(shard.sources);
-            routes.extend(shard.route);
-        }
-        Ok(KnowledgeMapView {
-            artifact_schema_version: ARTIFACT_SCHEMA_VERSION,
-            map_version: manifest.map_version,
-            updated_at: manifest.updated_at,
-            directories: if manifest.directories.is_empty() {
-                baseline_directories(self.map_type)
-            } else {
-                manifest.directories
-            },
-            topics,
-            sources,
-            routes,
-            history: KnowledgeMapHistoryWindow {
-                archived_through: manifest.history.archived_through,
-                complete: manifest.history.archived_through == 0,
-                recent: manifest.history.recent,
-            },
         })
     }
 
@@ -679,36 +466,6 @@ impl KnowledgeMapService {
         Ok(())
     }
 
-    async fn load_topic_route(
-        &self,
-        topic: &str,
-    ) -> Result<(Option<KnowledgeMapRoute>, Vec<KnowledgeMapSource>), KnowledgeMapServiceError>
-    {
-        let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
-            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        if probe.schema_version == 1 {
-            let map = parse_v1_map(&content)?;
-            return Ok((
-                map.routes
-                    .iter()
-                    .find(|route| route.topic == topic)
-                    .cloned(),
-                map.sources
-                    .into_iter()
-                    .filter(|source| source.topic == topic)
-                    .collect(),
-            ));
-        }
-        let manifest = parse_manifest(&content)?;
-        validate_recent_history(&manifest)?;
-        let Some(topic_ref) = manifest.topics.iter().find(|entry| entry.id == topic) else {
-            return Ok((None, Vec::new()));
-        };
-        let shard = self.load_topic_shard(topic_ref).await?;
-        Ok((shard.route, shard.sources))
-    }
-
     async fn load_topic_shard(
         &self,
         topic_ref: &KnowledgeMapTopicRef,
@@ -834,42 +591,6 @@ impl KnowledgeMapService {
             return Err(error.into());
         }
         Ok(true)
-    }
-
-    async fn validate_business_glossary_route(&self) -> Result<(), KnowledgeMapServiceError> {
-        let (route, sources) = self.load_topic_route("business-knowledge").await?;
-        let Some(route) = route else {
-            return Ok(());
-        };
-        for source_id in route.source_order {
-            let source = sources
-                .iter()
-                .find(|source| source.id == source_id)
-                .ok_or_else(|| {
-                    KnowledgeMapServiceError::Integrity(format!(
-                        "business-knowledge route references missing source '{source_id}'"
-                    ))
-                })?;
-            if source.kind != KnowledgeMapSourceKind::File
-                || source.source_scope.as_deref() != Some("repo")
-            {
-                return Err(KnowledgeMapServiceError::Integrity(format!(
-                    "business glossary source '{}' must use kind file and source scope repo",
-                    source.id
-                )));
-            }
-            let source_path = if self.uses_legacy_contract().await?
-                && source.id == "repository-business-glossary"
-            {
-                LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
-            } else {
-                &source.uri
-            };
-            let path = safe_repository_source_path(&self.repository_root, source_path).await?;
-            let content = fs::read(path).await?;
-            BusinessGlossary::parse(&content)?;
-        }
-        Ok(())
     }
 }
 

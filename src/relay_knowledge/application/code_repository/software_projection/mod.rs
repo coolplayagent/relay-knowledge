@@ -26,7 +26,8 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<SoftwareGlobalResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let status =
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         if request.freshness_policy == FreshnessPolicy::GraphOnly {
             let graph_version = store
                 .current_graph_version()

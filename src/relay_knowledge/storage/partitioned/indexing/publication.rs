@@ -6,7 +6,8 @@ use crate::{
         SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     storage::{
-        CodeIndexPublicationTarget, CodeRepositoryStore, StorageError, StorageFuture,
+        CodeIndexPublicationStore, CodeIndexPublicationTarget, CodeIndexTaskStore,
+        RepositoryCatalogStore, SoftwareProjectionStore, StorageError, StorageFuture,
         partitioned::routing::is_missing_code_scope_error,
     },
 };

@@ -2,7 +2,7 @@
 
 use crate::{
     domain::CodeFileFingerprint,
-    storage::{CodeRepositoryStore, StorageFuture},
+    storage::{CodeIndexSourceStore, StorageFuture},
 };
 
 use super::super::{PartitionedSqliteKnowledgeStore, routing::source_scope_store};

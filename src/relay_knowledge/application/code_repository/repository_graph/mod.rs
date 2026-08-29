@@ -30,7 +30,8 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<RepositoryGraphNeighborhoodResponseV1, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let status =
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         let requested_ref = request.repository.ref_selector.clone();
         request.repository.ref_selector = indexed_commit_for_selector(
             &status,

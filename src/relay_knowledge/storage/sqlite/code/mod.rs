@@ -14,6 +14,7 @@ mod impact;
 pub(in crate::storage) mod lifecycle;
 pub(in crate::storage::sqlite) mod publication;
 mod query;
+mod repository_set_store;
 mod routes;
 pub(in crate::storage::sqlite) mod schema;
 mod search;
@@ -68,7 +69,9 @@ use crate::{
         SoftwareGlobalProjection, SoftwareGlobalRequest,
     },
     storage::{
-        BusinessKnowledgeStore, CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture,
+        BusinessKnowledgeStore, CodeImpactChanges, CodeIndexPublicationStore, CodeIndexSourceStore,
+        CodeIndexTaskStore, CodeQueryReadStore, CodeScopeRetentionStore, RepositoryCatalogStore,
+        SoftwareProjectionStore, StorageError, StorageFuture,
     },
 };
 
@@ -211,7 +214,7 @@ fn ensure_queryable_code_scope(
     Ok(())
 }
 
-impl CodeRepositoryStore for SqliteGraphStore {
+impl RepositoryCatalogStore for SqliteGraphStore {
     fn upsert_code_repository(
         &self,
         registration: CodeRepositoryRegistration,
@@ -271,7 +274,9 @@ impl CodeRepositoryStore for SqliteGraphStore {
             )
         })
     }
+}
 
+impl CodeIndexTaskStore for SqliteGraphStore {
     fn queue_code_index_task(
         &self,
         task: crate::storage::CodeIndexTaskSeed,
@@ -400,23 +405,9 @@ impl CodeRepositoryStore for SqliteGraphStore {
     ) -> StorageFuture<'_, crate::domain::CodeIndexTaskQueueStatus> {
         self.run_read(tasks::queue_status)
     }
+}
 
-    fn code_index_checkpoint(
-        &self,
-        source_scope: String,
-    ) -> StorageFuture<'_, Option<crate::domain::CodeIndexCheckpoint>> {
-        self.run_read(move |connection| tasks::checkpoint(connection, &source_scope))
-    }
-
-    fn latest_code_index_checkpoint(
-        &self,
-        repository_id: String,
-    ) -> StorageFuture<'_, Option<crate::domain::CodeIndexCheckpoint>> {
-        self.run_read(move |connection| {
-            tasks::latest_checkpoint_for_repository(connection, &repository_id)
-        })
-    }
-
+impl CodeScopeRetentionStore for SqliteGraphStore {
     fn code_scope_retention(
         &self,
         repository_id: String,
@@ -446,7 +437,9 @@ impl CodeRepositoryStore for SqliteGraphStore {
     fn code_repository_retention_scan_pending(&self) -> StorageFuture<'_, bool> {
         self.run_read(|connection| tasks::repository_retention_scan_pending(connection))
     }
+}
 
+impl CodeIndexSourceStore for SqliteGraphStore {
     fn code_file_fingerprints(
         &self,
         repository_id: String,
@@ -535,6 +528,24 @@ impl CodeRepositoryStore for SqliteGraphStore {
                 max_files,
                 max_bytes,
             )
+        })
+    }
+}
+
+impl CodeIndexPublicationStore for SqliteGraphStore {
+    fn code_index_checkpoint(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
+        self.run_read(move |connection| tasks::checkpoint(connection, &source_scope))
+    }
+
+    fn latest_code_index_checkpoint(
+        &self,
+        repository_id: String,
+    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
+        self.run_read(move |connection| {
+            tasks::latest_checkpoint_for_repository(connection, &repository_id)
         })
     }
 
@@ -709,7 +720,9 @@ impl CodeRepositoryStore for SqliteGraphStore {
     ) -> StorageFuture<'_, crate::storage::CodeIndexFinalizationStep> {
         session_finalization::advance_session_with_fence(self, session, fence)
     }
+}
 
+impl CodeQueryReadStore for SqliteGraphStore {
     fn search_code(
         &self,
         request: CodeRetrievalRequest,
@@ -804,7 +817,9 @@ impl CodeRepositoryStore for SqliteGraphStore {
             })
         })
     }
+}
 
+impl SoftwareProjectionStore for SqliteGraphStore {
     fn refresh_software_global_projection(
         &self,
         source_scope: String,
@@ -847,97 +862,6 @@ impl CodeRepositoryStore for SqliteGraphStore {
             ensure_queryable_code_scope(connection, &source_scope)?;
             software::projection_for_scope(connection, &source_scope, request)
         })
-    }
-
-    fn create_code_repository_set(
-        &self,
-        seed: crate::storage::CodeRepositorySetSeed,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySet> {
-        self.run(move |connection| set::create_set(connection, seed))
-    }
-
-    fn add_code_repository_set_member(
-        &self,
-        seed: crate::storage::CodeRepositorySetMemberSeed,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetMember> {
-        self.run(move |connection| set::add_member(connection, seed))
-    }
-
-    fn remove_code_repository_set_member(
-        &self,
-        set_alias: String,
-        repository_alias: String,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetMember> {
-        self.run(move |connection| set::remove_member(connection, &set_alias, &repository_alias))
-    }
-
-    fn code_repository_set(
-        &self,
-        set_alias: String,
-    ) -> StorageFuture<'_, Option<crate::domain::CodeRepositorySet>> {
-        self.run_read(move |connection| set::set_by_alias(connection, &set_alias))
-    }
-
-    fn code_repository_set_status(
-        &self,
-        set_alias: String,
-    ) -> StorageFuture<'_, Option<crate::domain::CodeRepositorySetStatus>> {
-        self.run_read_snapshot(move |connection| set::set_status(connection, &set_alias))
-    }
-
-    fn refresh_code_repository_set_overlay(
-        &self,
-        set_alias: String,
-        publication: crate::storage::CodeRepositorySetRefreshPublication,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshSummary> {
-        self.run(move |connection| {
-            set::refresh_overlay_for_task(connection, &set_alias, publication)
-        })
-    }
-
-    fn code_repository_set_cross_edges(
-        &self,
-        set_id: String,
-    ) -> StorageFuture<'_, Vec<crate::domain::CodeRepositoryCrossEdge>> {
-        self.run_read_snapshot(move |connection| set::cross_edges_for_set(connection, &set_id))
-    }
-
-    fn code_repository_set_cross_edges_for_selector(
-        &self,
-        set_id: String,
-        selector: crate::storage::CodeRepositorySetEdgeSelector,
-    ) -> StorageFuture<'_, Vec<crate::domain::CodeRepositoryCrossEdge>> {
-        self.run_read_snapshot(move |connection| {
-            set::cross_edges_for_selector(connection, &set_id, &selector)
-        })
-    }
-
-    fn queue_code_repository_set_refresh_task(
-        &self,
-        task: crate::storage::CodeRepositorySetRefreshTaskSeed,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
-        self.run(move |connection| set::refresh_tasks::queue_refresh_task(connection, task))
-    }
-
-    fn claim_code_repository_set_refresh_task(
-        &self,
-        request: crate::storage::CodeRepositorySetRefreshTaskClaimRequest,
-    ) -> StorageFuture<'_, Option<crate::domain::CodeRepositorySetRefreshTaskRecord>> {
-        self.run(move |connection| set::refresh_tasks::claim_refresh_task(connection, request))
-    }
-
-    fn complete_code_repository_set_refresh_task(
-        &self,
-        request: crate::storage::CodeRepositorySetRefreshTaskCompletion,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
-        self.run(move |connection| set::refresh_tasks::complete_refresh_task(connection, request))
-    }
-
-    fn fail_code_repository_set_refresh_task(
-        &self,
-        request: crate::storage::CodeRepositorySetRefreshTaskFailure,
-    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetRefreshTaskRecord> {
-        self.run(move |connection| set::refresh_tasks::fail_refresh_task(connection, request))
     }
 }
 

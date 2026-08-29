@@ -1,26 +1,33 @@
 //! Advances checkpointed code-index finalization one durable writer quantum at a time.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, Transaction, params};
 
 use super::{checkpoint, finalize};
 use crate::{
     domain::{
-        CodeIndexProgressSummary, CodeIndexSession, CodeIndexSummary,
-        CodeQueryIndexRepairResumePhase, code_query_index_repair, code_query_index_repair_state,
-        code_query_index_subphase, code_query_index_subphase_state, code_reference_resolution,
-        code_reference_resolution_query_index_repair, code_reference_search_query_index_repair,
-        code_reference_search_query_index_repair_state, code_reference_search_rebuild,
+        CodeIndexProgressSummary, CodeIndexSession, CodeIndexSummary, code_query_index_subphase,
         code_reference_search_rebuild_state,
     },
     storage::StorageError,
 };
 
 use super::super::super::{
-    cleanup::count_code_rows, lifecycle::publication_fence::PublicationFenceGuard, report, status,
-    workspace,
+    lifecycle::publication_fence::PublicationFenceGuard, report, status, workspace,
 };
 
 use super::reference_resolution;
+
+mod phase;
+mod publication;
+mod query_index;
+
+use phase::FinalizationCheckpointPhase;
+use publication::{complete_unfenced_publication, publish_repository_scope};
+use query_index::{
+    advance_query_index_phase, advance_query_index_repair,
+    advance_reference_search_query_index_repair, repair_query_indexes_after_coarse_checkpoint,
+    repair_query_indexes_during_reference_search,
+};
 
 #[derive(Debug)]
 pub(in crate::storage::sqlite::code) enum CodeIndexFinalizationAdvance {
@@ -83,13 +90,13 @@ fn advance_session_once(
             "finalization requires a complete committed file prefix",
         ));
     }
-    let advance = advance_transaction(
-        &transaction,
+    let context = FinalizationTransactionContext {
+        transaction: &transaction,
         session,
-        persisted.state.as_str(),
-        persisted.committed_reference_count,
+        committed_reference_count: persisted.committed_reference_count,
         fence,
-    )?;
+    };
+    let advance = advance_transaction(&context, persisted.state.as_str())?;
     if let Some(fence) = fence {
         fence.validate_target_scope(&transaction, &session.source_scope)?;
         fence.validate(&transaction)?;
@@ -170,94 +177,111 @@ pub(super) enum TransactionAdvance {
     Ready,
 }
 
-fn advance_transaction(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    checkpoint_state: &str,
+struct FinalizationTransactionContext<'transaction, 'connection> {
+    transaction: &'transaction Transaction<'connection>,
+    session: &'transaction CodeIndexSession,
     committed_reference_count: usize,
-    fence: Option<&PublicationFenceGuard>,
+    fence: Option<&'transaction PublicationFenceGuard>,
+}
+
+fn advance_transaction(
+    context: &FinalizationTransactionContext<'_, '_>,
+    checkpoint_state: &str,
 ) -> Result<TransactionAdvance, StorageError> {
-    if let Some(repair) = code_reference_resolution_query_index_repair(checkpoint_state) {
-        return reference_resolution::advance_query_index_repair(
-            transaction,
-            session,
-            checkpoint_state,
-            repair,
-            fence,
-        );
-    }
-    if let Some(repair) = code_reference_search_query_index_repair(checkpoint_state) {
-        return advance_reference_search_query_index_repair(
-            transaction,
-            session,
-            checkpoint_state,
-            repair,
-            fence,
-        );
-    }
-    if let Some(repair) = code_query_index_repair(checkpoint_state) {
-        return advance_query_index_repair(transaction, session, checkpoint_state, repair);
-    }
-    if checkpoint_state == "indexing" || code_query_index_subphase(checkpoint_state).is_some() {
-        return advance_query_index_phase(transaction, session, checkpoint_state);
-    }
-    if let Some(resolution) = code_reference_resolution(checkpoint_state) {
-        return reference_resolution::advance_page(
-            transaction,
-            session,
-            checkpoint_state,
-            resolution,
-            committed_reference_count,
-            fence,
-        );
-    }
-    if let Some(reference_search) = code_reference_search_rebuild(checkpoint_state) {
-        let fence = fence.ok_or_else(|| {
-            StorageError::Invariant(
-                "durable reference-search progress requires a publication fence".to_owned(),
-            )
-        })?;
-        require_unpublished_finalization_owner(transaction, session, fence)?;
-        if let Some(repair) = repair_query_indexes_during_reference_search(
-            transaction,
-            session,
-            checkpoint_state,
-            reference_search,
-        )? {
-            require_unpublished_finalization_owner(transaction, session, fence)?;
-            return Ok(repair);
+    let transaction = context.transaction;
+    let session = context.session;
+    let fence = context.fence;
+    let committed_reference_count = context.committed_reference_count;
+    let phase = FinalizationCheckpointPhase::decode(checkpoint_state);
+
+    match phase {
+        FinalizationCheckpointPhase::ReferenceResolutionQueryIndexRepair(repair) => {
+            return reference_resolution::advance_query_index_repair(
+                transaction,
+                session,
+                checkpoint_state,
+                repair,
+                fence,
+            );
         }
-        super::super::super::schema::require_code_query_indexes_for_fact_publication(transaction)?;
-        let advance = finalize::search_documents::advance_reference_search_progress(
-            transaction,
-            &session.source_scope,
-            reference_search,
-        )?;
-        let result =
-            mark_reference_search_advance(transaction, session, checkpoint_state, advance)?;
-        require_unpublished_finalization_target(transaction, session, fence)?;
-        return Ok(result);
-    }
-    if let Some(resume_phase) =
-        CodeQueryIndexRepairResumePhase::from_checkpoint_state(checkpoint_state)
-        && let Some(repair) = repair_query_indexes_after_coarse_checkpoint(
-            transaction,
-            session,
-            checkpoint_state,
+        FinalizationCheckpointPhase::ReferenceSearchQueryIndexRepair(repair) => {
+            return advance_reference_search_query_index_repair(
+                transaction,
+                session,
+                checkpoint_state,
+                repair,
+                fence,
+            );
+        }
+        FinalizationCheckpointPhase::QueryIndexRepair(repair) => {
+            return advance_query_index_repair(transaction, session, checkpoint_state, repair);
+        }
+        FinalizationCheckpointPhase::Indexing => {
+            return advance_query_index_phase(transaction, session, checkpoint_state);
+        }
+        FinalizationCheckpointPhase::ReferenceResolution(resolution) => {
+            return reference_resolution::advance_page(
+                transaction,
+                session,
+                checkpoint_state,
+                resolution,
+                committed_reference_count,
+                fence,
+            );
+        }
+        FinalizationCheckpointPhase::ReferenceSearch(reference_search) => {
+            let fence = fence.ok_or_else(|| {
+                StorageError::Invariant(
+                    "durable reference-search progress requires a publication fence".to_owned(),
+                )
+            })?;
+            require_unpublished_finalization_owner(transaction, session, fence)?;
+            if let Some(repair) = repair_query_indexes_during_reference_search(
+                transaction,
+                session,
+                checkpoint_state,
+                reference_search,
+            )? {
+                require_unpublished_finalization_owner(transaction, session, fence)?;
+                return Ok(repair);
+            }
+            super::super::super::schema::require_code_query_indexes_for_fact_publication(
+                transaction,
+            )?;
+            let advance = finalize::search_documents::advance_reference_search_progress(
+                transaction,
+                &session.source_scope,
+                reference_search,
+            )?;
+            let result =
+                mark_reference_search_advance(transaction, session, checkpoint_state, advance)?;
+            require_unpublished_finalization_target(transaction, session, fence)?;
+            return Ok(result);
+        }
+        FinalizationCheckpointPhase::Coarse {
             resume_phase,
-        )?
-    {
-        return Ok(repair);
-    }
-    if checkpoint_state == "completed" {
-        super::super::super::schema::validate_existing_query_indexes(transaction)?;
-        return Ok(TransactionAdvance::Ready);
-    }
-    if matches!(
-        checkpoint_state,
-        finalize::phases::SOFTWARE_PROJECTION | finalize::phases::PARTITIONED_PUBLISH
-    ) {
-        return Ok(TransactionAdvance::Ready);
+            ready_for_outer_publication,
+        } => {
+            if let Some(repair) = repair_query_indexes_after_coarse_checkpoint(
+                transaction,
+                session,
+                checkpoint_state,
+                resume_phase,
+            )? {
+                return Ok(repair);
+            }
+            if ready_for_outer_publication {
+                return Ok(TransactionAdvance::Ready);
+            }
+        }
+        FinalizationCheckpointPhase::Completed => {
+            super::super::super::schema::validate_existing_query_indexes(transaction)?;
+            return Ok(TransactionAdvance::Ready);
+        }
+        FinalizationCheckpointPhase::ReadyForOuterPublication => {
+            return Ok(TransactionAdvance::Ready);
+        }
+        FinalizationCheckpointPhase::Unknown => {}
     }
     if finalization_phase_pending(checkpoint_state, finalize::phases::RESOLVE_REFERENCES)? {
         if let Some(fence) = fence
@@ -487,190 +511,6 @@ pub(super) fn require_unpublished_finalization_owner(
     Ok(())
 }
 
-fn repair_query_indexes_during_reference_search(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    checkpoint_state: &str,
-    reference_search: crate::domain::CodeReferenceSearchRebuild,
-) -> Result<Option<TransactionAdvance>, StorageError> {
-    let advance =
-        super::super::super::schema::advance_search_query_index_repair(transaction, None, false)?;
-    let super::super::super::schema::SearchQueryIndexAdvance::Created { completed_unit, .. } =
-        advance
-    else {
-        return Ok(None);
-    };
-    let next_state = code_reference_search_query_index_repair_state(
-        completed_unit,
-        reference_search,
-    )
-    .ok_or_else(|| {
-        StorageError::Invariant(format!(
-            "query-index repair unit {completed_unit} exceeds the durable reference-search plan"
-        ))
-    })?;
-    checkpoint::compare_and_mark_state(
-        transaction,
-        &session.source_scope,
-        checkpoint_state,
-        &next_state,
-    )?;
-    Ok(Some(TransactionAdvance::Pending(next_state)))
-}
-
-fn advance_reference_search_query_index_repair(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    checkpoint_state: &str,
-    repair: crate::domain::CodeReferenceSearchQueryIndexRepair,
-    fence: Option<&PublicationFenceGuard>,
-) -> Result<TransactionAdvance, StorageError> {
-    let fence = fence.ok_or_else(|| {
-        StorageError::Invariant(
-            "reference-search query-index repair requires a publication fence".to_owned(),
-        )
-    })?;
-    require_unpublished_finalization_owner(transaction, session, fence)?;
-    let advance = super::super::super::schema::advance_search_query_index_repair(
-        transaction,
-        Some(repair.completed_unit),
-        repair.requires_legacy_retired_prefix(),
-    )?;
-    let next_state = match advance {
-        super::super::super::schema::SearchQueryIndexAdvance::Created {
-            completed_unit, ..
-        } => repair.next_state(completed_unit).ok_or_else(|| {
-            StorageError::Invariant(format!(
-                "query-index repair unit {completed_unit} exceeds the durable reference-search plan"
-            ))
-        })?,
-        super::super::super::schema::SearchQueryIndexAdvance::Complete => {
-            repair.reference_search.checkpoint_state().ok_or_else(|| {
-                StorageError::Invariant(
-                    "query-index repair carried a noncanonical reference-search cursor".to_owned(),
-                )
-            })?
-        }
-    };
-    checkpoint::compare_and_mark_state(
-        transaction,
-        &session.source_scope,
-        checkpoint_state,
-        &next_state,
-    )?;
-    require_unpublished_finalization_owner(transaction, session, fence)?;
-    Ok(TransactionAdvance::Pending(next_state))
-}
-
-fn advance_query_index_phase(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    checkpoint_state: &str,
-) -> Result<TransactionAdvance, StorageError> {
-    let cursor = code_query_index_subphase(checkpoint_state);
-    let completed_unit = cursor.map(|cursor| cursor.completed_unit);
-    let require_retired_prefix =
-        cursor.is_some_and(|cursor| cursor.requires_legacy_retired_prefix());
-    let advance = super::super::super::schema::advance_search_query_indexes(
-        transaction,
-        completed_unit,
-        require_retired_prefix,
-    )?;
-    let next_state = match advance {
-        super::super::super::schema::SearchQueryIndexAdvance::Created {
-            completed_unit,
-            plan_complete,
-        } => {
-            if plan_complete {
-                finalize::phases::BUILD_QUERY_INDEXES.to_owned()
-            } else {
-                let next_cursor = match cursor {
-                    Some(cursor) => cursor.next_state(completed_unit),
-                    None => code_query_index_subphase_state(completed_unit),
-                };
-                next_cursor.ok_or_else(|| {
-                    StorageError::Invariant(format!(
-                        "query-index finalization unit {completed_unit} exceeds the durable plan"
-                    ))
-                })?
-            }
-        }
-        super::super::super::schema::SearchQueryIndexAdvance::Complete => {
-            finalize::phases::BUILD_QUERY_INDEXES.to_owned()
-        }
-    };
-    checkpoint::compare_and_mark_state(
-        transaction,
-        &session.source_scope,
-        checkpoint_state,
-        &next_state,
-    )?;
-    Ok(TransactionAdvance::Pending(next_state))
-}
-
-/// Repairs any durable coarse checkpoint against the current versioned plan.
-/// The token preserves the exact completed phase, so already committed phases
-/// never run again after a compatible plan transition.
-fn repair_query_indexes_after_coarse_checkpoint(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    checkpoint_state: &str,
-    resume_phase: CodeQueryIndexRepairResumePhase,
-) -> Result<Option<TransactionAdvance>, StorageError> {
-    let advance =
-        super::super::super::schema::advance_search_query_indexes(transaction, None, false)?;
-    let super::super::super::schema::SearchQueryIndexAdvance::Created { completed_unit, .. } =
-        advance
-    else {
-        return Ok(None);
-    };
-    let next_state =
-        code_query_index_repair_state(completed_unit, resume_phase).ok_or_else(|| {
-            StorageError::Invariant(format!(
-                "query-index repair unit {completed_unit} exceeds the durable plan"
-            ))
-        })?;
-    checkpoint::compare_and_mark_state(
-        transaction,
-        &session.source_scope,
-        checkpoint_state,
-        &next_state,
-    )?;
-    Ok(Some(TransactionAdvance::Pending(next_state)))
-}
-
-fn advance_query_index_repair(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    checkpoint_state: &str,
-    repair: crate::domain::CodeQueryIndexRepair,
-) -> Result<TransactionAdvance, StorageError> {
-    let advance = super::super::super::schema::advance_search_query_index_repair(
-        transaction,
-        Some(repair.completed_unit),
-        repair.requires_legacy_retired_prefix(),
-    )?;
-    let next_state = match advance {
-        super::super::super::schema::SearchQueryIndexAdvance::Created {
-            completed_unit, ..
-        } => repair.next_state(completed_unit).ok_or_else(|| {
-            StorageError::Invariant(format!(
-                "query-index repair unit {completed_unit} exceeds the durable plan"
-            ))
-        })?,
-        super::super::super::schema::SearchQueryIndexAdvance::Complete => {
-            repair.resume_phase.checkpoint_state().to_owned()
-        }
-    };
-    checkpoint::compare_and_mark_state(
-        transaction,
-        &session.source_scope,
-        checkpoint_state,
-        &next_state,
-    )?;
-    Ok(TransactionAdvance::Pending(next_state))
-}
-
 fn mark_phase_pending(
     transaction: &Transaction<'_>,
     session: &CodeIndexSession,
@@ -684,29 +524,6 @@ fn mark_phase_pending(
         next_state,
     )?;
     Ok(TransactionAdvance::Pending(next_state.to_owned()))
-}
-
-fn complete_unfenced_publication(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    checkpoint_state: &str,
-) -> Result<TransactionAdvance, StorageError> {
-    if finalization_phase_pending(checkpoint_state, finalize::phases::PUBLISH_SCOPE)? {
-        publish_repository_scope(transaction, session, false)?;
-    }
-    if finalization_phase_pending(
-        checkpoint_state,
-        finalize::phases::RESOLVE_WORKSPACE_IMPORTS,
-    )? {
-        workspace::resolve_workspace_imports(
-            transaction,
-            &session.workspaces,
-            &session.repository_id,
-            &session.source_scope,
-        )?;
-    }
-    checkpoint::compare_and_mark_completed(transaction, &session.source_scope, checkpoint_state)?;
-    Ok(TransactionAdvance::Ready)
 }
 
 pub(super) fn finalization_phase_pending(
@@ -731,111 +548,6 @@ pub(super) fn finalization_phase_pending(
     })?;
 
     Ok(completed_position < target_position)
-}
-
-fn publish_repository_scope(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    defer_until_software_projection: bool,
-) -> Result<(), StorageError> {
-    for tombstone in &session.tombstones {
-        transaction.execute(
-            "INSERT OR REPLACE INTO code_repository_path_tombstones
-                (repository_id, source_scope, old_path, new_path, base_ref, head_ref)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                tombstone.repository_id,
-                tombstone.source_scope,
-                tombstone.old_path,
-                tombstone.new_path,
-                tombstone.base_ref,
-                tombstone.head_ref,
-            ],
-        )?;
-    }
-    let file_count = count_code_rows(transaction, "code_repository_files", &session.source_scope)?;
-    let symbol_count = count_code_rows(
-        transaction,
-        "code_repository_symbols",
-        &session.source_scope,
-    )?;
-    let reference_count = count_code_rows(
-        transaction,
-        "code_repository_references",
-        &session.source_scope,
-    )?;
-    if session.full_replace {
-        require_grouped_reference_search_manifest(
-            transaction,
-            &session.source_scope,
-            reference_count,
-        )?;
-    }
-    let chunk_count =
-        count_code_rows(transaction, "code_repository_chunks", &session.source_scope)?;
-    let degraded_file_count = count_code_rows(
-        transaction,
-        "code_repository_file_diagnostics",
-        &session.source_scope,
-    )?;
-    let degraded_reason = (degraded_file_count > 0)
-        .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
-    let path_filters_json = checkpoint::serialize_json(&session.path_filters)?;
-    let language_filters_json = checkpoint::serialize_json(&session.language_filters)?;
-    crate::storage::sqlite::code::publication::stage(
-        transaction,
-        &crate::storage::sqlite::code::publication::ScopePublication {
-            repository_id: &session.repository_id,
-            source_scope: &session.source_scope,
-            resolved_commit_sha: &session.resolved_commit_sha,
-            tree_hash: &session.tree_hash,
-            path_filters_json: &path_filters_json,
-            language_filters_json: &language_filters_json,
-            indexed_file_count: file_count,
-            symbol_count,
-            reference_count,
-            chunk_count,
-            degraded_reason: degraded_reason.as_deref(),
-        },
-        defer_until_software_projection,
-    )?;
-
-    Ok(())
-}
-
-fn require_grouped_reference_search_manifest(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-    expected_reference_count: usize,
-) -> Result<(), StorageError> {
-    let manifest = transaction
-        .query_row(
-            "SELECT projection_version, reference_count, group_count
-             FROM code_repository_reference_search_manifests WHERE source_scope = ?1",
-            params![source_scope],
-            |row| {
-                Ok((
-                    row.get::<_, usize>(0)?,
-                    row.get::<_, usize>(1)?,
-                    row.get::<_, usize>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((projection_version, reference_count, group_count)) = manifest else {
-        return Err(StorageError::Invariant(format!(
-            "full code scope '{source_scope}' has no durable grouped reference-search manifest"
-        )));
-    };
-    if projection_version != 2
-        || reference_count != expected_reference_count
-        || group_count > reference_count
-    {
-        return Err(StorageError::Invariant(format!(
-            "full code scope '{source_scope}' has an invalid grouped reference-search manifest"
-        )));
-    }
-    Ok(())
 }
 
 fn build_summary(

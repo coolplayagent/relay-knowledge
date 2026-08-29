@@ -7,7 +7,7 @@ use relay_knowledge::{
         CodeIndexMode, CodeIndexRequest, CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector,
         CodeRetrievalHit, CodeRetrievalRequest, FreshnessPolicy,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeIndexPublicationStore as _, SqliteGraphStore},
 };
 use rusqlite::{Connection, params};
 

@@ -198,7 +198,7 @@ async fn scoped_freshness_checkpoint(
     active_matches_request: bool,
 ) -> Result<Option<CodeRepositoryFreshnessCursor>, ApiError> {
     let checkpoint = if active_matches_request {
-        code_status_checkpoint(store, scoped_status, active_task).await?
+        code_status_checkpoint(store.as_ref(), scoped_status, active_task).await?
     } else if let Some(scope) = scoped_status.last_indexed_scope_id.clone() {
         store
             .code_index_checkpoint(scope)

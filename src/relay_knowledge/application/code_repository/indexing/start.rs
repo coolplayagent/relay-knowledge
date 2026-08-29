@@ -36,7 +36,8 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositoryIndexStartResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let status =
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         if let Some(response) =
             fresh_full_index_response(&store, &status, &request, &context).await?
         {

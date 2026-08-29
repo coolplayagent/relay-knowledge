@@ -1,8 +1,8 @@
 use std::{error::Error, fmt, path::PathBuf};
 
 use crate::{
-    env::{EnvError, EnvironmentConfig, windows_system_root_from_process},
-    net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
+    env::{EnvError, EnvironmentConfig},
+    net::{NetworkConfig, NetworkConfigError, NetworkRuntime},
     observability::{ObservabilityRuntime, TelemetryConfig},
     paths::{PathError, RuntimePaths, windows_tasklist_command},
     project::PROJECT_NAME,
@@ -45,20 +45,6 @@ pub struct RuntimeConfiguration {
 }
 
 impl RuntimeConfiguration {
-    /// Resolves runtime configuration from the current process environment.
-    pub async fn from_process_environment() -> Result<Self, RuntimeConfigurationError> {
-        let environment =
-            EnvironmentConfig::from_process().map_err(RuntimeConfigurationError::Environment)?;
-        Self::from_environment_with_process(
-            &environment,
-            ProcessRuntimeConfig::from_bootstrap_inputs(
-                PathBuf::from(PROJECT_NAME),
-                windows_system_root_from_process(),
-            ),
-        )
-        .await
-    }
-
     /// Resolves runtime configuration from a typed environment snapshot.
     pub async fn from_environment(
         environment: &EnvironmentConfig,
@@ -139,7 +125,6 @@ pub enum RuntimeConfigurationError {
     Environment(EnvError),
     Paths(PathError),
     Network(NetworkConfigError),
-    NetworkRuntime(NetworkRuntimeError),
     Agent(AgentRuntimeConfigError),
     Retrieval(RetrievalRuntimeConfigError),
     Workers(WorkerRuntimeConfigError),
@@ -154,7 +139,6 @@ impl fmt::Display for RuntimeConfigurationError {
             Self::Environment(error) => write!(formatter, "{error}"),
             Self::Paths(error) => write!(formatter, "{error}"),
             Self::Network(error) => write!(formatter, "{error}"),
-            Self::NetworkRuntime(error) => write!(formatter, "{error}"),
             Self::Agent(error) => write!(formatter, "{error}"),
             Self::Retrieval(error) => write!(formatter, "{error}"),
             Self::Workers(error) => write!(formatter, "{error}"),

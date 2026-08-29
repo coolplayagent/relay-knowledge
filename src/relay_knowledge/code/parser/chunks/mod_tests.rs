@@ -3,7 +3,10 @@
 use crate::{
     code::{SnapshotBuild, parser::parse_indexed_file},
     domain::CodeRepositoryRegistration,
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexSourceStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 use super::*;

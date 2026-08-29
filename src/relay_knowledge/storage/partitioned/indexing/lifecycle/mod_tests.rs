@@ -6,8 +6,9 @@ use crate::{
         CodeIndexSnapshot, CodeRepositoryRegistration, code_snapshot_scope_id,
     },
     storage::{
-        CodeIndexFinalizationStep, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
-        CodeRepositoryStore, PartitionedSqliteKnowledgeStore,
+        CodeIndexFinalizationStep, CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, PartitionedSqliteKnowledgeStore,
+        RepositoryCatalogStore as _, SoftwareProjectionStore as _,
     },
 };
 

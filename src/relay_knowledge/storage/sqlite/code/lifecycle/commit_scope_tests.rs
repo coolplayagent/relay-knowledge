@@ -5,7 +5,7 @@ use crate::{
         CodeIndexResourceBudget, CodeIndexSession, CodeRepositoryRegistration,
         code_snapshot_scope_id,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeIndexPublicationStore as _, RepositoryCatalogStore as _, SqliteGraphStore},
 };
 
 #[tokio::test]

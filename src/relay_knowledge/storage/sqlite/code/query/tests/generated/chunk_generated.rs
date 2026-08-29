@@ -4,7 +4,10 @@ use crate::{
         CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:chunk-generated:commit:tree";

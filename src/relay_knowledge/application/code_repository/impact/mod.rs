@@ -32,7 +32,8 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositoryImpactResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let status =
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         let head_commit =
             resolve_code_ref_for_selector(&status, &request.repository, request.head_ref.clone())
                 .await?;

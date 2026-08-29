@@ -3,7 +3,9 @@ use rusqlite::params;
 use super::{checkpoint, latest_checkpoint_for_repository};
 use crate::{
     domain::{CodeIndexResourceBudget, CodeRepositoryRegistration},
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
+    },
 };
 
 #[tokio::test]

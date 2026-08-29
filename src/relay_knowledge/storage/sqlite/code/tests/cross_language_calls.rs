@@ -9,7 +9,10 @@ use crate::{
         RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
         RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const SOURCE_SCOPE: &str = "code:test:cross-language-calls:commit:tree";

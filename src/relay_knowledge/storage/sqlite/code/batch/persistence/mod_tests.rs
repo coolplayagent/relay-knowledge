@@ -6,7 +6,10 @@ use crate::{
         CodeRetrievalRequest, CodeRouteRecord, FreshnessPolicy, RepositoryCodeFileRecord,
         RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, SymbolRole,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 use rusqlite::params;
 use std::collections::BTreeMap;

@@ -8,7 +8,9 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     paths::RuntimePaths,
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
+    },
 };
 
 use super::PartitionedSqliteKnowledgeStore;

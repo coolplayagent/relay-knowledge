@@ -10,7 +10,9 @@ use crate::{
         CodeRepositoryRegistration, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
         RepositoryCodeRange,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
+    },
 };
 
 use super::{

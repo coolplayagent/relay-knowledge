@@ -46,7 +46,8 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodebaseViewResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let status =
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         let requested_ref = request.repository.ref_selector.clone();
         let mut request = view_request_at_indexed_ref(request, &status).await?;
         if requested_ref == "worktree" {
@@ -246,7 +247,12 @@ async fn view_freshness(
         queue,
     );
     let checkpoint = if active_matches_request {
-        code_status_checkpoint(input.store, input.scoped_status, active_task.as_ref()).await?
+        code_status_checkpoint(
+            input.store.as_ref(),
+            input.scoped_status,
+            active_task.as_ref(),
+        )
+        .await?
     } else if let Some(scope) = input.scoped_status.last_indexed_scope_id.clone() {
         input
             .store

@@ -8,17 +8,17 @@ use crate::{
         ServiceOperatorStatus, WorkerStatus, WorkerTaskRecord,
     },
     storage::{
-        AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeRepositoryStore, CodeSymbolSearchRequest, FileContentSearchHit,
+        AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeQueryReadStore,
+        CodeReferenceSearchRequest, CodeSymbolSearchRequest, FileContentSearchHit,
         FileContentSearchRequest, FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus,
         FileIndexRootUpdate, FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest,
         GraphCanvasStorageSnapshot, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
         GraphStore, HealthStorageSnapshot, IndexCursor, IndexRefreshClaimRequest,
         IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
         IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
-        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
-        StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure,
-        WorkerTaskSeed,
+        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, RepositoryCatalogStore,
+        ServiceOperatorUpdate, StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion,
+        WorkerTaskFailure, WorkerTaskSeed,
     },
 };
 

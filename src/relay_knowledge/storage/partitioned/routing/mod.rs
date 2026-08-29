@@ -9,8 +9,8 @@ use crate::{
         CodebaseViewSnapshot, FrameworkGraph, FrameworkGraphRequest, IndexedRepositoryDocument,
     },
     storage::{
-        CodeImpactChanges, CodeRepositoryStore, FrameworkGraphStore, SqliteGraphStore,
-        StorageError, StorageFuture,
+        CodeImpactChanges, CodeIndexSourceStore, CodeQueryReadStore, FrameworkGraphStore,
+        RepositoryCatalogStore, SqliteGraphStore, StorageError, StorageFuture,
     },
 };
 

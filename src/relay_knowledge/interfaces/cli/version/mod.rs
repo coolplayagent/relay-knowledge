@@ -34,20 +34,11 @@ pub(super) async fn run_version_check(
     }
 }
 
-pub(super) async fn update_notice_for_process(
-    command: &CliCommand,
-    interactive_text_output: bool,
-) -> Option<String> {
-    if !interactive_text_output || !should_check_after_command(command) {
-        return None;
-    }
-    let runtime = RuntimeConfiguration::from_process_environment()
-        .await
-        .ok()?;
+pub(super) async fn update_notice_for_runtime(runtime: &RuntimeConfiguration) -> Option<String> {
     update_notice(&runtime.paths, &runtime.network, &runtime.updates).await
 }
 
-fn should_check_after_command(command: &CliCommand) -> bool {
+pub(super) fn should_check_after_command(command: &CliCommand) -> bool {
     matches!(command.format, OutputFormat::Text | OutputFormat::Markdown)
         && !matches!(
             command.action,

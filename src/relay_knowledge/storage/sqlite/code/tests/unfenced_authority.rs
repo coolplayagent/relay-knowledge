@@ -9,8 +9,9 @@ use crate::{
         code_snapshot_scope_id,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore,
-        SqliteGraphStore, StorageError,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskFailure,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore,
+        StorageError,
     },
 };
 

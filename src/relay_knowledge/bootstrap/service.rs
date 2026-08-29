@@ -33,19 +33,9 @@ impl RelayKnowledgeService {
 
     /// Creates a service by reading the current process environment once.
     pub async fn from_process_environment() -> Result<Self, RuntimeConfigurationError> {
-        let environment =
-            EnvironmentConfig::from_process().map_err(RuntimeConfigurationError::Environment)?;
-        let current_executable =
-            std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(PROJECT_NAME));
-        RuntimeConfiguration::from_environment_with_process(
-            &environment,
-            ProcessRuntimeConfig::from_bootstrap_inputs(
-                current_executable,
-                windows_system_root_from_process(),
-            ),
-        )
-        .await
-        .map(Self::new)
+        runtime_configuration_from_process_environment()
+            .await
+            .map(Self::new)
     }
 
     /// Creates a service from a deterministic environment snapshot.
@@ -66,6 +56,22 @@ impl RelayKnowledgeService {
             .await
             .map(Self::new)
     }
+}
+
+/// Captures live process inputs at the composition root before application
+/// configuration is resolved from typed snapshots.
+pub(crate) async fn runtime_configuration_from_process_environment()
+-> Result<RuntimeConfiguration, RuntimeConfigurationError> {
+    let environment =
+        EnvironmentConfig::from_process().map_err(RuntimeConfigurationError::Environment)?;
+    let current_executable =
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(PROJECT_NAME));
+    let process = ProcessRuntimeConfig::from_bootstrap_inputs(
+        current_executable,
+        windows_system_root_from_process(),
+    );
+
+    RuntimeConfiguration::from_environment_with_process(&environment, process).await
 }
 
 struct RuntimeNetworkAdapters {

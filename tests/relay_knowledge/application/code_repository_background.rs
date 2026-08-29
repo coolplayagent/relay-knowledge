@@ -6,7 +6,10 @@ use relay_knowledge::{
         CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
         CodeIndexSession, CodeIndexTaskState, CodeQueryKind, CodeRetrievalRequest, FreshnessPolicy,
     },
-    storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskStore as _,
+        RepositoryCatalogStore as _, SqliteGraphStore,
+    },
 };
 
 #[tokio::test]

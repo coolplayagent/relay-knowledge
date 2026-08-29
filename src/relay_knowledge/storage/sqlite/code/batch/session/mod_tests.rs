@@ -9,7 +9,10 @@ use crate::{
         CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
         RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore, StorageError,
+    },
 };
 
 #[tokio::test]

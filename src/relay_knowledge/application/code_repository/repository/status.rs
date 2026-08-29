@@ -5,12 +5,13 @@ use crate::{
     domain::{
         CodeIndexCheckpoint, CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryStatus,
     },
+    storage::{CodeIndexPublicationStore, RepositoryCatalogStore},
 };
 
 use super::super::errors::storage_api_error;
 
 pub(in crate::application::code_repository) async fn required_code_repository(
-    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    store: &(impl RepositoryCatalogStore + ?Sized),
     repository: &str,
 ) -> Result<crate::domain::CodeRepositoryStatus, ApiError> {
     store
@@ -23,7 +24,7 @@ pub(in crate::application::code_repository) async fn required_code_repository(
 }
 
 pub(in crate::application::code_repository) async fn code_status_checkpoint(
-    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    store: &(impl CodeIndexPublicationStore + ?Sized),
     status: &CodeRepositoryStatus,
     active_task: Option<&CodeIndexTaskRecord>,
 ) -> Result<Option<CodeIndexCheckpoint>, ApiError> {

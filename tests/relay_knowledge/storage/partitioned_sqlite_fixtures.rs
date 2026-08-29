@@ -16,8 +16,10 @@ use relay_knowledge::{
     env::{EnvironmentConfig, PlatformKind},
     paths::RuntimePaths,
     storage::{
-        BusinessKnowledgeStore, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
-        CodeIndexTaskSeed, CodeRepositoryStore, PartitionedSqliteKnowledgeStore, StorageError,
+        BusinessKnowledgeStore, CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _, SoftwareProjectionStore as _,
+        StorageError,
     },
 };
 use rusqlite::Connection;

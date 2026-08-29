@@ -45,7 +45,7 @@ impl RelayKnowledgeService {
         repository: &str,
     ) -> Result<PathBuf, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, repository).await?;
+        let status = required_code_repository(store.as_ref(), repository).await?;
 
         Ok(PathBuf::from(status.root_path))
     }
@@ -121,7 +121,7 @@ impl RelayKnowledgeService {
         let store = self.store().await.map_err(storage_api_error)?;
         let now_ms = now_millis();
         recover_code_index_task_leases(&store, now_ms).await?;
-        let removed_status = required_code_repository(&store, &repository).await?;
+        let removed_status = required_code_repository(store.as_ref(), &repository).await?;
         let summary = store
             .remove_code_repository(removed_status.repository_id.clone(), now_ms)
             .await
@@ -150,13 +150,14 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositoryStatusResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &selector.repository).await?;
+        let status = required_code_repository(store.as_ref(), &selector.repository).await?;
         recover_code_index_task_leases(&store, now_millis()).await?;
         let active_task = store
             .active_code_index_task(status.repository_id.clone())
             .await
             .map_err(storage_api_error)?;
-        let checkpoint = code_status_checkpoint(&store, &status, active_task.as_ref()).await?;
+        let checkpoint =
+            code_status_checkpoint(store.as_ref(), &status, active_task.as_ref()).await?;
         let retention = store
             .code_scope_retention(status.repository_id.clone())
             .await
@@ -196,7 +197,7 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositoryReportResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &selector.repository).await?;
+        let status = required_code_repository(store.as_ref(), &selector.repository).await?;
         let report = store
             .code_repository_report(status.repository_id.clone())
             .await

@@ -4,7 +4,9 @@ use crate::{
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
         RepositoryCodeFileRecord, RepositoryCodeRange,
     },
-    storage::CodeRepositoryStore,
+    storage::CodeIndexPublicationStore as _,
+    storage::CodeQueryReadStore as _,
+    storage::RepositoryCatalogStore as _,
     storage::SqliteGraphStore,
 };
 

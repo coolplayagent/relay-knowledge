@@ -7,7 +7,10 @@ use crate::{
         CodeRetrievalHit, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeFileRecord,
         RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 #[tokio::test]

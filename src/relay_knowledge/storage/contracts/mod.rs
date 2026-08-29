@@ -21,14 +21,16 @@ pub use canvas::{
 pub use code::{
     CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT, CODE_INDEX_FINALIZATION_MAX_STEPS,
     CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
-    CodeImpactChanges, CodeIndexFinalizationStep, CodeIndexPublicationTarget,
-    CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-    CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal,
-    CodeIndexTaskSeed, CodeRepositorySetEdgeSelector, CodeRepositorySetMemberSeed,
+    CodeImpactChanges, CodeIndexFinalizationStep, CodeIndexPublicationStore,
+    CodeIndexPublicationTarget, CodeIndexSourceStore, CodeIndexTaskClaimRequest,
+    CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskLeaseRecord,
+    CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeIndexTaskStore,
+    CodeQueryReadStore, CodeRepositorySetEdgeSelector, CodeRepositorySetMemberSeed,
     CodeRepositorySetRefreshPublication, CodeRepositorySetRefreshTaskClaimRequest,
     CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskFailure,
-    CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
-    CodeScopeRetentionRequest, code_index_finalization_max_steps,
+    CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositorySetStore,
+    CodeRepositoryStore, CodeScopeRetentionRequest, CodeScopeRetentionStore,
+    RepositoryCatalogStore, SoftwareProjectionStore, code_index_finalization_max_steps,
 };
 pub use code_graph::{
     CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest, CodeSymbolSearchRequest,

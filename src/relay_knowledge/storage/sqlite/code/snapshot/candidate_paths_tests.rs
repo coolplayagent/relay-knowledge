@@ -4,7 +4,10 @@ use crate::{
         CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexSourceStore as _, CodeQueryReadStore as _,
+        RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
+    },
 };
 use std::{
     fs,

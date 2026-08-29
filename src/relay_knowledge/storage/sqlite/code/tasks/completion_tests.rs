@@ -17,8 +17,9 @@ use crate::{
         code_snapshot_scope_id_with_workspace_detection,
     },
     storage::{
-        CodeIndexPublicationTarget, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
-        CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexPublicationTarget, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        RepositoryCatalogStore as _, SoftwareProjectionStore as _, SqliteGraphStore,
     },
 };
 

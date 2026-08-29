@@ -27,9 +27,11 @@ pub(super) async fn run(
     task_lease: Option<CodeIndexTaskLeaseContext>,
 ) -> Result<CodeRepositoryIndexResponse, ApiError> {
     let store = service.store().await.map_err(storage_api_error)?;
-    let status =
-        super::super::repository::required_code_repository(&store, &request.repository.repository)
-            .await?;
+    let status = super::super::repository::required_code_repository(
+        store.as_ref(),
+        &request.repository.repository,
+    )
+    .await?;
     let workflow = IndexWorkflowContext {
         service,
         store,

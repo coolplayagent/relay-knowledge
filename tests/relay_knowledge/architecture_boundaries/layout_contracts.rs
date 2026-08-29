@@ -1,13 +1,13 @@
 use super::*;
-use syn::{Attribute, Item};
+use syn::{Attribute, Item, TraitItem};
 
 const MAX_TRACKED_FILE_LINES: usize = 1_000;
 const FOUNDATIONAL_MODULES: &[&str] = &["clock", "env", "identity", "net", "paths"];
 const LARGE_OWNER_BASELINE: &[(&str, usize)] = &[
-    ("src/relay_knowledge/storage/sqlite/code/mod.rs", 992),
+    ("src/relay_knowledge/storage/sqlite/code/mod.rs", 915),
     (
         "src/relay_knowledge/storage/sqlite/schema/migration.rs",
-        990,
+        838,
     ),
     (
         "src/relay_knowledge/application/code_repository/indexing/mod.rs",
@@ -15,14 +15,14 @@ const LARGE_OWNER_BASELINE: &[(&str, usize)] = &[
     ),
     (
         "src/relay_knowledge/storage/sqlite/code/snapshot/durable_clone/mod.rs",
-        971,
+        665,
     ),
-    ("src/relay_knowledge/storage/contracts/code.rs", 978),
+    ("src/relay_knowledge/storage/contracts/code.rs", 314),
     ("src/relay_knowledge/storage/sqlite/schema/marker.rs", 970),
     ("src/relay_knowledge/storage/sqlite/business/mod.rs", 19),
     (
         "src/relay_knowledge/storage/sqlite/code/tasks/retention.rs",
-        961,
+        796,
     ),
     (
         "src/relay_knowledge/storage/sqlite/code/query/references/mod.rs",
@@ -36,13 +36,26 @@ const LARGE_OWNER_BASELINE: &[(&str, usize)] = &[
         "src/relay_knowledge/storage/sqlite/code/batch/finalize/search_documents/grouped.rs",
         937,
     ),
-    ("src/relay_knowledge/application/knowledge/map/mod.rs", 932),
+    ("src/relay_knowledge/application/knowledge/map/mod.rs", 599),
     (
         "src/relay_knowledge/storage/sqlite/code/batch/session/finalization.rs",
-        914,
+        626,
     ),
-    ("src/relay_knowledge/storage/partitioned/mod.rs", 901),
+    ("src/relay_knowledge/storage/partitioned/mod.rs", 814),
 ];
+
+const CODE_STORAGE_CAPABILITIES: &[(&str, &str)] = &[
+    ("catalog.rs", "RepositoryCatalogStore"),
+    ("projection.rs", "SoftwareProjectionStore"),
+    ("publication.rs", "CodeIndexPublicationStore"),
+    ("query.rs", "CodeQueryReadStore"),
+    ("repository_set.rs", "CodeRepositorySetStore"),
+    ("retention.rs", "CodeScopeRetentionStore"),
+    ("source.rs", "CodeIndexSourceStore"),
+    ("task.rs", "CodeIndexTaskStore"),
+];
+
+const MAX_CODE_STORAGE_CAPABILITY_METHODS: usize = 20;
 
 #[test]
 fn foundational_capabilities_have_one_physical_owner() {
@@ -169,6 +182,79 @@ fn all_tracked_text_files_stay_within_line_budget() {
         "tracked text file line-budget violations:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn code_repository_storage_contract_stays_capability_partitioned() {
+    let root = source_root().join("storage/contracts");
+    let facade = parse_rust_file(&root.join("code.rs"));
+    let aggregate = facade
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Trait(contract) if contract.ident == "CodeRepositoryStore" => Some(contract),
+            _ => None,
+        })
+        .expect("CodeRepositoryStore compatibility facade should exist");
+    assert!(
+        aggregate.items.is_empty(),
+        "CodeRepositoryStore must remain a method-free compatibility facade"
+    );
+
+    for (file_name, trait_name) in CODE_STORAGE_CAPABILITIES {
+        let syntax = parse_rust_file(&root.join("code").join(file_name));
+        let contract = syntax
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Trait(contract) if contract.ident == *trait_name => Some(contract),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{file_name} must own {trait_name}"));
+        let method_count = contract
+            .items
+            .iter()
+            .filter(|item| matches!(item, TraitItem::Fn(_)))
+            .count();
+        assert!(
+            method_count <= MAX_CODE_STORAGE_CAPABILITY_METHODS,
+            "{trait_name} has {method_count} methods; split it before exceeding {MAX_CODE_STORAGE_CAPABILITY_METHODS}"
+        );
+    }
+}
+
+#[test]
+fn application_uses_injected_process_runtime_and_narrow_repository_helpers() {
+    let application_root = source_root().join("application");
+    let mut process_access = Vec::new();
+    for path in production_rust_files(&application_root) {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        if source.contains("std::env") || source.contains("from_process_environment") {
+            process_access.push(relative_source_path(&path, &source_root()));
+        }
+    }
+    assert!(
+        process_access.is_empty(),
+        "application must consume bootstrap-injected runtime snapshots; direct process access remains in:\n{}",
+        process_access.join("\n")
+    );
+
+    let repository_helpers =
+        fs::read_to_string(application_root.join("code_repository/repository/status.rs"))
+            .expect("repository status helper should be readable");
+    assert!(
+        repository_helpers.contains("impl RepositoryCatalogStore")
+            && repository_helpers.contains("impl CodeIndexPublicationStore")
+            && !repository_helpers.contains("KnowledgeStore"),
+        "high-fan-in repository helpers must retain narrow capability parameters"
+    );
+}
+
+fn parse_rust_file(path: &Path) -> syn::File {
+    let source =
+        fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    syn::parse_file(&source).unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
 }
 
 fn production_path_redirect_lines(source: &str, relative_path: &str) -> Vec<usize> {

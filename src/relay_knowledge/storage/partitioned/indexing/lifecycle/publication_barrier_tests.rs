@@ -14,8 +14,10 @@ use crate::{
         code_snapshot_scope_id,
     },
     storage::{
-        CodeIndexPublicationTarget, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
-        CodeIndexTaskSeed, CodeRepositoryStore, PartitionedSqliteKnowledgeStore, StorageError,
+        CodeIndexPublicationStore as _, CodeIndexPublicationTarget, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        CodeQueryReadStore as _, PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _,
+        SoftwareProjectionStore as _, StorageError,
     },
 };
 

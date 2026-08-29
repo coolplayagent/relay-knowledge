@@ -5,7 +5,10 @@ use crate::{
         FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:bounded-chunk-recall:commit:tree";

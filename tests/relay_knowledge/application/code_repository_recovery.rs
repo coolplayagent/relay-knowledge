@@ -16,8 +16,8 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeRepositoryStore,
-        SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 

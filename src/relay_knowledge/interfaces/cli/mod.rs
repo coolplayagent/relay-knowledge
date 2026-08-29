@@ -239,25 +239,22 @@ fn legacy_knowledge_map_service(format: OutputFormat) -> Result<KnowledgeMapServ
     Ok(KnowledgeMapService::new(root))
 }
 
-/// Renders best-effort process-only notices after primary command output is emitted.
-pub async fn process_update_notice<I, S>(args: I, interactive_text_output: bool) -> Option<String>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<String>,
-{
-    update_notice_for_process(args, interactive_text_output).await
-}
-
-pub(crate) async fn update_notice_for_process<I, S>(
+pub(crate) fn update_notice_command<I, S>(
     args: I,
     interactive_text_output: bool,
-) -> Option<String>
+) -> Option<CliCommand>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
     let command = CliCommand::parse(args).ok()?;
-    version::update_notice_for_process(&command, interactive_text_output).await
+    (interactive_text_output && version::should_check_after_command(&command)).then_some(command)
+}
+
+pub(crate) async fn update_notice_for_runtime(
+    runtime: &crate::application::RuntimeConfiguration,
+) -> Option<String> {
+    version::update_notice_for_runtime(runtime).await
 }
 
 #[cfg(test)]

@@ -1,12 +1,13 @@
 use super::*;
 use crate::domain::{
     CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch,
-    CodeIndexCheckpoint, CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot,
-    CodeIndexSummary, CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeQueryKind,
-    CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
-    CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary, CodebaseViewKind,
-    CodebaseViewRequest, FreshnessPolicy, SoftwareGlobalKind, SoftwareGlobalRequest,
+    CodeIndexCheckpoint, CodeIndexPublicationFence, CodeIndexResourceBudget, CodeIndexSession,
+    CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskRecord, CodeQueryKind,
+    CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit,
+    CodeRetrievalRequest, CodeScopeRetentionSummary, CodebaseViewKind, CodebaseViewRequest,
+    FreshnessPolicy, SoftwareGlobalKind, SoftwareGlobalRequest,
 };
+use crate::storage::StorageFuture;
 
 struct MinimalCodeRepositoryStore;
 
@@ -21,24 +22,42 @@ macro_rules! required_code_repository_method {
 
 impl FrameworkGraphStore for MinimalCodeRepositoryStore {}
 
-impl CodeRepositoryStore for MinimalCodeRepositoryStore {
+impl RepositoryCatalogStore for MinimalCodeRepositoryStore {
     required_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     required_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
     required_code_repository_method!(code_repository_scope_status(repository: String, resolved_commit_sha: String, path_filters: Vec<String>, language_filters: Vec<String>) -> Option<CodeRepositoryStatus>);
+}
+
+impl CodeIndexTaskStore for MinimalCodeRepositoryStore {
     required_code_repository_method!(queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord);
     required_code_repository_method!(claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>);
     required_code_repository_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
     required_code_repository_method!(fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord);
     required_code_repository_method!(code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>);
     required_code_repository_method!(active_code_index_task(repository_id: String) -> Option<CodeIndexTaskRecord>);
+}
+
+impl CodeIndexPublicationStore for MinimalCodeRepositoryStore {
     required_code_repository_method!(code_index_checkpoint(source_scope: String) -> Option<CodeIndexCheckpoint>);
+    required_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeScopeRetentionStore for MinimalCodeRepositoryStore {
     required_code_repository_method!(code_scope_retention(repository_id: String) -> CodeScopeRetentionSummary);
     required_code_repository_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
+}
+
+impl CodeIndexSourceStore for MinimalCodeRepositoryStore {
     required_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
-    required_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeQueryReadStore for MinimalCodeRepositoryStore {
     required_code_repository_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
     required_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
+
+impl SoftwareProjectionStore for MinimalCodeRepositoryStore {}
+impl CodeRepositorySetStore for MinimalCodeRepositoryStore {}
 
 #[tokio::test]
 async fn default_code_repository_methods_are_bounded_and_explicit() {
@@ -73,47 +92,37 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
     )
     .expect("software request should validate");
 
-    assert!(
-        store
-            .list_code_repositories()
-            .await
-            .expect("default repository list should be empty")
-            .is_empty()
+    assert_unavailable(
+        store.list_code_repositories().await,
+        "code repository catalog listing is unavailable",
     );
-    assert!(
+    assert_unavailable(
         store
             .latest_code_repository_scope_status("repo".to_owned(), Vec::new(), Vec::new())
-            .await
-            .expect("default latest scope should be empty")
-            .is_none()
+            .await,
+        "latest code repository scope for 'repo' is unavailable",
     );
-    assert!(
+    assert_unavailable(
+        store.running_code_index_task_leases().await,
+        "code index task lease inspection is unavailable",
+    );
+    assert_unavailable(
+        store.code_index_task_queue_status().await,
+        "code index task queue status is unavailable",
+    );
+    assert_unavailable(
         store
-            .running_code_index_task_leases()
-            .await
-            .expect("default running leases should be empty")
-            .is_empty()
-    );
-    assert_eq!(
-        store
-            .code_index_task_queue_status()
-            .await
-            .expect("default queue status should load"),
-        CodeIndexTaskQueueStatus::default()
-    );
-    assert!(
-        !store
             .code_index_publication_receipt(
                 "task".to_owned(),
                 "repo".to_owned(),
                 "scope".to_owned(),
                 1,
             )
-            .await
-            .expect("default publication receipt should be absent")
+            .await,
+        "code index publication receipt for task 'task' is unavailable",
     );
-    assert!(
-        !store
+    assert_unavailable(
+        store
             .reconcile_code_index_publication_with_fence(
                 CodeIndexPublicationTarget {
                     task_id: "task".to_owned(),
@@ -132,55 +141,44 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
                     generation: 1,
                 },
             )
-            .await
-            .expect("default publication reconciliation should not adopt")
+            .await,
+        "code index publication reconciliation for task 'task' is unavailable",
     );
-    assert!(
+    assert_unavailable(
+        store.latest_code_index_checkpoint("repo".to_owned()).await,
+        "latest code index checkpoint for repository 'repo' is unavailable",
+    );
+    assert_unavailable(
         store
-            .latest_code_index_checkpoint("repo".to_owned())
-            .await
-            .expect("default latest checkpoint should be empty")
-            .is_none()
+            .clear_code_workspace_state("repo".to_owned(), "scope".to_owned())
+            .await,
+        "workspace cleanup for repository 'repo' scope 'scope' is unavailable",
     );
-    store
-        .clear_code_workspace_state("repo".to_owned(), "scope".to_owned())
-        .await
-        .expect("default workspace cleanup should be a no-op");
-    assert!(
-        !store
+    assert_unavailable(
+        store
             .code_repository_auto_workspace_state_exists("repo".to_owned())
-            .await
-            .expect("default workspace state should be absent")
+            .await,
+        "auto workspace state inspection for repository 'repo' is unavailable",
     );
-    assert_eq!(
-        store
-            .code_repository_totals()
-            .await
-            .expect("default totals should load"),
-        CodeRepositoryTotals::default()
+    assert_unavailable(
+        store.code_repository_totals().await,
+        "code repository totals are unavailable",
     );
-    assert!(
-        store
-            .code_repository_set("set".to_owned())
-            .await
-            .expect("default repository set should be empty")
-            .is_none()
+    assert_unavailable(
+        store.code_repository_set("set".to_owned()).await,
+        "repository set lookup for 'set' is unavailable",
     );
-    assert!(
-        store
-            .code_repository_set_status("set".to_owned())
-            .await
-            .expect("default repository set status should be empty")
-            .is_none()
+    assert_unavailable(
+        store.code_repository_set_status("set".to_owned()).await,
+        "repository set status for 'set' is unavailable",
     );
-    assert!(
+    assert_unavailable(
         store
             .code_repository_set_cross_edges("set".to_owned())
-            .await
-            .expect("default repository set edges should be empty")
-            .is_empty()
+            .await,
+        "repository set cross edges for 'set' are unavailable",
     );
-    assert!(
+    assert_unavailable(
         store
             .claim_code_repository_set_refresh_task(CodeRepositorySetRefreshTaskClaimRequest {
                 task_id: None,
@@ -189,9 +187,8 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
                 max_attempts: 1,
                 now_ms: 1,
             })
-            .await
-            .expect("default refresh claim should be empty")
-            .is_none()
+            .await,
+        "repository set refresh task claim is unavailable",
     );
 
     assert_unavailable(
@@ -325,10 +322,12 @@ async fn default_code_repository_methods_are_bounded_and_explicit() {
             .await,
         "attempt-scoped single-step finalization for task 'task' scope 'scope' is unavailable",
     );
-    store
-        .run_code_index_post_maintenance("repo".to_owned(), "scope".to_owned())
-        .await
-        .expect("default post-index maintenance should be a no-op");
+    assert_unavailable(
+        store
+            .run_code_index_post_maintenance("repo".to_owned(), "scope".to_owned())
+            .await,
+        "post-index maintenance for repository 'repo' scope 'scope' is unavailable",
+    );
     assert_unavailable(
         store.search_code_feature_flags(feature_flags.clone()).await,
         "code feature flag search for repository 'repo' is unavailable",

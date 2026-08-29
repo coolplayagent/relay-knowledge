@@ -12,10 +12,8 @@ use crate::{domain::CodeScopeRetirementJobStatus, storage::StorageError};
 
 pub(in crate::storage::sqlite::code) const GC_ROW_BATCH_SIZE: usize = 512;
 const SEARCH_OWNER_BATCH_SIZE: usize = GC_ROW_BATCH_SIZE / 2;
-const INITIAL_PHASE: &str = "workspace_edges";
-
 const PHASES: &[&str] = &[
-    INITIAL_PHASE,
+    "workspace_edges",
     "workspace_mappings",
     "workspace_members",
     "workspace_overlay",
@@ -59,6 +57,41 @@ const PHASES: &[&str] = &[
     "scope_metadata",
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ScopeGcPhase(usize);
+
+impl ScopeGcPhase {
+    const fn initial() -> Self {
+        Self(0)
+    }
+
+    fn decode(value: &str) -> Result<Self, StorageError> {
+        PHASES
+            .iter()
+            .position(|candidate| *candidate == value)
+            .map(Self)
+            .ok_or_else(|| {
+                StorageError::InvalidInput(format!("scope GC job has unknown phase '{value}'"))
+            })
+    }
+
+    const fn name(self) -> &'static str {
+        PHASES[self.0]
+    }
+
+    const fn next(self) -> Option<Self> {
+        if self.0 + 1 < PHASES.len() {
+            Some(Self(self.0 + 1))
+        } else {
+            None
+        }
+    }
+
+    fn is_search_orphans(self) -> bool {
+        self.name() == "search_orphans"
+    }
+}
+
 pub(super) fn jobs(
     connection: &Connection,
     repository_id: &str,
@@ -100,7 +133,12 @@ pub(super) fn schedule(
              source_scope, repository_id, phase, search_rowid_cursor, deleted_rows,
              created_at_ms, updated_at_ms, last_error
          ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?4, NULL)",
-        params![source_scope, repository_id, INITIAL_PHASE, now_ms],
+        params![
+            source_scope,
+            repository_id,
+            ScopeGcPhase::initial().name(),
+            now_ms
+        ],
     )?;
     transaction.execute(
         "UPDATE code_repositories
@@ -146,19 +184,22 @@ pub(super) fn process_one(
         return Ok(None);
     };
 
-    let result = if phase == "search_orphans" {
-        delete_search_orphan_batch(transaction, &source_scope, search_rowid_cursor)
-    } else {
-        delete_phase_batch(transaction, repository_id, &source_scope, &phase).map(
-            |(deleted, has_more)| PhaseProgress {
-                deleted,
-                has_more,
-                search_rowid_cursor: None,
-            },
-        )
-    };
-    let progress = match result {
-        Ok(progress) => progress,
+    let result = ScopeGcPhase::decode(&phase).and_then(|phase| {
+        let progress = if phase.is_search_orphans() {
+            delete_search_orphan_batch(transaction, &source_scope, search_rowid_cursor)
+        } else {
+            delete_phase_batch(transaction, repository_id, &source_scope, phase).map(
+                |(deleted, has_more)| PhaseProgress {
+                    deleted,
+                    has_more,
+                    search_rowid_cursor: None,
+                },
+            )
+        }?;
+        Ok((phase, progress))
+    });
+    let (phase, progress) = match result {
+        Ok(result) => result,
         Err(error) => {
             transaction.execute(
                 "UPDATE code_repository_scope_gc_jobs
@@ -169,12 +210,12 @@ pub(super) fn process_one(
             return Ok(None);
         }
     };
-    let next = (!progress.has_more).then(|| next_phase(&phase)).flatten();
+    let next = (!progress.has_more).then(|| phase.next()).flatten();
     if progress.has_more {
         update_progress(
             transaction,
             &source_scope,
-            &phase,
+            phase,
             progress.deleted,
             progress.search_rowid_cursor,
             now_ms,
@@ -225,7 +266,7 @@ pub(in crate::storage::sqlite::code) fn reject_retiring_scope(
 fn update_progress(
     transaction: &Transaction<'_>,
     source_scope: &str,
-    phase: &str,
+    phase: ScopeGcPhase,
     deleted: usize,
     search_rowid_cursor: Option<i64>,
     now_ms: u64,
@@ -236,7 +277,13 @@ fn update_progress(
              updated_at_ms = ?4, last_error = NULL,
              search_rowid_cursor = ?5
          WHERE source_scope = ?1",
-        params![source_scope, phase, deleted, now_ms, search_rowid_cursor],
+        params![
+            source_scope,
+            phase.name(),
+            deleted,
+            now_ms,
+            search_rowid_cursor
+        ],
     )?;
     Ok(())
 }
@@ -247,20 +294,13 @@ struct PhaseProgress {
     search_rowid_cursor: Option<i64>,
 }
 
-fn next_phase(phase: &str) -> Option<&'static str> {
-    PHASES
-        .iter()
-        .position(|candidate| *candidate == phase)
-        .and_then(|index| PHASES.get(index + 1).copied())
-}
-
 fn delete_phase_batch(
     transaction: &Transaction<'_>,
     repository_id: &str,
     source_scope: &str,
-    phase: &str,
+    phase: ScopeGcPhase,
 ) -> Result<(usize, bool), StorageError> {
-    match phase {
+    match phase.name() {
         "workspace_edges" => delete_cross_edges(transaction, source_scope),
         "workspace_mappings" => delete_table_batch(
             transaction,
@@ -360,8 +400,9 @@ fn delete_phase_batch(
             source_scope,
         ),
         "scope_metadata" => delete_scope_table(transaction, "code_repository_scopes", source_scope),
-        unknown => Err(StorageError::InvalidInput(format!(
-            "scope GC job has unknown phase '{unknown}'"
+        _ => Err(StorageError::Invariant(format!(
+            "scope GC phase table has no handler for '{}'",
+            phase.name()
         ))),
     }
 }

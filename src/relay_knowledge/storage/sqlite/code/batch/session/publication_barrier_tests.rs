@@ -7,7 +7,10 @@ use crate::{
         CodeIncrementalSummaryReceipt, CodeIndexMode, CodeIndexPublicationFence,
         CodeIndexResourceBudget, CodeIndexSnapshot, CodeIndexTaskState, CodeParseStatus,
     },
-    storage::{CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SoftwareProjectionStore as _,
+    },
 };
 
 use super::tests::{batch, file, reference, registered_store, session_for_scope};

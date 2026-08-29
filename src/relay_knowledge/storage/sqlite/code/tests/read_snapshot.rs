@@ -8,7 +8,10 @@ use crate::{
         CodeRepositoryRegistration, CodeRepositorySelector, CodebaseViewKind, CodebaseViewRequest,
         FreshnessPolicy,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore, StorageError,
+    },
 };
 
 use super::{code_test_support, retarget_snapshot_to_fact_scope, snapshot_with_chunk};

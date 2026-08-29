@@ -9,8 +9,8 @@ use crate::{
         code_reference_resolution_state,
     },
     storage::{
-        CodeIndexFinalizationStep, CodeIndexTaskClaimRequest, CodeRepositoryStore,
-        SqliteGraphStore, StorageError,
+        CodeIndexFinalizationStep, CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
     },
 };
 

@@ -6,7 +6,10 @@ use crate::{
         CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy, RepositoryCodeChunkRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:reference-underfill:commit:tree";

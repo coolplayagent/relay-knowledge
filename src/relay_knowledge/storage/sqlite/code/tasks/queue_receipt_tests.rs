@@ -5,8 +5,8 @@ use crate::{
         CodeIndexMode, CodeIndexResourceBudget, CodeIndexTaskRecord, CodeRepositoryRegistration,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
-        StorageError,
+        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, RepositoryCatalogStore as _,
+        SqliteGraphStore, StorageError,
     },
 };
 

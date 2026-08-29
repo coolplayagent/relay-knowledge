@@ -20,8 +20,10 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore,
-        KnowledgeStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexSourceStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskFailure, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        CodeScopeRetentionStore as _, KnowledgeStore, RepositoryCatalogStore as _,
+        SqliteGraphStore,
     },
 };
 

@@ -19,8 +19,8 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeRepositorySetMemberSeed, CodeRepositorySetSeed, CodeRepositoryStore, KnowledgeStore,
-        SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeRepositorySetMemberSeed, CodeRepositorySetSeed,
+        CodeRepositorySetStore as _, KnowledgeStore, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 

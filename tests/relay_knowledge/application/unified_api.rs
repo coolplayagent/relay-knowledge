@@ -18,10 +18,12 @@ use relay_knowledge::{
     env::{EnvironmentConfig, PlatformKind},
     storage::{
         BusinessKnowledgeStore, CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges,
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskSeed, CodeReferenceSearchRequest, CodeRepositoryStore,
-        CodeScopeRetentionRequest, CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome,
-        GraphSearchRequest, GraphStore, IndexStore, MutationLogEntry, MutationLogStore,
+        CodeIndexPublicationStore, CodeIndexSourceStore, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeIndexTaskStore,
+        CodeQueryReadStore, CodeReferenceSearchRequest, CodeRepositorySetStore,
+        CodeScopeRetentionRequest, CodeScopeRetentionStore, CodeSymbolSearchRequest,
+        GraphInspection, GraphSearchOutcome, GraphSearchRequest, GraphStore, IndexStore,
+        MutationLogEntry, MutationLogStore, RepositoryCatalogStore, SoftwareProjectionStore,
         SqliteGraphStore, StorageError, StorageFuture,
     },
 };
@@ -558,24 +560,42 @@ impl BusinessKnowledgeStore for RefreshFailStore {}
 
 impl relay_knowledge::storage::FrameworkGraphStore for RefreshFailStore {}
 
-impl CodeRepositoryStore for RefreshFailStore {
+impl RepositoryCatalogStore for RefreshFailStore {
     unsupported_code_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     unsupported_code_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
     unsupported_code_method!(code_repository_scope_status(repository: String, resolved_commit_sha: String, path_filters: Vec<String>, language_filters: Vec<String>) -> Option<CodeRepositoryStatus>);
+}
+
+impl CodeIndexTaskStore for RefreshFailStore {
     unsupported_code_method!(queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord);
     unsupported_code_method!(claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>);
     unsupported_code_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
     unsupported_code_method!(fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord);
     unsupported_code_method!(code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>);
     unsupported_code_method!(active_code_index_task(repository_id: String) -> Option<CodeIndexTaskRecord>);
+}
+
+impl CodeIndexPublicationStore for RefreshFailStore {
     unsupported_code_method!(code_index_checkpoint(source_scope: String) -> Option<CodeIndexCheckpoint>);
+    unsupported_code_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeScopeRetentionStore for RefreshFailStore {
     unsupported_code_method!(code_scope_retention(repository_id: String) -> CodeScopeRetentionSummary);
     unsupported_code_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
+}
+
+impl CodeIndexSourceStore for RefreshFailStore {
     unsupported_code_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
-    unsupported_code_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeQueryReadStore for RefreshFailStore {
     unsupported_code_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
     unsupported_code_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
+
+impl SoftwareProjectionStore for RefreshFailStore {}
+impl CodeRepositorySetStore for RefreshFailStore {}
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
     service_with_memory_store_type(Arc::new(memory_store())).await

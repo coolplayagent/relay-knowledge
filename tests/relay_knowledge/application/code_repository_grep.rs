@@ -12,20 +12,22 @@ use relay_knowledge::{
     domain::{
         CodeChunkRecord, CodeFileFingerprint, CodeGraphBatch, CodeGraphCommitReceipt,
         CodeImpactRequest, CodeIndexCheckpoint, CodeIndexMode, CodeIndexRequest, CodeIndexSummary,
-        CodeIndexTaskRecord, CodeQueryKind, CodeReferenceRecord, CodeRepositoryRegistration,
-        CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
-        CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord, CommitReceipt,
-        FreshnessPolicy, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
+        CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeQueryKind, CodeReferenceRecord,
+        CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalHit,
+        CodeRetrievalLayer, CodeRetrievalRequest, CodeScopeRetentionSummary, CodeSymbolRecord,
+        CommitReceipt, FreshnessPolicy, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
         RepositoryCodeRange, code_snapshot_scope_id,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
         BusinessKnowledgeStore, CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges,
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskSeed, CodeReferenceSearchRequest, CodeRepositoryStore,
-        CodeScopeRetentionRequest, CodeSymbolSearchRequest, GraphInspection, GraphSearchOutcome,
-        GraphSearchRequest, GraphStore, IndexStore, KnowledgeStore, MutationLogEntry,
-        MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
+        CodeIndexPublicationStore, CodeIndexSourceStore, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeIndexTaskStore,
+        CodeQueryReadStore, CodeReferenceSearchRequest, CodeRepositorySetStore,
+        CodeScopeRetentionRequest, CodeScopeRetentionStore, CodeSymbolSearchRequest,
+        GraphInspection, GraphSearchOutcome, GraphSearchRequest, GraphStore, IndexStore,
+        KnowledgeStore, MutationLogEntry, MutationLogStore, RepositoryCatalogStore,
+        SoftwareProjectionStore, SqliteGraphStore, StorageError, StorageFuture,
     },
 };
 
@@ -571,7 +573,7 @@ impl BusinessKnowledgeStore for CandidatePathUnavailableStore {}
 
 impl relay_knowledge::storage::FrameworkGraphStore for CandidatePathUnavailableStore {}
 
-impl CodeRepositoryStore for CandidatePathUnavailableStore {
+impl RepositoryCatalogStore for CandidatePathUnavailableStore {
     unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
 
     fn code_repository_status(
@@ -592,7 +594,9 @@ impl CodeRepositoryStore for CandidatePathUnavailableStore {
         let status = self.status.clone();
         Box::pin(async move { Ok(Some(status)) })
     }
+}
 
+impl CodeIndexTaskStore for CandidatePathUnavailableStore {
     unsupported_code_repository_method!(queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>);
     unsupported_code_repository_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
@@ -605,6 +609,12 @@ impl CodeRepositoryStore for CandidatePathUnavailableStore {
         Box::pin(async { Ok(None) })
     }
 
+    fn code_index_task_queue_status(&self) -> StorageFuture<'_, CodeIndexTaskQueueStatus> {
+        Box::pin(async { Ok(CodeIndexTaskQueueStatus::default()) })
+    }
+}
+
+impl CodeIndexPublicationStore for CandidatePathUnavailableStore {
     fn code_index_checkpoint(
         &self,
         _source_scope: String,
@@ -612,6 +622,10 @@ impl CodeRepositoryStore for CandidatePathUnavailableStore {
         Box::pin(async { Ok(None) })
     }
 
+    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: relay_knowledge::domain::CodeIndexSnapshot) -> CodeIndexSummary);
+}
+
+impl CodeScopeRetentionStore for CandidatePathUnavailableStore {
     fn code_scope_retention(
         &self,
         _repository_id: String,
@@ -620,9 +634,13 @@ impl CodeRepositoryStore for CandidatePathUnavailableStore {
     }
 
     unsupported_code_repository_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
-    unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
-    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: relay_knowledge::domain::CodeIndexSnapshot) -> CodeIndexSummary);
+}
 
+impl CodeIndexSourceStore for CandidatePathUnavailableStore {
+    unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
+}
+
+impl CodeQueryReadStore for CandidatePathUnavailableStore {
     fn search_code(
         &self,
         _request: CodeRetrievalRequest,
@@ -642,6 +660,9 @@ impl CodeRepositoryStore for CandidatePathUnavailableStore {
 
     unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
+
+impl SoftwareProjectionStore for CandidatePathUnavailableStore {}
+impl CodeRepositorySetStore for CandidatePathUnavailableStore {}
 
 fn structured_hit(status: &CodeRepositoryStatus) -> CodeRetrievalHit {
     CodeRetrievalHit {

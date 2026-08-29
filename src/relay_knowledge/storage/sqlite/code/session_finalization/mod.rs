@@ -6,7 +6,7 @@ use super::{batch, lifecycle};
 use crate::{
     domain::{CodeIndexPublicationFence, CodeIndexSession, CodeIndexSummary},
     storage::{
-        CodeIndexFinalizationStep, CodeRepositoryStore, StorageError, StorageFuture,
+        CodeIndexFinalizationStep, CodeIndexPublicationStore, StorageError, StorageFuture,
         code_index_finalization_max_steps, sqlite::SqliteGraphStore,
     },
 };
