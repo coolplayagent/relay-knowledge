@@ -1,6 +1,6 @@
 # 2026-05-16 至 2026-05-19 自迭代候选记录
 
-[中文](self-iteration-accepted-optimizations-20260813.md) | 英文版尚未提供
+[中文](2026-08-13-self-iteration-optimization-archive.md) | 英文版尚未提供
 
 本页原样保存 2026-05-16 至 2026-05-19 从 A.4 主记录迁出的连续历史候选说明。记录中的运行结果、路径和结论是当时证据，不代表当前实现或当前 case inventory；当前入口见[自迭代采纳优化记录](../04-self-iteration-accepted-optimizations.md)。
 

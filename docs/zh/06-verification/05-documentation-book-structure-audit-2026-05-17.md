@@ -1,6 +1,6 @@
-# 文档书架刷新审计 2026-05-17
+# 文档书架结构审计 2026-05-17
 
-[中文](./01-documentation-book-refresh-2026-05-17.md) | [英文](../../en/06-verification/01-documentation-book-refresh-2026-05-17.md)
+[中文](./05-documentation-book-structure-audit-2026-05-17.md) | [英文](../../en/06-verification/05-documentation-book-structure-audit-2026-05-17.md)
 
 本审计记录 2026-05-17 对文档书架、目录职责和已落地能力关闭状态的刷新。此次变更只调整文档，不改变 Rust、Web 或工具行为。
 
@@ -22,8 +22,8 @@
 ## 验证命令
 
 ```bash
-rg -n '02-capabilities/documentation-refresh' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/01-documentation-book-refresh-2026-05-17.md'
-rg -n '剩余实现工作|Remaining Implementation|Done:' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/01-documentation-book-refresh-2026-05-17.md'
+rg -n '02-capabilities/documentation-refresh' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/05-documentation-book-structure-audit-2026-05-17.md'
+rg -n '剩余实现工作|Remaining Implementation|Done:' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/05-documentation-book-structure-audit-2026-05-17.md'
 find docs -type f -maxdepth 4 -exec wc -l {} + | sort -nr | head -30
 git diff --check
 ```

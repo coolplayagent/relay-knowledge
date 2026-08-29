@@ -1,6 +1,6 @@
 # relay-knowledge 代码仓库 API
 
-[中文](api-code-repositories.md) | 英文版尚未提供
+[中文](03-code-repository-api.md) | 英文版尚未提供
 
 > 文档版本: 1.0
 > 编制日期: 2026-06-06
@@ -297,7 +297,7 @@
 
 ### 6.8 POST /api/v1/code/repositories/{alias}/views
 
-返回从版本化代码图事实派生的代码库理解视图。请求、响应和预算字段见[代码库视图 API 专题](api-codebase-views.md)。
+返回从版本化代码图事实派生的代码库理解视图。请求、响应和预算字段见[代码库视图 API 专题](04-codebase-view-api.md)。
 
 ### 6.9 GET /api/v1/code/repositories/{alias}/status
 
@@ -334,4 +334,4 @@
 
 ---
 
-导航：上一专题：[控制面与 Web 操作 API](api-control-web.md) | 下一专题：[代码库视图 API](api-codebase-views.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)
+导航：上一专题：[控制面与 Web 操作 API](02-control-and-web-api.md) | 下一专题：[代码库视图 API](04-codebase-view-api.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)

@@ -1,6 +1,6 @@
-# 文档刷新审计 2026-05-14
+# 文档内容审计 2026-05-14
 
-[中文](./03-documentation-refresh-audit-2026-05-14.md) | [英文](../../en/06-verification/03-documentation-refresh-audit-2026-05-14.md)
+[中文](./02-documentation-content-audit-2026-05-14.md) | [英文](../../en/06-verification/02-documentation-content-audit-2026-05-14.md)
 
 本审计记录 2026-05-14 对当前 `relay-knowledge` 实现所做的文档刷新。命令可用性的权威来源是 `relay-knowledge help --format json`；状态和健康检查行为已根据编译后的二进制进行核对。
 

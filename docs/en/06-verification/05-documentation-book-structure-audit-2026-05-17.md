@@ -1,6 +1,6 @@
-# Documentation Book Refresh Audit 2026-05-17
+# Documentation Book Structure Audit 2026-05-17
 
-[English](./01-documentation-book-refresh-2026-05-17.md) | [中文](../../zh/06-verification/01-documentation-book-refresh-2026-05-17.md)
+[English](./05-documentation-book-structure-audit-2026-05-17.md) | [中文](../../zh/06-verification/05-documentation-book-structure-audit-2026-05-17.md)
 
 This audit records the 2026-05-17 refresh of the documentation bookshelf,
 directory responsibilities, and closed implementation status. This pass updates
@@ -28,8 +28,8 @@ thresholds.
 ## Verification Commands
 
 ```bash
-rg -n '02-capabilities/documentation-refresh' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/01-documentation-book-refresh-2026-05-17.md'
-rg -n '剩余实现工作|Remaining Implementation|Done:' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/01-documentation-book-refresh-2026-05-17.md'
+rg -n '02-capabilities/documentation-refresh' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/05-documentation-book-structure-audit-2026-05-17.md'
+rg -n '剩余实现工作|Remaining Implementation|Done:' docs README.md README.zh-CN.md --glob '!docs/*/06-verification/05-documentation-book-structure-audit-2026-05-17.md'
 find docs -type f -maxdepth 4 -exec wc -l {} + | sort -nr | head -30
 git diff --check
 ```

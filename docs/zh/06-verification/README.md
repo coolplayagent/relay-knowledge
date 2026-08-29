@@ -9,12 +9,12 @@
 
 ## 记录目录
 
-1. [文档书架刷新审计 2026-05-17](01-documentation-book-refresh-2026-05-17.md)
-2. [文档刷新审计 2026-05-17](02-documentation-refresh-audit-2026-05-17.md)
-3. [文档刷新审计 2026-05-14](03-documentation-refresh-audit-2026-05-14.md)
-4. [relay-teams E2E 验证 2026-05-14](04-relay-teams-e2e-2026-05-14.md)
-5. [relay-teams 代码图检索准确性测试 2026-05-15](05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)
-6. [Linux 代码图检索准确性测试 2026-05-15](06-code-graph-retrieval-accuracy-linux-2026-05-15.md)
+1. [relay-teams E2E 验证 2026-05-14](01-relay-teams-e2e-2026-05-14.md)
+2. [文档内容审计 2026-05-14](02-documentation-content-audit-2026-05-14.md)
+3. [relay-teams 代码图检索准确性测试 2026-05-15](03-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)
+4. [Linux 代码图检索准确性测试 2026-05-15](04-code-graph-retrieval-accuracy-linux-2026-05-15.md)
+5. [文档书架结构审计 2026-05-17](05-documentation-book-structure-audit-2026-05-17.md)
+6. [文档内容刷新审计 2026-05-17](06-documentation-content-refresh-audit-2026-05-17.md)
 7. [Grep 兜底文档刷新审计 2026-05-22](07-grep-fallback-documentation-refresh-2026-05-22.md)
 8. [软件全域建模文档刷新审计 2026-05-28](08-software-global-modeling-documentation-refresh-2026-05-28.md)
 9. [软件全域、CodeGraph 与 Search Everything 研究文档刷新审计 2026-05-31](09-software-global-codegraph-search-everything-research-2026-05-31.md)
@@ -32,4 +32,4 @@
 
 ---
 
-导航：[中文文档总目录](../README.md) | 下一篇：[1. 文档书架刷新审计](01-documentation-book-refresh-2026-05-17.md)
+导航：[中文文档总目录](../README.md) | 下一篇：[1. relay-teams E2E 验证](01-relay-teams-e2e-2026-05-14.md)

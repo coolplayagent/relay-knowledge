@@ -16,7 +16,7 @@ relay-knowledge 通过统一的 HTTP API 层暴露知识图谱能力，包含控
 http://127.0.0.1:8791
 ```
 
-服务默认只监听 loopback `127.0.0.1:8791`。通过 `RELAY_KNOWLEDGE_HTTP_BIND` 可以修改完整的 `host:port`；非 loopback 绑定还必须满足远端客户端、scope/origin、QoS 与审计策略，详见[安全配置指南](../01-user-guide/17-security-configuration.md)。
+服务默认只监听 loopback `127.0.0.1:8791`。通过 `RELAY_KNOWLEDGE_HTTP_BIND` 可以修改完整的 `host:port`；非 loopback 绑定还必须满足远端客户端、scope/origin、QoS 与审计策略，详见[安全配置指南](../01-user-guide/16-security-configuration-guide.md)。
 
 ### 1.2 API 版本
 稳定的代码仓库与控制面路由使用 `/api/v1/` 前缀。same-origin Web 操作、模型配置、兼容诊断和 MCP 路由目前仍使用 `/api/web/`、`/api/configs/`、`/api/` 与可配置的 MCP endpoint；不能仅凭是否含 `/v1/` 判断接口是否存在。
@@ -102,14 +102,14 @@ curl -s http://127.0.0.1:8791/api/v1/code/repositories/unknown/status | jq .
 
 | API 表面 | 主要路径 | 详细参考 |
 | --- | --- | --- |
-| 控制面诊断 | `/api/project/status`、`/api/health`、`/api/service/status`、`/api/v1/control/**` | [控制面与 Web 操作 API](reference/api-control-web.md#4-控制面-api) |
-| Web 操作 | `/api/web/graph/canvas`、`/api/web/operations/execute` | [控制面与 Web 操作 API](reference/api-control-web.md#5-web-操作-api) |
-| 代码仓库 | `/api/v1/code/repositories`、`/api/v1/code/repositories/{alias}/**` | [代码仓库 API](reference/api-code-repositories.md#6-代码仓库-api) |
-| 代码库视图 | `/api/v1/code/repositories/{alias}/views` | [代码库视图 API](reference/api-codebase-views.md) |
-| MCP Streamable HTTP | `{mcp_endpoint}`、`{mcp_endpoint}/metrics` | [MCP Streamable HTTP API](reference/api-mcp-streamable-http.md#7-mcp-streamable-http-接口) |
-| 模型配置 | `/api/configs/model/**`、`/api/configs/model-*` | [模型配置 API](reference/api-model-configuration.md#8-模型配置-api) |
+| 控制面诊断 | `/api/project/status`、`/api/health`、`/api/service/status`、`/api/v1/control/**` | [控制面与 Web 操作 API](reference/02-control-and-web-api.md#4-控制面-api) |
+| Web 操作 | `/api/web/graph/canvas`、`/api/web/operations/execute` | [控制面与 Web 操作 API](reference/02-control-and-web-api.md#5-web-操作-api) |
+| 代码仓库 | `/api/v1/code/repositories`、`/api/v1/code/repositories/{alias}/**` | [代码仓库 API](reference/03-code-repository-api.md#6-代码仓库-api) |
+| 代码库视图 | `/api/v1/code/repositories/{alias}/views` | [代码库视图 API](reference/04-codebase-view-api.md) |
+| MCP Streamable HTTP | `{mcp_endpoint}`、`{mcp_endpoint}/metrics` | [MCP Streamable HTTP API](reference/05-mcp-streamable-http-api.md#7-mcp-streamable-http-接口) |
+| 模型配置 | `/api/configs/model/**`、`/api/configs/model-*` | [模型配置 API](reference/06-model-configuration-api.md#8-模型配置-api) |
 
-完整的方法、路径和用途清单见 [HTTP API 端点速查表](reference/api-http-endpoints.md)。
+完整的方法、路径和用途清单见 [HTTP API 端点速查表](reference/01-http-endpoints.md)。
 所有专题页都是本章的组成部分，不另行定义或放宽产品合同。
 
 ## 5. 静态资源
@@ -153,7 +153,7 @@ HTTP 请求默认超时 30 秒，可通过 `RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT
 
 ## 附录 A: 端点速查表
 
-完整的方法、路径和用途索引见[端点速查表](reference/api-http-endpoints.md)。详细请求、响应和边界由[专题索引](reference/README.md)链接的各 API 页面承接；跨端点约定仍以本章为准。
+完整的方法、路径和用途索引见[端点速查表](reference/01-http-endpoints.md)。详细请求、响应和边界由[专题索引](reference/README.md)链接的各 API 页面承接；跨端点约定仍以本章为准。
 
 ---
 

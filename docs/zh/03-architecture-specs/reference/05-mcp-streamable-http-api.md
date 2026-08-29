@@ -1,6 +1,6 @@
 # relay-knowledge MCP Streamable HTTP API
 
-[中文](api-mcp-streamable-http.md) | 英文版尚未提供
+[中文](05-mcp-streamable-http-api.md) | 英文版尚未提供
 
 > 文档版本: 1.0
 > 编制日期: 2026-06-06
@@ -203,4 +203,4 @@ curl -s -X DELETE http://127.0.0.1:8791/mcp \
 
 ---
 
-导航：上一专题：[代码库视图 API](api-codebase-views.md) | 下一专题：[模型配置 API](api-model-configuration.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)
+导航：上一专题：[代码库视图 API](04-codebase-view-api.md) | 下一专题：[模型配置 API](06-model-configuration-api.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)

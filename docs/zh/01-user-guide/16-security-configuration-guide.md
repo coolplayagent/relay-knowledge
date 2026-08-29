@@ -1,6 +1,6 @@
-# 第 17 章 安全配置完整指南
+# 第 16 章 安全配置指南
 
-[中文](17-security-configuration.md) | 中文深入专题；英文核心流程见 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)
+[中文](16-security-configuration-guide.md) | 中文深入专题；英文核心流程见 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)
 
 本章是 `relay-knowledge` 安全配置的完整参考，涵盖 QoS 准入控制、远端访问安全、MCP scope/origin 限制、审计日志和网络安全实践。所有配置项均基于代码实际实现，零配置时优先保证本机安全。
 
@@ -12,7 +12,7 @@
 > 远程访问必须先经过外部身份层，由它执行 mTLS（校验客户端证书并映射 ACL）
 > 或 OIDC/token 校验，并以 deny-by-default ACL 授权每条路径和操作。
 
-## 17.1 安全模型总览
+## 16.1 安全模型总览
 
 `relay-knowledge` 的安全模型建立在分层防御之上：
 
@@ -36,9 +36,9 @@
 | `net::qos` | 准入控制，所有网络工作在消耗资源前经过 QoS 策略 |
 | `net::http` | HTTP 监听/代理/TLS 配置，loopback 检测 |
 
-## 17.2 QoS 策略配置
+## 16.2 QoS 策略配置
 
-### 17.2.1 默认预算值
+### 16.2.1 默认预算值
 
 QoS 策略定义了三个独立的有界资源预算：
 
@@ -59,7 +59,7 @@ RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH=128 \
 relay-knowledge service run --mcp streamable-http
 ```
 
-### 17.2.2 准入决策机制
+### 16.2.2 准入决策机制
 
 `QosRuntime` 在三个层面执行准入检查，每个检查都是原子操作（`Arc<Mutex<QosSnapshot>>`）：
 
@@ -72,7 +72,7 @@ MCP 请求通过 `admit_queued_request` 进入，Web/HTTP 路由通过 `admit_co
 
 每种准入检查返回 `QosPermit`，该 permit 在 drop 时自动释放对应的预算计数（使用 `saturating_sub` 防止下溢），确保即使 panic 也不会泄漏预算。
 
-### 17.2.3 过载保护行为
+### 16.2.3 过载保护行为
 
 当预算耗尽时，系统返回以下拒绝原因：
 
@@ -86,7 +86,7 @@ MCP 请求通过 `admit_queued_request` 进入，Web/HTTP 路由通过 `admit_co
 
 MCP 服务在 QoS 拒绝时通过 `record_mcp_qos_rejection` 记录审计事件（`qos_decision: Rejected`，`status: Failed`），并调用 `metrics.record_rejection` 记录拒绝指标。
 
-### 17.2.4 调优建议
+### 16.2.4 调优建议
 
 | 场景 | 建议调整 |
 | --- | --- |
@@ -95,9 +95,9 @@ MCP 服务在 QoS 拒绝时通过 `record_mcp_qos_rejection` 记录审计事件�
 | 高并发反向代理后端 | 适度调高，注意数据库和文件描述符限制 |
 | 压测/基准测试 | 临时调高预算，配合 `http_request_timeout_ms` 确保资源及时释放 |
 
-## 17.3 远端访问安全
+## 16.3 远端访问安全
 
-### 17.3.1 Loopback vs 非 Loopback 绑定
+### 16.3.1 Loopback vs 非 Loopback 绑定
 
 默认绑定地址为 `127.0.0.1:8791`（`DEFAULT_HTTP_BIND`）。系统通过 `remote_clients_allowed()` 判断是否允许非本地客户端：
 
@@ -118,7 +118,7 @@ pub fn remote_clients_allowed(config: &HttpConfig, allow_remote_clients: bool) -
 调用方，也不授予 API 或 control 操作权限。Loopback 限制网络暴露范围，也不等同于
 本机多用户环境中的身份认证。
 
-### 17.3.2 远端访问的外部认证前提
+### 16.3.2 远端访问的外部认证前提
 
 安全的远端访问需要同时满足以下条件：
 
@@ -142,9 +142,9 @@ relay-knowledge service run --mcp streamable-http
 ```
 
 需要远端访问时仍让 Relay 绑定 `127.0.0.1:8791`，由同机外部身份网关监听远端
-地址并转发；完整的 deny-by-default 示例见 [17.6.1](#1761-反向代理部署)。
+地址并转发；完整的 deny-by-default 示例见 [16.6.1](#1661-反向代理部署)。
 
-### 17.3.3 `ensure_web_remote_bind_allowed` 机制
+### 16.3.3 `ensure_web_remote_bind_allowed` 机制
 
 服务启动时，`service_cli::ensure_web_remote_bind_allowed` 和
 `http_contract::ensure_remote_bind_allowed` 分别检查 Web 路由和 MCP 路由能否暴露到
@@ -176,9 +176,9 @@ MCP 端等价的检查返回 `McpServeError::RemoteBindDisabled`，阻止远端�
 
 `HttpBindAddress::parse()` 还拒绝端口为 `0` 的临时端口（返回 `HttpConfigError::EphemeralPort`），确保绑定地址始终显式指定端口。
 
-## 17.4 MCP 安全控制
+## 16.4 MCP 安全控制
 
-### 17.4.1 Scope 资源允许列表
+### 16.4.1 Scope 资源允许列表
 
 MCP scope 策略基于 `AgentAccessPolicy`，由以下环境变量控制：
 
@@ -216,7 +216,7 @@ Scope 过滤流程（`scope_authorization.rs`）：
 
 `max_runtime_ms` 由 HTTP 请求超时自动派生（`request_timeout - 1ms`），作为 MCP tool call 的响应等待上限；它不能强制终止已经进入 blocking worker 的工作。
 
-### 17.4.2 Origin 限制
+### 16.4.2 Origin 限制
 
 MCP 服务通过 `validate_origin()` 校验 HTTP `Origin` 请求头：
 
@@ -238,7 +238,7 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=http://localhost:3000,https://my-agent.examp
 
 配置 origins 后，所有无 `Origin` 头的请求（如 curl 直接调用）将被拒绝。仅用于本地调试时可保持为空。
 
-### 17.4.3 Session 管理
+### 16.4.3 Session 管理
 
 MCP Streamable HTTP 的会话由 `SessionRegistry` 管理：
 
@@ -260,7 +260,7 @@ MCP Streamable HTTP 的会话由 `SessionRegistry` 管理：
 4. `DELETE` 请求终止会话。
 5. 驱逐：当会话数超过 1024 时，LRU 驱逐写入时淘汰最老的未活跃会话。
 
-### 17.4.4 其他 MCP 安全配置
+### 16.4.4 其他 MCP 安全配置
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -281,9 +281,9 @@ HTTP 请求级校验：
 - `mcp-protocol-version` 头（非 `initialize` 请求后必需）必须为 `2025-11-25`。
 - 不支持 JSON-RPC batch 请求。
 
-## 17.5 审计日志
+## 16.5 审计日志
 
-### 17.5.1 AgentAuditLog 配置
+### 16.5.1 AgentAuditLog 配置
 
 审计日志由两层组成：
 
@@ -297,7 +297,7 @@ HTTP 请求级校验：
 
 持久化启用时，审计 sink 在 `McpServer::new()` 中创建，日志写入 `<log_dir>/agent-audit.jsonl`。队列深度通过 `clamp(1, 65536)` 限制，防止无界内存增长。
 
-### 17.5.2 审计事件结构
+### 16.5.2 审计事件结构
 
 每条审计事件（`AgentAuditEvent`）包含以下字段（JSON 序列化）：
 
@@ -323,7 +323,7 @@ HTTP 请求级校验：
 认证的调用方主体。需要按用户或服务追责时，外部认证网关还必须记录其认证主体、ACL
 决策和对应的 Relay request/trace 标识。
 
-### 17.5.3 审计场景
+### 16.5.3 审计场景
 
 审计日志覆盖以下场景：
 
@@ -332,7 +332,7 @@ HTTP 请求级校验：
 3. **非 Tool 操作**：`resources/read`、`prompts/get` 和 `ping`/`tools/list` 等通过 `metrics.record_request` 记录统计，其中 resource/prompt 方法额外通过 `record_mcp_method_audit` 记录完整审计事件。
 4. **取消操作**：收到 `notifications/cancelled` 后取消对应请求，状态标记为 `cancelled`。
 
-### 17.5.4 持久化格式
+### 16.5.4 持久化格式
 
 JSONL 追加写入，每条事件一行，使用 `serde_json::to_vec` 序列化后追加换行符，每次写入后 `flush`。文件通过 `tokio::fs::OpenOptions::create(true).append(true)` 打开，自动创建父目录。
 
@@ -342,15 +342,15 @@ JSONL 追加写入，每条事件一行，使用 `serde_json::to_vec` 序列化�
 {"sequence":1,"protocol":"mcp","operation":"retrieve_context","request_id":"session:rk-abc123|string:1","trace_id":"trace-mcp-session:rk-abc123|string:1","runtime_identity":{"protocol":"mcp","request_id":"session:rk-abc123|string:1"},"qos_decision":"admitted","status":"completed","source_scope":"docs","freshness":"allow-stale","limit":10,"result_count":5,"truncated":false,"elapsed_ms":42}
 ```
 
-### 17.5.5 后台索引发布与恢复
+### 16.5.5 后台索引发布与恢复
 
 Code facts 写完不代表仓库已经 fresh。Full 与 incremental task 必须继续受 fence 保护，直到 software projection 同样成功。单 SQLite 在一个 transaction 中同时发布 scope freshness、software status、checkpoint completion 与 publication receipt。Partitioned 模式则先让新 shard route 保持 `staged`，并用 durable task 的 `staged_task_id` 记录 owner；active-only read 在激活前继续读取旧 active scope。随后一个 control transaction 同时激活 route、镜像 repository status 并记录 receipt。
 
 Task 的 `succeeded` 是后续独立的 fenced transaction，必须验证该 receipt、匹配的 fresh scope，以及目标存在 checkpoint 时的 completed checkpoint；无 checkpoint 的 mode 不会虚构 checkpoint。服务若在 control activation 前 crash，恢复流程从 staged shard 继续；若在 activation 后、task completion 前 crash，reclaim 后的 attempt 复用 task-scoped receipt 收敛，不会重新发布，过期 attempt 仍不能报告成功。运维人员应查看 task、checkpoint 与 repository status，并让 reconciler 回收 lease；不要手工删除 lock file、catalog row 或 shard 数据。
 
-## 17.6 网络安全建议
+## 16.6 网络安全建议
 
-### 17.6.1 反向代理部署
+### 16.6.1 反向代理部署
 
 生产环境必须让 `relay-knowledge` 后端保持 loopback，并在前置网关对所有 Web、API、
 `/api/v1/control/**` 和 MCP 请求执行身份认证及 deny-by-default ACL。普通反向代理或
@@ -439,7 +439,7 @@ relay-knowledge service run --web --mcp streamable-http
 `/api/**`、`/api/v1/control/**` 和 `/mcp`。如监控需要免认证健康探测，应使用本机
 或专用管理网络，而不是在公网虚拟主机上创建匿名例外。
 
-### 17.6.2 TLS 终止
+### 16.6.2 TLS 终止
 
 `relay-knowledge` 本身不提供 TLS 终止能力（`DEFAULT_SSL_VERIFY=true` 仅用于出站请求的 TLS 证书验证），TLS 应由反向代理或外部 load balancer 处理。
 
@@ -459,7 +459,7 @@ OIDC/token 身份网关加 ACL，或完整 mTLS：验证受信任的客户端证
 
 代理 URL 必须为 `http://` 或 `https://` 协议且包含有效的主机名，否则 `HttpConfigError::InvalidProxyUrl`。
 
-### 17.6.3 防火墙规则
+### 16.6.3 防火墙规则
 
 推荐防火墙策略：
 
@@ -484,9 +484,9 @@ iptables -A INPUT -p tcp --dport 8791 -s 10.20.30.40 -j ACCEPT
 iptables -A INPUT -p tcp --dport 8791 -j DROP
 ```
 
-## 17.7 安全相关环境变量参考
+## 16.7 安全相关环境变量参考
 
-### 17.7.1 HTTP 与 QoS
+### 16.7.1 HTTP 与 QoS
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -498,7 +498,7 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 | `RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS` | 正整数 | `256` | QoS 最大在途请求数 |
 | `RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH` | 正整数 | `512` | QoS 最大排队请求数 |
 
-### 17.7.2 MCP Agent 接入
+### 16.7.2 MCP Agent 接入
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -511,14 +511,14 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 | `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | 正整数 | `65536` | 单次检索上下文最大字节数 |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | bool | `false` | 允许非 loopback 监听；不是身份认证或访问授权 |
 
-### 17.7.3 审计日志
+### 16.7.3 审计日志
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED` | bool | `false` | 启用审计日志 JSONL 持久化 |
 | `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` | 正整数 (1..65536) | `1024` | 审计日志异步写入通道容量 |
 
-### 17.7.4 网络代理与 TLS
+### 16.7.4 网络代理与 TLS
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -528,7 +528,7 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 | `NO_PROXY` / `no_proxy` | CSV | 空 | 不走代理的域名/IP |
 | `SSL_VERIFY` / `ssl_verify` | bool | `true` | 出站 HTTPS 证书验证 |
 
-### 17.7.5 布尔值格式
+### 16.7.5 布尔值格式
 
 所有布尔类型环境变量支持以下值（不区分大小写）：
 
@@ -538,7 +538,7 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 
 非法布尔值（如 `"sometimes"`）会被 `EnvErrorKind::InvalidBoolean` 拒绝。
 
-## 17.8 安全配置最佳实践
+## 16.8 安全配置最佳实践
 
 ### 本地开发
 
@@ -578,7 +578,7 @@ RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS=60000 \
 relay-knowledge service run --web --mcp streamable-http
 ```
 
-该配置只启动 loopback 后端；前置网关必须按 [17.6.1](#1761-反向代理部署)
+该配置只启动 loopback 后端；前置网关必须按 [16.6.1](#1661-反向代理部署)
 认证每个调用方并授权每条路径。不要给 Relay 端口增加公网或全内网旁路。
 
 ### 安全检查清单
@@ -600,4 +600,4 @@ relay-knowledge service run --web --mcp streamable-http
 
 ---
 
-导航：上一章：[第 16 章 SRE 运维手册](16-sre-operations-runbook.md) | 返回：[用户指南](README.md)
+导航：上一章：[第 15 章 SRE 运维手册](15-sre-operations-runbook.md) | 返回：[用户指南](README.md)

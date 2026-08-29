@@ -1,6 +1,6 @@
 # relay-knowledge 控制面与 Web 操作 API
 
-[中文](api-control-web.md) | 英文版尚未提供
+[中文](02-control-and-web-api.md) | 英文版尚未提供
 
 > 文档版本: 1.0
 > 编制日期: 2026-06-06
@@ -336,4 +336,4 @@ curl -s http://127.0.0.1:8791/api/web/operations/execute \
 
 ---
 
-导航：上一专题：[HTTP API 端点速查表](api-http-endpoints.md) | 下一专题：[代码仓库 API](api-code-repositories.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)
+导航：上一专题：[HTTP API 端点速查表](01-http-endpoints.md) | 下一专题：[代码仓库 API](03-code-repository-api.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)

@@ -1,6 +1,6 @@
 # relay-teams E2E Verification 2026-05-14
 
-[English](../../en/06-verification/04-relay-teams-e2e-2026-05-14.md) | [中文](../../zh/06-verification/04-relay-teams-e2e-2026-05-14.md)
+[English](../../en/06-verification/01-relay-teams-e2e-2026-05-14.md) | [中文](../../zh/06-verification/01-relay-teams-e2e-2026-05-14.md)
 
 [Documentation index](../../en/README.md) | [GitHub repository](https://github.com/coolplayagent/relay-knowledge)
 

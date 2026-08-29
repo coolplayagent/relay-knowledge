@@ -1,6 +1,6 @@
-# 第 15 章 完整服务化部署指南
+# 第 14 章 服务化部署指南
 
-[中文](15-service-deployment-full-guide.md) | 中文深入专题；英文核心流程见 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)
+[中文](14-service-deployment-guide.md) | 中文深入专题；英文核心流程见 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)
 
 > 本章为 relay-knowledge 服务化部署的完整操作手册，覆盖从安装准备到升级、回滚、卸载的全生命周期。
 > 架构契约参见 [第 19 章安装、发布与升级](../03-architecture-specs/19-installation-release-and-upgrade.md) 和 [第 22 章服务化部署、控制面与数据面分离](../03-architecture-specs/22-service-deployment-control-data-plane.md)。
@@ -8,11 +8,11 @@
 
 ---
 
-## 15.1 概述
+## 14.1 概述
 
 relay-knowledge 的常驻服务是一个异步优先、有界资源的后台进程，托管 Web HTTP API、MCP Streamable HTTP 协议、startup index reconciler、code-index worker pool 和 repository-set refresh worker。
 
-### 15.1.1 四种部署拓扑
+### 14.1.1 四种部署拓扑
 
 | 拓扑 | 控制面 | 数据面 | 适用场景 |
 |------|--------|--------|----------|
@@ -23,7 +23,7 @@ relay-knowledge 的常驻服务是一个异步优先、有界资源的后台进�
 
 默认使用 `resident_single_process`。本章重点覆盖 `resident_single_process` 和 `resident_partitioned_sqlite` 的完整部署流程。
 
-### 15.1.2 关键原则
+### 14.1.2 关键原则
 
 - **长期后台运行必须由 platform service manager 托管**（systemd / launchd / Windows Service）。`run.sh --daemon` 仅用于开发验证，不得用于生产部署。
 - **二进制安装路径与运行时状态严格分离**。配置、数据库、索引、日志、缓存、临时文件使用 `paths` 模块管理的平台目录。
@@ -32,16 +32,16 @@ relay-knowledge 的常驻服务是一个异步优先、有界资源的后台进�
 
 ---
 
-## 15.2 安装准备
+## 14.2 安装准备
 
-### 15.2.1 系统要求
+### 14.2.1 系统要求
 
 - **操作系统**：Linux（glibc ≥ 2.31）、macOS（Apple Silicon / Intel）、Windows（x86_64 / ARM64）
 - **无需另行管理应用运行时**：relay-knowledge 为单二进制，SQLite 已内置（bundled + FTS5）；仍依赖目标平台的系统库和 service manager
 - **磁盘空间**：二进制约 50 MB，运行时数据取决于知识图谱和代码仓库规模，建议预留 ≥ 2 GB
 - **内存**：建议 ≥ 512 MB（含 worker pool、HTTP 服务、SQLite 缓存）
 
-### 15.2.2 获取二进制
+### 14.2.2 获取二进制
 
 **方式一：从 GitHub Releases 下载**
 
@@ -94,7 +94,7 @@ relay-knowledge status --format json
 relay-knowledge setup doctor --format json
 ```
 
-### 15.2.3 安装后预检
+### 14.2.3 安装后预检
 
 ```bash
 relay-knowledge setup doctor --format json
@@ -110,9 +110,9 @@ relay-knowledge setup doctor --format json
 
 ---
 
-## 15.3 首次部署（Linux systemd）
+## 14.3 首次部署（Linux systemd）
 
-### 15.3.1 部署预检与配置
+### 14.3.1 部署预检与配置
 
 ```bash
 # 1. 静态预检
@@ -148,7 +148,7 @@ relay-knowledge service lifecycle install --dry-run \
 | `warnings` | 备份/迁移/shard/卸载等操作提醒 |
 | `checksum` | service definition 的稳定校验值 |
 
-### 15.3.2 确认 service definition 输入
+### 14.3.2 确认 service definition 输入
 
 写入前请确认以下配置已固定：
 
@@ -166,7 +166,7 @@ export RELAY_KNOWLEDGE_INSTALL_DIR="$HOME/.local/lib/relay-knowledge"
 systemd、注册并启动服务。
 生成的 Linux unit 会引用包含空格的路径，并把字面 `$` 写成 `$$`，避免 systemd 在 `ExecStart=` 或 `Environment=` 中误展开安装目录、二进制路径或数据目录。
 
-### 15.3.3 前台验证
+### 14.3.3 前台验证
 
 在安装为系统服务前，建议先前台验证：
 
@@ -197,7 +197,7 @@ relay-knowledge service running; code_index_workers=N
 
 `Ctrl+C` 或 `SIGTERM` 可停止前台进程。
 
-### 15.3.4 安装并启动 systemd 服务
+### 14.3.4 安装并启动 systemd 服务
 
 Linux lifecycle 当前管理的是 **systemd user service**。用部署用户执行：
 
@@ -220,7 +220,7 @@ sudo loginctl enable-linger "$USER"
 `RELAY_KNOWLEDGE_SERVICE_DIR` 改为 `/etc/systemd/system` 就宣称完成 system service 安装；该做法不会把
 lifecycle 命令切换为系统级 systemd manager。
 
-### 15.3.5 验证服务状态
+### 14.3.5 验证服务状态
 
 ```bash
 # CLI 诊断
@@ -236,7 +236,7 @@ curl http://127.0.0.1:8791/api/v1/control/storage/topology
 
 `service status` 返回 code-index worker、operator、storage topology、queue/dead-letter、runtime path 和 degraded reason。这些诊断接口有短预算，不会同步执行大型索引。
 
-### 15.3.6 停止与重启
+### 14.3.6 停止与重启
 
 ```bash
 # 停止服务
@@ -248,9 +248,9 @@ systemctl --user restart relay-knowledge.service
 
 ---
 
-## 15.4 首次部署（macOS launchd）
+## 14.4 首次部署（macOS launchd）
 
-### 15.4.1 部署预检
+### 14.4.1 部署预检
 
 ```bash
 relay-knowledge setup doctor --format json
@@ -262,7 +262,7 @@ relay-knowledge service lifecycle install --dry-run \
 
 生成的 launchd plist 文件名为 `com.coolplayagent.relay-knowledge.plist`，写入在 `service_dir` 指定的路径下（macOS 默认 `~/Library/LaunchAgents/`，以便 login 时由 launchd 重新加载）。
 
-### 15.4.2 前台验证
+### 14.4.2 前台验证
 
 ```bash
 RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
@@ -270,7 +270,7 @@ RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
   relay-knowledge service run --web --mcp streamable-http
 ```
 
-### 15.4.3 安装并启动 launchd 服务
+### 14.4.3 安装并启动 launchd 服务
 
 ```bash
 relay-knowledge service lifecycle install --execute \
@@ -278,14 +278,14 @@ relay-knowledge service lifecycle install --execute \
 launchctl print "gui/${UID}/com.coolplayagent.relay-knowledge"
 ```
 
-### 15.4.4 验证服务状态
+### 14.4.4 验证服务状态
 
 ```bash
 curl http://127.0.0.1:8791/api/health
 relay-knowledge service doctor --format json
 ```
 
-### 15.4.5 停止与卸载
+### 14.4.5 停止与卸载
 
 ```bash
 relay-knowledge service lifecycle uninstall --dry-run --format json
@@ -294,9 +294,9 @@ relay-knowledge service lifecycle uninstall --execute --format json
 
 ---
 
-## 15.5 首次部署（Windows Service）
+## 14.5 首次部署（Windows Service）
 
-### 15.5.1 部署预检
+### 14.5.1 部署预检
 
 ```powershell
 relay-knowledge setup doctor --format json
@@ -307,7 +307,7 @@ relay-knowledge service lifecycle install --dry-run --install-dir $InstallDir --
 
 生成的 Windows Service definition 文件名为 `relay-knowledge-service.xml`。
 
-### 15.5.2 前台验证
+### 14.5.2 前台验证
 
 ```powershell
 $env:RELAY_KNOWLEDGE_HTTP_BIND = '127.0.0.1:8791'
@@ -315,7 +315,7 @@ $env:RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES = 'docs'
 relay-knowledge service run --web --mcp streamable-http
 ```
 
-### 15.5.3 安装并启动 Windows Service
+### 14.5.3 安装并启动 Windows Service
 
 以管理员权限打开 PowerShell：
 
@@ -327,14 +327,14 @@ relay-knowledge service lifecycle install --execute --install-dir $InstallDir --
 Get-Service relay-knowledge
 ```
 
-### 15.5.4 验证服务状态
+### 14.5.4 验证服务状态
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8791/api/health
 relay-knowledge service doctor --format json
 ```
 
-### 15.5.5 停止与卸载
+### 14.5.5 停止与卸载
 
 ```powershell
 relay-knowledge service lifecycle uninstall --dry-run --format json
@@ -343,9 +343,9 @@ relay-knowledge service lifecycle uninstall --execute --format json
 
 ---
 
-## 15.6 存储拓扑选择
+## 14.6 存储拓扑选择
 
-### 15.6.1 选型指南
+### 14.6.1 选型指南
 
 | 场景 | 推荐拓扑 | 配置 |
 |------|----------|------|
@@ -356,7 +356,7 @@ relay-knowledge service lifecycle uninstall --execute --format json
 
 `partitioned_sqlite` 使用一个主 SQLite 控制库管理仓库注册和任务状态，每仓库独立 SQLite shard 存储代码事实和索引。shard 目录位于运行时数据目录的 `stores/repositories/` 下。
 
-### 15.6.2 配置方法
+### 14.6.2 配置方法
 
 ```bash
 export RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite
@@ -364,7 +364,7 @@ export RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite
 
 该环境变量必须在预检、生成 definition、启动服务和所有运维命令中保持一致。切换拓扑前必须先完成显式迁移或回滚。
 
-### 15.6.3 重要约束
+### 14.6.3 重要约束
 
 - 主数据库一旦包含 active shard catalog，**不能直接用 `single_sqlite` 打开同一运行时状态**。
 - 备份、迁移、doctor、卸载确认和回滚计划**必须同时覆盖主数据库和 shard 目录**。只移动或校验主数据库不能宣称操作成功。
@@ -372,9 +372,9 @@ export RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite
 
 ---
 
-## 15.7 HTTP 与 MCP 配置
+## 14.7 HTTP 与 MCP 配置
 
-### 15.7.1 HTTP 绑定配置
+### 14.7.1 HTTP 绑定配置
 
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
@@ -385,7 +385,7 @@ export RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite
 
 默认只绑定 `127.0.0.1`（loopback），仅本机可访问。
 
-### 15.7.2 QoS 预算配置
+### 14.7.2 QoS 预算配置
 
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
@@ -393,7 +393,7 @@ export RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite
 | `RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS` | `256` | 最大并发请求数 |
 | `RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH` | `512` | 最大排队请求数 |
 
-### 15.7.3 MCP 配置
+### 14.7.3 MCP 配置
 
 | 环境变量 | 说明 |
 |----------|------|
@@ -406,7 +406,7 @@ export RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite
 | `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | MCP 上下文最大字节数 |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | 是否允许非 loopback 远端客户端 |
 
-### 15.7.4 远端访问配置
+### 14.7.4 远端访问配置
 
 当前 Web、HTTP API（包括 `/api/v1/control/**`）和 MCP 不内建入站调用方身份认证。
 `ALLOW_REMOTE_CLIENTS`、Origin、scope、session、QoS 和审计都不能证明调用方身份。没有外部身份网关时，
@@ -421,9 +421,9 @@ RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
 远端访问应让 Relay 继续绑定 loopback，由同机外部身份网关执行 OIDC/token 校验与
 deny-by-default ACL，或校验 mTLS 客户端证书、映射身份并执行同等 ACL。网关必须保护 Web、
 `/api/**` 和 `/mcp` 的所有路径；仅有 TLS 服务端证书只加密传输，不认证调用方。跨机网关的
-专用私网绑定、防火墙和非 loopback 暴露前提见[第 17 章](17-security-configuration.md#173-远端访问安全)。
+专用私网绑定、防火墙和非 loopback 暴露前提见[第 16 章](16-security-configuration-guide.md#163-远端访问安全)。
 
-### 15.7.5 远端 CLI 使用
+### 14.7.5 远端 CLI 使用
 
 远端 CLI 通过统一 HTTP 服务访问 code repository API：
 
@@ -453,16 +453,16 @@ relay-knowledge repo status my-repo --format json
 
 ---
 
-## 15.8 升级流程
+## 14.8 升级流程
 
-### 15.8.1 升级顺序
+### 14.8.1 升级顺序
 
 ```text
 preflight doctor
   → 停止 ad hoc CLI writer
   → stop service through platform manager
   → 确认所有 writer 已停止
-  → 按第 16 章创建停服一致的 runtime backup
+  → 按第 15 章创建停服一致的 runtime backup
   → 从已校验、已解压的新版本二进制执行 lifecycle upgrade
   → start service through platform manager
      → 首次同步打开执行 schema/index migration 与必要的 shadow rebuild
@@ -473,17 +473,17 @@ preflight doctor
 本章选择 **lifecycle upgrade** 作为唯一二进制与 service definition 升级路径。不要再手工覆盖
 binary 或单独重写 definition；否则会绕过 lifecycle 的 attempt-scoped 文件 checkpoint 和失败回滚。
 
-### 15.8.2 停服备份边界
+### 14.8.2 停服备份边界
 
 在执行任何 `service lifecycle upgrade --execute` 之前，完整执行
-[第 16 章 16.6 节的停服一致备份流程](16-sre-operations-runbook.md#166-备份与恢复)。该流程是 runtime backup/restore
+[第 15 章 15.6 节的停服一致备份流程](15-sre-operations-runbook.md#156-备份与恢复)。该流程是 runtime backup/restore
 的唯一权威步骤，必须覆盖 plan 的全部 `runtime_state_paths`。`partitioned_sqlite` 必须把控制库、
 仍存在的 WAL/SHM 伴生文件和 `stores/repositories/` shards 作为同一个停服快照处理。
 
 Lifecycle checkpoint 只保护安装的 binary 和 service definition；它不是 SQLite 快照，不覆盖 runtime
 state，也不能证明非托管 writer 已停止。
 
-### 15.8.3 Linux systemd 升级
+### 14.8.3 Linux systemd 升级
 
 ```bash
 TARGET_VERSION=1.1.13
@@ -502,9 +502,9 @@ test -x "$NEW_BINARY"
 curl http://127.0.0.1:8791/api/health
 ```
 
-上述 `NEW_BINARY` 必须来自 15.2.2 已通过 checksum 的 archive，`INSTALL_DIR` 必须与首次安装时一致。
+上述 `NEW_BINARY` 必须来自 14.2.2 已通过 checksum 的 archive，`INSTALL_DIR` 必须与首次安装时一致。
 
-### 15.8.4 macOS launchd 升级
+### 14.8.4 macOS launchd 升级
 
 ```bash
 TARGET_VERSION=1.1.13
@@ -523,7 +523,7 @@ launchctl print "gui/${UID}/com.coolplayagent.relay-knowledge"
 
 Intel Mac 把 archive target 改为 `x86_64-apple-darwin`。
 
-### 15.8.5 Windows Service 升级
+### 14.8.5 Windows Service 升级
 
 以管理员权限执行：
 
@@ -546,12 +546,12 @@ Get-Service relay-knowledge
 
 ---
 
-## 15.9 回滚操作
+## 14.9 回滚操作
 
-### 15.9.1 回滚原则
+### 14.9.1 回滚原则
 
 - Lifecycle rollback 只恢复 checkpointed **binary** 和 **service definition**，然后刷新平台注册并启动服务。
-- 需要恢复 schema/data 时，必须另外使用第 16 章创建的停服一致 runtime backup；`checkpoint_path` 绝不是数据库回滚点。
+- 需要恢复 schema/data 时，必须另外使用第 15 章创建的停服一致 runtime backup；`checkpoint_path` 绝不是数据库回滚点。
 - upgrade checkpoint backup 使用 attempt-scoped 文件并原子发布 checkpoint；没有旧二进制或 service definition 备份时，失败回滚和显式 rollback 只删除本次确实复制或写入的目标文件，definition-only upgrade 不会删除当前运行的 binary。
 - uninstall 失败回滚和基于 uninstall checkpoint 的显式 rollback 会恢复被本次卸载删除的原 service definition，再重新注册 service。
 - Windows install 将 service 创建和 registry 环境写入拆成独立步骤；Windows/macOS upgrade 会在启动前刷新 SCM 或 launchd registration，使平台 service manager 使用更新后的 service definition。
@@ -559,10 +559,10 @@ Get-Service relay-knowledge
 - 外部 service manager 和 doctor 子进程退出或超时后，stdout/stderr 收集也有边界，继承管道的 helper 不会让执行报告无限等待。
 - forward-only migration 必须在变更说明中写清楚，不能只替换旧二进制后宣称回滚完成。
 
-### 15.9.2 回滚步骤
+### 14.9.2 回滚步骤
 
 先查阅发布说明，确认迁移是否 forward-only。如果需要恢复 runtime state，先按
-[第 16 章 16.6 节](16-sre-operations-runbook.md#166-备份与恢复)的恢复流程停服、验证备份，并使用其强制
+[第 15 章 15.6 节](15-sre-operations-runbook.md#156-备份与恢复)的恢复流程停服、验证备份，并使用其强制
 `--defer-start` 模式恢复全部路径。该模式不运行当前 binary 或 health check；在 user service 仍保持
 stopped 时再执行 lifecycle rollback，由 lifecycle 恢复旧 binary/definition、刷新注册、启动并进入验证。
 Linux 用户级安装示例：
@@ -580,15 +580,15 @@ relay-knowledge service lifecycle rollback --execute \
 
 ---
 
-## 15.10 卸载
+## 14.10 卸载
 
-### 15.10.1 卸载原则
+### 14.10.1 卸载原则
 
 - 当前 lifecycle uninstall 移除 platform service registration 和 service definition，保留安装的 binary 与全部 runtime state。
 - 删除配置、数据库、索引、日志、缓存、worker queue、dead-letter 或 shard 目录**必须经过用户确认**。
 - `partitioned_sqlite` 下卸载确认同时覆盖主库和 shard 目录。
 
-### 15.10.2 查看卸载计划
+### 14.10.2 查看卸载计划
 
 ```bash
 relay-knowledge service plan uninstall --format json
@@ -599,24 +599,24 @@ relay-knowledge service plan uninstall --format json
 - `uninstall_command`：平台卸载命令预览
 - `warnings`：关于数据保留的提醒
 
-### 15.10.3 Linux systemd 卸载
+### 14.10.3 Linux systemd 卸载
 
 ```bash
 relay-knowledge service lifecycle uninstall --dry-run --format json
 relay-knowledge service lifecycle uninstall --execute --format json
 ```
 
-如果 15.2.2 的系统级 CLI 也确定不再需要，可在确认 lifecycle 已完成且目标是预期文件后，单独删除
+如果 14.2.2 的系统级 CLI 也确定不再需要，可在确认 lifecycle 已完成且目标是预期文件后，单独删除
 `/usr/local/bin/relay-knowledge`。本章不提供递归删除 runtime 目录的命令。
 
-### 15.10.4 macOS launchd 卸载
+### 14.10.4 macOS launchd 卸载
 
 ```bash
 relay-knowledge service lifecycle uninstall --dry-run --format json
 relay-knowledge service lifecycle uninstall --execute --format json
 ```
 
-### 15.10.5 Windows Service 卸载
+### 14.10.5 Windows Service 卸载
 
 以管理员权限执行：
 
@@ -625,12 +625,12 @@ relay-knowledge service lifecycle uninstall --dry-run --format json
 relay-knowledge service lifecycle uninstall --execute --format json
 ```
 
-如需永久删除 runtime data，先完成第 16 章备份，再逐项核对 uninstall plan 的
+如需永久删除 runtime data，先完成第 15 章备份，再逐项核对 uninstall plan 的
 `runtime_state_paths`。只删除已核对的具体路径；不要对环境变量、通配符或平台运行时根目录执行递归删除。
 
 ---
 
-## 15.11 code-index worker 配置
+## 14.11 code-index worker 配置
 
 服务启动时会启动 code-index worker pool。worker 数量由环境变量控制：
 
@@ -653,7 +653,7 @@ relay-knowledge service status --format json
 
 ---
 
-## 15.12 Operator 管理
+## 14.12 Operator 管理
 
 Silent updates operator 用于控制后台自动刷新行为：
 
@@ -675,9 +675,9 @@ Silent updates 约束：
 
 ---
 
-## 15.13 诊断与排障
+## 14.13 诊断与排障
 
-### 15.13.1 常规诊断顺序
+### 14.13.1 常规诊断顺序
 
 ```bash
 # 1. 运行时状态
@@ -696,7 +696,7 @@ relay-knowledge service doctor --format json
 relay-knowledge audit query --limit 50 --format json
 ```
 
-### 15.13.2 HTTP 诊断端点
+### 14.13.2 HTTP 诊断端点
 
 | 端点 | 说明 |
 |------|------|
@@ -708,7 +708,7 @@ relay-knowledge audit query --limit 50 --format json
 | `GET /api/v1/control/service/status` | 控制面服务状态 |
 | `GET /api/v1/control/storage/topology` | 存储拓扑诊断 |
 
-### 15.13.3 常见问题
+### 14.13.3 常见问题
 
 | 问题 | 排查步骤 |
 |------|----------|
@@ -723,7 +723,7 @@ relay-knowledge audit query --limit 50 --format json
 
 ---
 
-## 15.14 环境变量速查表
+## 14.14 环境变量速查表
 
 ### 路径类
 
@@ -814,7 +814,7 @@ relay-knowledge audit query --limit 50 --format json
 
 ---
 
-## 15.15 命令速查
+## 14.15 命令速查
 
 | 命令 | 用途 |
 |------|------|
@@ -843,4 +843,4 @@ relay-knowledge audit query --limit 50 --format json
 
 ---
 
-**导航**：上一章：[第 13 章 运维与排障](13-operations-and-troubleshooting.md) | 下一章：[第 16 章 SRE 运维手册](16-sre-operations-runbook.md) | 返回：[用户指南](README.md)
+**导航**：上一章：[第 13 章 运维与排障](13-operations-and-troubleshooting.md) | 下一章：[第 15 章 SRE 运维手册](15-sre-operations-runbook.md) | 返回：[用户指南](README.md)

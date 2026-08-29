@@ -50,9 +50,9 @@ The file watcher feature must satisfy:
 
 ## Related Verification Records
 
-- [Documentation Book Refresh Audit](../06-verification/01-documentation-book-refresh-2026-05-17.md)
-- [relay-teams E2E Verification](../06-verification/04-relay-teams-e2e-2026-05-14.md)
-- [Linux Code Graph Retrieval Accuracy](../../zh/06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md)
+- [Documentation Book Structure Audit](../06-verification/05-documentation-book-structure-audit-2026-05-17.md)
+- [relay-teams E2E Verification](../06-verification/01-relay-teams-e2e-2026-05-14.md)
+- [Linux Code Graph Retrieval Accuracy](../../zh/06-verification/04-code-graph-retrieval-accuracy-linux-2026-05-15.md)
 
 ---
 

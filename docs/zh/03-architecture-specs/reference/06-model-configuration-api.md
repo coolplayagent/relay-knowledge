@@ -1,6 +1,6 @@
 # relay-knowledge 模型配置 API
 
-[中文](api-model-configuration.md) | 英文版尚未提供
+[中文](06-model-configuration-api.md) | 英文版尚未提供
 
 > 文档版本: 1.0
 > 编制日期: 2026-06-06
@@ -22,4 +22,4 @@
 
 ---
 
-导航：上一专题：[MCP Streamable HTTP API](api-mcp-streamable-http.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)
+导航：上一专题：[MCP Streamable HTTP API](05-mcp-streamable-http-api.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)

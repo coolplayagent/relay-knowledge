@@ -1,6 +1,6 @@
-# Documentation Refresh Audit 2026-05-14
+# Documentation Content Audit 2026-05-14
 
-[English](./03-documentation-refresh-audit-2026-05-14.md) | [中文](../../zh/06-verification/03-documentation-refresh-audit-2026-05-14.md)
+[English](./02-documentation-content-audit-2026-05-14.md) | [中文](../../zh/06-verification/02-documentation-content-audit-2026-05-14.md)
 
 [Documentation index](../README.md) | [GitHub repository](https://github.com/coolplayagent/relay-knowledge)
 

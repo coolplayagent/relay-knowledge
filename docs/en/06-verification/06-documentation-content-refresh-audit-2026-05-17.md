@@ -1,6 +1,6 @@
-# Documentation Refresh Audit 2026-05-17
+# Documentation Content Refresh Audit 2026-05-17
 
-[English](./02-documentation-refresh-audit-2026-05-17.md) | [中文](../../zh/06-verification/02-documentation-refresh-audit-2026-05-17.md)
+[English](./06-documentation-content-refresh-audit-2026-05-17.md) | [中文](../../zh/06-verification/06-documentation-content-refresh-audit-2026-05-17.md)
 
 This audit records the 2026-05-17 documentation pass for the code repository
 retrieval self-iteration commits. The related implementation changes focus on

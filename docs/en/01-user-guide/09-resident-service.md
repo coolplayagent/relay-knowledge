@@ -28,9 +28,9 @@ id instead of wrapping a failed execution report as success.
 > macOS, or Windows Service for long-running background operation.
 
 The Chinese edition provides deeper operational addenda for
-[full service deployment](../../zh/01-user-guide/15-service-deployment-full-guide.md),
-an [SRE operations runbook](../../zh/01-user-guide/16-sre-operations-runbook.md),
-and [security configuration](../../zh/01-user-guide/17-security-configuration.md).
+[full service deployment](../../zh/01-user-guide/14-service-deployment-guide.md),
+an [SRE operations runbook](../../zh/01-user-guide/15-sre-operations-runbook.md),
+and [security configuration](../../zh/01-user-guide/16-security-configuration-guide.md).
 This English chapter consolidates the executable service lifecycle; it does not
 claim one-to-one chapter parity with those addenda.
 
@@ -389,7 +389,7 @@ not the runtime database. `--execute` requires the stop-service step to succeed
 but does not independently prove that no unmanaged writer remains.
 
 Use the stopped-service backup and restore procedure in the Chinese
-[SRE operations runbook, Section 16.6](../../zh/01-user-guide/16-sre-operations-runbook.md)
+[SRE operations runbook, Section 15.6](../../zh/01-user-guide/15-sre-operations-runbook.md)
 as the authoritative runtime-data procedure. Do not mix manual binary copying
 or a separate definition rewrite into the lifecycle upgrade path.
 

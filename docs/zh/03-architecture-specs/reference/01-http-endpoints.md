@@ -1,13 +1,13 @@
 # HTTP API 端点速查表
 
-[中文](api-http-endpoints.md) | 英文版尚未提供
+[中文](01-http-endpoints.md) | 英文版尚未提供
 
 本页汇总[HTTP API 参考](../23-api-reference.md)中的方法、路径和用途。它仅用于快速导航；共享错误、响应 envelope 和运行时约定以主章为准，详细请求、响应与端点边界见以下专题：
 
-- [控制面与 Web 操作 API](api-control-web.md)
-- [代码仓库 API](api-code-repositories.md)与[代码库视图 API](api-codebase-views.md)
-- [MCP Streamable HTTP API](api-mcp-streamable-http.md)
-- [模型配置 API](api-model-configuration.md)
+- [控制面与 Web 操作 API](02-control-and-web-api.md)
+- [代码仓库 API](03-code-repository-api.md)与[代码库视图 API](04-codebase-view-api.md)
+- [MCP Streamable HTTP API](05-mcp-streamable-http-api.md)
+- [模型配置 API](06-model-configuration-api.md)
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -45,4 +45,4 @@
 
 ---
 
-导航：上一页：[API 专题索引](README.md) | 下一专题：[控制面与 Web 操作 API](api-control-web.md) | 返回：[23. HTTP API 参考](../23-api-reference.md)
+导航：上一页：[API 专题索引](README.md) | 下一专题：[控制面与 Web 操作 API](02-control-and-web-api.md) | 返回：[23. HTTP API 参考](../23-api-reference.md)

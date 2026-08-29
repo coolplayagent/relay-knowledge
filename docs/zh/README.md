@@ -29,11 +29,9 @@
 - [第 11 章 可观测性与遥测](01-user-guide/11-observability-and-telemetry.md)
 - [第 12 章 高级配置参考](01-user-guide/12-advanced-configuration.md)
 - [第 13 章 运维与排障](01-user-guide/13-operations-and-troubleshooting.md)
-- [第 15 章 完整服务化部署指南](01-user-guide/15-service-deployment-full-guide.md)
-- [第 16 章 SRE 运维手册](01-user-guide/16-sre-operations-runbook.md)
-- [第 17 章 安全配置完整指南](01-user-guide/17-security-configuration.md)
-
-第 14 章尚未分配，编号保留。
+- [第 14 章 服务化部署指南](01-user-guide/14-service-deployment-guide.md)
+- [第 15 章 SRE 运维手册](01-user-guide/15-sre-operations-runbook.md)
+- [第 16 章 安全配置指南](01-user-guide/16-security-configuration-guide.md)
 
 ## 第二卷：能力说明
 
@@ -81,8 +79,9 @@
 - [第 22 章 服务化部署、控制面与数据面分离](03-architecture-specs/22-service-deployment-control-data-plane.md)
 - [第 23 章 HTTP API 参考](03-architecture-specs/23-api-reference.md)
 - [第 24 章 代码地图驱动的 Knowledge 开发闭环](03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
-- [第 27 章 业务知识与技术图谱映射](03-architecture-specs/27-business-knowledge-technical-mapping.md)
+- [第 25 章 代码索引保留策略](03-architecture-specs/25-code-index-retention.md)
 - [第 26 章 Git Commit + Knowledge：开发迭代理念与 Loop](03-architecture-specs/26-git-commit-knowledge-development-loop.md)
+- [第 27 章 业务知识与技术图谱映射](03-architecture-specs/27-business-knowledge-technical-mapping.md)
 
 第 23 章的窄专题见[架构 API 专题索引](03-architecture-specs/reference/README.md)。
 
@@ -123,12 +122,12 @@
 ## 附录 B：验证记录
 
 - [附录 B 卷首：验证与审计记录](06-verification/README.md)：记录索引、时效边界和证据规则。
-- [附录 B.1 文档书架刷新审计 2026-05-17](06-verification/01-documentation-book-refresh-2026-05-17.md)：目录职责、能力关闭状态和书籍式索引刷新记录。
-- [附录 B.2 文档刷新审计 2026-05-17](06-verification/02-documentation-refresh-audit-2026-05-17.md)：代码仓库检索自迭代提交的文档同步记录。
-- [附录 B.3 文档刷新审计 2026-05-14](06-verification/03-documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和开放产品化工作。
-- [附录 B.4 relay-teams E2E 验证 2026-05-14](06-verification/04-relay-teams-e2e-2026-05-14.md)
-- [附录 B.5 relay-teams 代码图检索准确性测试 2026-05-15](06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)
-- [附录 B.6 Linux 代码图检索准确性测试 2026-05-15](06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md)
+- [附录 B.1 relay-teams E2E 验证 2026-05-14](06-verification/01-relay-teams-e2e-2026-05-14.md)
+- [附录 B.2 文档内容审计 2026-05-14](06-verification/02-documentation-content-audit-2026-05-14.md)：当前文档状态、已刷新内容和开放产品化工作。
+- [附录 B.3 relay-teams 代码图检索准确性测试 2026-05-15](06-verification/03-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)
+- [附录 B.4 Linux 代码图检索准确性测试 2026-05-15](06-verification/04-code-graph-retrieval-accuracy-linux-2026-05-15.md)
+- [附录 B.5 文档书架结构审计 2026-05-17](06-verification/05-documentation-book-structure-audit-2026-05-17.md)：目录职责、能力关闭状态和书籍式索引刷新记录。
+- [附录 B.6 文档内容刷新审计 2026-05-17](06-verification/06-documentation-content-refresh-audit-2026-05-17.md)：代码仓库检索自迭代提交的文档同步记录。
 - [附录 B.7 Grep 兜底文档刷新审计 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md)：代码检索 exact-text fallback 的章节同步记录。
 - [附录 B.8 软件全域建模文档刷新审计 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md)：软件全域建模研究与架构归档验证记录。
 - [附录 B.9 软件全域、CodeGraph 与 Search Everything 研究文档刷新审计 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md)：第 11 章研究与书籍目录同步记录。

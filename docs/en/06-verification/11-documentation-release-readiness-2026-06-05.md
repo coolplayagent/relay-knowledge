@@ -27,7 +27,7 @@ reference, and published agent skill.
   English pages but were missing from the index.
 - The Chinese bookshelf now lists Appendix A.6 through A.10 and Appendix B.11.
 - English navigation calls out Chinese-only benchmark Appendix A.8 through A.10
-  and verification Appendix B.5 through B.6 until they are translated.
+  and verification Appendix B.3 through B.4 until they are translated.
 
 ## 3. Documentation Changes
 

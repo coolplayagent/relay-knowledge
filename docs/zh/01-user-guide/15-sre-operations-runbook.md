@@ -1,10 +1,10 @@
-# 第 16 章 SRE 运维手册
+# 第 15 章 SRE 运维手册
 
-[中文](16-sre-operations-runbook.md) | 中文深入专题；英文核心流程见 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)
+[中文](15-sre-operations-runbook.md) | 中文深入专题；英文核心流程见 [English Chapter 9](../../en/01-user-guide/09-resident-service.md)
 
-> 本章面向值守与故障处置；部署、升级、回滚和卸载流程见[第 15 章](15-service-deployment-full-guide.md)，安全策略见[第 17 章](17-security-configuration.md)。
+> 本章面向值守与故障处置；部署、升级、回滚和卸载流程见[第 14 章](14-service-deployment-guide.md)，安全策略见[第 16 章](16-security-configuration-guide.md)。
 
-## 16.1 概述：SRE 运维全景图
+## 15.1 概述：SRE 运维全景图
 
 relay-knowledge 是一个基于 Rust async 运行时构建的知识图谱服务，采用事件驱动架构，核心数据存储在 SQLite 中（支持单库和分区拓扑）。SRE 需要关注的运维面包括：
 
@@ -19,9 +19,9 @@ relay-knowledge 是一个基于 Rust async 运行时构建的知识图谱服务�
 
 ---
 
-## 16.2 服务生命周期管理
+## 15.2 服务生命周期管理
 
-### 16.2.1 启动流程
+### 15.2.1 启动流程
 
 服务启动时按以下顺序初始化（参见 `src/relay_knowledge/interfaces/cli/service/mod.rs`）：
 
@@ -48,7 +48,7 @@ systemctl --user start relay-knowledge.service
 relay-knowledge service run --web --mcp streamable-http
 ```
 
-### 16.2.2 停止与 Graceful Shutdown
+### 15.2.2 停止与 Graceful Shutdown
 
 服务通过信号实现优雅关闭（参见 `service_shutdown_signal()`）：
 
@@ -69,7 +69,7 @@ systemctl --user stop relay-knowledge.service
 - 已进入一次 code-index 任务的 worker 在本次有界尝试返回后才观察关闭信号；值守时应观察任务 checkpoint 和 lease，不要把 5 秒当作强制退出承诺。
 - 遥测导出超时由 `RELAY_OTEL_EXPORT_TIMEOUT_MS` 控制，默认为 5 秒。
 
-### 16.2.3 服务状态查看
+### 15.2.3 服务状态查看
 
 ```bash
 # CLI 方式：带 reconcile 的完整状态（会尝试对账索引）
@@ -85,9 +85,9 @@ curl http://localhost:8791/api/service/status
 
 ---
 
-## 16.3 健康检查与诊断
+## 15.3 健康检查与诊断
 
-### 16.3.1 Health Endpoint（`/api/health`）
+### 15.3.1 Health Endpoint（`/api/health`）
 
 核心健康检查 API（参见 `src/relay_knowledge/application/service/health/mod.rs`）：
 
@@ -110,7 +110,7 @@ curl http://localhost:8791/api/health | jq .
 }
 ```
 
-### 16.3.2 只读健康检查（`/api/v1/control/health`）
+### 15.3.2 只读健康检查（`/api/v1/control/health`）
 
 `read_only_health` 与 `health` 的区别：
 - **不打开冷存储**：如果存储未就绪，返回 storage-free 健康状态
@@ -121,7 +121,7 @@ curl http://localhost:8791/api/health | jq .
 curl http://localhost:8791/api/v1/control/health | jq .healthy
 ```
 
-### 16.3.3 `service status`（带 reconcile）vs `read_only_service_status`
+### 15.3.3 `service status`（带 reconcile）vs `read_only_service_status`
 
 两种模式（来自 `ServiceStatusRefreshMode` 枚举）：
 
@@ -140,7 +140,7 @@ relay-knowledge service status
 curl http://localhost:8791/api/v1/control/service/status
 ```
 
-### 16.3.4 Doctor 检查（`relay-knowledge setup doctor`）
+### 15.3.4 Doctor 检查（`relay-knowledge setup doctor`）
 
 `setup doctor` 是不打开存储的配置就绪性检查（来源：`src/relay_knowledge/interfaces/cli/setup/mod.rs`）：
 
@@ -161,7 +161,7 @@ relay-knowledge health --format json
 relay-knowledge service doctor --format json
 ```
 
-### 16.3.5 存储拓扑快照（`/api/v1/control/storage/topology`）
+### 15.3.5 存储拓扑快照（`/api/v1/control/storage/topology`）
 
 返回 `StorageTopologyResponse`，其 `storage` 字段为 `StorageTopologyDiagnostics`（参见 `src/relay_knowledge/application/service/storage_diagnostics/mod.rs`）。拓扑快照有 500 毫秒预算；超时时通过 `storage.degraded_reason` 报告，不无界等待。
 
@@ -187,9 +187,9 @@ curl http://localhost:8791/api/v1/control/storage/topology | jq .
 
 ---
 
-## 16.4 监控指标
+## 15.4 监控指标
 
-### 16.4.1 OpenTelemetry 配置
+### 15.4.1 OpenTelemetry 配置
 
 遥测配置通过环境变量控制（参见 `src/relay_knowledge/observability/mod.rs`）：
 
@@ -210,7 +210,7 @@ export RELAY_OTEL_METRICS="true"
 export RELAY_OTEL_SERVICE_ENVIRONMENT="production"
 ```
 
-### 16.4.2 Traces
+### 15.4.2 Traces
 
 - 使用 OTLP HTTP 协议，导出到 `{endpoint}/v1/traces`
 - 通过 `opentelemetry_otlp::SpanExporter` + batch exporter 导出
@@ -218,11 +218,11 @@ export RELAY_OTEL_SERVICE_ENVIRONMENT="production"
 - 同时保留 `tracing_subscriber::fmt::layer` 用于本地日志输出
 - 默认日志级别为 `info`（可通过 `RUST_LOG` 覆盖）
 
-### 16.4.3 OpenTelemetry Metrics
+### 15.4.3 OpenTelemetry Metrics
 
 所有指标通过 `SdkMeterProvider` + `PeriodicReader`（每 5s 导出）导出到 `{endpoint}/v1/metrics`。
 
-#### 16.4.3.1 Agent 协议指标
+#### 15.4.3.1 Agent 协议指标
 
 | 指标名 | 类型 | 标签 | 说明 |
 |-------|------|------|------|
@@ -245,7 +245,7 @@ rate(relay_agent_protocol_rejections_total[5m]) / rate(relay_agent_protocol_requ
 histogram_quantile(0.99, rate(relay_agent_protocol_request_duration_ms_bucket[5m]))
 ```
 
-#### 16.4.3.2 诊断快照指标
+#### 15.4.3.2 诊断快照指标
 
 `AgentProtocolMetricsSnapshot` 提供内存中的低基数指标（通过 `service status` 暴露）：
 
@@ -259,7 +259,7 @@ histogram_quantile(0.99, rate(relay_agent_protocol_request_duration_ms_bucket[5m
 
 所有计数器使用 `saturating_add` 防止溢出。
 
-### 16.4.4 MCP Prometheus 快照
+### 15.4.4 MCP Prometheus 快照
 
 启用 MCP Streamable HTTP 后，`GET /mcp/metrics` 会直接返回 Prometheus text exposition 格式。该路由使用与 MCP 相同的 origin 校验、QoS 准入和 `max_runtime_ms` 超时，并读取有界健康快照：
 
@@ -292,9 +292,9 @@ service:
 
 ---
 
-## 16.5 告警阈值建议
+## 15.5 告警阈值建议
 
-### 16.5.1 QoS 水位告警
+### 15.5.1 QoS 水位告警
 
 QoS 默认值（参见 `src/relay_knowledge/net/qos/mod.rs`）：
 
@@ -336,7 +336,7 @@ groups:
           summary: "relay-knowledge 存在索引刷新死信"
 ```
 
-### 16.5.2 Code-Index Worker Pool 状态告警
+### 15.5.2 Code-Index Worker Pool 状态告警
 
 `CodeIndexWorkerStatus` 结构（参见 `src/relay_knowledge/api/operations/worker.rs`）：
 
@@ -361,7 +361,7 @@ groups:
 curl -s http://localhost:8791/api/service/status | jq '.code_index_workers'
 ```
 
-### 16.5.3 磁盘空间告警
+### 15.5.3 磁盘空间告警
 
 数据目录包含：
 
@@ -382,9 +382,9 @@ curl -s http://localhost:8791/api/service/status | jq '.code_index_workers'
 
 ---
 
-## 16.6 备份与恢复
+## 15.6 备份与恢复
 
-### 16.6.1 SQLite 备份策略
+### 15.6.1 SQLite 备份策略
 
 relay-knowledge 使用两种 SQLite 拓扑：
 
@@ -409,9 +409,9 @@ relay-knowledge 使用两种 SQLite 拓扑：
 备份产物还应包含：UTC 时间、应用版本、存储拓扑、源目录、文件清单、内部文件校验和以及归档文件校验和。
 审计日志可按组织保留策略单独归档，不属于数据库恢复的一致性集合。
 
-### 16.6.2 备份脚本示例
+### 15.6.2 备份脚本示例
 
-Linux 示例与第 15 章 lifecycle plan 保持一致，固定操作部署用户的 systemd user service。必须以部署用户运行，
+Linux 示例与第 14 章 lifecycle plan 保持一致，固定操作部署用户的 systemd user service。必须以部署用户运行，
 并确保其 user manager 可用；不要把 `systemctl --user` 静默改成系统级 manager。
 
 ```bash
@@ -539,7 +539,7 @@ echo "Backup complete: $FINAL_ARCHIVE"
 最终退出码均为非零。备份窗口应由调度器串行化，禁止两个备份任务同时操作同一服务和目标目录。归档保留期由
 备份系统按已发布的 `.tar.gz` 与同名 `.sha256` 精确配对管理，不在采集脚本中递归删除目录。
 
-### 16.6.3 恢复流程与验证
+### 15.6.3 恢复流程与验证
 
 ```bash
 #!/bin/bash
@@ -682,7 +682,7 @@ echo "Files restored; $SERVICE_UNIT remains stopped. Rollback copy: $ROLLBACK_DI
 
 `--defer-start` 是强制参数：脚本只替换完整数据目录并保持 user service stopped，不运行当前 binary，因而不会让
 当前版本先迁移旧数据库。需要同时回滚 runtime state 和 binary 时，先运行本脚本，再在 stopped 状态执行
-[15.9.2 节的 lifecycle rollback](15-service-deployment-full-guide.md#1592-回滚步骤)；lifecycle 会恢复 checkpointed
+[14.9.2 节的 lifecycle rollback](14-service-deployment-guide.md#1492-回滚步骤)；lifecycle 会恢复 checkpointed
 binary/definition、刷新平台注册并启动。仅恢复同版本数据时，也要先比对输出的备份版本与归档中的配置、service definition，
 确认兼容后再显式启动并执行下列检查。失败时原数据文件会复位且服务仍保持 stopped；成功后保留 `.pre-restore-*` 到观察期结束。
 
@@ -693,7 +693,7 @@ binary/definition、刷新平台注册并启动。仅恢复同版本数据时，
 3. `curl http://localhost:8791/api/v1/control/storage/topology | jq .storage.missing_shard_count` — 确认 missing_shard_count=0
 4. `relay-knowledge service status` — 确认 code_index_workers 队列正常
 
-### 16.6.4 一致性边界与禁止操作
+### 15.6.4 一致性边界与禁止操作
 
 - 不在服务运行时复制 `.sqlite`、`-wal` 或 `-shm` 文件，也不逐库拼接所谓“整组快照”。
 - 不忽略 systemd 停服错误；停止后必须同时验证 service active 状态、MainPID 和非托管进程。
@@ -704,9 +704,9 @@ binary/definition、刷新平台注册并启动。仅恢复同版本数据时，
 
 ---
 
-## 16.7 容量规划
+## 15.7 容量规划
 
-### 16.7.1 存储增长估算
+### 15.7.1 存储增长估算
 
 | 数据类型 | 预估大小 | 说明 |
 |---------|---------|------|
@@ -720,7 +720,7 @@ binary/definition、刷新平台注册并启动。仅恢复同版本数据时，
 总存储 ≈ 控制库大小 + Σ(每个仓库 shard 大小) + 审计日志大小
 ```
 
-### 16.7.2 内存需求
+### 15.7.2 内存需求
 
 | 组件 | 内存估算 | 说明 |
 |-----|---------|------|
@@ -734,7 +734,7 @@ binary/definition、刷新平台注册并启动。仅恢复同版本数据时，
 - 中型部署（10-50 仓库）：2-4 GB
 - 大型部署（50+ 仓库）：8+ GB
 
-### 16.7.3 磁盘 I/O 考量
+### 15.7.3 磁盘 I/O 考量
 
 - SQLite 使用 WAL 模式，读操作无锁
 - code-index 写入发生在独立 shard 上，互不阻塞
@@ -744,9 +744,9 @@ binary/definition、刷新平台注册并启动。仅恢复同版本数据时，
 
 ---
 
-## 16.8 常见故障处理 SOP
+## 15.8 常见故障处理 SOP
 
-### 16.8.1 服务无法启动
+### 15.8.1 服务无法启动
 
 **症状**：`systemctl --user start relay-knowledge.service` 失败，user service 状态显示退出。
 
@@ -779,12 +779,12 @@ env | grep RELAY_
 |-----|---------|
 | 数据目录权限不足 | `chown -R relay-knowledge:relay-knowledge $DATA_DIR` |
 | 端口被占用 | 修改 `RELAY_KNOWLEDGE_HTTP_BIND` 或终止占用进程 |
-| 数据库损坏 | 从备份恢复（参见 16.6.3 节） |
+| 数据库损坏 | 从备份恢复（参见 15.6.3 节） |
 | QoS 配置为零值 | 检查 `RELAY_KNOWLEDGE_QOS_*` 变量是否 > 0 |
 | 存储拓扑配置错误 | 检查 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY` |
 | 网络配置缺失 | `setup doctor` 查看 `network_budget` 检查项 |
 
-### 16.8.2 索引任务卡死（Lease Recovery）
+### 15.8.2 索引任务卡死（Lease Recovery）
 
 **症状**：code_index_workers 的 `dead_letter_task_count > 0`，或有 running 状态但无进展的任务。
 
@@ -811,7 +811,7 @@ systemctl --user restart relay-knowledge.service
 curl -s http://localhost:8791/api/service/status | jq '.code_index_workers.dead_letter_task_count'
 ```
 
-### 16.8.3 存储空间不足
+### 15.8.3 存储空间不足
 
 **症状**：磁盘使用率告警，服务运行缓慢或写入失败。
 
@@ -837,7 +837,7 @@ systemctl --user show relay-knowledge.service --property=MainPID --value | grep 
 #    只清理已经轮转并超过组织保留期的日志、已验证且过期的备份和可再生缓存；
 #    不改写 agent-audit.jsonl，不删除任何数据库伴生文件。
 
-# 4. 空间恢复后，先按 16.6.2 节创建停服一致备份，再决定是否离线 VACUUM。
+# 4. 空间恢复后，先按 15.6.2 节创建停服一致备份，再决定是否离线 VACUUM。
 while IFS= read -r -d '' database; do
     read -r database_bytes < <(stat -c %s -- "$database")
     database_parent="${database%/*}"
@@ -869,7 +869,7 @@ relay-knowledge service status
 - 调整 scope retention 策略限制每个仓库保留的索引版本数
 - 部署并演练平台日志轮转；轮转策略必须保留审计要求，且不能依赖移动仍由进程持有的活跃文件
 
-### 16.8.4 高负载下的 QoS 拒绝
+### 15.8.4 高负载下的 QoS 拒绝
 
 **症状**：客户端收到 503/429 响应，或 `relay_agent_protocol_rejections_total` 指标上升。
 
@@ -897,7 +897,7 @@ systemctl --user restart relay-knowledge.service
 curl -s http://localhost:8791/api/v1/control/status | jq '.qos'
 ```
 
-### 16.8.5 Shard 损坏修复
+### 15.8.5 Shard 损坏修复
 
 **症状**：
 - `missing_shard_count > 0`（拓扑快照显示）
@@ -931,7 +931,7 @@ echo "Topology evidence: $TOPOLOGY_EVIDENCE"
 ```
 
 不要把某个历史 shard 文件直接复制进当前拓扑：它可能与控制库中的 catalog、scope 发布状态和任务 checkpoint
-不匹配。若有同一停服时间点的一致备份，按 16.6.3 节恢复整个数据目录。若没有可用备份但授权源码仍可访问，
+不匹配。若有同一停服时间点的一致备份，按 15.6.3 节恢复整个数据目录。若没有可用备份但授权源码仍可访问，
 重新启动服务后通过受支持的仓库操作删除并重新索引该仓库。完整性检查代码块会有意保持服务停止；在下一步
 恢复或重建开始前不要让它处于无人值守状态。重建前先显式提供本次事件的真实值：
 
@@ -995,4 +995,4 @@ worker 无新增 dead letter 后才能关闭事件。
 
 ---
 
-导航：上一章：[第 15 章 完整服务化部署指南](15-service-deployment-full-guide.md) | 下一章：[第 17 章 安全配置完整指南](17-security-configuration.md) | 返回：[用户指南](README.md)
+导航：上一章：[第 14 章 服务化部署指南](14-service-deployment-guide.md) | 下一章：[第 16 章 安全配置指南](16-security-configuration-guide.md) | 返回：[用户指南](README.md)

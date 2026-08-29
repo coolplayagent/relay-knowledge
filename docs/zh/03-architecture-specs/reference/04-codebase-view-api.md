@@ -1,12 +1,12 @@
 # relay-knowledge 代码库视图 API
 
-[中文](api-codebase-views.md) | 英文版尚未提供
+[中文](04-codebase-view-api.md) | 英文版尚未提供
 
 > 文档版本: 1.0
 > 编制日期: 2026-06-15
 > 适用范围: `/api/v1/code/repositories/{alias}/views`
 
-> 文档定位: [代码仓库 API](api-code-repositories.md)的视图字段专题，也是第 23 章 [HTTP API 参考](../23-api-reference.md)的一部分；本页不单独占用章节号。
+> 文档定位: [代码仓库 API](03-code-repository-api.md)的视图字段专题，也是第 23 章 [HTTP API 参考](../23-api-reference.md)的一部分；本页不单独占用章节号。
 
 ## 1. POST /api/v1/code/repositories/{alias}/views
 
@@ -65,4 +65,4 @@
 
 ---
 
-导航：上一专题：[代码仓库 API](api-code-repositories.md) | 下一专题：[MCP Streamable HTTP API](api-mcp-streamable-http.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)
+导航：上一专题：[代码仓库 API](03-code-repository-api.md) | 下一专题：[MCP Streamable HTTP API](05-mcp-streamable-http-api.md) | 返回：[23. HTTP API 参考](../23-api-reference.md) | 上级：[API 专题索引](README.md)

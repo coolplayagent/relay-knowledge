@@ -1,6 +1,6 @@
 # relay-teams E2E 验证 2026-05-14
 
-[中文](../../zh/06-verification/04-relay-teams-e2e-2026-05-14.md) | [英文](../../en/06-verification/04-relay-teams-e2e-2026-05-14.md)
+[中文](../../zh/06-verification/01-relay-teams-e2e-2026-05-14.md) | [英文](../../en/06-verification/01-relay-teams-e2e-2026-05-14.md)
 
 ## 范围
 

@@ -50,9 +50,9 @@ uv run --extra dev pytest tests/browser
 
 ## 关联验证记录
 
-- [文档书架刷新审计](../06-verification/01-documentation-book-refresh-2026-05-17.md)
-- [relay-teams E2E 验证](../06-verification/04-relay-teams-e2e-2026-05-14.md)
-- [Linux 代码图检索准确性测试](../06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md)
+- [文档书架结构审计](../06-verification/05-documentation-book-structure-audit-2026-05-17.md)
+- [relay-teams E2E 验证](../06-verification/01-relay-teams-e2e-2026-05-14.md)
+- [Linux 代码图检索准确性测试](../06-verification/04-code-graph-retrieval-accuracy-linux-2026-05-15.md)
 
 ---
 
