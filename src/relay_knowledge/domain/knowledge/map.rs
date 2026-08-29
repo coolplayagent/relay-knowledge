@@ -4,13 +4,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{DomainError, SourceScope, error::required_text};
 
+pub(crate) const BUSINESS_GLOSSARY_RELATIVE_PATH: &str =
+    "knowledge/glossary/business-glossary.yaml";
+pub(crate) const LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH: &str = ".knowledge/business-glossary.yaml";
+
 const SOFTWARE_MODEL_TOPIC_ID: &str = "software-model";
 const SOFTWARE_MODEL_SOURCE_ID: &str = "repository-software-model";
 const SOFTWARE_MODEL_SOURCE_URI: &str = ".";
 const SOFTWARE_MODEL_SOURCE_SCOPE: &str = "repo";
 const BUSINESS_KNOWLEDGE_TOPIC_ID: &str = "business-knowledge";
 const BUSINESS_KNOWLEDGE_SOURCE_ID: &str = "repository-business-glossary";
-const BUSINESS_KNOWLEDGE_SOURCE_URI: &str = ".knowledge/business-glossary.yaml";
 const BUSINESS_KNOWLEDGE_SOURCE_SCOPE: &str = "repo";
 
 /// Assembled inline map used by domain workflows and API responses.
@@ -54,6 +57,24 @@ impl KnowledgeMap {
         map.ensure_business_knowledge_route()
             .expect("built-in business-knowledge route must remain valid");
         map
+    }
+
+    /// Creates an empty map state used by the CodeSpec directory contract.
+    pub(crate) fn empty(updated_at: String) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            map_version: 1,
+            updated_at,
+            topics: Vec::new(),
+            sources: Vec::new(),
+            routes: Vec::new(),
+            history: vec![KnowledgeMapHistoryEntry {
+                version: 1,
+                action: "init".to_owned(),
+                actor: "cli".to_owned(),
+                summary: "Created CodeSpec repository map contract.".to_owned(),
+            }],
+        }
     }
 
     /// Ensures the stable repository entry used to discover code-derived software models.
@@ -153,7 +174,7 @@ impl KnowledgeMap {
             BUSINESS_KNOWLEDGE_SOURCE_ID.to_owned(),
             BUSINESS_KNOWLEDGE_TOPIC_ID.to_owned(),
             KnowledgeMapSourceKind::File,
-            BUSINESS_KNOWLEDGE_SOURCE_URI.to_owned(),
+            BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned(),
             Some(BUSINESS_KNOWLEDGE_SOURCE_SCOPE.to_owned()),
             Some(
                 "Authored business glossary projected by the repository index writer at an immutable commit."
@@ -507,7 +528,10 @@ fn validate_software_model_source(source: &KnowledgeMapSource) -> Result<(), Dom
 fn validate_business_knowledge_source(source: &KnowledgeMapSource) -> Result<(), DomainError> {
     let compatible = source.topic == BUSINESS_KNOWLEDGE_TOPIC_ID
         && source.kind == KnowledgeMapSourceKind::File
-        && source.uri == BUSINESS_KNOWLEDGE_SOURCE_URI
+        && matches!(
+            source.uri.as_str(),
+            BUSINESS_GLOSSARY_RELATIVE_PATH | LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+        )
         && source.source_scope.as_deref() == Some(BUSINESS_KNOWLEDGE_SOURCE_SCOPE);
     if compatible {
         return Ok(());
@@ -515,7 +539,7 @@ fn validate_business_knowledge_source(source: &KnowledgeMapSource) -> Result<(),
     Err(DomainError::invalid(
         "sources",
         format!(
-            "reserved source '{BUSINESS_KNOWLEDGE_SOURCE_ID}' must use topic '{BUSINESS_KNOWLEDGE_TOPIC_ID}', kind 'file', uri '{BUSINESS_KNOWLEDGE_SOURCE_URI}', and scope '{BUSINESS_KNOWLEDGE_SOURCE_SCOPE}'"
+            "reserved source '{BUSINESS_KNOWLEDGE_SOURCE_ID}' must use topic '{BUSINESS_KNOWLEDGE_TOPIC_ID}', kind 'file', uri '{BUSINESS_GLOSSARY_RELATIVE_PATH}', and scope '{BUSINESS_KNOWLEDGE_SOURCE_SCOPE}'"
         ),
     ))
 }

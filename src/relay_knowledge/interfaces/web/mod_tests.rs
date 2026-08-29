@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use crate::{
     api::{CodeRepositoryRegisterRequest, IngestEvidence, IngestEvidenceExtraction, IngestRequest},
     application::{KnowledgeMapService, KnowledgeMapSourceAddRequest, RelayKnowledgeService},
-    domain::{EvidenceModality, KnowledgeMapSourceKind},
+    domain::{EvidenceModality, KnowledgeMapSourceKind, RepositoryMapType},
     env::{EnvironmentConfig, PlatformKind},
 };
 
@@ -235,6 +235,10 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     let map = KnowledgeMapService::new(root.clone());
     let context = RequestContext::for_interface(InterfaceKind::Web);
     map.init(&context).await.expect("map should initialize");
+    map.for_type(RepositoryMapType::Codespec)
+        .init(&context)
+        .await
+        .expect("codespec map should initialize");
     map.add_source(
         &context,
         KnowledgeMapSourceAddRequest {
@@ -285,6 +289,26 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     .await;
     assert_eq!(payload["result"]["from_version"], 1);
     assert_eq!(payload["result"]["entries"].as_array().unwrap().len(), 1);
+    let codespec = execute_json_with_router(
+        router.clone(),
+        json!({
+            "snapshot": {
+                "name": "CodeSpec map history",
+                "command": "relay-knowledge map history --type codespec --from 1 --limit 1",
+                "payload": {
+                    "operation": "repository.map.history",
+                    "repository": "map-history",
+                    "map_type": "codespec",
+                    "from_version": 1,
+                    "limit": 1
+                }
+            }
+        }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(codespec["result"]["map_type"], "codespec");
+    assert_eq!(codespec["result"]["entries"].as_array().unwrap().len(), 1);
     let unregistered = execute_json_with_router(
         router.clone(),
         json!({

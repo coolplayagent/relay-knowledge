@@ -370,7 +370,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 - Rust 行覆盖率必须保持 90% 以上，覆盖 invariant、错误分支、边界值、async cancellation 和 backpressure。
 - Browser integration gate 必须安装 Playwright Chromium，例如 `uv run --extra dev python -m playwright install --with-deps chromium`。
 - 文档本身需要检查链接、编号、行数上限和过期状态。
-- Knowledge Map writer schema 采用 staged rollout：CI 总是要求当前源码 CLI 通过 `.knowledge/knowledge-map.yaml`，并安装 crates.io 最新 stable CLI 复验。若 stable 低于声明的最小 v2 reader `1.1.14`，只有源码版本更高时，不兼容结果才可报告为 `staged_pending_reader_release` artifact；源码与 stable 同版本却不兼容必须以 `incompatible_same_version` 硬失败。stable 达到最小 reader 版本后，任何不兼容都必须使门禁失败。不得在没有兼容 reader release 的情况下继续提升默认 writer schema。
+- Knowledge Map writer schema 采用 staged rollout：CI 总是要求当前源码 CLI 通过 `knowledge/knowledge-map.yaml` 与 `codespec/codespec-map.yaml`，并安装 crates.io 最新 stable CLI 复验。若 stable 低于声明的最小 v3 reader `1.1.15`，只有源码版本更高时，不兼容结果才可报告为 `staged_pending_reader_release` artifact；源码与 stable 同版本却不兼容必须以 `incompatible_same_version` 硬失败。stable 达到最小 reader 版本后，任何不兼容都必须使门禁失败。不得在没有兼容 reader release 的情况下继续提升默认 writer schema。
 
 ## 7. 验收标准
 

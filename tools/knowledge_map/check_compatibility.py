@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MINIMUM_V2_STABLE_READER = (1, 1, 14)
+MINIMUM_V3_STABLE_READER = (1, 1, 15)
 
 
 def command_json(binary: Path, *arguments: str) -> tuple[int, dict[str, object]]:
@@ -41,9 +41,19 @@ def binary_version(binary: Path) -> tuple[int, int, int]:
     return tuple(int(part) for part in parts)  # type: ignore[return-value]
 
 
+def validation_payload_is_valid(payload: dict[str, object]) -> bool:
+    results = payload.get("results")
+    aggregate_valid = (
+        isinstance(results, list)
+        and len(results) == 2
+        and all(isinstance(result, dict) and result.get("valid") is True for result in results)
+    )
+    return payload.get("valid") is True or aggregate_valid
+
+
 def validation(binary: Path) -> tuple[bool, dict[str, object]]:
     status, payload = command_json(binary, "map", "validate")
-    return status == 0 and payload.get("valid") is True, payload
+    return status == 0 and validation_payload_is_valid(payload), payload
 
 
 def stable_reader_status(
@@ -53,7 +63,7 @@ def stable_reader_status(
 ) -> str:
     if stable_valid:
         return "compatible"
-    if stable_version >= MINIMUM_V2_STABLE_READER:
+    if stable_version >= MINIMUM_V3_STABLE_READER:
         return "incompatible"
     if current_version <= stable_version:
         return "incompatible_same_version"
@@ -72,10 +82,11 @@ def report(
 
     payload: dict[str, object] = {
         "schema_version": 1,
-        "knowledge_map_path": ".knowledge/knowledge-map.yaml",
-        "required_reader_schema_version": 2,
-        "minimum_v2_stable_reader": ".".join(
-            str(part) for part in MINIMUM_V2_STABLE_READER
+        "knowledge_map_path": "knowledge/knowledge-map.yaml",
+        "codespec_map_path": "codespec/codespec-map.yaml",
+        "required_reader_schema_version": 3,
+        "minimum_v3_stable_reader": ".".join(
+            str(part) for part in MINIMUM_V3_STABLE_READER
         ),
         "current": {
             "binary": str(current),
@@ -100,14 +111,21 @@ def report(
 
 
 def self_test() -> None:
-    assert stable_reader_status((1, 1, 14), (1, 1, 13), False) == (
+    assert validation_payload_is_valid(
+        {"results": [{"valid": True}, {"valid": True}]}
+    )
+    assert not validation_payload_is_valid({"results": [{"valid": True}]})
+    assert not validation_payload_is_valid(
+        {"results": [{"valid": True}, {"valid": False}]}
+    )
+    assert stable_reader_status((1, 1, 15), (1, 1, 14), False) == (
         "staged_pending_reader_release"
     )
-    assert stable_reader_status((1, 1, 13), (1, 1, 13), False) == (
+    assert stable_reader_status((1, 1, 14), (1, 1, 14), False) == (
         "incompatible_same_version"
     )
-    assert stable_reader_status((1, 1, 14), (1, 1, 14), False) == "incompatible"
-    assert stable_reader_status((1, 1, 14), (1, 1, 13), True) == "compatible"
+    assert stable_reader_status((1, 1, 15), (1, 1, 15), False) == "incompatible"
+    assert stable_reader_status((1, 1, 15), (1, 1, 14), True) == "compatible"
     print("knowledge-map compatibility checker self-test passed")
 
 

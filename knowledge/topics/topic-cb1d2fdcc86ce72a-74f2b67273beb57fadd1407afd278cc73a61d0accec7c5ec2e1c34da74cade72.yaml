@@ -1,0 +1,32 @@
+schema_version: 3
+topic:
+  id: benchmarks
+  title: Benchmark knowledge
+  description: Self-iteration and benchmark guardrail documentation.
+sources:
+- id: code-index-fact-versioning
+  topic: benchmarks
+  kind: doc
+  uri: docs/zh/05-benchmarks/08-code-index-fact-versioning.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Code index fact-version policy for parser and retrieval benchmark changes.
+- id: profile-all-performance-source-surface-2026-06-04
+  topic: benchmarks
+  kind: doc
+  uri: docs/zh/05-benchmarks/10-profile-all-performance-source-surface-2026-06-04.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Profile full performance and bounded hybrid source-surface validation notes.
+route:
+  topic: benchmarks
+  source_order:
+  - profile-all-performance-source-surface-2026-06-04
+  - code-index-fact-versioning
+  fallback: bounded-search

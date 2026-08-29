@@ -45,6 +45,7 @@ REQUIRED_SHELL_POLICY_PHRASES = (
 )
 KNOWLEDGE_WORKFLOW_REFERENCE = Path("references/knowledge-map-workflows.md")
 KNOWLEDGE_MAP_SCHEMA = Path("references/knowledge-map.schema.json")
+CODESPEC_MAP_SCHEMA = Path("references/codespec-map.schema.json")
 BUSINESS_GLOSSARY_SCHEMA = Path("references/business-glossary.schema.json")
 OPENAI_AGENT_CONFIG = Path("agents/openai.yaml")
 KNOWLEDGE_MAP_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
@@ -53,6 +54,7 @@ KNOWLEDGE_MAP_ARTIFACT_DEFS = (
     "topicShard",
     "historyArchive",
     "historyIndexNode",
+    "redirect",
 )
 KNOWLEDGE_MAP_REQUIRED_DEFS = (
     "digest",
@@ -68,6 +70,8 @@ KNOWLEDGE_MAP_REQUIRED_DEFS = (
     "historyIndexRef",
     "historyManifest",
     "historyIndexEntry",
+    "directoryRelation",
+    "directory",
     *KNOWLEDGE_MAP_ARTIFACT_DEFS,
 )
 KNOWLEDGE_MAP_SOURCE_KINDS = (
@@ -548,9 +552,20 @@ def knowledge_map_schema_examples() -> list[dict[str, object]]:
     digest = "a" * 64
     history_entry = {"version": 1, "action": "init", "actor": "cli", "summary": "Created map."}
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "artifact_kind": "map",
+        "map_type": "knowledge",
         "map_version": 1,
         "updated_at": "unix:1",
+        "directories": [{
+            "directory": name,
+            "purpose": f"Govern {name} knowledge.",
+            "content_scope": [f"knowledge/{name}/**"],
+            "key_files": [f"knowledge/{name}/README.md"],
+            "load_hint": "on_demand",
+            "relations": [],
+            "update_rule": "reviewed",
+        } for name in ("domain", "guides", "ops", "glossary", "best-practices")],
         "topics": [{
             "id": "cli", "title": "CLI", "description": "CLI docs", "source_ids": ["cli-doc"],
             "ref": f"topics/topic-{'b' * 16}-{digest}.yaml", "digest": digest,
@@ -563,24 +578,30 @@ def knowledge_map_schema_examples() -> list[dict[str, object]]:
         "status": "active", "version": 1, "description": None,
     }
     shard = {
-        "schema_version": 2,
+        "schema_version": 3,
         "topic": {"id": "cli", "title": "CLI", "description": "CLI docs"},
         "sources": [source],
         "route": {"topic": "cli", "source_order": ["cli-doc"], "fallback": None},
     }
     archive_ref = f"history/{1:020}-{1:020}-{digest}.yaml"
     archive = {
-        "schema_version": 2, "from_version": 1, "through_version": 1,
+        "schema_version": 3, "from_version": 1, "through_version": 1,
         "previous": None, "entries": [history_entry],
     }
     index = {
-        "schema_version": 2, "from_version": 1, "through_version": 1, "height": 0,
+        "schema_version": 3, "from_version": 1, "through_version": 1, "height": 0,
         "entries": [{
             "from_version": 1, "through_version": 1, "kind": "archive",
             "ref": archive_ref, "digest": digest,
         }],
     }
-    return [manifest, shard, archive, index]
+    redirect = {
+        "schema_version": 3,
+        "artifact_kind": "redirect",
+        "map_type": "knowledge",
+        "target": "knowledge/knowledge-map.yaml",
+    }
+    return [manifest, shard, archive, index, redirect]
 
 
 def check_knowledge_map_schema_examples(schema: dict[str, object]) -> None:
@@ -636,6 +657,45 @@ def check_knowledge_map_schema(path: Path) -> None:
     schema = load_schema(path)
     check_knowledge_map_schema_contract(path, schema)
     check_knowledge_map_schema_examples(schema)
+
+
+def check_codespec_map_schema(path: Path) -> None:
+    schema = load_schema(path)
+    require_schema_value(path, schema.get("$schema"), KNOWLEDGE_MAP_SCHEMA_DRAFT, "draft")
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        raise ValueError(f"{path} is missing CodeSpec Map schema $defs")
+    for name in ("directory", "directoryRelation", "historyEntry", "historyManifest"):
+        if name not in definitions:
+            raise ValueError(f"{path} is missing CodeSpec Map schema $defs/{name}")
+    if any(node.get("additionalProperties") is not True for node in schema_object_nodes(schema)):
+        raise ValueError(f"{path} must allow unknown fields on every object schema")
+    example = {
+        "schema_version": 3,
+        "artifact_kind": "map",
+        "map_type": "codespec",
+        "map_version": 1,
+        "updated_at": "unix:1",
+        "directories": [{
+            "directory": name,
+            "purpose": f"Govern {name} specifications.",
+            "content_scope": [f"codespec/{name}/**"],
+            "key_files": [f"codespec/{name}/README.md"],
+            "load_hint": "on_demand",
+            "relations": [],
+            "update_rule": "reviewed",
+        } for name in ("requirements", "design", "api", "test", "decisions")],
+        "topics": [],
+        "history": {
+            "archived_through": 0,
+            "recent": [{"version": 1, "action": "init", "actor": "cli", "summary": "Created map."}],
+        },
+        "future_extension": True,
+    }
+    validate_schema_instance(schema, example)
+    invalid = copy.deepcopy(example)
+    invalid["map_type"] = "knowledge"
+    expect_value_error(lambda: validate_schema_instance(schema, invalid), "const")
 
 
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
@@ -694,6 +754,7 @@ def check_skill_metadata(path: Path, expected: str) -> None:
     check_skill_shell_policy(path)
     check_knowledge_loop_contract(path)
     check_knowledge_map_schema(path.parent / KNOWLEDGE_MAP_SCHEMA)
+    check_codespec_map_schema(path.parent / CODESPEC_MAP_SCHEMA)
     check_business_glossary_schema(path.parent / BUSINESS_GLOSSARY_SCHEMA)
 
 
@@ -837,6 +898,18 @@ def run_self_test() -> None:
             lambda: check_knowledge_map_schema(drifted_path),
             "$defs/source",
         )
+    codespec_schema_path = (
+        Path(__file__).resolve().parents[2]
+        / "skills/relay-knowledge-cli"
+        / CODESPEC_MAP_SCHEMA
+    )
+    check_codespec_map_schema(codespec_schema_path)
+    with tempfile.TemporaryDirectory(prefix="relay-codespec-schema-") as directory:
+        missing = Path(directory) / "missing.json"
+        expect_value_error(lambda: check_codespec_map_schema(missing), "is missing")
+        corrupted = Path(directory) / "corrupted.json"
+        corrupted.write_text("{not-json", encoding="utf-8")
+        expect_value_error(lambda: check_codespec_map_schema(corrupted), "is not valid JSON")
     self_test_business_glossary_schema(
         Path(__file__).resolve().parents[2]
         / "skills/relay-knowledge-cli"

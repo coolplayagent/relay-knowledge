@@ -21,7 +21,13 @@ fn root_search_walks_up_to_git_marker() {
 fn root_search_walks_up_to_knowledge_contract_directory() {
     let root = temp_root("knowledge-marker");
     let nested = root.join("docs").join("architecture");
-    fs::create_dir_all(root.join(AGENT_CONTRACT_DIR_NAME)).expect("knowledge marker should create");
+    fs::create_dir_all(root.join(crate::project::AGENT_CONTRACT_DIR_NAME))
+        .expect("knowledge directory should create");
+    fs::write(
+        root.join(crate::project::KNOWLEDGE_MAP_RELATIVE_PATH),
+        "schema_version: 3",
+    )
+    .expect("knowledge marker should write");
     fs::create_dir_all(&nested).expect("nested dir should create");
 
     let discovered = discover_repository_root(&nested)
@@ -39,7 +45,7 @@ fn root_search_falls_back_to_nearest_agents_file() {
     fs::create_dir_all(&nested).expect("nested dir should create");
     fs::write(
         root.join("AGENTS.md"),
-        "Knowledge map: .knowledge/knowledge-map.yaml",
+        "Knowledge map: knowledge/knowledge-map.yaml",
     )
     .expect("agents should write");
 

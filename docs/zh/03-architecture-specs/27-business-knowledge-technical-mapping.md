@@ -6,7 +6,7 @@
 
 ## 1. 权威源与数据流
 
-`.knowledge/knowledge-map.yaml` 只保存 `business-knowledge` topic、`repository-business-glossary` file source 和 route order。业务定义保存在受版本控制的 `.knowledge/business-glossary.yaml`：
+`knowledge/knowledge-map.yaml` 只保存 `business-knowledge` topic、`repository-business-glossary` file source 和 route order。业务定义保存在受 Knowledge Map `glossary` 目录条目治理、版本控制的 `knowledge/glossary/business-glossary.yaml`：
 
 ```yaml
 schema_version: 1

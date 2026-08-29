@@ -112,7 +112,7 @@ source or manifest changed
 - `software_sdk_usages` 从 unresolved、ambiguous 或 external 的 `code_repository_imports` 生成，用于表达 SDK/API surface 使用候选，保留 `resolution_state` 和 `target_hint`，但不解析未授权外部源码。
 - `software_files` 从 `code_repository_files` 生成，把代码、配置、文档、构建、部署、测试、模板和 knowledge map 文件作为整体节点。
 - `software_files` refresh 严格保持每页最多 512 条权威事实，以唯一 `(source_scope, path)` keyset 前进，不再用 `OFFSET` 重扫已消费前缀；每条 row 继续经过同一个领域构造器校验，整个 refresh 只复用一个 prepared projection insert。该存储优化仍位于既有 software-projection transaction 与 publication fence 内，不削弱 freshness、rollback 或可见性语义。
-- `software_topics` 从 Markdown/spec heading 和 `.knowledge/knowledge-map.yaml` 的 topic id 生成，用于表达仓库文档主题、架构约束和知识路由主题。
+- `software_topics` 从 Markdown/spec heading 和 `knowledge/knowledge-map.yaml` 的 topic id 生成，用于表达仓库文档主题、架构约束和知识路由主题。
 - `software_relationships` 从已提交依赖、SDK usage、feature flag/config facts 和文档 topic evidence 生成 `depends_on`、`uses_sdk`、`configures`、`documents` 等跨域关系，保留 `resolution_state`、target hint、confidence、证据路径和行号。
 - `software_build_targets` 从已索引 chunk 中的构建证据生成，覆盖 Cargo、npm、Python、Go、Maven effective `pom.xml`、Gradle、CMake、Makefile 和 CI workflow 的 package、script、target、feature、module、profile、plugin、goal、job 等入口。Maven effective model 只基于已索引证据解析仓库内 parent POM、properties、dependency management、plugin management、modules、profiles 和 imported BOM 声明；投影只记录证据和命令提示，不执行构建工具、不读取包缓存、不访问 registry。
 - `software_iac_resources` 从已索引 Dockerfile、Compose、Kubernetes YAML、Helm、Terraform、systemd、launchd 和 CI workflow 证据生成，保留 provider、resource kind、name、scope hint、target hint 和解析状态；它不访问云 API、不解析集群实时状态。

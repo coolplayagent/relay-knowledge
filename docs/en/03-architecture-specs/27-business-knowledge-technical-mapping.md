@@ -6,7 +6,7 @@ This chapter defines how repository-authored business knowledge enters the versi
 
 ## 1. Authority and Data Flow
 
-`.knowledge/knowledge-map.yaml` stores only the `business-knowledge` topic, the `repository-business-glossary` file source, and route order. Business definitions live in version-controlled `.knowledge/business-glossary.yaml`:
+`knowledge/knowledge-map.yaml` stores only the `business-knowledge` topic, the `repository-business-glossary` file source, and route order. Business definitions live in version-controlled `knowledge/glossary/business-glossary.yaml`, governed by the Knowledge Map `glossary` directory entry:
 
 ```yaml
 schema_version: 1

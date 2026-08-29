@@ -116,7 +116,7 @@ history:
 
     let message = error.to_string();
     assert!(message.contains("reserved source 'repository-business-glossary'"));
-    assert!(message.contains("uri '.knowledge/business-glossary.yaml'"));
+    assert!(message.contains("uri 'knowledge/glossary/business-glossary.yaml'"));
 }
 
 fn git_repository(map: &str, glossary: &str) -> TestRepository {

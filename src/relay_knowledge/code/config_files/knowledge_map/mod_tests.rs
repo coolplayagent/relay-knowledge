@@ -45,7 +45,7 @@ fn emits_manifest_authorization_and_digest_verified_shard_facts() {
     let root = valid_root(&relative, &digest);
     let mut root_facts = Vec::new();
     facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut root_facts);
-    let shard_path = format!(".knowledge/{relative}");
+    let shard_path = format!("knowledge/{relative}");
     assert!(
         root_facts.iter().any(|fact| {
             fact.kind == "knowledge_map_topic_shard_ref" && fact.name == shard_path
@@ -245,8 +245,7 @@ fn flow_style_v2_topics_emit_authorization_facts() {
     facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut definitions);
 
     assert!(definitions.iter().any(|fact| {
-        fact.kind == "knowledge_map_topic_shard_ref"
-            && fact.name == format!(".knowledge/{relative}")
+        fact.kind == "knowledge_map_topic_shard_ref" && fact.name == format!("knowledge/{relative}")
     }));
 }
 
@@ -263,7 +262,6 @@ fn quoted_ref_keys_emit_manifest_authorization_facts() {
     facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut definitions);
 
     assert!(definitions.iter().any(|fact| {
-        fact.kind == "knowledge_map_topic_shard_ref"
-            && fact.name == format!(".knowledge/{relative}")
+        fact.kind == "knowledge_map_topic_shard_ref" && fact.name == format!("knowledge/{relative}")
     }));
 }

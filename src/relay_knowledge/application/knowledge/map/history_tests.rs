@@ -51,8 +51,13 @@ async fn oldest_history_lookup_has_a_constant_read_bound_and_crosses_leaves() {
     );
     let manifest = KnowledgeMapManifest {
         schema_version: ARTIFACT_SCHEMA_VERSION,
+        artifact_kind: Some("map".to_owned()),
+        map_type: Some(crate::domain::RepositoryMapType::Knowledge),
         map_version: 71,
         updated_at: "fixture".to_owned(),
+        directories: super::contracts::baseline_directories(
+            crate::domain::RepositoryMapType::Knowledge,
+        ),
         topics: Vec::new(),
         history: KnowledgeMapHistoryManifest {
             archived_through: 70,
@@ -573,6 +578,7 @@ async fn writer_lock_ignore_contract_is_target_local_preserved_and_idempotent() 
             .count(),
         1
     );
+    assert_eq!(content.matches("/topics/*.retired\n").count(), 1);
     let _ = fs::remove_dir_all(root).await;
 }
 

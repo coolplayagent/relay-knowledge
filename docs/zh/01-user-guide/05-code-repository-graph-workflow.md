@@ -178,7 +178,7 @@ relay-knowledge repo software repo --kind topics --ref HEAD --format json
 relay-knowledge repo software repo --kind relationships --ref HEAD --format json
 ```
 
-该投影会把 Markdown/spec heading 和 `.knowledge/knowledge-map.yaml` topic 与文档文件连接，把依赖 manifest 与 package component 连接，把 unresolved import 与 SDK/API usage 候选连接，并把配置/feature-flag facts 与代码或配置文件连接。它只读取所选 indexed scope 的已提交 projection 表，不在查询时扫描包缓存、SDK 目录、未索引外部源码或全仓文档。
+该投影会把 Markdown/spec heading 和 `knowledge/knowledge-map.yaml` topic 与文档文件连接，把依赖 manifest 与 package component 连接，把 unresolved import 与 SDK/API usage 候选连接，并把配置/feature-flag facts 与代码或配置文件连接。它只读取所选 indexed scope 的已提交 projection 表，不在查询时扫描包缓存、SDK 目录、未索引外部源码或全仓文档。
 
 ### 多仓库 Repository Set 查询
 

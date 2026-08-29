@@ -3,7 +3,7 @@
 use crate::{
     api::RequestContext,
     domain::{KnowledgeMap, KnowledgeMapHistoryEntry},
-    project::{KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH},
+    project::KNOWLEDGE_MAP_HISTORY_DIR_NAME,
 };
 
 use super::{
@@ -13,11 +13,12 @@ use super::{
         KnowledgeMapArchiveRef, KnowledgeMapHistoryArchive, KnowledgeMapHistoryIndexEntry,
         KnowledgeMapHistoryIndexNode, KnowledgeMapHistoryIndexRef, KnowledgeMapHistoryIndexTarget,
         KnowledgeMapHistoryManifest, KnowledgeMapManifest, KnowledgeMapSchemaProbe,
-        RECENT_HISTORY_LIMIT, content_digest, parse_manifest, read_verified_ref, serialize_yaml,
-        validate_history_index_ref_shape, validate_recent_history,
+        LEGACY_ARTIFACT_SCHEMA_VERSION, RECENT_HISTORY_LIMIT, content_digest, parse_manifest,
+        read_verified_ref_in, serialize_yaml, validate_history_index_ref_shape,
+        validate_recent_history,
     },
     contracts::metadata,
-    publish_immutable,
+    publish_immutable_in,
 };
 
 pub(crate) const MAX_HISTORY_PAGE_SIZE: usize = 256;
@@ -44,7 +45,8 @@ impl KnowledgeMapService {
             .flatten();
         Ok(KnowledgeMapHistoryResponse {
             metadata: metadata(context),
-            path: KNOWLEDGE_MAP_RELATIVE_PATH.to_owned(),
+            path: self.relative_path().to_owned(),
+            map_type: self.map_type,
             map_version,
             from_version,
             through_version,
@@ -74,8 +76,9 @@ impl KnowledgeMapService {
                     .collect();
                 Ok((map.map_version, entries))
             }
-            ARTIFACT_SCHEMA_VERSION => {
+            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION => {
                 let manifest = parse_manifest(&content)?;
+                self.validate_manifest_identity(&manifest)?;
                 let entries = self
                     .load_v2_history_page(&manifest, from_version, limit)
                     .await?;
@@ -373,7 +376,13 @@ impl KnowledgeMapService {
             "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/index-{height:02}-{:020}-{:020}-{digest}.yaml",
             node.from_version, node.through_version
         );
-        publish_immutable(&self.repository_root, &relative, yaml.as_bytes()).await?;
+        publish_immutable_in(
+            &self.repository_root,
+            self.contract_dir_name(),
+            &relative,
+            yaml.as_bytes(),
+        )
+        .await?;
         Ok(KnowledgeMapHistoryIndexRef {
             from_version: node.from_version,
             through_version: node.through_version,
@@ -441,11 +450,19 @@ impl KnowledgeMapService {
         index: &KnowledgeMapHistoryIndexRef,
     ) -> Result<KnowledgeMapHistoryIndexNode, KnowledgeMapServiceError> {
         validate_history_index_ref_shape(index, index.through_version)?;
-        let content = read_verified_ref(&self.repository_root, &index.r#ref, &index.digest).await?;
+        let content = read_verified_ref_in(
+            &self.repository_root,
+            self.read_contract_dir_name().await?,
+            &index.r#ref,
+            &index.digest,
+        )
+        .await?;
         let node = serde_norway::from_str::<KnowledgeMapHistoryIndexNode>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        if node.schema_version != ARTIFACT_SCHEMA_VERSION
-            || node.height != index.height
+        if !matches!(
+            node.schema_version,
+            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        ) || node.height != index.height
             || node.from_version != index.from_version
             || node.through_version != index.through_version
             || node.entries.first().map(|entry| entry.from_version) != Some(node.from_version)
@@ -470,8 +487,9 @@ impl KnowledgeMapService {
                 "history archive chain has an unsafe ref".to_owned(),
             ));
         }
-        let content = read_verified_ref(
+        let content = read_verified_ref_in(
             &self.repository_root,
+            self.read_contract_dir_name().await?,
             &archive_ref.r#ref,
             &archive_ref.digest,
         )
@@ -482,8 +500,10 @@ impl KnowledgeMapService {
             "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{}.yaml",
             archive.from_version, archive.through_version, archive_ref.digest
         );
-        if archive.schema_version != ARTIFACT_SCHEMA_VERSION
-            || archive_ref.r#ref != expected_ref
+        if !matches!(
+            archive.schema_version,
+            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        ) || archive_ref.r#ref != expected_ref
             || archive.through_version != expected_through
             || archive.entries.is_empty()
             || archive.entries.len() > RECENT_HISTORY_LIMIT

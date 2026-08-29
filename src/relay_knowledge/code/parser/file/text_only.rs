@@ -3,7 +3,10 @@
 use crate::{
     code::{CodeIndexError, SnapshotBuild, config_files, stable_id},
     domain::{RepositoryCodeRange, RepositoryCodeSymbolRecord},
-    project::{KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX},
+    project::{
+        KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+        LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
+    },
 };
 
 use super::contracts::{FileParseContext, FileParseOutput};
@@ -44,7 +47,11 @@ fn topic_source(path: &str, language_id: &str) -> bool {
 }
 
 fn knowledge_map_path(path: &str) -> bool {
-    path == KNOWLEDGE_MAP_RELATIVE_PATH || path.starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)
+    matches!(
+        path,
+        KNOWLEDGE_MAP_RELATIVE_PATH | LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH
+    ) || path.starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)
+        || path.starts_with(".knowledge/topics/")
 }
 
 fn record_markdown_headings(

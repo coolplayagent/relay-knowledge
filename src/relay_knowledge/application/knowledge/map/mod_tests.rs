@@ -227,7 +227,7 @@ async fn init_creates_and_then_preserves_business_glossary_without_version_churn
     fs::create_dir_all(&root).await.expect("root should create");
     fs::write(
         root.join("AGENTS.md"),
-        "Knowledge map: .knowledge/knowledge-map.yaml\n",
+        format!("Knowledge map: {KNOWLEDGE_MAP_RELATIVE_PATH}\n"),
     )
     .await
     .expect("agent contract should write");
@@ -235,7 +235,7 @@ async fn init_creates_and_then_preserves_business_glossary_without_version_churn
     let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
 
     let initialized = service.init(&context).await.expect("init should work");
-    let glossary_path = root.join(".knowledge/business-glossary.yaml");
+    let glossary_path = root.join(crate::project::BUSINESS_GLOSSARY_RELATIVE_PATH);
     let empty = fs::read(&glossary_path)
         .await
         .expect("glossary should exist");
@@ -988,3 +988,4 @@ mod history_tests;
 
 #[path = "path_tests.rs"]
 mod path_tests;
+use std::time::{SystemTime, UNIX_EPOCH};

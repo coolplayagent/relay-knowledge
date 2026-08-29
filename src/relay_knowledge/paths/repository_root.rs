@@ -1,7 +1,7 @@
 //! Repository-root discovery for repository-local contracts.
 //!
 //! This module owns path-based discovery for repository-scoped files such as
-//! `.knowledge/knowledge-map.yaml`. Callers provide the starting directory;
+//! `knowledge/knowledge-map.yaml`. Callers provide the starting directory;
 //! process cwd lookup belongs to bootstrap.
 
 use std::{
@@ -10,7 +10,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::project::AGENT_CONTRACT_DIR_NAME;
+use crate::project::{
+    CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_RELATIVE_PATH, LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
+};
 
 /// Error raised before repository-root discovery can walk ancestors.
 #[derive(Debug)]
@@ -62,7 +64,7 @@ impl Error for RepositoryRootDiscoveryError {
 /// Finds the repository root that owns repository-local knowledge contracts.
 ///
 /// Discovery starts at `start` and walks ancestors. A `.git` directory/file or
-/// `.knowledge` directory wins immediately. If neither exists, the nearest
+/// exact CodeSpec/Knowledge map file wins immediately. If none exists, the nearest
 /// `AGENTS.md` ancestor is used as a compatibility fallback.
 pub fn discover_repository_root(
     start: &Path,
@@ -80,7 +82,11 @@ pub fn discover_repository_root(
 
     let mut agents_root = None;
     for path in start.ancestors() {
-        if marker_exists(path.join(".git"))? || marker_exists(path.join(AGENT_CONTRACT_DIR_NAME))? {
+        if marker_exists(path.join(".git"))?
+            || marker_exists(path.join(KNOWLEDGE_MAP_RELATIVE_PATH))?
+            || marker_exists(path.join(CODESPEC_MAP_RELATIVE_PATH))?
+            || marker_exists(path.join(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH))?
+        {
             return Ok(Some(path.to_path_buf()));
         }
         if agents_root.is_none() && marker_exists(path.join("AGENTS.md"))? {

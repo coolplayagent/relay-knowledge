@@ -7,13 +7,14 @@ use tokio::fs;
 
 use crate::domain::{
     KnowledgeMap, KnowledgeMapHistoryEntry, KnowledgeMapRoute, KnowledgeMapSource,
-    KnowledgeMapTopic,
+    KnowledgeMapTopic, RepositoryMapDirectory, RepositoryMapType, validate_directory_collection,
 };
 
 use super::error::KnowledgeMapServiceError;
 
 pub(super) const RECENT_HISTORY_LIMIT: usize = 16;
-pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 2;
+pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 3;
+pub(super) const LEGACY_ARTIFACT_SCHEMA_VERSION: u16 = 2;
 pub(super) const HISTORY_INDEX_FANOUT: usize = 64;
 pub(super) const HISTORY_INDEX_MAX_HEIGHT: u8 = 10;
 
@@ -25,8 +26,15 @@ pub(super) struct KnowledgeMapSchemaProbe {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapManifest {
     pub(super) schema_version: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) artifact_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) map_type: Option<RepositoryMapType>,
     pub(super) map_version: u64,
     pub(super) updated_at: String,
+    #[serde(default)]
+    pub(super) directories: Vec<RepositoryMapDirectory>,
+    #[serde(default)]
     pub(super) topics: Vec<KnowledgeMapTopicRef>,
     pub(super) history: KnowledgeMapHistoryManifest,
 }
@@ -130,10 +138,25 @@ pub(super) fn parse_manifest(
 ) -> Result<KnowledgeMapManifest, KnowledgeMapServiceError> {
     let manifest = serde_norway::from_str::<KnowledgeMapManifest>(content)
         .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION || manifest.map_version == 0 {
+    if !matches!(
+        manifest.schema_version,
+        LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+    ) || manifest.map_version == 0
+    {
         return Err(KnowledgeMapServiceError::Integrity(
             "manifest schema_version or map_version is invalid".to_owned(),
         ));
+    }
+    if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        if manifest.artifact_kind.as_deref() != Some("map") {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "v3 manifest artifact_kind must be 'map'".to_owned(),
+            ));
+        }
+        let map_type = manifest.map_type.ok_or_else(|| {
+            KnowledgeMapServiceError::Integrity("v3 manifest map_type is required".to_owned())
+        })?;
+        validate_directory_collection(map_type, &manifest.directories, true)?;
     }
     let mut topic_ids = std::collections::HashSet::new();
     let mut folded_topic_ids = std::collections::HashSet::new();
@@ -448,12 +471,13 @@ fn is_scoped_contract_ref(relative: &str, directory: &str) -> bool {
         && components.next().is_none()
 }
 
-pub(super) async fn read_verified_ref(
+pub(super) async fn read_verified_ref_in(
     repository_root: &Path,
+    contract_dir: &str,
     relative: &str,
     expected_digest: &str,
 ) -> Result<String, KnowledgeMapServiceError> {
-    let path = resolve_contract_ref(repository_root, relative)?;
+    let path = resolve_contract_ref_in(repository_root, contract_dir, relative)?;
     match fs::symlink_metadata(&path).await {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
@@ -468,18 +492,17 @@ pub(super) async fn read_verified_ref(
         Err(error) => return Err(error.into()),
     }
     let canonical_repository = fs::canonicalize(repository_root).await?;
-    let canonical_contract =
-        fs::canonicalize(repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME)).await?;
+    let canonical_contract = fs::canonicalize(repository_root.join(contract_dir)).await?;
     let artifact_dir = if relative.starts_with(&format!(
         "{}/",
         crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME
     )) {
         repository_root
-            .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+            .join(contract_dir)
             .join(crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME)
     } else {
         repository_root
-            .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+            .join(contract_dir)
             .join(crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME)
     };
     reject_symlink(&artifact_dir).await?;
@@ -501,8 +524,9 @@ pub(super) async fn read_verified_ref(
     Ok(content)
 }
 
-pub(super) fn resolve_contract_ref(
+pub(super) fn resolve_contract_ref_in(
     repository_root: &Path,
+    contract_dir: &str,
     relative: &str,
 ) -> Result<PathBuf, KnowledgeMapServiceError> {
     let relative_path = Path::new(relative);
@@ -520,7 +544,5 @@ pub(super) fn resolve_contract_ref(
     {
         return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
     }
-    Ok(repository_root
-        .join(crate::project::AGENT_CONTRACT_DIR_NAME)
-        .join(relative_path))
+    Ok(repository_root.join(contract_dir).join(relative_path))
 }

@@ -13,7 +13,7 @@ use crate::{
         CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
         CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
         FrameworkGraphRequest, FrameworkKind, FrameworkNodeKind, FreshnessPolicy, IndexKind,
-        ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest, WorkerKind,
+        ProposalState, RepositoryMapType, SoftwareGlobalKind, SoftwareGlobalRequest, WorkerKind,
     },
 };
 
@@ -68,6 +68,7 @@ pub(super) fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebE
 #[derive(Debug)]
 pub(super) struct KnowledgeMapHistoryPage {
     pub(super) repository: String,
+    pub(super) map_type: RepositoryMapType,
     pub(super) from_version: u64,
     pub(super) limit: usize,
 }
@@ -89,8 +90,18 @@ pub(super) fn knowledge_map_history_page(
         )));
     }
     let repository = string_field(payload, "repository")?.trim().to_owned();
+    let map_type = match optional_string_field(payload, "map_type").as_deref() {
+        None | Some("knowledge") => RepositoryMapType::Knowledge,
+        Some("codespec") => RepositoryMapType::Codespec,
+        Some(_) => {
+            return Err(WebError::bad_request(
+                "map_type must be 'knowledge' or 'codespec'".to_owned(),
+            ));
+        }
+    };
     Ok(KnowledgeMapHistoryPage {
         repository,
+        map_type,
         from_version,
         limit,
     })

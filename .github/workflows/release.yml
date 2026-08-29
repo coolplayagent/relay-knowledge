@@ -10,7 +10,7 @@ on:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v1.1.14
+        default: v1.1.15
 
 permissions:
   contents: read
@@ -108,6 +108,7 @@ jobs:
           test -f skills/relay-knowledge-cli/references/cli-workflows.md
           test -f skills/relay-knowledge-cli/references/knowledge-map-workflows.md
           test -f skills/relay-knowledge-cli/references/knowledge-map.schema.json
+          test -f skills/relay-knowledge-cli/references/codespec-map.schema.json
           test -f skills/relay-knowledge-cli/references/business-glossary.schema.json
           grep -q 'Relay Knowledge CLI Skill' skills/relay-knowledge-cli/README.md
           grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/README.md
@@ -331,6 +332,7 @@ jobs:
           cp -R skills/relay-knowledge-cli/. "dist/$package/"
           test -f "dist/$package/README.md"
           test -f "dist/$package/references/knowledge-map.schema.json"
+          test -f "dist/$package/references/codespec-map.schema.json"
           test -f "dist/$package/references/business-glossary.schema.json"
           python3 tools/release/update_skill_metadata_version.py \
             "dist/$package/SKILL.md" "${{ needs.verify.outputs.version }}"
@@ -363,6 +365,8 @@ jobs:
           tar -tzf "dist/$package.tar.gz" | grep -Fx "$package/README.md" >/dev/null
           tar -tzf "dist/$package.tar.gz" \
             | grep -Fx "$package/references/knowledge-map.schema.json" >/dev/null
+          tar -tzf "dist/$package.tar.gz" \
+            | grep -Fx "$package/references/codespec-map.schema.json" >/dev/null
           tar -tzf "dist/$package.tar.gz" \
             | grep -Fx "$package/references/business-glossary.schema.json" >/dev/null
 

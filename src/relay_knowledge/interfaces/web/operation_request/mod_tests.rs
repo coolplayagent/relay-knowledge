@@ -13,8 +13,26 @@ fn knowledge_map_history_page_requires_positive_bounded_inputs() {
     }))
     .expect("valid page");
     assert_eq!(page.repository, "relay");
+    assert_eq!(page.map_type, RepositoryMapType::Knowledge);
     assert_eq!(page.from_version, 2);
     assert_eq!(page.limit, 16);
+    let codespec = knowledge_map_history_page(&serde_json::json!({
+        "repository": "relay",
+        "map_type": "codespec",
+        "from_version": 1,
+        "limit": 1
+    }))
+    .expect("codespec page");
+    assert_eq!(codespec.map_type, RepositoryMapType::Codespec);
+    assert!(
+        knowledge_map_history_page(&serde_json::json!({
+            "repository": "relay",
+            "map_type": "unknown",
+            "from_version": 1,
+            "limit": 1
+        }))
+        .is_err()
+    );
     assert!(
         knowledge_map_history_page(&serde_json::json!({
             "repository": "relay",

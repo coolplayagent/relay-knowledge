@@ -7,14 +7,17 @@ use serde::Serialize;
 use crate::{
     api::{ApiMetadata, RequestContext},
     domain::{
-        KnowledgeMap, KnowledgeMapHistoryEntry, KnowledgeMapRoute, KnowledgeMapSource,
-        KnowledgeMapSourceKind, KnowledgeMapTopic,
+        DirectoryLoadHint, DirectoryUpdateRule, KnowledgeMap, KnowledgeMapHistoryEntry,
+        KnowledgeMapRoute, KnowledgeMapSource, KnowledgeMapSourceKind, KnowledgeMapTopic,
+        RepositoryMapDirectory, RepositoryMapType,
     },
 };
 
 use super::artifact::{KnowledgeMapArchiveRef, KnowledgeMapHistoryIndexRef};
 
 pub(super) struct MutableKnowledgeMap {
+    pub(super) map_type: RepositoryMapType,
+    pub(super) directories: Vec<RepositoryMapDirectory>,
     pub(super) map: KnowledgeMap,
     pub(super) archived_through: u64,
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
@@ -23,14 +26,59 @@ pub(super) struct MutableKnowledgeMap {
 }
 
 impl MutableKnowledgeMap {
-    pub(super) fn initial(updated_at: String) -> Self {
+    pub(super) fn initial(map_type: RepositoryMapType, updated_at: String) -> Self {
         Self {
-            map: KnowledgeMap::initial(updated_at),
+            map: match map_type {
+                RepositoryMapType::Knowledge => KnowledgeMap::initial(updated_at),
+                RepositoryMapType::Codespec => KnowledgeMap::empty(updated_at),
+            },
+            map_type,
+            directories: baseline_directories(map_type),
             archived_through: 0,
             archive: None,
             history_index: None,
             requires_publish: false,
         }
+    }
+}
+
+pub(super) fn baseline_directories(map_type: RepositoryMapType) -> Vec<RepositoryMapDirectory> {
+    map_type
+        .required_directories()
+        .iter()
+        .map(|directory| RepositoryMapDirectory {
+            directory: (*directory).to_owned(),
+            purpose: baseline_purpose(map_type, directory).to_owned(),
+            content_scope: vec![format!("{}/{directory}/**", map_type.as_str())],
+            key_files: vec![format!("{}/{directory}/README.md", map_type.as_str())],
+            load_hint: DirectoryLoadHint::OnDemand,
+            relations: Vec::new(),
+            update_rule: DirectoryUpdateRule::Reviewed,
+        })
+        .collect()
+}
+
+fn baseline_purpose(map_type: RepositoryMapType, directory: &str) -> &'static str {
+    match (map_type, directory) {
+        (RepositoryMapType::Codespec, "requirements") => {
+            "Product requirements and acceptance criteria."
+        }
+        (RepositoryMapType::Codespec, "design") => {
+            "Architecture and implementation design records."
+        }
+        (RepositoryMapType::Codespec, "api") => "Public interface and schema contracts.",
+        (RepositoryMapType::Codespec, "test") => "Verification strategy, fixtures, and evidence.",
+        (RepositoryMapType::Codespec, "decisions") => "Durable architecture and product decisions.",
+        (RepositoryMapType::Knowledge, "domain") => "Domain concepts, models, and business rules.",
+        (RepositoryMapType::Knowledge, "guides") => "Task-oriented repository knowledge guides.",
+        (RepositoryMapType::Knowledge, "ops") => "Operational procedures and diagnostics.",
+        (RepositoryMapType::Knowledge, "glossary") => {
+            "Business terminology, aliases, and technical mappings."
+        }
+        (RepositoryMapType::Knowledge, "best-practices") => {
+            "Reviewed engineering and knowledge-management practices."
+        }
+        _ => "Repository navigation knowledge.",
     }
 }
 
@@ -62,6 +110,7 @@ pub struct KnowledgeMapSourceAddRequest {
 pub struct KnowledgeMapMutationResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub map_version: u64,
     pub summary: String,
 }
@@ -71,6 +120,7 @@ pub struct KnowledgeMapMutationResponse {
 pub struct KnowledgeMapShowResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub map: KnowledgeMapView,
 }
 
@@ -80,6 +130,7 @@ pub struct KnowledgeMapView {
     pub artifact_schema_version: u16,
     pub map_version: u64,
     pub updated_at: String,
+    pub directories: Vec<RepositoryMapDirectory>,
     pub topics: Vec<KnowledgeMapTopic>,
     pub sources: Vec<KnowledgeMapSource>,
     pub routes: Vec<KnowledgeMapRoute>,
@@ -99,6 +150,7 @@ pub struct KnowledgeMapHistoryWindow {
 pub struct KnowledgeMapHistoryResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub map_version: u64,
     pub from_version: u64,
     pub through_version: u64,
@@ -112,6 +164,7 @@ pub struct KnowledgeMapHistoryResponse {
 pub struct KnowledgeMapRouteResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub topic: String,
     pub route: Option<KnowledgeMapRoute>,
     pub sources: Vec<KnowledgeMapSource>,
@@ -122,6 +175,7 @@ pub struct KnowledgeMapRouteResponse {
 pub struct KnowledgeMapValidationResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub valid: bool,
     pub diagnostics: Vec<String>,
 }

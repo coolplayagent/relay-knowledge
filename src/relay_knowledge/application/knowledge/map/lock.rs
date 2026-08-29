@@ -13,8 +13,9 @@ use std::{
 
 use tokio::time::{Instant, sleep};
 
+use crate::project::{KNOWLEDGE_MAP_FILE_NAME, LEGACY_AGENT_CONTRACT_DIR_NAME};
+
 use super::{KnowledgeMapService, KnowledgeMapServiceError, ensure_owned_directory};
-use crate::project::{AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME};
 
 pub(super) const ADVISORY_LOCK_MARKER: &[u8] = b"relay-knowledge advisory writer lock v2\n";
 const PREPARED_LOCK_CLEANUP_LIMIT: usize = 64;
@@ -22,8 +23,7 @@ const PREPARED_LOCK_RETIREMENT_AGE: Duration = Duration::from_secs(60);
 const PREPARED_LOCK_STARTUP_ID_BYTES: usize = 16;
 const LOCK_IGNORE_MAX_BYTES: u64 = 64 * 1024;
 const LOCK_IGNORE_COMMENT: &[u8] = b"# relay-knowledge transient writer locks\n";
-const LOCK_IGNORE_CANONICAL: &[u8] = b"/knowledge-map.yaml.lock";
-const LOCK_IGNORE_PREPARED: &[u8] = b"/knowledge-map.yaml.lock.prepared.*";
+const RETIRED_SHARD_IGNORE: &[u8] = b"/topics/*.retired";
 static PREPARED_LOCK_NONCE: AtomicU64 = AtomicU64::new(0);
 static PREPARED_LOCK_STARTUP_ID: OnceLock<[u8; PREPARED_LOCK_STARTUP_ID_BYTES]> = OnceLock::new();
 
@@ -32,14 +32,44 @@ impl KnowledgeMapService {
         &self,
         timeout: Duration,
     ) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
+        self.acquire_write_lock_at(self.contract_dir_name(), self.map_file_name(), timeout)
+            .await
+    }
+
+    pub(super) async fn acquire_legacy_write_lock(
+        &self,
+        timeout: Duration,
+    ) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
+        self.acquire_write_lock_at(
+            LEGACY_AGENT_CONTRACT_DIR_NAME,
+            KNOWLEDGE_MAP_FILE_NAME,
+            timeout,
+        )
+        .await
+    }
+
+    async fn acquire_write_lock_at(
+        &self,
+        contract_dir_name: &str,
+        map_file_name: &str,
+        timeout: Duration,
+    ) -> Result<KnowledgeMapWriteLock, KnowledgeMapServiceError> {
         let deadline = Instant::now() + timeout;
-        let directory = self.repository_root.join(AGENT_CONTRACT_DIR_NAME);
+        let directory = self.repository_root.join(contract_dir_name);
         ensure_owned_directory(&self.repository_root, &directory).await?;
         let ignore_path = directory.join(".gitignore");
         let ignore_worker_path = ignore_path.clone();
+        let ignore_canonical = format!("/{map_file_name}.lock").into_bytes();
+        let ignore_prepared = format!("/{map_file_name}.lock.prepared.*").into_bytes();
         let ignore_timeout = deadline.saturating_duration_since(Instant::now());
         let ignore_result = tokio::task::spawn_blocking(move || {
-            ensure_lock_ignore_contract(&ignore_worker_path, ignore_timeout)
+            ensure_lock_ignore_contract(
+                &ignore_worker_path,
+                ignore_timeout,
+                &ignore_canonical,
+                &ignore_prepared,
+                RETIRED_SHARD_IGNORE,
+            )
         })
         .await
         .map_err(|error| {
@@ -54,7 +84,7 @@ impl KnowledgeMapService {
             }
             Err(error) => return Err(KnowledgeMapServiceError::Io(error)),
         }
-        let path = directory.join(format!("{KNOWLEDGE_MAP_FILE_NAME}.lock"));
+        let path = directory.join(format!("{map_file_name}.lock"));
         loop {
             let open_path = path.clone();
             let candidate = tokio::task::spawn_blocking(move || open_transition_lock(&open_path))
@@ -294,7 +324,13 @@ fn valid_prepared_lock_suffix(suffix: &str) -> bool {
     }
 }
 
-fn ensure_lock_ignore_contract(path: &Path, timeout: Duration) -> std::io::Result<()> {
+fn ensure_lock_ignore_contract(
+    path: &Path,
+    timeout: Duration,
+    canonical: &[u8],
+    prepared: &[u8],
+    retired_shards: &[u8],
+) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true).append(true).create(true);
     configure_no_follow(&mut options);
@@ -333,9 +369,10 @@ fn ensure_lock_ignore_contract(path: &Path, timeout: Duration) -> std::io::Resul
             ),
         ));
     }
-    let has_canonical = ignore_contract_has_line(&content, LOCK_IGNORE_CANONICAL);
-    let has_prepared = ignore_contract_has_line(&content, LOCK_IGNORE_PREPARED);
-    if has_canonical && has_prepared {
+    let has_canonical = ignore_contract_has_line(&content, canonical);
+    let has_prepared = ignore_contract_has_line(&content, prepared);
+    let has_retired_shards = ignore_contract_has_line(&content, retired_shards);
+    if has_canonical && has_prepared && has_retired_shards {
         return Ok(());
     }
     let mut addition = Vec::new();
@@ -344,11 +381,15 @@ fn ensure_lock_ignore_contract(path: &Path, timeout: Duration) -> std::io::Resul
     }
     addition.extend_from_slice(LOCK_IGNORE_COMMENT);
     if !has_canonical {
-        addition.extend_from_slice(LOCK_IGNORE_CANONICAL);
+        addition.extend_from_slice(canonical);
         addition.push(b'\n');
     }
     if !has_prepared {
-        addition.extend_from_slice(LOCK_IGNORE_PREPARED);
+        addition.extend_from_slice(prepared);
+        addition.push(b'\n');
+    }
+    if !has_retired_shards {
+        addition.extend_from_slice(retired_shards);
         addition.push(b'\n');
     }
     file.write_all(&addition)?;

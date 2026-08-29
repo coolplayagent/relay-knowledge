@@ -14,14 +14,17 @@ fn bootstrap_binds_business_software_and_context_to_one_indexed_commit() {
     let mut fixture = AcceptanceFixture::create();
 
     let initialized = fixture.cli(["map", "init", "--format", "json"]);
-    let initial_version = initialized["map_version"]
+    let initial_version = selected_map(&initialized, "knowledge")["map_version"]
         .as_u64()
         .expect("map init should report its version");
     let repeated = fixture.cli(["map", "init", "--format", "json"]);
-    assert_eq!(repeated["map_version"], initial_version);
+    assert_eq!(
+        selected_map(&repeated, "knowledge")["map_version"],
+        initial_version
+    );
     write(
         &fixture.repository,
-        ".knowledge/business-glossary.yaml",
+        "knowledge/glossary/business-glossary.yaml",
         r#"schema_version: 1
 domains:
   - id: revenue
@@ -48,14 +51,22 @@ terms:
         target: src/lib.rs
 "#,
     );
-    git(&fixture.repository, ["add", ".knowledge"]);
+    git(&fixture.repository, ["add", "codespec", "knowledge"]);
     git(
         &fixture.repository,
         ["commit", "-m", "author business glossary"],
     );
     fixture.commit = git_text(&fixture.repository, ["rev-parse", "HEAD"]);
 
-    let route = fixture.cli(["map", "route", "software-model", "--format", "json"]);
+    let route = fixture.cli([
+        "map",
+        "route",
+        "software-model",
+        "--type",
+        "knowledge",
+        "--format",
+        "json",
+    ]);
     assert_eq!(
         route["route"]["source_order"],
         serde_json::json!(["repository-software-model"])
@@ -63,7 +74,15 @@ terms:
     assert_eq!(route["sources"][0]["kind"], "repo");
     assert_eq!(route["sources"][0]["uri"], ".");
     assert_eq!(route["sources"][0]["source_scope"], "repo");
-    let business_route = fixture.cli(["map", "route", "business-knowledge", "--format", "json"]);
+    let business_route = fixture.cli([
+        "map",
+        "route",
+        "business-knowledge",
+        "--type",
+        "knowledge",
+        "--format",
+        "json",
+    ]);
     assert_eq!(
         business_route["route"]["source_order"],
         serde_json::json!(["repository-business-glossary"])
@@ -220,11 +239,14 @@ terms:
     );
 
     let validated = fixture.cli(["map", "validate", "--format", "json"]);
-    assert_eq!(
-        validated["valid"], true,
-        "final map validation should succeed: {validated}"
-    );
-    assert_eq!(validated["diagnostics"], serde_json::json!([]));
+    for map_type in ["codespec", "knowledge"] {
+        let result = selected_map(&validated, map_type);
+        assert_eq!(
+            result["valid"], true,
+            "final {map_type} map validation should succeed: {validated}"
+        );
+        assert_eq!(result["diagnostics"], serde_json::json!([]));
+    }
 }
 
 struct AcceptanceFixture {
@@ -264,7 +286,7 @@ impl AcceptanceFixture {
         write(
             &repository,
             "AGENTS.md",
-            "Knowledge map: .knowledge/knowledge-map.yaml\n",
+            "CodeSpec map: codespec/codespec-map.yaml\nKnowledge map: knowledge/knowledge-map.yaml\n",
         );
         git(&repository, ["init"]);
         git(
@@ -312,6 +334,13 @@ impl AcceptanceFixture {
         );
         serde_json::from_slice(&output.stdout).expect("relay-knowledge stdout should be JSON")
     }
+}
+
+fn selected_map<'a>(response: &'a Value, map_type: &str) -> &'a Value {
+    response["results"]
+        .as_array()
+        .and_then(|results| results.iter().find(|result| result["map_type"] == map_type))
+        .unwrap_or_else(|| panic!("response should contain {map_type} map result: {response}"))
 }
 
 impl Drop for AcceptanceFixture {

@@ -454,7 +454,8 @@ relay-knowledge repo context core \
   --format json
 ```
 
-When Markdown, specifications, or `.knowledge/knowledge-map.yaml` changed,
+When Markdown, specifications, `codespec/codespec-map.yaml`, or
+`knowledge/knowledge-map.yaml` changed,
 include topic/relationship projections and the focused OKF neighborhood:
 
 ```bash
@@ -564,7 +565,7 @@ instead.
 
 For the repository knowledge navigation contract, use
 `references/knowledge-map-workflows.md`. The contract lives at
-`.knowledge/knowledge-map.yaml` and should be maintained through
+`knowledge/knowledge-map.yaml` and should be maintained through
 `relay-knowledge map` commands rather than direct YAML edits.
 
 Ingest scoped evidence:

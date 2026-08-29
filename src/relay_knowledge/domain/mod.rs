@@ -92,12 +92,18 @@ pub use graph::{
     TraversalRankingContribution, TraversalTraceEdge, TraversalTraceEvidence, TraversalTraceNode,
     TraversalTraceNodeKind, TraversalTraceRedaction,
 };
+pub(crate) use knowledge::validate_directory_collection;
+pub(crate) use knowledge::{
+    BUSINESS_GLOSSARY_RELATIVE_PATH, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
+};
 pub use knowledge::{
+    DirectoryLoadHint, DirectoryRelation, DirectoryRelationKind, DirectoryUpdateRule,
     FileContentChunk, FileContentEntry, FileContentReadModelCursor, FileContentSearchHit,
     FileContentSearchRequest, FileIndexDiagnostics, FileIndexEntry, FileIndexRoot,
     FileIndexRootStatus, FileIndexRootUpdate, FileIndexScanSummary, FileKnowledgeFactCandidate,
     FileSearchHit, FileSearchRequest, KnowledgeMap, KnowledgeMapChange, KnowledgeMapHistoryEntry,
     KnowledgeMapRoute, KnowledgeMapSource, KnowledgeMapSourceKind, KnowledgeMapTopic,
+    RepositoryMapDirectory, RepositoryMapDirectoryChange, RepositoryMapType,
 };
 pub use operations::{
     AuditEventRecord, AuditStatus, GraphInspection, HealthStorageSnapshot, ProposalConflictRecord,

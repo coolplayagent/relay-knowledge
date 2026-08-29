@@ -38,7 +38,7 @@ fn initial_map_routes_the_repository_business_glossary() {
 
     assert_eq!(route.source_order, ["repository-business-glossary"]);
     assert_eq!(source.kind, KnowledgeMapSourceKind::File);
-    assert_eq!(source.uri, ".knowledge/business-glossary.yaml");
+    assert_eq!(source.uri, "knowledge/glossary/business-glossary.yaml");
     assert_eq!(source.source_scope.as_deref(), Some("repo"));
 }
 

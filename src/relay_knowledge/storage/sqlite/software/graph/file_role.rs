@@ -1,16 +1,25 @@
 //! Deterministic software-projection file role classification.
 
-use crate::project::{KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX};
+use crate::project::{
+    KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+    LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
+};
 
 pub(super) fn file_role(
     path: &str,
     language_id: &str,
     authorized_topic_shard: bool,
 ) -> &'static str {
-    if path == KNOWLEDGE_MAP_RELATIVE_PATH {
+    if matches!(
+        path,
+        KNOWLEDGE_MAP_RELATIVE_PATH | LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH
+    ) {
         return "knowledge_map_manifest";
     }
-    if authorized_topic_shard && path.starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX) {
+    if authorized_topic_shard
+        && (path.starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)
+            || path.starts_with(".knowledge/topics/"))
+    {
         return "knowledge_map_topic_shard";
     }
     let file_name = path.rsplit('/').next().unwrap_or(path);

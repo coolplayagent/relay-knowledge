@@ -58,6 +58,9 @@ async fn map_history_uses_repository_service_resolved_before_dispatch() {
     let output = run_command(
         CliCommand {
             action: CliAction::Map(MapCommand::History {
+                selection: crate::interfaces::cli::map::MapSelection::One(
+                    crate::domain::RepositoryMapType::Knowledge,
+                ),
                 from_version: 1,
                 limit: 64,
             }),

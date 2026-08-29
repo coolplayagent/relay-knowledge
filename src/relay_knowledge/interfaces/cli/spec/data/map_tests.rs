@@ -16,6 +16,10 @@ fn map_specs_keep_source_requirements_specific_to_add() {
             "map source add",
             "map source update",
             "map source remove",
+            "map directory add",
+            "map directory update",
+            "map directory remove",
+            "map migrate",
             "map validate",
             "map agent-snippet",
         ]

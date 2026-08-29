@@ -11,10 +11,10 @@ it tells agents to treat cold and incremental indexing as durable single-writer
 tasks so command-runner timeouts do not interrupt or obscure progress.
 
 Repository bootstrap initializes or upgrades the
-`.knowledge/knowledge-map.yaml` contract and the code map as one recoverable
+`codespec/codespec-map.yaml`, `knowledge/knowledge-map.yaml`, and the code map as one recoverable
 workflow. The YAML contains stable `software-model` and `business-knowledge`
 routes; the latter points to the version-controlled authored
-`.knowledge/business-glossary.yaml`. Snapshot-bound business, architecture,
+`knowledge/glossary/business-glossary.yaml`. Snapshot-bound business, architecture,
 build, deployment, dependency, and design facts remain in the indexed `repo
 business`/`repo software`/`repo view` read models. Before a spec or coding task,
 agents pin one ref and combine those models with business/domain views and code
@@ -122,12 +122,14 @@ bounded by an explicit cap.
 - `agents/openai.yaml`: UI metadata for OpenAI-compatible agent surfaces.
 - `references/cli-workflows.md`: detailed CLI workflows and safety defaults.
 - `references/knowledge-map-workflows.md`: agent workflow for CRUD operations
-  on the `.knowledge/knowledge-map.yaml` navigation contract plus repository
+  on the visible CodeSpec and Knowledge navigation contracts plus repository
   bootstrap and spec-grounded incremental development.
 - `references/knowledge-map.schema.json`: Draft 2020-12 structural schema for
-  the v2 root manifest, topic shards, history archives, and history index nodes;
+  the v3 root manifest, topic shards, history assets, and redirect;
   `relay-knowledge map validate` remains authoritative for cross-file and
   semantic integrity.
+- `references/codespec-map.schema.json`: Draft 2020-12 structural schema for
+  `codespec/codespec-map.yaml` and its typed directory governance fields.
 - `references/business-glossary.schema.json`: Draft 2020-12 structural schema
   for authored Business Glossary v1 domains, terms, aliases, semantics, and
   technical mappings; `relay-knowledge map validate` remains authoritative for

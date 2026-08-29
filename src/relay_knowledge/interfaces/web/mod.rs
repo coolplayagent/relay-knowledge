@@ -212,12 +212,12 @@ async fn dispatch_operation(
     context: RequestContext,
 ) -> Result<(crate::api::ApiMetadata, Value), WebError> {
     match operation {
-        "knowledge.map.history" => {
+        "knowledge.map.history" | "repository.map.history" => {
             let request = knowledge_map_history_page(payload)?;
             let root = service
                 .registered_code_repository_root(&request.repository)
                 .await?;
-            let map = KnowledgeMapService::new(root);
+            let map = KnowledgeMapService::new(root).for_type(request.map_type);
             let response = map
                 .history(&context, request.from_version, request.limit)
                 .await

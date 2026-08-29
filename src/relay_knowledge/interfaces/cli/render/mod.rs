@@ -120,6 +120,21 @@ where
             value["diagnostics"].as_array().map_or(0, Vec::len)
         ),
         "knowledge.map.agent_snippet" => value["snippet"].as_str().unwrap_or("").to_owned(),
+        "repository.map.init"
+        | "repository.map.show"
+        | "repository.map.history"
+        | "repository.map.validate" => format!(
+            "repository_maps={}",
+            value["results"].as_array().map_or(0, Vec::len)
+        ),
+        "repository.map.directory.add"
+        | "repository.map.directory.update"
+        | "repository.map.directory.remove"
+        | "repository.map.migrate" => format!(
+            "repository_map={} version={}",
+            value["path"].as_str().unwrap_or("unknown"),
+            value["map_version"].as_u64().unwrap_or(0)
+        ),
         "worker.status" => format!(
             "workers={}",
             value["workers"].as_array().map_or(0, Vec::len)

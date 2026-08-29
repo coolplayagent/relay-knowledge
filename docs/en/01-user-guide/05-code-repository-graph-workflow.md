@@ -180,7 +180,7 @@ relay-knowledge repo software repo --kind topics --ref HEAD --format json
 relay-knowledge repo software repo --kind relationships --ref HEAD --format json
 ```
 
-The projection connects Markdown/spec headings and `.knowledge/knowledge-map.yaml` topics with documentation files, dependency manifests with package components, unresolved imports with SDK/API usage candidates, and config/feature-flag facts with code or config files. It reads committed projection tables for the selected indexed scope and does not scan package caches, SDK directories, unindexed external source, or whole-repository docs at query time.
+The projection connects Markdown/spec headings and `knowledge/knowledge-map.yaml` topics with documentation files, dependency manifests with package components, unresolved imports with SDK/API usage candidates, and config/feature-flag facts with code or config files. It reads committed projection tables for the selected indexed scope and does not scan package caches, SDK directories, unindexed external source, or whole-repository docs at query time.
 
 ### Multi-Repository Repository Set Queries
 

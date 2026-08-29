@@ -4,7 +4,7 @@ use crate::{
     domain::{
         GraphVersion, RepositoryCodeRange, SoftwareGlobalRequest, SoftwareTopic, SoftwareTopicInput,
     },
-    project::KNOWLEDGE_MAP_RELATIVE_PATH,
+    project::{KNOWLEDGE_MAP_RELATIVE_PATH, LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH},
     storage::StorageError,
 };
 
@@ -190,7 +190,7 @@ fn knowledge_map_topic_page(
                    legacy.line_start, legacy.line_end
             FROM code_repository_symbols legacy
             WHERE legacy.source_scope = ?1
-              AND legacy.path = ?2
+              AND legacy.path IN (?2, ?3)
               AND legacy.kind = 'knowledge_map_topic'
             UNION ALL
             SELECT shards.repository_id, shards.source_scope, shards.path, shards.name,
@@ -222,17 +222,18 @@ fn knowledge_map_topic_page(
              AND shard_identity.kind = 'knowledge_map_topic_shard_identity'
              AND shard_identity.name = root_identity.name
             WHERE refs.source_scope = ?1
-              AND refs.path = ?2
+              AND refs.path IN (?2, ?3)
               AND refs.kind = 'knowledge_map_topic_shard_ref'
         ) current_topics
         ORDER BY path ASC, line_start ASC
-        LIMIT ?3 OFFSET ?4
+        LIMIT ?4 OFFSET ?5
         ",
     )?;
     let rows = statement.query_map(
         params![
             source_scope,
             KNOWLEDGE_MAP_RELATIVE_PATH,
+            LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
             limit as i64,
             offset as i64
         ],

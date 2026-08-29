@@ -16,7 +16,8 @@ Use the existing Rust layout:
 
 Keep generated output, build products, and large temporary data out of version control.
 
-Knowledge map: `.knowledge/knowledge-map.yaml`
+CodeSpec map: codespec/codespec-map.yaml
+Knowledge map: knowledge/knowledge-map.yaml
 
 ## Build, Test, and Development Commands
 

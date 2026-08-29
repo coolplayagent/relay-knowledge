@@ -4,15 +4,16 @@ Use this reference when an agent initializes repository knowledge, plans a
 specification, starts a coding task, reacts to a Git commit, or changes an
 authoritative document/configuration source.
 
-The shared entry point is `.knowledge/knowledge-map.yaml`. In schema v2 it is a
-small root manifest: topic sources/routes live in content-addressed
-`.knowledge/topics/` shards, and history older than the bounded recent window
-lives in a verified `.knowledge/history/` archive. `map route <topic>` loads one
+The shared entry points are `codespec/codespec-map.yaml` and
+`knowledge/knowledge-map.yaml`. In schema v3 they govern typed repository
+directories; Knowledge Map topic sources/routes live in content-addressed
+`knowledge/topics/` shards, and older history lives in verified
+`knowledge/history/` assets. `map route <topic> --type knowledge` loads one
 shard; `map show` loads current shards and returns only the bounded recent-history
 window. Use `map history --from <version> --limit <count>` for explicit pages of
 at most 256 entries. The bundled Draft 2020-12 schema at
-`knowledge-map.schema.json` describes the root manifest, topic shard, history
-archive, and history index node shapes for machine-readable discovery and
+`knowledge-map.schema.json` and `codespec-map.schema.json` describe the roots,
+typed directory entries, topic shard, history assets, and redirect for discovery and
 structural validation. It deliberately accepts unknown fields to remain
 compatible with current Serde readers. It cannot prove that digests match file
 content, source ids are globally unique, routes are complete, history is
@@ -43,7 +44,7 @@ It also ensures the authored business entry:
 - topic: `business-knowledge`
 - source: `repository-business-glossary`
 - kind: `file`
-- URI: `.knowledge/business-glossary.yaml`
+- URI: `knowledge/glossary/business-glossary.yaml`
 - scope: `repo`
 
 The Knowledge Map remains routing metadata. The glossary is the intentionally
@@ -75,17 +76,19 @@ conflict. Do not overwrite it.
 - Treat `map show.history.complete=false` as an explicit archive omission, not
   data loss; use bounded `map history` pages or `map validate` when old history
   is relevant.
-- Use only `map source add`, `map source update`, or `map source remove` for
+- Use only `map source add`, `map source update`, or `map source remove` with
+  `--type knowledge` for
   normal mutations, then validate again.
-- Use `knowledge-map.schema.json` only for v2 structural discovery or tooling;
+- Use the bundled map schemas only for v3 structural discovery or tooling;
   never treat schema acceptance as a replacement for `map validate` or as
   permission to edit CLI-generated artifacts.
 - Use `business-glossary.schema.json` for authored glossary v1 field discovery
   and structural checks, edit that source under normal review, and run
   `map validate` afterward for runtime and semantic validation.
 - Do not copy the YAML into `AGENTS.md`; keep only
-  `Knowledge map: .knowledge/knowledge-map.yaml`.
-- Read `map route business-knowledge --format json` before business/spec/coding
+  `CodeSpec map: codespec/codespec-map.yaml` and
+  `Knowledge map: knowledge/knowledge-map.yaml`.
+- Read `map route business-knowledge --type knowledge --format json` before business/spec/coding
   work and verify the routed glossary is the intended authority.
 - Do not materialize `repo software` or `repo view` responses into the YAML.
   Do not materialize `repo business` responses into the Knowledge Map or
@@ -93,6 +96,36 @@ conflict. Do not overwrite it.
 - If a map mutation must affect the current uncommitted coding decision,
   refresh a `worktree` overlay after a clean `HEAD` base exists. Otherwise
   commit the map with its related sources and publish it in the next update.
+
+## Directory Governance
+
+`map init` without `--type` idempotently initializes both maps. Read-only
+`show`, `history`, and `validate` also default to `all`; every targeted mutation
+must name one concrete map type. The five baseline directories in each map are
+required and cannot be removed, while custom confined directories may be added.
+
+```bash
+relay-knowledge map show --directory design --type codespec --format json
+relay-knowledge map directory add --type knowledge \
+  --directory integrations \
+  --purpose "Reviewed integration knowledge." \
+  --content-scope "knowledge/integrations/**" \
+  --key-file "knowledge/integrations/README.md" \
+  --load-hint on_demand \
+  --relation "documents=codespec:api" \
+  --update-rule reviewed \
+  --format json
+relay-knowledge map directory update --type knowledge \
+  --directory integrations --load-hint task_match --format json
+relay-knowledge map directory remove --type knowledge \
+  --directory integrations --format json
+relay-knowledge map validate --format json
+```
+
+Use `map migrate --type knowledge --to-v3` for an explicit v2 migration. The
+CLI retains the v2 root and publishes a v3 redirect at the legacy path only
+after the visible root succeeds. `map migrate --type knowledge --rollback`
+restores the verified v2 root while retaining v3 data for forward recovery.
 - Edit generated Knowledge Map YAML directly only when the CLI is unavailable
   and the user explicitly requests manual repair; this restriction does not
   apply to the intentionally authored business glossary.
@@ -125,7 +158,7 @@ POSIX bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register . --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
@@ -148,7 +181,7 @@ PowerShell bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register (Get-Location).Path --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
@@ -167,7 +200,7 @@ cmd.exe bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register "%CD%" --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
@@ -188,7 +221,7 @@ to obtain a non-null summary. Let the service drain the task or run bounded
 local worker attempts, then require `repo status` to identify the exact head as
 fresh.
 
-Before writing or revising a spec, read `map route business-knowledge` and
+Before writing or revising a spec, read `map route business-knowledge --type knowledge` and
 combine snapshot-bound business terms/mappings, software, architecture and
 business-domain views, and code context. After implementation,
 run impact on the pinned pair and repeat the model/context reads at the pinned
@@ -230,7 +263,7 @@ or move a source only when authoritative evidence confirms the old route is no
 longer valid and the requested task authorizes that mutation.
 
 ```bash
-relay-knowledge map source add \
+relay-knowledge map source add --type knowledge \
   --id cli-reference \
   --topic cli \
   --kind doc \
@@ -238,8 +271,8 @@ relay-knowledge map source add \
   --scope docs \
   --description "CLI command reference" \
   --format json
-relay-knowledge map source update --id cli-reference --description "User-facing CLI command reference" --format json
-relay-knowledge map route cli --format json
+relay-knowledge map source update --type knowledge --id cli-reference --description "User-facing CLI command reference" --format json
+relay-knowledge map route cli --type knowledge --format json
 relay-knowledge map validate --format json
 ```
 

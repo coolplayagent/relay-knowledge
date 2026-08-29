@@ -6,16 +6,25 @@ use super::*;
 fn agent_snippet_is_the_only_map_command_without_a_repository_root() {
     assert!(!MapCommand::AgentSnippet.needs_repository_root());
     for command in [
-        MapCommand::Init,
-        MapCommand::Show { topic: None },
+        MapCommand::Init {
+            selection: MapSelection::All,
+        },
+        MapCommand::Show {
+            selection: MapSelection::All,
+            topic: None,
+            directory: None,
+        },
         MapCommand::History {
+            selection: MapSelection::All,
             from_version: 1,
             limit: 64,
         },
         MapCommand::Route {
             topic: "build".to_owned(),
         },
-        MapCommand::Validate,
+        MapCommand::Validate {
+            selection: MapSelection::All,
+        },
     ] {
         assert!(command.needs_repository_root());
     }

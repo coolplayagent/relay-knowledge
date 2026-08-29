@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Relay Knowledge Map v2 artifacts",
-  "description": "Machine-readable structural schema for Knowledge Map v2 root manifests, topic shards, history archives, and history index nodes. Objects intentionally allow unknown fields to remain compatible with the Serde readers. This schema cannot verify content digests against files, global topic/source identity, route completeness, history continuity, index range or height relationships, reserved sources, or any other cross-file semantic invariant; relay-knowledge map validate is authoritative. Topic shards, history archives, and history index nodes are generated assets and this schema does not authorize agents to edit them directly.",
+  "title": "Relay Knowledge Map v3 artifacts",
+  "description": "Machine-readable structural schema for the Knowledge Map v3 root, topic shards, history assets, and legacy redirect. Objects intentionally allow unknown fields for Serde forward compatibility. Digest/content agreement, directory existence, cross-map relations, route completeness, history continuity, index relationships, and reserved sources cannot be fully expressed here; relay-knowledge map validate is authoritative. This schema does not authorize agents to edit them directly; generated shards, archives, indexes, and redirects remain CLI-managed assets.",
   "type": "object",
   "oneOf": [
     {
@@ -15,12 +15,15 @@
     },
     {
       "$ref": "#/$defs/historyIndexNode"
+    },
+    {
+      "$ref": "#/$defs/redirect"
     }
   ],
   "$defs": {
     "schemaVersion": {
       "type": "integer",
-      "const": 2
+      "const": 3
     },
     "nonEmptyString": {
       "type": "string",
@@ -378,13 +381,60 @@
         }
       ]
     },
+    "directoryRelation": {
+      "type": "object",
+      "required": ["kind", "target"],
+      "properties": {
+        "kind": {
+          "enum": ["depends_on", "implements", "documents", "tests", "operates", "related_to"]
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^(knowledge|codespec):[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+        }
+      },
+      "additionalProperties": true
+    },
+    "directory": {
+      "type": "object",
+      "required": ["directory", "purpose", "content_scope", "key_files", "load_hint", "relations", "update_rule"],
+      "properties": {
+        "directory": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+        },
+        "purpose": { "$ref": "#/$defs/nonEmptyString" },
+        "content_scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        },
+        "key_files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        },
+        "load_hint": { "enum": ["always", "task_match", "on_demand"] },
+        "relations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/directoryRelation" },
+          "uniqueItems": true
+        },
+        "update_rule": { "enum": ["reviewed", "generated", "external_sync"] }
+      },
+      "additionalProperties": true
+    },
     "rootManifest": {
-      "title": "Knowledge Map v2 root manifest",
+      "title": "Knowledge Map v3 root manifest",
       "type": "object",
       "required": [
         "schema_version",
+        "artifact_kind",
+        "map_type",
         "map_version",
         "updated_at",
+        "directories",
         "topics",
         "history"
       ],
@@ -392,11 +442,19 @@
         "schema_version": {
           "$ref": "#/$defs/schemaVersion"
         },
+        "artifact_kind": { "const": "map" },
+        "map_type": { "const": "knowledge" },
         "map_version": {
           "$ref": "#/$defs/positiveInteger"
         },
         "updated_at": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "directories": {
+          "type": "array",
+          "minItems": 5,
+          "items": { "$ref": "#/$defs/directory" },
+          "uniqueItems": true
         },
         "topics": {
           "type": "array",
@@ -412,7 +470,7 @@
       "additionalProperties": true
     },
     "topicShard": {
-      "title": "Knowledge Map v2 topic shard",
+      "title": "Knowledge Map v3 topic shard",
       "type": "object",
       "required": [
         "schema_version",
@@ -447,7 +505,7 @@
       "additionalProperties": true
     },
     "historyArchive": {
-      "title": "Knowledge Map v2 history archive",
+      "title": "Knowledge Map v3 history archive",
       "type": "object",
       "required": [
         "schema_version",
@@ -488,7 +546,7 @@
       "additionalProperties": true
     },
     "historyIndexNode": {
-      "title": "Knowledge Map v2 history index node",
+      "title": "Knowledge Map v3 history index node",
       "type": "object",
       "required": [
         "schema_version",
@@ -521,6 +579,18 @@
           "maxItems": 64,
           "uniqueItems": true
         }
+      },
+      "additionalProperties": true
+    },
+    "redirect": {
+      "title": "Legacy Knowledge Map v3 redirect",
+      "type": "object",
+      "required": ["schema_version", "artifact_kind", "map_type", "target"],
+      "properties": {
+        "schema_version": { "$ref": "#/$defs/schemaVersion" },
+        "artifact_kind": { "const": "redirect" },
+        "map_type": { "const": "knowledge" },
+        "target": { "const": "knowledge/knowledge-map.yaml" }
       },
       "additionalProperties": true
     }

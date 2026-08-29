@@ -11,7 +11,10 @@ use crate::{
         CodeRepositoryRegistration, KnowledgeMap, KnowledgeMapRoute, KnowledgeMapSource,
         KnowledgeMapSourceKind, KnowledgeMapTopic,
     },
-    project::{KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX},
+    project::{
+        KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+        LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
+    },
 };
 
 use super::{
@@ -24,6 +27,7 @@ use super::{
 
 const BUSINESS_TOPIC_ID: &str = "business-knowledge";
 const KNOWLEDGE_MAP_V2_SCHEMA: u16 = 2;
+const KNOWLEDGE_MAP_V3_SCHEMA: u16 = 3;
 
 #[derive(Deserialize)]
 struct SchemaProbe {
@@ -75,16 +79,26 @@ pub(crate) fn load_business_knowledge_projection(
             resolved_commit_sha,
         ));
     }
-    if snapshot_blob_size(root, resolved_commit_sha, KNOWLEDGE_MAP_RELATIVE_PATH)?.is_none() {
-        return Ok(empty_projection(
-            registration,
-            source_scope,
+    let map_path =
+        if snapshot_blob_size(root, resolved_commit_sha, KNOWLEDGE_MAP_RELATIVE_PATH)?.is_some() {
+            KNOWLEDGE_MAP_RELATIVE_PATH
+        } else if snapshot_blob_size(
+            root,
             resolved_commit_sha,
-        ));
-    }
-    let map_content =
-        source_snapshot_bytes(root, kind, resolved_commit_sha, KNOWLEDGE_MAP_RELATIVE_PATH)?;
-    let routed = routed_business_sources(root, kind, resolved_commit_sha, &map_content)?;
+            LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
+        )?
+        .is_some()
+        {
+            LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH
+        } else {
+            return Ok(empty_projection(
+                registration,
+                source_scope,
+                resolved_commit_sha,
+            ));
+        };
+    let map_content = source_snapshot_bytes(root, kind, resolved_commit_sha, map_path)?;
+    let routed = routed_business_sources(root, kind, resolved_commit_sha, map_path, &map_content)?;
     let Some(routed) = routed else {
         return Ok(empty_projection(
             registration,
@@ -162,6 +176,7 @@ fn routed_business_sources(
     root: &Path,
     kind: RepositorySourceKind,
     commit: &str,
+    map_path: &str,
     content: &[u8],
 ) -> Result<Option<RoutedBusinessSources>, CodeIndexError> {
     let probe = serde_norway::from_slice::<SchemaProbe>(content)
@@ -173,7 +188,10 @@ fn routed_business_sources(
             .map_err(|error| invalid(format!("knowledge map is invalid: {error}")))?;
         return Ok(route_from_parts(map.routes, map.sources));
     }
-    if probe.schema_version != KNOWLEDGE_MAP_V2_SCHEMA {
+    if !matches!(
+        probe.schema_version,
+        KNOWLEDGE_MAP_V2_SCHEMA | KNOWLEDGE_MAP_V3_SCHEMA
+    ) {
         return Err(invalid(format!(
             "knowledge map schema_version {} is unsupported",
             probe.schema_version
@@ -181,8 +199,8 @@ fn routed_business_sources(
     }
     let manifest = serde_norway::from_slice::<V2Manifest>(content)
         .map_err(|error| invalid(format!("knowledge map v2 manifest is invalid: {error}")))?;
-    if manifest.schema_version != KNOWLEDGE_MAP_V2_SCHEMA {
-        return Err(invalid("knowledge map v2 manifest schema drift"));
+    if manifest.schema_version != probe.schema_version {
+        return Err(invalid("knowledge map manifest schema drift"));
     }
     let Some(reference) = manifest
         .topics
@@ -191,8 +209,11 @@ fn routed_business_sources(
     else {
         return Ok(None);
     };
-    validate_v2_ref(reference)?;
-    let snapshot_path = format!(".knowledge/{}", reference.shard_ref);
+    let contract_dir = map_path
+        .rsplit_once('/')
+        .map_or("", |(directory, _)| directory);
+    validate_v2_ref(reference, contract_dir)?;
+    let snapshot_path = format!("{contract_dir}/{}", reference.shard_ref);
     let shard_content = source_snapshot_bytes(root, kind, commit, &snapshot_path)?;
     if sha256(&shard_content) != reference.digest {
         return Err(invalid(format!(
@@ -202,7 +223,7 @@ fn routed_business_sources(
     }
     let shard = serde_norway::from_slice::<V2TopicShard>(&shard_content)
         .map_err(|error| invalid(format!("business topic shard is invalid: {error}")))?;
-    if shard.schema_version != KNOWLEDGE_MAP_V2_SCHEMA
+    if shard.schema_version != probe.schema_version
         || shard.topic.id != reference.id
         || shard.topic.title != reference.title
         || shard.topic.description != reference.description
@@ -232,10 +253,11 @@ fn route_from_parts(
         .map(|route| RoutedBusinessSources { route, sources })
 }
 
-fn validate_v2_ref(reference: &V2TopicRef) -> Result<(), CodeIndexError> {
+fn validate_v2_ref(reference: &V2TopicRef, contract_dir: &str) -> Result<(), CodeIndexError> {
     if !reference.shard_ref.starts_with("topics/")
-        || !format!(".knowledge/{}", reference.shard_ref)
-            .starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)
+        || (contract_dir == "knowledge"
+            && !format!("{contract_dir}/{}", reference.shard_ref)
+                .starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX))
         || reference.digest.len() != 64
         || !reference
             .digest
@@ -244,7 +266,7 @@ fn validate_v2_ref(reference: &V2TopicRef) -> Result<(), CodeIndexError> {
     {
         return Err(invalid("business topic shard ref or digest is invalid"));
     }
-    validate_repository_path(&format!(".knowledge/{}", reference.shard_ref))
+    validate_repository_path(&format!("{contract_dir}/{}", reference.shard_ref))
 }
 
 fn validate_routed_source(source: &KnowledgeMapSource) -> Result<(), CodeIndexError> {

@@ -1,0 +1,159 @@
+schema_version: 3
+artifact_kind: map
+map_type: knowledge
+map_version: 13
+updated_at: unix:1787907388
+directories:
+- directory: domain
+  purpose: Domain concepts, models, and business rules.
+  content_scope:
+  - knowledge/domain/**
+  key_files:
+  - knowledge/domain/README.md
+  load_hint: on_demand
+  relations:
+  - kind: related_to
+    target: codespec:requirements
+  update_rule: reviewed
+- directory: guides
+  purpose: Task-oriented repository knowledge guides.
+  content_scope:
+  - knowledge/guides/**
+  key_files:
+  - knowledge/guides/README.md
+  load_hint: on_demand
+  relations:
+  - kind: documents
+    target: codespec:requirements
+  update_rule: reviewed
+- directory: ops
+  purpose: Operational procedures and diagnostics.
+  content_scope:
+  - knowledge/ops/**
+  key_files:
+  - knowledge/ops/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+- directory: glossary
+  purpose: Business terminology, aliases, and technical mappings.
+  content_scope:
+  - knowledge/glossary/**
+  key_files:
+  - knowledge/glossary/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+- directory: best-practices
+  purpose: Reviewed engineering and knowledge-management practices.
+  content_scope:
+  - knowledge/best-practices/**
+  key_files:
+  - knowledge/best-practices/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+topics:
+- id: architecture
+  title: Architecture knowledge
+  description: Architecture specs and hard constraints that guide implementation.
+  source_ids:
+  - architecture-hard-constraints
+  - code-map-knowledge-development-loop
+  - commit-driven-code-index-loop
+  - git-commit-knowledge-development-loop
+  ref: topics/topic-4ca303a3bf7ddf7b-40a2948285eb3649336bbecba677562ce059bcc17802d9af7021fd9d1c081d34.yaml
+  digest: 40a2948285eb3649336bbecba677562ce059bcc17802d9af7021fd9d1c081d34
+- id: benchmarks
+  title: Benchmark knowledge
+  description: Self-iteration and benchmark guardrail documentation.
+  source_ids:
+  - code-index-fact-versioning
+  - profile-all-performance-source-surface-2026-06-04
+  ref: topics/topic-cb1d2fdcc86ce72a-74f2b67273beb57fadd1407afd278cc73a61d0accec7c5ec2e1c34da74cade72.yaml
+  digest: 74f2b67273beb57fadd1407afd278cc73a61d0accec7c5ec2e1c34da74cade72
+- id: business-knowledge
+  title: Business knowledge
+  description: Version-controlled business domains, terminology, aliases, semantics, and technical mappings.
+  source_ids:
+  - repository-business-glossary
+  ref: topics/topic-17438b0266842113-0379e85217e8a3d1432b5ba9e72a8b9c4b978ced416dc27d8b13b6aa2c93ab6c.yaml
+  digest: 0379e85217e8a3d1432b5ba9e72a8b9c4b978ced416dc27d8b13b6aa2c93ab6c
+- id: cli
+  title: CLI knowledge
+  description: CLI command reference and agent workflow guidance.
+  source_ids:
+  - cli-command-reference
+  - cli-skill-workflows
+  ref: topics/topic-99bb88401742848e-2556ca2b68c14479502a0ff8eb8fc3dab664305a8432f0ccce2cfd98162f025e.yaml
+  digest: 2556ca2b68c14479502a0ff8eb8fc3dab664305a8432f0ccce2cfd98162f025e
+- id: release-documentation
+  title: Release documentation knowledge
+  description: Release-readiness documentation, navigation, and validation records.
+  source_ids:
+  - documentation-release-readiness-2026-06-05
+  - documentation-self-iteration-readiness-2026-08-18
+  ref: topics/topic-06be3638d1633e1a-c5c16af56f8c277913928faf0342060d9fa43f7e716e431f38736fdfaf5d05fd.yaml
+  digest: c5c16af56f8c277913928faf0342060d9fa43f7e716e431f38736fdfaf5d05fd
+- id: software-model
+  title: Whole-software model
+  description: Code-map-backed architecture, build, deployment, dependency, configuration, and design knowledge.
+  source_ids:
+  - repository-software-model
+  ref: topics/topic-247e2a0d6f43d185-b752f818d859387488b3ee9c2aefa0d86d9d3e8cb69fe907f28fd756cc567629.yaml
+  digest: b752f818d859387488b3ee9c2aefa0d86d9d3e8cb69fe907f28fd756cc567629
+history:
+  archived_through: 0
+  recent:
+  - version: 1
+    action: init
+    actor: cli
+    summary: Created repository knowledge map contract.
+  - version: 2
+    action: update
+    actor: codex
+    summary: Added benchmark fact-versioning documentation route.
+  - version: 3
+    action: update
+    actor: codex
+    summary: Added profile full performance and source-surface validation documentation.
+  - version: 4
+    action: update
+    actor: codex
+    summary: Added release-readiness documentation audit route.
+  - version: 5
+    action: update
+    actor: codex
+    summary: Added the managed Git commit loop and bounded retention architecture route.
+  - version: 6
+    action: software-model.ensure
+    actor: cli
+    summary: Added the repository code-map-backed software-model route.
+  - version: 7
+    action: source.add
+    actor: cli
+    summary: Added source 'code-map-knowledge-development-loop' to topic 'architecture'.
+  - version: 8
+    action: source.update
+    actor: cli
+    summary: Updated source 'cli-skill-workflows'.
+  - version: 9
+    action: source.add
+    actor: cli
+    summary: Added source 'git-commit-knowledge-development-loop' to topic 'architecture'.
+  - version: 10
+    action: update
+    actor: codex
+    summary: Prioritized the 2026-08-18 documentation and self-iteration readiness record while retaining the 2026-06-05 audit as history.
+  - version: 11
+    action: builtin-routes.ensure
+    actor: cli
+    summary: Ensured repository software-model and business-knowledge routes.
+  - version: 12
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'domain'.
+  - version: 13
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'guides'.
