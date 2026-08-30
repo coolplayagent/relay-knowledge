@@ -97,7 +97,11 @@ pub(super) fn score_framework_case(
         Err(observation) => return *observation,
     };
     let mut hits = score_array_field(&payload["graph"], "nodes").to_vec();
-    hits.extend(score_array_field(&payload["graph"], "edges").iter().cloned());
+    hits.extend(
+        score_array_field(&payload["graph"], "edges")
+            .iter()
+            .cloned(),
+    );
     let expected = score_array_field(case, "expected");
     let forbidden = score_array_field(case, "forbidden");
     let payload_failures = payload_constraint_failures(case, &payload, hits.len());

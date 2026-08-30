@@ -199,7 +199,7 @@ fn evaluate_repository_in_runtime(
                     .get("register_without_alias")
                     .and_then(Value::as_bool)
                     .unwrap_or(false))
-                    .then_some(alias),
+                .then_some(alias),
                 repo_config,
             ),
             &runtime.workspace,

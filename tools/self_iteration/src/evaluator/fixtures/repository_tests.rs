@@ -146,6 +146,27 @@ fn generated_language_fixtures_write_syntax_dense_sources() {
 }
 
 #[test]
+fn software_global_fixture_keeps_valid_legacy_map_metadata() {
+    let root = std::env::temp_dir().join(format!(
+        "relay-knowledge-software-global-fixture-test-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        std::fs::remove_dir_all(&root).expect("remove stale fixture");
+    }
+
+    create_generated_repository_files(&root, "software_global_v1")
+        .expect("software global fixture should write");
+    let map = std::fs::read_to_string(root.join(".knowledge/knowledge-map.yaml"))
+        .expect("software global knowledge map");
+
+    assert!(map.contains("updated_at: unix:0"));
+    assert!(map.contains("summary: Created software projection knowledge route."));
+
+    std::fs::remove_dir_all(&root).expect("cleanup fixture");
+}
+
+#[test]
 fn generated_repository_names_cannot_escape_run_home() {
     let run_home = std::env::temp_dir().join("relay-knowledge-self-iteration-safe-roots");
 

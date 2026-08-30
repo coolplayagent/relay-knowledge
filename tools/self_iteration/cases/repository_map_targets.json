@@ -1,0 +1,159 @@
+{
+  "cli_contract_cases": [
+    {
+      "id": "repository_map_help_exposes_typed_contracts",
+      "command": [
+        "help",
+        "map",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "stdout_contains": [
+        "CodeSpec and Knowledge map contracts",
+        "--type",
+        "codespec",
+        "knowledge"
+      ]
+    },
+    {
+      "id": "repository_map_validation_covers_codespec_and_knowledge",
+      "command": [
+        "map",
+        "validate",
+        "--type",
+        "all",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "results": [
+          {
+            "path": "codespec/codespec-map.yaml",
+            "map_type": "codespec",
+            "valid": true,
+            "diagnostics": []
+          },
+          {
+            "path": "knowledge/knowledge-map.yaml",
+            "map_type": "knowledge",
+            "valid": true,
+            "diagnostics": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "codespec_test_directory_contract_is_visible",
+      "command": [
+        "map",
+        "show",
+        "--type",
+        "codespec",
+        "--directory",
+        "test",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "codespec/codespec-map.yaml",
+        "map_type": "codespec",
+        "map": {
+          "directories": [
+            {
+              "directory": "test",
+              "content_scope": [
+                "codespec/test/**"
+              ],
+              "key_files": [
+                "codespec/test/README.md"
+              ],
+              "load_hint": "on_demand",
+              "update_rule": "reviewed"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "knowledge_guides_directory_contract_is_visible",
+      "command": [
+        "map",
+        "show",
+        "--type",
+        "knowledge",
+        "--directory",
+        "guides",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "map": {
+          "directories": [
+            {
+              "directory": "guides",
+              "content_scope": [
+                "knowledge/guides/**"
+              ],
+              "key_files": [
+                "knowledge/guides/README.md"
+              ],
+              "load_hint": "on_demand",
+              "relations": [
+                {
+                  "kind": "documents",
+                  "target": "codespec:requirements"
+                }
+              ],
+              "update_rule": "reviewed"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "knowledge_business_route_preserves_authored_glossary",
+      "command": [
+        "map",
+        "route",
+        "business-knowledge",
+        "--type",
+        "knowledge",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "topic": "business-knowledge",
+        "route": {
+          "topic": "business-knowledge",
+          "source_order": [
+            "repository-business-glossary"
+          ],
+          "fallback": "bounded-search"
+        },
+        "sources": [
+          {
+            "id": "repository-business-glossary",
+            "kind": "file",
+            "uri": "knowledge/glossary/business-glossary.yaml",
+            "source_scope": "repo",
+            "status": "active"
+          }
+        ]
+      }
+    }
+  ]
+}
