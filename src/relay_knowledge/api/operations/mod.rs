@@ -32,7 +32,8 @@ pub use repository::{
     CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse,
     CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
-    CodeRepositoryUpdateRequest, RepositoryGraphNeighborhoodResponseV1, SoftwareGlobalResponse,
+    CodeRepositoryUpdateRequest, RepositoryGraphNeighborhoodResponseV1,
+    SoftwareGlobalExportResponse, SoftwareGlobalResponse,
 };
 pub use repository_set::{
     CodeRepositorySetAddResponse, CodeRepositorySetCreateResponse, CodeRepositorySetQueryResponse,

@@ -1,6 +1,7 @@
 mod dependency_usage;
 mod graph;
 mod lifecycle;
+mod ontology;
 mod projection;
 mod query_scope;
 mod schema;

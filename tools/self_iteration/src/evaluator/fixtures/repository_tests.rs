@@ -159,9 +159,15 @@ fn software_global_fixture_keeps_valid_legacy_map_metadata() {
         .expect("software global fixture should write");
     let map = std::fs::read_to_string(root.join(".knowledge/knowledge-map.yaml"))
         .expect("software global knowledge map");
+    let readme = std::fs::read_to_string(root.join("README.md")).expect("software global README");
+    let catalog =
+        std::fs::read_to_string(root.join("docs/catalog.md")).expect("software catalog metadata");
 
     assert!(map.contains("updated_at: unix:0"));
     assert!(map.contains("summary: Created software projection knowledge route."));
+    assert!(readme.contains("# Getting Started"));
+    assert!(readme.contains("## Chapter Index"));
+    assert!(catalog.contains("software-system: relay-platform"));
 
     std::fs::remove_dir_all(&root).expect("cleanup fixture");
 }

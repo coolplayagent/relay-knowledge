@@ -449,6 +449,46 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     .await;
     assert_eq!(software["request"]["kind"], "relationships");
 
+    let export_request = SoftwareGlobalRequest::new(
+        selector.clone(),
+        SoftwareGlobalKind::All,
+        FreshnessPolicy::AllowStale,
+        10,
+    )
+    .expect("software export request should validate");
+    let export = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/software/export/prov-o",
+        Some(json!(export_request)),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(export["profile"], "prov-o");
+    assert_eq!(export["media_type"], "application/ld+json");
+    assert_eq!(
+        export["document"]["@context"]["prov"],
+        "http://www.w3.org/ns/prov#"
+    );
+
+    let invalid_export = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/software/export/unknown",
+        Some(json!(
+            SoftwareGlobalRequest::new(
+                selector.clone(),
+                SoftwareGlobalKind::All,
+                FreshnessPolicy::AllowStale,
+                10,
+            )
+            .expect("software export request should validate")
+        )),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(invalid_export["error_kind"], "invalid_argument");
+
     let mismatch = request_json(
         router,
         "POST",

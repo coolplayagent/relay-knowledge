@@ -14,7 +14,7 @@ Evaluation capability ensures foundational features and competitive capabilities
 
 - The Rust evaluation harness covers exact facts, multi-hop retrieval, temporal facts, negative rejection, stale indexes, ambiguous entities, and code impact.
 - relay-teams and Linux code graph retrieval accuracy records stay in the verification volume.
-- Browser integration tests validate Web diagnostics, GraphRAG readiness, operation composer, index tables, runtime panels, and mobile layout.
+- Browser integration tests validate Web diagnostics, GraphRAG readiness, knowledge/code graph canvases, the software ontology graph, conflicts and shape diagnostics, operation composer, index tables, runtime panels, and mobile layout.
 
 ## Competitive Features
 

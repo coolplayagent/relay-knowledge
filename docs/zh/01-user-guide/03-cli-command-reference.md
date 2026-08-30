@@ -6,7 +6,7 @@
 
 当请求 `--format json` 或 `--format streaming-json` 时，写入 stderr 的解析诊断和运行期 API 失败都会使用 JSON。运行期 API 失败沿用稳定 API 错误结构，包含 `error_kind`、`message` 和可选 `metadata`；text 和 markdown 格式继续输出便于人工阅读的 stderr 消息。
 
-需要从本地 CLI 访问已部署常驻服务时，使用全局 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`。远端模式覆盖 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo graph`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，用于访问服务端已经注册的仓库。`repo index --reset` 和 `repo index-worker` 在远端模式选中时会被拒绝，必须在服务端机器执行；仅设置环境变量时，`status`、`health` 等无关本地命令继续使用本机 runtime state。
+需要从本地 CLI 访问已部署常驻服务时，使用全局 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`。远端模式覆盖 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo graph`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo software`（包括 `export`）和 `repo view`，用于访问服务端已经注册的仓库。`repo index --reset` 和 `repo index-worker` 在远端模式选中时会被拒绝，必须在服务端机器执行；仅设置环境变量时，`status`、`health` 等无关本地命令继续使用本机 runtime state。
 
 ## 3.1 常用状态命令
 
@@ -115,7 +115,8 @@ relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
-relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo software export <alias> --profile spdx-3|cyclonedx-1.7|prov-o [--ref <ref>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo business <alias> [--ref <ref>] [--domain <id>] [--query <text>] [--kind terms|mappings|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo view <alias> [--kind architecture-layers|business-domains|dependency-tour|process-flow|affected-scope] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--changed-path <path>]
 relay-knowledge repo status <alias>
@@ -150,7 +151,9 @@ Kind 取值按命令家族隔离：
   `input`、`output`、`prop`、`emit`、`model`、`slot`、`template-variable`、
   `control-flow`。
 - `repo software --kind`：`dependencies`、`sdks`、`files`、`topics`、
-  `relationships`、`build`、`iac`、`design`、`all`。
+  `relationships`、`build`、`iac`、`design`、`systems`、`apis`、
+  `resources`、`tests`、`deployments`、`releases`、`statements`、
+  `conflicts`、`all`。
 - `repo business --kind`：`terms`、`mappings`、`all`。
 - `repo view --kind`：`architecture-layers`、`business-domains`、
   `dependency-tour`、`process-flow`、`affected-scope`。
@@ -191,13 +194,17 @@ Kind 取值按命令家族隔离：
 
 `repo framework` 读取索引阶段写入的独立 Angular/Vue component-template graph。重复传入 `--framework`、`--kind` 或 `--path` 可以取交集过滤；省略时在所选 scope 内受界枚举。Graph 包含 component、template、binding、slot、template variable 和 control flow 等类型化 node，以及 ownership、render、binding、event、read/write、directive 和 slot edge。Vue SFC 的 script symbol/import 仍可通过普通 `repo query` 查询。该命令不在查询期扫描源码，也不启动索引；`wait-until-fresh` 要求 durable indexed snapshot 已包含当前 framework fact。
 
-`repo software` 读取所选 repository scope 的软件全域模型投影。`--kind dependencies` 返回由 manifest 和 lockfile 生成的包组件，以及把 declared package 与代码/配置 import 证据关联的 `dependency_usages`。同一仓库级 package/version 坐标在多个 lockfile 中重复时，派生视图只返回一个带确定性代表证据的 locked component；declared component 与原始 `repo query --kind sbom` 证据仍按证据位置独立保留。`--kind sdks` 返回 unresolved external import/include 目标，作为 SDK 或 API surface 使用候选；`--kind files` 返回代码、配置、文档、构建、部署、测试和模板文件整体节点；`--kind topics` 返回从 Markdown/spec heading 和 `knowledge/knowledge-map.yaml` 抽取的主题；`--kind relationships` 返回 `documents`、`depends_on`、`uses_sdk` 和 `configures` 等跨域关系。`--kind build` 返回从 Cargo、npm、Python、Go、Maven effective `pom.xml`、Gradle、CMake、Makefile 和 CI workflow 证据中提取的 package、script、target、feature、module、profile、plugin、goal、job 等构建入口。`--kind iac` 返回 Dockerfile、Compose、Kubernetes YAML、Helm chart、Terraform、systemd、launchd 和 CI workflow 中提取的部署/基础设施资源。`--kind design` 返回 README、架构/设计 Markdown 和 package/module manifest 中有证据支撑的软件系统、模块、组件、接口和能力元素。该命令不会执行构建工具、扫描包缓存、SDK 目录、云 API、未索引外部源码或查询时全仓文档；source scope 变化后需要重新 `repo index` 或 `repo update` 刷新投影。
+`repo software` 读取所选 repository scope 的软件全域模型。旧 kind 继续返回兼容投影：`dependencies` 返回 manifest/lockfile package component 和 dependency usage，`sdks` 返回 unresolved/ambiguous/external target，`files`、`topics`、`relationships`、`build`、`iac`、`design` 返回各自旧切片。Dockerfile/Containerfile 现在属于 build definition，CI workflow job 属于 pipeline/build job；只有 Compose、Kubernetes、Helm、Terraform、systemd、launchd 等明确部署证据进入 IaC。普通 README heading 只生成 documentation topic；只有显式 frontmatter、受控 manifest/schema 或结构化代码证据才能晋升为 system/component/API/resource。
+
+类型化 kind `systems`、`apis`、`resources`、`tests`、`deployments` 和 `releases` 返回带稳定 `entity_key` 与 snapshot `occurrence_id` 的 ontology entity。`statements` 返回 subject/predicate/object、source/evidence、assertion mode、resolution、有效期、extractor、confidence 和 fact state；`conflicts` 返回 conflicting、unresolved、superseded/rejected statement 及 shape diagnostics。每个响应 status 都包含 `ontology_version`、`projection_schema_version`、`source_coverage`、`completeness_basis_points`、`freshness` 和 `conflict_count`。
+
+`repo software export` 从同一 snapshot-bound application service 输出原始标准 JSON 文档：`spdx-3` 对应 SPDX 3.0.1 JSON-LD，`cyclonedx-1.7` 对应 CycloneDX 1.7 JSON，`prov-o` 对应 PROV-O JSON-LD。导出不会补造当前 ontology 不掌握的标准字段。查询和导出都不会执行构建工具、扫描包缓存、SDK 目录、云 API、未索引外部源码或查询时全仓文档；source scope 变化后需要重新 `repo index` 或 `repo update` 刷新投影。
 
 `repo business` 读取索引时从 Knowledge Map `business-knowledge` route 授权的 `knowledge/glossary/business-glossary.yaml` 投影。`--kind terms` 返回 canonical term、definition、alias、semantics、冲突和 evidence；`mappings` 返回 `represented_by`/`calculated_from` 技术映射。跨 domain 同名且未给 `--domain` 时返回 `ambiguous`，不会猜测；授权 scope 外或尚未覆盖的目标保留 `resolution_state=unresolved` 和 `target_hint`，不会把仓库标成 degraded。业务定义只能通过版本化 glossary 和代码评审修改。
 
 `repo view` 以 JSON 返回从代码图谱派生的代码库理解视图。`business-domains` 优先合并 glossary 声明的 domain（`evidence.kind=business_glossary`），再补充路径、路由和 feature flag 推断；其余视图从所选 repository scope 中已索引的文件、符号、import、call、route、dependency 和 feature flag 事实派生。`affected-scope` 在 deterministic v1 中需要一个或多个 `--changed-path`，返回变更文件、受影响模块、调用边和附近的测试/配置/文档候选。响应包含 `nodes`、`edges`、`sections`、`evidence`、freshness 诊断和截断预算元数据；section narrative 只是带 evidence id 的短派生说明，不会作为图谱事实持久化，也不是 AI 生成的事实真源。
 
-面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_business_query` 覆盖 authored 业务术语与技术映射，`relay_software_query` 覆盖软件全域模型 kind，`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
+面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_business_query` 覆盖 authored 业务术语与技术映射，`relay_software_query` 覆盖全部软件全域模型 kind，并可传 `export_profile=spdx-3|cyclonedx-1.7|prov-o` 返回标准导出 envelope；`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
 
 `map` 命令维护 `codespec/codespec-map.yaml` 与 `knowledge/knowledge-map.yaml`。`map init`、`show`、`history`、`validate` 默认使用 `--type all`；定向 mutation 必须显式指定 `--type knowledge` 或 `--type codespec`，source 与 route 只适用于 Knowledge。Schema v3 增加强类型 `directories`，同时保留 `knowledge/topics/` 内容寻址分片、有界 recent history、`knowledge/history/` 校验归档和有界深度 index。目录治理只能通过 `map directory add|update|remove` 更新，两张 map 各自的五个基线目录不可删除。`map migrate --type knowledge --to-v3` 保留 v1/v2 内容、最后发布可见根文件并在旧路径写入 v3 redirect；`--rollback` 恢复保留的 v2 根文件。文件、digest、关系、历史、路径、保留 source 与 AGENTS 引用均以 `map validate` 为权威。
 

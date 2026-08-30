@@ -258,7 +258,7 @@
 
 ### 6.7 POST /api/v1/code/repositories/{alias}/software
 
-软件全局模型投影，按指定 kind 返回组件、依赖、SDK 等。
+软件全域模型查询，按指定 kind 返回兼容投影、ontology entity、provenance statement 或冲突诊断。CLI、Web 和 MCP 复用同一个 application service。
 
 **请求体**：
 
@@ -271,7 +271,7 @@
 }
 ```
 
-`kind` 枚举：`dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`all`
+`kind` 枚举：`dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`systems`、`apis`、`resources`、`tests`、`deployments`、`releases`、`statements`、`conflicts`、`all`
 
 **响应 200**：
 
@@ -280,7 +280,19 @@
   "metadata": { "_omitted": true },
   "scope": { "_omitted": true },
   "request": { "kind": "dependencies", "_omitted": true },
-  "status": { "_omitted": true },
+  "status": {
+    "ontology_version": "1.0.0",
+    "projection_schema_version": 6,
+    "source_coverage": {
+      "source_kinds": ["manifest"],
+      "source_path_count": 1,
+      "evidence_ref_count": 1
+    },
+    "completeness_basis_points": 10000,
+    "freshness": "fresh",
+    "conflict_count": 0,
+    "_omitted": true
+  },
   "components": [],
   "dependency_usages": [
     { "package_name": "serde", "module": "serde", "_omitted": true }
@@ -291,9 +303,20 @@
   "relationships": [],
   "build_targets": [],
   "iac_resources": [],
-  "design_elements": []
+  "design_elements": [],
+  "entities": [],
+  "statements": [],
+  "diagnostics": []
 }
 ```
+
+兼容 kind 保留既有数组；类型化 kind 使用 `entities`，`statements` 使用 `statements`，`conflicts` 可同时返回非 active statement 和 `diagnostics`。稳定 `entity_key` 不包含 commit/source scope，`occurrence_id` 绑定本次 snapshot evidence。普通 README heading 不会成为 software system，CI job 不会成为 IaC resource，Dockerfile 归入 build definition。
+
+### 6.7.1 POST /api/v1/code/repositories/{alias}/software/export/{profile}
+
+从同一 snapshot-bound statement 视图生成标准导出。`profile` 只接受 `spdx-3`、`cyclonedx-1.7` 或 `prov-o`。请求体与 6.7 相同，但服务会忽略 `kind` 并读取 `statements` 视图；`limit` 仍为 1–500 的有界单切片限制。
+
+响应 envelope 包含 `metadata`、`scope`、上述 `status`、`profile`、`media_type` 和 `document`。`document` 分别是 SPDX 3.0.1 JSON-LD、CycloneDX 1.7 JSON 或 PROV-O JSON-LD；Web 保留 envelope，CLI `repo software export` 只输出其中的原始 `document`。该端点不读取 live worktree、不调用云 API，也不根据目标标准补造无证据字段。
 
 ### 6.8 POST /api/v1/code/repositories/{alias}/views
 

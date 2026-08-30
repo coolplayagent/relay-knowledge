@@ -25,7 +25,7 @@ pub use operations::{
     ProposalDecisionApiRequest, ProposalDecisionResponse, ProposalListApiRequest,
     ProposalListResponse, ProposalShowResponse, RepositoryGraphNeighborhoodResponseV1,
     ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServiceRecoveryReport,
-    ServiceStatusResponse, SoftwareGlobalResponse, StorageShardDiagnostics,
-    StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest, WorkerRunResponse,
-    WorkerStatusRequest, WorkerStatusResponse,
+    ServiceStatusResponse, SoftwareGlobalExportResponse, SoftwareGlobalResponse,
+    StorageShardDiagnostics, StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest,
+    WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
 };

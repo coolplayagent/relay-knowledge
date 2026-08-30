@@ -25,6 +25,10 @@ use serde::Serialize;
 
 pub struct Config;
 
+pub trait GraphApi {
+    fn graph_version(&self) -> u64;
+}
+
 impl Config {
     pub fn get_bool(&self, key: &str) -> bool {
         key == "payments.enabled"
@@ -144,6 +148,23 @@ Owns software projection refresh and lifecycle extraction.
 
 ## Capability Global software projection
 Provides dependency, SDK, build, IaC, and design context for generation.
+"#;
+
+pub(super) const SOFTWARE_GLOBAL_README_MD: &str = r#"
+# Getting Started
+
+## Chapter Index
+This heading is documentation and must not become a software system.
+"#;
+
+pub(super) const SOFTWARE_GLOBAL_CATALOG_MD: &str = r#"
+
+---
+software-system: relay-platform
+api: Catalog API
+---
+# Catalog Guide
+Explicit catalog metadata may promote controlled software entities.
 "#;
 
 pub(super) const SOFTWARE_GLOBAL_KNOWLEDGE_MAP: &str = r#"

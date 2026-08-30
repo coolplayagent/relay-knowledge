@@ -26,7 +26,7 @@
 | Git repository | 源码、文档、manifest、CI、部署配置 | Git | immutable commit 或显式 worktree overlay |
 | Repository maps | 强类型 CodeSpec/Knowledge 目录及 topic、source、route、有限 history 和软件模型入口 | `codespec/codespec-map.yaml`、`knowledge/knowledge-map.yaml`、`knowledge/topics/`、`knowledge/history/` | `schema_version`、`map_type`、`map_version`、SHA-256 digest |
 | Code map | file、symbol、reference、call、import、chunk 和变更事实 | code repository index | repository id、resolved commit、tree hash、source scope |
-| Software model | dependency、SDK、file、topic、relationship、build、IaC、design 投影 | software global projection | 与 code map 相同的 source scope 和 graph version |
+| Software model | 兼容投影、稳定 ontology entity、snapshot occurrence、provenance statement、shape/conflict diagnostic | software global projection v6 | 与 code map 相同的 source scope 和 graph version；Knowledge Map 只保存稳定路由，不复制这些派生行 |
 | Business model | domain、canonical term、alias、semantics、definition conflict 与技术映射 | Git-authored glossary 的 fenced projection | 与 code map 相同的 resolved commit、source scope 和 graph version |
 | Agent context | map route、software/view/context/impact 的有界组合 | skill workflow | 固定 base/head、freshness、evidence id |
 

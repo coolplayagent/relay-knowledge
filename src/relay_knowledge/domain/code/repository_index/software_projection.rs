@@ -1,7 +1,8 @@
 //! Typed checkpoints for the durable software-global projection tail.
 
 pub(crate) const SOFTWARE_PROJECTION_CHECKPOINT: &str = "finalizing:software_projection";
-const SOFTWARE_PROJECTION_CHECKPOINT_PREFIX: &str = "finalizing:software_projection:v1:";
+const SOFTWARE_PROJECTION_CHECKPOINT_PREFIX_V1: &str = "finalizing:software_projection:v1:";
+const SOFTWARE_PROJECTION_CHECKPOINT_PREFIX_V2: &str = "finalizing:software_projection:v2:";
 
 /// One bounded writer phase in the fenced software projection workflow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,22 +14,24 @@ pub(crate) enum CodeSoftwareProjectionPhase {
     Files,
     Topics,
     Relationships,
+    Ontology,
     Publish,
 }
 
 impl CodeSoftwareProjectionPhase {
-    pub(crate) const COUNT: usize = 8;
+    pub(crate) const COUNT: usize = 9;
 
     pub(crate) const fn checkpoint_state(self) -> &'static str {
         match self {
-            Self::Reset => "finalizing:software_projection:v1:reset",
-            Self::Dependencies => "finalizing:software_projection:v1:dependencies",
-            Self::SdkUsages => "finalizing:software_projection:v1:sdk_usages",
-            Self::Lifecycle => "finalizing:software_projection:v1:lifecycle",
-            Self::Files => "finalizing:software_projection:v1:files",
-            Self::Topics => "finalizing:software_projection:v1:topics",
-            Self::Relationships => "finalizing:software_projection:v1:relationships",
-            Self::Publish => "finalizing:software_projection:v1:publish",
+            Self::Reset => "finalizing:software_projection:v2:reset",
+            Self::Dependencies => "finalizing:software_projection:v2:dependencies",
+            Self::SdkUsages => "finalizing:software_projection:v2:sdk_usages",
+            Self::Lifecycle => "finalizing:software_projection:v2:lifecycle",
+            Self::Files => "finalizing:software_projection:v2:files",
+            Self::Topics => "finalizing:software_projection:v2:topics",
+            Self::Relationships => "finalizing:software_projection:v2:relationships",
+            Self::Ontology => "finalizing:software_projection:v2:ontology",
+            Self::Publish => "finalizing:software_projection:v2:publish",
         }
     }
 
@@ -40,7 +43,8 @@ impl CodeSoftwareProjectionPhase {
             Self::Lifecycle => Some(Self::Files),
             Self::Files => Some(Self::Topics),
             Self::Topics => Some(Self::Relationships),
-            Self::Relationships => Some(Self::Publish),
+            Self::Relationships => Some(Self::Ontology),
+            Self::Ontology => Some(Self::Publish),
             Self::Publish => None,
         }
     }
@@ -51,7 +55,20 @@ pub(crate) fn code_software_projection_phase(state: &str) -> Option<CodeSoftware
     if state == SOFTWARE_PROJECTION_CHECKPOINT {
         return Some(CodeSoftwareProjectionPhase::Reset);
     }
-    let phase = state.strip_prefix(SOFTWARE_PROJECTION_CHECKPOINT_PREFIX)?;
+    if let Some(phase) = state.strip_prefix(SOFTWARE_PROJECTION_CHECKPOINT_PREFIX_V1) {
+        return match phase {
+            "reset" => Some(CodeSoftwareProjectionPhase::Reset),
+            "dependencies" => Some(CodeSoftwareProjectionPhase::Dependencies),
+            "sdk_usages" => Some(CodeSoftwareProjectionPhase::SdkUsages),
+            "lifecycle" => Some(CodeSoftwareProjectionPhase::Lifecycle),
+            "files" => Some(CodeSoftwareProjectionPhase::Files),
+            "topics" => Some(CodeSoftwareProjectionPhase::Topics),
+            "relationships" => Some(CodeSoftwareProjectionPhase::Relationships),
+            "publish" => Some(CodeSoftwareProjectionPhase::Ontology),
+            _ => None,
+        };
+    }
+    let phase = state.strip_prefix(SOFTWARE_PROJECTION_CHECKPOINT_PREFIX_V2)?;
     match phase {
         "reset" => Some(CodeSoftwareProjectionPhase::Reset),
         "dependencies" => Some(CodeSoftwareProjectionPhase::Dependencies),
@@ -60,6 +77,7 @@ pub(crate) fn code_software_projection_phase(state: &str) -> Option<CodeSoftware
         "files" => Some(CodeSoftwareProjectionPhase::Files),
         "topics" => Some(CodeSoftwareProjectionPhase::Topics),
         "relationships" => Some(CodeSoftwareProjectionPhase::Relationships),
+        "ontology" => Some(CodeSoftwareProjectionPhase::Ontology),
         "publish" => Some(CodeSoftwareProjectionPhase::Publish),
         _ => None,
     }
@@ -100,7 +118,7 @@ mod tests {
         for state in [
             "finalizing:software_projection:v1:",
             "finalizing:software_projection:v1:unknown",
-            "finalizing:software_projection:v2:reset",
+            "finalizing:software_projection:v3:reset",
             "finalizing:software_projection:reset",
         ] {
             assert_eq!(code_software_projection_phase(state), None, "state={state}");

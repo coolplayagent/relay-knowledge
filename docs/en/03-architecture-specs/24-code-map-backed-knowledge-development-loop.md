@@ -30,7 +30,7 @@ Loop](26-git-commit-knowledge-development-loop.md).
 | Git repository | Source, documents, manifests, CI, deployment configuration | Git | Immutable commit or explicit worktree overlay |
 | Repository maps | Typed CodeSpec/Knowledge directories plus topics, sources, routes, bounded history, and software-model entry point | `codespec/codespec-map.yaml`, `knowledge/knowledge-map.yaml`, `knowledge/topics/`, `knowledge/history/` | `schema_version`, `map_type`, `map_version`, SHA-256 digest |
 | Code map | Files, symbols, references, calls, imports, chunks, and change facts | Code repository index | Repository id, resolved commit, tree hash, source scope |
-| Software model | Dependency, SDK, file, topic, relationship, build, IaC, and design projections | Software global projection | Same source scope and graph version as the code map |
+| Software model | Compatibility projections, stable ontology entities, snapshot occurrences, provenance statements, and shape/conflict diagnostics | Software global projection v6 | Same source scope and graph version as the code map; the Knowledge Map stores only stable routes and never copies these derived rows |
 | Business model | Domains, canonical terms, aliases, semantics, definition conflicts, and technical mappings | Fenced projection of the Git-authored glossary | Same resolved commit, source scope, and graph version as the code map |
 | Agent context | Bounded map-route, software/view, context, and impact evidence | Skill workflow | Pinned base/head, freshness, evidence ids |
 

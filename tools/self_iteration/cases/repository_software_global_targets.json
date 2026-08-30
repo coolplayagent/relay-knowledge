@@ -86,7 +86,7 @@
         {"software_slice": "file", "path": "docs/architecture.md", "file_role": "documentation"},
         {"software_slice": "file", "path": "config/flags.yaml", "file_role": "configuration"},
         {"software_slice": "file", "path": "tests/smoke.rs", "file_role": "test"},
-        {"software_slice": "file", "path": "Dockerfile", "file_role": "deployment"},
+        {"software_slice": "file", "path": "Dockerfile", "file_role": "build_manifest"},
         {"software_slice": "file", "path": "templates/deployment.yaml.j2", "file_role": "template"}
       ],
       "case_group": "software_global_projection"
@@ -177,6 +177,7 @@
         {"software_slice": "build_target", "ecosystem": "rust", "kind": "package", "name": "software-global-fixture"},
         {"software_slice": "build_target", "ecosystem": "go", "kind": "module", "name": "example.com/relay/global"},
         {"software_slice": "build_target", "ecosystem": "cmake", "kind": "executable", "name": "relay_global_agent"},
+        {"software_slice": "build_target", "ecosystem": "container", "kind": "definition", "evidence_path": "Dockerfile"},
         {"software_slice": "build_target", "ecosystem": "github-actions", "kind": "job", "name": "verify"}
       ],
       "case_group": "software_global_projection"
@@ -199,10 +200,14 @@
         }
       ],
       "expected_all": [
-        {"software_slice": "iac_resource", "provider": "container", "resource_kind": "base_image", "target_hint": "rust:1.76"},
         {"software_slice": "iac_resource", "provider": "compose", "resource_kind": "service", "name": "web"},
         {"software_slice": "iac_resource", "provider": "terraform", "resource_kind": "resource", "scope_hint": "aws_ecs_service", "name": "relay_global"},
         {"software_slice": "iac_resource", "provider": "systemd", "resource_kind": "service", "name": "relay-global", "target_hint_contains": "service run"}
+      ],
+      "forbidden": [
+        {"software_slice": "iac_resource", "provider": "container"},
+        {"software_slice": "iac_resource", "provider": "github-actions"},
+        {"software_slice": "iac_resource", "provider": "gitlab-ci"}
       ],
       "case_group": "software_global_projection"
     },
@@ -229,6 +234,132 @@
         {"software_slice": "design_element", "element_kind": "module", "name": "software-global-fixture", "source_kind": "rust"}
       ],
       "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_systems_require_explicit_promotion_evidence",
+      "repository": "software_global_fixture",
+      "kind": "systems",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 30,
+      "max_rank": 4,
+      "expected": [
+        {"software_slice": "entity", "entity_kind": "software_system", "name": "relay-platform", "source_kind": "documentation"}
+      ],
+      "forbidden": [
+        {"software_slice": "entity", "entity_kind": "software_system", "name": "Getting Started"},
+        {"software_slice": "entity", "entity_kind": "software_system", "name": "Chapter Index"}
+      ],
+      "case_group": "software_ontology_classification"
+    },
+    {
+      "id": "software_global_apis_use_schema_code_or_explicit_metadata",
+      "repository": "software_global_fixture",
+      "kind": "apis",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 30,
+      "max_rank": 8,
+      "expected": [
+        {"software_slice": "entity", "entity_kind": "api", "name": "GraphApi", "source_kind": "code"}
+      ],
+      "expected_all": [
+        {"software_slice": "entity", "entity_kind": "api", "name": "Catalog API", "source_kind": "documentation"}
+      ],
+      "case_group": "software_ontology_classification"
+    },
+    {
+      "id": "software_global_resources_are_deployment_resources_not_ci_jobs",
+      "repository": "software_global_fixture",
+      "kind": "resources",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 50,
+      "max_rank": 12,
+      "expected": [
+        {"software_slice": "entity", "entity_kind": "resource", "name": "relay-global-api", "source_kind": "iac"}
+      ],
+      "forbidden": [
+        {"software_slice": "entity", "entity_kind": "resource", "name": "verify"}
+      ],
+      "case_group": "software_ontology_classification"
+    },
+    {
+      "id": "software_global_tests_are_structured_test_symbols",
+      "repository": "software_global_fixture",
+      "kind": "tests",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 30,
+      "max_rank": 6,
+      "expected": [
+        {"software_slice": "entity", "entity_kind": "test_case", "name": "relay_global_smoke", "source_kind": "test"}
+      ],
+      "case_group": "software_ontology_classification"
+    },
+    {
+      "id": "software_global_deployments_separate_units_and_runtime_services",
+      "repository": "software_global_fixture",
+      "kind": "deployments",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 50,
+      "max_rank": 12,
+      "expected": [
+        {"software_slice": "entity", "entity_kind": "deployment_unit", "name": "service/relay-global.service", "source_kind": "service_definition"}
+      ],
+      "expected_all": [
+        {"software_slice": "entity", "entity_kind": "runtime_service", "name": "relay-global", "source_kind": "service_definition"}
+      ],
+      "case_group": "software_ontology_lifecycle"
+    },
+    {
+      "id": "software_global_releases_link_declared_container_artifacts",
+      "repository": "software_global_fixture",
+      "kind": "releases",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 30,
+      "max_rank": 6,
+      "expected": [
+        {"software_slice": "entity", "entity_kind": "release_artifact", "name": "relay/global-web:latest", "source_kind": "iac"}
+      ],
+      "case_group": "software_ontology_lifecycle"
+    },
+    {
+      "id": "software_global_statements_keep_complete_provenance",
+      "repository": "software_global_fixture",
+      "kind": "statements",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 200,
+      "max_rank": 30,
+      "status_ontology_version": "1.0.0",
+      "status_projection_schema_version": 6,
+      "status_completeness_basis_points_min": 10000,
+      "expected": [
+        {"software_slice": "statement", "predicate": "contains", "source_kind": "ci", "assertion_mode": "declared", "fact_state": "active", "extractor_version": "1.0.0"}
+      ],
+      "expected_all": [
+        {"software_slice": "statement", "predicate": "depends_on", "source_kind": "manifest", "fact_state": "active"},
+        {"software_slice": "statement", "predicate": "runs_as", "source_kind": "service_definition", "fact_state": "active"},
+        {"software_slice": "statement", "predicate": "deploys", "source_kind": "iac", "fact_state": "active"},
+        {"software_slice": "statement", "predicate": "tests", "source_kind": "test", "fact_state": "active"}
+      ],
+      "case_group": "software_ontology_provenance"
+    },
+    {
+      "id": "software_global_conflicts_view_keeps_unresolved_external_evidence",
+      "repository": "software_global_fixture",
+      "kind": "conflicts",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 80,
+      "max_rank": 20,
+      "expected": [
+        {"software_slice": "statement", "predicate": "consumes_api", "resolution_state": "unresolved", "source_kind": "code"}
+      ],
+      "case_group": "software_ontology_provenance"
     },
     {
       "id": "software_global_all_kind_combines_foundational_and_lifecycle_slices",

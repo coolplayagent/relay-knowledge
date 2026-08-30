@@ -52,7 +52,7 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 `invalid --freshness value`: only `allow-stale`, `wait-until-fresh`, and `graph-only` are accepted.
 
-`invalid --kind value`: `index refresh` accepts only `bm25`, `semantic`, or `vector`; `repo query` accepts only `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, or `sbom`; `repo software` accepts only `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, or `all`.
+`invalid --kind value`: `index refresh` accepts only `bm25`, `semantic`, or `vector`; `repo query` accepts only `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, or `sbom`; `repo software` accepts `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, `systems`, `apis`, `resources`, `tests`, `deployments`, `releases`, `statements`, `conflicts`, or `all`. `repo software export --profile` accepts only `spdx-3`, `cyclonedx-1.7`, or `prov-o`; profiles are not kinds.
 
 `source_scope is required by the MCP access policy`: the MCP graph tool request lacks a scope, or unspecified scope is not allowed.
 

@@ -10,10 +10,10 @@ use super::introspection::{
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-// Version 7 adds scoped ontology identity columns and the repository business
-// knowledge projection. Bumping the marker is required so existing databases
-// run the additive schema initializer instead of retaining the v6 surface.
-pub(super) const SCHEMA_MARKER_VERSION: i64 = 7;
+// Version 8 adds the software ontology occurrence, statement, validation, and
+// provenance-status surfaces. Existing databases must run the additive schema
+// initializer before a v6 software projection can be published.
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 8;
 pub(in crate::storage::sqlite) const SEARCH_OWNER_V2_MIGRATION: &str =
     "search-owner-v2-writer-and-serving-gate";
 pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_V2_MIGRATION: &str =

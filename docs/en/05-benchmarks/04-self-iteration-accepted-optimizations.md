@@ -17,6 +17,12 @@ not published evidence. A current acceptance record must cite a tracked dated
 report with the revision or report digest, selected/executed/skipped counts,
 profile, product binary, environment, budgets, and result.
 
+## Issue #232: Software Ontology Classification and Provenance Guardrail
+
+- Classification contract: `software_global_fixture` fixes ordinary README “Getting Started” and “Chapter Index” headings as documentation only, requires Dockerfile/Containerfile to become build definitions, and forbids GitHub Actions or GitLab CI jobs from becoming IaC resources. Terraform, Kubernetes, Compose, and systemd deployment/resource types and explicit metadata promotion to systems or APIs are protected in the same fixture.
+- Ontology contract: targets cover `systems`, `apis`, `resources`, `tests`, `deployments`, `releases`, `statements`, and `conflicts` and require `ontology_version=1.0.0`, `projection_schema_version=6`, and `completeness_basis_points=10000`. Focused product tests separately freeze stable `entity_key`, snapshot `occurrence_id`, shape failures, cross-scope references, retained conflicts, and the nine-phase durable checkpoint.
+- Performance and status: `--categories performance` selects the same cases under the existing software fixture index and query p50/p95 budgets; no queue, batch, SQLite writer, lease, checkpoint, or query limit is widened. This entry records the new guardrail contract. It does not claim a wall-time improvement or an accepted performance result before a tracked release-binary report exists.
+
 ## Cold-Build-Safe BM25 Quality Gate
 
 - Root cause and evidence: repeated clean or cache-invalidated evaluations exhausted the former 120-second `bm25_hierarchy_suite` limit while Cargo was still compiling or linking; no test had started. With the exact library test target already built, all 50 tests complete in roughly 9 seconds. Counting cold compilation in the suite's 30-second metric also made that algorithm observation describe build state rather than BM25 behavior.

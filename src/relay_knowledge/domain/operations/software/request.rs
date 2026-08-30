@@ -14,6 +14,14 @@ pub enum SoftwareGlobalKind {
     Build,
     Iac,
     Design,
+    Systems,
+    Apis,
+    Resources,
+    Tests,
+    Deployments,
+    Releases,
+    Statements,
+    Conflicts,
     All,
 }
 
@@ -29,6 +37,14 @@ impl SoftwareGlobalKind {
             Self::Build => "build",
             Self::Iac => "iac",
             Self::Design => "design",
+            Self::Systems => "systems",
+            Self::Apis => "apis",
+            Self::Resources => "resources",
+            Self::Tests => "tests",
+            Self::Deployments => "deployments",
+            Self::Releases => "releases",
+            Self::Statements => "statements",
+            Self::Conflicts => "conflicts",
             Self::All => "all",
         }
     }

@@ -57,6 +57,45 @@ pub(super) fn payload_constraint_failures(
             failures.push(format!("degraded_reason={actual} missing={expected}"));
         }
     }
+    if let Some(expected) = case.get("status_ontology_version").and_then(Value::as_str) {
+        let actual = payload
+            .pointer("/status/ontology_version")
+            .and_then(Value::as_str)
+            .unwrap_or("missing");
+        if actual != expected {
+            failures.push(format!(
+                "status.ontology_version={actual} expected={expected}"
+            ));
+        }
+    }
+    if let Some(minimum) = case
+        .get("status_completeness_basis_points_min")
+        .and_then(Value::as_u64)
+    {
+        let actual = payload
+            .pointer("/status/completeness_basis_points")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if actual < minimum {
+            failures.push(format!(
+                "status.completeness_basis_points={actual} minimum={minimum}"
+            ));
+        }
+    }
+    if let Some(expected) = case
+        .get("status_projection_schema_version")
+        .and_then(Value::as_u64)
+    {
+        let actual = payload
+            .pointer("/status/projection_schema_version")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if actual != expected {
+            failures.push(format!(
+                "status.projection_schema_version={actual} expected={expected}"
+            ));
+        }
+    }
     failures
 }
 

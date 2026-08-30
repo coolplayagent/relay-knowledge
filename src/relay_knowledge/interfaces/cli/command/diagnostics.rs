@@ -102,7 +102,7 @@ impl fmt::Display for CliError {
             ),
             Self::InvalidSoftwareKind(value) => write!(
                 formatter,
-                "invalid --kind value '{value}', expected dependencies, sdks, files, topics, relationships, build, iac, design, or all"
+                "invalid --kind value '{value}', expected dependencies, sdks, files, topics, relationships, build, iac, design, systems, apis, resources, tests, deployments, releases, statements, conflicts, or all"
             ),
             Self::InvalidFreshness(value) => write!(
                 formatter,

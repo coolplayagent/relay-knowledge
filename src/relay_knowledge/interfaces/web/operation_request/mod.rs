@@ -198,6 +198,18 @@ pub(super) fn code_software_request(payload: &Value) -> Result<SoftwareGlobalReq
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
 
+pub(super) fn code_software_export_request(
+    payload: &Value,
+) -> Result<SoftwareGlobalRequest, WebError> {
+    SoftwareGlobalRequest::new(
+        code_selector(payload)?,
+        SoftwareGlobalKind::All,
+        parse_freshness(string_field(payload, "freshness")?)?,
+        usize_field(payload, "limit")?,
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
 pub(super) fn code_business_request(
     payload: &Value,
 ) -> Result<BusinessKnowledgeQueryRequest, WebError> {
@@ -426,6 +438,14 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
         "build" => Ok(SoftwareGlobalKind::Build),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
+        "systems" => Ok(SoftwareGlobalKind::Systems),
+        "apis" => Ok(SoftwareGlobalKind::Apis),
+        "resources" => Ok(SoftwareGlobalKind::Resources),
+        "tests" => Ok(SoftwareGlobalKind::Tests),
+        "deployments" => Ok(SoftwareGlobalKind::Deployments),
+        "releases" => Ok(SoftwareGlobalKind::Releases),
+        "statements" => Ok(SoftwareGlobalKind::Statements),
+        "conflicts" => Ok(SoftwareGlobalKind::Conflicts),
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(WebError::bad_request(format!(
             "unsupported software kind '{other}'"

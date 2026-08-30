@@ -1,13 +1,17 @@
 //! Coordinates repository software-projection reads and scope validation.
 
 use crate::{
-    api::{ApiError, ApiMetadata, RequestContext, SoftwareGlobalResponse},
+    api::{
+        ApiError, ApiMetadata, RequestContext, SoftwareGlobalExportResponse, SoftwareGlobalResponse,
+    },
     application::service::RelayKnowledgeService,
     domain::{
-        CodeRepositoryStatus, FreshnessPolicy, GraphVersion, SoftwareGlobalRequest,
-        SoftwareGlobalStatus,
+        CodeRepositoryStatus, FreshnessPolicy, GraphVersion, SoftwareExportProfile,
+        SoftwareGlobalRequest, SoftwareGlobalStatus,
     },
 };
+
+mod export;
 
 use super::{
     errors::storage_api_error,
@@ -19,6 +23,26 @@ use super::{
 };
 
 impl RelayKnowledgeService {
+    /// Exports the snapshot-bound ontology through a versioned interoperability profile.
+    pub async fn software_global_export(
+        &self,
+        mut request: SoftwareGlobalRequest,
+        profile: SoftwareExportProfile,
+        context: RequestContext,
+    ) -> Result<SoftwareGlobalExportResponse, ApiError> {
+        request.kind = crate::domain::SoftwareGlobalKind::Statements;
+        let response = self.software_global_projection(request, context).await?;
+        let document = export::export_document(&response, profile);
+        Ok(SoftwareGlobalExportResponse {
+            metadata: response.metadata,
+            scope: response.scope,
+            status: response.status,
+            profile,
+            media_type: profile.media_type().to_owned(),
+            document,
+        })
+    }
+
     /// Reads the repository-scoped software global dependency and SDK projection.
     pub async fn software_global_projection(
         &self,
@@ -49,6 +73,15 @@ impl RelayKnowledgeService {
                         .unwrap_or_else(|| "unscoped".to_owned()),
                     projected_graph_version: GraphVersion::ZERO,
                     stale: true,
+                    ontology_version: crate::domain::SOFTWARE_ONTOLOGY_VERSION.to_owned(),
+                    projection_schema_version: crate::domain::SOFTWARE_PROJECTION_SCHEMA_VERSION,
+                    source_coverage: crate::domain::SoftwareSourceCoverage::default(),
+                    completeness_basis_points: 0,
+                    freshness: crate::domain::SoftwareProjectionFreshness::Stale,
+                    conflict_count: 0,
+                    entity_count: 0,
+                    statement_count: 0,
+                    diagnostic_count: 0,
                     component_count: 0,
                     sdk_usage_count: 0,
                     file_count: 0,
@@ -68,6 +101,9 @@ impl RelayKnowledgeService {
                 build_targets: Vec::new(),
                 iac_resources: Vec::new(),
                 design_elements: Vec::new(),
+                entities: Vec::new(),
+                statements: Vec::new(),
+                diagnostics: Vec::new(),
             });
         }
 
@@ -146,6 +182,9 @@ impl RelayKnowledgeService {
         let mut status = projection.status;
         if scoped_status.stale || served_stale_scope {
             status.stale = true;
+            status.freshness = crate::domain::SoftwareProjectionFreshness::Stale;
+        } else if scoped_status.degraded_reason.is_some() {
+            status.freshness = crate::domain::SoftwareProjectionFreshness::Degraded;
         }
 
         Ok(SoftwareGlobalResponse {
@@ -162,6 +201,9 @@ impl RelayKnowledgeService {
             build_targets: projection.build_targets,
             iac_resources: projection.iac_resources,
             design_elements: projection.design_elements,
+            entities: projection.entities,
+            statements: projection.statements,
+            diagnostics: projection.diagnostics,
         })
     }
 }

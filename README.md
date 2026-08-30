@@ -69,9 +69,11 @@ and uninstall behavior.
   observable maintenance protect long-running indexing and background work.
 - Remote embedding and provider HTTP always pass through shared QoS admission;
   rejection, timeout, cancellation, and permit release remain observable.
-- Software-wide projections and authorized local-file indexing expose
-  dependencies, SDKs, files, topics, build/IaC/design evidence, and
-  relationships without query-time repository scans.
+- Software-wide projections and authorized local-file indexing expose typed
+  systems, APIs, resources, tests, build/deployment/release evidence,
+  provenance statements, conflicts, and legacy-compatible slices without
+  query-time repository scans. The Web Software page reads that same bounded,
+  snapshot-pinned application service.
 - CLI, Web, MCP Streamable HTTP, and local ACP modes share the same application
   behavior, scope policy, QoS, cancellation, audit, and diagnostics.
 
@@ -132,7 +134,16 @@ relay-knowledge repo framework repository --framework vue --kind component \
   --ref HEAD --path src --freshness wait-until-fresh --format json
 relay-knowledge repo software repository --kind relationships \
   --ref HEAD --format json
+relay-knowledge repo software repository --kind statements \
+  --ref HEAD --format json
+relay-knowledge repo software export repository --profile cyclonedx-1.7 \
+  --ref HEAD --format json
 ```
+
+Software responses retain stable entity identity, snapshot occurrences,
+statement provenance, freshness, completeness, and conflicts. Dockerfiles and
+CI jobs are build surfaces rather than IaC resources, and ordinary README
+headings remain documentation unless controlled metadata promotes them.
 
 Indexing returns a durable task and makes progress observable through
 `repo status`. If a one-shot CLI cannot finish a large cold index before the

@@ -139,7 +139,7 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
     assert!(matches!(
         reset,
         software::FencedProjectionAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:software_projection:v1:dependencies"
+            if checkpoint_state == "finalizing:software_projection:v2:dependencies"
     ));
     let dependency_fence = fence.clone();
     let dependencies = store
@@ -153,7 +153,7 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
     assert!(matches!(
         dependencies,
         software::FencedProjectionAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:software_projection:v1:sdk_usages"
+            if checkpoint_state == "finalizing:software_projection:v2:sdk_usages"
     ));
     let resumed_checkpoint = store
         .code_index_checkpoint(SOURCE_SCOPE.to_owned())
@@ -162,7 +162,7 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
         .expect("resumable projection checkpoint should exist");
     assert_eq!(
         resumed_checkpoint.state,
-        "finalizing:software_projection:v1:sdk_usages"
+        "finalizing:software_projection:v2:sdk_usages"
     );
     let projection = store
         .refresh_software_global_projection_with_fence(SOURCE_SCOPE.to_owned(), fence)

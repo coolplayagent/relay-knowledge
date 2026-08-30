@@ -1,6 +1,6 @@
 use crate::domain::{
     BusinessKnowledgeQueryKind, FrameworkKind, FrameworkNodeKind, FreshnessPolicy,
-    SoftwareGlobalKind,
+    SoftwareExportProfile, SoftwareGlobalKind,
 };
 
 #[cfg(test)]
@@ -459,6 +459,9 @@ fn parse_report(tokens: &[String]) -> Result<RepoCommand, CliError> {
 }
 
 fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    if tokens.first().map(String::as_str) == Some("export") {
+        return parse_software_export(&tokens[1..]);
+    }
     let alias = positional_alias(tokens)?;
     let mut ref_selector = "HEAD".to_owned();
     let mut kind = SoftwareGlobalKind::All;
@@ -494,6 +497,51 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
         alias,
         ref_selector,
         kind,
+        freshness,
+        limit,
+    })
+}
+
+fn parse_software_export(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut profile = None;
+    let mut freshness = FreshnessPolicy::AllowStale;
+    let mut limit = 500;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--profile" => {
+                let value = value_after(tokens, index, "--profile")?;
+                profile = SoftwareExportProfile::parse(&value);
+                if profile.is_none() {
+                    return Err(CliError::UnexpectedArgument(value));
+                }
+                index += 2;
+            }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::SoftwareExport {
+        alias,
+        ref_selector,
+        profile: profile.ok_or(CliError::MissingValue("--profile"))?,
         freshness,
         limit,
     })
@@ -635,6 +683,14 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
         "build" => Ok(SoftwareGlobalKind::Build),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
+        "systems" => Ok(SoftwareGlobalKind::Systems),
+        "apis" => Ok(SoftwareGlobalKind::Apis),
+        "resources" => Ok(SoftwareGlobalKind::Resources),
+        "tests" => Ok(SoftwareGlobalKind::Tests),
+        "deployments" => Ok(SoftwareGlobalKind::Deployments),
+        "releases" => Ok(SoftwareGlobalKind::Releases),
+        "statements" => Ok(SoftwareGlobalKind::Statements),
+        "conflicts" => Ok(SoftwareGlobalKind::Conflicts),
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(CliError::InvalidSoftwareKind(other.to_owned())),
     }

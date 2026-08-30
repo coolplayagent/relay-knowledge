@@ -257,6 +257,14 @@ fn binary_outputs_machine_readable_help() {
                         "build",
                         "iac",
                         "design",
+                        "systems",
+                        "apis",
+                        "resources",
+                        "tests",
+                        "deployments",
+                        "releases",
+                        "statements",
+                        "conflicts",
                         "all"
                     ]))
     );

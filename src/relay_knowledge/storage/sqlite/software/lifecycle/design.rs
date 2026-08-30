@@ -14,8 +14,8 @@ use super::{
     BoundedFacts,
     document::{IndexedDocument, IndexedLine},
     syntax::{
-        clean_scalar, design_heading_kind, file_name, json_string_value, markdown_heading,
-        next_markdown_summary, toml_value,
+        clean_scalar, design_heading_kind, file_name, json_string_value, key_value,
+        markdown_heading, next_markdown_summary, toml_value,
     },
 };
 
@@ -220,6 +220,7 @@ fn collect_markdown(
     graph_version: GraphVersion,
     elements: &mut DesignElements,
 ) -> Result<(), StorageError> {
+    collect_markdown_metadata(document, graph_version, elements)?;
     for (index, line) in document.lines.iter().enumerate() {
         let trimmed = line.text.trim();
         let Some(title) = markdown_heading(trimmed) else {
@@ -231,6 +232,55 @@ fn collect_markdown(
         let mut input = design_input(document, graph_version, kind, &title, "markdown", line);
         input.summary = next_markdown_summary(&document.lines[index + 1..]);
         push_design_element(elements, input)?;
+    }
+    Ok(())
+}
+
+fn collect_markdown_metadata(
+    document: &IndexedDocument,
+    graph_version: GraphVersion,
+    elements: &mut DesignElements,
+) -> Result<(), StorageError> {
+    let Some(metadata_start) = document
+        .lines
+        .iter()
+        .position(|line| !line.text.trim().is_empty())
+    else {
+        return Ok(());
+    };
+    if document.lines[metadata_start].text.trim() != "---" {
+        return Ok(());
+    }
+    for line in document.lines.iter().skip(metadata_start + 1).take(64) {
+        let trimmed = line.text.trim();
+        if trimmed == "---" {
+            break;
+        }
+        let Some((key, value)) = key_value(trimmed, ':') else {
+            continue;
+        };
+        let element_kind = match key {
+            "software-system" | "software_system" | "system" => "software_system",
+            "component" => "component",
+            "api" => "api",
+            "resource" => "resource",
+            _ => continue,
+        };
+        let name = clean_scalar(value);
+        if name.is_empty() {
+            continue;
+        }
+        push_design_element(
+            elements,
+            design_input(
+                document,
+                graph_version,
+                element_kind,
+                &name,
+                "markdown-metadata",
+                line,
+            ),
+        )?;
     }
     Ok(())
 }

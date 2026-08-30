@@ -1,6 +1,6 @@
 use crate::domain::{
     BusinessKnowledgeQueryKind, CodeQueryKind, CodeRepositorySelector, FrameworkKind,
-    FrameworkNodeKind, FreshnessPolicy, SoftwareGlobalKind,
+    FrameworkNodeKind, FreshnessPolicy, SoftwareExportProfile, SoftwareGlobalKind,
 };
 
 use super::{
@@ -121,6 +121,13 @@ pub enum RepoCommand {
         alias: String,
         ref_selector: String,
         kind: SoftwareGlobalKind,
+        freshness: FreshnessPolicy,
+        limit: usize,
+    },
+    SoftwareExport {
+        alias: String,
+        ref_selector: String,
+        profile: SoftwareExportProfile,
         freshness: FreshnessPolicy,
         limit: usize,
     },

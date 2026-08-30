@@ -152,7 +152,7 @@ HTTP 响应头包含 `mcp-session-id: <uuid>`。
 
 #### relay_software_query
 
-软件全局投影工具。参数包括 `alias`、`kind`、`freshness`、`limit`。
+软件全域 ontology 与兼容投影工具。参数包括 `repository`、`kind`、`freshness`、`limit`、`ref_selector`、`path_filters`、`language_filters` 和可选 `export_profile`。Kind 接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`systems`、`apis`、`resources`、`tests`、`deployments`、`releases`、`statements`、`conflicts` 和 `all`。`export_profile` 接受 `spdx-3`、`cyclonedx-1.7` 或 `prov-o`；设置时返回带 metadata、scope、ontology status、profile、media type 和标准 `document` 的 envelope，并忽略 kind。
 
 ### 7.8 错误响应
 

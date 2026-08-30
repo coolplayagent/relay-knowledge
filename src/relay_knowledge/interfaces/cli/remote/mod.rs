@@ -11,7 +11,8 @@ use crate::{
         CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
         CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
         CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
-        RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalResponse,
+        RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalExportResponse,
+        SoftwareGlobalResponse,
     },
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
@@ -28,7 +29,7 @@ use crate::{
 
 use super::{
     CliAction, CliError, OutputFormat,
-    render::render_response,
+    render::{render_response, serialize_line},
     repo::{self, RepoCommand},
 };
 use crate::interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request};
@@ -49,6 +50,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::Impact { .. }
                 | RepoCommand::Report { .. }
                 | RepoCommand::Software { .. }
+                | RepoCommand::SoftwareExport { .. }
                 | RepoCommand::Business { .. }
                 | RepoCommand::View(_)
                 | RepoCommand::Status { .. }
@@ -459,6 +461,32 @@ pub(super) async fn run_remote(
                 format,
             )
             .map(Some)
+        }
+        RepoCommand::SoftwareExport {
+            alias,
+            ref_selector,
+            profile,
+            freshness,
+            limit,
+        } => {
+            let request = SoftwareGlobalRequest::new(
+                repo::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    format,
+                )?,
+                crate::domain::SoftwareGlobalKind::All,
+                *freshness,
+                *limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let endpoint = format!("software/export/{}", profile.as_str());
+            let response = client
+                .post_repository::<_, SoftwareGlobalExportResponse>(alias, &endpoint, &request)
+                .await?;
+            serialize_line(&response.document).map(Some)
         }
         RepoCommand::Business {
             alias,

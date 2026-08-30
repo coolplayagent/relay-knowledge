@@ -14,6 +14,12 @@
 tracked report，记录 revision/report digest、profile、product binary、selected/executed/skipped、
 预算、环境和结果，而不能把本机 patch cache 当作 acceptance 证明。
 
+## Issue #232：软件本体分类与 provenance 护栏
+
+- 分类契约：`software_global_fixture` 固定普通 README 的 “Getting Started”/“Chapter Index” 只能成为 documentation，Dockerfile/Containerfile 必须成为 build definition，GitHub Actions/GitLab CI job 不得成为 IaC resource；Terraform、Kubernetes、Compose、systemd 的 deployment/resource 类型和显式 metadata 晋升 system/API 的路径同时受保护。
+- 本体契约：targets 覆盖 `systems`、`apis`、`resources`、`tests`、`deployments`、`releases`、`statements`、`conflicts`，并要求 `ontology_version=1.0.0`、`projection_schema_version=6`、`completeness_basis_points=10000`。产品定向测试另行固定稳定 `entity_key`、snapshot `occurrence_id`、shape failure、跨 scope 引用、冲突并存和九阶段 durable checkpoint。
+- 性能与状态：相同 cases 会被 `--categories performance` 选中，继续使用 software fixture 的索引与 query p50/p95 预算，不放宽 queue、batch、SQLite writer、lease、checkpoint 或查询 limit。本条记录的是新 guardrail contract；在 tracked release-binary report 完成前，不声称达到新的 wall-time 提升或把候选写成 accepted performance result。
+
 ## 候选优化说明：cold-build-safe-bm25-quality-gate
 
 - 根因与证据：多次干净构建或 incremental cache 失效的 evaluation 都在旧 `bm25_hierarchy_suite` 120 秒上限处退出，当时 Cargo 仍在编译或链接，尚未启动任何测试；精确 lib test target 已构建后，50 条测试约 9 秒完成。把冷编译计入 suite 的 30 秒指标还会让算法观测描述构建状态，而不是 BM25 行为。

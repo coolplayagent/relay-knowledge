@@ -15,7 +15,8 @@ use crate::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositorySelector,
         CodeRetrievalRequest, CodebaseViewRequest, FrameworkGraphRequest,
-        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
+        RepositoryGraphNeighborhoodRequest, SoftwareExportProfile, SoftwareGlobalKind,
+        SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::normalize_index_request,
 };
@@ -74,6 +75,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/software",
             post(code_repository_software),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/software/export/{profile}",
+            post(code_repository_software_export),
         )
         .route(
             "/api/v1/code/repositories/{alias}/business",
@@ -343,6 +348,34 @@ async fn code_repository_software(
     match state
         .service
         .software_global_projection(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_software_export(
+    State(state): State<WebState>,
+    AxumPath((alias, profile)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Json(mut request): Json<SoftwareGlobalRequest>,
+) -> Response {
+    if let Some(error) = normalize_software_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    let Some(profile) = SoftwareExportProfile::parse(&profile) else {
+        return api_error_response(ApiError::invalid_argument(
+            "software export profile must be spdx-3, cyclonedx-1.7, or prov-o",
+        ));
+    };
+    request.kind = SoftwareGlobalKind::All;
+    match state
+        .service
+        .software_global_export(request, profile, api_context(&headers))
         .await
     {
         Ok(response) => Json(response).into_response(),

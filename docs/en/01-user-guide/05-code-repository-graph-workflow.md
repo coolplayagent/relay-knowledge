@@ -70,7 +70,7 @@ When the requested full scope is not already fresh, `repo index` queues a durabl
 
 The CLI-shaped Web index request accepts the optional boolean `reuse_historical`; omission and `null` keep the default full-index behavior. The 100-path reuse budget counts both the old and new path of each rename or copy, and a historical base retired before task admission safely falls back to a full task.
 
-In remote service mode, register the repository on the service host, start `service run --web`, and point the local CLI at the resident HTTP API with `--remote http://host:8791` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote `repo index` and `repo update` only submit durable tasks and return task/status/checkpoint data; they do not run `repo index-worker` in the local CLI process. The remote resident master drains the task through its code-index worker pool. Remote mode supports `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo context`, `repo framework`, `repo feature-flags`, `repo impact`, `repo report`, `repo software`, and `repo view`; it does not register local paths into a remote service. Run `repo index --reset` and `repo index-worker` on the service host because remote-selected CLIs reject those maintenance commands instead of falling back to local state.
+In remote service mode, register the repository on the service host, start `service run --web`, and point the local CLI at the resident HTTP API with `--remote http://host:8791` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote `repo index` and `repo update` only submit durable tasks and return task/status/checkpoint data; they do not run `repo index-worker` in the local CLI process. The remote resident master drains the task through its code-index worker pool. Remote mode supports `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo context`, `repo framework`, `repo feature-flags`, `repo impact`, `repo report`, `repo software` including standard exports, and `repo view`; it does not register local paths into a remote service. Run `repo index --reset` and `repo index-worker` on the service host because remote-selected CLIs reject those maintenance commands instead of falling back to local state.
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
@@ -170,17 +170,21 @@ relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 -
 
 Responses are grouped by feature flag and include configuration source, `defines_config`, `reads_config`, or `guards_code` relationships, source ranges, confidence, related symbols, and excerpts. The indexer recognizes static code/config evidence from environment access, config/settings reads, boolean config facts from supported configuration formats, and common OpenFeature, LaunchDarkly, and Unleash evaluation calls. Provider control-plane state such as rollout strategies, segments, and variants is not synchronized in this path. The query reads only the feature-flag table and FTS documents for the selected indexed scope; it does not recursively grep the repository at query time. Re-run `repo index` or `repo update` after adding flags or changing extraction rules.
 
-### Software Global Projection
+### Software Global Ontology and Compatibility Projections
 
-`repo software` exposes repository-scoped software graph projections for dependencies, unresolved SDK/API usage, whole-file nodes, documentation topics, and cross-domain relationships:
+`repo software` exposes compatibility projections, typed ontology entities, provenance statements, and conflict diagnostics for one repository scope:
 
 ```bash
 relay-knowledge repo software repo --kind files --ref HEAD --format json
 relay-knowledge repo software repo --kind topics --ref HEAD --format json
 relay-knowledge repo software repo --kind relationships --ref HEAD --format json
+relay-knowledge repo software repo --kind systems --ref HEAD --format json
+relay-knowledge repo software repo --kind statements --ref HEAD --format json
+relay-knowledge repo software repo --kind conflicts --ref HEAD --format json
+relay-knowledge repo software export repo --profile cyclonedx-1.7 --ref HEAD --format json
 ```
 
-The projection connects Markdown/spec headings and `knowledge/knowledge-map.yaml` topics with documentation files, dependency manifests with package components, unresolved imports with SDK/API usage candidates, and config/feature-flag facts with code or config files. It reads committed projection tables for the selected indexed scope and does not scan package caches, SDK directories, unindexed external source, or whole-repository docs at query time.
+An `entity_key` remains stable across commits while `occurrence_id` binds a snapshot and evidence. Ordinary Markdown/spec headings become only documentation units or topics. Explicit frontmatter, API traits or schemas, test symbols, Dockerfiles and build files, Compose/Kubernetes/Terraform, and service definitions project into their corresponding controlled kinds. Dockerfiles and CI jobs no longer become IaC resources. Statements retain source kind, evidence, extractor version, assertion/resolution/fact state, time, and confidence. A statement without evidence or violating a shape returns a `rejected` diagnostic and does not become an accepted fact. Every slice and SPDX 3.0.1, CycloneDX 1.7, or PROV-O export reads committed tables for the selected indexed scope and does not scan package caches, SDK directories, unindexed external source, or whole-repository docs at query time.
 
 ### Multi-Repository Repository Set Queries
 

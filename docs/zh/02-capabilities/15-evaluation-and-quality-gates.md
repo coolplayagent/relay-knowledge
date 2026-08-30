@@ -14,7 +14,7 @@
 
 - Rust evaluation harness 覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。
 - relay-teams 和 Linux 代码图检索准确性记录保留在验证卷。
-- Browser integration test 验证 Web diagnostics、GraphRAG readiness、operation composer、索引表、运行时面板和移动端布局。
+- Browser integration test 验证 Web diagnostics、GraphRAG readiness、knowledge/code graph canvas、software ontology graph、冲突与 shape diagnostics、operation composer、索引表、运行时面板和移动端布局。
 
 ## 竞争力特性
 

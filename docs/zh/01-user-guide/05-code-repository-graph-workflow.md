@@ -70,7 +70,7 @@ relay-knowledge repo index repo --ref <commit-sha> --format json
 
 CLI-shaped Web 索引请求接受可选布尔字段 `reuse_historical`；省略或传 `null` 时保持默认 full-index 行为。100-path 复用预算会分别统计 rename/copy 的 old/new path；历史基线若在 task admission 前被 retention 标为 retiring，则安全回退 full task。
 
-远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 和 `repo update` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
+远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 和 `repo update` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo software`（包括标准导出）和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
@@ -168,17 +168,21 @@ relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 -
 
 响应按 feature flag 分组，包含配置来源、`defines_config`、`reads_config` 或 `guards_code` 关系、source range、置信度、相关符号和 excerpt。索引器识别环境访问、config/settings 读取、支持配置格式里的布尔 config fact，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用中的静态代码/配置证据；provider 控制面的 rollout strategy、segment 和 variant 不在该路径同步。该查询只读取当前 indexed scope 下的 feature-flag 表和 FTS 文档，不在查询时递归 grep 全仓库；新增开关或抽取规则变化后需要重新 `repo index` 或 `repo update`。
 
-### 软件全域投影
+### 软件全域本体与兼容投影
 
-`repo software` 暴露 repository scope 内的软件图投影，包括依赖、未解析 SDK/API 使用、文件整体节点、文档主题和跨域关系：
+`repo software` 暴露同一 repository scope 内的兼容投影、类型化 ontology entity、provenance statement 和冲突诊断：
 
 ```bash
 relay-knowledge repo software repo --kind files --ref HEAD --format json
 relay-knowledge repo software repo --kind topics --ref HEAD --format json
 relay-knowledge repo software repo --kind relationships --ref HEAD --format json
+relay-knowledge repo software repo --kind systems --ref HEAD --format json
+relay-knowledge repo software repo --kind statements --ref HEAD --format json
+relay-knowledge repo software repo --kind conflicts --ref HEAD --format json
+relay-knowledge repo software export repo --profile cyclonedx-1.7 --ref HEAD --format json
 ```
 
-该投影会把 Markdown/spec heading 和 `knowledge/knowledge-map.yaml` topic 与文档文件连接，把依赖 manifest 与 package component 连接，把 unresolved import 与 SDK/API usage 候选连接，并把配置/feature-flag facts 与代码或配置文件连接。它只读取所选 indexed scope 的已提交 projection 表，不在查询时扫描包缓存、SDK 目录、未索引外部源码或全仓文档。
+`entity_key` 跨 commit 稳定，`occurrence_id` 绑定 snapshot 和 evidence。普通 Markdown/spec heading 只成为 documentation unit/topic；显式 frontmatter、API trait/schema、test symbol、Dockerfile/build file、Compose/Kubernetes/Terraform 或 service definition 才投影到相应受控类型。Dockerfile 和 CI job 不再成为 IaC resource。Statement 保留 source kind、evidence、extractor version、assertion/resolution/fact state、时间和 confidence；无证据或违反 shape 的 statement 返回 `rejected` diagnostic，不会成为 accepted fact。所有切片和 SPDX 3.0.1、CycloneDX 1.7、PROV-O 导出只读取所选 indexed scope 的已提交表，不在查询时扫描包缓存、SDK 目录、未索引外部源码或全仓文档。
 
 ### 多仓库 Repository Set 查询
 

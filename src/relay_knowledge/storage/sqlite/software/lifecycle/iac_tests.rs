@@ -6,7 +6,7 @@ use super::{collect, initialize_schema, new_resources};
 use crate::storage::sqlite::software::lifecycle::document::{IndexedDocument, IndexedLine};
 
 #[test]
-fn collectors_extract_container_and_kubernetes_resources() {
+fn collectors_extract_deployment_resources_without_build_or_ci_jobs() {
     let mut resources = new_resources();
     collect(
         &document(
@@ -17,7 +17,17 @@ fn collectors_extract_container_and_kubernetes_resources() {
         GraphVersion::new(3),
         &mut resources,
     )
-    .expect("container resources should collect");
+    .expect("Dockerfile should be ignored by IaC extraction");
+    collect(
+        &document(
+            ".github/workflows/ci.yml",
+            "yaml",
+            &["jobs:", "  verify:", "    runs-on: ubuntu-latest"],
+        ),
+        GraphVersion::new(3),
+        &mut resources,
+    )
+    .expect("CI jobs should be ignored by IaC extraction");
     collect(
         &document(
             "deploy/app.yaml",
@@ -29,11 +39,13 @@ fn collectors_extract_container_and_kubernetes_resources() {
     )
     .expect("kubernetes resources should collect");
 
-    assert!(resources.as_slice().iter().any(|resource| {
-        resource.provider == "container"
-            && resource.resource_kind == "base_image"
-            && resource.target_hint.as_deref() == Some("rust:1.88")
-    }));
+    assert!(
+        resources
+            .as_slice()
+            .iter()
+            .all(|resource| resource.provider != "container"
+                && resource.provider != "github-actions")
+    );
     assert!(resources.as_slice().iter().any(|resource| {
         resource.provider == "kubernetes"
             && resource.resource_kind == "Deployment"

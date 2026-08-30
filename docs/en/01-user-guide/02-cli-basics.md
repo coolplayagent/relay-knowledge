@@ -87,7 +87,7 @@ General knowledge retrieval uses the current implementation default. Code reposi
 - `worker`: `embedding`, `ocr`, `vision`, `extractor`.
 - `repo query`: `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, `sbom`.
 - `repo framework`: `component`, `directive`, `pipe`, `template`, `input`, `output`, `prop`, `emit`, `model`, `slot`, `template-variable`, `control-flow`.
-- `repo software`: `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, `all`.
+- `repo software`: `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, `systems`, `apis`, `resources`, `tests`, `deployments`, `releases`, `statements`, `conflicts`, `all`; use `repo software export --profile spdx-3|cyclonedx-1.7|prov-o` for standard documents.
 
 When query text or a reason contains words beginning with `-`, use `--` or quoting so they are not parsed as options.
 

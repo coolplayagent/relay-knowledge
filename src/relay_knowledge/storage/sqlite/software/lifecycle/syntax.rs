@@ -113,7 +113,7 @@ pub(super) fn markdown_heading(line: &str) -> Option<String> {
     (!title.is_empty()).then(|| title.to_owned())
 }
 
-pub(super) fn design_heading_kind(title: &str, path: &str) -> Option<&'static str> {
+pub(super) fn design_heading_kind(title: &str, _path: &str) -> Option<&'static str> {
     let lower = title.to_ascii_lowercase();
     if lower.contains("architecture") || lower.contains("design") {
         Some("architecture")
@@ -125,8 +125,6 @@ pub(super) fn design_heading_kind(title: &str, path: &str) -> Option<&'static st
         Some("interface")
     } else if lower.contains("capability") || lower.contains("feature") {
         Some("capability")
-    } else if path.to_ascii_lowercase().contains("readme") {
-        Some("software_system")
     } else {
         None
     }

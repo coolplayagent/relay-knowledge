@@ -90,15 +90,17 @@ fn build_manifest_path(file_name: &str, language_id: &str) -> bool {
             | "BSDmakefile"
             | "CMakeLists.txt"
             | "build.ninja"
-    ) || matches!(language_id, "cmake" | "make" | "ninja" | "starlark")
+    ) || file_name.starts_with("Dockerfile")
+        || file_name.starts_with("Containerfile")
+        || matches!(
+            language_id,
+            "cmake" | "make" | "ninja" | "starlark" | "dockerfile"
+        )
 }
 
 fn deployment_path(path: &str, file_name: &str, language_id: &str) -> bool {
-    file_name.starts_with("Dockerfile")
-        || file_name.starts_with("Containerfile")
-        || matches!(language_id, "dockerfile")
-        || (deployment_service_path(path)
-            && (deployment_manifest_language(language_id) || service_manager_file_name(file_name)))
+    (deployment_service_path(path)
+        && (deployment_manifest_language(language_id) || service_manager_file_name(file_name)))
         || (kubernetes_manifest_path(path) && deployment_manifest_language(language_id))
 }
 

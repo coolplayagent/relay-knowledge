@@ -84,6 +84,31 @@ serde = "1"
     assert_eq!(event.limit, Some(5));
     assert_eq!(event.result_count, Some(1));
     assert_eq!(event.status, AgentAuditStatus::Completed);
+
+    let export = run_cancellable_tool_call(
+        &server,
+        ToolCallParams {
+            name: CODE_SOFTWARE_QUERY_TOOL.to_owned(),
+            arguments: json!({
+                "repository": "fixture",
+                "kind": "conflicts",
+                "export_profile": "cyclonedx-1.7",
+                "limit": 10,
+                "freshness": "wait-until-fresh"
+            }),
+        },
+        "software-export".to_owned(),
+    )
+    .await;
+    let exported = &export.result["structuredContent"];
+    assert_eq!(export.result["isError"], false, "{}", export.result);
+    assert_eq!(exported["profile"], "cyclonedx-1.7");
+    assert_eq!(
+        exported["media_type"],
+        "application/vnd.cyclonedx+json; version=1.7"
+    );
+    assert_eq!(exported["document"]["bomFormat"], "CycloneDX");
+    assert_eq!(exported["document"]["specVersion"], "1.7");
 }
 
 async fn register_and_index_fixture(

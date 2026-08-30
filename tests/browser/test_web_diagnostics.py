@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Page, expect
+from software_fixture import CODE_REPOSITORY_LIST_RESPONSE, software_response
 
 
 def test_web_diagnostics_render_browser_contract(page: Page) -> None:
@@ -47,7 +48,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".home-query-preview")).to_contain_text("graph cache freshness")
         expect(page.get_by_role("heading", name="GraphRAG readiness")).not_to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
-        expect(page.locator("aside nav a")).to_have_count(8)
+        expect(page.locator("aside nav a")).to_have_count(9)
         expect(page.get_by_role("link", name="Status")).to_have_attribute("aria-current", "page")
         assert page.locator("link[rel='icon']").get_attribute("href", timeout=5000).startswith(
             "data:image/svg+xml"
@@ -187,6 +188,26 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         page.get_by_role("button", name="Fit graph to the viewport").click()
         page.get_by_role("button", name="Reset graph zoom and selection").click()
 
+        page.get_by_role("link", name="Software").click()
+        expect(page.get_by_role("heading", name="Software graph")).to_be_visible()
+        expect(page.get_by_label("Software repository")).to_have_value("relay")
+        expect(page.locator(".software-status")).to_contain_text("ontology 1.0.0")
+        expect(page.locator(".software-status")).to_contain_text("provenance 100%")
+        expect(page.locator(".software-status")).to_contain_text("1 conflicts")
+        expect(page.locator(".software-canvas canvas").first).to_be_visible()
+        page.evaluate(
+            """() => {
+                const host = document.querySelector("[data-testid='software-graph-canvas']");
+                host.__relaySelectSoftwareElement("software_entity:system");
+            }"""
+        )
+        expect(page.locator(".software-details")).to_contain_text("Checkout system")
+        expect(page.locator(".software-details")).to_contain_text("software system")
+        expect(page.locator(".software-conflicts tbody tr")).to_have_count(2)
+        expect(page.locator(".software-conflicts")).to_contain_text("database v1")
+        expect(page.locator(".software-conflicts")).to_contain_text("database v2")
+        expect(page.locator(".software-diagnostics")).to_contain_text("invalid range")
+
         page.get_by_role("link", name="Providers").click()
         expect(page.get_by_role("heading", name="Providers")).to_be_visible()
         expect(page.get_by_text("Semantic backend")).to_be_visible()
@@ -236,7 +257,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".result-preview")).to_contain_text("worker.status")
 
         page.set_viewport_size({"width": 390, "height": 844})
-        expect(page.locator("aside nav a")).to_have_count(8)
+        expect(page.locator("aside nav a")).to_have_count(9)
         page.get_by_role("link", name="Status").click()
         mobile_graph = page.evaluate(
             """() => {
@@ -318,6 +339,8 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/api/web/graph/canvas":
             kind = parse_qs(parsed.query).get("kind", ["knowledge"])[0]
             self.write_json(graph_canvas_response(kind))
+        elif path == "/api/v1/code/repositories":
+            self.write_json(CODE_REPOSITORY_LIST_RESPONSE)
         elif path == "/api/configs/model/profiles":
             self.write_json(MODEL_PROFILES_RESPONSE)
         elif path == "/api/configs/model-fallback":
@@ -371,6 +394,11 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
                     },
                 }
             )
+        elif path == "/api/v1/code/repositories/relay/software":
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length)
+            request = json.loads(body.decode("utf-8"))
+            self.write_json(software_response(request["kind"]))
         elif path == "/api/configs/model/catalog:refresh":
             self.write_json(MODEL_CATALOG_RESPONSE)
         elif path == "/api/configs/model:probe":

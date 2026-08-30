@@ -2,11 +2,12 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::V
 
 use crate::{
     domain::{
-        GraphVersion, RepositoryCodeRange, SoftwareBuildTarget, SoftwareComponent,
-        SoftwareComponentInput, SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile,
-        SoftwareGlobalKind, SoftwareGlobalProjection, SoftwareGlobalRequest, SoftwareGlobalStatus,
-        SoftwareIacResource, SoftwareRelationship, SoftwareSdkUsage, SoftwareSdkUsageInput,
-        SoftwareTopic,
+        GraphVersion, RepositoryCodeRange, SOFTWARE_ONTOLOGY_VERSION, SoftwareBuildTarget,
+        SoftwareComponent, SoftwareComponentInput, SoftwareDependencyUsage, SoftwareDesignElement,
+        SoftwareEntity, SoftwareFile, SoftwareGlobalKind, SoftwareGlobalProjection,
+        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
+        SoftwareProjectionFreshness, SoftwareRelationship, SoftwareSdkUsage, SoftwareSdkUsageInput,
+        SoftwareShapeDiagnostic, SoftwareSourceCoverage, SoftwareStatement, SoftwareTopic,
     },
     storage::StorageError,
 };
@@ -41,6 +42,9 @@ struct ProjectionSlices {
     build_targets: Vec<SoftwareBuildTarget>,
     iac_resources: Vec<SoftwareIacResource>,
     design_elements: Vec<SoftwareDesignElement>,
+    entities: Vec<SoftwareEntity>,
+    statements: Vec<SoftwareStatement>,
+    diagnostics: Vec<SoftwareShapeDiagnostic>,
 }
 pub(in super::super) fn refresh_projection(
     connection: &mut Connection,
@@ -70,6 +74,7 @@ pub(in super::super) fn refresh_projection(
     )?;
     dependency_usage::delete_scope(&transaction, source_scope)?;
     lifecycle::delete_scope(&transaction, source_scope)?;
+    super::ontology::delete_scope(&transaction, source_scope)?;
 
     let components = dependency_components(&transaction, source_scope, graph_version)?;
     insert_components(&transaction, &components)?;
@@ -93,6 +98,8 @@ pub(in super::super) fn refresh_projection(
 
     let relationship_count =
         graph::materialize_relationships(&transaction, source_scope, graph_version)?;
+    let ontology_projection =
+        super::ontology::refresh_projection(&transaction, source_scope, graph_version)?;
 
     let repository_id = repository_id_for_scope(&transaction, source_scope)?
         .unwrap_or_else(|| "unknown".to_owned());
@@ -101,6 +108,15 @@ pub(in super::super) fn refresh_projection(
         source_scope: source_scope.to_owned(),
         projected_graph_version: graph_version,
         stale: false,
+        ontology_version: SOFTWARE_ONTOLOGY_VERSION.to_owned(),
+        projection_schema_version: SOFTWARE_PROJECTION_SCHEMA_VERSION as u32,
+        source_coverage: ontology_projection.source_coverage.clone(),
+        completeness_basis_points: ontology_projection.completeness_basis_points,
+        freshness: SoftwareProjectionFreshness::Fresh,
+        conflict_count: ontology_projection.conflict_count,
+        entity_count: ontology_projection.entities.len(),
+        statement_count: ontology_projection.statements.len(),
+        diagnostic_count: ontology_projection.diagnostics.len(),
         component_count: components.len(),
         sdk_usage_count: sdk_usages.len(),
         file_count,
@@ -125,6 +141,9 @@ pub(in super::super) fn refresh_projection(
         build_targets: lifecycle_projection.build_targets,
         iac_resources: lifecycle_projection.iac_resources,
         design_elements: lifecycle_projection.design_elements,
+        entities: ontology_projection.entities,
+        statements: ontology_projection.statements,
+        diagnostics: ontology_projection.diagnostics,
     })
 }
 
@@ -150,6 +169,15 @@ pub(in super::super) fn projection_for_scope(
             source_scope: source_scope.to_owned(),
             projected_graph_version: GraphVersion::ZERO,
             stale: true,
+            ontology_version: SOFTWARE_ONTOLOGY_VERSION.to_owned(),
+            projection_schema_version: SOFTWARE_PROJECTION_SCHEMA_VERSION as u32,
+            source_coverage: SoftwareSourceCoverage::default(),
+            completeness_basis_points: 0,
+            freshness: SoftwareProjectionFreshness::Stale,
+            conflict_count: 0,
+            entity_count: 0,
+            statement_count: 0,
+            diagnostic_count: 0,
             component_count: 0,
             sdk_usage_count: 0,
             file_count: 0,
@@ -173,6 +201,9 @@ pub(in super::super) fn projection_for_scope(
         build_targets: slices.build_targets,
         iac_resources: slices.iac_resources,
         design_elements: slices.design_elements,
+        entities: slices.entities,
+        statements: slices.statements,
+        diagnostics: slices.diagnostics,
     })
 }
 
@@ -242,6 +273,53 @@ fn projection_slices(
             )?,
             ..ProjectionSlices::default()
         }),
+        SoftwareGlobalKind::Systems
+        | SoftwareGlobalKind::Apis
+        | SoftwareGlobalKind::Resources
+        | SoftwareGlobalKind::Tests
+        | SoftwareGlobalKind::Deployments
+        | SoftwareGlobalKind::Releases => Ok(ProjectionSlices {
+            entities: super::ontology::entities_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Statements => Ok(ProjectionSlices {
+            entities: super::ontology::entities_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            statements: super::ontology::statements_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Conflicts => {
+            let statements = super::ontology::statements_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            let remaining = request.limit.saturating_sub(statements.len());
+            Ok(ProjectionSlices {
+                statements,
+                diagnostics: super::ontology::diagnostics_for_scope(
+                    connection,
+                    source_scope,
+                    remaining,
+                )?,
+                ..ProjectionSlices::default()
+            })
+        }
         SoftwareGlobalKind::All => {
             let components =
                 components_for_scope(connection, source_scope, request, request.limit)?;
@@ -290,6 +368,24 @@ fn projection_slices(
             } else {
                 lifecycle::design_elements_for_scope(connection, source_scope, request, remaining)?
             };
+            let remaining = remaining.saturating_sub(design_elements.len());
+            let entities = if remaining == 0 {
+                Vec::new()
+            } else {
+                super::ontology::entities_for_scope(connection, source_scope, request, remaining)?
+            };
+            let remaining = remaining.saturating_sub(entities.len());
+            let statements = if remaining == 0 {
+                Vec::new()
+            } else {
+                super::ontology::statements_for_scope(connection, source_scope, request, remaining)?
+            };
+            let remaining = remaining.saturating_sub(statements.len());
+            let diagnostics = if remaining == 0 {
+                Vec::new()
+            } else {
+                super::ontology::diagnostics_for_scope(connection, source_scope, remaining)?
+            };
             Ok(ProjectionSlices {
                 components,
                 dependency_usages,
@@ -300,6 +396,9 @@ fn projection_slices(
                 build_targets,
                 iac_resources,
                 design_elements,
+                entities,
+                statements,
+                diagnostics,
             })
         }
     }
@@ -549,9 +648,12 @@ fn upsert_status(
             source_scope, repository_id, projected_graph_version, stale,
             component_count, sdk_usage_count, file_count, topic_count,
             relationship_count, build_target_count, iac_resource_count,
-            design_element_count, projection_schema_version, last_error
+            design_element_count, projection_schema_version, ontology_version,
+            source_coverage_json, completeness_basis_points, freshness,
+            conflict_count, entity_count, statement_count, diagnostic_count, last_error
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
         ON CONFLICT(source_scope) DO UPDATE SET
             repository_id = excluded.repository_id,
             projected_graph_version = excluded.projected_graph_version,
@@ -565,6 +667,14 @@ fn upsert_status(
             iac_resource_count = excluded.iac_resource_count,
             design_element_count = excluded.design_element_count,
             projection_schema_version = excluded.projection_schema_version,
+            ontology_version = excluded.ontology_version,
+            source_coverage_json = excluded.source_coverage_json,
+            completeness_basis_points = excluded.completeness_basis_points,
+            freshness = excluded.freshness,
+            conflict_count = excluded.conflict_count,
+            entity_count = excluded.entity_count,
+            statement_count = excluded.statement_count,
+            diagnostic_count = excluded.diagnostic_count,
             last_error = excluded.last_error
         ",
         params![
@@ -581,6 +691,18 @@ fn upsert_status(
             status.iac_resource_count,
             status.design_element_count,
             SOFTWARE_PROJECTION_SCHEMA_VERSION,
+            status.ontology_version,
+            serde_json::to_string(&status.source_coverage).map_err(|error| {
+                StorageError::Invariant(format!(
+                    "software source coverage cannot be serialized: {error}"
+                ))
+            })?,
+            status.completeness_basis_points,
+            status.freshness.as_str(),
+            status.conflict_count,
+            status.entity_count,
+            status.statement_count,
+            status.diagnostic_count,
             status.last_error,
         ],
     )?;
@@ -598,7 +720,10 @@ fn status_for_scope(
             SELECT repository_id, source_scope, projected_graph_version, stale,
                    component_count, sdk_usage_count, file_count, topic_count,
                    relationship_count, build_target_count, iac_resource_count,
-                   design_element_count, last_error
+                   design_element_count, projection_schema_version, ontology_version,
+                   source_coverage_json, completeness_basis_points, freshness,
+                   conflict_count, entity_count, statement_count, diagnostic_count,
+                   last_error
             FROM software_global_status
             WHERE source_scope = ?1
             ",
@@ -609,6 +734,30 @@ fn status_for_scope(
                     source_scope: row.get(1)?,
                     projected_graph_version: GraphVersion::new(row.get::<_, u64>(2)?),
                     stale: row.get::<_, i64>(3)? != 0,
+                    ontology_version: row.get(13)?,
+                    projection_schema_version: row.get::<_, u32>(12)?,
+                    source_coverage: serde_json::from_str(&row.get::<_, String>(14)?).map_err(
+                        |error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                14,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        },
+                    )?,
+                    completeness_basis_points: row.get(15)?,
+                    freshness: SoftwareProjectionFreshness::parse(&row.get::<_, String>(16)?)
+                        .ok_or_else(|| {
+                            rusqlite::Error::InvalidColumnType(
+                                16,
+                                "freshness".to_owned(),
+                                rusqlite::types::Type::Text,
+                            )
+                        })?,
+                    conflict_count: row.get(17)?,
+                    entity_count: row.get(18)?,
+                    statement_count: row.get(19)?,
+                    diagnostic_count: row.get(20)?,
                     component_count: row.get(4)?,
                     sdk_usage_count: row.get(5)?,
                     file_count: row.get(6)?,
@@ -617,7 +766,7 @@ fn status_for_scope(
                     build_target_count: row.get(9)?,
                     iac_resource_count: row.get(10)?,
                     design_element_count: row.get(11)?,
-                    last_error: row.get(12)?,
+                    last_error: row.get(21)?,
                 })
             },
         )

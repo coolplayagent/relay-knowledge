@@ -134,12 +134,21 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
     initialize_schema(&connection).expect("software schema should initialize");
     seed_scope(&connection);
     seed_lifecycle_chunks(&connection);
+    seed_ontology_symbols(&connection);
     let refreshed =
         refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
 
     assert!(refreshed.status.build_target_count >= 3);
     assert!(refreshed.status.iac_resource_count >= 3);
     assert!(refreshed.status.design_element_count >= 2);
+    assert_eq!(
+        refreshed.status.ontology_version,
+        crate::domain::SOFTWARE_ONTOLOGY_VERSION
+    );
+    assert_eq!(refreshed.status.completeness_basis_points, 10_000);
+    assert!(refreshed.status.entity_count > 0);
+    assert!(refreshed.status.statement_count > 0);
+    assert_eq!(refreshed.status.diagnostic_count, 0);
 
     let build_request = SoftwareGlobalRequest::new(
         crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
@@ -159,6 +168,11 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
                 && target.kind == "script"
                 && target.name == "build")
     );
+    assert!(build_projection.build_targets.iter().any(|target| {
+        target.ecosystem == "container"
+            && target.kind == "definition"
+            && target.evidence_path == "Dockerfile"
+    }));
     assert!(
         build_projection
             .build_targets
@@ -199,6 +213,12 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
                 && resource.resource_kind == "resource"
                 && resource.name == "app")
     );
+    assert!(iac_projection.iac_resources.iter().all(|resource| {
+        !matches!(
+            resource.provider.as_str(),
+            "github-actions" | "gitlab-ci" | "container"
+        )
+    }));
     assert!(
         iac_projection
             .iac_resources
@@ -227,6 +247,77 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
             .design_elements
             .iter()
             .any(|element| element.element_kind == "module" && element.name == "relay-core")
+    );
+    assert!(!design_projection.design_elements.iter().any(|element| {
+        element.element_kind == "software_system"
+            && matches!(element.name.as_str(), "Getting Started" | "Chapter Index")
+    }));
+    assert!(design_projection.design_elements.iter().any(|element| {
+        element.element_kind == "software_system"
+            && element.name == "relay-platform"
+            && element.source_kind == "markdown-metadata"
+    }));
+
+    for (kind, expected_entity_kind) in [
+        (SoftwareGlobalKind::Systems, "software_system"),
+        (SoftwareGlobalKind::Apis, "api"),
+        (SoftwareGlobalKind::Resources, "resource"),
+        (SoftwareGlobalKind::Tests, "test_case"),
+        (SoftwareGlobalKind::Deployments, "deployment_unit"),
+        (SoftwareGlobalKind::Releases, "release_artifact"),
+    ] {
+        let request = SoftwareGlobalRequest::new(
+            crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+                .expect("selector"),
+            kind,
+            crate::domain::FreshnessPolicy::AllowStale,
+            200,
+        )
+        .expect("ontology request should validate");
+        let projection = projection(&mut connection, request).expect("ontology slice should load");
+        assert!(
+            projection
+                .entities
+                .iter()
+                .any(|entity| entity.entity_kind.as_str() == expected_entity_kind),
+            "kind={} should expose entity_kind={expected_entity_kind}",
+            kind.as_str()
+        );
+    }
+
+    let statement_request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Statements,
+        crate::domain::FreshnessPolicy::AllowStale,
+        200,
+    )
+    .expect("statement request should validate");
+    let statement_projection =
+        projection(&mut connection, statement_request).expect("statement slice should load");
+    assert!(!statement_projection.entities.is_empty());
+    assert!(!statement_projection.statements.is_empty());
+    assert!(statement_projection.statements.iter().all(|statement| {
+        !statement.source_scope.is_empty()
+            && !statement.evidence_refs.is_empty()
+            && !statement.extractor_version.is_empty()
+    }));
+    let first_contains = statement_projection
+        .statements
+        .iter()
+        .position(|statement| statement.predicate.as_str() == "contains")
+        .expect("contains statement should exist");
+    let ci_contains = statement_projection
+        .statements
+        .iter()
+        .position(|statement| {
+            statement.predicate.as_str() == "contains"
+                && statement.source_kind == crate::domain::SoftwareSourceKind::Ci
+        })
+        .expect("CI containment statement should exist");
+    assert_eq!(
+        ci_contains, first_contains,
+        "evidence-path ordering should keep the CI statement rank snapshot-independent"
     );
 }
 
@@ -525,11 +616,35 @@ fn seed_lifecycle_chunks(connection: &Connection) {
     );
     insert_chunk(
         connection,
+        "chunk-dockerfile",
+        "Dockerfile",
+        "dockerfile",
+        1,
+        "FROM rust:1.89\nRUN cargo build --release\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-workflow",
+        ".github/workflows/ci.yml",
+        "yaml",
+        1,
+        "name: CI\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: cargo test\n",
+    );
+    insert_chunk(
+        connection,
         "chunk-package",
         "package.json",
         "json",
         1,
         "{\n  \"name\": \"relay-web\",\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest\"\n  }\n}\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-systemd",
+        "deploy/relay.service",
+        "ini",
+        1,
+        "[Service]\nExecStart=/usr/bin/relay-knowledge serve\n",
     );
     insert_chunk(
         connection,
@@ -590,6 +705,38 @@ fn seed_lifecycle_chunks(connection: &Connection) {
         1,
         "# Architecture\nRelay core separates indexing from query serving.\n\n## Module relay-core\nOwns software projection refresh.\n",
     );
+    insert_chunk(
+        connection,
+        "chunk-readme",
+        "README.md",
+        "markdown",
+        1,
+        "# Getting Started\n\n## Chapter Index\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-catalog",
+        "docs/catalog.md",
+        "markdown",
+        1,
+        "---\nsoftware-system: relay-platform\napi: Catalog API\n---\n# Guide\n",
+    );
+}
+
+fn seed_ontology_symbols(connection: &Connection) {
+    connection
+        .execute(
+            "INSERT INTO code_repository_symbols (
+                repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                name, kind, line_start, line_end
+            ) VALUES
+                ('repo', 'scope-1', 'symbol-api', 'src/api.rs', 'rust',
+                 'GraphApi', 'trait', 4, 20),
+                ('repo', 'scope-1', 'symbol-test', 'tests/lifecycle.rs', 'rust',
+                 'lifecycle_smoke_test', 'function', 8, 16)",
+            [],
+        )
+        .expect("ontology symbols should insert");
 }
 
 fn insert_chunk(

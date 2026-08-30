@@ -40,14 +40,14 @@ fn classifies_dependency_and_build_manifests_with_stable_precedence() {
         file_role("BUILD.bazel", "starlark", false),
         "build_manifest"
     );
+    assert_eq!(
+        file_role("Dockerfile", "dockerfile", false),
+        "build_manifest"
+    );
 }
 
 #[test]
 fn limits_deployment_roles_to_deployment_scopes() {
-    assert_eq!(
-        file_role("Dockerfile.dev", "dockerfile", false),
-        "deployment"
-    );
     assert_eq!(
         file_role("systemd/relay.service", "ini", false),
         "deployment"

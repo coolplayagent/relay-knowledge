@@ -624,8 +624,8 @@ pub(in crate::interfaces::cli::spec) fn repo_view() -> CliCommandSpec {
 pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
     command!(
         &["repo", "software"],
-        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|all] [--freshness <policy>] [--limit <n>]",
-        "Read repository-scoped software dependency, SDK/API, file, topic, relationship, build, IaC, and design facts.",
+        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness <policy>] [--limit <n>]",
+        "Read compatible software projections and provenance-bearing ontology entities, statements, and conflicts.",
         "code.repo.software",
         CommandEffect::ReadOnly,
         &[arg(
@@ -662,6 +662,14 @@ pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
                     "build",
                     "iac",
                     "design",
+                    "systems",
+                    "apis",
+                    "resources",
+                    "tests",
+                    "deployments",
+                    "releases",
+                    "statements",
+                    "conflicts",
                     "all",
                 ],
             ),
@@ -686,7 +694,67 @@ pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
         ],
         &["relay-knowledge repo software core --kind all --format json"],
         &[
-            "The projection is built from authorized repository index facts: dependency manifests, lockfiles, unresolved import/include targets, build manifests, IaC files, and design documentation."
+            "The projection is built from authorized repository index facts and retains ontology version, source coverage, evidence, freshness, completeness, and conflict diagnostics."
+        ],
+    )
+}
+
+pub(in crate::interfaces::cli::spec) fn repo_software_export() -> CliCommandSpec {
+    command!(
+        &["repo", "software", "export"],
+        "relay-knowledge repo software export <alias> --profile spdx-3|cyclonedx-1.7|prov-o [--ref <ref>] [--freshness <policy>] [--limit <n>]",
+        "Export the snapshot-bound software ontology through a standard interoperability profile.",
+        "code.repo.software_export",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[],
+        )],
+        &[
+            opt(
+                "--profile",
+                Some("profile"),
+                true,
+                false,
+                "Standard mapping profile.",
+                None,
+                &["spdx-3", "cyclonedx-1.7", "prov-o"],
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed Git ref or worktree selector.",
+                Some("HEAD"),
+                &[],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls projection freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum ontology rows used by the bounded export.",
+                Some("500"),
+                &[],
+            ),
+        ],
+        &["relay-knowledge repo software export core --profile cyclonedx-1.7 --format json"],
+        &[
+            "SPDX uses the 3.0.1 JSON-LD context; CycloneDX uses the 1.7 JSON schema; PROV-O emits JSON-LD Entity, Activity, Agent, and provenance relations."
         ],
     )
 }

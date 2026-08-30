@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn parses_software_export_profile_and_bounded_scope() {
+    assert_eq!(
+        parse_repo(&[
+            "software".to_owned(),
+            "export".to_owned(),
+            "repo".to_owned(),
+            "--profile".to_owned(),
+            "cyclonedx-1.7".to_owned(),
+            "--ref".to_owned(),
+            "abc123".to_owned(),
+            "--freshness".to_owned(),
+            "wait-until-fresh".to_owned(),
+            "--limit".to_owned(),
+            "250".to_owned(),
+        ])
+        .expect("software export command should parse"),
+        RepoCommand::SoftwareExport {
+            alias: "repo".to_owned(),
+            ref_selector: "abc123".to_owned(),
+            profile: SoftwareExportProfile::Cyclonedx17,
+            freshness: FreshnessPolicy::WaitUntilFresh,
+            limit: 250,
+        }
+    );
+    assert!(matches!(
+        parse_repo(&[
+            "software".to_owned(),
+            "export".to_owned(),
+            "repo".to_owned(),
+        ]),
+        Err(CliError::MissingValue("--profile"))
+    ));
+}
+
+#[test]
 fn parses_business_query_with_domain_and_fixed_ref() {
     assert_eq!(
         parse_repo(&[

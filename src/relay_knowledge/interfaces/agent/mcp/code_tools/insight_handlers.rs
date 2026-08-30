@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use crate::{
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeImpactRequest,
-        CodeRepositorySelector, FrameworkGraphRequest, SoftwareGlobalRequest,
+        CodeRepositorySelector, FrameworkGraphRequest, SoftwareExportProfile, SoftwareGlobalKind,
+        SoftwareGlobalRequest,
     },
     interfaces::agent::{
         AgentAdapterError, AgentAdapterErrorKind, authorize_limit, validate_optional_query_text,
@@ -139,9 +140,25 @@ pub(super) async fn code_software_query_tool(
         Ok(limit) => limit,
         Err(error) => return tool_error_result(error),
     };
-    let kind = match parse_software_query_kind(args.kind.as_deref().unwrap_or("all")) {
-        Ok(kind) => kind,
-        Err(error) => return tool_error_result(error),
+    let export_profile = match args.export_profile.as_deref() {
+        Some(value) => match SoftwareExportProfile::parse(value) {
+            Some(profile) => Some(profile),
+            None => {
+                return tool_error_result(AgentAdapterError::new(
+                    AgentAdapterErrorKind::InvalidArgument,
+                    format!("invalid software export profile '{value}'"),
+                ));
+            }
+        },
+        None => None,
+    };
+    let kind = if export_profile.is_some() {
+        SoftwareGlobalKind::All
+    } else {
+        match parse_software_query_kind(args.kind.as_deref().unwrap_or("all")) {
+            Ok(kind) => kind,
+            Err(error) => return tool_error_result(error),
+        }
     };
     let freshness = match parse_freshness(args.freshness.as_deref()) {
         Ok(freshness) => freshness,
@@ -160,6 +177,20 @@ pub(super) async fn code_software_query_tool(
         Ok(request) => request,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };
+
+    if let Some(profile) = export_profile {
+        return match server
+            .service
+            .software_global_export(request, profile, request_context(request_id))
+            .await
+        {
+            Ok(response) => tool_success_result(
+                format!("software ontology exported as {}", profile.as_str()),
+                json!(response),
+            ),
+            Err(error) => api_error_result(error),
+        };
+    }
 
     match server
         .service
@@ -396,4 +427,7 @@ fn software_projection_result_count(response: &crate::api::SoftwareGlobalRespons
         + response.build_targets.len()
         + response.iac_resources.len()
         + response.design_elements.len()
+        + response.entities.len()
+        + response.statements.len()
+        + response.diagnostics.len()
 }

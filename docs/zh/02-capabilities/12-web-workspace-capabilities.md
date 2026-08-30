@@ -2,8 +2,8 @@
 
 [中文](./12-web-workspace-capabilities.md) | [English](../../en/02-capabilities/12-web-workspace-capabilities.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 文档版本: 2.1
+> 编制日期: 2026-08-30
 > 适用范围: 第二卷能力说明
 
 ## 能力定位
@@ -12,11 +12,11 @@ Web 工作区把本地能力组织成可视化操作面。它不是单独业务�
 
 ## 用户可见行为
 
-Web workspace 从同源服务读取 `/api/project/status`、`/api/health` 和 `/api/web/operations/execute`。页面展示 graph version、health、index lag、GraphRAG readiness、runtime budgets、refresh recovery、stale reasons、operation composer 和执行结果。
+Web workspace 从同源服务读取 `/api/project/status`、`/api/health`、`/api/v1/code/repositories`、snapshot-bound software projection 和 `/api/web/operations/execute`。页面展示 graph version、health、index lag、GraphRAG readiness、software ontology graph、provenance completeness、冲突与 shape diagnostics、runtime budgets、refresh recovery、stale reasons、operation composer 和执行结果。
 
 ## 竞争力特性
 
-Web operation composer 生成 typed command/request preview，用户能在执行前看到 payload 和命令语义。执行时 Rust Web adapter 复用 application service，不复制 CLI 逻辑。
+Web operation composer 生成 typed command/request preview，用户能在执行前看到 payload 和命令语义。Software 页面与 CLI/MCP 复用同一 application service 和 ontology status，不另建前端事实模型；执行时 Rust Web adapter 同样不复制 CLI 逻辑。
 
 ## 命令/API 入口
 

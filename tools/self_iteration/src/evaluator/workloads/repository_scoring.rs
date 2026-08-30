@@ -216,6 +216,16 @@ fn software_hits_for_kind(payload: &Value, kind: &str) -> Vec<Value> {
         "build" => append_software_hits(payload, "build_targets", "build_target", &mut hits),
         "iac" => append_software_hits(payload, "iac_resources", "iac_resource", &mut hits),
         "design" => append_software_hits(payload, "design_elements", "design_element", &mut hits),
+        "systems" | "apis" | "resources" | "tests" | "deployments" | "releases" => {
+            append_software_hits(payload, "entities", "entity", &mut hits);
+        }
+        "statements" => {
+            append_software_hits(payload, "statements", "statement", &mut hits);
+        }
+        "conflicts" => {
+            append_software_hits(payload, "statements", "statement", &mut hits);
+            append_software_hits(payload, "diagnostics", "diagnostic", &mut hits);
+        }
         _ => {
             append_software_hits(payload, "components", "component", &mut hits);
             append_software_hits(payload, "dependency_usages", "dependency_usage", &mut hits);
@@ -226,6 +236,9 @@ fn software_hits_for_kind(payload: &Value, kind: &str) -> Vec<Value> {
             append_software_hits(payload, "build_targets", "build_target", &mut hits);
             append_software_hits(payload, "iac_resources", "iac_resource", &mut hits);
             append_software_hits(payload, "design_elements", "design_element", &mut hits);
+            append_software_hits(payload, "entities", "entity", &mut hits);
+            append_software_hits(payload, "statements", "statement", &mut hits);
+            append_software_hits(payload, "diagnostics", "diagnostic", &mut hits);
         }
     }
     hits

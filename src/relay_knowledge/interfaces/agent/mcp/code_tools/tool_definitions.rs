@@ -159,7 +159,7 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
                 "repository": {"type": "string", "minLength": 1},
                 "kind": {
                     "type": "string",
-                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "iac", "design", "model", "models", "all"]
+                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "iac", "design", "model", "models", "system", "systems", "api", "apis", "resource", "resources", "test", "tests", "deployment", "deployments", "release", "releases", "statement", "statements", "conflict", "conflicts", "all"]
                 },
                 "limit": {"type": "integer", "minimum": 1},
                 "ref_selector": {"type": "string"},
@@ -168,6 +168,10 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
                 "freshness": {
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
+                },
+                "export_profile": {
+                    "type": "string",
+                    "enum": ["spdx-3", "cyclonedx-1.7", "prov-o"]
                 }
             },
             "required": ["repository"]

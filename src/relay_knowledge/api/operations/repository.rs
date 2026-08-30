@@ -11,8 +11,9 @@ use crate::{
         CodeRetrievalRequest, CodeScopeRetentionSummary, FrameworkGraph, FrameworkGraphRequest,
         RepositoryGraphEdge, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
         SoftwareBuildTarget, SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement,
-        SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
-        SoftwareRelationship, SoftwareSdkUsage, SoftwareTopic,
+        SoftwareEntity, SoftwareExportProfile, SoftwareFile, SoftwareGlobalRequest,
+        SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship, SoftwareSdkUsage,
+        SoftwareShapeDiagnostic, SoftwareStatement, SoftwareTopic,
     },
 };
 
@@ -208,6 +209,23 @@ pub struct SoftwareGlobalResponse {
     pub build_targets: Vec<SoftwareBuildTarget>,
     pub iac_resources: Vec<SoftwareIacResource>,
     pub design_elements: Vec<SoftwareDesignElement>,
+    #[serde(default)]
+    pub entities: Vec<SoftwareEntity>,
+    #[serde(default)]
+    pub statements: Vec<SoftwareStatement>,
+    #[serde(default)]
+    pub diagnostics: Vec<SoftwareShapeDiagnostic>,
+}
+
+/// A standard-profile export produced from the same snapshot-bound software read model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftwareGlobalExportResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub status: SoftwareGlobalStatus,
+    pub profile: SoftwareExportProfile,
+    pub media_type: String,
+    pub document: serde_json::Value,
 }
 
 /// Repository-scoped authored business knowledge projection response.

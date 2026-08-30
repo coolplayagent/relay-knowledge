@@ -1,4 +1,4 @@
-use super::{score_framework_case, score_query_case};
+use super::{score_framework_case, score_query_case, score_software_case};
 use crate::command::CommandResult;
 
 #[test]
@@ -84,6 +84,54 @@ fn framework_case_scores_nodes_and_edges_as_ranked_hits() {
     };
 
     let observation = score_framework_case("vue", &case, &result);
+
+    assert!(observation.passed, "{}", observation.message);
+    assert_eq!(observation.rank, Some(1));
+}
+
+#[test]
+fn software_statement_case_scores_ontology_fields_and_status_contract() {
+    let case = serde_json::json!({
+        "id": "software_statements",
+        "kind": "statements",
+        "guardrail": true,
+        "max_rank": 1,
+        "status_ontology_version": "1.0.0",
+        "status_projection_schema_version": 6,
+        "status_completeness_basis_points_min": 10000,
+        "expected": [{
+            "software_slice": "statement",
+            "predicate": "depends_on",
+            "assertion_mode": "declared",
+            "fact_state": "active",
+            "extractor_version": "1.0.0"
+        }]
+    });
+    let result = CommandResult {
+        name: "repo_software".to_owned(),
+        command: vec!["relay-knowledge".to_owned()],
+        exit_code: 0,
+        duration_ms: 1,
+        stdout: serde_json::json!({
+            "status": {
+                "ontology_version": "1.0.0",
+                "projection_schema_version": 6,
+                "completeness_basis_points": 10000
+            },
+            "entities": [],
+            "statements": [{
+                "predicate": "depends_on",
+                "assertion_mode": "declared",
+                "fact_state": "active",
+                "extractor_version": "1.0.0"
+            }],
+            "diagnostics": []
+        })
+        .to_string(),
+        stderr: String::new(),
+    };
+
+    let observation = score_software_case("software_global_fixture", &case, &result);
 
     assert!(observation.passed, "{}", observation.message);
     assert_eq!(observation.rank, Some(1));

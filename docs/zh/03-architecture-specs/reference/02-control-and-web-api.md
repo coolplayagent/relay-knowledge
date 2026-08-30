@@ -256,7 +256,8 @@
 | `code.repo.view` | 从已索引代码图派生有界代码库理解视图 | `alias`, `kind`；可选 `ref`, `freshness`, `limit`, `changed_paths` |
 | `code.repo.feature_flags` | 特性标志查询 | `alias`, `freshness`, `limit`；可选 `query` |
 | `code.repo.impact` | 变更影响分析 | `alias`, `base_ref`, `head_ref`, `limit` |
-| `code.repo.software` | 软件全局投影 | `alias`, `kind`, `freshness`, `limit` |
+| `code.repo.software` | 软件全域兼容投影、ontology entity、statement 或 conflict | `alias`, `kind`, `freshness`, `limit` |
+| `code.repo.software_export` | 从同一 snapshot-bound statement 视图导出标准文档 | `alias`, `profile`, `freshness`, `limit`；profile 为 `spdx-3`、`cyclonedx-1.7` 或 `prov-o` |
 | `code.repo.status` | 仓库索引状态 | `alias` |
 | `code.repo_set.create` | 创建仓库集 | `set_alias`；可选 `description`, `default_ref_policy_json` |
 | `code.repo_set.add` | 添加仓库成员 | `set_alias`, `repository_alias`, `ref`；可选 `path_filters`, `language_filters`, `priority` |
@@ -271,7 +272,7 @@
 **freshness 枚举值**：`allow-stale`、`wait-until-fresh`、`graph-only`
 **code query kind 枚举值**：`hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`
 **index kind 枚举值**：`bm25`、`semantic`、`vector`
-**software kind 枚举值**：`dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`all`
+**software kind 枚举值**：`dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`systems`、`apis`、`resources`、`tests`、`deployments`、`releases`、`statements`、`conflicts`、`all`
 **files.content 契约**：该 operation 只查询已授权 root 内的文本内容 read model。请求字段为 `query`、`limit`，以及可选的 `source_scope`、`root_id`、`freshness`。响应包含 `freshness` 诊断、`truncated`、`duration_ms`、可选 `degraded_reason`，以及 `results[]`。每个命中必须携带 `scope_id`、`root_id`、`path`、`relative_path`、`chunk_id`、`excerpt`、`span`、`fingerprint`、`content_hash`、`graph_version`、`indexed_graph_version`、`freshness_cursor`、`rank`、`score`、`ranking_signals` 和 `fact_candidates`。`content_role` 固定表示非可信来源内容（当前为 `user_source`）；CLI、Web 和 agent adapter 只能把 `excerpt` 当作带 provenance 的引用数据，不能拼接为 system/developer 指令。
 
 **响应 200**：

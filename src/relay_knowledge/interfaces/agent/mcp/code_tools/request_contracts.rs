@@ -137,6 +137,8 @@ pub(super) struct CodeSoftwareQueryArgs {
     pub(super) language_filters: Vec<String>,
     #[serde(default)]
     pub(super) freshness: Option<String>,
+    #[serde(default)]
+    pub(super) export_profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -290,6 +292,14 @@ pub(super) fn parse_software_query_kind(
         "build" => Ok(SoftwareGlobalKind::Build),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" | "model" | "models" => Ok(SoftwareGlobalKind::Design),
+        "system" | "systems" => Ok(SoftwareGlobalKind::Systems),
+        "api" | "apis" => Ok(SoftwareGlobalKind::Apis),
+        "resource" | "resources" => Ok(SoftwareGlobalKind::Resources),
+        "test" | "tests" => Ok(SoftwareGlobalKind::Tests),
+        "deployment" | "deployments" => Ok(SoftwareGlobalKind::Deployments),
+        "release" | "releases" => Ok(SoftwareGlobalKind::Releases),
+        "statement" | "statements" => Ok(SoftwareGlobalKind::Statements),
+        "conflict" | "conflicts" => Ok(SoftwareGlobalKind::Conflicts),
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(AgentAdapterError::new(
             AgentAdapterErrorKind::InvalidArgument,

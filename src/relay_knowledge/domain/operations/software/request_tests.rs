@@ -4,6 +4,8 @@ use super::*;
 fn global_kind_uses_stable_external_names() {
     assert_eq!(SoftwareGlobalKind::Dependencies.as_str(), "dependencies");
     assert_eq!(SoftwareGlobalKind::Build.as_str(), "build");
+    assert_eq!(SoftwareGlobalKind::Statements.as_str(), "statements");
+    assert_eq!(SoftwareGlobalKind::Conflicts.as_str(), "conflicts");
     assert_eq!(SoftwareGlobalKind::All.as_str(), "all");
 }
 

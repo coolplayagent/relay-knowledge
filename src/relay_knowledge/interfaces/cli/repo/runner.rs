@@ -15,7 +15,7 @@ use super::{
     index::{CodeIndexWorkerRunResponse, finish_started_index_task, render_index_worker_response},
     render_response,
     report::render_report_response,
-    selector,
+    selector, serialize_line,
 };
 
 pub async fn run_repo(
@@ -458,6 +458,26 @@ pub async fn run_repo(
                 &response,
                 format,
             )
+        }
+        RepoCommand::SoftwareExport {
+            alias,
+            ref_selector,
+            profile,
+            freshness,
+            limit,
+        } => {
+            let request = SoftwareGlobalRequest::new(
+                selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
+                crate::domain::SoftwareGlobalKind::All,
+                freshness,
+                limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = service
+                .software_global_export(request, profile, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+            serialize_line(&response.document)
         }
         RepoCommand::Business {
             alias,

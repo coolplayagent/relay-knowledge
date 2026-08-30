@@ -125,7 +125,7 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "software_global_status",
-        columns: "source_scope, repository_id, projected_graph_version, stale, component_count, sdk_usage_count, file_count, topic_count, relationship_count, build_target_count, iac_resource_count, design_element_count, projection_schema_version, last_error",
+        columns: "source_scope, repository_id, projected_graph_version, stale, component_count, sdk_usage_count, file_count, topic_count, relationship_count, build_target_count, iac_resource_count, design_element_count, projection_schema_version, ontology_version, source_coverage_json, completeness_basis_points, freshness, conflict_count, entity_count, statement_count, diagnostic_count, last_error",
         cursor: CodeScopeCursor::Singleton,
     },
     CodeScopeTable {
@@ -142,5 +142,20 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
         table: "software_design_elements",
         columns: "element_id, repository_id, source_scope, language_id, element_kind, name, parent, summary, source_kind, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
         cursor: CodeScopeCursor::Key("element_id"),
+    },
+    CodeScopeTable {
+        table: "software_entities",
+        columns: "occurrence_id, entity_key, repository_id, source_scope, entity_kind, name, namespace, source_kind, primary_evidence_path, language_id, evidence_refs_json, attributes_json, created_graph_version",
+        cursor: CodeScopeCursor::Key("occurrence_id"),
+    },
+    CodeScopeTable {
+        table: "software_statements",
+        columns: "statement_id, source_scope, subject_id, predicate, object_id, object_value, source_kind, evidence_refs_json, primary_evidence_path, assertion_mode, resolution_state, valid_from, valid_to, observed_at, extractor_id, extractor_version, confidence_basis_points, fact_state",
+        cursor: CodeScopeCursor::Key("statement_id"),
+    },
+    CodeScopeTable {
+        table: "software_ontology_diagnostics",
+        columns: "diagnostic_id, source_scope, shape_id, code, severity, statement_id, entity_key, field, message",
+        cursor: CodeScopeCursor::Key("diagnostic_id"),
     },
 ];

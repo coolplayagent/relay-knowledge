@@ -42,6 +42,51 @@ fn collectors_extract_documented_architecture_and_manifest_module() {
 }
 
 #[test]
+fn readme_headings_stay_document_topics_unless_metadata_declares_an_entity() {
+    let mut elements = new_elements();
+    collect(
+        &document(
+            "README.md",
+            "markdown",
+            &["# Getting Started", "## Chapter Index"],
+        ),
+        GraphVersion::new(5),
+        &mut elements,
+    )
+    .expect("generic README headings should be ignored by design promotion");
+    assert!(elements.as_slice().is_empty());
+
+    collect(
+        &document(
+            "docs/catalog.md",
+            "markdown",
+            &[
+                "",
+                "---",
+                "software-system: relay-knowledge",
+                "api: Graph API",
+                "---",
+                "# Guide",
+            ],
+        ),
+        GraphVersion::new(5),
+        &mut elements,
+    )
+    .expect("explicit metadata should collect");
+    assert!(elements.as_slice().iter().any(|element| {
+        element.element_kind == "software_system"
+            && element.name == "relay-knowledge"
+            && element.source_kind == "markdown-metadata"
+    }));
+    assert!(
+        elements
+            .as_slice()
+            .iter()
+            .any(|element| element.element_kind == "api" && element.name == "Graph API")
+    );
+}
+
+#[test]
 fn initialize_schema_creates_design_lookup_index() {
     let connection = Connection::open_in_memory().expect("sqlite should open");
 

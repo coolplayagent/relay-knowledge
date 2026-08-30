@@ -75,6 +75,7 @@ pub(in crate::storage::sqlite) fn advance_fenced_projection(
         CodeSoftwareProjectionPhase::Relationships => {
             materialize_relationships(&transaction, source_scope)?
         }
+        CodeSoftwareProjectionPhase::Ontology => materialize_ontology(&transaction, source_scope)?,
         CodeSoftwareProjectionPhase::Publish => {
             require_staged_status(&transaction, source_scope)?;
             code::publication::complete_after_software_projection(
@@ -218,6 +219,23 @@ pub(in crate::storage::sqlite) fn refreshed_fenced_projection(
             &request,
             status.design_element_count,
         )?,
+        entities: super::super::ontology::entities_for_scope(
+            connection,
+            source_scope,
+            &request,
+            status.entity_count,
+        )?,
+        statements: super::super::ontology::statements_for_scope(
+            connection,
+            source_scope,
+            &request,
+            status.statement_count,
+        )?,
+        diagnostics: super::super::ontology::diagnostics_for_scope(
+            connection,
+            source_scope,
+            status.diagnostic_count,
+        )?,
         status,
     })
 }
@@ -245,6 +263,7 @@ fn reset(connection: &Connection, source_scope: &str) -> Result<(), StorageError
     )?;
     super::super::dependency_usage::delete_scope(connection, source_scope)?;
     super::super::lifecycle::delete_scope(connection, source_scope)?;
+    super::super::ontology::delete_scope(connection, source_scope)?;
     let repository_id =
         super::super::query_scope::repository_id_for_scope(connection, source_scope)?.ok_or_else(
             || {
@@ -260,6 +279,15 @@ fn reset(connection: &Connection, source_scope: &str) -> Result<(), StorageError
             source_scope: source_scope.to_owned(),
             projected_graph_version: current_graph_version_in_transaction(connection)?,
             stale: true,
+            ontology_version: crate::domain::SOFTWARE_ONTOLOGY_VERSION.to_owned(),
+            projection_schema_version: super::SOFTWARE_PROJECTION_SCHEMA_VERSION as u32,
+            source_coverage: crate::domain::SoftwareSourceCoverage::default(),
+            completeness_basis_points: 0,
+            freshness: crate::domain::SoftwareProjectionFreshness::Stale,
+            conflict_count: 0,
+            entity_count: 0,
+            statement_count: 0,
+            diagnostic_count: 0,
             component_count: 0,
             sdk_usage_count: 0,
             file_count: 0,
@@ -343,6 +371,25 @@ fn materialize_relationships(
         source_scope,
         status.projected_graph_version,
     )?;
+    upsert_status(connection, &status)
+}
+
+fn materialize_ontology(connection: &Connection, source_scope: &str) -> Result<(), StorageError> {
+    let mut status = require_staged_status(connection, source_scope)?;
+    let projection = super::super::ontology::refresh_projection(
+        connection,
+        source_scope,
+        status.projected_graph_version,
+    )?;
+    status.ontology_version = crate::domain::SOFTWARE_ONTOLOGY_VERSION.to_owned();
+    status.projection_schema_version = super::SOFTWARE_PROJECTION_SCHEMA_VERSION as u32;
+    status.source_coverage = projection.source_coverage;
+    status.completeness_basis_points = projection.completeness_basis_points;
+    status.freshness = crate::domain::SoftwareProjectionFreshness::Fresh;
+    status.conflict_count = projection.conflict_count;
+    status.entity_count = projection.entities.len();
+    status.statement_count = projection.statements.len();
+    status.diagnostic_count = projection.diagnostics.len();
     upsert_status(connection, &status)
 }
 
