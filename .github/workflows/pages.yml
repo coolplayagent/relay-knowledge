@@ -28,6 +28,19 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v6
 
+      - name: Validate current release pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          for language in en zh; do
+            release_page="pages/${language}/releases/${version}.html"
+            test -f "$release_page"
+            grep -Fq "./releases/${version}.html" "pages/${language}/index.html"
+            grep -Fq "releases/tag/v${version}" "$release_page"
+            grep -Fq "crates.io/crates/relay-knowledge/${version}" "$release_page"
+          done
+
       - name: Build static Pages site
         run: |
           mkdir -p _site

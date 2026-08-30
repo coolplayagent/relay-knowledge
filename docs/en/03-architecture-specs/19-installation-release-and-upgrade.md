@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 3.13
-> Date: 2026-08-29
+> Document version: 3.14
+> Date: 2026-08-30
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -18,7 +18,7 @@ Installation and release are part of product architecture. Stable releases are v
 - Release tags use `vX.Y.Z`, `X.Y.Z`, or matching prerelease forms such as `vX.Y.Z-rc.1`; the numeric version must match `Cargo.toml` and `Cargo.lock` before the tag is pushed. Manual dry-run dispatches validate the same version contract without publishing crates.io or GitHub release artifacts, and the workflow default dry-run tag must be updated with each release version bump.
 - The v1.1.16 maintenance release preparation pins `Cargo.toml`, `Cargo.lock`, CLI skill metadata, and the release workflow dry-run default to `1.1.16`; publishing remains tag-driven and starts only after pushing `v1.1.16` or `1.1.16` to GitHub. Its lockfile refresh replaces the yanked transitive `chacha20` 0.10.1 package with compatible 0.10.2 without changing the declared dependency surface. Keeping source development ahead of crates.io stable prevents unreleased behavior from sharing a version number with an incompatible published binary.
 - macOS x64 release jobs must use an active Intel runner label, such as `macos-15-intel`, rather than retired `macos-13` images. Artifact upload/download and attestation actions must stay on Node 24-compatible releases so the release workflow remains runnable after GitHub-hosted runner runtime migrations.
-- The repository Pages site must be enabled once with `build_type=workflow` by an administrator. The Pages workflow uses Node 24-compatible `configure-pages`, `upload-pages-artifact`, and `deploy-pages` releases and must not ask its scoped `GITHUB_TOKEN` to create or enable the site on every push.
+- The repository Pages site must be enabled once with `build_type=workflow` by an administrator. The Pages workflow uses Node 24-compatible `configure-pages`, `upload-pages-artifact`, and `deploy-pages` releases and must not ask its scoped `GITHUB_TOKEN` to create or enable the site on every push. Before uploading, it derives the package version from `Cargo.toml` and requires matching English and Chinese release pages, index links, GitHub Release links, and crates.io links; a stale or one-language-only release surface fails deployment instead of silently publishing an older version.
 - Linux GNU release jobs must build `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` artifacts natively on architecture-matched GitHub-hosted runners in digest-pinned manylinux 2.28 x64 and ARM64 containers. Each container must assert its actual glibc is 2.28 before building and start the new binary in-container; the release fails if the resulting ELF requires any `GLIBC_*` symbol newer than 2.28. The CLI skill Linux x64 bundled asset must pass the same ABI check after packaging.
 - OpenTelemetry dependencies form one release compatibility family: `opentelemetry`, `opentelemetry_sdk`, and `opentelemetry-otlp` use the same minor release, and `tracing-opentelemetry` uses the corresponding integration release. Dependency automation must update and validate the family together; a release candidate must not contain duplicate OpenTelemetry core or SDK major/minor lines. The current security floor is `opentelemetry_sdk` 0.32.1, which rejects W3C Baggage values above 8,192 bytes and stops after 64 list members as required by GHSA-w9wp-h8wv-79jx / CVE-2026-48504.
 - The XML parser security floor is `quick-xml` 0.41.0, which keeps duplicate-attribute checking linear and caps namespace declarations per element as required by RUSTSEC-2026-0194 and RUSTSEC-2026-0195. Informational unsoundness warnings with an available patch are upgraded in the lockfile rather than ignored.

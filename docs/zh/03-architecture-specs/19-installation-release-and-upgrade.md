@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 3.13
-> 编制日期: 2026-08-29
+> 文档版本: 3.14
+> 编制日期: 2026-08-30
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -18,7 +18,7 @@
 - Release tag 使用 `vX.Y.Z`、`X.Y.Z` 或 `vX.Y.Z-rc.1` 这类 prerelease 形式；数字版本必须在推送 tag 前与 `Cargo.toml` 和 `Cargo.lock` 保持一致。手动 dry-run dispatch 复用同一版本契约，但不会发布 crates.io 或 GitHub release 产物；workflow 默认 dry-run tag 必须随每次 release 版本提升同步更新。
 - v1.1.16 maintenance release 准备将 `Cargo.toml`、`Cargo.lock`、CLI skill metadata 和 release workflow dry-run 默认值统一固定到 `1.1.16`；发布仍由 tag 驱动，只有推送 `v1.1.16` 或 `1.1.16` 到 GitHub 后才会开始。该版本刷新 lockfile，将已被 yanked 的传递依赖 `chacha20` 0.10.1 兼容升级到 0.10.2，不改变直接依赖声明面。源码开发版本必须领先于 crates.io stable，禁止未发布行为与不兼容的已发布 binary 共用版本号。
 - macOS x64 release job 必须使用仍可用的 Intel runner label，例如 `macos-15-intel`，不能继续依赖已退休的 `macos-13` 镜像。Artifact upload/download 和 attestation action 必须保持在兼容 Node 24 的版本，确保 GitHub-hosted runner runtime 迁移后 release workflow 仍可运行。
-- 仓库 Pages 站点必须由管理员一次性启用并设置 `build_type=workflow`。Pages workflow 使用兼容 Node 24 的 `configure-pages`、`upload-pages-artifact` 与 `deploy-pages` release，不得让权限受限的 `GITHUB_TOKEN` 在每次 push 时重复创建或启用站点。
+- 仓库 Pages 站点必须由管理员一次性启用并设置 `build_type=workflow`。Pages workflow 使用兼容 Node 24 的 `configure-pages`、`upload-pages-artifact` 与 `deploy-pages` release，不得让权限受限的 `GITHUB_TOKEN` 在每次 push 时重复创建或启用站点。上传前必须从 `Cargo.toml` 推导当前 package version，并要求中英文 release page、首页入口、GitHub Release 链接和 crates.io 链接一致；页面仍停留在旧版本或只更新一种语言时必须拒绝部署，不能静默发布过期内容。
 - Linux GNU release job 必须在架构匹配的 GitHub-hosted runner 上，分别使用固定 digest 的 manylinux 2.28 x64 与 ARM64 容器原生构建 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu` 产物。容器必须在构建前断言实际 glibc 为 2.28，并在容器内启动新 binary；如果产出的 ELF 需要任何高于 2.28 的 `GLIBC_*` 符号，release 必须失败。CLI skill 内置的 Linux x64 asset 打包后也必须通过同一 ABI 检查。
 - OpenTelemetry 依赖构成一个发版兼容族：`opentelemetry`、`opentelemetry_sdk` 与 `opentelemetry-otlp` 使用相同 minor 版本，`tracing-opentelemetry` 使用对应的集成版本。依赖自动化必须整体升级并验证该兼容族；发版候选不能同时包含多条 OpenTelemetry core 或 SDK major/minor 版本线。当前安全基线为 `opentelemetry_sdk` 0.32.1；它按照 GHSA-w9wp-h8wv-79jx / CVE-2026-48504 拒绝超过 8,192 byte 的 W3C Baggage，并最多解析 64 个 list member。
 - XML parser 的安全基线为 `quick-xml` 0.41.0；它按 RUSTSEC-2026-0194 与 RUSTSEC-2026-0195 将重复属性检查保持为线性复杂度，并限制每个元素的 namespace declaration 数量。Informational unsoundness warning 如果已有补丁，必须升级 lockfile，不能直接忽略。
