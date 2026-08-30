@@ -1,0 +1,65 @@
+schema_version: 3
+topic:
+  id: architecture
+  title: Architecture knowledge
+  description: Architecture specs and hard constraints that guide implementation.
+sources:
+- id: architecture-hard-constraints
+  topic: architecture
+  kind: doc
+  uri: docs/zh/03-architecture-specs/02-engineering-hard-constraints.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Hard architecture constraints for relay-knowledge changes.
+- id: code-map-knowledge-development-loop
+  topic: architecture
+  kind: doc
+  uri: docs/zh/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Code-map-backed bootstrap, software modeling, spec context, and incremental consistency contract.
+- id: commit-driven-code-index-loop
+  topic: architecture
+  kind: doc
+  uri: docs/zh/03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Managed Git commit reconciliation, durable incremental publication, and bounded scope retention.
+- id: git-commit-knowledge-development-loop
+  topic: architecture
+  kind: doc
+  uri: docs/zh/03-architecture-specs/26-git-commit-knowledge-development-loop.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Git commit fact boundaries and knowledge-backed development-loop philosophy.
+- id: partitioned-sqlite-catalog-read-fast-path
+  topic: architecture
+  kind: doc
+  uri: knowledge/best-practices/partitioned-sqlite-catalog-read-fast-path.md
+  source_scope: repo
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Read-only catalog compatibility probe, serialized legacy migration boundary, and concurrent CLI latency guardrails.
+route:
+  topic: architecture
+  source_order:
+  - commit-driven-code-index-loop
+  - architecture-hard-constraints
+  - code-map-knowledge-development-loop
+  - git-commit-knowledge-development-loop
+  - partitioned-sqlite-catalog-read-fast-path
+  fallback: bounded-search

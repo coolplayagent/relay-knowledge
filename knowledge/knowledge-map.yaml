@@ -1,8 +1,8 @@
 schema_version: 3
 artifact_kind: map
 map_type: knowledge
-map_version: 13
-updated_at: unix:1787907388
+map_version: 15
+updated_at: unix:1788056166
 directories:
 - directory: domain
   purpose: Domain concepts, models, and business rules.
@@ -62,16 +62,17 @@ topics:
   - code-map-knowledge-development-loop
   - commit-driven-code-index-loop
   - git-commit-knowledge-development-loop
-  ref: topics/topic-4ca303a3bf7ddf7b-40a2948285eb3649336bbecba677562ce059bcc17802d9af7021fd9d1c081d34.yaml
-  digest: 40a2948285eb3649336bbecba677562ce059bcc17802d9af7021fd9d1c081d34
+  - partitioned-sqlite-catalog-read-fast-path
+  ref: topics/topic-4ca303a3bf7ddf7b-ec57300301a53ea94dff4bd7f2a7996f4c3510e84df67b717f7ec3cfbe3c0c99.yaml
+  digest: ec57300301a53ea94dff4bd7f2a7996f4c3510e84df67b717f7ec3cfbe3c0c99
 - id: benchmarks
   title: Benchmark knowledge
   description: Self-iteration and benchmark guardrail documentation.
   source_ids:
   - code-index-fact-versioning
   - profile-all-performance-source-surface-2026-06-04
-  ref: topics/topic-cb1d2fdcc86ce72a-74f2b67273beb57fadd1407afd278cc73a61d0accec7c5ec2e1c34da74cade72.yaml
-  digest: 74f2b67273beb57fadd1407afd278cc73a61d0accec7c5ec2e1c34da74cade72
+  ref: topics/topic-cb1d2fdcc86ce72a-00171d6dfe615346484dfc425f8505794872feefde00637c82d4b51e5861c29c.yaml
+  digest: 00171d6dfe615346484dfc425f8505794872feefde00637c82d4b51e5861c29c
 - id: business-knowledge
   title: Business knowledge
   description: Version-controlled business domains, terminology, aliases, semantics, and technical mappings.
@@ -157,3 +158,11 @@ history:
     action: directory.update
     actor: cli
     summary: Updated governed directory 'guides'.
+  - version: 14
+    action: source.add
+    actor: cli
+    summary: Added source 'partitioned-sqlite-catalog-read-fast-path' to topic 'architecture'.
+  - version: 15
+    action: source.update
+    actor: cli
+    summary: Updated source 'profile-all-performance-source-surface-2026-06-04'.

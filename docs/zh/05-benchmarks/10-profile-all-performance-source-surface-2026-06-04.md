@@ -126,3 +126,53 @@ body context under an exact path, and exercise the Bash token boundary. They do
 not encode external repository names, paths, challenge ids, or known production
 symbols. This follow-up records the algorithm and targeted gates; it does not
 claim a new full-profile score until the complete evaluation is rerun.
+
+## 2026-08-30 Partitioned Catalog Read-Path Follow-up
+
+The fast performance profile exposed a general concurrent-startup convoy. Every
+CLI query opened `PartitionedSqliteKnowledgeStore`, and catalog initialization
+unconditionally entered a `BEGIN IMMEDIATE` transaction before running
+idempotent DDL. Parallel read-only queries therefore serialized on the control
+database writer lock.
+
+Catalog startup now probes both catalog tables and their complete required
+column sets through the existing bounded read-only connection. A current shape
+returns without a write transaction; only first creation or legacy migration
+uses the serialized immediate transaction. The change does not alter durable
+task leases, checkpoint replay, publication fences, bounded retry/backoff, or
+the at-most-one-writer-per-repository rule.
+
+The pre-change current-candidate baseline used:
+
+```bash
+./self-iterate.sh evaluate --use-current-candidate --profile fast --categories performance
+```
+
+Baseline report `manual-evaluate-1788054780161505913-0-911521` executed all
+124 selected cases and 352 gates. It rejected the unchanged candidate, with the
+key `cpp_syntax_fixture_query_p95_ms` metric at 182 ms against a 180 ms budget;
+the C++ p50 was 89 ms.
+
+The same command on the post-change warm worktree produced report
+`manual-evaluate-1788056804251829828-0-984166`:
+
+- Score and performance score: `1.0`.
+- Cases: `124/124`; gates: `352/352`.
+- Commands: `299`; metrics: `80`; metric budget failures: `0`.
+- C++ query p50/p95: `64/110 ms` (budgets `80/180 ms`).
+- C query p50/p95: `75/149 ms` (budgets `80/180 ms`).
+- TypeScript query p50/p95: `63/121 ms` (budgets `90/200 ms`).
+- Cross-language query p50/p95: `59/64 ms` (budgets `100/220 ms`).
+
+The first post-change run performed the initial release rebuild and is not used
+as a warm latency comparison; it still completed all selected functional gates.
+The recorded warm rerun is the acceptance result. The checked-in p95 budgets are
+the end-to-end regression rail: the unchanged baseline failed them, while the
+corrected startup path passes without fixture-specific product behavior.
+
+Focused storage regression commands:
+
+```bash
+cargo test current_catalog_schema_revalidation_does_not_request_a_write_lock --all-features
+cargo test legacy_scope_publication_columns_migrate_idempotently_and_default_active --all-features
+```

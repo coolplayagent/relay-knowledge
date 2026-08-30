@@ -1,8 +1,8 @@
 schema_version: 3
 artifact_kind: map
 map_type: knowledge
-map_version: 12
-updated_at: unix:1787907127
+map_version: 14
+updated_at: unix:1788056159
 directories:
 - directory: domain
   purpose: Domain concepts, models, and business rules.
@@ -22,7 +22,9 @@ directories:
   key_files:
   - knowledge/guides/README.md
   load_hint: on_demand
-  relations: []
+  relations:
+  - kind: documents
+    target: codespec:requirements
   update_rule: reviewed
 - directory: ops
   purpose: Operational procedures and diagnostics.
@@ -60,8 +62,9 @@ topics:
   - code-map-knowledge-development-loop
   - commit-driven-code-index-loop
   - git-commit-knowledge-development-loop
-  ref: topics/topic-4ca303a3bf7ddf7b-40a2948285eb3649336bbecba677562ce059bcc17802d9af7021fd9d1c081d34.yaml
-  digest: 40a2948285eb3649336bbecba677562ce059bcc17802d9af7021fd9d1c081d34
+  - partitioned-sqlite-catalog-read-fast-path
+  ref: topics/topic-4ca303a3bf7ddf7b-ec57300301a53ea94dff4bd7f2a7996f4c3510e84df67b717f7ec3cfbe3c0c99.yaml
+  digest: ec57300301a53ea94dff4bd7f2a7996f4c3510e84df67b717f7ec3cfbe3c0c99
 - id: benchmarks
   title: Benchmark knowledge
   description: Self-iteration and benchmark guardrail documentation.
@@ -151,3 +154,11 @@ history:
     action: directory.update
     actor: cli
     summary: Updated governed directory 'domain'.
+  - version: 13
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'guides'.
+  - version: 14
+    action: source.add
+    actor: cli
+    summary: Added source 'partitioned-sqlite-catalog-read-fast-path' to topic 'architecture'.
