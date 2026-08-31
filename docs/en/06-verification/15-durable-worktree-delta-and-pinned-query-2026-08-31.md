@@ -125,7 +125,10 @@ against the separate 180,000-ms quality-build budget. The PR workflow now
 prebuilds that same release binary in an explicit untimed compilation step;
 the evaluator still verifies the release path and incremental build gate, while
 the index-performance job remains authoritative for cold/incremental repository
-runtime rather than host compiler cold-start variance. No product or index
+runtime rather than host compiler cold-start variance. The historical-reuse
+fixture reports its incremental duration as `initialization_incremental_index_ms`;
+the workflow accepts that fixture-specific metric alongside the normal
+`incremental_index_ms` name without changing either budget. No product or index
 latency budget was enlarged.
 
 ## 5. Full Tests and Coverage

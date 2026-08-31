@@ -96,7 +96,8 @@ jobs:
               ([.metrics[] |
                 select(.name == "index_performance_many_files_cold_index_ms" or
                        .name == "index_performance_many_files_cold_register_index_ms" or
-                       .name == "index_performance_many_files_incremental_index_ms") |
+                       .name == "index_performance_many_files_incremental_index_ms" or
+                       .name == "index_performance_many_files_initialization_incremental_index_ms") |
                 select(.budget != null and .value <= .budget)] | length) == 3)
           ' "$report"
 

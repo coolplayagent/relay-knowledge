@@ -107,7 +107,7 @@ performance、stability 与 semantic/vector 均保持 `1.0`。`agent_workflows` 
 build 预算，因此候选仍被拒绝。PR workflow 现在先在显式、不计入性能测量的步骤中构建同一个
 release binary；evaluator 仍校验 release 路径与增量 build gate，而 index-performance job 继续只
 对 cold/incremental repository runtime 负责，不再把 host compiler 冷启动波动混入索引性能。
-没有放宽产品或索引延迟预算。
+历史复用 fixture 将增量耗时记录为 `initialization_incremental_index_ms`；workflow 在不改变任一预算的前提下，同时接受该 fixture 专用名称和普通的 `incremental_index_ms` 名称。没有放宽产品或索引延迟预算。
 
 ## 5. 全量测试与覆盖率
 
