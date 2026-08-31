@@ -17,7 +17,7 @@ use super::{
     scope_tables::{CODE_SCOPE_TABLES, CodeScopeTable, REFERENCE_SEARCH_SCOPE_TABLES},
 };
 
-const SNAPSHOT_SEARCH_EXPANSION: usize = 8;
+pub(super) const SNAPSHOT_SEARCH_EXPANSION: usize = 8;
 pub(super) const ROW_STORAGE_OVERHEAD_BYTES: usize = 128;
 const FIXED_PUBLICATION_ROWS: usize = 8;
 

@@ -44,8 +44,9 @@ The implemented state machine is:
    business, and publication finalizer without skipping freshness checks.
 
 Checked arithmetic rejects capacity overflow before mutation. Facts without a
-file owner fail closed, as does any indivisible file whose bytes or owned rows
-cannot fit one frozen writer quantum. Receipt batches measure parsed-file data
+file owner fail closed, as does any indivisible file whose source bytes,
+serialized owned-fact surface, derived search rows, or control row cannot fit
+one frozen writer quantum. Receipt batches measure parsed-file data
 work; deletion-only affected paths remain auditable without being mistaken for
 parsed-file capacity after clone ownership is removed. The worktree task is
 never reinterpreted as a clean full index, and no queue, batch, transaction,

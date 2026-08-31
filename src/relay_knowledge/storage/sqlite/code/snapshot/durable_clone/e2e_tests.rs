@@ -110,7 +110,9 @@ async fn oversized_worktree_code_index_task_delta_batches_and_recovers_between_l
         .expect("repository should register");
     let base_tree = "base-tree";
     let base_scope = code_snapshot_scope_id(REPOSITORY_ID, base_tree, &[], &[]);
-    let budget = CodeIndexResourceBudget::new(8, 1_000_000, 32)
+    // Keep the two-file fixture split by the row budget while leaving enough
+    // page headroom for the complete serialized/derived surface of one file.
+    let budget = CodeIndexResourceBudget::new(6, 1_000_000, 96)
         .expect("bounded clone budget should validate");
     store
         .apply_code_index_snapshot(base_snapshot(&base_scope, base_tree))

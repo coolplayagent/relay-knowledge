@@ -2,6 +2,7 @@ use super::DeltaBatchPlan;
 use crate::domain::{
     CodeFileDiagnostic, CodeIndexResourceBudget, CodeIndexSnapshot, CodeParseStatus,
     RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+    RepositoryCodeSymbolRecord,
 };
 
 #[test]
@@ -9,7 +10,7 @@ fn plan_keeps_every_file_owned_fact_in_one_deterministic_batch() {
     let mut snapshot = snapshot(&["a.rs", "b.rs"]);
     snapshot.chunks = vec![chunk("a.rs"), chunk("b.rs")];
     snapshot.diagnostics = vec![diagnostic("b.rs")];
-    let budget = CodeIndexResourceBudget::new(1, 1_024, 100).expect("budget");
+    let budget = CodeIndexResourceBudget::new(1, 32_768, 100).expect("budget");
     let plan = DeltaBatchPlan::new(&snapshot, budget).expect("plan should partition");
 
     assert_eq!(plan.len(), 2);
@@ -43,6 +44,20 @@ fn plan_rejects_an_indivisible_file_outside_the_frozen_byte_or_row_budget() {
         .expect("one oversized file must fail row admission");
     assert!(row_error.to_string().contains("large.rs"));
     assert!(row_error.to_string().contains("frozen writer quantum"));
+}
+
+#[test]
+fn plan_rejects_an_owned_serialized_surface_even_when_source_bytes_fit() {
+    let mut snapshot = snapshot(&["owned.rs"]);
+    snapshot.symbols = vec![symbol("owned.rs")];
+    snapshot.symbols[0].doc_comment = Some("x".repeat(2_000));
+    let budget = CodeIndexResourceBudget::new(8, 4_096, 100).expect("budget");
+
+    let error = DeltaBatchPlan::new(&snapshot, budget)
+        .err()
+        .expect("serialized owned records must count toward byte admission");
+    assert!(error.to_string().contains("owned.rs"));
+    assert!(error.to_string().contains("owned fact surface"));
 }
 
 #[test]
@@ -139,6 +154,26 @@ fn chunk(path: &str) -> RepositoryCodeChunkRecord {
         byte_range: range(),
         line_range: range(),
         symbol_snapshot_id: None,
+    }
+}
+
+fn symbol(path: &str) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: "scope".to_owned(),
+        symbol_snapshot_id: format!("symbol:{path}"),
+        canonical_symbol_id: format!("canonical:{path}"),
+        file_id: format!("file:{path}"),
+        path: path.to_owned(),
+        language_id: "rust".to_owned(),
+        name: "owned".to_owned(),
+        qualified_name: "owned".to_owned(),
+        kind: "function".to_owned(),
+        signature: "fn owned()".to_owned(),
+        doc_comment: None,
+        byte_range: range(),
+        line_range: range(),
+        symbol_role: None,
     }
 }
 

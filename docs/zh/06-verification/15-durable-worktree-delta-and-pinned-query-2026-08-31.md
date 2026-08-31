@@ -38,8 +38,8 @@ synthetic-ref query 边界。修复后，小 overlay 继续走 direct path；发
    finalizer，不跳过 freshness 检查。
 
 所有容量派生都使用 checked arithmetic，在写入前拒绝溢出。没有 file owner 的 fact 会 fail
-closed；bytes 或 owned rows 无法装进一个冻结 writer quantum 的不可分文件同样在 delta 写入前
-被拒绝。Receipt batch 只计 parsed-file data work；删除路径继续保留在 affected-path 审计指标中，
+closed；源字节、序列化 owned-fact surface、派生搜索行或 control row 无法装进一个冻结 writer
+quantum 的不可分文件同样在 delta 写入前被拒绝。Receipt batch 只计 parsed-file data work；删除路径继续保留在 affected-path 审计指标中，
 但 clone owner 删除后不会被误当作 parsed-file capacity。worktree task 不会被重新解释成 clean
 full index，也没有把 queue、batch、transaction、retry、source fallback 或 timeout 改成无界。
 
