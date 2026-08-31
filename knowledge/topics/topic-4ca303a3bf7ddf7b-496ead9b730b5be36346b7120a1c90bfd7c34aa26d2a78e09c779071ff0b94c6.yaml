@@ -12,8 +12,8 @@ sources:
   read_policy: direct
   write_policy: manual-review
   status: active
-  version: 1
-  description: Hard architecture constraints for relay-knowledge changes.
+  version: 2
+  description: Hard architecture constraints, including dirty-worktree-aware tracked and untracked regular-file line-budget validation.
 - id: code-map-knowledge-development-loop
   topic: architecture
   kind: doc
@@ -34,6 +34,16 @@ sources:
   status: active
   version: 1
   description: Managed Git commit reconciliation, durable incremental publication, and bounded scope retention.
+- id: durable-worktree-delta-design
+  topic: architecture
+  kind: doc
+  uri: codespec/design/durable-worktree-delta-batching.md
+  source_scope: repo
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Durable direct-first worktree clone, deterministic dirty batches, lease recovery, terminal budgeting, and pinned synthetic-query identity contract.
 - id: git-commit-knowledge-development-loop
   topic: architecture
   kind: doc
@@ -44,6 +54,26 @@ sources:
   status: active
   version: 1
   description: Git commit fact boundaries and knowledge-backed development-loop philosophy.
+- id: partitioned-sqlite-catalog-read-fast-path
+  topic: architecture
+  kind: doc
+  uri: knowledge/best-practices/partitioned-sqlite-catalog-read-fast-path.md
+  source_scope: repo
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Read-only catalog compatibility probe, serialized legacy migration boundary, and concurrent CLI latency guardrails.
+- id: software-global-domain-model
+  topic: architecture
+  kind: doc
+  uri: docs/zh/03-architecture-specs/21-software-global-domain-modeling.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Versioned software ontology, projection, evidence-priority, and query boundary contract.
 route:
   topic: architecture
   source_order:
@@ -51,4 +81,7 @@ route:
   - architecture-hard-constraints
   - code-map-knowledge-development-loop
   - git-commit-knowledge-development-loop
+  - partitioned-sqlite-catalog-read-fast-path
+  - software-global-domain-model
+  - durable-worktree-delta-design
   fallback: bounded-search

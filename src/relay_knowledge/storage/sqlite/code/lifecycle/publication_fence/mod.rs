@@ -62,12 +62,14 @@ impl PublicationFenceGuard {
         self.authority_schema == "main"
     }
 
-    /// Selects the direct snapshot protocol for a fenced worktree task.
+    /// Selects the direct-first snapshot protocol for a fenced worktree task.
     ///
     /// Worktree snapshots must preserve their synthetic overlay identity and
-    /// cannot fall back to the clean full-index pipeline. The eventual data
-    /// transaction still performs the exact pending-to-content scope rebind
-    /// and live lease validation before commit.
+    /// cannot fall back to the clean full-index pipeline. When direct admission
+    /// exceeds its writer quantum, the snapshot layer may instead clone the
+    /// immutable base in bounded durable pages before applying the same dirty
+    /// delta. Both paths perform the exact pending-to-content scope rebind and
+    /// live lease validation before commit.
     pub(in crate::storage) fn is_worktree_overlay_task(
         &self,
         connection: &Connection,

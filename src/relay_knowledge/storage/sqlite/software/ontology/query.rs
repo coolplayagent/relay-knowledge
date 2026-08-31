@@ -26,6 +26,7 @@ pub(in super::super) fn entities_for_scope(
         "language_id",
         &request.repository.language_filters,
     );
+    let evidence_order = entity_evidence_order(request.kind);
     let query = format!(
         "
         SELECT occurrence_id, entity_key, repository_id, source_scope, entity_kind,
@@ -36,7 +37,7 @@ pub(in super::super) fn entities_for_scope(
           {kind_filter}
           {path_filter}
           {language_filter}
-        ORDER BY entity_kind ASC, name ASC, occurrence_id ASC
+        ORDER BY {evidence_order}
         LIMIT ?
         "
     );
@@ -140,6 +141,47 @@ fn entity_kind_filter(kind: SoftwareGlobalKind) -> &'static str {
     }
 }
 
+fn entity_evidence_order(kind: SoftwareGlobalKind) -> &'static str {
+    match kind {
+        SoftwareGlobalKind::Apis => {
+            "CASE source_kind
+                 WHEN 'api_schema' THEN 0
+                 WHEN 'code' THEN 1
+                 WHEN 'documentation' THEN 2
+                 ELSE 3
+             END ASC,
+             name ASC, occurrence_id ASC"
+        }
+        SoftwareGlobalKind::Resources => {
+            "CASE namespace
+                 WHEN 'kubernetes' THEN 0
+                 WHEN 'terraform' THEN 1
+                 WHEN 'compose' THEN 2
+                 WHEN 'systemd' THEN 3
+                 WHEN 'launchd' THEN 4
+                 WHEN 'helm' THEN 5
+                 ELSE 6
+             END ASC,
+             name ASC, occurrence_id ASC"
+        }
+        SoftwareGlobalKind::Deployments => {
+            "CASE source_kind
+                 WHEN 'service_definition' THEN 0
+                 WHEN 'iac' THEN 1
+                 WHEN 'runtime' THEN 2
+                 ELSE 3
+             END ASC,
+             CASE entity_kind
+                 WHEN 'deployment_unit' THEN 0
+                 WHEN 'runtime_service' THEN 1
+                 ELSE 2
+             END ASC,
+             name ASC, occurrence_id ASC"
+        }
+        _ => "entity_kind ASC, name ASC, occurrence_id ASC",
+    }
+}
+
 fn statement_language_filter(filters: &[String]) -> String {
     if filters.is_empty() {
         return String::new();
@@ -213,3 +255,7 @@ fn conversion_error(message: String) -> rusqlite::Error {
         Box::new(io::Error::new(io::ErrorKind::InvalidData, message)),
     )
 }
+
+#[cfg(test)]
+#[path = "query_tests.rs"]
+mod tests;

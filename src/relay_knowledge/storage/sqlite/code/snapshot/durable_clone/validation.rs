@@ -21,6 +21,69 @@ pub(super) fn validate_progress(
     guard: &PublicationFenceGuard,
     budget: CodeIndexResourceBudget,
 ) -> Result<(), StorageError> {
+    let phase = validate_progress_state(transaction, current, identity, base_scope, guard, budget)?;
+    let expected_checkpoint = progress::checkpoint_state(current)?;
+    let checkpoint = transaction
+        .query_row(
+            "SELECT state FROM code_repository_index_checkpoints WHERE source_scope = ?1",
+            [&identity.source_scope],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let parsed_checkpoint = checkpoint
+        .as_deref()
+        .and_then(code_incremental_clone)
+        .filter(|parsed| {
+            parsed.phase == phase
+                && parsed.table_ordinal == current.table_ordinal
+                && parsed.completed_page_ordinal == current.completed_page_ordinal
+                && parsed.scanned_total_rows == current.scanned_total_rows
+        });
+    if checkpoint.as_deref() != Some(expected_checkpoint.as_str()) || parsed_checkpoint.is_none() {
+        return Err(StorageError::Invariant(format!(
+            "incremental clone progress and checkpoint for scope '{}' diverged",
+            identity.source_scope
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_delta_progress(
+    transaction: &Transaction<'_>,
+    current: &progress::CloneProgress,
+    identity: &CloneIdentity,
+    guard: &PublicationFenceGuard,
+    budget: CodeIndexResourceBudget,
+) -> Result<(), StorageError> {
+    let base_scope = current.base_scope.as_str();
+    let phase = validate_progress_state(transaction, current, identity, base_scope, guard, budget)?;
+    let checkpoint = transaction
+        .query_row(
+            "SELECT state, incremental_summary_json
+             FROM code_repository_index_checkpoints WHERE source_scope = ?1",
+            [&identity.source_scope],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    if phase != CodeIncrementalClonePhase::CloneComplete
+        || checkpoint != Some(("indexing".to_owned(), None))
+    {
+        return Err(StorageError::Invariant(format!(
+            "incremental clone delta checkpoint for scope '{}' is not resumable",
+            identity.source_scope
+        )));
+    }
+    Ok(())
+}
+
+fn validate_progress_state(
+    transaction: &Transaction<'_>,
+    current: &progress::CloneProgress,
+    identity: &CloneIdentity,
+    base_scope: &str,
+    guard: &PublicationFenceGuard,
+    budget: CodeIndexResourceBudget,
+) -> Result<CodeIncrementalClonePhase, StorageError> {
     let identity_matches = current.source_scope == identity.source_scope
         && current.repository_id == identity.repository_id
         && current.base_scope == base_scope
@@ -99,29 +162,7 @@ pub(super) fn validate_progress(
             identity.source_scope
         )));
     }
-    let expected_checkpoint = progress::checkpoint_state(current)?;
-    let checkpoint = transaction
-        .query_row(
-            "SELECT state FROM code_repository_index_checkpoints WHERE source_scope = ?1",
-            [&identity.source_scope],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    let parsed_checkpoint = checkpoint
-        .as_deref()
-        .and_then(code_incremental_clone)
-        .filter(|parsed| {
-            parsed.phase == phase
-                && parsed.table_ordinal == current.table_ordinal
-                && parsed.completed_page_ordinal == current.completed_page_ordinal
-                && parsed.scanned_total_rows == current.scanned_total_rows
-        });
-    if checkpoint.as_deref() != Some(expected_checkpoint.as_str()) || parsed_checkpoint.is_none() {
-        return Err(StorageError::Invariant(format!(
-            "incremental clone progress and checkpoint for scope '{}' diverged",
-            identity.source_scope
-        )));
-    }
     validate_base_scope(transaction, identity, base_scope)?;
-    validate_staged_target(transaction, identity)
+    validate_staged_target(transaction, identity)?;
+    Ok(phase)
 }

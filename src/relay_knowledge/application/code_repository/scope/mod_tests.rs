@@ -95,6 +95,26 @@ fn active_language_filters_preserve_registration_scope_boundaries() {
     ));
 }
 
+#[tokio::test]
+async fn pinned_worktree_identity_does_not_reenter_git_ref_resolution() {
+    let overlay = "worktree:base:0123456789abcdef";
+    let mut status = status_for_scope(
+        None,
+        Some("worktree:0123456789abcdef"),
+        Vec::new(),
+        Vec::new(),
+    );
+    status.last_indexed_commit = Some(overlay.to_owned());
+    let selector = CodeRepositorySelector::new("fixture", overlay, Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let resolved = indexed_commit_for_selector(&status, &selector, overlay.to_owned())
+        .await
+        .expect("resolved overlay identities should bypass Git");
+
+    assert_eq!(resolved, overlay);
+}
+
 fn status_for_scope(
     source_scope: Option<String>,
     tree_hash: Option<&str>,

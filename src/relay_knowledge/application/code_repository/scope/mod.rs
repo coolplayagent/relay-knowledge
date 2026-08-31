@@ -12,6 +12,7 @@ use crate::{
     },
 };
 
+use super::worktree_ref::worktree_overlay_base_commit;
 use super::{blocking::run_blocking_code, errors::storage_api_error};
 
 pub(super) async fn retrieval_request_at_indexed_ref(
@@ -347,6 +348,12 @@ pub(super) async fn indexed_commit_for_selector(
     selector: &CodeRepositorySelector,
     ref_selector: String,
 ) -> Result<String, ApiError> {
+    // Context expansion pins the first worktree query to its immutable overlay
+    // identity. That identity is already resolved and must never be sent back
+    // through Git's ref parser on subsequent graph queries.
+    if worktree_overlay_base_commit(&ref_selector).is_some() {
+        return Ok(ref_selector);
+    }
     if ref_selector == "worktree" {
         if is_worktree_overlay(status) {
             return status.last_indexed_commit.clone().ok_or_else(|| {

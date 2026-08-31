@@ -7,7 +7,11 @@ what was checked at a particular revision; it does not certify later changes.
 For current release readiness, rerun the repository's active quality gates and
 record the exact commands, revision, environment, and any skipped checks.
 
-The current entry point is
+The current focused durable-indexing evidence is
+[Durable Worktree Delta and Pinned Query Verification 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md).
+The preceding software-global ordering evidence remains in
+[Software-Global Evidence Priority Verification 2026-08-31](14-software-global-evidence-priority-2026-08-31.md).
+Overall release readiness remains governed by
 [Documentation and Self-Iteration Readiness Verification 2026-08-18](13-documentation-self-iteration-readiness-2026-08-18.md).
 The 2026-06-05 documentation audit remains a historical snapshot.
 
@@ -26,6 +30,8 @@ The 2026-06-05 documentation audit remains a historical snapshot.
 11. [Documentation Release Readiness Audit 2026-06-05](11-documentation-release-readiness-2026-06-05.md)
 12. [Graph Database, Knowledge Graph, and CodeGraph Research Archive 2026-06-05](12-graph-database-codegraph-deep-research-archive-2026-06-05.md)
 13. [Documentation and Self-Iteration Readiness Verification 2026-08-18](13-documentation-self-iteration-readiness-2026-08-18.md)
+14. [Software-Global Evidence Priority Verification 2026-08-31](14-software-global-evidence-priority-2026-08-31.md)
+15. [Durable Worktree Delta and Pinned Query Verification 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
 
 Records 3 and 4 remain explicit positions in the chronological index even
 though their English translations are pending. This keeps record identity

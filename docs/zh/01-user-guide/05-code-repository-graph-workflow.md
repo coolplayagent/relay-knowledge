@@ -255,6 +255,10 @@ relay-knowledge repo query repo --query retry_policy --ref worktree --format jso
 
 overlay 绑定当前 checked-out `HEAD`，使用合成 snapshot 标识，包含已修改文件、未跟踪文件、staged submodule gitlink 更新，以及 submodule `HEAD` 不同于父仓 gitlink 时的 unstaged submodule worktree commit。如果 submodule 同时有 staged gitlink 和另一个已检出的 submodule `HEAD`，overlay 会索引已检出的 worktree commit。deinit 后只能从缓存 gitdir 读取的 staged submodule commit 也会纳入 overlay。staged submodule 的新增、删除、重命名以及 file/submodule 互换会按展开后的 child path 清理旧索引，而不是只处理 gitlink path。overlay 活跃时，clean commit ref 查询会被拒绝，避免把未提交内容误标成 clean Git snapshot。
 
+Query admission 会把用户输入的 `worktree` selector 固定为当前 active、不可变的 `worktree:<base>:<overlay-hash>` identity。`repo context` 等多步操作的每个内部 graph query 都复用这个已解析 identity，不会再把 synthetic identity 当作 branch 或 commit 送回 Git。发布后再修改 live worktree 不会悄悄改变正在生成的 context pack；需要重新执行 `repo index ... --ref worktree` 发布新 overlay。
+
+对于 CLI 默认关闭 workspace detection 的路径，索引只有在完整 clone/delete/insert surface 装得进 task 冻结的 writer budget 时才使用 direct overlay transaction。若超预算，同一个 durable task 会 staging overlay bytes、按受界 page clone immutable clean base，再把 dirty file 划分为确定性的受界 batch。每个 worker step 最多提交一个 dirty batch，因此过期 lease 可被重新 claim，且不会重放已提交 batch。最终 handoff 还会把 owner cleanup、tombstone、checkpoint control row 与多批 receipt 一并纳入预算。整个操作始终保留 worktree identity 与 scope；不得把它报告成 clean full index，也不得在 finalization 与 publication 完成前返回成功。API/Web 启用 auto-workspace detection 的 worktree request 在需要 durable staging 时目前会 fail closed；系统不会丢弃 workspace metadata，也不会把 overlay 转成 clean snapshot。
+
 ## 5.7 影响分析
 
 分析 diff 影响:

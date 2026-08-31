@@ -20,6 +20,7 @@ use super::{
 use crate::storage::sqlite::code::lifecycle::publication_fence::PublicationFenceGuard;
 
 mod base;
+mod delta;
 mod initialization;
 mod progress;
 mod search_bulk;
@@ -29,6 +30,8 @@ mod validation;
 
 use initialization::{initialize_progress, require_init_budget};
 use validation::validate_progress;
+
+pub(super) use delta::{batched_delta_completion, finish_batched_delta, start_batched_delta};
 
 const MAX_SOURCE_ROWS_PER_PAGE: usize = 32_768;
 const MAX_PAGE_BYTES: usize = CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH;
@@ -68,16 +71,13 @@ pub(super) struct CloneSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CloneCompletion {
     pub(super) task_id: String,
-    pub(super) base_scope: String,
     pub(super) checkpoint_state: String,
     pub(super) cloned_file_count: usize,
     pub(super) cloned_symbol_count: usize,
     pub(super) cloned_reference_count: usize,
     pub(super) cloned_chunk_count: usize,
-    pub(super) cloned_diagnostic_count: usize,
-    pub(super) cloned_reference_group_count: usize,
-    pub(super) cloned_search_document_count: usize,
     pub(super) base_source_fact_row_upper_bound: usize,
+    pub(super) completed_page_ordinal: usize,
     pub(super) terminal_cleanup_rows: usize,
     pub(super) terminal_cleanup_bytes: usize,
 }
@@ -148,11 +148,12 @@ pub(super) fn begin_or_resume(
     guard.validate_repository(&snapshot.repository_id)?;
     let budget = guard.resource_budget(connection)?;
     require_delta_path_budget(snapshot, budget)?;
-    let measure = admission::measure_snapshot_insert_surface(snapshot, budget)?;
-    let identity =
-        CloneIdentity::from_snapshot(snapshot, measure.delta_digest().to_owned(), budget)?;
+    let identity = CloneIdentity::from_snapshot(
+        snapshot,
+        admission::snapshot_delta_digest(snapshot)?,
+        budget,
+    )?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    guard.validate_target_scope(&transaction, &snapshot.source_scope)?;
     guard.validate(&transaction)?;
     validate_partitioned_target(&transaction, guard, &identity)?;
     if guard.resource_budget(&transaction)? != budget {
@@ -208,6 +209,8 @@ pub(super) fn begin_or_resume(
     };
     validate_affected_paths(&transaction, &identity, budget)?;
     let max_steps = base_step_proof.max_steps;
+    // A new worktree target exists only after initialization stages its empty scope. Rebinding in
+    // this transaction prevents both an unowned staged target and a rebound task without progress.
     guard.validate_target_scope(&transaction, &identity.source_scope)?;
     guard.validate(&transaction)?;
     validate_partitioned_target(&transaction, guard, &identity)?;
@@ -304,23 +307,7 @@ pub(super) fn validate_clone_complete(
         )));
     }
     let checkpoint_state = progress::checkpoint_state(&progress)?;
-    let (terminal_cleanup_rows, terminal_cleanup_bytes) =
-        progress::cleanup_surface(&progress, &identity.affected_paths)?;
-    Ok(CloneCompletion {
-        task_id: progress.task_id,
-        base_scope: progress.base_scope,
-        checkpoint_state,
-        cloned_file_count: progress.cloned_file_count,
-        cloned_symbol_count: progress.cloned_symbol_count,
-        cloned_reference_count: progress.cloned_reference_count,
-        cloned_chunk_count: progress.cloned_chunk_count,
-        cloned_diagnostic_count: progress.cloned_diagnostic_count,
-        cloned_reference_group_count: progress.cloned_reference_group_count,
-        cloned_search_document_count: progress.cloned_search_document_count,
-        base_source_fact_row_upper_bound: progress.base_source_fact_row_upper_bound,
-        terminal_cleanup_rows,
-        terminal_cleanup_bytes,
-    })
+    delta::clone_completion(progress, checkpoint_state, &identity.affected_paths)
 }
 
 pub(super) fn remove_after_delta(

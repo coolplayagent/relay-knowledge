@@ -93,6 +93,176 @@ async fn direct_full_base_without_a_fact_proof_requests_full_staging_before_targ
 }
 
 #[tokio::test]
+async fn oversized_worktree_code_index_task_delta_batches_and_recovers_between_leases() {
+    let store = SqliteGraphStore::open_in_memory().expect("database should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                REPOSITORY_ID,
+                ALIAS,
+                "/tmp/durable-worktree",
+                vec![],
+                vec![],
+            )
+            .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should register");
+    let base_tree = "base-tree";
+    let base_scope = code_snapshot_scope_id(REPOSITORY_ID, base_tree, &[], &[]);
+    let budget = CodeIndexResourceBudget::new(8, 1_000_000, 32)
+        .expect("bounded clone budget should validate");
+    store
+        .apply_code_index_snapshot(base_snapshot(&base_scope, base_tree))
+        .await
+        .expect("base snapshot should publish");
+    persist_base_fact_proof(&store, &base_scope, base_tree, budget).await;
+
+    let overlay_hash = "0123456789abcdef";
+    let actual_tree = format!("worktree:{overlay_hash}");
+    let actual_commit = format!("worktree:{BASE_COMMIT}:{overlay_hash}");
+    let actual_scope = code_snapshot_scope_id(REPOSITORY_ID, &actual_tree, &[], &[]);
+    let pending_tree = format!("worktree:pending:{BASE_COMMIT}");
+    let pending_scope = code_snapshot_scope_id(REPOSITORY_ID, &pending_tree, &[], &[]);
+    let mut snapshot = target_snapshot(&actual_scope, &actual_tree);
+    snapshot.resolved_commit_sha = actual_commit.clone();
+    snapshot.changed_path_count = 2;
+    snapshot.skipped_unchanged_count = FILE_COUNT - 2;
+    snapshot.files = vec![
+        file(&actual_scope, 0, "target-0"),
+        file(&actual_scope, 1, "target-1"),
+    ];
+    snapshot.chunks = vec![
+        chunk(&actual_scope, 0, "targetcontent0"),
+        chunk(&actual_scope, 1, "targetcontent1"),
+    ];
+    snapshot.references = (0..40)
+        .map(|ordinal| {
+            let file_index = ordinal % 2;
+            let mut record =
+                reference(&actual_scope, file_index, &format!("target_name_{ordinal}"));
+            record.reference_id = format!("worktree-reference-{ordinal:03}");
+            record
+        })
+        .collect();
+    let queued = store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: REPOSITORY_ID.to_owned(),
+            alias: ALIAS.to_owned(),
+            ref_selector: BASE_COMMIT.to_owned(),
+            resolved_commit_sha: pending_tree.clone(),
+            tree_hash: pending_tree,
+            source_scope: pending_scope,
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            mode: CodeIndexMode::WorktreeOverlay,
+            input_fingerprint: "durable-worktree-overlay".to_owned(),
+            resource_budget: budget,
+            payload_json: "{}".to_owned(),
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("worktree task should queue");
+    let running = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: "worktree-worker".to_owned(),
+            lease_duration_ms: 600_000,
+            max_attempts: 3,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("task claim should run")
+        .expect("worktree task should claim");
+    let mut publication_fence = fence(&running, "worktree-worker");
+
+    assert_pending_step(
+        store
+            .apply_code_index_snapshot_with_fence(snapshot.clone(), publication_fence.clone())
+            .await,
+        0,
+    );
+    let rebound = store
+        .code_index_task(running.task_id.clone())
+        .await
+        .expect("rebound task should load")
+        .expect("rebound task should remain durable");
+    assert_eq!(rebound.source_scope, actual_scope);
+    assert_eq!(rebound.resolved_commit_sha, actual_commit);
+    assert_eq!(rebound.tree_hash, actual_tree);
+    assert_eq!(
+        clone_owner_counts(&store, &rebound.source_scope).await,
+        (1, 2)
+    );
+
+    let mut reclaimed_between_delta_batches = false;
+    for call in 1..256 {
+        match store
+            .apply_code_index_snapshot_with_fence(snapshot.clone(), publication_fence.clone())
+            .await
+        {
+            Err(StorageError::DurableStagingPending {
+                completed_steps,
+                max_steps,
+            }) => {
+                assert!(completed_steps <= max_steps);
+                let checkpoint = store
+                    .code_index_checkpoint(actual_scope.clone())
+                    .await
+                    .expect("durable worktree checkpoint should load")
+                    .expect("durable worktree checkpoint should remain staged");
+                if !reclaimed_between_delta_batches
+                    && checkpoint.state == "indexing"
+                    && checkpoint.batch_count == 2
+                    && checkpoint.incremental_summary.is_none()
+                {
+                    expire_task(&store, &running.task_id).await;
+                    let reclaimed = store
+                        .claim_code_index_task(CodeIndexTaskClaimRequest {
+                            task_id: Some(running.task_id.clone()),
+                            lease_owner: "worktree-worker-recovered".to_owned(),
+                            lease_duration_ms: 600_000,
+                            max_attempts: 3,
+                            now_ms: now_millis(),
+                        })
+                        .await
+                        .expect("durable delta takeover should run")
+                        .expect("expired durable delta should be reclaimed");
+                    assert!(reclaimed.publication_generation > running.publication_generation);
+                    publication_fence = fence(&reclaimed, "worktree-worker-recovered");
+                    reclaimed_between_delta_batches = true;
+                }
+            }
+            Err(StorageError::DurableFinalizationRequired { checkpoint_state }) => {
+                assert_eq!(checkpoint_state, "indexing");
+                assert!(
+                    call > 1,
+                    "fixture must require multiple bounded clone pages"
+                );
+                let checkpoint = store
+                    .code_index_checkpoint(actual_scope.clone())
+                    .await
+                    .expect("durable worktree checkpoint should load")
+                    .expect("durable worktree checkpoint should remain staged");
+                assert_eq!(checkpoint.batch_count, 3);
+                assert_eq!(checkpoint.last_path, Some(path(FILE_COUNT - 1)));
+                let receipt = checkpoint
+                    .incremental_summary
+                    .expect("batched delta should persist its handoff receipt");
+                assert_eq!(receipt.batch_count, 2);
+                assert_eq!(receipt.parsed_file_count, 2);
+                assert_eq!(receipt.sqlite_write_count, 44);
+                assert!(reclaimed_between_delta_batches);
+                return;
+            }
+            Ok(_) => panic!("durable worktree clone must expose its finalization handoff"),
+            Err(error) => panic!("durable worktree clone failed: {error}"),
+        }
+    }
+    panic!("durable worktree clone exceeded its bounded call proof");
+}
+
+#[tokio::test]
 async fn fenced_clone_reopens_takes_over_and_publishes_one_bounded_page_at_a_time() {
     let database_path = unique_database_path();
     let base_tree = "base-tree";

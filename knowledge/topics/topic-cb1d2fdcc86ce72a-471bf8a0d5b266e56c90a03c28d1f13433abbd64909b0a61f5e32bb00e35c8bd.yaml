@@ -24,9 +24,31 @@ sources:
   status: active
   version: 2
   description: Profile performance, bounded hybrid source-surface, and 2026-08-30 partitioned catalog read-path validation notes.
+- id: software-global-evidence-priority-verification-2026-08-31
+  topic: benchmarks
+  kind: doc
+  uri: docs/zh/06-verification/14-software-global-evidence-priority-2026-08-31.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Dated release-binary verification, budget variance, coverage, and open-risk evidence for software-global typed-evidence priority.
+- id: software-global-ranking-evaluation
+  topic: benchmarks
+  kind: doc
+  uri: docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 2
+  description: Accepted focused self-iteration evidence and open boundaries for software-global typed-evidence ranking.
 route:
   topic: benchmarks
   source_order:
   - profile-all-performance-source-surface-2026-06-04
   - code-index-fact-versioning
+  - software-global-ranking-evaluation
+  - software-global-evidence-priority-verification-2026-08-31
   fallback: bounded-search

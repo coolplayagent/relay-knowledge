@@ -93,3 +93,4 @@ revision，应新增带日期记录，而不是静默扩大本快照的证明范
 导航: 上一条:
 [12. 图数据库、知识图谱与 CodeGraph 深度研究归档](12-graph-database-codegraph-deep-research-archive-2026-06-05.md)
 | 索引: [验证与审计记录](README.md)
+| 下一条: [14. 软件全域证据优先级验证记录](14-software-global-evidence-priority-2026-08-31.md)

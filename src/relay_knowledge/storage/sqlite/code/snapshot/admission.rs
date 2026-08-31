@@ -24,7 +24,6 @@ const FIXED_PUBLICATION_ROWS: usize = 8;
 struct BoundedByteCounter {
     bytes: usize,
     limit: usize,
-    identity: super::super::super::evidence_identity::StableIdWriter,
 }
 
 pub(super) struct DirectBudgetMeasure {
@@ -32,7 +31,6 @@ pub(super) struct DirectBudgetMeasure {
     budget: CodeIndexResourceBudget,
     rows: usize,
     bytes: usize,
-    delta_digest: String,
 }
 
 #[derive(Debug)]
@@ -43,9 +41,6 @@ pub(super) struct DirectIncrementalPlan {
 }
 
 impl DirectBudgetMeasure {
-    pub(super) fn delta_digest(&self) -> &str {
-        &self.delta_digest
-    }
     pub(super) fn remaining_rows(&self) -> usize {
         self.budget.max_rows_per_batch.saturating_sub(self.rows)
     }
@@ -95,7 +90,6 @@ impl Write for BoundedByteCounter {
             ));
         }
         self.bytes = next;
-        self.identity.write_all(buffer)?;
         Ok(buffer.len())
     }
 
@@ -197,6 +191,8 @@ pub(super) fn measure_snapshot_insert_surface(
         .saturating_add(snapshot.dependencies.len())
         .saturating_add(snapshot.calls.len())
         .saturating_add(snapshot.feature_flags.len())
+        .saturating_add(snapshot.framework_nodes.len())
+        .saturating_add(snapshot.framework_edges.len())
         .saturating_add(snapshot.routes.len())
         .saturating_add(snapshot.chunks.len())
         .saturating_add(snapshot.diagnostics.len())
@@ -225,7 +221,6 @@ pub(super) fn measure_snapshot_insert_surface(
         budget,
         rows: 0,
         bytes: 0,
-        delta_digest: String::new(),
     };
 
     let identity_bytes = insert_rows.saturating_mul(
@@ -239,11 +234,9 @@ pub(super) fn measure_snapshot_insert_surface(
     let mut counter = BoundedByteCounter {
         bytes: 0,
         limit: remaining_bytes / SNAPSHOT_SEARCH_EXPANSION,
-        identity: super::super::super::evidence_identity::StableIdWriter::new(),
     };
     serde_json::to_writer(&mut counter, snapshot)
         .map_err(|_| capacity_error(&snapshot.source_scope))?;
-    measure.delta_digest = counter.identity.finish("code-incremental-delta");
     measure.add(
         0,
         counter
@@ -253,6 +246,17 @@ pub(super) fn measure_snapshot_insert_surface(
     )?;
 
     Ok(measure)
+}
+
+pub(super) fn snapshot_delta_digest(snapshot: &CodeIndexSnapshot) -> Result<String, StorageError> {
+    let mut identity = super::super::super::evidence_identity::StableIdWriter::new();
+    serde_json::to_writer(&mut identity, snapshot).map_err(|error| {
+        StorageError::Invariant(format!(
+            "incremental snapshot '{}' could not produce a stable delta digest: {error}",
+            snapshot.source_scope
+        ))
+    })?;
+    Ok(identity.finish("code-incremental-delta"))
 }
 
 pub(super) fn require_no_workspace_projection(

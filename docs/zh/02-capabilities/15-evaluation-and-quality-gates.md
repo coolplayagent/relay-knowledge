@@ -2,8 +2,8 @@
 
 [中文](./15-evaluation-and-quality-gates.md) | [English](../../en/02-capabilities/15-evaluation-and-quality-gates.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 文档版本: 2.1
+> 编制日期: 2026-08-31
 > 适用范围: 第二卷能力说明
 
 ## 能力定位
@@ -32,6 +32,13 @@ uv run --extra dev pytest tests/browser
 ## 降级与诊断
 
 测试失败不能通过枚举已知 query、path、symbol 或 fixture 特例修复。优化必须来自通用 ranking signal、索引策略、数据结构、query planning 或并发边界。
+
+## GitHub 自动化策略
+
+仓库继续在 pull request 上执行确定性的文档、格式、Clippy、单元测试、集成测试、benchmark、
+架构、兼容性、覆盖率、构建、runtime 和浏览器门禁。Qodana 是可选云端诊断，仅允许通过
+`workflow_dispatch` 手动执行；pull request 与 push 不再自动触发。外部服务 quota 或可用性
+不能成为产品正确性的合并门禁。
 
 ## 文件监听 (fs.watch) 验收
 

@@ -4,7 +4,7 @@
 
 本卷保存带日期的验证和审计记录。每篇只证明对应 revision 与环境中实际执行的范围，不自动认证后续变更。判断当前状态时，必须重新运行有效门禁，并记录精确命令、revision、环境、结果及所有跳过项。
 
-当前优先入口为[文档与自迭代准备度验证记录 2026-08-18](13-documentation-self-iteration-readiness-2026-08-18.md)。
+当前 focused durable indexing 证据入口为[Durable Worktree Delta 与固定身份查询验证记录 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md)；此前的软件全域排序证据保留在[软件全域证据优先级验证记录 2026-08-31](14-software-global-evidence-priority-2026-08-31.md)。整体发版准备度仍以[文档与自迭代准备度验证记录 2026-08-18](13-documentation-self-iteration-readiness-2026-08-18.md)为准。
 2026-06-05 文档审计继续作为历史快照保留。
 
 ## 记录目录
@@ -22,6 +22,8 @@
 11. [文档发版准备审计 2026-06-05](11-documentation-release-readiness-2026-06-05.md)
 12. [图数据库、知识图谱与 CodeGraph 深度研究归档 2026-06-05](12-graph-database-codegraph-deep-research-archive-2026-06-05.md)
 13. [文档与自迭代准备度验证记录 2026-08-18](13-documentation-self-iteration-readiness-2026-08-18.md)
+14. [软件全域证据优先级验证记录 2026-08-31](14-software-global-evidence-priority-2026-08-31.md)
+15. [Durable Worktree Delta 与固定身份查询验证记录 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
 
 ## 证据规则
 

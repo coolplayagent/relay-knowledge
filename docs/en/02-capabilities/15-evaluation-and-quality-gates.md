@@ -2,8 +2,8 @@
 
 [English](./15-evaluation-and-quality-gates.md) | [中文](../../zh/02-capabilities/15-evaluation-and-quality-gates.md)
 
-> Document version: 2.0
-> Date: 2026-05-17
+> Document version: 2.1
+> Date: 2026-08-31
 > Scope: Book 2 capability guide
 
 ## Capability Positioning
@@ -32,6 +32,15 @@ uv run --extra dev pytest tests/browser
 ## Degradation and Diagnostics
 
 Failing tests are not fixed by enumerating known queries, paths, symbols, or fixture cases. Improvements come from general ranking signals, indexing strategy, data structures, query planning, or concurrency boundaries.
+
+## GitHub Automation Policy
+
+The repository keeps deterministic documentation, formatting, Clippy, unit,
+integration, benchmark, architecture, compatibility, coverage, build, runtime,
+and browser checks on pull requests. Qodana is an optional cloud diagnostic and
+is available only through manual `workflow_dispatch`; pull requests and pushes
+do not start it. External service quota or availability must not become a merge
+gate for product correctness.
 
 ## File Watcher (fs.watch) Acceptance Criteria
 

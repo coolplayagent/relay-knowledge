@@ -85,14 +85,13 @@ async fn reconcile_incremental_target(
     {
         return Ok(None);
     }
-    let actual_lease = CodeIndexTaskLeaseContext {
-        source_scope: actual_target.source_scope,
-        resolved_commit_sha: actual_target.resolved_commit_sha,
-        tree_hash: actual_target.tree_hash,
-        path_filters: actual_target.path_filters,
-        language_filters: actual_target.language_filters,
-        ..lease.clone()
-    };
+    let actual_lease = effective_publication_lease(
+        lease,
+        &actual_target.repository_id,
+        actual_target.source_scope,
+        actual_target.resolved_commit_sha,
+        actual_target.tree_hash,
+    )?;
     published_task_response(
         &workflow.store,
         &workflow.status,
@@ -176,9 +175,22 @@ async fn publish_incremental(
                         snapshot.source_scope
                     )));
                 }
+                let actual_lease = workflow
+                    .task_lease
+                    .as_ref()
+                    .map(|lease| {
+                        effective_publication_lease(
+                            lease,
+                            &snapshot.repository_id,
+                            snapshot.source_scope.clone(),
+                            snapshot.resolved_commit_sha.clone(),
+                            snapshot.tree_hash.clone(),
+                        )
+                    })
+                    .transpose()?;
                 let summary = resume_finalization(
                     &workflow.store,
-                    workflow.task_lease.as_ref(),
+                    actual_lease.as_ref(),
                     checkpoint.as_ref(),
                 )
                 .await?
@@ -220,6 +232,13 @@ async fn reconcile_finalization(
     let Some(lease) = workflow.task_lease.as_ref() else {
         return Ok(PublicationOutcome::Summary(Box::new(summary)));
     };
+    let actual_lease = effective_publication_lease(
+        lease,
+        &summary.repository_id,
+        summary.source_scope.clone(),
+        summary.resolved_commit_sha.clone(),
+        summary.tree_hash.clone(),
+    )?;
     let checkpoint = workflow
         .store
         .code_index_checkpoint(summary.source_scope.clone())
@@ -237,15 +256,15 @@ async fn reconcile_finalization(
         .store
         .reconcile_code_index_publication_with_fence(
             CodeIndexPublicationTarget {
-                task_id: lease.task_id.clone(),
+                task_id: actual_lease.task_id.clone(),
                 repository_id: summary.repository_id.clone(),
                 source_scope: summary.source_scope.clone(),
                 resolved_commit_sha: summary.resolved_commit_sha.clone(),
                 tree_hash: summary.tree_hash.clone(),
-                path_filters: lease.path_filters.clone(),
-                language_filters: lease.language_filters.clone(),
+                path_filters: actual_lease.path_filters.clone(),
+                language_filters: actual_lease.language_filters.clone(),
             },
-            lease.publication_fence.clone(),
+            actual_lease.publication_fence.clone(),
         )
         .await
         .map_err(storage_api_error)?;
@@ -255,7 +274,7 @@ async fn reconcile_finalization(
             &workflow.status,
             &workflow.request,
             &workflow.context,
-            lease,
+            &actual_lease,
         )
         .await
         .map(|response| PublicationOutcome::Published(Box::new(response)));
@@ -284,3 +303,32 @@ pub(in crate::application::code_repository::indexing) fn incremental_snapshot_ma
         && snapshot.path_filters == lease.path_filters
         && snapshot.language_filters == lease.language_filters
 }
+
+fn effective_publication_lease(
+    lease: &CodeIndexTaskLeaseContext,
+    repository_id: &str,
+    source_scope: String,
+    resolved_commit_sha: String,
+    tree_hash: String,
+) -> Result<CodeIndexTaskLeaseContext, ApiError> {
+    if repository_id != lease.publication_fence.repository_id
+        || source_scope.trim().is_empty()
+        || resolved_commit_sha.trim().is_empty()
+        || tree_hash.trim().is_empty()
+    {
+        return Err(ApiError::internal(format!(
+            "code index task '{}' produced an invalid publication target",
+            lease.task_id
+        )));
+    }
+    Ok(CodeIndexTaskLeaseContext {
+        source_scope,
+        resolved_commit_sha,
+        tree_hash,
+        ..lease.clone()
+    })
+}
+
+#[cfg(test)]
+#[path = "publication_tests.rs"]
+mod tests;

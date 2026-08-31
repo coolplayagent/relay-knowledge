@@ -20,6 +20,11 @@ volume covers and count as chapter 0 when they appear in a reading path.
 For release preparation, start with the root README, Chapter 1 installation
 workflow, Chapter 19 installation/release architecture contract, and the latest
 [documentation and self-iteration readiness record](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md).
+The [software-global evidence-priority verification](06-verification/14-software-global-evidence-priority-2026-08-31.md)
+adds current focused performance evidence without superseding overall readiness.
+The [durable worktree delta verification](06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
+adds bounded lease-recovery and pinned synthetic-ref evidence under the same
+readiness boundary.
 The [2026-06-05 audit](06-verification/11-documentation-release-readiness-2026-06-05.md)
 remains a historical snapshot rather than evidence for the current worktree.
 The Chinese edition currently includes several benchmark and verification
@@ -141,6 +146,8 @@ their entry point is the [Chinese archive index](../zh/05-benchmarks/archive/REA
 - [Appendix B.11: Documentation Release Readiness Audit 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md): release navigation, file inventory, local link checking, and documentation-only change boundaries.
 - [Appendix B.12: Graph Database, Knowledge Graph, and CodeGraph Deep Research Archive 2026-06-05](06-verification/12-graph-database-codegraph-deep-research-archive-2026-06-05.md): arXiv, X.com, Reddit, and open-source source ledger, research artifacts, competitive feature issues, and validation state archive.
 - [Appendix B.13: Documentation and Self-Iteration Readiness Verification 2026-08-18](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md): current confirmed Rust/package/Web-build/runtime/browser/coverage evidence, an accepted focused-fast performance report, the local `--with-deps` setup limitation, pending exhaustive/Kubernetes accuracy evidence, and the failed Kubernetes 210-second performance rail.
+- [Appendix B.14: Software-Global Evidence Priority Verification 2026-08-31](06-verification/14-software-global-evidence-priority-2026-08-31.md): code-graph analysis, release-binary A/B evidence, budget variance, owner tests, 90.01% coverage, and open boundaries for typed software-global evidence ordering.
+- [Appendix B.15: Durable Worktree Delta and Pinned Query Verification 2026-08-31](06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md): bounded delta batching, lease takeover, release-product self-iteration, full tests and coverage, real repository replay, and the explicit auto-workspace boundary.
 
 Appendix B keeps one chronological identity across both editions. Entries B.3
 and B.4 therefore stay in sequence while their English translations are pending.
