@@ -25,19 +25,24 @@ fn plan_keeps_every_file_owned_fact_in_one_deterministic_batch() {
 }
 
 #[test]
-fn one_indivisible_file_may_cross_a_batch_threshold_without_absorbing_another_file() {
+fn plan_rejects_an_indivisible_file_outside_the_frozen_byte_or_row_budget() {
     let mut snapshot = snapshot(&["large.rs", "next.rs"]);
     snapshot.files[0].byte_len = 8_192;
     snapshot.chunks = vec![chunk("large.rs"), chunk("large.rs"), chunk("next.rs")];
-    let budget = CodeIndexResourceBudget::new(8, 16, 1).expect("budget");
-    let plan = DeltaBatchPlan::new(&snapshot, budget).expect("plan should partition");
+    let byte_budget = CodeIndexResourceBudget::new(8, 16, 100).expect("byte budget");
+    let byte_error = DeltaBatchPlan::new(&snapshot, byte_budget)
+        .err()
+        .expect("one oversized file must fail byte admission");
+    assert!(byte_error.to_string().contains("large.rs"));
+    assert!(byte_error.to_string().contains("frozen writer quantum"));
 
-    assert_eq!(plan.len(), 2);
-    let oversized = plan.batch(0, 1).expect("oversized file batch");
-    assert_eq!(oversized.files.len(), 1);
-    assert_eq!(oversized.chunks.len(), 2);
-    assert!(oversized.parsed_byte_count > budget.max_bytes_per_batch);
-    assert!(oversized.row_count() > budget.max_rows_per_batch);
+    snapshot.files[0].byte_len = 8;
+    let row_budget = CodeIndexResourceBudget::new(8, 1_024, 2).expect("row budget");
+    let row_error = DeltaBatchPlan::new(&snapshot, row_budget)
+        .err()
+        .expect("one oversized file must fail row admission");
+    assert!(row_error.to_string().contains("large.rs"));
+    assert!(row_error.to_string().contains("frozen writer quantum"));
 }
 
 #[test]

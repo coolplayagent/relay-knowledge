@@ -242,6 +242,53 @@ fn projection_orders_operational_files_and_relationships_first() {
 }
 
 #[test]
+fn projection_materializes_api_schema_provenance_before_code_contracts() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute_batch(
+            "INSERT INTO code_repository_files (
+                 repository_id, source_scope, file_id, path, language_id, parse_status
+             ) VALUES
+                 ('repo', 'scope-1', 'schema-file', 'spec/catalog.openapi.yaml', 'yaml', 'parsed'),
+                 ('repo', 'scope-1', 'api-code-file', 'src/api.rs', 'rust', 'parsed');
+             INSERT INTO code_repository_symbols (
+                 repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                 name, kind, line_start, line_end
+             ) VALUES (
+                 'repo', 'scope-1', 'api-code-symbol', 'src/api.rs', 'rust',
+                 'GraphApi', 'trait', 1, 3
+             );",
+        )
+        .expect("API schema and code contract should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Apis,
+        crate::domain::FreshnessPolicy::AllowStale,
+        10,
+    )
+    .expect("request should validate");
+    let projection = projection(&mut connection, request).expect("APIs should load");
+
+    assert_eq!(projection.entities.len(), 2);
+    assert_eq!(projection.entities[0].name, "spec/catalog.openapi.yaml");
+    assert_eq!(
+        projection.entities[0].source_kind,
+        crate::domain::SoftwareSourceKind::ApiSchema
+    );
+    assert_eq!(projection.entities[1].name, "GraphApi");
+    assert_eq!(
+        projection.entities[1].source_kind,
+        crate::domain::SoftwareSourceKind::Code
+    );
+}
+
+#[test]
 fn projection_orders_build_manifests_before_source_files() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);

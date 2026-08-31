@@ -215,3 +215,11 @@ kind: Deployment
 metadata:
   name: relay-global-template
 "#;
+
+pub(super) const SOFTWARE_GLOBAL_OPENAPI: &str = r#"
+openapi: 3.1.0
+info:
+  title: Relay Global API
+  version: 1.0.0
+paths: {}
+"#;

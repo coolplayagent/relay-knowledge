@@ -42,6 +42,13 @@ is available only through manual `workflow_dispatch`; pull requests and pushes
 do not start it. External service quota or availability must not become a merge
 gate for product correctness.
 
+The pull-request index-performance job compiles the release product in a
+separate prerequisite step before starting the timed self-iteration workload.
+The report still requires `target/release/relay-knowledge`, a passing
+incremental build gate, completed cold/incremental tasks, and every declared
+index latency budget. This keeps cold runner compiler variance out of the index
+runtime signal without weakening compilation or product-performance checks.
+
 ## File Watcher (fs.watch) Acceptance Criteria
 
 The file watcher feature must satisfy:

@@ -38,9 +38,10 @@ synthetic-ref query 边界。修复后，小 overlay 继续走 direct path；发
    finalizer，不跳过 freshness 检查。
 
 所有容量派生都使用 checked arithmetic，在写入前拒绝溢出。没有 file owner 的 fact 会 fail
-closed。一个已经受全局约束的不可分文件可以单独跨过单 batch 行数或字节阈值，但不能再吸收
-后续文件。worktree task 不会被重新解释成 clean full index，也没有把 queue、batch、
-transaction、retry、source fallback 或 timeout 改成无界。
+closed；bytes 或 owned rows 无法装进一个冻结 writer quantum 的不可分文件同样在 delta 写入前
+被拒绝。Receipt batch 只计 parsed-file data work；删除路径继续保留在 affected-path 审计指标中，
+但 clone owner 删除后不会被误当作 parsed-file capacity。worktree task 不会被重新解释成 clean
+full index，也没有把 queue、batch、transaction、retry、source fallback 或 timeout 改成无界。
 
 resolved 与 pending worktree selector 作为互斥 identity 解析。嵌套 context query 直接复用
 固定的 resolved identity，不会把 synthetic value 送入 Git ref resolution。publication 使用
@@ -60,9 +61,9 @@ dirty batches，在两批之间让 lease 过期并 reclaim，随后从持久化 
 receipt 记录 2 个 delta batches、2 个 parsed files 和 44 次 SQLite writes；完成 checkpoint
 记录 3 个总 batches 和真实字典序最大路径。
 
-确定性 planner、不可分文件隔离、orphan 拒绝、terminal cleanup/tombstone/control/receipt
-admission、多 batch receipt 扩展、固定 worktree context、publication identity 重绑定和 CLI
-map namespace 报错顺序的 owner tests 均通过。resume precheck 也证明 clone phase 尚未创建
+确定性 planner、超预算不可分文件与 orphan 拒绝、terminal cleanup/tombstone/control/receipt
+admission、删除密集与多 batch receipt 扩展、固定 worktree context、publication identity 重绑定和
+CLI map namespace 报错顺序的 owner tests 均通过。resume precheck 也证明 clone phase 尚未创建
 staged target 时不会提前验证它。
 
 ## 4. Release 产品自迭代
@@ -101,6 +102,13 @@ build 预算被拒绝。通过轮 score 为 `0.9989406099518459`，`score_accept
 performance、stability 与 semantic/vector 均保持 `1.0`。`agent_workflows` 和
 `research_judge` 因 category 选择而跳过，不能由通过的 fast/performance 结果代替。
 
+随后第一次 GitHub `index-performance-regression` 执行通过全部 runtime gate、case、完成性断言和
+索引延迟预算，但冷 runner 的 release 产品编译耗时 330,829 ms，超过独立的 180,000-ms quality
+build 预算，因此候选仍被拒绝。PR workflow 现在先在显式、不计入性能测量的步骤中构建同一个
+release binary；evaluator 仍校验 release 路径与增量 build gate，而 index-performance job 继续只
+对 cold/incremental repository runtime 负责，不再把 host compiler 冷启动波动混入索引性能。
+没有放宽产品或索引延迟预算。
+
 ## 5. 全量测试与覆盖率
 
 独立的当前工作树 Rust 门禁通过：
@@ -109,7 +117,7 @@ performance、stability 与 semantic/vector 均保持 `1.0`。`agent_workflows` 
 cargo test --all-targets --all-features
 ```
 
-结果为 library 3,778 passed、1 ignored，benchmark 1/1 passed，integration 156/156
+结果为 library 3,792 passed、1 ignored，benchmark 1/1 passed，integration 156/156
 passed。被忽略的 subprocess fixture 仍显式记为 ignored，不能计作 passed。
 
 精确覆盖率门禁为：
@@ -123,8 +131,8 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 file ownership、超出冻结 batch plan 的 ordinal，以及缺少不可变 base identity 的 durable
 receipt 返回类型化错误。
 
-最终结果为 154,185 行中 missed 15,407 行，即 line coverage `90.01%`，通过未调整的
-90% 阈值。这次执行重新运行全部 targets 与 features：library 3,781 passed、1 ignored，
+最终结果为 154,238 行中 missed 15,348 行，即 line coverage `90.05%`，通过未调整的
+90% 阈值。这次执行重新运行全部 targets 与 features：library 3,792 passed、1 ignored，
 benchmark 1/1 passed，integration 156/156 passed；没有排除新增 storage owner 或降低要求。
 
 ## 6. 真实仓库回放

@@ -105,9 +105,11 @@ is the end-to-end owner case. It requires two dirty batches, an expired lease
 and a new attempt between them, replay from the persisted cursor, one
 task-bound multi-batch receipt, the true maximum `last_path`, and publication
 only after ordinary query-index, edge, software, and business finalization.
-Planner tests also require deterministic file ownership, reject orphan facts,
-and allow only one globally bounded indivisible file to cross a batch threshold
-without absorbing another file.
+Planner tests also require deterministic file ownership and reject orphan facts
+or any indivisible file whose bytes or owned rows exceed one frozen writer
+quantum. Receipt tests keep deletion-only affected-path metrics decodable after
+clone ownership is removed while continuing to bound parsed files and SQLite
+writes by the recorded durable data batches.
 
 The real-product rail is a `relay-knowledge repo index <alias> --ref worktree`
 followed by `repo context` at the returned resolved synthetic identity. The CLI

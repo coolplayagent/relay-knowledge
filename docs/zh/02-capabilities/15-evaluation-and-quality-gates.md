@@ -40,6 +40,11 @@ uv run --extra dev pytest tests/browser
 `workflow_dispatch` 手动执行；pull request 与 push 不再自动触发。外部服务 quota 或可用性
 不能成为产品正确性的合并门禁。
 
+Pull request 的 index-performance job 会先在独立 prerequisite step 中构建 release 产品，再启动
+计时的 self-iteration workload。报告仍必须选择 `target/release/relay-knowledge`、通过增量 build
+gate、完成 cold/incremental task，并满足所有已声明索引延迟预算。这样只把冷 runner 编译器波动
+移出索引 runtime 信号，不会削弱编译或产品性能检查。
+
 ## 文件监听 (fs.watch) 验收
 
 文件监听功能需要满足以下验收条件：

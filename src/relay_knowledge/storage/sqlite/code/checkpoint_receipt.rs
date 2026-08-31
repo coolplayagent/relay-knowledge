@@ -62,7 +62,7 @@ pub(in crate::storage::sqlite::code) fn decode(
         .max_rows_per_batch
         .checked_mul(receipt.batch_count)
         .ok_or_else(|| conversion_error(column, "incremental row budget overflowed"))?;
-    if receipt.affected_path_count > file_budget
+    if receipt.parsed_file_count > file_budget
         || receipt.blob_read_count > file_budget
         || receipt.sqlite_write_count > row_budget
         || encoded.len() > budget.max_bytes_per_batch

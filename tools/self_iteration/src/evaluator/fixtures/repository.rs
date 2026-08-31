@@ -274,6 +274,7 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("deploy/app.yaml", SOFTWARE_GLOBAL_K8S),
             ("infra/main.tf", SOFTWARE_GLOBAL_TERRAFORM),
             ("service/relay-global.service", SOFTWARE_GLOBAL_SYSTEMD),
+            ("api/openapi.yaml", SOFTWARE_GLOBAL_OPENAPI),
             ("docs/architecture.md", SOFTWARE_GLOBAL_ARCHITECTURE_MD),
             ("README.md", SOFTWARE_GLOBAL_README_MD),
             ("docs/catalog.md", SOFTWARE_GLOBAL_CATALOG_MD),

@@ -30,6 +30,12 @@ impl<'a> DeltaBatchPlan<'a> {
                     file.path
                 ))
             })?;
+            if file.byte_len > budget.max_bytes_per_batch || file_rows > budget.max_rows_per_batch {
+                return Err(StorageError::CapacityExceeded(format!(
+                    "durable delta file '{}' cannot fit one frozen writer quantum for scope '{}'",
+                    file.path, snapshot.source_scope
+                )));
+            }
             let next_files = files.checked_add(1).ok_or_else(|| capacity(snapshot))?;
             let next_bytes = bytes
                 .checked_add(file.byte_len)

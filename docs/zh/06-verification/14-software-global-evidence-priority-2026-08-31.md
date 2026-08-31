@@ -19,9 +19,12 @@
 代码图把 API/resource/deployment 查询路由到
 `storage::sqlite::software::ontology::query`，把 topic 路由到
 `storage::sqlite::software::graph::topics`，把 design 路由到
-`storage::sqlite::software::lifecycle::design`。实现因此只调整对应读取边界的确定性排序，
-没有修改 ingestion、projection、schema、durable task、lease、checkpoint、freshness 或 writer
-路径。
+`storage::sqlite::software::lifecycle::design`。实测实现只调整对应读取边界的确定性排序；但 PR
+检视随后发现最高优先级的 `api_schema` 分支没有生产 materializer。最终变更会识别已索引
+JSON/YAML 文件名中常规 OpenAPI/Swagger token，物化同 scope、带 `api_schema` provenance 的
+file/API entity，并把派生 projection schema 推进到 version 7，使既有 scope 通过正常 fenced
+projection 重建。Parser fact、durable task ownership、lease、checkpoint、freshness barrier 与
+权威 code fact 均不变。
 
 ## 2. 基线、算法与结果
 
@@ -87,6 +90,11 @@ suite 的 skipped 状态不能被 368 个已通过 gate 替代。
 新增 owner 测试直接固定 API code、Kubernetes resource、systemd service definition、
 architecture/capability/module 和 nested-document topic 的相对顺序。聚焦排序测试 16/16
 通过；架构边界聚焦测试 6/6 通过。
+
+检视强化新增生产 projection 链路测试，证明已索引 OpenAPI schema 会以 `api_schema` provenance
+物化并排在 code trait 前；file-role 测试同时证明生成式源码 client 不会被误分类。已提交的
+software-global fixture 也加入相同 OpenAPI 证据并要求 projection schema version 7。这些后续
+变更由最终 PR 门禁验证，不能倒置为上文 schema-version-6 自迭代报告的一部分。
 
 全量覆盖率命令为：
 

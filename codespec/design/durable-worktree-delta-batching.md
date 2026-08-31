@@ -62,13 +62,17 @@ duplicate storage phase logic.
 - File, byte, row, queue, retry, and lease bounds are unchanged. Arithmetic
   that derives batch or terminal capacity is checked and fails before writes.
 - Batch membership is deterministic and file-owned. A fact whose path has no
-  file owner is an invariant error. One already globally bounded indivisible
-  file may occupy a batch alone, but never absorbs another file after crossing
-  a frozen threshold.
+  file owner is an invariant error. Every indivisible file and all of its owned
+  facts must fit one frozen byte/row writer quantum; an oversized file is
+  rejected before any delta batch is written.
 - Calls are rebuilt from call-shaped references during finalization, but their
   eventual rows are still charged to the owner file's delta batch.
 - The terminal quantum jointly accounts for affected-path/progress cleanup,
   tombstones, fixed checkpoint/fence control rows, and the encoded receipt.
+- Receipt `batch_count` measures parsed-file delta batches. Deleted paths remain
+  in `affected_path_count` for audit but do not consume parsed-file capacity;
+  decoding still bounds parsed/blob work by file quanta and SQLite writes by row
+  quanta after clone-progress ownership has been removed.
 - Repository, base, target, tree, filters, delta digest, resource budget, task,
   active attempt, and publication fence are revalidated around every mutation.
 - A worktree task is never reinterpreted as a clean full task. Missing legacy
@@ -89,8 +93,9 @@ workspace manifest that survives finalization recovery.
 
 ## Verification contract
 
-Focused storage and adapter tests must cover deterministic planning, orphan
-rejection, terminal-control admission, receipt scaling, pending/resolved
+Focused storage and adapter tests must cover deterministic planning, oversized
+single-file and orphan rejection, terminal-control admission, deletion-heavy
+and parsed-file receipt scaling, pending/resolved
 identity disjointness, pinned nested queries, and exact lease takeover between
 two dirty batches. The recovery filter used by the fast/performance profile
 must include the worktree end-to-end test:

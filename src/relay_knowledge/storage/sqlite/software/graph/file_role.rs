@@ -26,6 +26,9 @@ pub(super) fn file_role(
     if language_id == "markdown" {
         return "documentation";
     }
+    if api_schema_path(file_name, language_id) {
+        return "api_schema";
+    }
     if dependency_manifest_path(path, file_name) {
         return "dependency_manifest";
     }
@@ -46,6 +49,16 @@ pub(super) fn file_role(
     }
 
     "source"
+}
+
+fn api_schema_path(file_name: &str, language_id: &str) -> bool {
+    if !matches!(language_id, "json" | "yaml") {
+        return false;
+    }
+    file_name
+        .to_ascii_lowercase()
+        .split(['.', '-', '_'])
+        .any(|segment| matches!(segment, "openapi" | "swagger"))
 }
 
 fn dependency_manifest_path(path: &str, file_name: &str) -> bool {

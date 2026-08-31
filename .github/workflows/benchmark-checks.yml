@@ -54,6 +54,9 @@ jobs:
       - name: Historical gitlink expansion budget regression
         run: cargo test --lib --all-features historical_reuse_budget_counts_files_expanded_from_gitlinks -- --nocapture
 
+      - name: Prebuild release product outside index-performance timing
+        run: cargo build --release --bin relay-knowledge
+
       - name: Cold and incremental index regression gate
         run: |
           tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate \

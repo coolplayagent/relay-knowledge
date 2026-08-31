@@ -214,12 +214,47 @@ impl OntologyBuilder {
             Some(key.clone()),
             None,
             source_kind,
-            evidence,
+            evidence.clone(),
             SoftwareAssertionMode::Extracted,
             SoftwareStatementResolution::Resolved,
             10_000,
         )?;
+        if source_kind == SoftwareSourceKind::ApiSchema {
+            self.add_api_schema(projection_id, path, language_id, evidence)?;
+        }
         Ok(key)
+    }
+
+    fn add_api_schema(
+        &mut self,
+        projection_id: &str,
+        path: &str,
+        language_id: &str,
+        evidence: SoftwareEvidenceRef,
+    ) -> Result<(), StorageError> {
+        let mut attributes = BTreeMap::new();
+        attributes.insert("language_id".to_owned(), language_id.to_owned());
+        attributes.insert("schema_path".to_owned(), path.to_owned());
+        let api_key = self.add_entity(OntologyEntityCandidate {
+            projection_id: Some(projection_id),
+            kind: SoftwareEntityKind::Api,
+            name: path.to_owned(),
+            namespace: Some(path.to_owned()),
+            source_kind: SoftwareSourceKind::ApiSchema,
+            evidence: evidence.clone(),
+            attributes,
+        })?;
+        self.add_statement(
+            self.snapshot_key.clone(),
+            SoftwarePredicate::Contains,
+            Some(api_key),
+            None,
+            SoftwareSourceKind::ApiSchema,
+            evidence,
+            SoftwareAssertionMode::Declared,
+            SoftwareStatementResolution::Resolved,
+            10_000,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -444,7 +479,9 @@ fn conflict_count(statements: &[SoftwareStatement]) -> usize {
 fn source_kind_for(source_kind: &str, path: &str) -> SoftwareSourceKind {
     let source = source_kind.to_ascii_lowercase();
     let path = path.to_ascii_lowercase();
-    if source.contains("lock") || path.ends_with(".lock") || path.ends_with("lock.json") {
+    if source == "api_schema" || source.contains("openapi") || source.contains("swagger") {
+        SoftwareSourceKind::ApiSchema
+    } else if source.contains("lock") || path.ends_with(".lock") || path.ends_with("lock.json") {
         SoftwareSourceKind::Lockfile
     } else if source.contains("github-actions")
         || source.contains("gitlab-ci")

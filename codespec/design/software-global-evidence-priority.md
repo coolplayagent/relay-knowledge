@@ -17,7 +17,8 @@ does not sort the maximum 524,288-statement scope on a query hot path.
 
 | Requirement | Production owner | Graph or storage evidence | Verification |
 | --- | --- | --- | --- |
-| Prefer schema/code API contracts to descriptive metadata | `storage::sqlite::software::ontology::query::entities_for_scope` | committed `software_entities.source_kind` within one source scope and `entity_kind=api` | `typed_entity_queries_prioritize_actionable_evidence` |
+| Materialize machine-readable API contracts | `storage::sqlite::software::{graph::file_role,ontology::materialize}` | indexed JSON/YAML files with conventional OpenAPI/Swagger filename tokens become `api_schema` file/API entities and same-scope statements | `classifies_machine_readable_api_schemas_without_misclassifying_generated_clients` and `projection_materializes_api_schema_provenance_before_code_contracts` |
+| Prefer schema/code API contracts to descriptive metadata | `storage::sqlite::software::ontology::query::entities_for_scope` | committed `software_entities.source_kind` within one source scope and `entity_kind=api` | production materialization test above and `typed_entity_queries_prioritize_actionable_evidence` |
 | Prefer deployable resources to provider/module helpers | `storage::sqlite::software::ontology::query::entities_for_scope` | committed resource namespace/provider generated from existing IaC rows | `typed_entity_queries_prioritize_actionable_evidence` and the software-global self-iteration resource case |
 | Prefer installed service definitions to generic IaC deployment units | `storage::sqlite::software::ontology::query::entities_for_scope` | committed `source_kind=service_definition` and typed deployment/runtime-service entities | `typed_entity_queries_prioritize_actionable_evidence` and the deployment case |
 | Put architecture/capability/module evidence before catalog metadata | `storage::sqlite::software::lifecycle::design::design_elements_for_scope` | committed design element kind and confidence | `design_queries_prioritize_architecture_before_catalog_metadata` |
@@ -33,8 +34,10 @@ CLI, Web, and MCP. No adapter receives a parallel ranking implementation.
   name/path/identity tie-breaks remain unchanged.
 - Reads use committed materialized rows only. They do not scan live source,
   package caches, SDK directories, cloud APIs, or external repositories.
-- The policy does not change ontology schema/version, parser facts, projection
-  publication, task leases, checkpoints, or the single-writer boundary.
+- Projection schema version 7 makes the new derived API-schema classification
+  refreshable for existing scopes. It does not change authoritative parser
+  facts, ontology/table shape, publication fencing, task leases, checkpoints,
+  or the single-writer boundary.
 - Product code must not enumerate repository names, fixture paths, case ids,
   queries, or symbols.
 - Any future statement-priority change must prove bounded query work on the
@@ -47,6 +50,7 @@ Run focused owner tests first:
 
 ```bash
 cargo test --lib --all-features prioritize
+cargo test --lib --all-features projection_materializes_api_schema_provenance_before_code_contracts
 ```
 
 Then run the release-product self-iteration workload:

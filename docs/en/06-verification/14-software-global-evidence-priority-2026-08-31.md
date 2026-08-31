@@ -21,9 +21,15 @@ the same result set.
 The code graph routed API, resource, and deployment reads to
 `storage::sqlite::software::ontology::query`, topics to
 `storage::sqlite::software::graph::topics`, and design evidence to
-`storage::sqlite::software::lifecycle::design`. The implementation changes only
-deterministic ordering at those read boundaries. Ingestion, projection, schema,
-durable tasks, leases, checkpoints, freshness, and writer paths are unchanged.
+`storage::sqlite::software::lifecycle::design`. The measured implementation
+changed deterministic ordering at those read boundaries. Pull-request review
+then exposed that its top `api_schema` branch had no production materializer.
+The final change classifies conventional indexed JSON/YAML OpenAPI and Swagger
+filenames, materializes same-scope file/API entities with `api_schema`
+provenance, and advances the derived projection schema to version 7 so existing
+scopes rebuild through the normal fenced projection. Parser facts, durable task
+ownership, leases, checkpoints, freshness barriers, and authoritative code
+facts remain unchanged.
 
 ## 2. Baseline, Algorithm, and Result
 
@@ -94,6 +100,14 @@ New owner tests directly fix the relative order of API code, Kubernetes
 resources, systemd service definitions, architecture/capability/module
 evidence, and nested-document topics. All 16 focused ordering tests passed, as
 did all 6 focused architecture-boundary tests.
+
+Review hardening adds a production-path projection test proving that an indexed
+OpenAPI schema is materialized with `api_schema` provenance and sorts before a
+code trait, plus file-role tests proving generated source clients are not
+misclassified. The checked-in software-global fixture now carries the same
+OpenAPI evidence and requires projection schema version 7. These follow-up
+changes are validated by the final PR gates; they are not retroactively claimed
+as part of the schema-version-6 self-iteration report above.
 
 The full coverage command was:
 

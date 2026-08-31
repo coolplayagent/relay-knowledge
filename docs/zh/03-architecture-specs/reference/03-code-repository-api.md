@@ -282,7 +282,7 @@
   "request": { "kind": "dependencies", "_omitted": true },
   "status": {
     "ontology_version": "1.0.0",
-    "projection_schema_version": 6,
+    "projection_schema_version": 7,
     "source_coverage": {
       "source_kinds": ["manifest"],
       "source_path_count": 1,

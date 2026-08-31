@@ -44,10 +44,12 @@ The implemented state machine is:
    business, and publication finalizer without skipping freshness checks.
 
 Checked arithmetic rejects capacity overflow before mutation. Facts without a
-file owner fail closed. One already globally bounded indivisible file may cross
-a per-batch row or byte threshold alone, but it cannot absorb a following file.
-The worktree task is never reinterpreted as a clean full index, and no queue,
-batch, transaction, retry, source fallback, or timeout was made unbounded.
+file owner fail closed, as does any indivisible file whose bytes or owned rows
+cannot fit one frozen writer quantum. Receipt batches measure parsed-file data
+work; deletion-only affected paths remain auditable without being mistaken for
+parsed-file capacity after clone ownership is removed. The worktree task is
+never reinterpreted as a clean full index, and no queue, batch, transaction,
+retry, source fallback, or timeout was made unbounded.
 
 Resolved and pending worktree selectors are parsed as disjoint identities.
 Nested context queries reuse the pinned resolved identity directly instead of
@@ -71,12 +73,12 @@ then completed without replaying the first batch. Its receipt reported two
 delta batches, two parsed files, and 44 SQLite writes; its completed checkpoint
 reported three total batches and the real lexicographic maximum path.
 
-Additional owner tests passed for deterministic planning, indivisible-file
-isolation, orphan rejection, terminal cleanup/tombstone/control/receipt
-admission, multi-batch receipt scaling, pinned worktree context, publication
-identity rebinding, and the CLI map namespace error order. The resume precheck
-also proves it does not validate an unstaged target before the clone phase has
-created it.
+Additional owner tests passed for deterministic planning, oversized
+indivisible-file and orphan rejection, terminal cleanup/tombstone/control/
+receipt admission, deletion-heavy and multi-batch receipt scaling, pinned
+worktree context, publication identity rebinding, and the CLI map namespace
+error order. The resume precheck also proves it does not validate an unstaged
+target before the clone phase has created it.
 
 ## 4. Release-Product Self-Iteration
 
@@ -116,6 +118,16 @@ Performance, stability, and semantic/vector metrics remained `1.0`. The
 `agent_workflows` and `research_judge` suites were skipped by the selected
 category and are not implied by the passing fast/performance result.
 
+The first GitHub `index-performance-regression` run later passed every runtime
+gate, case, completion assertion, and index latency budget but rejected the
+candidate because a cold runner spent 330,829 ms compiling the release product
+against the separate 180,000-ms quality-build budget. The PR workflow now
+prebuilds that same release binary in an explicit untimed compilation step;
+the evaluator still verifies the release path and incremental build gate, while
+the index-performance job remains authoritative for cold/incremental repository
+runtime rather than host compiler cold-start variance. No product or index
+latency budget was enlarged.
+
 ## 5. Full Tests and Coverage
 
 The independent current-worktree Rust gate passed:
@@ -124,7 +136,7 @@ The independent current-worktree Rust gate passed:
 cargo test --all-targets --all-features
 ```
 
-The result was 3,778 passed and 1 ignored library tests, 1 of 1 benchmark test,
+The result was 3,792 passed and 1 ignored library tests, 1 of 1 benchmark test,
 and 156 of 156 integration tests. The ignored subprocess fixture remains an
 explicit ignored result rather than a pass.
 
@@ -140,9 +152,9 @@ fail-closed branches in the new owners. Three focused tests now require
 duplicate file ownership, an ordinal outside the frozen batch plan, and a
 durable receipt without an immutable base identity to return typed errors.
 
-The final result was 15,407 missed lines out of 154,185, or `90.01%` line
+The final result was 15,348 missed lines out of 154,238, or `90.05%` line
 coverage, and passed the unchanged 90% threshold. That execution reran all
-targets and features with 3,781 passed and 1 ignored library tests, 1 of 1
+targets and features with 3,792 passed and 1 ignored library tests, 1 of 1
 benchmark test, and 156 of 156 integration tests; it did not exclude new
 storage owners or lower the required percentage.
 
