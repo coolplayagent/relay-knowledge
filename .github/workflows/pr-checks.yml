@@ -55,6 +55,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Deep-profile prerequisite regression gate
+        run: sh tests/runtime/check_sh_prerequisites.sh
+
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
 

@@ -51,6 +51,10 @@ rustup toolchain install nightly --profile minimal --component miri,rust-src
 ./check.sh --deep
 ```
 
+PR check job 还会运行 `tests/runtime/check_sh_prerequisites.sh`。该测试使用隔离的
+`rustup` fixture，验证 deep profile 在启动高成本仓库门禁前检查的是实际会被
+`+nightly` 调用的精确别名，并能识别不带目标三元组的 `rust-src` 组件名。
+
 Miri 只运行核心领域测试面，因为产品 SQLite 与网络边界使用 Miri 不支持的 FFI
 或 host API。这是显式覆盖边界，不是跳过失败：普通测试继续覆盖这些路径，
 AddressSanitizer 则在受支持的原生 target 上执行 library 与 binary tests。参见

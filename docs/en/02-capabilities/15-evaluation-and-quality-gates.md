@@ -53,6 +53,11 @@ rustup toolchain install nightly --profile minimal --component miri,rust-src
 ./check.sh --deep
 ```
 
+The PR check job also runs `tests/runtime/check_sh_prerequisites.sh`. Its
+isolated `rustup` fixture verifies that the exact `+nightly` alias is available
+and that the target-independent `rust-src` component is recognized before the
+deep profile starts expensive repository gates.
+
 Miri runs only the core domain surface because the product's SQLite and network
 boundaries use FFI or host APIs that Miri does not support. This is an explicit
 coverage boundary, not a skipped failure: normal tests continue to cover those

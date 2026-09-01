@@ -27,20 +27,20 @@ command_exists() {
 
 sanitizer_target=""
 if [ "$QUALITY_PROFILE" = "deep" ]; then
-  if ! command_exists rustup || ! rustup toolchain list | grep -Eq '^nightly(-| )'; then
+  if ! command_exists rustup || ! rustup run nightly rustc --version >/dev/null 2>&1; then
     echo "[Error] The deep profile requires the nightly Rust toolchain." >&2
     echo "Install it with: rustup toolchain install nightly --profile minimal --component miri,rust-src" >&2
     exit 1
   fi
 
-  nightly_components="$(rustup component list --toolchain nightly)"
-  if ! printf '%s\n' "$nightly_components" | grep -Eq '^miri-.* \(installed\)$'; then
+  nightly_components="$(rustup component list --toolchain nightly --installed)"
+  if ! printf '%s\n' "$nightly_components" | grep -Eq '^miri(-[[:alnum:]_.-]+)?$'; then
     echo "[Error] The deep profile requires the nightly Miri component." >&2
     echo "Install it with: rustup component add miri --toolchain nightly" >&2
     exit 1
   fi
 
-  if ! printf '%s\n' "$nightly_components" | grep -Eq '^rust-src-.* \(installed\)$'; then
+  if ! printf '%s\n' "$nightly_components" | grep -Eq '^rust-src$'; then
     echo "[Error] The deep profile requires nightly rust-src for instrumented standard-library builds." >&2
     echo "Install it with: rustup component add rust-src --toolchain nightly" >&2
     exit 1
