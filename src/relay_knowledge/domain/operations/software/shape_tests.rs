@@ -139,3 +139,23 @@ fn cross_scope_evidence_is_rejected_instead_of_accepted() {
     );
     assert_eq!(statements[0].fact_state, SoftwareFactState::Rejected);
 }
+
+#[test]
+fn owl_object_properties_reject_literal_objects() {
+    let component = entity(SoftwareEntityKind::Component, "core");
+    let package = entity(SoftwareEntityKind::PackageComponent, "serde");
+    let mut candidate = statement(&component, &package);
+    candidate.predicate = SoftwarePredicate::DependsOn;
+    candidate.object_id = None;
+    candidate.object_value = Some("serde".to_owned());
+
+    let (statements, report) = reconcile_software_statements(&[component], vec![candidate]);
+
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "literal_object_for_object_property")
+    );
+    assert_eq!(statements[0].fact_state, SoftwareFactState::Rejected);
+}

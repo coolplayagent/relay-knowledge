@@ -16,7 +16,7 @@
 - 结构化 API 可写入 source path、span、confidence、status、typed relation、claim 和 event。
 - 结构化 fact 必须引用 supporting evidence ids。
 - `rejected` 和 `superseded` evidence 不会作为默认检索上下文返回。
-- Repository software ontology 以一等 `SoftwareStatement` 保留 source kind、同 scope evidence refs、extractor id/version、assertion mode、resolution state、有效期、观察时间、confidence 和 fact state；`repo software --kind statements|conflicts` 可直接检查这些字段。
+- Repository software ontology 以一等 `SoftwareStatement` 保留 source kind、同 scope evidence refs、extractor id/version、assertion mode、resolution state、有效期、观察时间、confidence 和 fact state；21 个 class 与 15 个 OWL object property 来自独立、有界且 storage-independent 的 core schema，shape validation 与 PROV-O JSON-LD export 复用同一 RDF namespace 和 domain/range contract。`repo software --kind statements|conflicts` 可直接检查 statement 与 rejected/conflicting diagnostics。
 - `entity_key` 表达不含 commit/source scope 的稳定软件身份，`occurrence_id` 表达该身份在一个 snapshot/evidence 集合中的出现；快照和运行事件类型故意保持 scope-bound。
 
 ## 竞争力特性

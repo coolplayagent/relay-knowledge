@@ -8,6 +8,7 @@ mod request;
 mod shape;
 mod statement;
 mod validation;
+mod vocabulary;
 
 pub use dependencies::{
     SoftwareComponent, SoftwareComponentInput, SoftwareDependencyUsage,
@@ -23,8 +24,8 @@ pub use lifecycle::{
     SoftwareDesignElementInput, SoftwareIacResource, SoftwareIacResourceInput,
 };
 pub use ontology::{
-    SOFTWARE_ONTOLOGY_VERSION, SoftwareEntity, SoftwareEntityInput, SoftwareEntityKind,
-    SoftwareEvidenceRef, SoftwareSourceKind,
+    SoftwareEntity, SoftwareEntityInput, SoftwareEntityKind, SoftwareEvidenceRef,
+    SoftwareSourceKind,
 };
 pub use projection::{
     SOFTWARE_PROJECTION_SCHEMA_VERSION, SoftwareGlobalProjection, SoftwareGlobalStatus,
@@ -38,4 +39,7 @@ pub use shape::{
 pub use statement::{
     SoftwareAssertionMode, SoftwareFactState, SoftwarePredicate, SoftwareStatement,
     SoftwareStatementInput, SoftwareStatementResolution,
+};
+pub use vocabulary::{
+    SOFTWARE_ONTOLOGY_NAMESPACE, SOFTWARE_ONTOLOGY_SCHEMA, SOFTWARE_ONTOLOGY_VERSION,
 };

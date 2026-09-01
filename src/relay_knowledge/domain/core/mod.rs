@@ -12,5 +12,9 @@ pub use index::{
     IndexCursor, IndexKind, IndexLag, IndexModality, IndexRefreshDiagnostics, IndexStalenessReason,
     IndexState, IndexStatus,
 };
-pub use ontology::{OntologyEntityKind, OntologyIdentity};
+pub use ontology::{
+    OntologyClassDefinition, OntologyClassIdentity, OntologyDomainConstraint, OntologyEntityKind,
+    OntologyIdentity, OntologyObjectPropertyDefinition, OntologyRangeConstraint,
+    OntologyRelationShape, OntologySchema,
+};
 pub use source::SourceScope;

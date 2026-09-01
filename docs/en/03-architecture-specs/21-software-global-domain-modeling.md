@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/21-software-global-domain-modeling.md) | [中文](../../zh/03-architecture-specs/21-software-global-domain-modeling.md)
 
-> Document version: 1.2
-> Prepared: 2026-08-30
+> Document version: 1.3
+> Prepared: 2026-09-01
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -29,6 +29,10 @@ The ontology contract has four layers:
 | Snapshot and event instances | `RepositorySnapshot`, `FileRevision`, `BuildRun`, `DeploymentRevision`, and `RuntimeObservation` |
 | Traceable assertions | First-class `SoftwareStatement` records with subject, predicate, object, source, evidence, extractor, time, confidence, resolution, and fact state |
 | Derived read models | Compatible dependency, SDK, file, topic, relationship, build, IaC, and design projections plus new typed query slices; they are rebuildable rather than authoritative facts |
+
+The Issue #362 core-module boundary sits between this data model and storage implementations. `domain::core::ontology` defines the bounded, storage-independent `OntologySchema`, class identity, RDF local names, OWL object properties, and executable domain/range relation shapes. `domain::operations::software::vocabulary` registers and directly exports the `SOFTWARE_ONTOLOGY_SCHEMA` catalog with 21 classes, 15 object properties, `1.0.0` version, and `https://relay-knowledge.dev/ontology/software/1#` namespace. Entity/statement construction, shape validation, SQLite materialization, and PROV-O JSON-LD export consume this one catalog instead of maintaining separate namespaces or domain/range matches.
+
+Core schema validation parses namespace IRIs and requires an absolute HTTP(S) scheme plus a valid host, then checks schema/version identity, class/property capacities, RDF local names, identity uniqueness, nonempty relation shapes, and every class reference before projection publication. Executable relation checks reject subject or object class ids absent from the catalog even when a shape uses `Any`. Current software predicates are OWL object properties, so a literal object is retained as a rejected statement with a `literal_object_for_object_property` shape diagnostic instead of bypassing entity range validation. The schema describes the ontology contract only: it reads no files, performs no network I/O, owns no graph storage, and does not replace the LPG runtime with an RDF triple store.
 
 A stable entity `entity_key` is derived from repository, controlled type, namespace, and normalized name without a commit or source scope, so one entity retains identity across commits. Each evidence observation has a separate `occurrence_id` bound to the entity key, source scope, and evidence ids. Snapshot and event instance kinds intentionally include source scope in their identity. Dependency and SDK versions, requirements, ecosystems, and authorities live in occurrence attributes and statements; a display name alone never proves a resolved version.
 

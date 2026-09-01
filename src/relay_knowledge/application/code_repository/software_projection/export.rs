@@ -8,15 +8,14 @@ use serde_json::{Value, json};
 use crate::{
     api::SoftwareGlobalResponse,
     domain::{
-        SoftwareEntity, SoftwareEntityKind, SoftwareExportProfile, SoftwarePredicate,
-        SoftwareStatement,
+        SOFTWARE_ONTOLOGY_NAMESPACE, SoftwareEntity, SoftwareEntityKind, SoftwareExportProfile,
+        SoftwarePredicate, SoftwareStatement,
     },
 };
 
 const SPDX_CONTEXT: &str = "https://spdx.org/rdf/3.0.1/spdx-context.jsonld";
 const CYCLONEDX_SCHEMA: &str = "http://cyclonedx.org/schema/bom-1.7.schema.json";
 const PROV_NAMESPACE: &str = "http://www.w3.org/ns/prov#";
-const ONTOLOGY_NAMESPACE: &str = "https://relay-knowledge.dev/ontology/software/1#";
 const EXPORT_AGENT: &str = "urn:relay-knowledge:agent:relay-knowledge";
 
 pub(super) fn export_document(
@@ -290,9 +289,10 @@ fn prov_document(response: &SoftwareGlobalResponse) -> Value {
         } else {
             "prov:Entity"
         };
+        let ontology_type = format!("rko:{}", entity.entity_kind.rdf_local_name());
         graph.push(json!({
             "@id": export_id("entity", &entity.entity_key),
-            "@type": node_type,
+            "@type": [node_type, ontology_type],
             "prov:label": entity.name,
             "rko:entityKind": entity.entity_kind.as_str(),
             "rko:sourceKind": entity.source_kind.as_str(),
@@ -334,6 +334,9 @@ fn prov_document(response: &SoftwareGlobalResponse) -> Value {
             "prov:wasDerivedFrom": evidence_ids,
             "rko:subject": export_id("entity", &statement.subject_id),
             "rko:predicate": statement.predicate.as_str(),
+            "rko:ontologyProperty": {
+                "@id": format!("rko:{}", statement.predicate.rdf_local_name())
+            },
             "rko:object": object,
             "rko:assertionMode": statement.assertion_mode.as_str(),
             "rko:resolutionState": statement.resolution_state.as_str(),
@@ -345,7 +348,7 @@ fn prov_document(response: &SoftwareGlobalResponse) -> Value {
     json!({
         "@context": {
             "prov": PROV_NAMESPACE,
-            "rko": ONTOLOGY_NAMESPACE
+            "rko": SOFTWARE_ONTOLOGY_NAMESPACE
         },
         "@graph": graph
     })

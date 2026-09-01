@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    SoftwareAssertionMode, SoftwareEntity, SoftwareEntityKind, SoftwareFactState,
-    SoftwarePredicate, SoftwareSourceKind, SoftwareStatement, SoftwareStatementResolution,
+    SOFTWARE_ONTOLOGY_SCHEMA, SoftwareAssertionMode, SoftwareEntity, SoftwareEntityKind,
+    SoftwareFactState, SoftwarePredicate, SoftwareSourceKind, SoftwareStatement,
+    SoftwareStatementResolution,
 };
 
 /// Severity of a software ontology shape diagnostic.
@@ -108,6 +109,27 @@ pub fn validate_software_shapes(
     statements: &[SoftwareStatement],
 ) -> SoftwareShapeReport {
     let mut diagnostics = Vec::new();
+    if let Err(error) = SOFTWARE_ONTOLOGY_SCHEMA.validate() {
+        diagnostics.push(SoftwareShapeDiagnostic {
+            diagnostic_id: diagnostic_id(
+                "ontology:SchemaShape",
+                "invalid_ontology_schema",
+                "software",
+                error.field,
+            ),
+            shape_id: "ontology:SchemaShape".to_owned(),
+            code: "invalid_ontology_schema".to_owned(),
+            severity: SoftwareShapeSeverity::Error,
+            statement_id: None,
+            entity_key: None,
+            field: error.field.to_owned(),
+            message: error.message,
+        });
+        return SoftwareShapeReport {
+            conforms: false,
+            diagnostics,
+        };
+    }
     let entity_kinds = entity_kind_index(entities, &mut diagnostics);
     validate_stable_identities(entities, &mut diagnostics);
     for statement in statements {
@@ -329,6 +351,14 @@ fn validate_statement(
             "object_id",
             "exactly one of object_id or object_value is required",
         ));
+    } else if statement.object_value.is_some() {
+        diagnostics.push(statement_diagnostic(
+            statement,
+            "ontology:ObjectPropertyShape",
+            "literal_object_for_object_property",
+            "object_value",
+            "software ontology object properties require an ontology entity object",
+        ));
     }
 
     let Some(subject) = entity_kinds.get(&statement.subject_id) else {
@@ -350,7 +380,8 @@ fn validate_statement(
             "subject_id has no occurrence in the statement source scope",
         ));
     }
-    if !valid_domain(statement.predicate, subject.kind) {
+    let schema = &SOFTWARE_ONTOLOGY_SCHEMA;
+    if !schema.allows_subject(statement.predicate.as_str(), subject.kind.as_str()) {
         diagnostics.push(statement_diagnostic(
             statement,
             "software:RelationShape",
@@ -379,7 +410,11 @@ fn validate_statement(
                 "object_id has no occurrence in the statement source scope",
             ));
         }
-        if !valid_range(statement.predicate, subject.kind, object.kind) {
+        if !schema.allows_relation(
+            statement.predicate.as_str(),
+            subject.kind.as_str(),
+            object.kind.as_str(),
+        ) {
             diagnostics.push(statement_diagnostic(
                 statement,
                 "software:RelationShape",
@@ -388,150 +423,6 @@ fn validate_statement(
                 "predicate range does not allow the object entity kind",
             ));
         }
-    }
-}
-
-fn valid_domain(predicate: SoftwarePredicate, kind: SoftwareEntityKind) -> bool {
-    use SoftwareEntityKind as Kind;
-    match predicate {
-        SoftwarePredicate::Contains => matches!(
-            kind,
-            Kind::Domain
-                | Kind::SoftwareSystem
-                | Kind::Component
-                | Kind::DeploymentUnit
-                | Kind::ReleaseArtifact
-                | Kind::Pipeline
-                | Kind::RepositorySnapshot
-        ),
-        SoftwarePredicate::ProvidesApi => matches!(
-            kind,
-            Kind::SoftwareSystem | Kind::Component | Kind::RuntimeService | Kind::Sdk
-        ),
-        SoftwarePredicate::ConsumesApi => matches!(
-            kind,
-            Kind::Component
-                | Kind::RuntimeService
-                | Kind::TestCase
-                | Kind::FileRevision
-                | Kind::BuildDefinition
-        ),
-        SoftwarePredicate::DependsOn => matches!(
-            kind,
-            Kind::SoftwareSystem
-                | Kind::Component
-                | Kind::BuildDefinition
-                | Kind::DeploymentUnit
-                | Kind::RuntimeService
-                | Kind::PackageComponent
-                | Kind::RepositorySnapshot
-                | Kind::FileRevision
-        ),
-        SoftwarePredicate::Configures => kind == Kind::Configuration,
-        SoftwarePredicate::Builds | SoftwarePredicate::Produces => {
-            matches!(
-                kind,
-                Kind::BuildDefinition | Kind::BuildRun | Kind::BuildJob
-            )
-        }
-        SoftwarePredicate::Packages => kind == Kind::ReleaseArtifact,
-        SoftwarePredicate::Deploys => kind == Kind::DeploymentUnit,
-        SoftwarePredicate::RunsAs => {
-            matches!(
-                kind,
-                Kind::Component | Kind::ReleaseArtifact | Kind::DeploymentUnit
-            )
-        }
-        SoftwarePredicate::Tests => kind == Kind::TestCase,
-        SoftwarePredicate::Documents => kind == Kind::DocumentationUnit,
-        SoftwarePredicate::DerivedFrom
-        | SoftwarePredicate::ObservedAs
-        | SoftwarePredicate::Supersedes => true,
-    }
-}
-
-fn valid_range(
-    predicate: SoftwarePredicate,
-    subject: SoftwareEntityKind,
-    object: SoftwareEntityKind,
-) -> bool {
-    use SoftwareEntityKind as Kind;
-    match predicate {
-        SoftwarePredicate::Contains => match subject {
-            Kind::Domain => object == Kind::SoftwareSystem,
-            Kind::SoftwareSystem => matches!(
-                object,
-                Kind::Component
-                    | Kind::Resource
-                    | Kind::Configuration
-                    | Kind::DeploymentUnit
-                    | Kind::DocumentationUnit
-            ),
-            Kind::Component => matches!(
-                object,
-                Kind::Component | Kind::FileRevision | Kind::Configuration | Kind::TestCase
-            ),
-            Kind::DeploymentUnit => object == Kind::Resource,
-            Kind::ReleaseArtifact => matches!(
-                object,
-                Kind::PackageComponent | Kind::Component | Kind::FileRevision
-            ),
-            Kind::Pipeline => object == Kind::BuildJob,
-            Kind::RepositorySnapshot => matches!(
-                object,
-                Kind::SoftwareSystem
-                    | Kind::Component
-                    | Kind::Api
-                    | Kind::Resource
-                    | Kind::Configuration
-                    | Kind::BuildDefinition
-                    | Kind::DeploymentUnit
-                    | Kind::TestCase
-                    | Kind::ReleaseArtifact
-                    | Kind::PackageComponent
-                    | Kind::Sdk
-                    | Kind::DocumentationUnit
-                    | Kind::Pipeline
-                    | Kind::FileRevision
-            ),
-            _ => false,
-        },
-        SoftwarePredicate::ProvidesApi => object == Kind::Api,
-        SoftwarePredicate::ConsumesApi => matches!(object, Kind::Api | Kind::Sdk),
-        SoftwarePredicate::DependsOn => matches!(
-            object,
-            Kind::PackageComponent | Kind::Sdk | Kind::Component | Kind::RuntimeService | Kind::Api
-        ),
-        SoftwarePredicate::Configures => matches!(
-            object,
-            Kind::BuildDefinition
-                | Kind::DeploymentUnit
-                | Kind::RuntimeService
-                | Kind::Component
-                | Kind::FileRevision
-        ),
-        SoftwarePredicate::Builds | SoftwarePredicate::Produces => object == Kind::ReleaseArtifact,
-        SoftwarePredicate::Packages => matches!(
-            object,
-            Kind::PackageComponent | Kind::Component | Kind::FileRevision
-        ),
-        SoftwarePredicate::Deploys => {
-            matches!(object, Kind::ReleaseArtifact | Kind::RuntimeService)
-        }
-        SoftwarePredicate::RunsAs => object == Kind::RuntimeService,
-        SoftwarePredicate::Tests => matches!(
-            object,
-            Kind::Component
-                | Kind::Api
-                | Kind::RuntimeService
-                | Kind::BuildDefinition
-                | Kind::ReleaseArtifact
-                | Kind::FileRevision
-                | Kind::RepositorySnapshot
-        ),
-        SoftwarePredicate::Documents => object != Kind::DocumentationUnit,
-        SoftwarePredicate::DerivedFrom | SoftwarePredicate::ObservedAs => true,
-        SoftwarePredicate::Supersedes => subject == object,
     }
 }
 

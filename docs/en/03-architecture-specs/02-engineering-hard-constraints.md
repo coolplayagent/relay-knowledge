@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/02-engineering-hard-constraints.md) | [中文](../../zh/03-architecture-specs/02-engineering-hard-constraints.md)
 
-> Document version: 2.5
-> Date: 2026-08-29
+> Document version: 2.6
+> Date: 2026-09-01
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -38,6 +38,8 @@ The application infrastructure migration budget is frozen by exact file, target 
 | `net::qos` | Admission control, source/tenant limits, priority, budgets, overload metrics | Resource consumption before QoS |
 
 Stable identity and wall-clock primitives also have one lower-layer owner. `identity` exclusively owns the persisted FNV-1a algorithm and its incremental hasher; domain, application, watcher, path, and storage owners consume that contract instead of copying constants. `clock` owns the narrow `Clock` contract, `SystemClock`, Unix-millisecond conversion, and pre-epoch/overflow errors; callers may map those errors at their boundary but must not read `SystemTime::now()` independently. Neither owner may become a generic `utils` bucket.
+
+Ontology schema primitives follow the same single-owner rule. `domain::core::ontology` exclusively owns the storage-independent bounded contracts for class identity, RDF local names, OWL object properties, domain/range relation shapes, and schema validation; `domain::operations::software::vocabulary` only registers the software-domain class/property catalog, version, and namespace. Software entities, statements, shape validation, and RDF/JSON-LD export consume that catalog. Storage adapters, read models, and exporters must not copy the ontology namespace or define a second domain/range match. Business-term identity may consume core primitives but must not depend back on the software vocabulary; LPG/RDF store choice, materialization, and querying do not belong to the core ontology owner.
 
 Named platform process inputs follow the same boundary. During process bootstrap, `env::windows_system_root_from_process` captures Windows `SystemRoot`, bootstrap captures `std::env::current_exe` once, `paths::windows_tasklist_command` resolves the Windows process-list executable, and `RuntimeConfiguration::process` injects both values into service recovery and lifecycle planning/execution. Binary preflight, copy, upgrade, rollback, and checkpoint recovery use that same captured executable path. Application workflows must neither call `std::env`/`current_exe` nor construct platform executable paths while recovering workers or invoking service managers.
 
