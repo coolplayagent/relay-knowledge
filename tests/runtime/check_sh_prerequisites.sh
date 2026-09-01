@@ -2,9 +2,14 @@
 set -eu
 
 repository_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
-fixture_bin="$repository_root/tests/fixtures/check_sh/bin"
-test_output="$(mktemp)"
-trap 'rm -f -- "$test_output"' EXIT HUP INT TERM
+fixture_root="$repository_root/tests/fixtures/check_sh"
+test_workspace="$(mktemp -d)"
+fixture_bin="$test_workspace/bin"
+test_output="$test_workspace/output"
+mkdir "$fixture_bin"
+ln -s "$fixture_root/fake_python3.sh" "$fixture_bin/python3"
+ln -s "$fixture_root/fake_rustup.sh" "$fixture_bin/rustup"
+trap 'rm -f -- "$test_output" "$fixture_bin/python3" "$fixture_bin/rustup"; rmdir -- "$fixture_bin" "$test_workspace"' EXIT HUP INT TERM
 
 run_deep_preflight() {
   rustup_case="$1"
