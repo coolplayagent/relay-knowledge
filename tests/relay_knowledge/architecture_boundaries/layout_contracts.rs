@@ -131,6 +131,35 @@ fn all_tracked_text_files_stay_within_line_budget() {
         .and_then(Path::parent)
         .expect("source root has repository ancestors")
         .to_path_buf();
+    let mut violations = Vec::new();
+    for relative in workspace_regular_files(&repository_root) {
+        if relative == "Cargo.lock" {
+            continue;
+        }
+        let bytes = fs::read(repository_root.join(&relative))
+            .unwrap_or_else(|error| panic!("read workspace file {relative}: {error}"));
+        if bytes.contains(&0) {
+            continue;
+        }
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        let line_count = text.lines().count();
+        if line_count > MAX_TRACKED_FILE_LINES {
+            violations.push(format!(
+                "{relative} has {line_count} lines; tracked text files may have at most {MAX_TRACKED_FILE_LINES}"
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "tracked text file line-budget violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn workspace_regular_files(repository_root: &Path) -> Vec<String> {
     let output = Command::new("git")
         .args([
             "-C",
@@ -151,37 +180,66 @@ fn all_tracked_text_files_stay_within_line_budget() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let mut violations = Vec::new();
-    for path_bytes in output.stdout.split(|byte| *byte == 0) {
-        if path_bytes.is_empty() {
-            continue;
-        }
-        let relative = String::from_utf8(path_bytes.to_vec())
-            .expect("tracked repository paths should be valid UTF-8");
-        if relative == "Cargo.lock" {
-            continue;
-        }
-        let bytes = fs::read(repository_root.join(&relative))
-            .unwrap_or_else(|error| panic!("read tracked file {relative}: {error}"));
-        if bytes.contains(&0) {
-            continue;
-        }
-        let Ok(text) = std::str::from_utf8(&bytes) else {
-            continue;
-        };
-        let line_count = text.lines().count();
-        if line_count > MAX_TRACKED_FILE_LINES {
-            violations.push(format!(
-                "{relative} has {line_count} lines; tracked text files may have at most {MAX_TRACKED_FILE_LINES}"
-            ));
-        }
-    }
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            String::from_utf8(path.to_vec())
+                .expect("tracked repository paths should be valid UTF-8")
+        })
+        .filter(|relative| {
+            let path = repository_root.join(relative);
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata.file_type().is_file(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => panic!("inspect workspace file {relative}: {error}"),
+            }
+        })
+        .collect()
+}
 
-    assert!(
-        violations.is_empty(),
-        "tracked text file line-budget violations:\n{}",
-        violations.join("\n")
-    );
+#[test]
+fn tracked_file_listing_excludes_deleted_cache_entries() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock should follow the Unix epoch")
+        .as_nanos();
+    let repository_root = std::env::temp_dir().join(format!(
+        "relay-knowledge-layout-contract-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir(&repository_root).expect("temporary repository should be created");
+    let retained = repository_root.join("retained.md");
+    let deleted = repository_root.join("deleted.md");
+    let untracked = repository_root.join("untracked.md");
+    fs::write(&retained, "retained\n").expect("retained fixture should be written");
+    fs::write(&deleted, "deleted\n").expect("deleted fixture should be written");
+    fs::write(&untracked, "untracked\n").expect("untracked fixture should be written");
+
+    let initialized = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&repository_root)
+        .status()
+        .expect("git init should execute");
+    assert!(initialized.success(), "git init should succeed");
+    let staged = Command::new("git")
+        .args(["add", "retained.md", "deleted.md"])
+        .current_dir(&repository_root)
+        .status()
+        .expect("git add should execute");
+    assert!(staged.success(), "git add should succeed");
+    fs::remove_file(deleted).expect("tracked fixture should be deleted");
+
+    let files = workspace_regular_files(&repository_root);
+    let retained_is_listed = files.iter().any(|path| path == "retained.md");
+    let untracked_is_listed = files.iter().any(|path| path == "untracked.md");
+    let deleted_is_listed = files.iter().any(|path| path == "deleted.md");
+    fs::remove_dir_all(repository_root).expect("temporary repository should be removed");
+
+    assert!(retained_is_listed);
+    assert!(untracked_is_listed);
+    assert!(!deleted_is_listed);
 }
 
 #[test]

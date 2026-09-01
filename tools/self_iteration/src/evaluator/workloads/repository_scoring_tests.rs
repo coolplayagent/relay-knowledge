@@ -97,7 +97,7 @@ fn software_statement_case_scores_ontology_fields_and_status_contract() {
         "guardrail": true,
         "max_rank": 1,
         "status_ontology_version": "1.0.0",
-        "status_projection_schema_version": 6,
+        "status_projection_schema_version": 7,
         "status_completeness_basis_points_min": 10000,
         "expected": [{
             "software_slice": "statement",
@@ -115,7 +115,7 @@ fn software_statement_case_scores_ontology_fields_and_status_contract() {
         stdout: serde_json::json!({
             "status": {
                 "ontology_version": "1.0.0",
-                "projection_schema_version": 6,
+                "projection_schema_version": 7,
                 "completeness_basis_points": 10000
             },
             "entities": [],

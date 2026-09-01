@@ -1,8 +1,8 @@
 schema_version: 3
 artifact_kind: map
 map_type: knowledge
-map_version: 15
-updated_at: unix:1788056166
+map_version: 25
+updated_at: unix:1788149781
 directories:
 - directory: domain
   purpose: Domain concepts, models, and business rules.
@@ -61,18 +61,23 @@ topics:
   - architecture-hard-constraints
   - code-map-knowledge-development-loop
   - commit-driven-code-index-loop
+  - durable-worktree-delta-design
   - git-commit-knowledge-development-loop
   - partitioned-sqlite-catalog-read-fast-path
-  ref: topics/topic-4ca303a3bf7ddf7b-ec57300301a53ea94dff4bd7f2a7996f4c3510e84df67b717f7ec3cfbe3c0c99.yaml
-  digest: ec57300301a53ea94dff4bd7f2a7996f4c3510e84df67b717f7ec3cfbe3c0c99
+  - software-global-domain-model
+  ref: topics/topic-4ca303a3bf7ddf7b-29241b44dc8e89c7e1419b31f15d80af3d5912ce7f159913206dbc761c26be42.yaml
+  digest: 29241b44dc8e89c7e1419b31f15d80af3d5912ce7f159913206dbc761c26be42
 - id: benchmarks
   title: Benchmark knowledge
   description: Self-iteration and benchmark guardrail documentation.
   source_ids:
   - code-index-fact-versioning
+  - durable-worktree-delta-verification-2026-08-31
   - profile-all-performance-source-surface-2026-06-04
-  ref: topics/topic-cb1d2fdcc86ce72a-00171d6dfe615346484dfc425f8505794872feefde00637c82d4b51e5861c29c.yaml
-  digest: 00171d6dfe615346484dfc425f8505794872feefde00637c82d4b51e5861c29c
+  - software-global-evidence-priority-verification-2026-08-31
+  - software-global-ranking-evaluation
+  ref: topics/topic-cb1d2fdcc86ce72a-8b3e7416a2f93141b136174bae329fb35ac77467f503f964f2323ebe91e5a7fc.yaml
+  digest: 8b3e7416a2f93141b136174bae329fb35ac77467f503f964f2323ebe91e5a7fc
 - id: business-knowledge
   title: Business knowledge
   description: Version-controlled business domains, terminology, aliases, semantics, and technical mappings.
@@ -104,65 +109,50 @@ topics:
   ref: topics/topic-247e2a0d6f43d185-b752f818d859387488b3ee9c2aefa0d86d9d3e8cb69fe907f28fd756cc567629.yaml
   digest: b752f818d859387488b3ee9c2aefa0d86d9d3e8cb69fe907f28fd756cc567629
 history:
-  archived_through: 0
+  archived_through: 16
+  archive:
+    ref: history/00000000000000000001-00000000000000000016-d8d12f83fc6a833ad46901c200451cd85a939e12118e40ddaa1368a706e80bd7.yaml
+    digest: d8d12f83fc6a833ad46901c200451cd85a939e12118e40ddaa1368a706e80bd7
+  index:
+    from_version: 1
+    through_version: 16
+    height: 0
+    ref: history/index-00-00000000000000000001-00000000000000000016-919315c03837a9cd2b2906ec547fe7a0ca6f4c41aa8e259e617e69bdc217b889.yaml
+    digest: 919315c03837a9cd2b2906ec547fe7a0ca6f4c41aa8e259e617e69bdc217b889
   recent:
-  - version: 1
-    action: init
-    actor: cli
-    summary: Created repository knowledge map contract.
-  - version: 2
-    action: update
-    actor: codex
-    summary: Added benchmark fact-versioning documentation route.
-  - version: 3
-    action: update
-    actor: codex
-    summary: Added profile full performance and source-surface validation documentation.
-  - version: 4
-    action: update
-    actor: codex
-    summary: Added release-readiness documentation audit route.
-  - version: 5
-    action: update
-    actor: codex
-    summary: Added the managed Git commit loop and bounded retention architecture route.
-  - version: 6
-    action: software-model.ensure
-    actor: cli
-    summary: Added the repository code-map-backed software-model route.
-  - version: 7
+  - version: 17
     action: source.add
     actor: cli
-    summary: Added source 'code-map-knowledge-development-loop' to topic 'architecture'.
-  - version: 8
+    summary: Added source 'software-global-ranking-evaluation' to topic 'benchmarks'.
+  - version: 18
     action: source.update
     actor: cli
-    summary: Updated source 'cli-skill-workflows'.
-  - version: 9
-    action: source.add
-    actor: cli
-    summary: Added source 'git-commit-knowledge-development-loop' to topic 'architecture'.
-  - version: 10
-    action: update
-    actor: codex
-    summary: Prioritized the 2026-08-18 documentation and self-iteration readiness record while retaining the 2026-06-05 audit as history.
-  - version: 11
-    action: builtin-routes.ensure
-    actor: cli
-    summary: Ensured repository software-model and business-knowledge routes.
-  - version: 12
-    action: directory.update
-    actor: cli
-    summary: Updated governed directory 'domain'.
-  - version: 13
-    action: directory.update
-    actor: cli
-    summary: Updated governed directory 'guides'.
-  - version: 14
-    action: source.add
-    actor: cli
-    summary: Added source 'partitioned-sqlite-catalog-read-fast-path' to topic 'architecture'.
-  - version: 15
+    summary: Updated source 'architecture-hard-constraints'.
+  - version: 19
     action: source.update
     actor: cli
-    summary: Updated source 'profile-all-performance-source-surface-2026-06-04'.
+    summary: Updated source 'software-global-ranking-evaluation'.
+  - version: 20
+    action: source.add
+    actor: cli
+    summary: Added source 'software-global-evidence-priority-verification-2026-08-31' to topic 'benchmarks'.
+  - version: 21
+    action: source.add
+    actor: cli
+    summary: Added source 'durable-worktree-delta-design' to topic 'architecture'.
+  - version: 22
+    action: source.update
+    actor: cli
+    summary: Updated source 'commit-driven-code-index-loop'.
+  - version: 23
+    action: source.update
+    actor: cli
+    summary: Updated source 'architecture-hard-constraints'.
+  - version: 24
+    action: source.update
+    actor: cli
+    summary: Updated source 'software-global-ranking-evaluation'.
+  - version: 25
+    action: source.add
+    actor: cli
+    summary: Added source 'durable-worktree-delta-verification-2026-08-31' to topic 'benchmarks'.

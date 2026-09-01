@@ -76,6 +76,12 @@ Before tagging a new release, read the documentation in this order:
 The [2026-06-05 documentation audit](./en/06-verification/11-documentation-release-readiness-2026-06-05.md)
 remains historical evidence; it is not the current readiness result.
 
+The [2026-08-31 software-global evidence-priority record](./en/06-verification/14-software-global-evidence-priority-2026-08-31.md)
+records the focused typed-evidence ordering change. The later
+[2026-08-31 durable worktree delta record](./en/06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
+records the bounded staging and pinned-query remediation. Neither supersedes
+the overall readiness record in step 4.
+
 The Chinese edition currently carries detailed deployment, SRE, and security
 addenda plus a few benchmark and verification records without standalone
 English chapters. The English service chapter consolidates the core operational

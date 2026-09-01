@@ -3,33 +3,23 @@
 use rusqlite::{Transaction, params};
 
 use crate::{
-    domain::{
-        CodeIncrementalClonePhase, CodeIndexResourceBudget, CodeIndexSnapshot,
-        code_incremental_clone_state,
-    },
+    domain::{CodeIndexResourceBudget, CodeIndexSnapshot},
     storage::StorageError,
 };
 
 use super::{
-    CloneBaseHeader, CloneIdentity, admission, clone_capacity_error, durable_page_byte_limit,
-    now_millis, progress,
+    CloneBaseHeader, CloneIdentity, admission, affected_paths, clone_capacity_error,
+    durable_page_byte_limit, now_millis, progress,
 };
 use crate::storage::sqlite::code::lifecycle::publication_fence::PublicationFenceGuard;
 
-pub(super) fn require_init_budget(
+fn require_init_budget(
+    progress: &progress::CloneProgress,
     identity: &CloneIdentity,
-    base_scope: &str,
-    task_id: &str,
     budget: CodeIndexResourceBudget,
 ) -> Result<(), StorageError> {
-    let rows = identity
-        .affected_paths
-        .len()
-        .checked_add(3)
-        .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
-    let checkpoint_state =
-        code_incremental_clone_state(CodeIncrementalClonePhase::Tables, 0, 0, 0, "none")
-            .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
+    let rows = 3;
+    let checkpoint_state = progress::checkpoint_state(progress)?;
     let resource_budget_json = serde_json::to_string(&budget)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let scope_bytes = [
@@ -68,10 +58,12 @@ pub(super) fn require_init_budget(
     let progress_bytes = [
         identity.source_scope.as_str(),
         identity.repository_id.as_str(),
-        base_scope,
-        task_id,
+        progress.base_scope.as_str(),
+        progress.task_id.as_str(),
         identity.delta_digest.as_str(),
         progress::PHASE_TABLES,
+        progress.cursor_key.as_deref().unwrap_or_default(),
+        progress.cursor_tiebreaker.as_deref().unwrap_or_default(),
     ]
     .iter()
     .try_fold(
@@ -82,17 +74,10 @@ pub(super) fn require_init_budget(
                 .ok_or_else(|| clone_capacity_error(&identity.source_scope))
         },
     )?;
-    let mut bytes = scope_bytes
+    let bytes = scope_bytes
         .checked_add(checkpoint_bytes)
         .and_then(|value| value.checked_add(progress_bytes))
         .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
-    for path in &identity.affected_paths {
-        bytes = bytes
-            .checked_add(identity.source_scope.len())
-            .and_then(|value| value.checked_add(path.len()))
-            .and_then(|value| value.checked_add(admission::ROW_STORAGE_OVERHEAD_BYTES))
-            .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
-    }
     if rows > budget.max_rows_per_batch || bytes > budget.max_bytes_per_batch {
         return Err(clone_capacity_error(&identity.source_scope));
     }
@@ -109,6 +94,7 @@ pub(super) fn initialize_progress(
 ) -> Result<progress::CloneProgress, StorageError> {
     admission::require_unused_target(transaction, &identity.source_scope)?;
     stage_empty_target(transaction, identity)?;
+    let (cursor_key, cursor_tiebreaker) = affected_paths::initial_cursor(identity);
     let progress = progress::CloneProgress {
         source_scope: identity.source_scope.clone(),
         repository_id: identity.repository_id.clone(),
@@ -118,8 +104,8 @@ pub(super) fn initialize_progress(
         phase: progress::PHASE_TABLES.to_owned(),
         table_ordinal: 0,
         completed_page_ordinal: 0,
-        cursor_key: None,
-        cursor_tiebreaker: None,
+        cursor_key,
+        cursor_tiebreaker,
         completed_table_ordinal: None,
         expected_table_rows: None,
         scanned_table_rows: 0,
@@ -144,6 +130,7 @@ pub(super) fn initialize_progress(
         page_row_limit: budget.max_rows_per_batch,
         page_byte_limit: durable_page_byte_limit(budget),
     };
+    require_init_budget(&progress, identity, budget)?;
     let now_ms = now_millis()?;
     let checkpoint_state = progress::checkpoint_state(&progress)?;
     transaction.execute(
@@ -172,13 +159,6 @@ pub(super) fn initialize_progress(
         ],
     )?;
     progress::insert(transaction, &progress, now_ms)?;
-    let mut insert_path = transaction.prepare_cached(
-        "INSERT INTO code_repository_incremental_clone_affected_paths (source_scope, path)
-         VALUES (?1, ?2)",
-    )?;
-    for path in &identity.affected_paths {
-        insert_path.execute(params![identity.source_scope, path])?;
-    }
     Ok(progress)
 }
 

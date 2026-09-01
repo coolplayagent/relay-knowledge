@@ -105,7 +105,16 @@ pub(in crate::storage::sqlite::software) fn topics_for_scope(
         WHERE topics.source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY topics.topic_kind ASC, topics.source_path ASC, topics.line_start ASC
+        ORDER BY
+            CASE
+                WHEN topics.topic_kind = 'document_heading'
+                 AND instr(topics.source_path, '/') > 0 THEN 0
+                WHEN topics.topic_kind = 'knowledge_map_topic' THEN 1
+                WHEN topics.topic_kind = 'document_heading' THEN 2
+                ELSE 3
+            END ASC,
+            topics.source_path ASC,
+            topics.line_start ASC
         LIMIT ?
         ",
     );

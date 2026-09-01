@@ -8,6 +8,10 @@
 
 发版准备时，先读根 README、第 1 章安装流程、第 19 章安装/发布架构契约，以及最新的
 [文档与自迭代准备度验证记录](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md)。
+[软件全域证据优先级验证记录](06-verification/14-software-global-evidence-priority-2026-08-31.md)
+补充当前 focused performance 优化证据，但不替代整体准备度结论。
+[Durable Worktree Delta 与固定身份查询验证记录](06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
+补充同一准备度边界下的有界 lease recovery 与 synthetic ref 固定查询证据。
 [2026-06-05 文档审计](06-verification/11-documentation-release-readiness-2026-06-05.md)
 继续作为历史快照保留，不代表当前工作树结论。
 中文卷目前保留若干尚未翻译成英文的基准和验证记录；英文目录会显式标注这些中文-only
@@ -135,3 +139,5 @@
 - [附录 B.11 文档发版准备审计 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md)：发版导航、文件清单、本地链接检查和文档-only 改动边界。
 - [附录 B.12 图数据库、知识图谱与 CodeGraph 深度研究归档 2026-06-05](06-verification/12-graph-database-codegraph-deep-research-archive-2026-06-05.md)：arXiv、X.com、Reddit 和开源来源清单、研究产物、竞品特性 issue 与验证状态归档。
 - [附录 B.13 文档与自迭代准备度验证记录 2026-08-18](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md)：记录当前已确认的 Rust/package/Web build/runtime/browser/coverage 证据、已通过的 focused-fast performance 报告、本地 `--with-deps` 环境限制、仍 pending 的 exhaustive/Kubernetes accuracy 证据，以及失败的 Kubernetes 210 秒性能 rail。
+- [附录 B.14 软件全域证据优先级验证记录 2026-08-31](06-verification/14-software-global-evidence-priority-2026-08-31.md)：记录 software-global typed evidence 排序的代码图分析、release-binary A/B、预算波动、owner tests、90.01% 覆盖率与未关闭边界。
+- [附录 B.15 Durable Worktree Delta 与固定身份查询验证记录 2026-08-31](06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)：记录有界 delta batching、lease takeover、release 产品自迭代、全量测试与覆盖率、真实仓库回放和显式 auto-workspace 边界。

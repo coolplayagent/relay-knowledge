@@ -1,8 +1,8 @@
 schema_version: 3
 artifact_kind: map
 map_type: codespec
-map_version: 1
-updated_at: unix:1787907039
+map_version: 4
+updated_at: unix:1788139186
 directories:
 - directory: requirements
   purpose: Product requirements and acceptance criteria.
@@ -11,7 +11,9 @@ directories:
   key_files:
   - codespec/requirements/README.md
   load_hint: on_demand
-  relations: []
+  relations:
+  - kind: depends_on
+    target: knowledge:domain
   update_rule: reviewed
 - directory: design
   purpose: Architecture and implementation design records.
@@ -19,7 +21,8 @@ directories:
   - codespec/design/**
   key_files:
   - codespec/design/README.md
-  load_hint: on_demand
+  - codespec/design/software-global-evidence-priority.md
+  load_hint: task_match
   relations: []
   update_rule: reviewed
 - directory: api
@@ -57,3 +60,15 @@ history:
     action: init
     actor: cli
     summary: Created CodeSpec repository map contract.
+  - version: 2
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'requirements'.
+  - version: 3
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'design'.
+  - version: 4
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'test'.

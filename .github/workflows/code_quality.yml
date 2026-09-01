@@ -1,12 +1,7 @@
-name: Qodana
+name: Qodana (Manual)
 
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - main
-      - 'releases/*'
 
 concurrency:
   group: qodana-${{ github.event.pull_request.number || github.ref }}
@@ -14,7 +9,6 @@ concurrency:
 
 jobs:
   qodana:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
       contents: write

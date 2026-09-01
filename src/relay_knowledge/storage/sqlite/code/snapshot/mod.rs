@@ -16,6 +16,7 @@ use super::{
 mod admission;
 mod candidate_paths;
 mod durable_clone;
+mod durable_delta;
 mod durable_handoff;
 mod fingerprints;
 mod import_compat;
@@ -54,10 +55,16 @@ pub(super) fn apply_snapshot_with_fence(
     fence: Option<&super::lifecycle::publication_fence::PublicationFenceGuard>,
 ) -> Result<CodeIndexSummary, StorageError> {
     let Some(guard) = fence.filter(|_| !snapshot.full_replace) else {
-        return apply_snapshot_attempt(connection, &snapshot, fence, None);
+        return apply_snapshot_attempt(connection, &snapshot, fence);
     };
     if guard.is_worktree_overlay_task(connection)? {
-        return apply_snapshot_attempt(connection, &snapshot, fence, None);
+        match apply_snapshot_attempt(connection, &snapshot, fence) {
+            Err(StorageError::DurableStagingRequired(_)) => {}
+            outcome => return outcome,
+        }
+    }
+    if let Some(advance) = durable_delta::resume(connection, &snapshot, guard)? {
+        return delta_advance_result(advance);
     }
     let session = durable_clone::begin_or_resume(connection, &snapshot, guard).map_err(
         |error| match error {
@@ -67,9 +74,9 @@ pub(super) fn apply_snapshot_with_fence(
             other => other,
         },
     )?;
-    if session.initialized {
+    if let Some(completed_steps) = session.pending_owner_step {
         return Err(StorageError::DurableStagingPending {
-            completed_steps: 0,
+            completed_steps,
             max_steps: session.max_steps,
         });
     }
@@ -88,14 +95,34 @@ pub(super) fn apply_snapshot_with_fence(
         }
         durable_clone::CloneAdvance::CloneComplete => {}
     }
-    apply_snapshot_attempt(connection, &snapshot, fence, Some(&session))
+    delta_advance_result(durable_delta::start(
+        connection, &snapshot, &session, guard,
+    )?)
+}
+
+fn delta_advance_result(
+    advance: durable_delta::DeltaAdvance,
+) -> Result<CodeIndexSummary, StorageError> {
+    match advance {
+        durable_delta::DeltaAdvance::Pending {
+            completed_steps,
+            max_steps,
+        } => Err(StorageError::DurableStagingPending {
+            completed_steps,
+            max_steps,
+        }),
+        durable_delta::DeltaAdvance::FinalizationRequired => {
+            Err(StorageError::DurableFinalizationRequired {
+                checkpoint_state: durable_handoff::FINALIZATION_HANDOFF_STATE.to_owned(),
+            })
+        }
+    }
 }
 
 fn apply_snapshot_attempt(
     connection: &mut Connection,
     snapshot: &CodeIndexSnapshot,
     fence: Option<&super::lifecycle::publication_fence::PublicationFenceGuard>,
-    durable_session: Option<&durable_clone::CloneSession>,
 ) -> Result<CodeIndexSummary, StorageError> {
     if let Some(fence) = fence {
         fence.validate_repository(&snapshot.repository_id)?;
@@ -120,35 +147,7 @@ fn apply_snapshot_attempt(
         .map(|guard| guard.resource_budget(&transaction))
         .transpose()?
         .unwrap_or_default();
-    let durable_completion = durable_session
-        .map(|session| {
-            let guard = fence.ok_or_else(|| {
-                StorageError::Invariant(
-                    "durable incremental clone requires a publication fence".to_owned(),
-                )
-            })?;
-            durable_clone::validate_clone_complete(
-                &transaction,
-                snapshot,
-                &session.identity,
-                guard,
-                direct_budget,
-            )
-        })
-        .transpose()?;
-    if let Some(completion) = durable_completion.as_ref() {
-        let mut measure = admission::measure_snapshot_insert_surface(snapshot, direct_budget)?;
-        let (_, encoded_summary) = durable_handoff::encoded_summary(snapshot, &completion.task_id)?;
-        measure.add_scaled(0, encoded_summary.len(), 1)?;
-        measure.add_scaled(
-            completion.terminal_cleanup_rows,
-            completion.terminal_cleanup_bytes,
-            1,
-        )?;
-    }
-    let incremental_plan = if durable_completion.is_some() {
-        None
-    } else if snapshot.full_replace {
+    let incremental_plan = if snapshot.full_replace {
         admission::require_fresh_full_snapshot_within_budget(
             &transaction,
             snapshot,
@@ -163,13 +162,8 @@ fn apply_snapshot_attempt(
         )?)
     };
     super::schema::prepare_query_indexes_for_empty_owners(&transaction)?;
-    if durable_completion.is_none() {
-        super::schema::require_code_query_indexes_for_fact_publication(&transaction)?;
-    }
-    if durable_completion.is_some() {
-        // Every affected base owner was omitted while scanning the immutable base. The bounded
-        // delta below therefore consists only of inserts and cannot trigger a scope-wide delete.
-    } else if let Some(plan) = incremental_plan.as_ref() {
+    super::schema::require_code_query_indexes_for_fact_publication(&transaction)?;
+    if let Some(plan) = incremental_plan.as_ref() {
         if plan.clone_base {
             for table in CODE_SCOPE_TABLES
                 .iter()
@@ -206,9 +200,6 @@ fn apply_snapshot_attempt(
         )?;
     }
 
-    if let Some(completion) = durable_completion.as_ref() {
-        insert_durable_reference_manifest(&transaction, snapshot, completion)?;
-    }
     for file in &snapshot.files {
         transaction.execute(
             "
@@ -279,23 +270,8 @@ fn apply_snapshot_attempt(
     )?;
     insert_imports_calls_chunks_diagnostics(&transaction, snapshot, &mut search_inserter)?;
     search_inserter.finish()?;
-    if let Some(completion) = durable_completion.as_ref() {
-        stage_repository_after_durable_snapshot(&transaction, snapshot, completion)?;
-        require_durable_grouped_reference_projection(&transaction, snapshot, completion)?;
-        durable_handoff::mark_delta_ready_for_finalization(
-            &transaction,
-            snapshot,
-            completion,
-            direct_budget,
-        )?;
-        durable_clone::remove_after_delta(&transaction, &snapshot.source_scope)?;
-    } else {
-        stage_repository_after_snapshot(&transaction, snapshot, fence.is_some())?;
-        repository_import::require_grouped_reference_projection(
-            &transaction,
-            &snapshot.source_scope,
-        )?;
-    }
+    stage_repository_after_snapshot(&transaction, snapshot, fence.is_some())?;
+    repository_import::require_grouped_reference_projection(&transaction, &snapshot.source_scope)?;
     // Resolve workspace-level cross-repo imports when monorepo workspaces
     // were detected during snapshot build.  No-op when workspaces is empty.
     super::workspace::resolve_workspace_imports(
@@ -309,12 +285,6 @@ fn apply_snapshot_attempt(
         fence.validate(&transaction)?;
     }
     transaction.commit()?;
-
-    if durable_completion.is_some() {
-        return Err(StorageError::DurableFinalizationRequired {
-            checkpoint_state: durable_handoff::FINALIZATION_HANDOFF_STATE.to_owned(),
-        });
-    }
 
     let status =
         super::status::repository_scope_status_by_source_scope(connection, &snapshot.source_scope)?
@@ -692,133 +662,4 @@ fn stage_repository_after_snapshot(
     )?;
 
     Ok(())
-}
-
-fn insert_durable_reference_manifest(
-    transaction: &rusqlite::Transaction<'_>,
-    snapshot: &CodeIndexSnapshot,
-    completion: &durable_clone::CloneCompletion,
-) -> Result<(), StorageError> {
-    if completion.cloned_reference_group_count > completion.cloned_reference_count {
-        return Err(StorageError::Invariant(format!(
-            "incremental clone for scope '{}' has more grouped reference owners than references",
-            snapshot.source_scope
-        )));
-    }
-    let changed = transaction.execute(
-        "INSERT INTO code_repository_reference_search_manifests (
-             source_scope, projection_version, reference_count, group_count
-         ) VALUES (?1, 2, ?2, ?3)",
-        params![
-            snapshot.source_scope,
-            completion.cloned_reference_count,
-            completion.cloned_reference_group_count,
-        ],
-    )?;
-    if changed == 1 {
-        return Ok(());
-    }
-    Err(StorageError::Invariant(format!(
-        "incremental clone for scope '{}' could not create its grouped-reference manifest",
-        snapshot.source_scope
-    )))
-}
-
-fn stage_repository_after_durable_snapshot(
-    transaction: &rusqlite::Transaction<'_>,
-    snapshot: &CodeIndexSnapshot,
-    completion: &durable_clone::CloneCompletion,
-) -> Result<(), StorageError> {
-    let file_count = durable_count(
-        completion.cloned_file_count,
-        snapshot.files.len(),
-        &snapshot.source_scope,
-    )?;
-    let symbol_count = durable_count(
-        completion.cloned_symbol_count,
-        snapshot.symbols.len(),
-        &snapshot.source_scope,
-    )?;
-    let reference_count = durable_count(
-        completion.cloned_reference_count,
-        snapshot.references.len(),
-        &snapshot.source_scope,
-    )?;
-    let chunk_count = durable_count(
-        completion.cloned_chunk_count,
-        snapshot.chunks.len(),
-        &snapshot.source_scope,
-    )?;
-    let degraded_file_count = durable_count(
-        completion.cloned_diagnostic_count,
-        snapshot.diagnostics.len(),
-        &snapshot.source_scope,
-    )?;
-    let degraded_reason = (degraded_file_count > 0)
-        .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
-    let path_filters_json = serde_json::to_string(&snapshot.path_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let language_filters_json = serde_json::to_string(&snapshot.language_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    crate::storage::sqlite::code::publication::stage(
-        transaction,
-        &crate::storage::sqlite::code::publication::ScopePublication {
-            repository_id: &snapshot.repository_id,
-            source_scope: &snapshot.source_scope,
-            resolved_commit_sha: &snapshot.resolved_commit_sha,
-            tree_hash: &snapshot.tree_hash,
-            path_filters_json: &path_filters_json,
-            language_filters_json: &language_filters_json,
-            indexed_file_count: file_count,
-            symbol_count,
-            reference_count,
-            chunk_count,
-            degraded_reason: degraded_reason.as_deref(),
-        },
-        true,
-    )
-}
-
-fn require_durable_grouped_reference_projection(
-    transaction: &rusqlite::Transaction<'_>,
-    snapshot: &CodeIndexSnapshot,
-    completion: &durable_clone::CloneCompletion,
-) -> Result<(), StorageError> {
-    let delta_group_count = reference_projection::reference_search_group_count(snapshot)?;
-    let expected_reference_count = durable_count(
-        completion.cloned_reference_count,
-        snapshot.references.len(),
-        &snapshot.source_scope,
-    )?;
-    let expected_group_count = durable_count(
-        completion.cloned_reference_group_count,
-        delta_group_count,
-        &snapshot.source_scope,
-    )?;
-    let exact = transaction.query_row(
-        "SELECT projection_version = 2 AND reference_count = ?2 AND group_count = ?3
-         FROM code_repository_reference_search_manifests
-         WHERE source_scope = ?1",
-        params![
-            snapshot.source_scope,
-            expected_reference_count,
-            expected_group_count,
-        ],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if exact && expected_group_count <= expected_reference_count {
-        return Ok(());
-    }
-    Err(StorageError::Invariant(format!(
-        "incremental clone for scope '{}' has an inexact grouped-reference manifest",
-        snapshot.source_scope
-    )))
-}
-
-fn durable_count(left: usize, right: usize, source_scope: &str) -> Result<usize, StorageError> {
-    left.checked_add(right).ok_or_else(|| {
-        StorageError::CapacityExceeded(format!(
-            "incremental clone counters for scope '{source_scope}' exceed platform capacity"
-        ))
-    })
 }

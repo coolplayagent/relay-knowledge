@@ -19,7 +19,9 @@ use super::{
 };
 use crate::storage::sqlite::code::lifecycle::publication_fence::PublicationFenceGuard;
 
+mod affected_paths;
 mod base;
+mod delta;
 mod initialization;
 mod progress;
 mod search_bulk;
@@ -27,8 +29,10 @@ mod search_page;
 mod table_page;
 mod validation;
 
-use initialization::{initialize_progress, require_init_budget};
+use initialization::initialize_progress;
 use validation::validate_progress;
+
+pub(super) use delta::{batched_delta_completion, finish_batched_delta, start_batched_delta};
 
 const MAX_SOURCE_ROWS_PER_PAGE: usize = 32_768;
 const MAX_PAGE_BYTES: usize = CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH;
@@ -41,6 +45,10 @@ mod tests;
 #[cfg(test)]
 #[path = "e2e_tests.rs"]
 mod e2e_tests;
+
+#[cfg(test)]
+#[path = "affected_paths_e2e_tests.rs"]
+mod affected_paths_e2e_tests;
 
 #[derive(Clone, Debug)]
 pub(super) struct CloneIdentity {
@@ -62,22 +70,19 @@ pub(super) struct CloneIdentity {
 pub(super) struct CloneSession {
     pub(super) identity: CloneIdentity,
     pub(super) max_steps: usize,
-    pub(super) initialized: bool,
+    pub(super) pending_owner_step: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CloneCompletion {
     pub(super) task_id: String,
-    pub(super) base_scope: String,
     pub(super) checkpoint_state: String,
     pub(super) cloned_file_count: usize,
     pub(super) cloned_symbol_count: usize,
     pub(super) cloned_reference_count: usize,
     pub(super) cloned_chunk_count: usize,
-    pub(super) cloned_diagnostic_count: usize,
-    pub(super) cloned_reference_group_count: usize,
-    pub(super) cloned_search_document_count: usize,
     pub(super) base_source_fact_row_upper_bound: usize,
+    pub(super) completed_page_ordinal: usize,
     pub(super) terminal_cleanup_rows: usize,
     pub(super) terminal_cleanup_bytes: usize,
 }
@@ -147,12 +152,12 @@ pub(super) fn begin_or_resume(
     }
     guard.validate_repository(&snapshot.repository_id)?;
     let budget = guard.resource_budget(connection)?;
-    require_delta_path_budget(snapshot, budget)?;
-    let measure = admission::measure_snapshot_insert_surface(snapshot, budget)?;
-    let identity =
-        CloneIdentity::from_snapshot(snapshot, measure.delta_digest().to_owned(), budget)?;
+    let identity = CloneIdentity::from_snapshot(
+        snapshot,
+        admission::snapshot_delta_digest(snapshot)?,
+        budget,
+    )?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    guard.validate_target_scope(&transaction, &snapshot.source_scope)?;
     guard.validate(&transaction)?;
     validate_partitioned_target(&transaction, guard, &identity)?;
     if guard.resource_budget(&transaction)? != budget {
@@ -182,7 +187,7 @@ pub(super) fn begin_or_resume(
     }
     let persisted = progress::load(&transaction, &snapshot.source_scope)?;
     let initialized = persisted.is_none();
-    match persisted {
+    let current = match persisted {
         Some(progress) => {
             validate_progress(
                 &transaction,
@@ -194,20 +199,35 @@ pub(super) fn begin_or_resume(
             )?;
             progress
         }
-        None => {
-            require_init_budget(&identity, &base_scope, guard.task_id(), budget)?;
-            initialize_progress(
-                &transaction,
-                snapshot,
-                &identity,
-                &base_header,
-                guard,
-                budget,
-            )?
-        }
+        None => initialize_progress(
+            &transaction,
+            snapshot,
+            &identity,
+            &base_header,
+            guard,
+            budget,
+        )?,
     };
-    validate_affected_paths(&transaction, &identity, budget)?;
-    let max_steps = base_step_proof.max_steps;
+    let owner_advance = if initialized {
+        affected_paths::validate_owner(&transaction, &current, &identity)?;
+        None
+    } else if affected_paths::is_staging(&current) {
+        Some(affected_paths::advance(
+            &transaction,
+            &current,
+            &identity,
+            now_millis()?,
+        )?)
+    } else {
+        affected_paths::validate_owner(&transaction, &current, &identity)?;
+        None
+    };
+    let max_steps = base_step_proof
+        .max_steps
+        .checked_add(identity.affected_paths.len())
+        .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
+    // A new worktree target exists only after initialization stages its empty scope. Rebinding in
+    // this transaction prevents both an unowned staged target and a rebound task without progress.
     guard.validate_target_scope(&transaction, &identity.source_scope)?;
     guard.validate(&transaction)?;
     validate_partitioned_target(&transaction, guard, &identity)?;
@@ -216,7 +236,9 @@ pub(super) fn begin_or_resume(
     Ok(CloneSession {
         identity,
         max_steps,
-        initialized,
+        pending_owner_step: initialized
+            .then_some(0)
+            .or_else(|| owner_advance.map(|advance| advance.completed_steps)),
     })
 }
 
@@ -245,6 +267,12 @@ pub(super) fn advance(
         guard,
         budget,
     )?;
+    if affected_paths::is_staging(&current) {
+        return Err(StorageError::Invariant(format!(
+            "incremental clone affected paths for scope '{}' are not fully staged",
+            identity.source_scope
+        )));
+    }
     if current.completed_page_ordinal > max_steps
         || (current.phase != progress::PHASE_CLONE_COMPLETE
             && current.completed_page_ordinal == max_steps)
@@ -304,23 +332,7 @@ pub(super) fn validate_clone_complete(
         )));
     }
     let checkpoint_state = progress::checkpoint_state(&progress)?;
-    let (terminal_cleanup_rows, terminal_cleanup_bytes) =
-        progress::cleanup_surface(&progress, &identity.affected_paths)?;
-    Ok(CloneCompletion {
-        task_id: progress.task_id,
-        base_scope: progress.base_scope,
-        checkpoint_state,
-        cloned_file_count: progress.cloned_file_count,
-        cloned_symbol_count: progress.cloned_symbol_count,
-        cloned_reference_count: progress.cloned_reference_count,
-        cloned_chunk_count: progress.cloned_chunk_count,
-        cloned_diagnostic_count: progress.cloned_diagnostic_count,
-        cloned_reference_group_count: progress.cloned_reference_group_count,
-        cloned_search_document_count: progress.cloned_search_document_count,
-        base_source_fact_row_upper_bound: progress.base_source_fact_row_upper_bound,
-        terminal_cleanup_rows,
-        terminal_cleanup_bytes,
-    })
+    delta::clone_completion(progress, checkpoint_state, &identity.affected_paths)
 }
 
 pub(super) fn remove_after_delta(
@@ -362,48 +374,17 @@ pub(super) fn remove_after_delta(
     )))
 }
 
-fn require_delta_path_budget(
-    snapshot: &CodeIndexSnapshot,
-    budget: CodeIndexResourceBudget,
-) -> Result<(), StorageError> {
-    let affected = snapshot
-        .files
-        .iter()
-        .map(|file| file.path.as_str())
-        .chain(snapshot.deleted_paths.iter().map(String::as_str))
-        .collect::<BTreeSet<_>>();
-    if affected.len() > budget.max_files_per_batch {
-        return Err(clone_capacity_error(&snapshot.source_scope));
-    }
-    Ok(())
-}
-
 fn validate_affected_paths(
     transaction: &Transaction<'_>,
     identity: &CloneIdentity,
-    budget: CodeIndexResourceBudget,
 ) -> Result<(), StorageError> {
-    let limit = i64::try_from(budget.max_files_per_batch.saturating_add(1))
-        .map_err(|_| clone_capacity_error(&identity.source_scope))?;
-    let mut statement = transaction.prepare(
-        "SELECT path
-         FROM code_repository_incremental_clone_affected_paths
-         WHERE source_scope = ?1
-         ORDER BY path
-         LIMIT ?2",
-    )?;
-    let persisted = statement
-        .query_map(params![identity.source_scope, limit], |row| {
-            row.get::<_, String>(0)
-        })?
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    if persisted == identity.affected_paths {
-        return Ok(());
-    }
-    Err(StorageError::Invariant(format!(
-        "incremental clone affected-path owner for scope '{}' changed",
-        identity.source_scope
-    )))
+    let progress = progress::load(transaction, &identity.source_scope)?.ok_or_else(|| {
+        StorageError::Invariant(format!(
+            "incremental clone progress for scope '{}' disappeared",
+            identity.source_scope
+        ))
+    })?;
+    affected_paths::validate_owner(transaction, &progress, identity)
 }
 
 fn validate_base_scope(

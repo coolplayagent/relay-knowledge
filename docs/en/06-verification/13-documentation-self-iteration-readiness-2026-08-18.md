@@ -109,3 +109,4 @@ do not close any PENDING self-iteration or Kubernetes gate.
 Navigation: Previous:
 [12. Graph Database, Knowledge Graph, and CodeGraph Research Archive](12-graph-database-codegraph-deep-research-archive-2026-06-05.md)
 | Index: [Verification Records](README.md)
+| Next: [14. Software-Global Evidence Priority Verification](14-software-global-evidence-priority-2026-08-31.md)

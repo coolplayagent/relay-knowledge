@@ -481,30 +481,34 @@ fn parse_history(tokens: &[String]) -> Result<CliAction, CliError> {
 }
 
 fn parse_source(tokens: &[String]) -> Result<CliAction, CliError> {
-    let (selection, tokens) = extract_selection(tokens, true)?;
+    let operation = tokens
+        .first()
+        .map(String::as_str)
+        .ok_or_else(|| CliError::UnexpectedArgument("source".to_owned()))?;
+    let (selection, tokens) = extract_selection(&tokens[1..], true)?;
     require_knowledge_selection(selection)?;
-    match tokens.first().map(String::as_str) {
-        Some("add") => parse_source_add(&tokens[1..]),
-        Some("update") => parse_source_update(&tokens[1..]),
-        Some("remove") => parse_source_remove(&tokens[1..]),
-        other => Err(CliError::UnexpectedArgument(
-            other.unwrap_or("source").to_owned(),
-        )),
+    match operation {
+        "add" => parse_source_add(&tokens),
+        "update" => parse_source_update(&tokens),
+        "remove" => parse_source_remove(&tokens),
+        other => Err(CliError::UnexpectedArgument(other.to_owned())),
     }
 }
 
 fn parse_directory(tokens: &[String]) -> Result<CliAction, CliError> {
-    let (selection, tokens) = extract_selection(tokens, true)?;
+    let operation = tokens
+        .first()
+        .map(String::as_str)
+        .ok_or_else(|| CliError::UnexpectedArgument("directory".to_owned()))?;
+    let (selection, tokens) = extract_selection(&tokens[1..], true)?;
     let MapSelection::One(map_type) = selection else {
         return Err(CliError::UnexpectedArgument("all".to_owned()));
     };
-    match tokens.first().map(String::as_str) {
-        Some("add") => parse_directory_add(map_type, &tokens[1..]),
-        Some("update") => parse_directory_update(map_type, &tokens[1..]),
-        Some("remove") => parse_directory_remove(map_type, &tokens[1..]),
-        other => Err(CliError::UnexpectedArgument(
-            other.unwrap_or("directory").to_owned(),
-        )),
+    match operation {
+        "add" => parse_directory_add(map_type, &tokens),
+        "update" => parse_directory_update(map_type, &tokens),
+        "remove" => parse_directory_remove(map_type, &tokens),
+        other => Err(CliError::UnexpectedArgument(other.to_owned())),
     }
 }
 

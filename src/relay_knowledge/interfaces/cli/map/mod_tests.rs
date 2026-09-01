@@ -63,6 +63,23 @@ fn map_source_kind_parser_covers_supported_contract_values() {
 }
 
 #[test]
+fn map_mutation_namespaces_require_an_operation_before_map_type() {
+    assert_eq!(
+        parse_map(&["source".to_owned()]).expect_err("source operation should be required"),
+        CliError::UnexpectedArgument("source".to_owned())
+    );
+    assert_eq!(
+        parse_map(&["directory".to_owned()]).expect_err("directory operation should be required"),
+        CliError::UnexpectedArgument("directory".to_owned())
+    );
+    assert_eq!(
+        parse_map(&["source".to_owned(), "add".to_owned()])
+            .expect_err("concrete source mutation should still require a map type"),
+        CliError::MissingValue("--type")
+    );
+}
+
+#[test]
 fn writer_lock_expiry_is_reported_as_a_timeout() {
     let error = map_error(
         "knowledge map mutation failed",

@@ -1,8 +1,199 @@
 use super::*;
+use crate::{
+    domain::{
+        CodeIndexMode, CodeIndexSnapshot, CodeRepositoryRegistration, code_snapshot_scope_id,
+    },
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
+        CodeIndexTaskStore as _, KnowledgeStore, RepositoryCatalogStore as _, SqliteGraphStore,
+    },
+};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
 };
+
+#[tokio::test]
+async fn worktree_recovery_reloads_the_durably_rebound_task_scope() {
+    let sqlite = SqliteGraphStore::open_in_memory().expect("store should open");
+    sqlite
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo-recovery-rebind",
+                "recovery-rebind",
+                "/tmp/recovery-rebind",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let base_commit = "base-commit";
+    let base_tree = "base-tree";
+    let base_scope = code_snapshot_scope_id("repo-recovery-rebind", base_tree, &[], &[]);
+    let base_snapshot = CodeIndexSnapshot {
+        repository_id: "repo-recovery-rebind".to_owned(),
+        source_scope: base_scope,
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: base_commit.to_owned(),
+        tree_hash: base_tree.to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 0,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: Vec::new(),
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
+        routes: Vec::new(),
+        chunks: Vec::new(),
+        workspaces: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    sqlite
+        .apply_code_index_snapshot(base_snapshot.clone())
+        .await
+        .expect("base snapshot should publish");
+
+    let pending_tree = format!("worktree:pending:{base_commit}");
+    let pending_scope = code_snapshot_scope_id("repo-recovery-rebind", &pending_tree, &[], &[]);
+    let queued = sqlite
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: "repo-recovery-rebind".to_owned(),
+            alias: "recovery-rebind".to_owned(),
+            ref_selector: base_commit.to_owned(),
+            resolved_commit_sha: pending_tree.clone(),
+            tree_hash: pending_tree,
+            source_scope: pending_scope,
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            mode: CodeIndexMode::WorktreeOverlay,
+            input_fingerprint: "recovery-rebind".to_owned(),
+            resource_budget: crate::domain::CodeIndexResourceBudget::default(),
+            payload_json: "{}".to_owned(),
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("worktree task should queue");
+    let running = sqlite
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id),
+            lease_owner: "worker-recovery".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: now_millis(),
+        })
+        .await
+        .expect("worktree task should claim")
+        .expect("worktree task should be available");
+    let stale_lease = lease_from_task(&running, "worker-recovery");
+
+    let overlay_hash = "0123456789abcdef";
+    let actual_tree = format!("worktree:{overlay_hash}");
+    let actual_commit = format!("worktree:{base_commit}:{overlay_hash}");
+    let actual_scope = code_snapshot_scope_id("repo-recovery-rebind", &actual_tree, &[], &[]);
+    let mut overlay = base_snapshot;
+    overlay.source_scope = actual_scope.clone();
+    overlay.base_resolved_commit_sha = Some(base_commit.to_owned());
+    overlay.resolved_commit_sha = actual_commit.clone();
+    overlay.tree_hash = actual_tree.clone();
+    overlay.full_replace = false;
+    overlay.changed_path_count = 1;
+    sqlite
+        .apply_code_index_snapshot_with_fence(overlay, stale_lease.publication_fence.clone())
+        .await
+        .expect("verified overlay should durably rebind its task");
+
+    let store: Arc<dyn KnowledgeStore> = Arc::new(sqlite);
+    let restored = restore_rebound_worktree_task_lease(
+        &store,
+        &CodeIndexMode::WorktreeOverlay,
+        Some(stale_lease.clone()),
+    )
+    .await
+    .expect("recovery should reload the rebound task")
+    .expect("leased recovery should retain its attempt");
+    assert_eq!(restored.source_scope, actual_scope);
+    assert_eq!(restored.resolved_commit_sha, actual_commit);
+    assert_eq!(restored.tree_hash, actual_tree);
+    assert_eq!(restored.publication_fence, stale_lease.publication_fence);
+
+    assert!(
+        restore_rebound_worktree_task_lease(&store, &CodeIndexMode::WorktreeOverlay, None)
+            .await
+            .expect("an unleased request should bypass task recovery")
+            .is_none()
+    );
+    let clean_lease = restore_rebound_worktree_task_lease(
+        &store,
+        &CodeIndexMode::Full,
+        Some(stale_lease.clone()),
+    )
+    .await
+    .expect("a clean task should keep its claimed identity")
+    .expect("the clean lease should remain present");
+    assert_eq!(clean_lease.source_scope, stale_lease.source_scope);
+
+    let mut missing_task = stale_lease.clone();
+    missing_task.task_id = "missing-task".to_owned();
+    let missing_error = restore_rebound_worktree_task_lease(
+        &store,
+        &CodeIndexMode::WorktreeOverlay,
+        Some(missing_task),
+    )
+    .await
+    .expect_err("a vanished task must fail recovery closed");
+    assert!(
+        missing_error
+            .message
+            .contains("disappeared before recovery")
+    );
+
+    let mut stale_attempt = stale_lease;
+    stale_attempt.publication_fence.generation += 1;
+    let error = restore_rebound_worktree_task_lease(
+        &store,
+        &CodeIndexMode::WorktreeOverlay,
+        Some(stale_attempt),
+    )
+    .await
+    .expect_err("recovery must reject a different fenced attempt");
+    assert!(error.message.contains("changed attempt identity"));
+}
+
+fn lease_from_task(
+    task: &crate::domain::CodeIndexTaskRecord,
+    lease_owner: &str,
+) -> CodeIndexTaskLeaseContext {
+    CodeIndexTaskLeaseContext {
+        task_id: task.task_id.clone(),
+        lease_owner: lease_owner.to_owned(),
+        attempt_count: task.attempt_count,
+        lease_duration_ms: 60_000,
+        publication_fence: crate::domain::CodeIndexPublicationFence {
+            repository_id: task.repository_id.clone(),
+            task_id: task.task_id.clone(),
+            lease_owner: lease_owner.to_owned(),
+            attempt_count: task.attempt_count,
+            generation: task.publication_generation,
+        },
+        source_scope: task.source_scope.clone(),
+        resolved_commit_sha: task.resolved_commit_sha.clone(),
+        tree_hash: task.tree_hash.clone(),
+        path_filters: task.path_filters.clone(),
+        language_filters: task.language_filters.clone(),
+        resource_budget: task.resource_budget,
+    }
+}
 
 #[test]
 fn recognizes_only_default_optional_code_index_lease_unavailable_errors() {

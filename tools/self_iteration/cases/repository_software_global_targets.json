@@ -261,9 +261,10 @@
       "limit": 30,
       "max_rank": 8,
       "expected": [
-        {"software_slice": "entity", "entity_kind": "api", "name": "GraphApi", "source_kind": "code"}
+        {"software_slice": "entity", "entity_kind": "api", "name": "api/openapi.yaml", "source_kind": "api_schema"}
       ],
       "expected_all": [
+        {"software_slice": "entity", "entity_kind": "api", "name": "GraphApi", "source_kind": "code"},
         {"software_slice": "entity", "entity_kind": "api", "name": "Catalog API", "source_kind": "documentation"}
       ],
       "case_group": "software_ontology_classification"
@@ -335,7 +336,7 @@
       "limit": 200,
       "max_rank": 30,
       "status_ontology_version": "1.0.0",
-      "status_projection_schema_version": 6,
+      "status_projection_schema_version": 7,
       "status_completeness_basis_points_min": 10000,
       "expected": [
         {"software_slice": "statement", "predicate": "contains", "source_kind": "ci", "assertion_mode": "declared", "fact_state": "active", "extractor_version": "1.0.0"}

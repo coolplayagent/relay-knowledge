@@ -654,7 +654,8 @@ impl CodeIncrementalSummaryReceipt {
             || self.affected_path_count > affected_surface
             || self.degraded_file_count > self.parsed_file_count
             || self.sqlite_write_count < minimum_sqlite_writes
-            || self.batch_count != 1
+            || self.batch_count == 0
+            || self.batch_count > self.parsed_file_count.max(1)
         {
             return Err(DomainError::invalid(
                 "incremental_summary",

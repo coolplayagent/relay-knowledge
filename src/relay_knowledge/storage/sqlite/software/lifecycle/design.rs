@@ -124,7 +124,18 @@ pub(in super::super) fn design_elements_for_scope(
         WHERE source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY element_kind ASC, name ASC, evidence_path ASC
+        ORDER BY
+            CASE element_kind
+                WHEN 'architecture' THEN 0
+                WHEN 'capability' THEN 1
+                WHEN 'module' THEN 2
+                WHEN 'api' THEN 3
+                WHEN 'software_system' THEN 4
+                ELSE 5
+            END ASC,
+            confidence_basis_points DESC,
+            name ASC,
+            evidence_path ASC
         LIMIT ?
         ",
     );

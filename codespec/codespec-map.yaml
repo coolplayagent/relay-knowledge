@@ -1,8 +1,8 @@
 schema_version: 3
 artifact_kind: map
 map_type: codespec
-map_version: 2
-updated_at: unix:1787907127
+map_version: 5
+updated_at: unix:1788148329
 directories:
 - directory: requirements
   purpose: Product requirements and acceptance criteria.
@@ -21,7 +21,10 @@ directories:
   - codespec/design/**
   key_files:
   - codespec/design/README.md
-  load_hint: on_demand
+  - codespec/design/partitioned-sqlite-catalog-read-fast-path.md
+  - codespec/design/durable-worktree-delta-batching.md
+  - codespec/design/software-global-evidence-priority.md
+  load_hint: task_match
   relations: []
   update_rule: reviewed
 - directory: api
@@ -63,3 +66,15 @@ history:
     action: directory.update
     actor: cli
     summary: Updated governed directory 'requirements'.
+  - version: 3
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'design'.
+  - version: 4
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'test'.
+  - version: 5
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'design'.

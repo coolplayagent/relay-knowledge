@@ -83,7 +83,12 @@ async fn staged_checkpoint(
     workflow: &IndexWorkflowContext<'_>,
 ) -> Result<Option<CodeIndexCheckpoint>, ApiError> {
     match workflow.task_lease.as_ref() {
-        Some(lease) if matches!(&workflow.request.mode, CodeIndexMode::Incremental { .. }) => {
+        Some(lease)
+            if matches!(
+                &workflow.request.mode,
+                CodeIndexMode::Incremental { .. } | CodeIndexMode::WorktreeOverlay
+            ) =>
+        {
             workflow
                 .store
                 .code_index_checkpoint(lease.source_scope.clone())
