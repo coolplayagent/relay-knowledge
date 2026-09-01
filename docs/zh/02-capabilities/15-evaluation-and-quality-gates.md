@@ -2,8 +2,8 @@
 
 [中文](./15-evaluation-and-quality-gates.md) | [English](../../en/02-capabilities/15-evaluation-and-quality-gates.md)
 
-> 文档版本: 2.1
-> 编制日期: 2026-08-31
+> 文档版本: 2.2
+> 编制日期: 2026-09-01
 > 适用范围: 第二卷能力说明
 
 ## 能力定位
@@ -29,14 +29,43 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
+## Commit 与 Rust 深检门禁
+
+Issue #358 采用分层合同落地，不让每次 Git commit 都重建 nightly 插桩产物：
+
+| 门禁 | 日常 commit 证据 | deep/PR 证据 |
+| --- | --- | --- |
+| Cargo check | pre-commit 与 PR CI 执行 `cargo check --all-targets --all-features` | `./check.sh --deep` 在插桩前再次执行 |
+| Clippy | pre-commit 与 PR CI 对所有 target/feature 拒绝 warning | deep profile 再次执行 |
+| Tests | pre-commit 执行所有 target/feature；PR CI 拆分 UT 与集成测试 | library/binary tests 在 AddressSanitizer 下再次执行 |
+| Miri | stable commit hook 不执行 | nightly 对 `domain::core::` 执行 strict provenance、symbolic alignment 与 deterministic concurrency |
+| Sanitizer | stable commit hook 不执行 | Linux x86_64 CI 使用带插桩标准库的 nightly AddressSanitizer |
+| Benchmark | pre-commit 的 `--all-targets` 已包含 | 独立确定性 benchmark jobs 与 `--deep` 诊断 |
+
+普通 commit hook 固定使用仓库 stable 工具链。Miri 与 AddressSanitizer 依赖
+nightly，并有显著编译或解释成本，因此作为必跑 pull-request jobs，同时提供显式
+本地 deep profile：
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri 只运行核心领域测试面，因为产品 SQLite 与网络边界使用 Miri 不支持的 FFI
+或 host API。这是显式覆盖边界，不是跳过失败：普通测试继续覆盖这些路径，
+AddressSanitizer 则在受支持的原生 target 上执行 library 与 binary tests。参见
+[Miri 支持与 CI 指南](https://github.com/rust-lang/miri#using-miri)及
+[Rust sanitizer target 与插桩合同](https://doc.rust-lang.org/stable/unstable-book/compiler-flags/sanitizer.html)。
+
 ## 降级与诊断
 
 测试失败不能通过枚举已知 query、path、symbol 或 fixture 特例修复。优化必须来自通用 ranking signal、索引策略、数据结构、query planning 或并发边界。
 
 ## GitHub 自动化策略
 
-仓库继续在 pull request 上执行确定性的文档、格式、Clippy、单元测试、集成测试、benchmark、
-架构、兼容性、覆盖率、构建、runtime 和浏览器门禁。Qodana 是可选云端诊断，仅允许通过
+仓库继续在 pull request 上执行确定性的文档、格式、Cargo check、Clippy、单元测试、
+集成测试、benchmark、Miri、AddressSanitizer、架构、兼容性、覆盖率、构建、runtime
+和浏览器门禁。Qodana 是可选云端诊断，仅允许通过
 `workflow_dispatch` 手动执行；pull request 与 push 不再自动触发。外部服务 quota 或可用性
 不能成为产品正确性的合并门禁。
 

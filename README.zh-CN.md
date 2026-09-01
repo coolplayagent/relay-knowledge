@@ -166,17 +166,31 @@ Session、授权、取消、审计、平台服务管理器和诊断说明见
 ./run.sh status
 ./run.sh stop --force
 ./check.sh
+./check.sh --deep
 ```
 
 主要本地质量门禁：
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 python3 tools/docs/check_docs.py --self-test-and-check
 ```
+
+默认 `./check.sh` 使用 stable 工具链，适合日常改动。deep profile 还会执行
+确定性 benchmark、针对无 FFI 核心领域不变量的 Miri，以及覆盖 library 和 binary
+的 AddressSanitizer。先安装 nightly 前置组件：
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri 和 sanitizer 也作为 Linux pull request job 自动运行。它们依赖 nightly、
+需要重建插桩产物且明显慢于 stable check/Clippy/test，因此不进入普通 commit hook。
 
 架构边界、async 与资源预算、UT 覆盖率、文档完整性和手写文件少于 1,000 行的要求都属于
 [工程硬约束](docs/zh/03-architecture-specs/02-engineering-hard-constraints.md)，
@@ -216,4 +230,5 @@ uv run --extra dev pytest tests/browser
 [安装与运行时目录](docs/zh/01-user-guide/01-install-and-runtime.md)。
 
 可选本地 hook：`pre-commit install` 和
-`pre-commit run --all-files`。
+`pre-commit run --all-files`。Rust 改动在 commit 前执行 `cargo check`、Clippy
+和 tests；test 命令通过 `--all-targets` 同时覆盖确定性 benchmark target。

@@ -2,8 +2,8 @@
 
 [English](./15-evaluation-and-quality-gates.md) | [中文](../../zh/02-capabilities/15-evaluation-and-quality-gates.md)
 
-> Document version: 2.1
-> Date: 2026-08-31
+> Document version: 2.2
+> Date: 2026-09-01
 > Scope: Book 2 capability guide
 
 ## Capability Positioning
@@ -29,15 +29,47 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
+## Commit and Deep Rust Gates
+
+Issue #358 is implemented as a layered contract rather than making every Git
+commit rebuild nightly-instrumented artifacts:
+
+| Gate | Routine commit evidence | Deep/PR evidence |
+| --- | --- | --- |
+| Cargo check | `cargo check --all-targets --all-features` in pre-commit and PR CI | Repeated by `./check.sh --deep` before instrumentation |
+| Clippy | All targets/features with warnings denied in pre-commit and PR CI | Repeated by the deep profile |
+| Tests | All targets/features in pre-commit; split unit/integration jobs in PR CI | Library and binary tests execute again under AddressSanitizer |
+| Miri | Not run by the stable commit hook | Nightly `domain::core::` tests with strict provenance, symbolic alignment, and deterministic concurrency |
+| Sanitizer | Not run by the stable commit hook | Nightly AddressSanitizer with an instrumented standard library on Linux x86_64 CI |
+| Benchmark | Included in pre-commit through `--all-targets` | Explicit deterministic benchmark jobs and `--deep` diagnostics |
+
+The ordinary commit hook remains deterministic on the repository's stable
+toolchain. Miri and AddressSanitizer require nightly, have substantial compile
+or interpretation cost, and are therefore mandatory pull-request jobs plus an
+explicit local deep profile:
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri runs only the core domain surface because the product's SQLite and network
+boundaries use FFI or host APIs that Miri does not support. This is an explicit
+coverage boundary, not a skipped failure: normal tests continue to cover those
+paths, while AddressSanitizer executes library and binary tests on a supported
+native target. See the [Miri support and CI guidance](https://github.com/rust-lang/miri#using-miri)
+and the [Rust sanitizer target and instrumentation contract](https://doc.rust-lang.org/stable/unstable-book/compiler-flags/sanitizer.html).
+
 ## Degradation and Diagnostics
 
 Failing tests are not fixed by enumerating known queries, paths, symbols, or fixture cases. Improvements come from general ranking signals, indexing strategy, data structures, query planning, or concurrency boundaries.
 
 ## GitHub Automation Policy
 
-The repository keeps deterministic documentation, formatting, Clippy, unit,
-integration, benchmark, architecture, compatibility, coverage, build, runtime,
-and browser checks on pull requests. Qodana is an optional cloud diagnostic and
+The repository keeps deterministic documentation, formatting, Cargo check,
+Clippy, unit, integration, benchmark, Miri, AddressSanitizer, architecture,
+compatibility, coverage, build, runtime, and browser checks on pull requests.
+Qodana is an optional cloud diagnostic and
 is available only through manual `workflow_dispatch`; pull requests and pushes
 do not start it. External service quota or availability must not become a merge
 gate for product correctness.

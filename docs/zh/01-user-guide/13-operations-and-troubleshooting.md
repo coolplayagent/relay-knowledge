@@ -111,10 +111,24 @@ Rust 质量门禁:
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
+
+nightly 未定义行为与内存插桩门禁需要先安装 Miri 和 `rust-src`，再运行有界
+deep profile：
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri 门禁有意只执行无 FFI 的 `domain::core::` 单元测试面。SQLite、socket
+和其他外部边界继续由普通测试与 Linux AddressSanitizer job 覆盖，因为 Miri
+不实现这些 host API。
 
 Web 和浏览器集成测试:
 
