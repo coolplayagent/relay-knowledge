@@ -17,7 +17,7 @@ use crate::{
 use super::{
     super::{errors::storage_api_error, repository::registration_from_status},
     state::requested_index_ref_for_response,
-    task::CodeIndexTaskLeaseContext,
+    task::{CodeIndexTaskLeaseContext, restore_rebound_worktree_task_lease},
 };
 
 pub(super) async fn run(
@@ -27,6 +27,7 @@ pub(super) async fn run(
     task_lease: Option<CodeIndexTaskLeaseContext>,
 ) -> Result<CodeRepositoryIndexResponse, ApiError> {
     let store = service.store().await.map_err(storage_api_error)?;
+    let task_lease = restore_rebound_worktree_task_lease(&store, &request.mode, task_lease).await?;
     let status = super::super::repository::required_code_repository(
         store.as_ref(),
         &request.repository.repository,

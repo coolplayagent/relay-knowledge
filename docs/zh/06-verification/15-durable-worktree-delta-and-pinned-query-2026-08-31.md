@@ -74,6 +74,10 @@ staged target 时不会提前验证它。
 过期并 reclaim，随后无重放地完成两个确定性 delta batches，也没有发生 whole-delta capacity
 拒绝。这是检视提出的 513-path/512-file 边界的紧凑确定性复现。
 
+`worktree_recovery_reloads_the_durably_rebound_task_scope` 模拟 storage 已完成 task
+重绑定、application 仍持有旧 pending 内存 lease 的 crash 边界。Recovery 按 task id 重载任务，
+保留精确 fence，选择内容寻址 scope，并拒绝 generation 不匹配的 attempt。
+
 ## 4. Release 产品自迭代
 
 候选通过公开 release 产品评估入口运行：
@@ -125,7 +129,7 @@ release binary；evaluator 仍校验 release 路径与增量 build gate，而 in
 cargo test --all-targets --all-features
 ```
 
-结果为 library 3,792 passed、1 ignored，benchmark 1/1 passed，integration 156/156
+结果为 library 3,796 passed、1 ignored，benchmark 1/1 passed，integration 156/156
 passed。被忽略的 subprocess fixture 仍显式记为 ignored，不能计作 passed。
 
 精确覆盖率门禁为：
@@ -139,8 +143,8 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 file ownership、超出冻结 batch plan 的 ordinal，以及缺少不可变 base identity 的 durable
 receipt 返回类型化错误。
 
-最终结果为 154,238 行中 missed 15,348 行，即 line coverage `90.05%`，通过未调整的
-90% 阈值。这次执行重新运行全部 targets 与 features：library 3,792 passed、1 ignored，
+最终结果为 154,586 行中 missed 15,379 行，即 line coverage `90.05%`，通过未调整的
+90% 阈值。这次执行重新运行全部 targets 与 features：library 3,796 passed、1 ignored，
 benchmark 1/1 passed，integration 156/156 passed；没有排除新增 storage owner 或降低要求。
 
 ## 6. 真实仓库回放

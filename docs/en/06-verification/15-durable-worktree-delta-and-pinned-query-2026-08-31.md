@@ -92,6 +92,11 @@ finishes two deterministic delta batches without replay or whole-delta
 capacity rejection. This is the small deterministic analogue of the reviewed
 513-path/512-file boundary.
 
+`worktree_recovery_reloads_the_durably_rebound_task_scope` simulates the
+application crash boundary with a stale pending in-memory lease after storage
+has rebound the task. Recovery reloads the task by id, preserves the exact
+fence, selects the content-addressed scope, and rejects a mismatched generation.
+
 ## 4. Release-Product Self-Iteration
 
 The candidate ran through the public release-product evaluation path:
@@ -151,7 +156,7 @@ The independent current-worktree Rust gate passed:
 cargo test --all-targets --all-features
 ```
 
-The result was 3,792 passed and 1 ignored library tests, 1 of 1 benchmark test,
+The result was 3,796 passed and 1 ignored library tests, 1 of 1 benchmark test,
 and 156 of 156 integration tests. The ignored subprocess fixture remains an
 explicit ignored result rather than a pass.
 
@@ -167,9 +172,9 @@ fail-closed branches in the new owners. Three focused tests now require
 duplicate file ownership, an ordinal outside the frozen batch plan, and a
 durable receipt without an immutable base identity to return typed errors.
 
-The final result was 15,348 missed lines out of 154,238, or `90.05%` line
+The final result was 15,379 missed lines out of 154,586, or `90.05%` line
 coverage, and passed the unchanged 90% threshold. That execution reran all
-targets and features with 3,792 passed and 1 ignored library tests, 1 of 1
+targets and features with 3,796 passed and 1 ignored library tests, 1 of 1
 benchmark test, and 156 of 156 integration tests; it did not exclude new
 storage owners or lower the required percentage.
 

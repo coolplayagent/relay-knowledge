@@ -1,14 +1,15 @@
-use super::effective_publication_lease;
 use crate::{
     api::ErrorKind,
-    application::code_repository::indexing::task::CodeIndexTaskLeaseContext,
+    application::code_repository::indexing::task::{
+        CodeIndexTaskLeaseContext, code_index_task_lease_for_target,
+    },
     domain::{CodeIndexPublicationFence, CodeIndexResourceBudget},
 };
 
 #[test]
 fn effective_lease_rebinds_pending_worktree_identity_without_changing_fence() {
     let pending = pending_lease();
-    let actual = effective_publication_lease(
+    let actual = code_index_task_lease_for_target(
         &pending,
         "repo",
         "git_snapshot:actual".to_owned(),
@@ -33,7 +34,7 @@ fn effective_lease_rejects_cross_repository_or_empty_targets() {
         ("repo", "scope", "", "tree"),
         ("repo", "scope", "commit", ""),
     ] {
-        let error = effective_publication_lease(
+        let error = code_index_task_lease_for_target(
             &pending,
             repository_id,
             source_scope.to_owned(),

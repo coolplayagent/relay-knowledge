@@ -10,7 +10,10 @@ use super::{
     super::{
         durable_incremental::{IncrementalSnapshotApply, resume_finalization},
         fast_path::published_task_response,
-        task::{CodeIndexTaskLeaseContext, await_with_code_index_task_lease},
+        task::{
+            CodeIndexTaskLeaseContext, await_with_code_index_task_lease,
+            code_index_task_lease_for_target,
+        },
     },
     IndexWorkflowContext,
     snapshot::{self, GeneratedIndex},
@@ -85,7 +88,7 @@ async fn reconcile_incremental_target(
     {
         return Ok(None);
     }
-    let actual_lease = effective_publication_lease(
+    let actual_lease = code_index_task_lease_for_target(
         lease,
         &actual_target.repository_id,
         actual_target.source_scope,
@@ -179,7 +182,7 @@ async fn publish_incremental(
                     .task_lease
                     .as_ref()
                     .map(|lease| {
-                        effective_publication_lease(
+                        code_index_task_lease_for_target(
                             lease,
                             &snapshot.repository_id,
                             snapshot.source_scope.clone(),
@@ -232,7 +235,7 @@ async fn reconcile_finalization(
     let Some(lease) = workflow.task_lease.as_ref() else {
         return Ok(PublicationOutcome::Summary(Box::new(summary)));
     };
-    let actual_lease = effective_publication_lease(
+    let actual_lease = code_index_task_lease_for_target(
         lease,
         &summary.repository_id,
         summary.source_scope.clone(),
@@ -302,31 +305,6 @@ pub(in crate::application::code_repository::indexing) fn incremental_snapshot_ma
         && snapshot.tree_hash == lease.tree_hash
         && snapshot.path_filters == lease.path_filters
         && snapshot.language_filters == lease.language_filters
-}
-
-fn effective_publication_lease(
-    lease: &CodeIndexTaskLeaseContext,
-    repository_id: &str,
-    source_scope: String,
-    resolved_commit_sha: String,
-    tree_hash: String,
-) -> Result<CodeIndexTaskLeaseContext, ApiError> {
-    if repository_id != lease.publication_fence.repository_id
-        || source_scope.trim().is_empty()
-        || resolved_commit_sha.trim().is_empty()
-        || tree_hash.trim().is_empty()
-    {
-        return Err(ApiError::internal(format!(
-            "code index task '{}' produced an invalid publication target",
-            lease.task_id
-        )));
-    }
-    Ok(CodeIndexTaskLeaseContext {
-        source_scope,
-        resolved_commit_sha,
-        tree_hash,
-        ..lease.clone()
-    })
 }
 
 #[cfg(test)]
