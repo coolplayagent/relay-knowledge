@@ -1,4 +1,4 @@
-use super::DeltaBatchPlan;
+use super::{DURABLE_BATCH_CONTROL_ROW_COUNT, DeltaBatchPlan, batch_control_bytes, file_surfaces};
 use crate::domain::{
     CodeFileDiagnostic, CodeIndexResourceBudget, CodeIndexSnapshot, CodeParseStatus,
     RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
@@ -58,6 +58,48 @@ fn plan_rejects_an_owned_serialized_surface_even_when_source_bytes_fit() {
         .expect("serialized owned records must count toward byte admission");
     assert!(error.to_string().contains("owned.rs"));
     assert!(error.to_string().contains("owned fact surface"));
+}
+
+#[test]
+fn plan_reserves_every_mandatory_control_row_and_its_bytes() {
+    let snapshot = snapshot(&["owned.rs"]);
+    let surface = file_surfaces(&snapshot)
+        .expect("surface should measure")
+        .remove("owned.rs")
+        .expect("file should own one surface");
+    let control_bytes = batch_control_bytes(&snapshot).expect("controls should measure");
+    let row_budget = CodeIndexResourceBudget::new(
+        8,
+        control_bytes + surface.bytes,
+        DURABLE_BATCH_CONTROL_ROW_COUNT,
+    )
+    .expect("row budget");
+    DeltaBatchPlan::new(&snapshot, row_budget)
+        .err()
+        .expect("the file row cannot consume a reserved control row");
+
+    let byte_budget = CodeIndexResourceBudget::new(
+        8,
+        control_bytes + surface.bytes - 1,
+        DURABLE_BATCH_CONTROL_ROW_COUNT + surface.rows,
+    )
+    .expect("byte budget");
+    DeltaBatchPlan::new(&snapshot, byte_budget)
+        .err()
+        .expect("the file surface cannot consume reserved control bytes");
+
+    let exact_budget = CodeIndexResourceBudget::new(
+        8,
+        control_bytes + surface.bytes,
+        DURABLE_BATCH_CONTROL_ROW_COUNT + surface.rows,
+    )
+    .expect("exact budget");
+    assert_eq!(
+        DeltaBatchPlan::new(&snapshot, exact_budget)
+            .expect("the exact complete batch surface should fit")
+            .len(),
+        1
+    );
 }
 
 #[test]

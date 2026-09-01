@@ -74,9 +74,9 @@ pub(super) fn apply_snapshot_with_fence(
             other => other,
         },
     )?;
-    if session.initialized {
+    if let Some(completed_steps) = session.pending_owner_step {
         return Err(StorageError::DurableStagingPending {
-            completed_steps: 0,
+            completed_steps,
             max_steps: session.max_steps,
         });
     }

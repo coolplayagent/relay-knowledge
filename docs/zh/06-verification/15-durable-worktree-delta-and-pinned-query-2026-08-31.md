@@ -27,14 +27,17 @@ synthetic-ref query 边界。修复后，小 overlay 继续走 direct path；发
 
 1. 原子地把 pending task 重新绑定到不可变
    `worktree:<base>:<overlay-hash>` target。
-2. 通过 metadata-indexed keyset page 克隆 clean base，同时排除 dirty file owner。
-3. 按路径顺序冻结确定性 delta plan。每个文件拥有自己的 symbol、reference、import、
+2. 按字典序分页登记 dirty-path ownership，受冻结的 file/row/byte quantum 约束，并通过
+   progress/checkpoint CAS 持久化 cursor。
+3. 通过 metadata-indexed keyset page 克隆 clean base，同时排除 dirty file owner。
+4. 按路径顺序冻结确定性 delta plan。每个文件拥有自己的 symbol、reference、import、
    dependency、feature flag、framework fact、route、chunk、diagnostic 和最终 call。
-4. 每个 worker step 最多提交一个 delta batch；持久化 `batch_count` 是 lease 过期和 takeover
-   之间的 replay cursor。
-5. 在独立 terminal writer quantum 中共同 admission cleanup、tombstone、固定 control rows 和
+5. 每个 worker step 最多提交一个 delta batch，并为 staged-manifest insert、checkpoint update、
+   repository-status update 与 manifest publication 预留四条 control row 及其保守字节；持久化
+   `batch_count` 是 lease 过期和 takeover 之间的 replay cursor。
+6. 在独立 terminal writer quantum 中共同 admission cleanup、tombstone、固定 control rows 和
    可变大小 receipt，并把 `last_path` 恢复为 target 的真实最大路径。
-6. 进入既有 query-index、reference/import/call、search、software、business 与 publication
+7. 进入既有 query-index、reference/import/call、search、software、business 与 publication
    finalizer，不跳过 freshness 检查。
 
 所有容量派生都使用 checked arithmetic，在写入前拒绝溢出。没有 file owner 的 fact 会 fail
@@ -65,6 +68,11 @@ receipt 记录 2 个 delta batches、2 个 parsed files 和 44 次 SQLite writes
 admission、删除密集与多 batch receipt 扩展、固定 worktree context、publication identity 重绑定和
 CLI map namespace 报错顺序的 owner tests 均通过。resume precheck 也证明 clone phase 尚未创建
 staged target 时不会提前验证它。
+
+聚焦回归 `affected_path_ownership_pages_past_the_file_quantum_and_recovers_between_leases`
+使用 7 个 changed files 和 6-file quantum，观测到 6+1 ownership 分页；它在两页之间让 lease
+过期并 reclaim，随后无重放地完成两个确定性 delta batches，也没有发生 whole-delta capacity
+拒绝。这是检视提出的 513-path/512-file 边界的紧凑确定性复现。
 
 ## 4. Release 产品自迭代
 

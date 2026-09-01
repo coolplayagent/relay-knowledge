@@ -14,8 +14,12 @@ const SEARCH_DOCUMENT_ROW_COUNT: usize = 2;
 // Reference finalization can own one grouped fact, FTS row, and metadata row
 // for each reference; charging that upper bound keeps grouping conservative.
 const REFERENCE_SEARCH_ROW_COUNT: usize = 3;
-// The staging manifest is inserted in the same writer quantum as the facts.
-const DURABLE_BATCH_CONTROL_ROW_COUNT: usize = 1;
+// One logical durable batch owns the staged-manifest insert plus the checkpoint,
+// repository-status, and manifest-publication mutations needed to publish its facts.
+const DURABLE_BATCH_CONTROL_ROW_COUNT: usize = 4;
+const STAGED_STATE: &str = "staged";
+const INDEXING_STATE: &str = "indexing";
+const PUBLISHED_STATE: &str = "published";
 
 pub(super) struct DeltaBatchPlan<'a> {
     snapshot: &'a CodeIndexSnapshot,
@@ -387,10 +391,30 @@ fn persisted_bytes(
 }
 
 fn batch_control_bytes(snapshot: &CodeIndexSnapshot) -> Result<usize, StorageError> {
-    snapshot
+    let longest_last_path = snapshot
+        .files
+        .iter()
+        .map(|file| file.path.len())
+        .max()
+        .unwrap_or_default();
+    let identity_bytes = snapshot
         .source_scope
         .len()
-        .checked_add(super::super::admission::ROW_STORAGE_OVERHEAD_BYTES)
+        .checked_mul(DURABLE_BATCH_CONTROL_ROW_COUNT)
+        .and_then(|bytes| bytes.checked_add(snapshot.repository_id.len()))
+        .and_then(|bytes| bytes.checked_add(longest_last_path))
+        .ok_or_else(|| capacity(snapshot))?;
+    let state_bytes = [STAGED_STATE, INDEXING_STATE, PUBLISHED_STATE]
+        .iter()
+        .try_fold(0usize, |total, state| {
+            total
+                .checked_add(state.len())
+                .ok_or_else(|| capacity(snapshot))
+        })?;
+    super::super::admission::ROW_STORAGE_OVERHEAD_BYTES
+        .checked_mul(DURABLE_BATCH_CONTROL_ROW_COUNT)
+        .and_then(|bytes| bytes.checked_add(identity_bytes))
+        .and_then(|bytes| bytes.checked_add(state_bytes))
         .ok_or_else(|| capacity(snapshot))
 }
 

@@ -194,7 +194,7 @@ async fn oversized_worktree_code_index_task_delta_batches_and_recovers_between_l
     assert_eq!(rebound.tree_hash, actual_tree);
     assert_eq!(
         clone_owner_counts(&store, &rebound.source_scope).await,
-        (1, 2)
+        (1, 0)
     );
 
     let mut reclaimed_between_delta_batches = false;
@@ -341,7 +341,7 @@ async fn fenced_clone_reopens_takes_over_and_publishes_one_bounded_page_at_a_tim
             .await,
         0,
     );
-    assert_eq!(clone_owner_counts(&store, &target_scope).await, (1, 1));
+    assert_eq!(clone_owner_counts(&store, &target_scope).await, (1, 0));
     drop(store);
 
     let store = SqliteGraphStore::open(&database_path).expect("database should reopen");

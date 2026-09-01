@@ -43,7 +43,7 @@ pub(in crate::storage::sqlite::code::snapshot) fn batched_delta_completion(
         return Ok(None);
     }
     validation::validate_delta_progress(&transaction, &progress, &identity, guard, budget)?;
-    validate_affected_paths(&transaction, &identity, budget)?;
+    validate_affected_paths(&transaction, &identity)?;
     let completion = clone_completion(progress, "indexing".to_owned(), &identity.affected_paths)?;
     guard.validate_target_scope(&transaction, &identity.source_scope)?;
     guard.validate(&transaction)?;

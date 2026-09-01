@@ -30,17 +30,21 @@ The implemented state machine is:
 
 1. Rebind the pending task atomically to the immutable
    `worktree:<base>:<overlay-hash>` target.
-2. Clone the clean base in metadata-indexed keyset pages while excluding dirty
+2. Stage dirty-path ownership in lexicographic pages under the frozen
+   file/row/byte quantum, persisting the cursor through progress/checkpoint CAS.
+3. Clone the clean base in metadata-indexed keyset pages while excluding dirty
    file owners.
-3. Freeze a deterministic delta plan in path order. A file owns all of its
+4. Freeze a deterministic delta plan in path order. A file owns all of its
    symbols, references, imports, dependencies, feature flags, framework facts,
    routes, chunks, diagnostics, and eventual calls.
-4. Commit at most one delta batch per worker step. Persisted `batch_count` is
-   the replay cursor across lease expiry and takeover.
-5. Admit cleanup, tombstones, fixed control rows, and the variable-size receipt
+5. Commit at most one delta batch per worker step. Reserve four control rows
+   and their conservative bytes for staged-manifest insert, checkpoint update,
+   repository-status update, and manifest publication. Persisted `batch_count`
+   is the replay cursor across lease expiry and takeover.
+6. Admit cleanup, tombstones, fixed control rows, and the variable-size receipt
    together in a separate terminal writer quantum. Restore `last_path` to the
    true maximum target path.
-6. Enter the existing query-index, reference/import/call, search, software,
+7. Enter the existing query-index, reference/import/call, search, software,
    business, and publication finalizer without skipping freshness checks.
 
 Checked arithmetic rejects capacity overflow before mutation. Facts without a
@@ -80,6 +84,13 @@ receipt admission, deletion-heavy and multi-batch receipt scaling, pinned
 worktree context, publication identity rebinding, and the CLI map namespace
 error order. The resume precheck also proves it does not validate an unstaged
 target before the clone phase has created it.
+
+The focused `affected_path_ownership_pages_past_the_file_quantum_and_recovers_between_leases`
+regression uses seven changed files with a six-file quantum. It observes a
+6+1 ownership split, expires and reclaims the lease between those pages, then
+finishes two deterministic delta batches without replay or whole-delta
+capacity rejection. This is the small deterministic analogue of the reviewed
+513-path/512-file boundary.
 
 ## 4. Release-Product Self-Iteration
 
