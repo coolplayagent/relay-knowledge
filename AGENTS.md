@@ -22,6 +22,7 @@ Knowledge map: knowledge/knowledge-map.yaml
 ## Build, Test, and Development Commands
 
 - `cargo build`: compile the project.
+- `cargo check --all-targets --all-features`: run the fast type/build gate without final code generation.
 - `cargo test --all-targets --all-features`: run unit and integration tests.
 - `cargo fmt --all -- --check`: verify formatting without rewriting files.
 - `cargo clippy --all-targets --all-features -- -D warnings`: run lint checks and fail on warnings.
@@ -31,6 +32,7 @@ Knowledge map: knowledge/knowledge-map.yaml
 - `python3 tools/docs/check_docs.py`: validate documentation structure, local links and anchors, code fences, chapter numbering, indexes, and English-edition translation hygiene.
 - `./setup.sh` or `setup.bat`: install/check the Rust toolchain, set up hooks, and run quality gates.
 - `pre-commit run --all-files`: run the local quality hooks.
+- `./check.sh --deep`: after installing nightly `miri` and `rust-src`, run the deterministic benchmark, FFI-free Miri core-domain tests, and AddressSanitizer in addition to the standard local gates.
 
 Document required services, such as graph databases or local containers, in `README.md` and commit example configuration files.
 
@@ -107,6 +109,8 @@ For graph/database behavior, prefer deterministic fixtures and isolate tests fro
 Tests for foundational modules must cover environment parsing errors, platform path resolution, network timeout/backpressure behavior, QoS admission/limit decisions, and HTTP cancellation or graceful shutdown where applicable.
 
 Unit-test line coverage must stay above 90%. Use `cargo llvm-cov` or an equivalent auditable coverage gate for Rust, and add focused unit tests for invariants, error branches, boundary values, and async cancellation/backpressure behavior instead of relying on broad integration tests.
+
+Keep routine commit checks on the stable toolchain: Cargo check, Clippy, and all-target tests are pre-commit gates. Miri and AddressSanitizer are required pull-request jobs and explicit `./check.sh --deep` gates because they require nightly and instrumented rebuilds. Miri covers the FFI-free `domain::core::` invariants; SQLite, network, and other host boundaries remain covered by normal tests and the native Linux AddressSanitizer job.
 
 Testing must be layered for the whole project: keep a distinct UT gate and a distinct integration-test gate. The integration-test gate must mirror the `relay-teams` browser pattern by installing Playwright Chromium, for example `uv run --extra dev python -m playwright install --with-deps chromium`, before browser integration tests and failing CI when browser setup or integration tests fail.
 

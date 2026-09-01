@@ -193,12 +193,14 @@ Use the repository scripts by responsibility:
 ./run.sh status
 ./run.sh stop --force
 ./check.sh
+./check.sh --deep
 ```
 
 The principal local quality gates are:
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --lib --bins --all-features
 cargo test --test relay_knowledge --all-features
@@ -207,6 +209,20 @@ cargo test --test relay_knowledge architecture_boundaries --all-features
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 python3 tools/docs/check_docs.py --self-test-and-check
 ```
+
+The default `./check.sh` profile uses the stable toolchain and is suitable for
+routine changes. The deep profile additionally runs the deterministic benchmark,
+Miri over the FFI-free core-domain invariants, and AddressSanitizer over the
+library and binaries. Install its nightly prerequisites first:
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri and sanitizer checks also run as Linux pull-request jobs. They stay out of
+the ordinary commit hook because they require nightly, rebuild instrumented
+artifacts, and are materially slower than the stable check/Clippy/test loop.
 
 Architecture boundaries, async and resource-budget requirements, unit-test
 coverage, documentation completeness, and the requirement that hand-written
@@ -250,4 +266,6 @@ databases, private datasets, or generated build output. See
 [Installation and Runtime Directories](docs/en/01-user-guide/01-install-and-runtime.md).
 
 Optional local hooks: `pre-commit install` and
-`pre-commit run --all-files`.
+`pre-commit run --all-files`. Rust changes run `cargo check`, Clippy, and tests
+before the commit is accepted; the test command includes the deterministic
+benchmark target through `--all-targets`.

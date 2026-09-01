@@ -111,10 +111,25 @@ Rust quality gates:
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
+
+For nightly undefined-behavior and memory instrumentation, install Miri and
+`rust-src`, then run the bounded deep profile:
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+The Miri gate intentionally executes the FFI-free `domain::core::` unit-test
+surface. SQLite, sockets, and the other external boundaries remain in normal
+tests and the Linux AddressSanitizer job because Miri does not implement those
+host APIs.
 
 Web and browser integration tests:
 

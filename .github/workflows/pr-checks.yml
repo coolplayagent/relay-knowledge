@@ -48,6 +48,22 @@ jobs:
       - name: Format gate
         run: cargo fmt --all -- --check
 
+  check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Deep-profile prerequisite regression gate
+        run: sh tests/runtime/check_sh_prerequisites.sh
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Type and build gate
+        run: cargo check --all-targets --all-features
+
   clippy:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
@@ -102,6 +118,44 @@ jobs:
 
       - name: Deterministic benchmark gate
         run: cargo test --test benchmarks --all-features
+
+  miri:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install nightly Miri
+        run: rustup toolchain install nightly --profile minimal --component miri
+
+      - name: Prepare Miri
+        run: cargo +nightly miri setup
+
+      - name: Miri core-domain gate
+        env:
+          MIRIFLAGS: '-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-deterministic-concurrency'
+        run: 'cargo +nightly miri test --lib --all-features domain::core::'
+
+  address-sanitizer:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install nightly sanitizer prerequisites
+        run: rustup toolchain install nightly --profile minimal --component rust-src
+
+      - name: AddressSanitizer gate
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          RUSTFLAGS: -Zsanitizer=address
+          RUSTDOCFLAGS: -Zsanitizer=address
+        run: >-
+          cargo +nightly test -Zbuild-std
+          --target x86_64-unknown-linux-gnu
+          --lib --bins --all-features
 
   architecture:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
