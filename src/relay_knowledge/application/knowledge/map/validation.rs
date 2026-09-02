@@ -64,17 +64,9 @@ impl KnowledgeMapService {
     pub(super) async fn validate_map_contract(&self) -> Result<(), KnowledgeMapServiceError> {
         let content = self.read_root_content().await?;
         let contract_dir = self.read_contract_dir_name().await?;
-        self.validate_map_content_in(contract_dir, &content).await
-    }
-
-    pub(super) async fn validate_map_content_in(
-        &self,
-        contract_dir: &str,
-        content: &str,
-    ) -> Result<(), KnowledgeMapServiceError> {
         self.validate_map_content_with_policy(
             contract_dir,
-            content,
+            &content,
             MapContentValidation::CurrentContract,
         )
         .await
@@ -198,6 +190,7 @@ impl KnowledgeMapService {
                         .to_owned(),
                 )
             })?;
+        let uses_legacy_contract = self.uses_legacy_contract().await?;
         if source.kind != KnowledgeMapSourceKind::File
             || source.uri != BUSINESS_GLOSSARY_RELATIVE_PATH
             || source.source_scope.as_deref() != Some("repo")
@@ -207,7 +200,7 @@ impl KnowledgeMapService {
                     .to_owned(),
             ));
         }
-        let source_path = if self.uses_legacy_contract().await? {
+        let source_path = if uses_legacy_contract {
             LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
         } else {
             BUSINESS_GLOSSARY_RELATIVE_PATH

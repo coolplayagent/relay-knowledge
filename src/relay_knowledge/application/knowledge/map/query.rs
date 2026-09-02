@@ -83,9 +83,7 @@ impl KnowledgeMapService {
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
             self.require_knowledge_map("legacy map show")?;
-            let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
-                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-            map.validate()?;
+            let mut map = parse_v1_map(&content)?;
             let omitted = map.history.len().saturating_sub(RECENT_HISTORY_LIMIT);
             let recent = map.history.split_off(omitted);
             let archived_through = recent

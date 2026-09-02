@@ -12,7 +12,8 @@ use crate::{
         KnowledgeMapSourceKind, KnowledgeMapTopic,
     },
     project::{
-        KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+        BUSINESS_GLOSSARY_RELATIVE_PATH, KNOWLEDGE_MAP_RELATIVE_PATH,
+        KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
         LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
     },
 };
@@ -184,7 +185,12 @@ fn routed_business_sources(
     if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
         let map = serde_norway::from_slice::<KnowledgeMap>(content)
             .map_err(|error| invalid(format!("knowledge map YAML is invalid: {error}")))?;
-        map.validate()
+        let mut validation_map = map.clone();
+        if map_path == LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH {
+            normalize_legacy_glossary_uri(&mut validation_map);
+        }
+        validation_map
+            .validate()
             .map_err(|error| invalid(format!("knowledge map is invalid: {error}")))?;
         return Ok(route_from_parts(map.routes, map.sources));
     }
@@ -241,6 +247,16 @@ fn routed_business_sources(
         route,
         sources: shard.sources,
     }))
+}
+
+fn normalize_legacy_glossary_uri(map: &mut KnowledgeMap) {
+    for source in &mut map.sources {
+        if source.id == "repository-business-glossary"
+            && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+        {
+            source.uri = BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
+        }
+    }
 }
 
 fn route_from_parts(

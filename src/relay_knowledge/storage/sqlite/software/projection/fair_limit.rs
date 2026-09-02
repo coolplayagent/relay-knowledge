@@ -5,6 +5,15 @@ use std::collections::{HashMap, HashSet};
 use super::ProjectionSlices;
 
 pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit: usize) {
+    let component_candidates = slices
+        .components
+        .iter()
+        .cloned()
+        .map(|component| (component.component_id.clone(), component))
+        .collect::<HashMap<_, _>>();
+    slices
+        .dependency_usages
+        .retain(|usage| component_candidates.contains_key(&usage.component_id));
     let [
         components,
         dependency_usages,
@@ -36,7 +45,12 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
         total_limit,
     );
 
-    retain_components_referenced_by_dependency_usages(slices, components, dependency_usages);
+    retain_components_referenced_by_dependency_usages(
+        slices,
+        components,
+        dependency_usages,
+        &component_candidates,
+    );
     slices.sdk_usages.truncate(sdk_usages);
     slices.files.truncate(files);
     slices.topics.truncate(topics);
@@ -53,13 +67,8 @@ fn retain_components_referenced_by_dependency_usages(
     slices: &mut ProjectionSlices,
     component_limit: usize,
     dependency_usage_limit: usize,
+    component_candidates: &HashMap<String, super::SoftwareComponent>,
 ) {
-    let component_candidates = slices
-        .components
-        .iter()
-        .cloned()
-        .map(|component| (component.component_id.clone(), component))
-        .collect::<HashMap<_, _>>();
     slices.components.truncate(component_limit);
     let mut retained_component_ids = slices
         .components
@@ -71,9 +80,10 @@ fn retain_components_referenced_by_dependency_usages(
 
     for usage in slices.dependency_usages.drain(..dependency_usage_limit) {
         if !retained_component_ids.contains(&usage.component_id) {
-            let Some(component) = component_candidates.get(&usage.component_id).cloned() else {
-                continue;
-            };
+            let component = component_candidates
+                .get(&usage.component_id)
+                .expect("dependency usages were filtered to known components")
+                .clone();
             let Some(index) = slices
                 .components
                 .iter()

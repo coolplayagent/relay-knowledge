@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::{
@@ -31,6 +33,7 @@ pub(in super::super) use fenced::{
 
 const MAX_DEPENDENCY_COMPONENTS_PER_SCOPE: usize = 65_536;
 const MAX_SDK_USAGES_PER_SCOPE: usize = 131_072;
+const COMPONENT_USAGE_TARGET_QUERY_BATCH_SIZE: usize = 256;
 
 #[derive(Default)]
 struct ProjectionSlices {
@@ -323,14 +326,23 @@ fn projection_slices(
             })
         }
         SoftwareGlobalKind::All => {
+            let mut components =
+                components_for_scope(connection, source_scope, request, request.limit)?;
+            let dependency_usages = dependency_usage::usages_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            add_usage_target_components(
+                connection,
+                source_scope,
+                &mut components,
+                &dependency_usages,
+            )?;
             let mut slices = ProjectionSlices {
-                components: components_for_scope(connection, source_scope, request, request.limit)?,
-                dependency_usages: dependency_usage::usages_for_scope(
-                    connection,
-                    source_scope,
-                    request,
-                    request.limit,
-                )?,
+                components,
+                dependency_usages,
                 sdk_usages: sdk_usages_for_scope(connection, source_scope, request, request.limit)?,
                 files: graph::files_for_scope(connection, source_scope, request, request.limit)?,
                 topics: graph::topics_for_scope(connection, source_scope, request, request.limit)?,
@@ -784,6 +796,53 @@ fn components_for_scope(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn add_usage_target_components(
+    connection: &Connection,
+    source_scope: &str,
+    components: &mut Vec<SoftwareComponent>,
+    dependency_usages: &[SoftwareDependencyUsage],
+) -> Result<(), StorageError> {
+    let mut seen_ids = components
+        .iter()
+        .map(|component| component.component_id.clone())
+        .collect::<BTreeSet<_>>();
+    let target_ids = dependency_usages
+        .iter()
+        .filter_map(|usage| {
+            seen_ids
+                .insert(usage.component_id.clone())
+                .then_some(usage.component_id.as_str())
+        })
+        .collect::<Vec<_>>();
+
+    for batch in target_ids.chunks(COMPONENT_USAGE_TARGET_QUERY_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", batch.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!(
+            "
+            SELECT component_id, repository_id, source_scope, ecosystem, name, requirement,
+                   resolved_version, dependency_group, source_kind, relationship_state,
+                   language_id, evidence_path, evidence_line_start, evidence_line_end,
+                   confidence_basis_points, created_graph_version
+            FROM software_components
+            WHERE source_scope = ?1 AND component_id IN ({placeholders})
+            ORDER BY component_id ASC
+            "
+        );
+        let values = std::iter::once(Value::Text(source_scope.to_owned()))
+            .chain(batch.iter().map(|id| Value::Text((*id).to_owned())))
+            .collect::<Vec<_>>();
+        let mut statement = connection.prepare(&query)?;
+        let rows = statement.query_map(params_from_iter(values), component_from_row)?;
+        components.extend(
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(StorageError::from)?,
+        );
+    }
+    Ok(())
 }
 
 fn sdk_usages_for_scope(

@@ -34,6 +34,8 @@ Code edges include defines, references, calls, imports, implements, overrides, c
 
 Repository Markdown/spec documents and `knowledge/knowledge-map.yaml` also participate in the software global projection: headings and knowledge-map topic ids form `software_topics` and `DocumentationUnit` entities, documentation files form `documents` relationships to those topics, and configuration/feature-flag facts project relationships that connect documentation, config files, code files, and config keys. An ordinary heading is not promoted to `SoftwareSystem` from keywords or a README path alone; promotion requires explicit frontmatter, a controlled manifest or schema, or structured corroborating evidence. These relationships are derived from committed indexing and projection facts, not from whole-repository documentation or source scans on query hot paths.
 
+Bounded `all` projections retain the component target for every returned dependency usage. If a target falls outside the ordinary component page, its exact indexed component is added through a bounded lookup before response budgeting; a response never exposes a dangling `component_id`.
+
 ## 4. Confidence
 
 Reference, call, and import resolution may be uncertain. Results expose target hints, confidence basis points, confidence tiers, and resolution reasons; inferred edges are not presented as certain calls.
