@@ -16,7 +16,7 @@ Evidence and graph facts are the foundation of GraphRAG. The system does not tre
 - Structured APIs can write source path, span, confidence, status, typed relations, claims, and events.
 - Structured facts reference supporting evidence ids.
 - `rejected` and `superseded` evidence is not returned as default retrieval context.
-- The repository software ontology uses first-class `SoftwareStatement` records to retain source kind, same-scope evidence references, extractor id/version, assertion mode, resolution state, validity, observation time, confidence, and fact state. Inspect them with `repo software --kind statements|conflicts`.
+- The repository software ontology uses first-class `SoftwareStatement` records to retain source kind, same-scope evidence references, extractor id/version, assertion mode, resolution state, validity, observation time, confidence, and fact state. Its 21 classes and 15 OWL object properties come from an independent, bounded, storage-independent core schema; shape validation and PROV-O JSON-LD export reuse the same RDF namespace and domain/range contract. Inspect statements plus rejected/conflicting diagnostics with `repo software --kind statements|conflicts`.
 - `entity_key` identifies stable software identity without a commit or source scope, while `occurrence_id` identifies one appearance in a snapshot and evidence set. Snapshot and runtime-event kinds intentionally remain scope-bound.
 
 ## Competitive Features

@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/02-engineering-hard-constraints.md) | [English](../../en/03-architecture-specs/02-engineering-hard-constraints.md)
 
-> 文档版本: 2.5
-> 编制日期: 2026-08-29
+> 文档版本: 2.6
+> 编制日期: 2026-09-01
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -37,6 +37,8 @@ Application 基础设施迁移预算按“文件、目标 module、AST 引用数
 | `net::qos` | 准入控制、租户/来源限额、优先级、预算、overload metric | 绕过 QoS 消耗无界资源 |
 
 稳定 identity 与 wall-clock primitive 同样只有一个底层 owner。`identity` 独占持久 FNV-1a 算法及其 incremental hasher；domain、application、watcher、paths 和 storage owner 只能消费该合同，不能复制常量。`clock` 独占窄 `Clock` contract、`SystemClock`、Unix-millisecond 转换及 pre-epoch/overflow 错误；调用方可以在自己的边界映射错误，但不能自行读取 `SystemTime::now()`。两者都不得演变为通用 `utils` 桶。
+
+Ontology schema primitive 同样属于单一底层 owner。`domain::core::ontology` 独占与存储无关且有界的 class identity、RDF local name、OWL object property、domain/range relation shape 和 schema validation 合同；`domain::operations::software::vocabulary` 只登记软件领域 class/property catalog、版本与 namespace。Software entity、statement、shape validator 和 RDF/JSON-LD exporter 必须消费该 catalog，storage adapter、read model 和 exporter 不得各自复制 ontology namespace 或另一套 domain/range match。业务术语 identity 可以消费 core primitive，但不得反向依赖 software vocabulary；LPG/RDF store choice、materialization 和查询不进入 core ontology owner。
 
 具名的平台进程输入同样必须经过该边界。进程 bootstrap 期间由 `env::windows_system_root_from_process` 捕获 Windows `SystemRoot`，bootstrap 只捕获一次 `std::env::current_exe`，`paths::windows_tasklist_command` 解析 Windows process-list 可执行文件，`RuntimeConfiguration::process` 再把两者注入服务恢复及生命周期 plan/execution。Binary preflight、copy、upgrade、rollback 与 checkpoint recovery 必须复用同一个已捕获 executable path；应用工作流在恢复 worker 或调用 service manager 时既不得直接调用 `std::env`/`current_exe`，也不得自行拼接平台可执行文件路径。
 

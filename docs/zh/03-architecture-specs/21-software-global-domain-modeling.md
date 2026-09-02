@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/21-software-global-domain-modeling.md) | [English](../../en/03-architecture-specs/21-software-global-domain-modeling.md)
 
-> 文档版本: 1.2
-> 编制日期: 2026-08-30
+> 文档版本: 1.3
+> 编制日期: 2026-09-01
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -29,6 +29,10 @@ Ontology contract 分成四层：
 | 快照与事件实例 | `RepositorySnapshot`、`FileRevision`、`BuildRun`、`DeploymentRevision`、`RuntimeObservation` |
 | 可追溯陈述 | 一等 `SoftwareStatement`，表达 subject、predicate、object、来源、证据、提取器、时间、置信度、解析和事实状态 |
 | 派生读模型 | 兼容的 dependency、SDK、file、topic、relationship、build、IaC、design 投影及新的类型化查询切片；它们可重建，不是权威事实本身 |
+
+Issue #362 的核心模块边界位于数据模型与存储实现之间：`domain::core::ontology` 定义有界、storage-independent 的 `OntologySchema`、class identity、RDF local name、OWL object property 及可执行 domain/range relation shape；`domain::operations::software::vocabulary` 登记并直接导出 `SOFTWARE_ONTOLOGY_SCHEMA` catalog，其中包含软件 ontology 的 21 个 class、15 个 object property、`1.0.0` 版本和 `https://relay-knowledge.dev/ontology/software/1#` namespace。Entity/statement constructor、shape validator、SQLite materialization 及 PROV-O JSON-LD export 消费同一 catalog，不再各自维护 namespace 或 domain/range match。
+
+Core schema validation 会解析 namespace IRI，要求绝对 HTTP(S) scheme 和有效 host，再于投影发布前检查 schema/version identity、class/property 容量、RDF local name、identity 唯一性、relation shape 非空和所有 class reference。可执行 relation check 即使遇到 `Any` shape，也必须拒绝 catalog 中未声明的 subject 或 object class id。软件 predicate 当前都是 OWL object property，因此 literal object 会以 `literal_object_for_object_property` shape diagnostic 保留为 rejected statement；它不能绕过 entity range validation。该 schema 只描述 ontology contract，不读取文件、不访问网络、不拥有 graph storage，也不把 LPG 运行时改成 RDF triple store。
 
 稳定实体的 `entity_key` 由 repository、受控类型、namespace 和规范化名称生成，不包含 commit 或 source scope；同一实体跨提交保持身份。每次证据观察另有 `occurrence_id`，它绑定 `entity_key`、source scope 和 evidence id。快照与事件实例故意把 source scope 纳入身份。依赖和 SDK 的版本、requirement、ecosystem 与来源保存在 occurrence 属性和 statement 中，不能仅用显示名称推断已解析版本。
 

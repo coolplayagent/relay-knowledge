@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use super::ontology::{SoftwareEvidenceRef, SoftwareSourceKind};
 use super::validation::stable_software_id;
+use super::vocabulary::SOFTWARE_PROPERTIES;
 
 /// Controlled relationship vocabulary for provenance-bearing software statements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(usize)]
 pub enum SoftwarePredicate {
     Contains,
     ProvidesApi,
@@ -26,23 +28,12 @@ pub enum SoftwarePredicate {
 
 impl SoftwarePredicate {
     pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Contains => "contains",
-            Self::ProvidesApi => "provides_api",
-            Self::ConsumesApi => "consumes_api",
-            Self::DependsOn => "depends_on",
-            Self::Configures => "configures",
-            Self::Builds => "builds",
-            Self::Produces => "produces",
-            Self::Packages => "packages",
-            Self::Deploys => "deploys",
-            Self::RunsAs => "runs_as",
-            Self::Tests => "tests",
-            Self::Documents => "documents",
-            Self::DerivedFrom => "derived_from",
-            Self::ObservedAs => "observed_as",
-            Self::Supersedes => "supersedes",
-        }
+        SOFTWARE_PROPERTIES[self as usize].id
+    }
+
+    /// RDF local name declared by the shared OWL object-property vocabulary.
+    pub const fn rdf_local_name(self) -> &'static str {
+        SOFTWARE_PROPERTIES[self as usize].rdf_local_name
     }
 
     pub fn parse(value: &str) -> Option<Self> {

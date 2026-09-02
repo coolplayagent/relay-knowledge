@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 #[test]
 fn utc_timestamp_formatter_covers_epoch_and_leap_year() {
@@ -21,10 +22,89 @@ fn standard_documents_expose_required_profile_roots() {
 
     let prov = prov_document(&response);
     assert_eq!(prov["@context"]["prov"], PROV_NAMESPACE);
+    assert_eq!(
+        prov["@context"]["rko"],
+        crate::domain::SOFTWARE_ONTOLOGY_NAMESPACE
+    );
     assert!(
         prov["@graph"]
             .as_array()
             .is_some_and(|graph| !graph.is_empty())
+    );
+}
+
+#[test]
+fn prov_export_uses_the_executable_owl_vocabulary() {
+    use crate::domain::{
+        GraphVersion, RepositoryCodeRange, SoftwareAssertionMode, SoftwareEntityInput,
+        SoftwareEvidenceRef, SoftwareFactState, SoftwareSourceKind, SoftwareStatementInput,
+        SoftwareStatementResolution,
+    };
+
+    let mut response = empty_response();
+    let evidence = SoftwareEvidenceRef::new(
+        "scope",
+        "Cargo.toml",
+        RepositoryCodeRange { start: 1, end: 1 },
+    )
+    .expect("evidence");
+    let component = SoftwareEntity::new(SoftwareEntityInput {
+        repository_id: "repo".to_owned(),
+        source_scope: "scope".to_owned(),
+        entity_kind: SoftwareEntityKind::Component,
+        name: "relay-knowledge".to_owned(),
+        namespace: None,
+        source_kind: SoftwareSourceKind::Manifest,
+        evidence_refs: vec![evidence.clone()],
+        attributes: BTreeMap::new(),
+        created_graph_version: GraphVersion::new(1),
+    })
+    .expect("component");
+    let package = SoftwareEntity::new(SoftwareEntityInput {
+        repository_id: "repo".to_owned(),
+        source_scope: "scope".to_owned(),
+        entity_kind: SoftwareEntityKind::PackageComponent,
+        name: "serde".to_owned(),
+        namespace: None,
+        source_kind: SoftwareSourceKind::Manifest,
+        evidence_refs: vec![evidence.clone()],
+        attributes: BTreeMap::new(),
+        created_graph_version: GraphVersion::new(1),
+    })
+    .expect("package");
+    let statement = SoftwareStatement::candidate(SoftwareStatementInput {
+        subject_id: component.entity_key.clone(),
+        predicate: SoftwarePredicate::DependsOn,
+        object_id: Some(package.entity_key.clone()),
+        object_value: None,
+        source_scope: "scope".to_owned(),
+        source_kind: SoftwareSourceKind::Manifest,
+        evidence_refs: vec![evidence],
+        assertion_mode: SoftwareAssertionMode::Declared,
+        resolution_state: SoftwareStatementResolution::Resolved,
+        valid_from: None,
+        valid_to: None,
+        observed_at: None,
+        extractor_id: "relay-knowledge/software-ontology".to_owned(),
+        extractor_version: crate::domain::SOFTWARE_ONTOLOGY_VERSION.to_owned(),
+        confidence_basis_points: 10_000,
+        fact_state: SoftwareFactState::Active,
+    });
+    response.entities = vec![component, package];
+    response.statements = vec![statement];
+
+    let document = prov_document(&response);
+    let graph = document["@graph"].as_array().expect("PROV graph");
+
+    assert!(graph.iter().any(|node| {
+        node["@type"]
+            .as_array()
+            .is_some_and(|types| types.iter().any(|kind| kind == "rko:Component"))
+    }));
+    assert!(
+        graph
+            .iter()
+            .any(|node| { node["rko:ontologyProperty"]["@id"] == "rko:dependsOn" })
     );
 }
 

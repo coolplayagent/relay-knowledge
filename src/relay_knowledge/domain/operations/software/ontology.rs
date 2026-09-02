@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::core::OntologyClassIdentity;
+
 use super::super::{DomainError, GraphVersion, RepositoryCodeRange, error::required_text};
 use super::validation::{normalize_optional, stable_software_id};
-
-/// Version of the repository software ontology contract exposed on every read model.
-pub const SOFTWARE_ONTOLOGY_VERSION: &str = "1.0.0";
+use super::vocabulary::SOFTWARE_CLASSES;
 
 const MAX_ENTITY_ATTRIBUTES: usize = 64;
 const MAX_EVIDENCE_REFS: usize = 64;
@@ -14,6 +14,7 @@ const MAX_EVIDENCE_REFS: usize = 64;
 /// Stable and occurrence entity kinds in the software ontology contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(usize)]
 pub enum SoftwareEntityKind {
     Domain,
     SoftwareSystem,
@@ -41,29 +42,12 @@ pub enum SoftwareEntityKind {
 impl SoftwareEntityKind {
     /// Stable storage and wire value.
     pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Domain => "domain",
-            Self::SoftwareSystem => "software_system",
-            Self::Component => "component",
-            Self::Api => "api",
-            Self::Resource => "resource",
-            Self::Configuration => "configuration",
-            Self::BuildDefinition => "build_definition",
-            Self::DeploymentUnit => "deployment_unit",
-            Self::RuntimeService => "runtime_service",
-            Self::TestCase => "test_case",
-            Self::ReleaseArtifact => "release_artifact",
-            Self::PackageComponent => "package_component",
-            Self::Sdk => "sdk",
-            Self::DocumentationUnit => "documentation_unit",
-            Self::Pipeline => "pipeline",
-            Self::BuildJob => "build_job",
-            Self::RepositorySnapshot => "repository_snapshot",
-            Self::FileRevision => "file_revision",
-            Self::BuildRun => "build_run",
-            Self::DeploymentRevision => "deployment_revision",
-            Self::RuntimeObservation => "runtime_observation",
-        }
+        SOFTWARE_CLASSES[self as usize].id
+    }
+
+    /// RDF local name declared by the shared OWL class vocabulary.
+    pub const fn rdf_local_name(self) -> &'static str {
+        SOFTWARE_CLASSES[self as usize].rdf_local_name
     }
 
     /// Parses persisted contract values without accepting unknown future kinds.
@@ -97,12 +81,8 @@ impl SoftwareEntityKind {
     /// Snapshot and event instances intentionally carry source-scope identity.
     pub const fn is_occurrence_kind(self) -> bool {
         matches!(
-            self,
-            Self::RepositorySnapshot
-                | Self::FileRevision
-                | Self::BuildRun
-                | Self::DeploymentRevision
-                | Self::RuntimeObservation
+            SOFTWARE_CLASSES[self as usize].identity,
+            OntologyClassIdentity::Occurrence
         )
     }
 }

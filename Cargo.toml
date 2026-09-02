@@ -77,6 +77,7 @@ tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
 notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
 unicode-ident = "1.0"
+url = "2.5.8"
 quick-xml = "0.41"
 
 [dev-dependencies]
