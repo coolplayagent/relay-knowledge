@@ -322,6 +322,58 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
 }
 
 #[test]
+fn projection_all_kind_fairly_budgets_dense_cross_dimension_results() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    seed_dense_dependencies(&connection, 120);
+    seed_lifecycle_chunks(&connection);
+    seed_ontology_symbols(&connection);
+    seed_documentation_topic(&connection);
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = || {
+        SoftwareGlobalRequest::new(
+            crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+                .expect("selector"),
+            SoftwareGlobalKind::All,
+            crate::domain::FreshnessPolicy::AllowStale,
+            100,
+        )
+        .expect("request should validate")
+    };
+    let first = projection(&mut connection, request()).expect("first projection should load");
+    let second = projection(&mut connection, request()).expect("second projection should load");
+    let returned_rows = first.components.len()
+        + first.dependency_usages.len()
+        + first.sdk_usages.len()
+        + first.files.len()
+        + first.topics.len()
+        + first.relationships.len()
+        + first.build_targets.len()
+        + first.iac_resources.len()
+        + first.design_elements.len()
+        + first.entities.len()
+        + first.statements.len()
+        + first.diagnostics.len();
+
+    assert_eq!(returned_rows, 100);
+    assert!(first.components.len() < 100);
+    assert!(!first.dependency_usages.is_empty());
+    assert!(!first.sdk_usages.is_empty());
+    assert!(!first.files.is_empty());
+    assert!(!first.topics.is_empty());
+    assert!(!first.relationships.is_empty());
+    assert!(!first.build_targets.is_empty());
+    assert!(!first.iac_resources.is_empty());
+    assert!(!first.design_elements.is_empty());
+    assert!(!first.entities.is_empty());
+    assert!(!first.statements.is_empty());
+    assert_eq!(first, second);
+}
+
+#[test]
 fn projection_preserves_maven_build_targets_when_pom_chunk_is_truncated() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
@@ -584,6 +636,51 @@ fn seed_scope(connection: &Connection) {
             [],
         )
             .expect("javascript import should insert");
+}
+
+fn seed_dense_dependencies(connection: &Connection, count: usize) {
+    let mut insert = connection
+        .prepare(
+            "INSERT INTO code_repository_dependencies (
+                repository_id, source_scope, ecosystem, package_name, requirement,
+                resolved_version, dependency_group, source_kind, is_lockfile, language_id,
+                path, line_start, line_end, excerpt
+            ) VALUES (
+                'repo', 'scope-1', 'cargo', ?1, '1', NULL, 'normal', 'manifest', 0,
+                'rust', ?2, 1, 1, ?3
+            )",
+        )
+        .expect("dense dependency insert should prepare");
+    for index in 0..count {
+        let name = format!("dense-package-{index:03}");
+        insert
+            .execute(params![
+                name,
+                format!("crates/dense-{index:03}/Cargo.toml"),
+                format!("dense-package-{index:03} = \"1\"")
+            ])
+            .expect("dense dependency should insert");
+    }
+}
+
+fn seed_documentation_topic(connection: &Connection) {
+    connection
+        .execute_batch(
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES (
+                'repo', 'scope-1', 'file-software-guide', 'docs/software-guide.md',
+                'markdown', 'parsed'
+            );
+            INSERT INTO code_repository_symbols (
+                repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                name, kind, line_start, line_end
+            ) VALUES (
+                'repo', 'scope-1', 'heading-software-guide', 'docs/software-guide.md',
+                'markdown', 'Software Guide', 'heading', 1, 1
+            );",
+        )
+        .expect("documentation topic should insert");
 }
 
 fn insert_existing_maven_build_target(connection: &Connection) {

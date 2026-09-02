@@ -196,6 +196,43 @@ impl KnowledgeMap {
         self.validate_history(archived_through)
     }
 
+    /// Requires the two stable repository entry points without excluding ordinary sources.
+    pub(crate) fn validate_reserved_repository_routes(&self) -> Result<(), DomainError> {
+        let software_source = self
+            .sources
+            .iter()
+            .find(|source| source.id == SOFTWARE_MODEL_SOURCE_ID)
+            .ok_or_else(|| {
+                DomainError::invalid(
+                    "sources",
+                    format!("required reserved source '{SOFTWARE_MODEL_SOURCE_ID}' is missing"),
+                )
+            })?;
+        validate_software_model_source(software_source)?;
+        validate_reserved_route(
+            &self.routes,
+            SOFTWARE_MODEL_TOPIC_ID,
+            SOFTWARE_MODEL_SOURCE_ID,
+        )?;
+
+        let business_source = self
+            .sources
+            .iter()
+            .find(|source| source.id == BUSINESS_KNOWLEDGE_SOURCE_ID)
+            .ok_or_else(|| {
+                DomainError::invalid(
+                    "sources",
+                    format!("required reserved source '{BUSINESS_KNOWLEDGE_SOURCE_ID}' is missing"),
+                )
+            })?;
+        validate_business_knowledge_source(business_source)?;
+        validate_reserved_route(
+            &self.routes,
+            BUSINESS_KNOWLEDGE_TOPIC_ID,
+            BUSINESS_KNOWLEDGE_SOURCE_ID,
+        )
+    }
+
     fn validate_state(&self) -> Result<(), DomainError> {
         if self.schema_version != Self::SCHEMA_VERSION {
             return Err(DomainError::invalid(
@@ -541,6 +578,29 @@ fn validate_business_knowledge_source(source: &KnowledgeMapSource) -> Result<(),
         format!(
             "reserved source '{BUSINESS_KNOWLEDGE_SOURCE_ID}' must use topic '{BUSINESS_KNOWLEDGE_TOPIC_ID}', kind 'file', uri '{BUSINESS_GLOSSARY_RELATIVE_PATH}', and scope '{BUSINESS_KNOWLEDGE_SOURCE_SCOPE}'"
         ),
+    ))
+}
+
+fn validate_reserved_route(
+    routes: &[KnowledgeMapRoute],
+    topic: &str,
+    source_id: &str,
+) -> Result<(), DomainError> {
+    let route = routes
+        .iter()
+        .find(|route| route.topic == topic)
+        .ok_or_else(|| {
+            DomainError::invalid(
+                "routes",
+                format!("required reserved route '{topic}' is missing"),
+            )
+        })?;
+    if route.source_order.iter().any(|id| id == source_id) {
+        return Ok(());
+    }
+    Err(DomainError::invalid(
+        "routes",
+        format!("reserved route '{topic}' must include source '{source_id}'"),
     ))
 }
 

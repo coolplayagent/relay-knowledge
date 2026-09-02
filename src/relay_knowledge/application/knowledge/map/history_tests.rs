@@ -1,4 +1,5 @@
 use super::*;
+use crate::application::knowledge::map::history::MISSING_HISTORY_INDEX_MESSAGE;
 
 #[tokio::test]
 async fn oldest_history_lookup_has_a_constant_read_bound_and_crosses_leaves() {
@@ -145,7 +146,7 @@ fn balanced_prepend_shape_stays_logarithmic_past_two_full_levels() {
 }
 
 #[tokio::test]
-async fn map_init_migrates_a_legacy_v2_archive_chain_before_history_paging() {
+async fn map_validate_is_read_only_before_init_migrates_a_legacy_v2_history_index() {
     let root = temp_root("legacy-v2-index-migration");
     fs::create_dir_all(&root).await.expect("root should create");
     fs::write(
@@ -180,6 +181,7 @@ async fn map_init_migrates_a_legacy_v2_archive_chain_before_history_paging() {
     )
     .expect("manifest should parse");
     assert!(manifest.history.archive.is_some());
+    manifest.schema_version = LEGACY_ARTIFACT_SCHEMA_VERSION;
     manifest.history.index = None;
     fs::write(
         service.map_path(),
@@ -187,6 +189,52 @@ async fn map_init_migrates_a_legacy_v2_archive_chain_before_history_paging() {
     )
     .await
     .expect("legacy v2 manifest should write");
+
+    let history_directory = root
+        .join(AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME);
+    let mut history_files = fs::read_dir(&history_directory)
+        .await
+        .expect("history directory should read");
+    while let Some(entry) = history_files
+        .next_entry()
+        .await
+        .expect("history entry should read")
+    {
+        if entry.file_name().to_string_lossy().starts_with("index-") {
+            fs::remove_file(entry.path())
+                .await
+                .expect("legacy fixture index should remove");
+        }
+    }
+    let root_before_validation = fs::read(service.map_path())
+        .await
+        .expect("legacy v2 root should read");
+    let history_before_validation = history_file_contents(&history_directory).await;
+
+    let validation = service
+        .validate(&context)
+        .await
+        .expect("read-only validation should return diagnostics");
+    assert!(!validation.valid);
+    assert!(
+        validation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(MISSING_HISTORY_INDEX_MESSAGE))
+    );
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("validated root should read"),
+        root_before_validation,
+        "map validate must not publish a migrated root"
+    );
+    assert_eq!(
+        history_file_contents(&history_directory).await,
+        history_before_validation,
+        "map validate must not create or rewrite history artifacts"
+    );
 
     let error = service
         .history(&context, 1, 1)
@@ -212,6 +260,27 @@ async fn map_init_migrates_a_legacy_v2_archive_chain_before_history_paging() {
         1
     );
     let _ = fs::remove_dir_all(root).await;
+}
+
+async fn history_file_contents(directory: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    let mut entries = fs::read_dir(directory)
+        .await
+        .expect("history directory should read");
+    let mut names = Vec::new();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .expect("history entry should read")
+    {
+        names.push((
+            entry.file_name().to_string_lossy().into_owned(),
+            fs::read(entry.path())
+                .await
+                .expect("history artifact should read"),
+        ));
+    }
+    names.sort();
+    names
 }
 
 #[tokio::test]

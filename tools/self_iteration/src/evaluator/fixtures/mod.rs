@@ -6,6 +6,7 @@ mod cross_language;
 mod incremental;
 mod nonstandard_layout;
 mod repository;
+mod repository_maps;
 mod software_global;
 mod writer;
 

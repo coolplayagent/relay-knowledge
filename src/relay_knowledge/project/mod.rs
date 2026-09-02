@@ -45,6 +45,35 @@ pub const KNOWLEDGE_MAP_RELATIVE_PATH: &str = "knowledge/knowledge-map.yaml";
 /// Legacy Knowledge Map root used by v1/v2 readers and v3 redirects.
 pub const LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH: &str = ".knowledge/knowledge-map.yaml";
 
+/// Retained v1/v2 Knowledge Map root used to preflight and execute v3 rollback.
+pub const LEGACY_KNOWLEDGE_MAP_BACKUP_FILE_NAME: &str = "knowledge-map.v2.yaml";
+
+/// Previous legacy Knowledge Map root retained by v1/v2 manifest publication.
+pub const LEGACY_KNOWLEDGE_MAP_PREVIOUS_FILE_NAME: &str = "knowledge-map.yaml.previous";
+
+/// Retained visible v3 Knowledge Map root kept after a rollback.
+pub const KNOWLEDGE_MAP_V3_RETAINED_FILE_NAME: &str = "knowledge-map.yaml.v3.previous";
+
+/// Retained ordinary publication backup kept outside the visible reader fallback after rollback.
+pub const KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME: &str =
+    "knowledge-map.yaml.v3.previous.backup";
+
+/// Staged legacy redirect used by the recoverable v3 publication protocol.
+pub const LEGACY_KNOWLEDGE_MAP_REDIRECT_PREPARED_FILE_NAME: &str =
+    "knowledge-map.yaml.redirect.prepared";
+
+/// Previous legacy root used by the recoverable v3 redirect publication protocol.
+pub const LEGACY_KNOWLEDGE_MAP_REDIRECT_PREVIOUS_FILE_NAME: &str =
+    "knowledge-map.yaml.redirect.previous";
+
+/// Staged retained root used by the no-follow v3 rollback publication protocol.
+pub const LEGACY_KNOWLEDGE_MAP_ROLLBACK_PREPARED_FILE_NAME: &str =
+    "knowledge-map.yaml.rollback.prepared";
+
+/// Previous legacy live root used while atomically publishing a v3 rollback.
+pub const LEGACY_KNOWLEDGE_MAP_ROLLBACK_PREVIOUS_FILE_NAME: &str =
+    "knowledge-map.yaml.rollback.previous";
+
 /// Repository-relative CodeSpec navigation contract filename.
 pub const CODESPEC_MAP_FILE_NAME: &str = "codespec-map.yaml";
 

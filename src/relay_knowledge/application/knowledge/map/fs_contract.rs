@@ -12,15 +12,18 @@ use crate::{
     project::{
         AGENT_CONTRACT_DIR_NAME, CODESPEC_DIR_NAME, CODESPEC_MAP_FILE_NAME,
         CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
-        KNOWLEDGE_MAP_TOPICS_DIR_NAME, LEGACY_AGENT_CONTRACT_DIR_NAME,
-        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
+        KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME,
+        KNOWLEDGE_MAP_V3_RETAINED_FILE_NAME, LEGACY_AGENT_CONTRACT_DIR_NAME,
+        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH, LEGACY_KNOWLEDGE_MAP_BACKUP_FILE_NAME,
+        LEGACY_KNOWLEDGE_MAP_PREVIOUS_FILE_NAME,
     },
 };
 
 use super::{
     KnowledgeMapService, KnowledgeMapServiceError,
     artifact::{
-        KnowledgeMapManifest, ensure_regular_file_within, is_generated_topic_shard_name,
+        ARTIFACT_SCHEMA_VERSION, KnowledgeMapManifest, KnowledgeMapSchemaProbe,
+        LEGACY_ARTIFACT_SCHEMA_VERSION, ensure_regular_file_within, is_generated_topic_shard_name,
         parse_manifest, read_root_file, reject_symlink, resolve_contract_ref_in, unsafe_path,
     },
 };
@@ -297,7 +300,29 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
     grace: Duration,
 ) {
     let mut retained = manifest.referenced_topic_files();
-    if let Ok(content) = fs::read_to_string(backup).await {
+    for recovery_path in recovery_manifest_paths(repository_root, contract_dir, backup) {
+        let content = match read_root_file(repository_root, &recovery_path).await {
+            Ok(content) => content,
+            Err(KnowledgeMapServiceError::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                continue;
+            }
+            Err(_) => return,
+        };
+        let probe = match serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content) {
+            Ok(probe) => probe,
+            Err(_) => return,
+        };
+        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
+            continue;
+        }
+        if !matches!(
+            probe.schema_version,
+            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        ) {
+            return;
+        }
         let Ok(recovery) = parse_manifest(&content) else {
             return;
         };
@@ -356,4 +381,32 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
             let _ = fs::remove_file(marker).await;
         }
     }
+}
+
+fn recovery_manifest_paths(
+    repository_root: &Path,
+    contract_dir: &str,
+    backup: &Path,
+) -> Vec<PathBuf> {
+    let mut paths = vec![backup.to_path_buf()];
+    if contract_dir == AGENT_CONTRACT_DIR_NAME {
+        paths.extend([
+            repository_root
+                .join(AGENT_CONTRACT_DIR_NAME)
+                .join(KNOWLEDGE_MAP_V3_RETAINED_FILE_NAME),
+            repository_root
+                .join(AGENT_CONTRACT_DIR_NAME)
+                .join(KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME),
+        ]);
+    } else if contract_dir == LEGACY_AGENT_CONTRACT_DIR_NAME {
+        paths.extend([
+            repository_root
+                .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
+                .join(LEGACY_KNOWLEDGE_MAP_BACKUP_FILE_NAME),
+            repository_root
+                .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
+                .join(LEGACY_KNOWLEDGE_MAP_PREVIOUS_FILE_NAME),
+        ]);
+    }
+    paths
 }

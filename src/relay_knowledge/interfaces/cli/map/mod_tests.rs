@@ -366,6 +366,63 @@ async fn map_execution_keeps_cli_and_repository_governance_in_sync() {
 }
 
 #[tokio::test]
+async fn first_source_add_through_cli_bootstraps_a_validate_ready_knowledge_map() {
+    let root = temp_root("cli-first-source-add");
+    tokio::fs::create_dir_all(&root)
+        .await
+        .expect("repository root should create");
+    tokio::fs::write(
+        root.join("AGENTS.md"),
+        format!("Knowledge map: {KNOWLEDGE_MAP_RELATIVE_PATH}\n"),
+    )
+    .await
+    .expect("knowledge map pointer should write");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::with_ids(
+        InterfaceKind::Cli,
+        "req-map-first-add",
+        "trace-map-first-add",
+    );
+
+    run_map(
+        MapCommand::SourceAdd {
+            request: KnowledgeMapSourceAddRequest {
+                id: "architecture-guide".to_owned(),
+                topic: "architecture".to_owned(),
+                kind: KnowledgeMapSourceKind::Doc,
+                uri: "docs/architecture.md".to_owned(),
+                source_scope: Some("docs".to_owned()),
+                description: None,
+            },
+        },
+        Some(&service),
+        context.clone(),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("first source add should bootstrap through the CLI adapter");
+
+    let validation = run_map(
+        MapCommand::Validate {
+            selection: MapSelection::One(RepositoryMapType::Knowledge),
+        },
+        Some(&service),
+        context,
+        OutputFormat::Json,
+    )
+    .await
+    .expect("bootstrapped map should validate through the CLI adapter");
+    let validation: serde_json::Value =
+        serde_json::from_str(validation.trim()).expect("validation should render JSON");
+    assert_eq!(validation["valid"], true);
+    assert_eq!(validation["diagnostics"].as_array().map(Vec::len), Some(0));
+
+    tokio::fs::remove_dir_all(root)
+        .await
+        .expect("temporary repository should remove");
+}
+
+#[tokio::test]
 async fn map_migration_commands_preserve_a_recoverable_legacy_root() {
     let root = temp_root("cli-migration");
     tokio::fs::create_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))

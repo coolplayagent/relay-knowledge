@@ -31,7 +31,23 @@ fn projection_query_filters_kind_without_unrelated_graph_staleness() {
 }
 
 #[test]
-fn projection_all_kind_keeps_combined_results_within_limit() {
+fn all_slice_budget_uses_fixed_round_robin_priority_and_redistributes_capacity() {
+    assert_eq!(
+        fair_limit::round_robin_slice_budgets([8; 12], 4),
+        [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        fair_limit::round_robin_slice_budgets([0, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], 3),
+        [0, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        fair_limit::round_robin_slice_budgets([8; 12], 16),
+        [2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1]
+    );
+}
+
+#[test]
+fn projection_all_kind_applies_small_limit_across_response_arrays() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
     initialize_schema(&connection).expect("software schema should initialize");
@@ -47,10 +63,26 @@ fn projection_all_kind_keeps_combined_results_within_limit() {
     )
     .expect("request should validate");
     let projection = projection(&mut connection, request).expect("projection should load");
+    let slice_lengths = [
+        projection.components.len(),
+        projection.dependency_usages.len(),
+        projection.sdk_usages.len(),
+        projection.files.len(),
+        projection.topics.len(),
+        projection.relationships.len(),
+        projection.build_targets.len(),
+        projection.iac_resources.len(),
+        projection.design_elements.len(),
+        projection.entities.len(),
+        projection.statements.len(),
+        projection.diagnostics.len(),
+    ];
 
-    assert_eq!(projection.components.len() + projection.sdk_usages.len(), 4);
-    assert_eq!(projection.components.len(), 3);
+    assert_eq!(slice_lengths.iter().sum::<usize>(), 4);
+    assert_eq!(projection.components.len(), 1);
     assert_eq!(projection.sdk_usages.len(), 1);
+    assert_eq!(projection.files.len(), 1);
+    assert_eq!(projection.relationships.len(), 1);
 }
 
 #[test]

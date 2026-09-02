@@ -9,13 +9,11 @@ use tokio::time::sleep;
 use crate::project::{AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME};
 use crate::{
     api::RequestContext,
-    domain::{
-        BusinessGlossary, KnowledgeMap, KnowledgeMapChange, KnowledgeMapSource, RepositoryMapType,
-        validate_directory_collection,
-    },
+    domain::{BusinessGlossary, KnowledgeMap, RepositoryMapType, validate_directory_collection},
     project::{
         CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
-        KNOWLEDGE_MAP_TOPICS_DIR_NAME, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
+        KNOWLEDGE_MAP_TOPICS_DIR_NAME, LEGACY_AGENT_CONTRACT_DIR_NAME,
+        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
     },
 };
 
@@ -28,6 +26,7 @@ mod history;
 mod lock;
 mod migration;
 mod query;
+mod source_mutation;
 mod validation;
 
 pub(crate) use history::MAX_HISTORY_PAGE_SIZE;
@@ -74,16 +73,16 @@ impl KnowledgeMapService {
         &self,
         context: &RequestContext,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let migrating_legacy = self.map_type == RepositoryMapType::Knowledge
-            && fs::try_exists(self.legacy_map_path()).await?
-            && !fs::try_exists(self.map_path()).await?;
-        let _legacy_lock = if migrating_legacy {
+        let legacy_recovery_state = self.legacy_recovery_state_exists().await?;
+        let _legacy_lock = if legacy_recovery_state {
             Some(self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?)
         } else {
             None
         };
         let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let _rollback_committed = self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
+        self.recover_legacy_redirect_transition().await?;
         self.prepare_legacy_migration().await?;
         self.ensure_baseline_files().await?;
         let path = self.map_path();
@@ -164,92 +163,6 @@ impl KnowledgeMapService {
                     "created CodeSpec map with governed baseline directories".to_owned()
                 }
             },
-        ))
-    }
-
-    pub async fn add_source(
-        &self,
-        context: &RequestContext,
-        request: KnowledgeMapSourceAddRequest,
-    ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        self.require_knowledge_map("map source add")?;
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
-        self.recover_manifest_backup().await?;
-        let mut snapshot = self.load_or_initial().await?;
-        let id = request.id.clone();
-        let topic = request.topic.clone();
-        let source = KnowledgeMapSource::new(
-            request.id,
-            request.topic,
-            request.kind,
-            request.uri,
-            request.source_scope,
-            request.description,
-        )?;
-        snapshot
-            .map
-            .add_source_snapshot(source, snapshot.archived_through)?;
-        snapshot.map.record_change(
-            "source.add",
-            format!("Added source '{id}' to topic '{topic}'."),
-            now_stamp(),
-        );
-        self.write_map(&mut snapshot).await?;
-        Ok(self.mutation_response(
-            context,
-            snapshot.map.map_version,
-            format!("added source {id}"),
-        ))
-    }
-
-    pub async fn update_source(
-        &self,
-        context: &RequestContext,
-        change: KnowledgeMapChange,
-    ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        self.require_knowledge_map("map source update")?;
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
-        self.recover_manifest_backup().await?;
-        let mut snapshot = self.load_for_mutation().await?;
-        let id = change.id.clone();
-        snapshot
-            .map
-            .update_source_snapshot(change, snapshot.archived_through)?;
-        snapshot.map.record_change(
-            "source.update",
-            format!("Updated source '{id}'."),
-            now_stamp(),
-        );
-        self.write_map(&mut snapshot).await?;
-        Ok(self.mutation_response(
-            context,
-            snapshot.map.map_version,
-            format!("updated source {id}"),
-        ))
-    }
-
-    pub async fn remove_source(
-        &self,
-        context: &RequestContext,
-        id: String,
-    ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        self.require_knowledge_map("map source remove")?;
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
-        self.recover_manifest_backup().await?;
-        let mut snapshot = self.load_for_mutation().await?;
-        snapshot
-            .map
-            .remove_source_snapshot(&id, snapshot.archived_through)?;
-        snapshot.map.record_change(
-            "source.remove",
-            format!("Removed source '{id}'."),
-            now_stamp(),
-        );
-        self.write_map(&mut snapshot).await?;
-        Ok(self.mutation_response(
-            context,
-            snapshot.map.map_version,
-            format!("removed source {id}"),
         ))
     }
 
@@ -471,6 +384,14 @@ impl KnowledgeMapService {
         topic_ref: &KnowledgeMapTopicRef,
     ) -> Result<KnowledgeMapTopicShard, KnowledgeMapServiceError> {
         let contract_dir = self.read_contract_dir_name().await?;
+        self.load_topic_shard_in(contract_dir, topic_ref).await
+    }
+
+    async fn load_topic_shard_in(
+        &self,
+        contract_dir: &str,
+        topic_ref: &KnowledgeMapTopicRef,
+    ) -> Result<KnowledgeMapTopicShard, KnowledgeMapServiceError> {
         let content = read_verified_ref_in(
             &self.repository_root,
             contract_dir,
@@ -480,12 +401,14 @@ impl KnowledgeMapService {
         .await?;
         let mut shard = serde_norway::from_str::<KnowledgeMapTopicShard>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        for source in &mut shard.sources {
-            if source.id == "repository-business-glossary"
-                && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
-            {
-                source.uri = crate::project::BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
-                source.version = source.version.saturating_add(1);
+        if contract_dir == LEGACY_AGENT_CONTRACT_DIR_NAME {
+            for source in &mut shard.sources {
+                if source.id == "repository-business-glossary"
+                    && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+                {
+                    source.uri = crate::project::BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
+                    source.version = source.version.saturating_add(1);
+                }
             }
         }
         let expected_ref = format!(
@@ -597,3 +520,10 @@ impl KnowledgeMapService {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reserved_contract_tests.rs"]
+mod reserved_contract_tests;
+
+#[cfg(test)]
+mod identity_contract_tests;

@@ -75,7 +75,9 @@ impl KnowledgeMapService {
         })
     }
 
-    async fn load_show_view(&self) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
+    pub(super) async fn load_show_view(
+        &self,
+    ) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
         let content = self.read_root_content().await?;
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
@@ -166,6 +168,7 @@ impl KnowledgeMapService {
             ));
         }
         let manifest = parse_manifest(&content)?;
+        self.validate_manifest_identity(&manifest)?;
         super::validate_recent_history(&manifest)?;
         let Some(topic_ref) = manifest.topics.iter().find(|entry| entry.id == topic) else {
             return Ok((None, Vec::new()));

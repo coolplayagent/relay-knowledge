@@ -22,6 +22,7 @@ use super::{
     schema::SOFTWARE_PROJECTION_SCHEMA_VERSION,
 };
 
+mod fair_limit;
 mod fenced;
 
 pub(in super::super) use fenced::{
@@ -46,6 +47,7 @@ struct ProjectionSlices {
     statements: Vec<SoftwareStatement>,
     diagnostics: Vec<SoftwareShapeDiagnostic>,
 }
+
 pub(in super::super) fn refresh_projection(
     connection: &mut Connection,
     source_scope: &str,
@@ -321,85 +323,61 @@ fn projection_slices(
             })
         }
         SoftwareGlobalKind::All => {
-            let components =
-                components_for_scope(connection, source_scope, request, request.limit)?;
-            let remaining = request.limit.saturating_sub(components.len());
-            let dependency_usages =
-                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
-            let remaining = remaining.saturating_sub(dependency_usages.len());
-            let sdk_usages = if remaining == 0 {
-                Vec::new()
-            } else {
-                sdk_usages_for_scope(connection, source_scope, request, remaining)?
+            let mut slices = ProjectionSlices {
+                components: components_for_scope(connection, source_scope, request, request.limit)?,
+                dependency_usages: dependency_usage::usages_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                sdk_usages: sdk_usages_for_scope(connection, source_scope, request, request.limit)?,
+                files: graph::files_for_scope(connection, source_scope, request, request.limit)?,
+                topics: graph::topics_for_scope(connection, source_scope, request, request.limit)?,
+                relationships: graph::relationships_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                build_targets: lifecycle::build_targets_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                iac_resources: lifecycle::iac_resources_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                design_elements: lifecycle::design_elements_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                entities: super::ontology::entities_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                statements: super::ontology::statements_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                diagnostics: super::ontology::diagnostics_for_scope(
+                    connection,
+                    source_scope,
+                    request.limit,
+                )?,
             };
-            let remaining = remaining.saturating_sub(sdk_usages.len());
-            let files = if remaining == 0 {
-                Vec::new()
-            } else {
-                graph::files_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(files.len());
-            let topics = if remaining == 0 {
-                Vec::new()
-            } else {
-                graph::topics_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(topics.len());
-            let relationships = if remaining == 0 {
-                Vec::new()
-            } else {
-                graph::relationships_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(relationships.len());
-            let build_targets = if remaining == 0 {
-                Vec::new()
-            } else {
-                lifecycle::build_targets_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(build_targets.len());
-            let iac_resources = if remaining == 0 {
-                Vec::new()
-            } else {
-                lifecycle::iac_resources_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(iac_resources.len());
-            let design_elements = if remaining == 0 {
-                Vec::new()
-            } else {
-                lifecycle::design_elements_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(design_elements.len());
-            let entities = if remaining == 0 {
-                Vec::new()
-            } else {
-                super::ontology::entities_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(entities.len());
-            let statements = if remaining == 0 {
-                Vec::new()
-            } else {
-                super::ontology::statements_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(statements.len());
-            let diagnostics = if remaining == 0 {
-                Vec::new()
-            } else {
-                super::ontology::diagnostics_for_scope(connection, source_scope, remaining)?
-            };
-            Ok(ProjectionSlices {
-                components,
-                dependency_usages,
-                sdk_usages,
-                files,
-                topics,
-                relationships,
-                build_targets,
-                iac_resources,
-                design_elements,
-                entities,
-                statements,
-                diagnostics,
-            })
+            fair_limit::apply_fair_total_limit(&mut slices, request.limit);
+            Ok(slices)
         }
     }
 }

@@ -3,7 +3,7 @@
 use rusqlite::{Connection, params};
 
 use super::{compare_and_mark_completed, compare_and_mark_state, load};
-use crate::domain::CodeIndexResourceBudget;
+use crate::domain::{CodeIncrementalSummaryReceipt, CodeIndexResourceBudget};
 
 #[test]
 fn checkpoint_state_transitions_update_the_persisted_record() {
@@ -30,6 +30,40 @@ fn checkpoint_state_transitions_update_the_persisted_record() {
             .state,
         "completed"
     );
+}
+
+#[test]
+fn completed_checkpoint_loads_a_durable_multi_batch_incremental_summary() {
+    let connection = checkpoint_database();
+    let receipt = CodeIncrementalSummaryReceipt {
+        task_id: "task-incremental".to_owned(),
+        base_resolved_commit_sha: "base-commit".to_owned(),
+        changed_path_count: 12,
+        skipped_unchanged_count: 0,
+        deleted_path_count: 0,
+        affected_path_count: 12,
+        blob_read_count: 12,
+        parsed_file_count: 12,
+        sqlite_write_count: 2_082,
+        degraded_file_count: 1,
+        batch_count: 2,
+    };
+    let encoded = serde_json::to_string(&receipt)
+        .expect("already-persisted multi-batch receipt should serialize canonically");
+    connection
+        .execute(
+            "UPDATE code_repository_index_checkpoints
+             SET state = 'completed', incremental_summary_json = ?1, batch_count = 3
+             WHERE source_scope = 'scope'",
+            [encoded],
+        )
+        .expect("completed multi-batch checkpoint should persist");
+
+    let checkpoint = load(&connection, "scope").expect("completed checkpoint should decode");
+
+    assert_eq!(checkpoint.state, "completed");
+    assert_eq!(checkpoint.batch_count, 3);
+    assert_eq!(checkpoint.incremental_summary, Some(receipt));
 }
 
 fn checkpoint_database() -> Connection {

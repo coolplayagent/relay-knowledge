@@ -14,7 +14,8 @@ use crate::{
 use super::super::runtime::{concurrency::run_limited, contracts::EvalRuntime};
 use super::{
     additional_languages::*, agent_workflow::*, c_and_cpp::*, common_languages::*,
-    cross_language::*, nonstandard_layout::*, software_global::*, writer::write_fixture_file,
+    cross_language::*, nonstandard_layout::*, repository_maps::*, software_global::*,
+    writer::write_fixture_file,
 };
 
 pub(in crate::evaluator) fn prepare_repository_path(
@@ -65,6 +66,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     }
     if fixture == "index_performance_c_fragment_v1" {
         return write_index_performance_c_fragment_fixture(root);
+    }
+    if fixture == "repository_map_graph_v3" {
+        return write_repository_map_graph_v3_fixture(root);
     }
     if fixture == "index_performance_wide_mixed_files_v1" {
         return write_index_performance_wide_mixed_files_fixture(root);

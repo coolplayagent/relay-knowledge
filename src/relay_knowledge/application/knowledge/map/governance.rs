@@ -163,10 +163,10 @@ impl KnowledgeMapService {
         if self.uses_legacy_contract().await? {
             return Ok(());
         }
-        let snapshot = self.load_for_mutation().await?;
-        validate_directory_collection(self.map_type, &snapshot.directories, true)?;
+        let map = self.load_show_view().await?;
+        validate_directory_collection(self.map_type, &map.directories, true)?;
         let repository = fs::canonicalize(&self.repository_root).await?;
-        for entry in snapshot.directories {
+        for entry in map.directories {
             let directory = self
                 .repository_root
                 .join(self.map_type.as_str())
@@ -200,12 +200,12 @@ impl KnowledgeMapService {
     pub(super) async fn validate_cross_map_relations(
         &self,
     ) -> Result<(), KnowledgeMapServiceError> {
-        let snapshot = self.load_for_mutation().await?;
+        let map = self.load_show_view().await?;
         let peer_type = match self.map_type {
             RepositoryMapType::Knowledge => RepositoryMapType::Codespec,
             RepositoryMapType::Codespec => RepositoryMapType::Knowledge,
         };
-        let peer_targets = snapshot
+        let peer_targets = map
             .directories
             .iter()
             .flat_map(|entry| &entry.relations)
@@ -218,7 +218,7 @@ impl KnowledgeMapService {
         if peer_targets.is_empty() {
             return Ok(());
         }
-        let peer = self.for_type(peer_type).load_for_mutation().await?;
+        let peer = self.for_type(peer_type).load_show_view().await?;
         for target in peer_targets {
             if !peer
                 .directories

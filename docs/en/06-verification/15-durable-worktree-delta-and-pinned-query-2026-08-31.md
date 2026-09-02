@@ -85,6 +85,13 @@ worktree context, publication identity rebinding, and the CLI map namespace
 error order. The resume precheck also proves it does not validate an unstaged
 target before the clone phase has created it.
 
+`completed_checkpoint_loads_a_durable_multi_batch_incremental_summary` also
+decodes a completed checkpoint from its SQLite row, covering the durable shape
+with receipt `batch_count = 2`, checkpoint-wide `batch_count = 3`, and twelve
+parsed/blob reads. This protects `repo status` and pinned-ref queries from
+rejecting a valid multi-batch receipt as the former single-batch contract while
+deserializing the checkpoint.
+
 The focused `affected_path_ownership_pages_past_the_file_quantum_and_recovers_between_leases`
 regression uses seven changed files with a six-file quantum. It observes a
 6+1 ownership split, expires and reclaims the lease between those pages, then

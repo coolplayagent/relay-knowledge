@@ -687,7 +687,7 @@ pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
                 Some("n"),
                 false,
                 false,
-                "Maximum rows per returned projection slice.",
+                "Result bound; kind=all shares one strict total across slices using deterministic round-robin.",
                 Some("100"),
                 &[],
             ),

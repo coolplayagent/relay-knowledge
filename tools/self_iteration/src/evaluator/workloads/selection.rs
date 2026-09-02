@@ -292,6 +292,7 @@ fn fast_repository_names() -> Vec<String> {
                 "typescript_syntax_fixture".to_owned(),
                 "nonstandard_layout_fixture".to_owned(),
                 "software_global_fixture".to_owned(),
+                "repository_map_graph_fixture".to_owned(),
                 "project_alias_fixture".to_owned(),
                 "relay_teams".to_owned(),
                 "leveldb_cpp".to_owned(),

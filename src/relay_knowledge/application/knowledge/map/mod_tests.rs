@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::KnowledgeMapSourceKind;
+use crate::domain::{KnowledgeMapChange, KnowledgeMapSourceKind};
 
 #[tokio::test]
 async fn writes_and_reads_yaml_contract() {
