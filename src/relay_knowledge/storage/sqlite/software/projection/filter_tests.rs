@@ -370,6 +370,18 @@ fn projection_all_kind_fairly_budgets_dense_cross_dimension_results() {
     assert!(!first.design_elements.is_empty());
     assert!(!first.entities.is_empty());
     assert!(!first.statements.is_empty());
+    let returned_entity_keys = first
+        .entities
+        .iter()
+        .map(|entity| entity.entity_key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert!(first.statements.iter().all(|statement| {
+        returned_entity_keys.contains(statement.subject_id.as_str())
+            && statement
+                .object_id
+                .as_deref()
+                .is_none_or(|object_id| returned_entity_keys.contains(object_id))
+    }));
     assert_eq!(first, second);
 }
 

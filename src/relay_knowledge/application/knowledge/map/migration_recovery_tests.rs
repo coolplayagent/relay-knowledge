@@ -233,6 +233,77 @@ async fn rollback_transition_keeps_the_retained_v3_contract_readable() {
     let _ = fs::remove_dir_all(root).await;
 }
 
+#[tokio::test]
+async fn committed_rollback_recovery_keeps_post_commit_legacy_edits_when_cleanup_is_retried() {
+    let (root, service, _context) = migrated_v2_fixture("rollback-cleanup-residue").await;
+
+    fs::copy(
+        service.legacy_backup_path(),
+        service.legacy_rollback_prepared_path(),
+    )
+    .await
+    .expect("legacy rollback root should stage");
+    fs::rename(service.map_path(), service.retained_v3_path())
+        .await
+        .expect("current v3 root should retain");
+    fs::rename(service.backup_path(), service.retained_v3_backup_path())
+        .await
+        .expect("fallback v3 root should retain");
+    fs::rename(
+        service.legacy_map_path(),
+        service.legacy_rollback_previous_path(),
+    )
+    .await
+    .expect("legacy redirect should retain");
+    fs::rename(
+        service.legacy_rollback_prepared_path(),
+        service.legacy_map_path(),
+    )
+    .await
+    .expect("legacy rollback publication should commit");
+
+    let mut legacy = parse_manifest(
+        &fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("committed legacy root should read"),
+    )
+    .expect("committed legacy root should parse");
+    legacy.updated_at = "unix:2".to_owned();
+    let edited_legacy = serialize_yaml(&legacy).expect("edited legacy root should serialize");
+    fs::write(service.legacy_map_path(), &edited_legacy)
+        .await
+        .expect("v2 writer should update the committed legacy root");
+
+    let _legacy_lock = service
+        .acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT)
+        .await
+        .expect("legacy lock should acquire");
+    let _current_lock = service
+        .acquire_write_lock(WRITE_LOCK_TIMEOUT)
+        .await
+        .expect("current lock should acquire");
+    assert!(
+        service
+            .recover_legacy_rollback_transition()
+            .await
+            .expect("recovery should only clean committed rollback residue")
+    );
+
+    assert_eq!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("edited legacy root should remain active"),
+        edited_legacy
+    );
+    assert!(
+        !fs::try_exists(service.legacy_rollback_previous_path())
+            .await
+            .unwrap()
+    );
+    assert!(fs::try_exists(service.retained_v3_path()).await.unwrap());
+    let _ = fs::remove_dir_all(root).await;
+}
+
 async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, RequestContext) {
     let root = temp_root(label);
     fs::create_dir_all(&root)

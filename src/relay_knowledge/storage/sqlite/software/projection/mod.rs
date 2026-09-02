@@ -34,6 +34,7 @@ pub(in super::super) use fenced::{
 const MAX_DEPENDENCY_COMPONENTS_PER_SCOPE: usize = 65_536;
 const MAX_SDK_USAGES_PER_SCOPE: usize = 131_072;
 const COMPONENT_USAGE_TARGET_QUERY_BATCH_SIZE: usize = 256;
+const STATEMENT_ENTITY_TARGET_QUERY_BATCH_SIZE: usize = 256;
 
 #[derive(Default)]
 struct ProjectionSlices {
@@ -340,6 +341,19 @@ fn projection_slices(
                 &mut components,
                 &dependency_usages,
             )?;
+            let mut entities = super::ontology::entities_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            let statements = super::ontology::statements_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            add_statement_target_entities(connection, source_scope, &mut entities, &statements)?;
             let mut slices = ProjectionSlices {
                 components,
                 dependency_usages,
@@ -370,18 +384,8 @@ fn projection_slices(
                     request,
                     request.limit,
                 )?,
-                entities: super::ontology::entities_for_scope(
-                    connection,
-                    source_scope,
-                    request,
-                    request.limit,
-                )?,
-                statements: super::ontology::statements_for_scope(
-                    connection,
-                    source_scope,
-                    request,
-                    request.limit,
-                )?,
+                entities,
+                statements,
                 diagnostics: super::ontology::diagnostics_for_scope(
                     connection,
                     source_scope,
@@ -841,6 +845,35 @@ fn add_usage_target_components(
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(StorageError::from)?,
         );
+    }
+    Ok(())
+}
+
+fn add_statement_target_entities(
+    connection: &Connection,
+    source_scope: &str,
+    entities: &mut Vec<SoftwareEntity>,
+    statements: &[SoftwareStatement],
+) -> Result<(), StorageError> {
+    let mut seen_keys = entities
+        .iter()
+        .map(|entity| entity.entity_key.clone())
+        .collect::<BTreeSet<_>>();
+    let target_keys = statements
+        .iter()
+        .flat_map(|statement| {
+            std::iter::once(statement.subject_id.as_str()).chain(statement.object_id.as_deref())
+        })
+        .filter(|entity_key| seen_keys.insert((*entity_key).to_owned()))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    for batch in target_keys.chunks(STATEMENT_ENTITY_TARGET_QUERY_BATCH_SIZE) {
+        entities.extend(super::ontology::entities_by_keys_for_scope(
+            connection,
+            source_scope,
+            batch,
+        )?);
     }
     Ok(())
 }

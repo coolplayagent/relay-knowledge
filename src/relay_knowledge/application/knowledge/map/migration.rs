@@ -261,19 +261,13 @@ impl KnowledgeMapService {
             return Ok(false);
         }
 
-        let expected_legacy = self.validate_legacy_backup().await?;
         let legacy = self.legacy_map_path();
         let legacy_exists = regular_file_exists_or_missing(&legacy).await?;
-        let legacy_content = if legacy_exists {
-            Some(read_root_file(&self.repository_root, &legacy).await?)
-        } else {
-            None
-        };
-
-        if !prepared_exists && legacy_content.as_deref() == Some(expected_legacy.as_str()) {
+        if !prepared_exists && previous_exists && legacy_exists {
             let _ = remove_regular_transition_file(&previous).await;
             return Ok(true);
         }
+        let expected_legacy = self.validate_legacy_backup().await?;
         if prepared_exists {
             let staged = read_root_file(&self.repository_root, &prepared).await?;
             if staged.as_bytes() != expected_legacy.as_bytes() {

@@ -51,6 +51,36 @@ pub(in super::super) fn entities_for_scope(
         .map_err(StorageError::from)
 }
 
+pub(in super::super) fn entities_by_keys_for_scope(
+    connection: &Connection,
+    source_scope: &str,
+    entity_keys: &[String],
+) -> Result<Vec<SoftwareEntity>, StorageError> {
+    if entity_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", entity_keys.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let query = format!(
+        "
+        SELECT occurrence_id, entity_key, repository_id, source_scope, entity_kind,
+               name, namespace, source_kind, evidence_refs_json, attributes_json,
+               created_graph_version
+        FROM software_entities
+        WHERE source_scope = ?1 AND entity_key IN ({placeholders})
+        ORDER BY entity_key ASC, occurrence_id ASC
+        "
+    );
+    let values = std::iter::once(Value::Text(source_scope.to_owned()))
+        .chain(entity_keys.iter().cloned().map(Value::Text))
+        .collect::<Vec<_>>();
+    let mut statement = connection.prepare(&query)?;
+    let rows = statement.query_map(params_from_iter(values), entity_from_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
 pub(in super::super) fn statements_for_scope(
     connection: &Connection,
     source_scope: &str,
