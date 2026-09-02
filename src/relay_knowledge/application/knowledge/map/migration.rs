@@ -43,6 +43,7 @@ impl KnowledgeMapService {
         let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
         let legacy_backup = self.validate_legacy_backup().await?;
         let rollback_version = map_version_from_validated_legacy_content(&legacy_backup)?;
+        self.recover_manifest_backup().await?;
         let legacy = self.legacy_map_path();
         let rollback_prepared = self.legacy_rollback_prepared_path();
         let rollback_previous = self.legacy_rollback_previous_path();
@@ -131,7 +132,7 @@ impl KnowledgeMapService {
             let _ = fs::remove_file(&rollback_prepared).await;
             return Err(error.into());
         }
-        remove_regular_transition_file(&rollback_previous).await?;
+        let _ = remove_regular_transition_file(&rollback_previous).await;
         Ok(self.mutation_response(
             context,
             rollback_version,
@@ -159,11 +160,8 @@ impl KnowledgeMapService {
         self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &legacy_content)
             .await?;
         let backup = self.legacy_backup_path();
-        if regular_file_exists_or_missing(&backup).await? {
-            self.validate_legacy_backup().await?;
-        } else {
-            write_new_synced_file(&backup, legacy_content.as_bytes()).await?;
-        }
+        remove_regular_transition_file(&backup).await?;
+        write_new_synced_file(&backup, legacy_content.as_bytes()).await?;
         copy_contract_tree(
             &self.repository_root,
             &self
@@ -272,7 +270,7 @@ impl KnowledgeMapService {
         };
 
         if !prepared_exists && legacy_content.as_deref() == Some(expected_legacy.as_str()) {
-            remove_regular_transition_file(&previous).await?;
+            let _ = remove_regular_transition_file(&previous).await;
             return Ok(true);
         }
         if prepared_exists {
@@ -291,12 +289,15 @@ impl KnowledgeMapService {
         let current_exists = regular_file_exists_or_missing(&current).await?;
         let retained_exists = regular_file_exists_or_missing(&retained).await?;
         let ordinary_backup_exists = regular_file_exists_or_missing(&ordinary_backup).await?;
-        let retained_backup_exists = regular_file_exists_or_missing(&retained_backup).await?;
         if !current_exists && !retained_exists {
-            return Err(KnowledgeMapServiceError::Integrity(
-                "rollback recovery has neither a visible nor retained v3 root".to_owned(),
-            ));
+            if !regular_file_exists_or_missing(&retained_backup).await? {
+                return Err(KnowledgeMapServiceError::Integrity(
+                    "rollback recovery has neither a visible nor retained v3 root".to_owned(),
+                ));
+            }
+            fs::rename(&retained_backup, &retained).await?;
         }
+        let retained_backup_exists = regular_file_exists_or_missing(&retained_backup).await?;
         if !current_exists {
             fs::rename(&retained, &current).await?;
         }
@@ -577,3 +578,7 @@ async fn copy_contract_tree(
 #[cfg(test)]
 #[path = "migration_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "migration_recovery_tests.rs"]
+mod recovery_tests;

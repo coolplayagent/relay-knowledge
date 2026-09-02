@@ -49,6 +49,16 @@ impl KnowledgeMapService {
         let _rollback_committed = self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
         self.recover_legacy_redirect_transition().await?;
+        if legacy_recovery_state && !fs::try_exists(self.map_path()).await? {
+            let mut preflight = self.load_for_mutation().await?;
+            preflight
+                .map
+                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+            preflight
+                .map
+                .add_source_snapshot(source.clone(), preflight.archived_through)?;
+            preflight.map.validate_reserved_repository_routes()?;
+        }
         self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_or_initial().await?;
         snapshot
@@ -89,6 +99,16 @@ impl KnowledgeMapService {
         self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
         self.recover_legacy_redirect_transition().await?;
+        if legacy_recovery_state && !fs::try_exists(self.map_path()).await? {
+            let mut preflight = self.load_for_mutation().await?;
+            preflight
+                .map
+                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+            preflight
+                .map
+                .update_source_snapshot(change.clone(), preflight.archived_through)?;
+            preflight.map.validate_reserved_repository_routes()?;
+        }
         self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
         snapshot
@@ -130,6 +150,16 @@ impl KnowledgeMapService {
         self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
         self.recover_legacy_redirect_transition().await?;
+        if legacy_recovery_state && !fs::try_exists(self.map_path()).await? {
+            let mut preflight = self.load_for_mutation().await?;
+            preflight
+                .map
+                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+            preflight
+                .map
+                .remove_source_snapshot(&id, preflight.archived_through)?;
+            preflight.map.validate_reserved_repository_routes()?;
+        }
         self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
         snapshot

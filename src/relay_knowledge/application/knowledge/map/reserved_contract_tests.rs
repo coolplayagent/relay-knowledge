@@ -236,6 +236,30 @@ async fn source_add_migrates_a_legacy_only_map_and_rollback_restores_exact_bytes
     let service = KnowledgeMapService::new(root.clone());
     let context = RequestContext::for_interface(InterfaceKind::Cli);
 
+    let error = service
+        .add_source(
+            &context,
+            KnowledgeMapSourceAddRequest {
+                id: "repository-software-model".to_owned(),
+                topic: "software-model".to_owned(),
+                kind: KnowledgeMapSourceKind::Repo,
+                uri: ".".to_owned(),
+                source_scope: Some("repository".to_owned()),
+                description: None,
+            },
+        )
+        .await
+        .expect_err("duplicate legacy source add should fail before migration");
+    assert!(matches!(error, KnowledgeMapServiceError::Domain(_)));
+    assert_eq!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("legacy root should remain readable"),
+        original
+    );
+    assert!(!fs::try_exists(service.map_path()).await.unwrap());
+    assert!(!fs::try_exists(service.legacy_backup_path()).await.unwrap());
+
     service
         .add_source(
             &context,
@@ -305,6 +329,30 @@ async fn source_update_migrates_and_repairs_a_legacy_only_map_before_publication
     let (root, service, context, original) =
         legacy_only_repository_with_ordinary_source("legacy-source-update").await;
 
+    let error = service
+        .update_source(
+            &context,
+            KnowledgeMapChange {
+                id: "missing-source".to_owned(),
+                topic: None,
+                kind: None,
+                uri: None,
+                source_scope: None,
+                description: Some("This update must not publish migration state.".to_owned()),
+            },
+        )
+        .await
+        .expect_err("missing legacy source update should fail before migration");
+    assert!(matches!(error, KnowledgeMapServiceError::Domain(_)));
+    assert_eq!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("legacy root should remain readable"),
+        original
+    );
+    assert!(!fs::try_exists(service.map_path()).await.unwrap());
+    assert!(!fs::try_exists(service.legacy_backup_path()).await.unwrap());
+
     service
         .update_source(
             &context,
@@ -328,6 +376,20 @@ async fn source_update_migrates_and_repairs_a_legacy_only_map_before_publication
 async fn source_remove_migrates_and_repairs_a_legacy_only_map_before_publication() {
     let (root, service, context, original) =
         legacy_only_repository_with_ordinary_source("legacy-source-remove").await;
+
+    let error = service
+        .remove_source(&context, "missing-source".to_owned())
+        .await
+        .expect_err("missing legacy source removal should fail before migration");
+    assert!(matches!(error, KnowledgeMapServiceError::Domain(_)));
+    assert_eq!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("legacy root should remain readable"),
+        original
+    );
+    assert!(!fs::try_exists(service.map_path()).await.unwrap());
+    assert!(!fs::try_exists(service.legacy_backup_path()).await.unwrap());
 
     service
         .remove_source(&context, "architecture-guide".to_owned())
