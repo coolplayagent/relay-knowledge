@@ -108,7 +108,10 @@ pub(crate) fn load_business_knowledge_projection(
         ));
     };
     let mut sources = Vec::with_capacity(routed.route.source_order.len());
-    for (authority_rank, source_id) in routed.route.source_order.iter().enumerate() {
+    for source_id in &routed.route.source_order {
+        if source_id != "repository-business-glossary" {
+            continue;
+        }
         let source = routed
             .sources
             .iter()
@@ -135,7 +138,7 @@ pub(crate) fn load_business_knowledge_projection(
         sources.push(BusinessKnowledgeSource {
             source_id: source.id.clone(),
             source_path: source.uri.clone(),
-            authority_rank,
+            authority_rank: sources.len(),
             content_digest: sha256(&content),
             glossary,
         });

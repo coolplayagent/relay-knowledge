@@ -304,7 +304,40 @@ async fn committed_rollback_recovery_keeps_post_commit_legacy_edits_when_cleanup
     let _ = fs::remove_dir_all(root).await;
 }
 
+#[tokio::test]
+async fn migration_rejects_an_oversized_unreferenced_legacy_artifact() {
+    let (root, service, context) = legacy_v2_fixture("bounded-legacy-artifact").await;
+    let oversized = root
+        .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME)
+        .join("unreferenced-large.yaml");
+    fs::write(
+        &oversized,
+        vec![b'x'; (MAX_LEGACY_MIGRATION_ARTIFACT_FILE_BYTES + 1) as usize],
+    )
+    .await
+    .expect("oversized unreferenced artifact should write");
+
+    let error = service
+        .migrate_to_v3(&context)
+        .await
+        .expect_err("oversized legacy artifacts must be rejected before loading their contents");
+
+    assert!(error.to_string().contains("legacy migration artifact"));
+    assert!(!fs::try_exists(service.map_path()).await.unwrap());
+    let _ = fs::remove_dir_all(root).await;
+}
+
 async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, RequestContext) {
+    let (root, service, context) = legacy_v2_fixture(label).await;
+    service
+        .migrate_to_v3(&context)
+        .await
+        .expect("v2 fixture should migrate");
+    (root, service, context)
+}
+
+async fn legacy_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, RequestContext) {
     let root = temp_root(label);
     fs::create_dir_all(&root)
         .await
@@ -329,10 +362,6 @@ async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Requ
     fs::write(&legacy, v2)
         .await
         .expect("v2 fixture root should write");
-    service
-        .migrate_to_v3(&context)
-        .await
-        .expect("v2 fixture should migrate");
     (root, service, context)
 }
 

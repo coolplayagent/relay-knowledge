@@ -338,6 +338,7 @@ fn projection_slices(
             add_usage_target_components(
                 connection,
                 source_scope,
+                request,
                 &mut components,
                 &dependency_usages,
             )?;
@@ -353,7 +354,13 @@ fn projection_slices(
                 request,
                 request.limit,
             )?;
-            add_statement_target_entities(connection, source_scope, &mut entities, &statements)?;
+            add_statement_target_entities(
+                connection,
+                source_scope,
+                request,
+                &mut entities,
+                &statements,
+            )?;
             let mut slices = ProjectionSlices {
                 components,
                 dependency_usages,
@@ -805,6 +812,7 @@ fn components_for_scope(
 fn add_usage_target_components(
     connection: &Connection,
     source_scope: &str,
+    request: &SoftwareGlobalRequest,
     components: &mut Vec<SoftwareComponent>,
     dependency_usages: &[SoftwareDependencyUsage],
 ) -> Result<(), StorageError> {
@@ -825,6 +833,10 @@ fn add_usage_target_components(
         let placeholders = std::iter::repeat_n("?", batch.len())
             .collect::<Vec<_>>()
             .join(", ");
+        let path_filter =
+            path_filter_sql_for_column("evidence_path", &request.repository.path_filters);
+        let language_filter =
+            language_filter_sql_for_column("language_id", &request.repository.language_filters);
         let query = format!(
             "
             SELECT component_id, repository_id, source_scope, ecosystem, name, requirement,
@@ -833,12 +845,16 @@ fn add_usage_target_components(
                    confidence_basis_points, created_graph_version
             FROM software_components
             WHERE source_scope = ?1 AND component_id IN ({placeholders})
+            {path_filter}
+            {language_filter}
             ORDER BY component_id ASC
             "
         );
-        let values = std::iter::once(Value::Text(source_scope.to_owned()))
+        let mut values = std::iter::once(Value::Text(source_scope.to_owned()))
             .chain(batch.iter().map(|id| Value::Text((*id).to_owned())))
             .collect::<Vec<_>>();
+        push_path_filter_values(&mut values, &request.repository.path_filters);
+        push_language_filter_values(&mut values, &request.repository.language_filters);
         let mut statement = connection.prepare(&query)?;
         let rows = statement.query_map(params_from_iter(values), component_from_row)?;
         components.extend(
@@ -852,6 +868,7 @@ fn add_usage_target_components(
 fn add_statement_target_entities(
     connection: &Connection,
     source_scope: &str,
+    request: &SoftwareGlobalRequest,
     entities: &mut Vec<SoftwareEntity>,
     statements: &[SoftwareStatement],
 ) -> Result<(), StorageError> {
@@ -872,6 +889,7 @@ fn add_statement_target_entities(
         entities.extend(super::ontology::entities_by_keys_for_scope(
             connection,
             source_scope,
+            request,
             batch,
         )?);
     }

@@ -79,6 +79,60 @@ terms:
 }
 
 #[test]
+fn ignores_ordinary_business_route_sources_when_projecting_glossaries() {
+    let repository = git_repository(
+        r#"schema_version: 1
+map_version: 1
+updated_at: "2026-08-26T00:00:00Z"
+topics:
+  - id: business-knowledge
+    title: Business knowledge
+    description: Authored glossary
+sources:
+  - id: business-notes
+    topic: business-knowledge
+    kind: doc
+    uri: docs/business-notes.md
+    read_policy: direct
+    write_policy: manual-review
+    status: active
+    version: 1
+    source_scope: repo
+  - id: repository-business-glossary
+    topic: business-knowledge
+    kind: file
+    uri: .knowledge/business-glossary.yaml
+    read_policy: direct
+    write_policy: manual-review
+    status: active
+    version: 1
+    source_scope: repo
+routes:
+  - topic: business-knowledge
+    source_order: [business-notes, repository-business-glossary]
+history:
+  - version: 1
+    action: map.init
+    actor: test
+    summary: Initialized business knowledge
+"#,
+        "schema_version: 1\ndomains: []\nterms: []\n",
+    );
+    let commit = git(&repository, &["rev-parse", "HEAD"]);
+
+    let projection =
+        load_business_knowledge_projection(&registration(&repository), "scope-1", &commit)
+            .expect("ordinary business sources should not block glossary projection");
+
+    assert_eq!(projection.sources.len(), 1);
+    assert_eq!(
+        projection.sources[0].source_id,
+        "repository-business-glossary"
+    );
+    assert_eq!(projection.sources[0].authority_rank, 0);
+}
+
+#[test]
 fn rejects_route_path_escape_before_reading_source() {
     let repository = git_repository(
         r#"schema_version: 1

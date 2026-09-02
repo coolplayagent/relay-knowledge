@@ -54,6 +54,7 @@ pub(in super::super) fn entities_for_scope(
 pub(in super::super) fn entities_by_keys_for_scope(
     connection: &Connection,
     source_scope: &str,
+    request: &SoftwareGlobalRequest,
     entity_keys: &[String],
 ) -> Result<Vec<SoftwareEntity>, StorageError> {
     if entity_keys.is_empty() {
@@ -62,6 +63,14 @@ pub(in super::super) fn entities_by_keys_for_scope(
     let placeholders = std::iter::repeat_n("?", entity_keys.len())
         .collect::<Vec<_>>()
         .join(", ");
+    let path_filter = super::super::path_filter_sql_for_column(
+        "primary_evidence_path",
+        &request.repository.path_filters,
+    );
+    let language_filter = super::super::language_filter_sql_for_column(
+        "language_id",
+        &request.repository.language_filters,
+    );
     let query = format!(
         "
         SELECT occurrence_id, entity_key, repository_id, source_scope, entity_kind,
@@ -69,12 +78,16 @@ pub(in super::super) fn entities_by_keys_for_scope(
                created_graph_version
         FROM software_entities
         WHERE source_scope = ?1 AND entity_key IN ({placeholders})
+          {path_filter}
+          {language_filter}
         ORDER BY entity_key ASC, occurrence_id ASC
         "
     );
-    let values = std::iter::once(Value::Text(source_scope.to_owned()))
+    let mut values = std::iter::once(Value::Text(source_scope.to_owned()))
         .chain(entity_keys.iter().cloned().map(Value::Text))
         .collect::<Vec<_>>();
+    super::super::push_path_filter_values(&mut values, &request.repository.path_filters);
+    super::super::push_language_filter_values(&mut values, &request.repository.language_filters);
     let mut statement = connection.prepare(&query)?;
     let rows = statement.query_map(params_from_iter(values), entity_from_row)?;
     rows.collect::<Result<Vec<_>, _>>()

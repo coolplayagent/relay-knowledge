@@ -80,6 +80,50 @@ fn projection_filters_rows_when_serving_broader_scope() {
 }
 
 #[test]
+fn projection_all_kind_does_not_widen_path_filtered_component_targets() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_imports (
+                repository_id, source_scope, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, line_start, line_end
+            ) VALUES (
+                'repo', 'scope-1', 'file-1', 'src/main.cc',
+                'use serde::Serialize;', 'serde', 'external', 9000, 12, 12
+            )",
+            [],
+        )
+        .expect("filtered import should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec!["src".to_owned()],
+            Vec::new(),
+        )
+        .expect("selector"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        20,
+    )
+    .expect("request should validate");
+    let projection = projection(&mut connection, request).expect("projection should load");
+
+    assert!(
+        projection
+            .components
+            .iter()
+            .all(|component| component.evidence_path.starts_with("src/"))
+    );
+    assert!(projection.dependency_usages.is_empty());
+}
+
+#[test]
 fn projection_links_declared_dependencies_to_import_usage() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);

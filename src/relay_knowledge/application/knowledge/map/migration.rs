@@ -26,6 +26,10 @@ use super::{
     read_root_file,
 };
 
+const MAX_LEGACY_MIGRATION_ARTIFACT_FILES: usize = 1_024;
+const MAX_LEGACY_MIGRATION_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_LEGACY_MIGRATION_ARTIFACT_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
 impl KnowledgeMapService {
     pub async fn migrate_to_v3(
         &self,
@@ -562,12 +566,41 @@ async fn copy_contract_tree(
     }
     let target = ensure_owned_directory(repository_root, target).await?;
     let mut entries = fs::read_dir(source).await?;
+    let mut copied_files = 0usize;
+    let mut copied_bytes = 0u64;
     while let Some(entry) = entries.next_entry().await? {
         let file_type = entry.file_type().await?;
         if file_type.is_symlink() || !file_type.is_file() {
             return Err(KnowledgeMapServiceError::UnsafePath(
                 entry.path().display().to_string(),
             ));
+        }
+        copied_files = copied_files.checked_add(1).ok_or_else(|| {
+            KnowledgeMapServiceError::Integrity(
+                "legacy migration artifact file count overflow".to_owned(),
+            )
+        })?;
+        if copied_files > MAX_LEGACY_MIGRATION_ARTIFACT_FILES {
+            return Err(KnowledgeMapServiceError::Integrity(format!(
+                "legacy migration artifact count exceeds {MAX_LEGACY_MIGRATION_ARTIFACT_FILES}"
+            )));
+        }
+        let file_bytes = entry.metadata().await?.len();
+        if file_bytes > MAX_LEGACY_MIGRATION_ARTIFACT_FILE_BYTES {
+            return Err(KnowledgeMapServiceError::Integrity(format!(
+                "legacy migration artifact '{}' exceeds {MAX_LEGACY_MIGRATION_ARTIFACT_FILE_BYTES} bytes",
+                entry.path().display()
+            )));
+        }
+        copied_bytes = copied_bytes.checked_add(file_bytes).ok_or_else(|| {
+            KnowledgeMapServiceError::Integrity(
+                "legacy migration artifact byte count overflow".to_owned(),
+            )
+        })?;
+        if copied_bytes > MAX_LEGACY_MIGRATION_ARTIFACT_BYTES {
+            return Err(KnowledgeMapServiceError::Integrity(format!(
+                "legacy migration artifacts exceed {MAX_LEGACY_MIGRATION_ARTIFACT_BYTES} bytes"
+            )));
         }
         let content = read_root_file(repository_root, &entry.path()).await?;
         let destination = target.join(entry.file_name());
