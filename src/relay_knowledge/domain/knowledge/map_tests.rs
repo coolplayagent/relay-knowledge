@@ -79,6 +79,58 @@ fn software_model_route_upgrade_is_idempotent() {
 }
 
 #[test]
+fn software_model_route_upgrade_repairs_an_existing_reserved_source_without_route_membership() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    map.routes
+        .iter_mut()
+        .find(|route| route.topic == "software-model")
+        .expect("software route should exist")
+        .source_order
+        .clear();
+
+    assert!(
+        map.ensure_software_model_route()
+            .expect("repairable reserved route drift should upgrade")
+    );
+    assert_eq!(
+        map.routes
+            .iter()
+            .find(|route| route.topic == "software-model")
+            .expect("software route should remain")
+            .source_order,
+        ["repository-software-model"]
+    );
+    map.validate_reserved_repository_routes()
+        .expect("repaired route should satisfy the reserved contract");
+}
+
+#[test]
+fn business_route_upgrade_repairs_an_existing_reserved_source_without_route_membership() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    map.routes
+        .iter_mut()
+        .find(|route| route.topic == "business-knowledge")
+        .expect("business route should exist")
+        .source_order
+        .clear();
+
+    assert!(
+        map.ensure_business_knowledge_route()
+            .expect("repairable reserved route drift should upgrade")
+    );
+    assert_eq!(
+        map.routes
+            .iter()
+            .find(|route| route.topic == "business-knowledge")
+            .expect("business route should remain")
+            .source_order,
+        ["repository-business-glossary"]
+    );
+    map.validate_reserved_repository_routes()
+        .expect("repaired route should satisfy the reserved contract");
+}
+
+#[test]
 fn rejects_conflicting_reserved_software_model_source() {
     let mut map = KnowledgeMap::initial("now".to_owned());
     map.sources

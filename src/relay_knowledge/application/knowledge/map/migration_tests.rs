@@ -164,6 +164,54 @@ async fn legacy_map_without_current_reserved_routes_migrates_and_remains_rollbac
 }
 
 #[tokio::test]
+async fn migration_repairs_legacy_reserved_sources_without_route_membership() {
+    let root = temp_root("map-v3-legacy-repairs-reserved-routes");
+    fs::create_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
+        .await
+        .expect("legacy directory should create");
+    let mut legacy = KnowledgeMap::initial("unix:1".to_owned());
+    for topic in ["software-model", "business-knowledge"] {
+        legacy
+            .routes
+            .iter_mut()
+            .find(|route| route.topic == topic)
+            .expect("reserved route should exist")
+            .source_order
+            .clear();
+    }
+    fs::write(
+        root.join(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH),
+        serde_norway::to_string(&legacy).expect("repairable legacy map should serialize"),
+    )
+    .await
+    .expect("repairable legacy map should write");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(InterfaceKind::Cli);
+
+    service
+        .migrate_to_v3(&context)
+        .await
+        .expect("migration should repair reserved route membership");
+    service
+        .validate_map_contract()
+        .await
+        .expect("published v3 map should satisfy reserved route validation");
+    for (topic, source) in [
+        ("software-model", "repository-software-model"),
+        ("business-knowledge", "repository-business-glossary"),
+    ] {
+        let route = service
+            .route(&context, topic.to_owned())
+            .await
+            .expect("migrated route should load")
+            .route
+            .expect("reserved route should remain visible");
+        assert!(route.source_order.iter().any(|entry| entry == source));
+    }
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn migration_rejects_a_legacy_redirect_instead_of_copying_it_as_a_visible_root() {
     let root = temp_root("legacy-redirect-is-not-a-map");
     fs::create_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
@@ -898,6 +946,32 @@ async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Requ
         .await
         .expect("v2 fixture should migrate");
     (root, service, context)
+}
+
+#[test]
+fn rollback_response_version_reads_a_legacy_manifest_without_a_history_index() {
+    let legacy_manifest = r#"
+schema_version: 2
+map_version: 7
+updated_at: unix:7
+topics: []
+history:
+  archived_through: 6
+  archive:
+    ref: history/00000000000000000001-00000000000000000006-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.yaml
+    digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  recent:
+    - version: 7
+      action: mutation
+      actor: cli
+      summary: retained legacy fixture
+"#;
+
+    assert_eq!(
+        map_version_from_validated_legacy_content(legacy_manifest)
+            .expect("a validated legacy root should expose its response version"),
+        7
+    );
 }
 
 fn temp_root(name: &str) -> PathBuf {

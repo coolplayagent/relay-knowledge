@@ -12,7 +12,7 @@ use super::{
     ARTIFACT_SCHEMA_VERSION, KnowledgeMapSchemaProbe, KnowledgeMapService,
     KnowledgeMapServiceError, KnowledgeMapValidationResponse, LEGACY_ARTIFACT_SCHEMA_VERSION,
     history::MISSING_HISTORY_INDEX_MESSAGE, metadata, parse_manifest, parse_v1_map,
-    safe_repository_source_path,
+    parse_v1_map_for_legacy_recovery, safe_repository_source_path,
 };
 
 #[derive(Clone, Copy)]
@@ -102,7 +102,13 @@ impl KnowledgeMapService {
         let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
-            let map = parse_v1_map(content)?;
+            let map = if matches!(policy, MapContentValidation::LegacyRecovery)
+                && self.map_type == crate::domain::RepositoryMapType::Knowledge
+            {
+                parse_v1_map_for_legacy_recovery(content)?
+            } else {
+                parse_v1_map(content)?
+            };
             if matches!(policy, MapContentValidation::CurrentContract)
                 && self.map_type == crate::domain::RepositoryMapType::Knowledge
             {
@@ -121,6 +127,8 @@ impl KnowledgeMapService {
         }
         let manifest = parse_manifest(content)?;
         self.validate_manifest_identity(&manifest)?;
+        self.validate_archived_history_in(contract_dir, &manifest.history)
+            .await?;
         if matches!(policy, MapContentValidation::CurrentContract)
             && manifest.history.archived_through > 0
             && manifest.history.index.is_none()
@@ -129,8 +137,6 @@ impl KnowledgeMapService {
                 MISSING_HISTORY_INDEX_MESSAGE.to_owned(),
             ));
         }
-        self.validate_archived_history_in(contract_dir, &manifest.history)
-            .await?;
         let mut topics = Vec::with_capacity(manifest.topics.len());
         let mut sources = Vec::new();
         let mut routes = Vec::new();
@@ -140,7 +146,7 @@ impl KnowledgeMapService {
             sources.extend(shard.sources);
             routes.extend(shard.route);
         }
-        let map = KnowledgeMap {
+        let mut map = KnowledgeMap {
             schema_version: KnowledgeMap::SCHEMA_VERSION,
             map_version: manifest.map_version,
             updated_at: manifest.updated_at,
@@ -149,7 +155,13 @@ impl KnowledgeMapService {
             routes,
             history: manifest.history.recent,
         };
-        map.validate_snapshot(manifest.history.archived_through)?;
+        if matches!(policy, MapContentValidation::LegacyRecovery)
+            && self.map_type == crate::domain::RepositoryMapType::Knowledge
+        {
+            map.ensure_reserved_repository_routes_snapshot(manifest.history.archived_through)?;
+        } else {
+            map.validate_snapshot(manifest.history.archived_through)?;
+        }
         if matches!(policy, MapContentValidation::CurrentContract)
             && self.map_type == crate::domain::RepositoryMapType::Knowledge
         {

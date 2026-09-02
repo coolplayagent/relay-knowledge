@@ -183,6 +183,18 @@ pub(super) fn parse_v1_map(content: &str) -> Result<KnowledgeMap, KnowledgeMapSe
     Ok(map)
 }
 
+/// Parses a legacy map while admitting only repairable omissions in reserved routes.
+pub(super) fn parse_v1_map_for_legacy_recovery(
+    content: &str,
+) -> Result<KnowledgeMap, KnowledgeMapServiceError> {
+    let mut map = serde_norway::from_str::<KnowledgeMap>(content)
+        .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+    map.schema_version = KnowledgeMap::SCHEMA_VERSION;
+    normalize_legacy_builtin_sources(&mut map);
+    map.ensure_reserved_repository_routes()?;
+    Ok(map)
+}
+
 pub(super) fn temporary_path(path: &Path) -> PathBuf {
     let elapsed = SystemTime::now().duration_since(UNIX_EPOCH);
     let suffix = elapsed.map_or(0, |duration| duration.as_nanos());

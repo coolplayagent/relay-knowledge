@@ -181,6 +181,11 @@ async fn map_validate_is_read_only_before_init_migrates_a_legacy_v2_history_inde
     )
     .expect("manifest should parse");
     assert!(manifest.history.archive.is_some());
+    let archive = manifest
+        .history
+        .archive
+        .clone()
+        .expect("legacy index fixture should retain an archive");
     manifest.schema_version = LEGACY_ARTIFACT_SCHEMA_VERSION;
     manifest.history.index = None;
     fs::write(
@@ -235,6 +240,32 @@ async fn map_validate_is_read_only_before_init_migrates_a_legacy_v2_history_inde
         history_before_validation,
         "map validate must not create or rewrite history artifacts"
     );
+
+    let archive_path = root.join(AGENT_CONTRACT_DIR_NAME).join(&archive.r#ref);
+    let archive_content = fs::read(&archive_path)
+        .await
+        .expect("archive should read before corruption");
+    fs::write(&archive_path, "corrupt archive").await.unwrap();
+    let corrupted = service
+        .validate(&context)
+        .await
+        .expect("validation should surface the blocking archive corruption");
+    assert!(
+        corrupted
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("digest mismatch")),
+        "archive integrity must be checked before reporting a missing index"
+    );
+    assert!(
+        !corrupted
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(MISSING_HISTORY_INDEX_MESSAGE))
+    );
+    fs::write(&archive_path, archive_content)
+        .await
+        .expect("archive should restore");
 
     let error = service
         .history(&context, 1, 1)

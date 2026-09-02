@@ -53,10 +53,7 @@ impl KnowledgeMapService {
         let mut snapshot = self.load_or_initial().await?;
         snapshot
             .map
-            .ensure_software_model_route_snapshot(snapshot.archived_through)?;
-        snapshot
-            .map
-            .ensure_business_knowledge_route_snapshot(snapshot.archived_through)?;
+            .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
         snapshot
             .map
             .add_source_snapshot(source, snapshot.archived_through)?;
@@ -96,10 +93,7 @@ impl KnowledgeMapService {
         let mut snapshot = self.load_for_mutation().await?;
         snapshot
             .map
-            .ensure_software_model_route_snapshot(snapshot.archived_through)?;
-        snapshot
-            .map
-            .ensure_business_knowledge_route_snapshot(snapshot.archived_through)?;
+            .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
         let id = change.id.clone();
         snapshot
             .map
@@ -140,10 +134,7 @@ impl KnowledgeMapService {
         let mut snapshot = self.load_for_mutation().await?;
         snapshot
             .map
-            .ensure_software_model_route_snapshot(snapshot.archived_through)?;
-        snapshot
-            .map
-            .ensure_business_knowledge_route_snapshot(snapshot.archived_through)?;
+            .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
         snapshot
             .map
             .remove_source_snapshot(&id, snapshot.archived_through)?;

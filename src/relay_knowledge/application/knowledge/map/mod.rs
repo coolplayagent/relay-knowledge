@@ -95,13 +95,12 @@ impl KnowledgeMapService {
             let mut snapshot = self.load_for_mutation().await?;
             let (software_changed, business_changed, glossary_created) =
                 if self.map_type == RepositoryMapType::Knowledge {
+                    let (software_changed, business_changed) = snapshot
+                        .map
+                        .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
                     (
-                        snapshot
-                            .map
-                            .ensure_software_model_route_snapshot(snapshot.archived_through)?,
-                        snapshot
-                            .map
-                            .ensure_business_knowledge_route_snapshot(snapshot.archived_through)?,
+                        software_changed,
+                        business_changed,
                         self.ensure_default_business_glossary().await?,
                     )
                 } else {
@@ -194,7 +193,6 @@ impl KnowledgeMapService {
                 .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
             map.schema_version = KnowledgeMap::SCHEMA_VERSION;
             normalize_legacy_builtin_sources(&mut map);
-            map.validate()?;
             return Ok(MutableKnowledgeMap {
                 map_type: RepositoryMapType::Knowledge,
                 directories: baseline_directories(RepositoryMapType::Knowledge),
@@ -239,7 +237,11 @@ impl KnowledgeMapService {
             history: manifest.history.recent,
         };
         normalize_legacy_builtin_sources(&mut map);
-        map.validate_snapshot(manifest.history.archived_through)?;
+        if probe.schema_version != LEGACY_ARTIFACT_SCHEMA_VERSION
+            || self.map_type != RepositoryMapType::Knowledge
+        {
+            map.validate_snapshot(manifest.history.archived_through)?;
+        }
         Ok(MutableKnowledgeMap {
             map_type: self.map_type,
             directories: if manifest.directories.is_empty() {

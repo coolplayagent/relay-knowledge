@@ -6,7 +6,7 @@ use tokio::{fs, io::AsyncWriteExt};
 
 use crate::{
     api::RequestContext,
-    domain::RepositoryMapType,
+    domain::{KnowledgeMap, RepositoryMapType},
     project::{
         AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
         KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME,
@@ -20,8 +20,9 @@ use crate::{
 };
 
 use super::{
-    KnowledgeMapMutationResponse, KnowledgeMapService, KnowledgeMapServiceError,
-    WRITE_LOCK_TIMEOUT, ensure_owned_directory, read_root_file,
+    ARTIFACT_SCHEMA_VERSION, KnowledgeMapMutationResponse, KnowledgeMapSchemaProbe,
+    KnowledgeMapService, KnowledgeMapServiceError, LEGACY_ARTIFACT_SCHEMA_VERSION,
+    WRITE_LOCK_TIMEOUT, ensure_owned_directory, parse_manifest, parse_v1_map, read_root_file,
 };
 
 impl KnowledgeMapService {
@@ -41,6 +42,7 @@ impl KnowledgeMapService {
         let _legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
         let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
         let legacy_backup = self.validate_legacy_backup().await?;
+        let rollback_version = map_version_from_validated_legacy_content(&legacy_backup)?;
         let legacy = self.legacy_map_path();
         let rollback_prepared = self.legacy_rollback_prepared_path();
         let rollback_previous = self.legacy_rollback_previous_path();
@@ -130,10 +132,9 @@ impl KnowledgeMapService {
             return Err(error.into());
         }
         remove_regular_transition_file(&rollback_previous).await?;
-        let map = self.load_for_mutation().await?;
         Ok(self.mutation_response(
             context,
-            map.map.map_version,
+            rollback_version,
             "restored Knowledge Map v2 root; retained v3 data for forward recovery".to_owned(),
         ))
     }
@@ -451,6 +452,26 @@ async fn regular_file_exists_or_missing(path: &Path) -> Result<bool, KnowledgeMa
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error.into()),
     }
+}
+
+fn map_version_from_validated_legacy_content(
+    content: &str,
+) -> Result<u64, KnowledgeMapServiceError> {
+    let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
+        .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+    if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
+        return Ok(parse_v1_map(content)?.map_version);
+    }
+    if matches!(
+        probe.schema_version,
+        LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+    ) {
+        return Ok(parse_manifest(content)?.map_version);
+    }
+    Err(KnowledgeMapServiceError::Yaml(format!(
+        "unsupported schema_version {}",
+        probe.schema_version
+    )))
 }
 
 async fn restore_visible_rollback_roots(
