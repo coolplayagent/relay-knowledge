@@ -438,6 +438,39 @@ async fn validate_accepts_the_legacy_glossary_uri_in_the_legacy_namespace() {
 }
 
 #[tokio::test]
+async fn source_update_rejects_the_legacy_glossary_uri_before_publication() {
+    let (root, service, context) =
+        initialized_repository("reject-visible-legacy-glossary-uri").await;
+    let original = fs::read(service.map_path())
+        .await
+        .expect("visible v3 root should read");
+
+    let error = service
+        .update_source(
+            &context,
+            KnowledgeMapChange {
+                id: "repository-business-glossary".to_owned(),
+                topic: None,
+                kind: None,
+                uri: Some(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned()),
+                source_scope: None,
+                description: None,
+            },
+        )
+        .await
+        .expect_err("visible v3 mutations must reject the legacy glossary URI");
+
+    assert!(matches!(error, KnowledgeMapServiceError::Domain(_)));
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("rejected mutation must not rewrite the root"),
+        original
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn validate_rejects_the_legacy_glossary_uri_in_the_visible_v3_namespace() {
     let (root, service, context) = initialized_repository("visible-legacy-glossary-uri").await;
     let mut manifest = parse_manifest(

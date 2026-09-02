@@ -54,6 +54,9 @@ impl KnowledgeMapService {
             Err(error) => return Err(error),
         }
         if self.map_type == RepositoryMapType::Knowledge {
+            if let Some(path) = self.readable_retained_v3_root().await? {
+                return read_root_file(&self.repository_root, &path).await;
+            }
             match read_root_file(&self.repository_root, &self.legacy_map_path()).await {
                 Ok(content) if content.contains("artifact_kind: redirect") => {
                     return read_root_file(&self.repository_root, &path).await;
@@ -88,7 +91,8 @@ impl KnowledgeMapService {
         Ok(self.map_type == RepositoryMapType::Knowledge
             && fs::try_exists(self.legacy_map_path()).await?
             && !fs::try_exists(self.map_path()).await?
-            && !fs::try_exists(self.backup_path()).await?)
+            && !fs::try_exists(self.backup_path()).await?
+            && self.readable_retained_v3_root().await?.is_none())
     }
 
     pub(super) fn map_file_name(&self) -> &'static str {

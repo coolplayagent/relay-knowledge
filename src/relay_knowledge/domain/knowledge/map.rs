@@ -565,10 +565,7 @@ fn validate_software_model_source(source: &KnowledgeMapSource) -> Result<(), Dom
 fn validate_business_knowledge_source(source: &KnowledgeMapSource) -> Result<(), DomainError> {
     let compatible = source.topic == BUSINESS_KNOWLEDGE_TOPIC_ID
         && source.kind == KnowledgeMapSourceKind::File
-        && matches!(
-            source.uri.as_str(),
-            BUSINESS_GLOSSARY_RELATIVE_PATH | LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
-        )
+        && source.uri == BUSINESS_GLOSSARY_RELATIVE_PATH
         && source.source_scope.as_deref() == Some(BUSINESS_KNOWLEDGE_SOURCE_SCOPE);
     if compatible {
         return Ok(());

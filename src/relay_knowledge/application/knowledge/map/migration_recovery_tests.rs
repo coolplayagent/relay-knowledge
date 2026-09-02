@@ -173,6 +173,66 @@ async fn rollback_recovery_promotes_a_retained_fallback_only_root() {
     let _ = fs::remove_dir_all(root).await;
 }
 
+#[tokio::test]
+async fn rollback_transition_keeps_the_retained_v3_contract_readable() {
+    let (root, service, context) = migrated_v2_fixture("readable-rollback-transition").await;
+    let current_before = fs::read_to_string(service.map_path())
+        .await
+        .expect("v3 root should read");
+
+    fs::copy(
+        service.legacy_backup_path(),
+        service.legacy_rollback_prepared_path(),
+    )
+    .await
+    .expect("legacy rollback root should stage");
+    fs::rename(service.map_path(), service.retained_v3_path())
+        .await
+        .expect("current v3 root should move to retained recovery state");
+    fs::rename(service.backup_path(), service.retained_v3_backup_path())
+        .await
+        .expect("fallback v3 root should move to retained recovery state");
+
+    assert_eq!(
+        service
+            .read_root_content()
+            .await
+            .expect("retained v3 root should remain readable during rollback"),
+        current_before
+    );
+    assert_eq!(
+        service
+            .read_contract_dir_name()
+            .await
+            .expect("retained root must keep the v3 contract directory"),
+        AGENT_CONTRACT_DIR_NAME
+    );
+    assert!(
+        service
+            .route(&context, "software-model".to_owned())
+            .await
+            .expect("route reads should use the retained v3 root")
+            .route
+            .is_some()
+    );
+
+    let _legacy_lock = service
+        .acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT)
+        .await
+        .expect("legacy lock should acquire");
+    let _current_lock = service
+        .acquire_write_lock(WRITE_LOCK_TIMEOUT)
+        .await
+        .expect("current lock should acquire");
+    assert!(
+        !service
+            .recover_legacy_rollback_transition()
+            .await
+            .expect("recovery should restore the v3 root before legacy publication")
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
 async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, RequestContext) {
     let root = temp_root(label);
     fs::create_dir_all(&root)

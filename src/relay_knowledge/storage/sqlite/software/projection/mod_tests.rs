@@ -86,6 +86,53 @@ fn projection_all_kind_applies_small_limit_across_response_arrays() {
 }
 
 #[test]
+fn projection_all_kind_keeps_components_referenced_by_returned_dependency_usages() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES (
+                'repo', 'scope-1', 'handwritten-rust', 'src/lib.rs', 'rust', 'parsed'
+            )",
+            [],
+        )
+        .expect("handwritten file should insert");
+    connection
+        .execute(
+            "INSERT INTO code_repository_imports (
+                repository_id, source_scope, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, line_start, line_end
+            ) VALUES (
+                'repo', 'scope-1', 'handwritten-rust', 'src/lib.rs',
+                'use serde::Serialize;', 'use serde::Serialize;', 'external', 9000, 1, 1
+            )",
+            [],
+        )
+        .expect("handwritten import should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        2,
+    )
+    .expect("request should validate");
+    let projection = projection(&mut connection, request).expect("projection should load");
+
+    assert_eq!(projection.components.len(), 1);
+    assert_eq!(projection.dependency_usages.len(), 1);
+    assert!(projection.components.iter().any(|component| {
+        component.component_id == projection.dependency_usages[0].component_id
+    }));
+}
+
+#[test]
 fn projection_query_rejects_unindexed_refs() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);

@@ -22,7 +22,8 @@ use crate::{
 use super::{
     ARTIFACT_SCHEMA_VERSION, KnowledgeMapMutationResponse, KnowledgeMapSchemaProbe,
     KnowledgeMapService, KnowledgeMapServiceError, LEGACY_ARTIFACT_SCHEMA_VERSION,
-    WRITE_LOCK_TIMEOUT, ensure_owned_directory, parse_manifest, parse_v1_map, read_root_file,
+    WRITE_LOCK_TIMEOUT, ensure_owned_directory, parse_manifest, parse_v1_map_for_legacy_recovery,
+    read_root_file,
 };
 
 impl KnowledgeMapService {
@@ -311,6 +312,22 @@ impl KnowledgeMapService {
         Ok(false)
     }
 
+    pub(super) async fn readable_retained_v3_root(
+        &self,
+    ) -> Result<Option<PathBuf>, KnowledgeMapServiceError> {
+        if self.map_type != RepositoryMapType::Knowledge
+            || !regular_file_exists_or_missing(&self.legacy_rollback_prepared_path()).await?
+        {
+            return Ok(None);
+        }
+        for path in [self.retained_v3_path(), self.retained_v3_backup_path()] {
+            if regular_file_exists_or_missing(&path).await? {
+                return Ok(Some(path));
+            }
+        }
+        Ok(None)
+    }
+
     async fn converge_legacy_redirect(&self) -> Result<(), KnowledgeMapServiceError> {
         let yaml = format!(
             "schema_version: 3\nartifact_kind: redirect\nmap_type: knowledge\ntarget: {KNOWLEDGE_MAP_RELATIVE_PATH}\n"
@@ -412,7 +429,7 @@ impl KnowledgeMapService {
             .join(LEGACY_KNOWLEDGE_MAP_REDIRECT_PREVIOUS_FILE_NAME)
     }
 
-    fn legacy_rollback_prepared_path(&self) -> PathBuf {
+    pub(super) fn legacy_rollback_prepared_path(&self) -> PathBuf {
         self.repository_root
             .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
             .join(LEGACY_KNOWLEDGE_MAP_ROLLBACK_PREPARED_FILE_NAME)
@@ -461,7 +478,7 @@ fn map_version_from_validated_legacy_content(
     let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
         .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
     if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
-        return Ok(parse_v1_map(content)?.map_version);
+        return Ok(parse_v1_map_for_legacy_recovery(content)?.map_version);
     }
     if matches!(
         probe.schema_version,

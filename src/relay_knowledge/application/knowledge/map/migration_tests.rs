@@ -179,12 +179,11 @@ async fn migration_repairs_legacy_reserved_sources_without_route_membership() {
             .source_order
             .clear();
     }
-    fs::write(
-        root.join(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH),
-        serde_norway::to_string(&legacy).expect("repairable legacy map should serialize"),
-    )
-    .await
-    .expect("repairable legacy map should write");
+    let legacy_yaml =
+        serde_norway::to_string(&legacy).expect("repairable legacy map should serialize");
+    fs::write(root.join(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH), &legacy_yaml)
+        .await
+        .expect("repairable legacy map should write");
     let service = KnowledgeMapService::new(root.clone());
     let context = RequestContext::for_interface(InterfaceKind::Cli);
 
@@ -208,6 +207,16 @@ async fn migration_repairs_legacy_reserved_sources_without_route_membership() {
             .expect("reserved route should remain visible");
         assert!(route.source_order.iter().any(|entry| entry == source));
     }
+    service
+        .rollback_v3(&context)
+        .await
+        .expect("repairable legacy sources should remain rollbackable");
+    assert_eq!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("rolled-back legacy root should read"),
+        legacy_yaml
+    );
     let _ = fs::remove_dir_all(root).await;
 }
 
