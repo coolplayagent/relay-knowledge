@@ -6,7 +6,7 @@ use tokio::{fs, io::AsyncWriteExt};
 
 use crate::{
     api::RequestContext,
-    domain::{KnowledgeMap, RepositoryMapType},
+    domain::{BusinessGlossary, KnowledgeMap, RepositoryMapType},
     project::{
         AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
         KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME,
@@ -209,13 +209,13 @@ impl KnowledgeMapService {
             .join(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH);
         let glossary = self.business_glossary_path();
         let legacy_glossary_exists = regular_file_exists_or_missing(&legacy_glossary).await?;
-        let glossary_exists = regular_file_exists_or_missing(&glossary).await?;
-        if legacy_glossary_exists && !glossary_exists {
+        if legacy_glossary_exists {
             if let Some(parent) = glossary.parent() {
                 ensure_owned_directory(&self.repository_root, parent).await?;
             }
             let content = read_root_file(&self.repository_root, &legacy_glossary).await?;
-            write_new_synced_file(&glossary, content.as_bytes()).await?;
+            BusinessGlossary::parse(content.as_bytes())?;
+            write_synced_file(&glossary, content.as_bytes()).await?;
         }
         if let Some(parent) = current.parent() {
             ensure_owned_directory(&self.repository_root, parent).await?;
@@ -227,6 +227,12 @@ impl KnowledgeMapService {
     pub(super) async fn publish_legacy_redirect(&self) -> Result<(), KnowledgeMapServiceError> {
         if self.map_type != RepositoryMapType::Knowledge {
             return Ok(());
+        }
+        let current = read_root_file(&self.repository_root, &self.map_path()).await?;
+        if !self.validate_visible_v3_map_content(&current).await? {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "legacy redirect publication requires a complete v3 visible root".to_owned(),
+            ));
         }
         self.converge_legacy_redirect().await
     }
@@ -259,6 +265,10 @@ impl KnowledgeMapService {
             || !path_entry_exists(&self.map_path()).await?
             || !path_entry_exists(&self.legacy_backup_path()).await?
         {
+            return Ok(());
+        }
+        let current = read_root_file(&self.repository_root, &self.map_path()).await?;
+        if !self.validate_visible_v3_map_content(&current).await? {
             return Ok(());
         }
         self.converge_legacy_redirect().await
@@ -538,6 +548,19 @@ async fn write_new_synced_file(
         let _ = fs::remove_file(path).await;
         return Err(error.into());
     }
+    Ok(())
+}
+
+async fn write_synced_file(path: &Path, content: &[u8]) -> Result<(), KnowledgeMapServiceError> {
+    regular_file_exists_or_missing(path).await?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .await?;
+    file.write_all(content).await?;
+    file.sync_all().await?;
     Ok(())
 }
 

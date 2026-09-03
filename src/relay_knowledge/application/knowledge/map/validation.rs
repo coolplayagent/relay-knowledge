@@ -85,6 +85,28 @@ impl KnowledgeMapService {
         .await
     }
 
+    /// Confirms that a visible root has reached the current v3 publication contract.
+    ///
+    /// Older roots are valid migration inputs, but must not trigger legacy-reader
+    /// redirect publication before the v3 root and its referenced artifacts validate.
+    pub(super) async fn validate_visible_v3_map_content(
+        &self,
+        content: &str,
+    ) -> Result<bool, KnowledgeMapServiceError> {
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+            return Ok(false);
+        }
+        self.validate_map_content_with_policy(
+            self.contract_dir_name(),
+            content,
+            MapContentValidation::CurrentContract,
+        )
+        .await?;
+        Ok(true)
+    }
+
     async fn validate_map_content_with_policy(
         &self,
         contract_dir: &str,

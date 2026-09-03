@@ -8,8 +8,10 @@ use tokio::fs;
 use super::*;
 use crate::{
     api::{InterfaceKind, RequestContext},
+    domain::BusinessGlossary,
     project::{
-        AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_TOPICS_DIR_NAME, LEGACY_AGENT_CONTRACT_DIR_NAME,
+        AGENT_CONTRACT_DIR_NAME, BUSINESS_GLOSSARY_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
+        LEGACY_AGENT_CONTRACT_DIR_NAME, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
     },
 };
 
@@ -91,6 +93,85 @@ async fn migration_refreshes_the_rollback_backup_from_the_active_v2_root() {
             .await
             .expect("restored refreshed root should read"),
         active_v2_root
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn migration_refreshes_the_canonical_glossary_from_the_active_legacy_glossary() {
+    let (root, service, context) = migrated_v2_fixture("refresh-legacy-glossary").await;
+
+    service
+        .rollback_v3(&context)
+        .await
+        .expect("rollback should restore the v2 root");
+    let canonical_glossary = root.join(BUSINESS_GLOSSARY_RELATIVE_PATH);
+    let canonical_before = fs::read(&canonical_glossary)
+        .await
+        .expect("canonical glossary should remain after rollback");
+    let active_legacy_glossary =
+        b"schema_version: 1\ndomains:\n  - id: sales\n    name: Sales\nterms: []\n";
+    BusinessGlossary::parse(active_legacy_glossary)
+        .expect("active legacy glossary fixture should validate");
+    fs::write(
+        root.join(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH),
+        active_legacy_glossary,
+    )
+    .await
+    .expect("legacy writer should update its glossary");
+
+    service
+        .migrate_to_v3(&context)
+        .await
+        .expect("forward migration should refresh the canonical glossary");
+
+    assert_ne!(canonical_before, active_legacy_glossary);
+    assert_eq!(
+        fs::read(&canonical_glossary)
+            .await
+            .expect("canonical glossary should read"),
+        active_legacy_glossary
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn redirect_recovery_defers_legacy_redirect_until_visible_v3_publication() {
+    let (root, service, _context) = legacy_v2_fixture("defer-legacy-redirect").await;
+    let legacy = service.legacy_map_path();
+    let legacy_before = fs::read(&legacy).await.expect("legacy root should read");
+
+    service
+        .prepare_legacy_migration()
+        .await
+        .expect("migration preparation should publish the v2 staging root");
+    let visible_before = fs::read(service.map_path())
+        .await
+        .expect("visible staging root should read");
+    assert!(visible_before.starts_with(b"schema_version: 2\n"));
+
+    let error = service
+        .publish_legacy_redirect()
+        .await
+        .expect_err("a v2 staging root must not publish the legacy redirect");
+    assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
+
+    service
+        .recover_legacy_redirect_transition()
+        .await
+        .expect("redirect recovery should defer the incomplete v3 publication");
+
+    assert_eq!(
+        fs::read(&legacy)
+            .await
+            .expect("legacy root should remain readable"),
+        legacy_before
+    );
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("visible staging root should remain available for conversion"),
+        visible_before
     );
     let _ = fs::remove_dir_all(root).await;
 }
