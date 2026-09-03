@@ -126,14 +126,22 @@ fn retain_entities_referenced_by_statements(
             .filter(|entity_key| !retained_entity_counts.contains_key(**entity_key))
             .copied()
             .collect::<Vec<_>>();
+        let mut replaceable_entity_counts = retained_entity_counts.clone();
         let replacement_indices = slices
             .entities
             .iter()
             .enumerate()
             .filter_map(|(index, entity)| {
-                (!required_entity_keys.contains(&entity.entity_key)
-                    && !referenced_entity_keys.contains(entity.entity_key.as_str()))
-                .then_some(index)
+                let remaining_count = replaceable_entity_counts
+                    .get_mut(&entity.entity_key)
+                    .expect("replacement candidates must be retained");
+                let entity_key_is_required = required_entity_keys.contains(&entity.entity_key)
+                    || referenced_entity_keys.contains(entity.entity_key.as_str());
+                if entity_key_is_required && *remaining_count == 1 {
+                    return None;
+                }
+                *remaining_count -= 1;
+                Some(index)
             })
             .take(missing_entity_keys.len())
             .collect::<Vec<_>>();

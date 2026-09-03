@@ -56,6 +56,31 @@ fn statement_budget_never_replaces_an_endpoint_of_the_statement_being_retained()
 }
 
 #[test]
+fn statement_budget_replaces_duplicate_endpoint_occurrences_when_one_remains() {
+    let mut slices = ProjectionSlices {
+        entities: vec![
+            entity_with_occurrence("subject", "first"),
+            entity_with_occurrence("subject", "second"),
+            entity("object"),
+        ],
+        statements: vec![statement("subject", Some("object"))],
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 3);
+
+    assert_eq!(slices.statements.len(), 1);
+    assert_eq!(
+        slices
+            .entities
+            .iter()
+            .map(|entity| entity.entity_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["object", "subject"]
+    );
+}
+
+#[test]
 fn statement_budget_skips_unrepresentable_candidates_to_fill_its_allocation() {
     let mut slices = ProjectionSlices {
         entities: vec![entity("available")],
@@ -70,9 +95,13 @@ fn statement_budget_skips_unrepresentable_candidates_to_fill_its_allocation() {
 }
 
 fn entity(entity_key: &str) -> SoftwareEntity {
+    entity_with_occurrence(entity_key, entity_key)
+}
+
+fn entity_with_occurrence(entity_key: &str, occurrence_id: &str) -> SoftwareEntity {
     SoftwareEntity {
         entity_key: entity_key.to_owned(),
-        occurrence_id: format!("occurrence-{entity_key}"),
+        occurrence_id: format!("occurrence-{occurrence_id}"),
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         entity_kind: SoftwareEntityKind::Component,
