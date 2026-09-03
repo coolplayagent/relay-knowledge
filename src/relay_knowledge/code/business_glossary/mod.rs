@@ -120,7 +120,7 @@ pub(crate) fn load_business_knowledge_projection(
             .iter()
             .find(|source| &source.id == source_id)
             .ok_or_else(|| invalid(format!("route references missing source '{source_id}'")))?;
-        validate_routed_source(source)?;
+        validate_routed_source(source, map_path == LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH)?;
         validate_repository_path(&source.uri)?;
         let size =
             snapshot_blob_size(root, resolved_commit_sha, &source.uri)?.ok_or_else(|| {
@@ -325,7 +325,10 @@ fn validate_v2_ref(reference: &V2TopicRef, contract_dir: &str) -> Result<(), Cod
     validate_repository_path(&format!("{contract_dir}/{}", reference.shard_ref))
 }
 
-fn validate_routed_source(source: &KnowledgeMapSource) -> Result<(), CodeIndexError> {
+fn validate_routed_source(
+    source: &KnowledgeMapSource,
+    legacy_contract: bool,
+) -> Result<(), CodeIndexError> {
     if source.topic != BUSINESS_TOPIC_ID
         || source.kind != KnowledgeMapSourceKind::File
         || source.source_scope.as_deref() != Some("repo")
@@ -334,6 +337,16 @@ fn validate_routed_source(source: &KnowledgeMapSource) -> Result<(), CodeIndexEr
         return Err(invalid(format!(
             "business source '{}' must be an active repository-scoped file",
             source.id
+        )));
+    }
+    let expected_uri = if legacy_contract {
+        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+    } else {
+        BUSINESS_GLOSSARY_RELATIVE_PATH
+    };
+    if source.uri != expected_uri {
+        return Err(invalid(format!(
+            "reserved source 'repository-business-glossary' must use uri '{expected_uri}'"
         )));
     }
     Ok(())

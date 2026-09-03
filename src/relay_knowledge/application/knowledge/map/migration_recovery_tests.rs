@@ -339,6 +339,53 @@ async fn redirect_recovery_defers_legacy_redirect_until_visible_v3_publication()
 }
 
 #[tokio::test]
+async fn rollback_discards_initial_forward_staging_and_keeps_the_live_legacy_root() {
+    let (root, service, context) = legacy_v2_fixture("initial-forward-rollback").await;
+    let legacy_before = fs::read(service.legacy_map_path())
+        .await
+        .expect("legacy root should read");
+
+    service
+        .prepare_legacy_migration()
+        .await
+        .expect("initial migration should publish only legacy staging");
+    assert!(
+        !service
+            .validate_visible_v3_map_content(
+                &fs::read_to_string(service.map_path())
+                    .await
+                    .expect("initial staging root should read"),
+            )
+            .await
+            .expect("initial staging root should validate as incomplete")
+    );
+    assert!(
+        !fs::try_exists(service.retained_v3_path())
+            .await
+            .expect("initial migration must not invent a retained v3 root")
+    );
+
+    let response = service
+        .rollback_v3(&context)
+        .await
+        .expect("rollback should discard initial staging without a retained v3 root");
+
+    assert_eq!(
+        fs::read(service.legacy_map_path())
+            .await
+            .expect("live legacy root should remain readable"),
+        legacy_before
+    );
+    assert!(
+        !fs::try_exists(service.map_path())
+            .await
+            .expect("initial staging root should be removed")
+    );
+    assert!(response.summary.contains("initial migration staging"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn redirect_recovery_preserves_legacy_edits_after_v3_publication() {
     let (root, service, context) =
         migrated_v2_fixture("preserve-post-publication-legacy-edits").await;

@@ -34,6 +34,37 @@ fn statement_budget_replaces_unrelated_entities_with_its_resolved_endpoints() {
 }
 
 #[test]
+fn statement_budget_reclaims_surplus_capacity_for_its_resolved_endpoints() {
+    let mut slices = ProjectionSlices {
+        components: vec![component("first"), component("second")],
+        entities: vec![entity("subject"), entity("object")],
+        statements: vec![statement("subject", Some("object"))],
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 4);
+
+    assert_eq!(slices.components.len(), 1);
+    assert_eq!(slices.entities.len(), 2);
+    assert_eq!(slices.statements.len(), 1);
+    assert_eq!(
+        slices.components.len() + slices.entities.len() + slices.statements.len(),
+        4
+    );
+    assert!(
+        slices
+            .entities
+            .iter()
+            .any(|entity| { entity.entity_key == slices.statements[0].subject_id })
+    );
+    assert!(
+        slices.entities.iter().any(|entity| {
+            entity.entity_key == slices.statements[0].object_id.as_deref().unwrap()
+        })
+    );
+}
+
+#[test]
 fn statement_budget_keeps_the_first_representable_statement_and_recovers_entity_capacity() {
     let mut slices = ProjectionSlices {
         entities: vec![entity("previous"), entity("subject"), entity("object")],

@@ -174,6 +174,75 @@ history:
 }
 
 #[test]
+fn rejects_a_v3_reserved_glossary_source_with_a_noncanonical_uri() {
+    let repository = TestRepository::new();
+    fs::create_dir_all(repository.path().join("knowledge/topics"))
+        .expect("topic directory should create");
+    fs::create_dir_all(repository.path().join("docs")).expect("docs directory should create");
+    fs::write(
+        repository.path().join("docs/glossary.yaml"),
+        "schema_version: 1\ndomains: []\nterms: []\n",
+    )
+    .expect("noncanonical glossary should write");
+    let shard = concat!(
+        "schema_version: 3\n",
+        "topic:\n",
+        "  id: business-knowledge\n",
+        "  title: Business knowledge\n",
+        "  description: Authored glossary\n",
+        "sources:\n",
+        "  - id: repository-business-glossary\n",
+        "    topic: business-knowledge\n",
+        "    kind: file\n",
+        "    uri: docs/glossary.yaml\n",
+        "    read_policy: direct\n",
+        "    write_policy: manual-review\n",
+        "    status: active\n",
+        "    version: 1\n",
+        "    source_scope: repo\n",
+        "route:\n",
+        "  topic: business-knowledge\n",
+        "  source_order: [repository-business-glossary]\n",
+    );
+    let digest = super::sha256(shard.as_bytes());
+    let shard_ref = format!("topics/topic-business-knowledge-{digest}.yaml");
+    let manifest = format!(
+        "schema_version: 3\nmap_version: 1\nupdated_at: unix:1\ntopics:\n  - id: business-knowledge\n    title: Business knowledge\n    description: Authored glossary\n    source_ids: [repository-business-glossary]\n    ref: {shard_ref}\n    digest: {digest}\nhistory:\n  recent: []\n  archived_through: 0\n"
+    );
+    fs::write(
+        repository.path().join("knowledge/knowledge-map.yaml"),
+        manifest,
+    )
+    .expect("v3 manifest should write");
+    fs::write(repository.path().join("knowledge").join(&shard_ref), shard)
+        .expect("v3 topic shard should write");
+    git(&repository, &["init"]);
+    git(
+        &repository,
+        &["config", "user.email", "tests@example.invalid"],
+    );
+    git(
+        &repository,
+        &["config", "user.name", "Relay Knowledge Tests"],
+    );
+    git(&repository, &["add", "knowledge", "docs"]);
+    git(
+        &repository,
+        &["commit", "-m", "Add noncanonical v3 business source"],
+    );
+    let commit = git(&repository, &["rev-parse", "HEAD"]);
+
+    let error = load_business_knowledge_projection(&registration(&repository), "scope-1", &commit)
+        .expect_err("v3 reserved glossary URI must remain canonical");
+
+    assert!(
+        error
+            .to_string()
+            .contains("uri 'knowledge/glossary/business-glossary.yaml'")
+    );
+}
+
+#[test]
 fn rejects_v2_route_with_a_dangling_non_glossary_source() {
     let repository = TestRepository::new();
     fs::create_dir_all(repository.path().join(".knowledge/topics"))

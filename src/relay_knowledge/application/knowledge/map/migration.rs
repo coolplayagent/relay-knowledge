@@ -23,7 +23,7 @@ use super::{
     ARTIFACT_SCHEMA_VERSION, KnowledgeMapMutationResponse, KnowledgeMapSchemaProbe,
     KnowledgeMapService, KnowledgeMapServiceError, LEGACY_ARTIFACT_SCHEMA_VERSION,
     WRITE_LOCK_TIMEOUT, ensure_owned_directory, parse_manifest, parse_v1_map_for_legacy_recovery,
-    read_root_file,
+    read_root_file, temporary_path,
 };
 
 const MAX_LEGACY_MIGRATION_ARTIFACT_FILES: usize = 1_024;
@@ -46,7 +46,17 @@ impl KnowledgeMapService {
         self.require_knowledge_map("map migrate --rollback")?;
         let _legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
         let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
-        self.discard_incomplete_forward_migration_staging().await?;
+        if self.discard_incomplete_forward_migration_staging().await? {
+            let active_legacy =
+                read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
+            let rollback_version = map_version_from_validated_legacy_content(&active_legacy)?;
+            return Ok(self.mutation_response(
+                context,
+                rollback_version,
+                "discarded incomplete initial migration staging; legacy Knowledge Map remains active"
+                    .to_owned(),
+            ));
+        }
         if self.recover_legacy_rollback_transition().await? {
             let restored_legacy =
                 read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
@@ -225,7 +235,7 @@ impl KnowledgeMapService {
             }
             let content = read_root_file(&self.repository_root, &legacy_glossary).await?;
             BusinessGlossary::parse(content.as_bytes())?;
-            write_synced_file(&glossary, content.as_bytes()).await?;
+            replace_with_new_synced_file(&glossary, content.as_bytes()).await?;
         }
         if let Some(parent) = current.parent() {
             ensure_owned_directory(&self.repository_root, parent).await?;
@@ -377,26 +387,29 @@ impl KnowledgeMapService {
 
     async fn discard_incomplete_forward_migration_staging(
         &self,
-    ) -> Result<(), KnowledgeMapServiceError> {
+    ) -> Result<bool, KnowledgeMapServiceError> {
         if self.map_type != RepositoryMapType::Knowledge {
-            return Ok(());
+            return Ok(false);
         }
         let current = self.map_path();
         if !regular_file_exists_or_missing(&current).await? {
-            return Ok(());
+            return Ok(false);
         }
         let current_content = read_root_file(&self.repository_root, &current).await?;
         if self
             .validate_visible_v3_map_content(&current_content)
             .await?
         {
-            return Ok(());
+            return Ok(false);
         }
         let retained = self.retained_v3_path();
         if !regular_file_exists_or_missing(&retained).await? {
-            return Err(KnowledgeMapServiceError::Integrity(
-                "incomplete forward migration has no retained v3 root to preserve".to_owned(),
-            ));
+            let active_legacy =
+                read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
+            self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &active_legacy)
+                .await?;
+            remove_regular_transition_file(&current).await?;
+            return Ok(true);
         }
         let retained_content = read_root_file(&self.repository_root, &retained).await?;
         if !self
@@ -407,7 +420,8 @@ impl KnowledgeMapService {
                 "incomplete forward migration retained root is not a complete v3 map".to_owned(),
             ));
         }
-        remove_regular_transition_file(&current).await
+        remove_regular_transition_file(&current).await?;
+        Ok(false)
     }
 
     async fn converge_legacy_redirect(&self) -> Result<(), KnowledgeMapServiceError> {
@@ -633,16 +647,17 @@ async fn write_new_synced_file(
     Ok(())
 }
 
-async fn write_synced_file(path: &Path, content: &[u8]) -> Result<(), KnowledgeMapServiceError> {
+async fn replace_with_new_synced_file(
+    path: &Path,
+    content: &[u8],
+) -> Result<(), KnowledgeMapServiceError> {
     regular_file_exists_or_missing(path).await?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-        .await?;
-    file.write_all(content).await?;
-    file.sync_all().await?;
+    let temporary = temporary_path(path);
+    write_new_synced_file(&temporary, content).await?;
+    if let Err(error) = fs::rename(&temporary, path).await {
+        let _ = fs::remove_file(&temporary).await;
+        return Err(error.into());
+    }
     Ok(())
 }
 
