@@ -128,7 +128,9 @@ fn retain_entities_referenced_by_statements(
             .iter()
             .enumerate()
             .filter_map(|(index, entity)| {
-                (!required_entity_keys.contains(&entity.entity_key)).then_some(index)
+                (!required_entity_keys.contains(&entity.entity_key)
+                    && !referenced_entity_keys.contains(entity.entity_key.as_str()))
+                .then_some(index)
             })
             .take(missing_entity_keys.len())
             .collect::<Vec<_>>();

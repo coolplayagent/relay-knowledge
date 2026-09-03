@@ -32,6 +32,29 @@ fn statement_budget_replaces_unrelated_entities_with_its_resolved_endpoints() {
     );
 }
 
+#[test]
+fn statement_budget_never_replaces_an_endpoint_of_the_statement_being_retained() {
+    let mut slices = ProjectionSlices {
+        entities: vec![entity("previous"), entity("subject"), entity("object")],
+        statements: vec![
+            statement("previous", None),
+            statement("subject", Some("object")),
+        ],
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 4);
+
+    assert_eq!(slices.statements.len(), 1);
+    assert_eq!(slices.statements[0].subject_id, "previous");
+    assert!(
+        slices
+            .entities
+            .iter()
+            .all(|entity| entity.entity_key != "object")
+    );
+}
+
 fn entity(entity_key: &str) -> SoftwareEntity {
     SoftwareEntity {
         entity_key: entity_key.to_owned(),
