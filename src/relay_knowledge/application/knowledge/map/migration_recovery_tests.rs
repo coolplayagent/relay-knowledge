@@ -408,20 +408,12 @@ async fn rollback_transition_keeps_the_retained_v3_contract_readable() {
         .await
         .expect("fallback v3 root should move to retained recovery state");
 
-    assert_eq!(
-        service
-            .read_root_content()
-            .await
-            .expect("retained v3 root should remain readable during rollback"),
-        current_before
-    );
-    assert_eq!(
-        service
-            .read_contract_dir_name()
-            .await
-            .expect("retained root must keep the v3 contract directory"),
-        AGENT_CONTRACT_DIR_NAME
-    );
+    let snapshot = service
+        .read_root_snapshot()
+        .await
+        .expect("retained v3 root should keep its selected contract directory");
+    assert_eq!(snapshot.content, current_before);
+    assert_eq!(snapshot.contract_dir, AGENT_CONTRACT_DIR_NAME);
     assert!(
         service
             .route(&context, "software-model".to_owned())
@@ -445,6 +437,48 @@ async fn rollback_transition_keeps_the_retained_v3_contract_readable() {
             .await
             .expect("recovery should restore the v3 root before legacy publication")
     );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn rollback_discards_incomplete_forward_staging_without_replacing_retained_v3() {
+    let (root, service, context) = migrated_v2_fixture("incomplete-forward-rollback").await;
+    service
+        .rollback_v3(&context)
+        .await
+        .expect("clean rollback should retain the v3 root");
+    let retained_before = fs::read_to_string(service.retained_v3_path())
+        .await
+        .expect("retained v3 root should read");
+
+    service
+        .prepare_legacy_migration()
+        .await
+        .expect("forward migration should stage the legacy root before publication");
+    assert!(
+        !service
+            .validate_visible_v3_map_content(
+                &fs::read_to_string(service.map_path())
+                    .await
+                    .expect("staged forward root should read"),
+            )
+            .await
+            .expect("staged legacy root should not be v3")
+    );
+
+    let response = service
+        .rollback_v3(&context)
+        .await
+        .expect("rollback should discard incomplete forward staging");
+
+    assert_eq!(
+        fs::read_to_string(service.retained_v3_path())
+            .await
+            .expect("retained v3 root should remain intact"),
+        retained_before
+    );
+    assert!(!fs::try_exists(service.map_path()).await.unwrap());
+    assert!(response.summary.contains("already active"));
     let _ = fs::remove_dir_all(root).await;
 }
 

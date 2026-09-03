@@ -160,6 +160,30 @@ fn dependency_usage_target_selection_preserves_component_evidence_order() {
     );
 }
 
+#[test]
+fn rejected_statements_redistribute_capacity_to_dependency_usage_candidates() {
+    let mut slices = ProjectionSlices {
+        components: vec![component("available")],
+        dependency_usages: (0..8)
+            .map(|index| dependency_usage(&format!("available-{index}")))
+            .map(|mut usage| {
+                usage.component_id = "available".to_owned();
+                usage
+            })
+            .collect(),
+        entities: vec![entity("available")],
+        statements: (0..8).map(|_| statement("unavailable", None)).collect(),
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 10);
+
+    assert_eq!(slices.components.len(), 1);
+    assert_eq!(slices.entities.len(), 1);
+    assert!(slices.statements.is_empty());
+    assert_eq!(slices.dependency_usages.len(), 8);
+}
+
 fn entity(entity_key: &str) -> SoftwareEntity {
     entity_with_occurrence(entity_key, entity_key)
 }

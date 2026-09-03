@@ -62,11 +62,10 @@ impl KnowledgeMapService {
     }
 
     pub(super) async fn validate_map_contract(&self) -> Result<(), KnowledgeMapServiceError> {
-        let content = self.read_root_content().await?;
-        let contract_dir = self.read_contract_dir_name().await?;
+        let root = self.read_root_snapshot().await?;
         self.validate_map_content_with_policy(
-            contract_dir,
-            &content,
+            root.contract_dir,
+            &root.content,
             MapContentValidation::CurrentContract,
         )
         .await

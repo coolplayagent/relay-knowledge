@@ -33,13 +33,6 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
         ],
         total_limit,
     );
-    let retained_component_indices = retain_components_referenced_by_dependency_usages(
-        &component_candidates,
-        &component_indices_by_id,
-        &mut slices.dependency_usages,
-        initial_budgets[0],
-        initial_budgets[1],
-    );
     let entity_candidates = std::mem::take(&mut slices.entities);
     let retained_entity_indices = retain_entities_referenced_by_statements(
         &entity_candidates,
@@ -78,13 +71,21 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
         total_limit,
     );
 
+    let (retained_component_indices, dependency_usages) =
+        retain_components_referenced_by_dependency_usages(
+            &component_candidates,
+            &component_indices_by_id,
+            &slices.dependency_usages,
+            components,
+            dependency_usages,
+        );
     slices.components = selected_components(
         &component_candidates,
         &retained_component_indices,
         components,
     );
     debug_assert_eq!(slices.components.len(), components);
-    slices.dependency_usages.truncate(dependency_usages);
+    slices.dependency_usages = dependency_usages;
     slices.sdk_usages.truncate(sdk_usages);
     slices.files.truncate(files);
     slices.topics.truncate(topics);
@@ -225,10 +226,10 @@ fn selected_entities(
 fn retain_components_referenced_by_dependency_usages(
     component_candidates: &[super::SoftwareComponent],
     component_indices_by_id: &HashMap<&str, usize>,
-    dependency_usages: &mut Vec<super::SoftwareDependencyUsage>,
+    dependency_usages: &[super::SoftwareDependencyUsage],
     component_limit: usize,
     dependency_usage_limit: usize,
-) -> BTreeSet<usize> {
+) -> (BTreeSet<usize>, Vec<super::SoftwareDependencyUsage>) {
     let mut retained_indices =
         (0..component_candidates.len().min(component_limit)).collect::<BTreeSet<_>>();
     let mut retained_component_ids = retained_indices
@@ -238,10 +239,7 @@ fn retain_components_referenced_by_dependency_usages(
     let mut required_component_ids = HashSet::new();
     let mut retained_usages = Vec::with_capacity(dependency_usage_limit);
 
-    for usage in std::mem::take(dependency_usages)
-        .into_iter()
-        .take(dependency_usage_limit)
-    {
+    for usage in dependency_usages.iter().take(dependency_usage_limit) {
         let component_id = usage.component_id.as_str();
         let Some(target_index) = component_indices_by_id.get(component_id).copied() else {
             continue;
@@ -265,10 +263,9 @@ fn retain_components_referenced_by_dependency_usages(
             retained_component_ids.insert(component_candidates[target_index].component_id.as_str());
         }
         required_component_ids.insert(component_candidates[target_index].component_id.as_str());
-        retained_usages.push(usage);
+        retained_usages.push(usage.clone());
     }
-    *dependency_usages = retained_usages;
-    retained_indices
+    (retained_indices, retained_usages)
 }
 
 fn selected_components(

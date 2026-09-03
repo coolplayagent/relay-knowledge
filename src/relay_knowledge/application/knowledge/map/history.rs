@@ -60,12 +60,12 @@ impl KnowledgeMapService {
         from_version: u64,
         limit: usize,
     ) -> Result<(u64, Vec<KnowledgeMapHistoryEntry>), KnowledgeMapServiceError> {
-        let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+        let root = self.read_root_snapshot().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&root.content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         match probe.schema_version {
             1 => {
-                let map = super::parse_v1_map(&content)?;
+                let map = super::parse_v1_map(&root.content)?;
                 let entries = map
                     .history
                     .into_iter()
@@ -75,10 +75,10 @@ impl KnowledgeMapService {
                 Ok((map.map_version, entries))
             }
             LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION => {
-                let manifest = parse_manifest(&content)?;
+                let manifest = parse_manifest(&root.content)?;
                 self.validate_manifest_identity(&manifest)?;
                 let entries = self
-                    .load_v2_history_page(&manifest, from_version, limit)
+                    .load_v2_history_page(&manifest, root.contract_dir, from_version, limit)
                     .await?;
                 Ok((manifest.map_version, entries))
             }
@@ -91,6 +91,7 @@ impl KnowledgeMapService {
     async fn load_v2_history_page(
         &self,
         manifest: &KnowledgeMapManifest,
+        contract_dir: &str,
         from_version: u64,
         limit: usize,
     ) -> Result<Vec<KnowledgeMapHistoryEntry>, KnowledgeMapServiceError> {
@@ -119,7 +120,9 @@ impl KnowledgeMapService {
             })?;
             let mut target = from_version;
             while target <= through_version && target <= manifest.history.archived_through {
-                let (archive, _, reads) = self.load_indexed_history_archive(index, target).await?;
+                let (archive, _, reads) = self
+                    .load_indexed_history_archive_in(contract_dir, index, target)
+                    .await?;
                 if reads > MAX_HISTORY_LOOKUP_READS {
                     return Err(KnowledgeMapServiceError::Integrity(
                         "history archive index exceeded its lookup read budget".to_owned(),
@@ -397,6 +400,7 @@ impl KnowledgeMapService {
         })
     }
 
+    #[cfg(test)]
     pub(super) async fn load_indexed_history_archive(
         &self,
         root: &KnowledgeMapHistoryIndexRef,

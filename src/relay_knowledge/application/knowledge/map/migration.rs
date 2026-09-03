@@ -46,6 +46,7 @@ impl KnowledgeMapService {
         self.require_knowledge_map("map migrate --rollback")?;
         let _legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
         let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        self.discard_incomplete_forward_migration_staging().await?;
         if self.recover_legacy_rollback_transition().await? {
             let restored_legacy =
                 read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
@@ -372,6 +373,41 @@ impl KnowledgeMapService {
         self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &active_legacy)
             .await?;
         Ok(Some(active_legacy))
+    }
+
+    async fn discard_incomplete_forward_migration_staging(
+        &self,
+    ) -> Result<(), KnowledgeMapServiceError> {
+        if self.map_type != RepositoryMapType::Knowledge {
+            return Ok(());
+        }
+        let current = self.map_path();
+        if !regular_file_exists_or_missing(&current).await? {
+            return Ok(());
+        }
+        let current_content = read_root_file(&self.repository_root, &current).await?;
+        if self
+            .validate_visible_v3_map_content(&current_content)
+            .await?
+        {
+            return Ok(());
+        }
+        let retained = self.retained_v3_path();
+        if !regular_file_exists_or_missing(&retained).await? {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "incomplete forward migration has no retained v3 root to preserve".to_owned(),
+            ));
+        }
+        let retained_content = read_root_file(&self.repository_root, &retained).await?;
+        if !self
+            .validate_visible_v3_map_content(&retained_content)
+            .await?
+        {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "incomplete forward migration retained root is not a complete v3 map".to_owned(),
+            ));
+        }
+        remove_regular_transition_file(&current).await
     }
 
     async fn converge_legacy_redirect(&self) -> Result<(), KnowledgeMapServiceError> {

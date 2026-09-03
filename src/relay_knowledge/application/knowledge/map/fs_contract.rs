@@ -28,6 +28,11 @@ use super::{
     },
 };
 
+pub(super) struct MapRootSnapshot {
+    pub(super) content: String,
+    pub(super) contract_dir: &'static str,
+}
+
 impl KnowledgeMapService {
     pub(super) fn map_path(&self) -> PathBuf {
         self.repository_root
@@ -40,34 +45,64 @@ impl KnowledgeMapService {
     }
 
     pub(super) async fn read_root_content(&self) -> Result<String, KnowledgeMapServiceError> {
+        Ok(self.read_root_snapshot().await?.content)
+    }
+
+    pub(super) async fn read_root_snapshot(
+        &self,
+    ) -> Result<MapRootSnapshot, KnowledgeMapServiceError> {
         let path = self.map_path();
         match read_root_file(&self.repository_root, &path).await {
-            Ok(content) => return Ok(content),
+            Ok(content) => {
+                return Ok(MapRootSnapshot {
+                    content,
+                    contract_dir: self.contract_dir_name(),
+                });
+            }
             Err(KnowledgeMapServiceError::Io(error))
                 if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
         match read_root_file(&self.repository_root, &self.backup_path()).await {
-            Ok(content) => return Ok(content),
+            Ok(content) => {
+                return Ok(MapRootSnapshot {
+                    content,
+                    contract_dir: self.contract_dir_name(),
+                });
+            }
             Err(KnowledgeMapServiceError::Io(error))
                 if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
         if self.map_type == RepositoryMapType::Knowledge {
             if let Some(path) = self.readable_retained_v3_root().await? {
-                return read_root_file(&self.repository_root, &path).await;
+                return Ok(MapRootSnapshot {
+                    content: read_root_file(&self.repository_root, &path).await?,
+                    contract_dir: self.contract_dir_name(),
+                });
             }
             match read_root_file(&self.repository_root, &self.legacy_map_path()).await {
                 Ok(content) if content.contains("artifact_kind: redirect") => {
-                    return read_root_file(&self.repository_root, &path).await;
+                    return Ok(MapRootSnapshot {
+                        content: read_root_file(&self.repository_root, &path).await?,
+                        contract_dir: self.contract_dir_name(),
+                    });
                 }
-                Ok(content) => return Ok(content),
+                Ok(content) => {
+                    return Ok(MapRootSnapshot {
+                        content,
+                        contract_dir: LEGACY_AGENT_CONTRACT_DIR_NAME,
+                    });
+                }
                 Err(KnowledgeMapServiceError::Io(error))
                     if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
             }
         }
-        read_root_file(&self.repository_root, &path).await
+        Ok(MapRootSnapshot {
+            content: read_root_file(&self.repository_root, &path).await?,
+            contract_dir: self.contract_dir_name(),
+        })
     }
 
     pub(super) fn contract_dir_name(&self) -> &'static str {

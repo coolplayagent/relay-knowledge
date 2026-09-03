@@ -386,14 +386,6 @@ impl KnowledgeMapService {
         Ok(())
     }
 
-    async fn load_topic_shard(
-        &self,
-        topic_ref: &KnowledgeMapTopicRef,
-    ) -> Result<KnowledgeMapTopicShard, KnowledgeMapServiceError> {
-        let contract_dir = self.read_contract_dir_name().await?;
-        self.load_topic_shard_in(contract_dir, topic_ref).await
-    }
-
     async fn load_topic_shard_for_mutation(
         &self,
         topic_ref: &KnowledgeMapTopicRef,
