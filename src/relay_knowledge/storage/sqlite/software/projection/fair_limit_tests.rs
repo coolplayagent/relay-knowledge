@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::domain::{
-    GraphVersion, SoftwareAssertionMode, SoftwareEntity, SoftwareEntityKind, SoftwareFactState,
+    GraphVersion, RepositoryCodeRange, SoftwareAssertionMode, SoftwareComponent,
+    SoftwareDependencyUsage, SoftwareEntity, SoftwareEntityKind, SoftwareFactState,
     SoftwarePredicate, SoftwareSourceKind, SoftwareStatement, SoftwareStatementResolution,
 };
 
@@ -127,8 +128,79 @@ fn statement_budget_skips_unrepresentable_candidates_to_fill_its_allocation() {
     assert_eq!(slices.statements[0].subject_id, "available");
 }
 
+#[test]
+fn dependency_usage_target_selection_preserves_component_evidence_order() {
+    let mut slices = ProjectionSlices {
+        components: vec![
+            component("unused-a"),
+            component("used-b"),
+            component("used-c"),
+        ],
+        dependency_usages: vec![dependency_usage("used-b"), dependency_usage("used-c")],
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 4);
+
+    assert_eq!(
+        slices
+            .components
+            .iter()
+            .map(|component| component.component_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["used-b", "used-c"]
+    );
+    assert_eq!(
+        slices
+            .dependency_usages
+            .iter()
+            .map(|usage| usage.component_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["used-b", "used-c"]
+    );
+}
+
 fn entity(entity_key: &str) -> SoftwareEntity {
     entity_with_occurrence(entity_key, entity_key)
+}
+
+fn component(component_id: &str) -> SoftwareComponent {
+    SoftwareComponent {
+        component_id: component_id.to_owned(),
+        repository_id: "repo".to_owned(),
+        source_scope: "scope".to_owned(),
+        ecosystem: "cargo".to_owned(),
+        language_id: "rust".to_owned(),
+        name: component_id.to_owned(),
+        requirement: None,
+        resolved_version: None,
+        dependency_group: "normal".to_owned(),
+        source_kind: "manifest".to_owned(),
+        relationship_state: "declared".to_owned(),
+        evidence_path: format!("{component_id}.toml"),
+        evidence_line_range: RepositoryCodeRange { start: 1, end: 1 },
+        confidence_basis_points: 10_000,
+        created_graph_version: GraphVersion::new(1),
+    }
+}
+
+fn dependency_usage(component_id: &str) -> SoftwareDependencyUsage {
+    SoftwareDependencyUsage {
+        usage_id: format!("usage-{component_id}"),
+        component_id: component_id.to_owned(),
+        repository_id: "repo".to_owned(),
+        source_scope: "scope".to_owned(),
+        ecosystem: "cargo".to_owned(),
+        package_name: component_id.to_owned(),
+        language_id: "rust".to_owned(),
+        module: component_id.to_owned(),
+        target_hint: None,
+        resolution_state: "resolved".to_owned(),
+        evidence_path: format!("src/{component_id}.rs"),
+        evidence_line_range: RepositoryCodeRange { start: 1, end: 1 },
+        confidence_basis_points: 10_000,
+        created_graph_version: GraphVersion::new(1),
+    }
 }
 
 fn entity_with_occurrence(entity_key: &str, occurrence_id: &str) -> SoftwareEntity {

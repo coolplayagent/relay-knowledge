@@ -252,6 +252,48 @@ fn entity_query_rejects_invalid_persisted_evidence_json() {
 }
 
 #[test]
+fn exact_entity_lookup_preserves_all_kind_evidence_order() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    super::super::schema::initialize_schema(&connection)
+        .expect("ontology schema should initialize");
+    insert_entity(
+        &connection,
+        "a-component",
+        "component",
+        "Component",
+        "code",
+        "code",
+        "src/component.rs",
+    );
+    insert_entity(
+        &connection,
+        "z-api",
+        "api",
+        "API",
+        "code",
+        "code",
+        "src/api.rs",
+    );
+
+    let entities = entities_by_keys_for_scope(
+        &connection,
+        "scope",
+        &request(SoftwareGlobalKind::All),
+        &["entity-a-component".to_owned(), "entity-z-api".to_owned()],
+        2,
+    )
+    .expect("exact lookup should load in canonical evidence order");
+
+    assert_eq!(
+        entities
+            .iter()
+            .map(|entity| entity.occurrence_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["z-api", "a-component"]
+    );
+}
+
+#[test]
 fn exact_entity_lookup_returns_one_deterministic_occurrence_per_key_with_a_total_cap() {
     let connection = Connection::open_in_memory().expect("database should open");
     super::super::schema::initialize_schema(&connection)

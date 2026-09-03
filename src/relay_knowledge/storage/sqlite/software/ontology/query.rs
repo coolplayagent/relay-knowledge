@@ -91,7 +91,7 @@ pub(in super::super) fn entities_by_keys_for_scope(
                created_graph_version
         FROM ranked_entities
         WHERE occurrence_rank = 1
-        ORDER BY entity_key ASC, occurrence_id ASC
+        ORDER BY entity_kind ASC, name ASC, occurrence_id ASC
         LIMIT ?
         "
     );

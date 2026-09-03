@@ -5,18 +5,20 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use super::ProjectionSlices;
 
 pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit: usize) {
-    let component_candidates = slices
-        .components
-        .iter()
-        .cloned()
-        .map(|component| (component.component_id.clone(), component))
-        .collect::<HashMap<_, _>>();
+    let component_candidates = std::mem::take(&mut slices.components);
+    let component_indices_by_id = component_candidates.iter().enumerate().fold(
+        HashMap::<&str, usize>::new(),
+        |mut indices, (index, component)| {
+            indices.insert(component.component_id.as_str(), index);
+            indices
+        },
+    );
     slices
         .dependency_usages
-        .retain(|usage| component_candidates.contains_key(&usage.component_id));
+        .retain(|usage| component_indices_by_id.contains_key(usage.component_id.as_str()));
     let initial_budgets = round_robin_slice_budgets(
         [
-            slices.components.len(),
+            component_candidates.len(),
             slices.dependency_usages.len(),
             slices.sdk_usages.len(),
             slices.files.len(),
@@ -30,6 +32,13 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
             slices.diagnostics.len(),
         ],
         total_limit,
+    );
+    let retained_component_indices = retain_components_referenced_by_dependency_usages(
+        &component_candidates,
+        &component_indices_by_id,
+        &mut slices.dependency_usages,
+        initial_budgets[0],
+        initial_budgets[1],
     );
     let entity_candidates = std::mem::take(&mut slices.entities);
     let retained_entity_indices = retain_entities_referenced_by_statements(
@@ -53,7 +62,7 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
         diagnostics,
     ] = round_robin_slice_budgets(
         [
-            slices.components.len(),
+            component_candidates.len(),
             slices.dependency_usages.len(),
             slices.sdk_usages.len(),
             slices.files.len(),
@@ -69,12 +78,13 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
         total_limit,
     );
 
-    retain_components_referenced_by_dependency_usages(
-        slices,
-        components,
-        dependency_usages,
+    slices.components = selected_components(
         &component_candidates,
+        &retained_component_indices,
+        components,
     );
+    debug_assert_eq!(slices.components.len(), components);
+    slices.dependency_usages.truncate(dependency_usages);
     slices.sdk_usages.truncate(sdk_usages);
     slices.files.truncate(files);
     slices.topics.truncate(topics);
@@ -213,41 +223,74 @@ fn selected_entities(
 }
 
 fn retain_components_referenced_by_dependency_usages(
-    slices: &mut ProjectionSlices,
+    component_candidates: &[super::SoftwareComponent],
+    component_indices_by_id: &HashMap<&str, usize>,
+    dependency_usages: &mut Vec<super::SoftwareDependencyUsage>,
     component_limit: usize,
     dependency_usage_limit: usize,
-    component_candidates: &HashMap<String, super::SoftwareComponent>,
-) {
-    slices.components.truncate(component_limit);
-    let mut retained_component_ids = slices
-        .components
+) -> BTreeSet<usize> {
+    let mut retained_indices =
+        (0..component_candidates.len().min(component_limit)).collect::<BTreeSet<_>>();
+    let mut retained_component_ids = retained_indices
         .iter()
-        .map(|component| component.component_id.clone())
+        .map(|index| component_candidates[*index].component_id.as_str())
         .collect::<HashSet<_>>();
     let mut required_component_ids = HashSet::new();
     let mut retained_usages = Vec::with_capacity(dependency_usage_limit);
 
-    for usage in slices.dependency_usages.drain(..dependency_usage_limit) {
-        if !retained_component_ids.contains(&usage.component_id) {
-            let component = component_candidates
-                .get(&usage.component_id)
-                .expect("dependency usages were filtered to known components")
-                .clone();
-            let Some(index) = slices
-                .components
+    for usage in std::mem::take(dependency_usages)
+        .into_iter()
+        .take(dependency_usage_limit)
+    {
+        let component_id = usage.component_id.as_str();
+        let Some(target_index) = component_indices_by_id.get(component_id).copied() else {
+            continue;
+        };
+        if !retained_component_ids.contains(component_id) {
+            let Some(index) = retained_indices
                 .iter()
-                .position(|component| !required_component_ids.contains(&component.component_id))
+                .find(|index| {
+                    !required_component_ids
+                        .contains(component_candidates[**index].component_id.as_str())
+                })
+                .copied()
             else {
                 continue;
             };
-            let replaced = std::mem::replace(&mut slices.components[index], component);
-            retained_component_ids.remove(&replaced.component_id);
-            retained_component_ids.insert(usage.component_id.clone());
+            let replaced = &component_candidates[index];
+            retained_indices.remove(&index);
+            let inserted = retained_indices.insert(target_index);
+            debug_assert!(inserted, "missing components cannot already be retained");
+            retained_component_ids.remove(replaced.component_id.as_str());
+            retained_component_ids.insert(component_candidates[target_index].component_id.as_str());
         }
-        required_component_ids.insert(usage.component_id.clone());
+        required_component_ids.insert(component_candidates[target_index].component_id.as_str());
         retained_usages.push(usage);
     }
-    slices.dependency_usages = retained_usages;
+    *dependency_usages = retained_usages;
+    retained_indices
+}
+
+fn selected_components(
+    component_candidates: &[super::SoftwareComponent],
+    retained_indices: &BTreeSet<usize>,
+    component_limit: usize,
+) -> Vec<super::SoftwareComponent> {
+    debug_assert!(
+        retained_indices.len() <= component_limit,
+        "filtering dependency usages cannot reduce the component allocation"
+    );
+    let mut selected_indices = retained_indices.clone();
+    for index in 0..component_candidates.len() {
+        if selected_indices.len() == component_limit {
+            break;
+        }
+        selected_indices.insert(index);
+    }
+    selected_indices
+        .into_iter()
+        .map(|index| component_candidates[index].clone())
+        .collect()
 }
 
 pub(super) fn round_robin_slice_budgets<const N: usize>(

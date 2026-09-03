@@ -24,6 +24,7 @@ use super::{
     schema::SOFTWARE_PROJECTION_SCHEMA_VERSION,
 };
 
+mod component_order;
 mod fair_limit;
 mod fenced;
 
@@ -794,7 +795,8 @@ fn components_for_scope(
         WHERE source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY ecosystem ASC, name ASC, relationship_state DESC, evidence_path ASC
+        ORDER BY ecosystem ASC, name ASC, relationship_state DESC, evidence_path ASC,
+                 component_id ASC
         LIMIT ?
         ",
     );
@@ -847,7 +849,8 @@ fn add_usage_target_components(
             WHERE source_scope = ?1 AND component_id IN ({placeholders})
             {path_filter}
             {language_filter}
-            ORDER BY component_id ASC
+            ORDER BY ecosystem ASC, name ASC, relationship_state DESC, evidence_path ASC,
+                     component_id ASC
             "
         );
         let mut values = std::iter::once(Value::Text(source_scope.to_owned()))
@@ -862,6 +865,7 @@ fn add_usage_target_components(
                 .map_err(StorageError::from)?,
         );
     }
+    component_order::sort_by_canonical_evidence(components);
     Ok(())
 }
 
