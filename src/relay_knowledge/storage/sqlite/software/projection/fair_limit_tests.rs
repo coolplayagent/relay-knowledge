@@ -55,6 +55,20 @@ fn statement_budget_never_replaces_an_endpoint_of_the_statement_being_retained()
     );
 }
 
+#[test]
+fn statement_budget_skips_unrepresentable_candidates_to_fill_its_allocation() {
+    let mut slices = ProjectionSlices {
+        entities: vec![entity("available")],
+        statements: vec![statement("unavailable", None), statement("available", None)],
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 2);
+
+    assert_eq!(slices.statements.len(), 1);
+    assert_eq!(slices.statements[0].subject_id, "available");
+}
+
 fn entity(entity_key: &str) -> SoftwareEntity {
     SoftwareEntity {
         entity_key: entity_key.to_owned(),

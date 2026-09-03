@@ -136,6 +136,43 @@ async fn migration_refreshes_the_canonical_glossary_from_the_active_legacy_gloss
 }
 
 #[tokio::test]
+async fn repeated_clean_rollback_preserves_active_legacy_edits() {
+    let (root, service, context) = migrated_v2_fixture("repeated-clean-rollback").await;
+
+    service
+        .rollback_v3(&context)
+        .await
+        .expect("first rollback should restore the v2 root");
+    let mut legacy = parse_manifest(
+        &fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("active legacy root should read"),
+    )
+    .expect("active legacy root should parse");
+    legacy.updated_at = "unix:2".to_owned();
+    let edited_legacy = serialize_yaml(&legacy).expect("edited legacy root should serialize");
+    fs::write(service.legacy_map_path(), &edited_legacy)
+        .await
+        .expect("legacy writer should update the active root");
+
+    let response = service
+        .rollback_v3(&context)
+        .await
+        .expect("repeated clean rollback should preserve the active legacy root");
+
+    assert_eq!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("edited legacy root should remain active"),
+        edited_legacy
+    );
+    assert!(response.summary.contains("already active"));
+    assert!(!fs::try_exists(service.map_path()).await.unwrap());
+    assert!(fs::try_exists(service.retained_v3_path()).await.unwrap());
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn redirect_recovery_defers_legacy_redirect_until_visible_v3_publication() {
     let (root, service, _context) = legacy_v2_fixture("defer-legacy-redirect").await;
     let legacy = service.legacy_map_path();

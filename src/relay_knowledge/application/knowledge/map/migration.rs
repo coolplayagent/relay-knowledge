@@ -59,6 +59,15 @@ impl KnowledgeMapService {
                     .to_owned(),
             ));
         }
+        if let Some(active_legacy) = self.active_clean_legacy_rollback().await? {
+            let rollback_version = map_version_from_validated_legacy_content(&active_legacy)?;
+            return Ok(self.mutation_response(
+                context,
+                rollback_version,
+                "Knowledge Map v2 rollback is already active; retained v3 data remains available"
+                    .to_owned(),
+            ));
+        }
         let legacy_backup = self.validate_legacy_backup().await?;
         let rollback_version = map_version_from_validated_legacy_content(&legacy_backup)?;
         self.recover_manifest_backup().await?;
@@ -347,6 +356,22 @@ impl KnowledgeMapService {
             }
         }
         Ok(None)
+    }
+
+    async fn active_clean_legacy_rollback(
+        &self,
+    ) -> Result<Option<String>, KnowledgeMapServiceError> {
+        if regular_file_exists_or_missing(&self.map_path()).await?
+            || regular_file_exists_or_missing(&self.backup_path()).await?
+            || !regular_file_exists_or_missing(&self.retained_v3_path()).await?
+            || !regular_file_exists_or_missing(&self.legacy_map_path()).await?
+        {
+            return Ok(None);
+        }
+        let active_legacy = read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
+        self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &active_legacy)
+            .await?;
+        Ok(Some(active_legacy))
     }
 
     async fn converge_legacy_redirect(&self) -> Result<(), KnowledgeMapServiceError> {

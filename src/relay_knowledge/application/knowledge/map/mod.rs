@@ -73,13 +73,7 @@ impl KnowledgeMapService {
         &self,
         context: &RequestContext,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let legacy_recovery_state = self.legacy_recovery_state_exists().await?;
-        let _legacy_lock = if legacy_recovery_state {
-            Some(self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?)
-        } else {
-            None
-        };
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let _mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
         let _rollback_committed = self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
         self.recover_legacy_redirect_transition().await?;

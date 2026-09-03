@@ -9,8 +9,15 @@ use crate::{
 
 use super::{
     KnowledgeMapMutationResponse, KnowledgeMapService, KnowledgeMapServiceError,
-    KnowledgeMapSourceAddRequest, MutableKnowledgeMap, WRITE_LOCK_TIMEOUT, now_stamp,
+    KnowledgeMapSourceAddRequest, MutableKnowledgeMap, WRITE_LOCK_TIMEOUT,
+    lock::KnowledgeMapWriteLock, now_stamp,
 };
+
+pub(super) struct KnowledgeMapMutationLocks {
+    _legacy_lock: Option<KnowledgeMapWriteLock>,
+    _current_lock: KnowledgeMapWriteLock,
+    legacy_recovery_state: bool,
+}
 
 impl KnowledgeMapService {
     pub async fn add_source(
@@ -29,10 +36,10 @@ impl KnowledgeMapService {
             request.source_scope,
             request.description,
         )?;
-        let legacy_recovery_state = self.legacy_recovery_state_exists().await?;
+        let initial_legacy_recovery_state = self.legacy_recovery_state_exists().await?;
         let contract_exists = fs::try_exists(self.map_path()).await?
             || fs::try_exists(self.backup_path()).await?
-            || legacy_recovery_state;
+            || initial_legacy_recovery_state;
         if !contract_exists {
             let mut preflight = MutableKnowledgeMap::initial(self.map_type, now_stamp());
             preflight
@@ -40,12 +47,8 @@ impl KnowledgeMapService {
                 .add_source_snapshot(source.clone(), preflight.archived_through)?;
         }
 
-        let _legacy_lock = if legacy_recovery_state {
-            Some(self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?)
-        } else {
-            None
-        };
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        let legacy_recovery_state = mutation_locks.legacy_recovery_state;
         let _rollback_committed = self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
         self.recover_legacy_redirect_transition().await?;
@@ -89,13 +92,8 @@ impl KnowledgeMapService {
         change: KnowledgeMapChange,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
         self.require_knowledge_map("map source update")?;
-        let legacy_recovery_state = self.legacy_recovery_state_exists().await?;
-        let _legacy_lock = if legacy_recovery_state {
-            Some(self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?)
-        } else {
-            None
-        };
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        let legacy_recovery_state = mutation_locks.legacy_recovery_state;
         self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
         self.recover_legacy_redirect_transition().await?;
@@ -140,13 +138,8 @@ impl KnowledgeMapService {
         id: String,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
         self.require_knowledge_map("map source remove")?;
-        let legacy_recovery_state = self.legacy_recovery_state_exists().await?;
-        let _legacy_lock = if legacy_recovery_state {
-            Some(self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?)
-        } else {
-            None
-        };
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        let legacy_recovery_state = mutation_locks.legacy_recovery_state;
         self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
         self.recover_legacy_redirect_transition().await?;
@@ -182,5 +175,37 @@ impl KnowledgeMapService {
             snapshot.map.map_version,
             format!("removed source {id}"),
         ))
+    }
+
+    pub(super) async fn acquire_legacy_aware_mutation_locks(
+        &self,
+    ) -> Result<KnowledgeMapMutationLocks, KnowledgeMapServiceError> {
+        if self.legacy_recovery_state_exists().await? {
+            let legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
+            let current_lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+            return Ok(KnowledgeMapMutationLocks {
+                _legacy_lock: Some(legacy_lock),
+                _current_lock: current_lock,
+                legacy_recovery_state: true,
+            });
+        }
+
+        let current_lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        if !self.legacy_recovery_state_exists().await? {
+            return Ok(KnowledgeMapMutationLocks {
+                _legacy_lock: None,
+                _current_lock: current_lock,
+                legacy_recovery_state: false,
+            });
+        }
+        drop(current_lock);
+
+        let legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let current_lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        Ok(KnowledgeMapMutationLocks {
+            _legacy_lock: Some(legacy_lock),
+            _current_lock: current_lock,
+            legacy_recovery_state: true,
+        })
     }
 }

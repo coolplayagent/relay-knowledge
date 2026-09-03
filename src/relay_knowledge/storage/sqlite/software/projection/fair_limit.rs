@@ -108,7 +108,10 @@ fn retain_entities_referenced_by_statements(
     let mut required_entity_keys = BTreeSet::new();
     let mut retained_statements = Vec::with_capacity(statement_limit);
 
-    for statement in slices.statements.drain(..statement_limit) {
+    for statement in slices.statements.drain(..) {
+        if retained_statements.len() == statement_limit {
+            break;
+        }
         let referenced_entity_keys = std::iter::once(statement.subject_id.as_str())
             .chain(statement.object_id.as_deref())
             .collect::<BTreeSet<_>>();
