@@ -56,8 +56,9 @@ pub(in super::super) fn entities_by_keys_for_scope(
     source_scope: &str,
     request: &SoftwareGlobalRequest,
     entity_keys: &[String],
+    limit: usize,
 ) -> Result<Vec<SoftwareEntity>, StorageError> {
-    if entity_keys.is_empty() {
+    if entity_keys.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
     let placeholders = std::iter::repeat_n("?", entity_keys.len())
@@ -73,14 +74,25 @@ pub(in super::super) fn entities_by_keys_for_scope(
     );
     let query = format!(
         "
+        WITH ranked_entities AS (
+            SELECT occurrence_id, entity_key, repository_id, source_scope, entity_kind,
+                   name, namespace, source_kind, evidence_refs_json, attributes_json,
+                   created_graph_version,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY entity_key ORDER BY occurrence_id ASC
+                   ) AS occurrence_rank
+            FROM software_entities
+            WHERE source_scope = ?1 AND entity_key IN ({placeholders})
+              {path_filter}
+              {language_filter}
+        )
         SELECT occurrence_id, entity_key, repository_id, source_scope, entity_kind,
                name, namespace, source_kind, evidence_refs_json, attributes_json,
                created_graph_version
-        FROM software_entities
-        WHERE source_scope = ?1 AND entity_key IN ({placeholders})
-          {path_filter}
-          {language_filter}
+        FROM ranked_entities
+        WHERE occurrence_rank = 1
         ORDER BY entity_key ASC, occurrence_id ASC
+        LIMIT ?
         "
     );
     let mut values = std::iter::once(Value::Text(source_scope.to_owned()))
@@ -88,6 +100,7 @@ pub(in super::super) fn entities_by_keys_for_scope(
         .collect::<Vec<_>>();
     super::super::push_path_filter_values(&mut values, &request.repository.path_filters);
     super::super::push_language_filter_values(&mut values, &request.repository.language_filters);
+    values.push(Value::Integer(limit as i64));
     let mut statement = connection.prepare(&query)?;
     let rows = statement.query_map(params_from_iter(values), entity_from_row)?;
     rows.collect::<Result<Vec<_>, _>>()

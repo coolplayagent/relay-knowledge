@@ -986,6 +986,9 @@ fn temp_root(label: &str) -> PathBuf {
 #[path = "history_tests.rs"]
 mod history_tests;
 
+#[path = "history_legacy_tests.rs"]
+mod history_legacy_tests;
+
 #[path = "path_tests.rs"]
 mod path_tests;
 use std::time::{SystemTime, UNIX_EPOCH};

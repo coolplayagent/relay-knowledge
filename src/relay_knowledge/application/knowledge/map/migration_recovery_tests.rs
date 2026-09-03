@@ -235,7 +235,7 @@ async fn rollback_transition_keeps_the_retained_v3_contract_readable() {
 
 #[tokio::test]
 async fn committed_rollback_recovery_keeps_post_commit_legacy_edits_when_cleanup_is_retried() {
-    let (root, service, _context) = migrated_v2_fixture("rollback-cleanup-residue").await;
+    let (root, service, context) = migrated_v2_fixture("rollback-cleanup-residue").await;
 
     fs::copy(
         service.legacy_backup_path(),
@@ -274,20 +274,10 @@ async fn committed_rollback_recovery_keeps_post_commit_legacy_edits_when_cleanup
         .await
         .expect("v2 writer should update the committed legacy root");
 
-    let _legacy_lock = service
-        .acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT)
+    let response = service
+        .rollback_v3(&context)
         .await
-        .expect("legacy lock should acquire");
-    let _current_lock = service
-        .acquire_write_lock(WRITE_LOCK_TIMEOUT)
-        .await
-        .expect("current lock should acquire");
-    assert!(
-        service
-            .recover_legacy_rollback_transition()
-            .await
-            .expect("recovery should only clean committed rollback residue")
-    );
+        .expect("repeated rollback should only clean committed rollback residue");
 
     assert_eq!(
         fs::read_to_string(service.legacy_map_path())
@@ -301,6 +291,7 @@ async fn committed_rollback_recovery_keeps_post_commit_legacy_edits_when_cleanup
             .unwrap()
     );
     assert!(fs::try_exists(service.retained_v3_path()).await.unwrap());
+    assert!(response.summary.contains("retained committed"));
     let _ = fs::remove_dir_all(root).await;
 }
 

@@ -46,6 +46,19 @@ impl KnowledgeMapService {
         self.require_knowledge_map("map migrate --rollback")?;
         let _legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
         let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        if self.recover_legacy_rollback_transition().await? {
+            let restored_legacy =
+                read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
+            self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &restored_legacy)
+                .await?;
+            let rollback_version = map_version_from_validated_legacy_content(&restored_legacy)?;
+            return Ok(self.mutation_response(
+                context,
+                rollback_version,
+                "retained committed Knowledge Map v2 rollback and cleaned recovery residue"
+                    .to_owned(),
+            ));
+        }
         let legacy_backup = self.validate_legacy_backup().await?;
         let rollback_version = map_version_from_validated_legacy_content(&legacy_backup)?;
         self.recover_manifest_backup().await?;

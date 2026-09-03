@@ -876,7 +876,7 @@ fn add_statement_target_entities(
         .iter()
         .map(|entity| entity.entity_key.clone())
         .collect::<BTreeSet<_>>();
-    let target_keys = statements
+    let mut target_keys = statements
         .iter()
         .flat_map(|statement| {
             std::iter::once(statement.subject_id.as_str()).chain(statement.object_id.as_deref())
@@ -884,6 +884,7 @@ fn add_statement_target_entities(
         .filter(|entity_key| seen_keys.insert((*entity_key).to_owned()))
         .map(str::to_owned)
         .collect::<Vec<_>>();
+    target_keys.truncate(request.limit);
 
     for batch in target_keys.chunks(STATEMENT_ENTITY_TARGET_QUERY_BATCH_SIZE) {
         entities.extend(super::ontology::entities_by_keys_for_scope(
@@ -891,6 +892,7 @@ fn add_statement_target_entities(
             source_scope,
             request,
             batch,
+            batch.len(),
         )?);
     }
     Ok(())

@@ -1,9 +1,7 @@
 //! Bounded Knowledge Map history paging and archive-chain validation.
 
 use crate::{
-    api::RequestContext,
-    domain::{KnowledgeMap, KnowledgeMapHistoryEntry},
-    project::KNOWLEDGE_MAP_HISTORY_DIR_NAME,
+    api::RequestContext, domain::KnowledgeMapHistoryEntry, project::KNOWLEDGE_MAP_HISTORY_DIR_NAME,
 };
 
 use super::{
@@ -67,9 +65,7 @@ impl KnowledgeMapService {
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         match probe.schema_version {
             1 => {
-                let map = serde_norway::from_str::<KnowledgeMap>(&content)
-                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-                map.validate()?;
+                let map = super::parse_v1_map(&content)?;
                 let entries = map
                     .history
                     .into_iter()
