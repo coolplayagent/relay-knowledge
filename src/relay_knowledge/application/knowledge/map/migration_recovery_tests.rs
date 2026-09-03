@@ -946,6 +946,9 @@ async fn legacy_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Reques
         .init(&context)
         .await
         .expect("v3 fixture should create");
+    fs::remove_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
+        .await
+        .expect("current writer lock directory should clear before seeding a v2 root");
     fs::rename(
         root.join(AGENT_CONTRACT_DIR_NAME),
         root.join(LEGACY_AGENT_CONTRACT_DIR_NAME),

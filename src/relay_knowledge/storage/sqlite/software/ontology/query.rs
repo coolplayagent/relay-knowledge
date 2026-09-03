@@ -183,6 +183,56 @@ pub(in super::super) fn diagnostics_for_scope(
         .map_err(StorageError::from)
 }
 
+pub(in super::super) fn diagnostics_for_evidence(
+    connection: &Connection,
+    source_scope: &str,
+    entity_keys: &[String],
+    statement_ids: &[String],
+    limit: usize,
+) -> Result<Vec<SoftwareShapeDiagnostic>, StorageError> {
+    let entity_keys_json = serde_json::to_string(entity_keys)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let statement_ids_json = serde_json::to_string(statement_ids)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let query = "
+        SELECT diagnostic_id, shape_id, code, severity, statement_id, entity_key,
+               field, message
+        FROM software_ontology_diagnostics
+        WHERE source_scope = ?1
+          AND (entity_key IS NULL OR entity_key IN (
+              SELECT CAST(value AS TEXT) FROM json_each(?2)
+          ))
+          AND (statement_id IS NULL OR statement_id IN (
+              SELECT CAST(value AS TEXT) FROM json_each(?3)
+          ))
+        ORDER BY severity ASC, code ASC, diagnostic_id ASC
+        LIMIT ?4
+        ";
+    let mut statement = connection.prepare(query)?;
+    let rows = statement.query_map(
+        params![
+            source_scope,
+            entity_keys_json,
+            statement_ids_json,
+            limit as i64
+        ],
+        |row| {
+            Ok(SoftwareShapeDiagnostic {
+                diagnostic_id: row.get(0)?,
+                shape_id: row.get(1)?,
+                code: row.get(2)?,
+                severity: parse_enum(row.get::<_, String>(3)?, SoftwareShapeSeverity::parse)?,
+                statement_id: row.get(4)?,
+                entity_key: row.get(5)?,
+                field: row.get(6)?,
+                message: row.get(7)?,
+            })
+        },
+    )?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
 fn entity_kind_filter(kind: SoftwareGlobalKind) -> &'static str {
     match kind {
         SoftwareGlobalKind::Systems => "AND entity_kind = 'software_system'",

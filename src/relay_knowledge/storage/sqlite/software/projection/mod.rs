@@ -418,24 +418,23 @@ fn diagnostics_for_filtered_ontology(
 ) -> Result<Vec<SoftwareShapeDiagnostic>, StorageError> {
     let entity_keys = entities
         .iter()
-        .map(|entity| entity.entity_key.as_str())
-        .collect::<std::collections::HashSet<_>>();
+        .map(|entity| entity.entity_key.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     let statement_ids = statements
         .iter()
-        .map(|statement| statement.statement_id.as_str())
-        .collect::<std::collections::HashSet<_>>();
-    let mut diagnostics = super::ontology::diagnostics_for_scope(connection, source_scope, limit)?;
-    diagnostics.retain(|diagnostic| {
-        diagnostic
-            .entity_key
-            .as_deref()
-            .is_none_or(|entity_key| entity_keys.contains(entity_key))
-            && diagnostic
-                .statement_id
-                .as_deref()
-                .is_none_or(|statement_id| statement_ids.contains(statement_id))
-    });
-    Ok(diagnostics)
+        .map(|statement| statement.statement_id.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    super::ontology::diagnostics_for_evidence(
+        connection,
+        source_scope,
+        &entity_keys,
+        &statement_ids,
+        limit,
+    )
 }
 
 fn dependency_components(

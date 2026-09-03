@@ -351,12 +351,10 @@ fn validate_routed_source(
             source.id
         )));
     }
-    let expected_uri = if legacy_contract {
-        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
-    } else {
-        BUSINESS_GLOSSARY_RELATIVE_PATH
-    };
-    if source.uri != expected_uri {
+    let expected_uri = BUSINESS_GLOSSARY_RELATIVE_PATH;
+    let accepts_legacy_uri =
+        legacy_contract && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH;
+    if source.uri != expected_uri && !accepts_legacy_uri {
         return Err(invalid(format!(
             "reserved source 'repository-business-glossary' must use uri '{expected_uri}'"
         )));

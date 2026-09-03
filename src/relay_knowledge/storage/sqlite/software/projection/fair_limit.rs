@@ -120,18 +120,27 @@ fn reserve_surplus_capacity_for_statement_endpoints(
         .iter()
         .map(|entity| entity.entity_key.as_str())
         .collect::<HashSet<_>>();
-    let Some(endpoint_count) = statements.iter().find_map(|statement| {
+    let mut required_endpoints = BTreeSet::new();
+    let mut retained_statement_count = 0;
+    for statement in statements {
         let endpoints = std::iter::once(statement.subject_id.as_str())
             .chain(statement.object_id.as_deref())
             .collect::<BTreeSet<_>>();
-        endpoints
+        if endpoints
             .iter()
             .all(|endpoint| available_entity_keys.contains(*endpoint))
-            .then_some(endpoints.len())
-    }) else {
+        {
+            required_endpoints.extend(endpoints);
+            retained_statement_count += 1;
+            if retained_statement_count == budgets[10] {
+                break;
+            }
+        }
+    }
+    if required_endpoints.is_empty() {
         return;
-    };
-    let mut required = endpoint_count.saturating_sub(budgets[9]);
+    }
+    let mut required = required_endpoints.len().saturating_sub(budgets[9]);
     for index in (0..budgets.len()).rev() {
         if required == 0 {
             break;

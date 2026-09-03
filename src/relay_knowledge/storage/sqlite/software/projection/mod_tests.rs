@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, limits::Limit, params};
 
 use super::super::schema::initialize_schema;
 use super::test_support::*;
@@ -108,6 +108,69 @@ fn projection_all_kind_excludes_diagnostics_outside_the_requested_evidence_filte
             .collect::<Vec<_>>(),
         vec!["diagnostic-inside-src"]
     );
+
+    let bounded_request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec!["src".to_owned()],
+            vec!["rust".to_owned()],
+        )
+        .expect("selector should validate"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        1,
+    )
+    .expect("request should validate");
+    let retained_entities =
+        super::super::ontology::entities_for_scope(&connection, "scope-1", &bounded_request, 1)
+            .expect("filtered entity should load");
+    let diagnostics =
+        diagnostics_for_filtered_ontology(&connection, "scope-1", &retained_entities, &[], 1)
+            .expect("eligible diagnostics should be selected before their limit");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.diagnostic_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["diagnostic-inside-src"]
+    );
+}
+
+#[test]
+fn filtered_diagnostics_do_not_expand_sqlite_bind_count_with_evidence_count() {
+    let connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    connection
+        .execute(
+            "INSERT INTO software_ontology_diagnostics (
+                diagnostic_id, source_scope, shape_id, code, severity, statement_id,
+                entity_key, field, message
+            ) VALUES ('global-diagnostic', 'scope-1', 'shape', 'global', 'warning',
+                      NULL, NULL, 'scope', 'global diagnostic')",
+            [],
+        )
+        .expect("global diagnostic should insert");
+    connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 4);
+    let entity_keys = (0..32)
+        .map(|index| format!("entity-{index}"))
+        .collect::<Vec<_>>();
+    let statement_ids = (0..32)
+        .map(|index| format!("statement-{index}"))
+        .collect::<Vec<_>>();
+
+    let diagnostics = super::super::ontology::diagnostics_for_evidence(
+        &connection,
+        "scope-1",
+        &entity_keys,
+        &statement_ids,
+        1,
+    )
+    .expect("bounded JSON binds should load the global diagnostic");
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].diagnostic_id, "global-diagnostic");
 }
 
 #[test]

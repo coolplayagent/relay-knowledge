@@ -180,32 +180,25 @@ impl KnowledgeMapService {
     pub(super) async fn acquire_legacy_aware_mutation_locks(
         &self,
     ) -> Result<KnowledgeMapMutationLocks, KnowledgeMapServiceError> {
-        if self.legacy_recovery_state_exists().await? {
-            let legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
-            let current_lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
-            return Ok(KnowledgeMapMutationLocks {
-                _legacy_lock: Some(legacy_lock),
-                _current_lock: current_lock,
-                legacy_recovery_state: true,
-            });
-        }
-
+        let legacy_lock = if self.map_type == crate::domain::RepositoryMapType::Knowledge {
+            Some(self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?)
+        } else {
+            None
+        };
         let current_lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
-        if !self.legacy_recovery_state_exists().await? {
-            return Ok(KnowledgeMapMutationLocks {
-                _legacy_lock: None,
-                _current_lock: current_lock,
-                legacy_recovery_state: false,
-            });
-        }
-        drop(current_lock);
-
-        let legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
-        let current_lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let legacy_recovery_state = if legacy_lock.is_some() {
+            self.legacy_recovery_state_exists().await?
+        } else {
+            false
+        };
         Ok(KnowledgeMapMutationLocks {
-            _legacy_lock: Some(legacy_lock),
+            _legacy_lock: legacy_lock,
             _current_lock: current_lock,
-            legacy_recovery_state: true,
+            legacy_recovery_state,
         })
     }
 }
+
+#[cfg(test)]
+#[path = "source_mutation_tests.rs"]
+mod tests;

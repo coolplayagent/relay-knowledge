@@ -372,6 +372,9 @@ async fn v2_reader_resolves_shards_from_the_legacy_contract_root() {
         .init(&context)
         .await
         .expect("v3 map should initialize");
+    fs::remove_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
+        .await
+        .expect("current writer lock directory should clear before seeding a v2 root");
     fs::rename(
         root.join(AGENT_CONTRACT_DIR_NAME),
         root.join(LEGACY_AGENT_CONTRACT_DIR_NAME),
@@ -936,6 +939,9 @@ async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Requ
         .init(&context)
         .await
         .expect("v3 fixture should create");
+    fs::remove_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
+        .await
+        .expect("current writer lock directory should clear before seeding a v2 root");
     fs::rename(
         root.join(AGENT_CONTRACT_DIR_NAME),
         root.join(LEGACY_AGENT_CONTRACT_DIR_NAME),

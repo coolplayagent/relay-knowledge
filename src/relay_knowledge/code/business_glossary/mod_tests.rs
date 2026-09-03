@@ -79,6 +79,76 @@ terms:
 }
 
 #[test]
+fn loads_the_canonical_glossary_uri_from_a_legacy_map_root() {
+    let repository = TestRepository::new();
+    fs::create_dir_all(repository.path().join(".knowledge")).expect("legacy root should create");
+    fs::create_dir_all(repository.path().join("knowledge/glossary"))
+        .expect("canonical glossary directory should create");
+    fs::write(
+        repository.path().join(".knowledge/knowledge-map.yaml"),
+        r#"schema_version: 1
+map_version: 1
+updated_at: "2026-08-26T00:00:00Z"
+topics:
+  - id: business-knowledge
+    title: Business knowledge
+    description: Authored glossary
+sources:
+  - id: repository-business-glossary
+    topic: business-knowledge
+    kind: file
+    uri: knowledge/glossary/business-glossary.yaml
+    read_policy: direct
+    write_policy: manual-review
+    status: active
+    version: 1
+    source_scope: repo
+routes:
+  - topic: business-knowledge
+    source_order: [repository-business-glossary]
+history:
+  - version: 1
+    action: map.init
+    actor: test
+    summary: Initialized business knowledge
+"#,
+    )
+    .expect("legacy map should write");
+    fs::write(
+        repository
+            .path()
+            .join("knowledge/glossary/business-glossary.yaml"),
+        "schema_version: 1\ndomains: []\nterms: []\n",
+    )
+    .expect("canonical glossary should write");
+    git(&repository, &["init"]);
+    git(
+        &repository,
+        &["config", "user.email", "tests@example.invalid"],
+    );
+    git(
+        &repository,
+        &["config", "user.name", "Relay Knowledge Tests"],
+    );
+    git(&repository, &["add", "."]);
+    git(
+        &repository,
+        &["commit", "-m", "Add legacy map with canonical glossary"],
+    );
+    let commit = git(&repository, &["rev-parse", "HEAD"]);
+
+    let projection =
+        load_business_knowledge_projection(&registration(&repository), "scope-1", &commit)
+            .expect("canonical URI should remain readable from a legacy root");
+
+    assert_eq!(projection.sources.len(), 1);
+    assert_eq!(
+        projection.sources[0].source_path,
+        "knowledge/glossary/business-glossary.yaml"
+    );
+}
+
+#[test]
 fn ignores_ordinary_business_route_sources_when_projecting_glossaries() {
     let repository = git_repository(
         r#"schema_version: 1
