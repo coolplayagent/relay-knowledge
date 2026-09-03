@@ -301,6 +301,73 @@ fn rejects_v2_route_with_a_dangling_non_glossary_source() {
     assert!(error.to_string().contains("has an invalid route"));
 }
 
+#[test]
+fn rejects_v2_business_route_that_omits_the_reserved_glossary_source() {
+    let repository = TestRepository::new();
+    fs::create_dir_all(repository.path().join(".knowledge/topics"))
+        .expect("topic directory should create");
+    let shard = concat!(
+        "schema_version: 2\n",
+        "topic:\n",
+        "  id: business-knowledge\n",
+        "  title: Business knowledge\n",
+        "  description: Authored glossary\n",
+        "sources:\n",
+        "  - id: business-notes\n",
+        "    topic: business-knowledge\n",
+        "    kind: file\n",
+        "    uri: docs/business-notes.md\n",
+        "    read_policy: direct\n",
+        "    write_policy: manual-review\n",
+        "    status: active\n",
+        "    version: 1\n",
+        "    source_scope: repo\n",
+        "route:\n",
+        "  topic: business-knowledge\n",
+        "  source_order: [business-notes]\n",
+    );
+    let digest = super::sha256(shard.as_bytes());
+    let shard_ref = format!("topics/topic-business-knowledge-{digest}.yaml");
+    let manifest = format!(
+        "schema_version: 2\nmap_version: 1\nupdated_at: unix:1\ntopics:\n  - id: business-knowledge\n    title: Business knowledge\n    description: Authored glossary\n    source_ids: [business-notes]\n    ref: {shard_ref}\n    digest: {digest}\nhistory:\n  recent: []\n  archived_through: 0\n"
+    );
+    fs::write(
+        repository.path().join(".knowledge/knowledge-map.yaml"),
+        manifest,
+    )
+    .expect("manifest should write");
+    fs::write(repository.path().join(".knowledge").join(&shard_ref), shard)
+        .expect("topic shard should write");
+    git(&repository, &["init"]);
+    git(
+        &repository,
+        &["config", "user.email", "tests@example.invalid"],
+    );
+    git(
+        &repository,
+        &["config", "user.name", "Relay Knowledge Tests"],
+    );
+    git(&repository, &["add", ".knowledge"]);
+    git(
+        &repository,
+        &[
+            "commit",
+            "-m",
+            "Add business route without reserved glossary",
+        ],
+    );
+    let commit = git(&repository, &["rev-parse", "HEAD"]);
+
+    let error = load_business_knowledge_projection(&registration(&repository), "scope-1", &commit)
+        .expect_err("a v2 business route without the reserved glossary must fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("must include reserved source 'repository-business-glossary'")
+    );
+}
+
 fn git_repository(map: &str, glossary: &str) -> TestRepository {
     let repository = TestRepository::new();
     fs::create_dir_all(repository.path().join(".knowledge")).expect("knowledge directory");

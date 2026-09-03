@@ -16,7 +16,7 @@ use super::{
 pub(super) struct KnowledgeMapMutationLocks {
     _legacy_lock: Option<KnowledgeMapWriteLock>,
     _current_lock: KnowledgeMapWriteLock,
-    legacy_recovery_state: bool,
+    pub(super) legacy_recovery_state: bool,
 }
 
 impl KnowledgeMapService {

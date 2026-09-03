@@ -250,7 +250,19 @@ fn routed_business_sources(
         ));
     }
     validate_v2_topic_shard(&shard)?;
-    Ok(shard.route.map(|route| RoutedBusinessSources {
+    let route = shard.route.ok_or_else(|| {
+        invalid("business topic shard must route reserved source 'repository-business-glossary'")
+    })?;
+    if !route
+        .source_order
+        .iter()
+        .any(|source_id| source_id == "repository-business-glossary")
+    {
+        return Err(invalid(
+            "business topic route must include reserved source 'repository-business-glossary'",
+        ));
+    }
+    Ok(Some(RoutedBusinessSources {
         route,
         sources: shard.sources,
     }))

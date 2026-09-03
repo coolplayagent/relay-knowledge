@@ -149,6 +149,54 @@ async fn directory_mutation_republishes_a_clean_legacy_rollback() {
 }
 
 #[tokio::test]
+async fn directory_mutation_rejects_invalid_legacy_input_before_creating_migration_staging() {
+    let (root, service, context) = legacy_v2_fixture("directory-mutation-preflight").await;
+    let legacy_before = fs::read(service.legacy_map_path())
+        .await
+        .expect("legacy map should read");
+
+    let error = service
+        .add_directory(
+            &context,
+            RepositoryMapDirectory {
+                directory: "../outside".to_owned(),
+                purpose: "Invalid governed directory.".to_owned(),
+                content_scope: vec!["knowledge/outside/**".to_owned()],
+                key_files: vec!["knowledge/outside/README.md".to_owned()],
+                load_hint: DirectoryLoadHint::OnDemand,
+                relations: Vec::new(),
+                update_rule: DirectoryUpdateRule::Reviewed,
+            },
+        )
+        .await
+        .expect_err("invalid legacy directory must fail before migration staging");
+
+    assert!(
+        error.to_string().contains("directory"),
+        "the invalid directory should be rejected during preflight"
+    );
+    assert_eq!(
+        fs::read(service.legacy_map_path())
+            .await
+            .expect("legacy map should remain visible"),
+        legacy_before
+    );
+    assert!(
+        !fs::try_exists(service.map_path())
+            .await
+            .expect("migration staging should be probed"),
+        "invalid directory input must not create a forward-migration staging root"
+    );
+    assert!(
+        !fs::try_exists(service.legacy_backup_path())
+            .await
+            .expect("migration backup should be probed"),
+        "invalid directory input must not replace the rollback backup"
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn rollback_rejects_an_unreadable_routed_legacy_glossary_before_hiding_v3() {
     let (root, service, context) = migrated_v2_fixture("rollback-routed-glossary-preflight").await;
     let visible_before = fs::read(service.map_path())
@@ -427,6 +475,66 @@ async fn redirect_recovery_preserves_legacy_edits_after_v3_publication() {
 }
 
 #[tokio::test]
+async fn redirect_recovery_preserves_legacy_glossary_edits_after_v3_publication() {
+    let (root, service, context) =
+        migrated_v2_fixture("preserve-post-publication-legacy-glossary-edits").await;
+    let visible_before = fs::read(service.map_path())
+        .await
+        .expect("visible v3 root should read");
+    let legacy_backup = fs::read(service.legacy_backup_path())
+        .await
+        .expect("legacy migration backup should read");
+    let canonical_before = fs::read(root.join(BUSINESS_GLOSSARY_RELATIVE_PATH))
+        .await
+        .expect("canonical glossary should read");
+    let edited_glossary =
+        b"schema_version: 1\ndomains:\n  - id: sales\n    name: Sales\nterms: []\n";
+    BusinessGlossary::parse(edited_glossary).expect("edited legacy glossary should validate");
+    fs::write(service.legacy_map_path(), &legacy_backup)
+        .await
+        .expect("legacy writer should restore the map root before editing its glossary");
+    fs::write(
+        root.join(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH),
+        edited_glossary,
+    )
+    .await
+    .expect("legacy writer should update only the glossary");
+
+    let error = service
+        .init(&context)
+        .await
+        .expect_err("redirect recovery must preserve a post-publication legacy glossary edit");
+
+    assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
+    assert!(error.to_string().contains("business glossary diverged"));
+    assert_eq!(
+        fs::read(service.legacy_map_path())
+            .await
+            .expect("legacy map should remain writable"),
+        legacy_backup
+    );
+    assert_eq!(
+        fs::read(root.join(BUSINESS_GLOSSARY_RELATIVE_PATH))
+            .await
+            .expect("canonical glossary should remain visible"),
+        canonical_before
+    );
+    assert_eq!(
+        fs::read(root.join(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH))
+            .await
+            .expect("edited legacy glossary should remain visible"),
+        edited_glossary
+    );
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("visible v3 root should remain available"),
+        visible_before
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn redirect_recovery_preserves_staged_legacy_edits_after_v3_publication() {
     let (root, service, context) =
         migrated_v2_fixture("preserve-staged-post-publication-legacy-edits").await;
@@ -655,6 +763,48 @@ async fn rollback_discards_incomplete_forward_staging_without_replacing_retained
 }
 
 #[tokio::test]
+async fn rollback_recovers_forward_staging_from_manifest_backup_before_discarding_it() {
+    let (root, service, context) = migrated_v2_fixture("backup-forward-staging-rollback").await;
+    service
+        .rollback_v3(&context)
+        .await
+        .expect("clean rollback should retain the v3 root");
+    let retained_before = fs::read(service.retained_v3_path())
+        .await
+        .expect("retained v3 root should read");
+
+    service
+        .prepare_legacy_migration()
+        .await
+        .expect("forward migration should stage the legacy root");
+    fs::rename(service.map_path(), service.backup_path())
+        .await
+        .expect("interrupted manifest publication should retain staging as its backup");
+
+    let response = service
+        .rollback_v3(&context)
+        .await
+        .expect("rollback should recover and discard manifest-backup staging");
+
+    assert_eq!(
+        fs::read(service.retained_v3_path())
+            .await
+            .expect("retained v3 root should remain intact"),
+        retained_before
+    );
+    assert!(
+        !fs::try_exists(service.map_path()).await.unwrap(),
+        "recovered staging must be discarded rather than treated as a visible v3 contract"
+    );
+    assert!(
+        !fs::try_exists(service.backup_path()).await.unwrap(),
+        "manifest backup staging must not be retained after rollback"
+    );
+    assert!(response.summary.contains("already active"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn committed_rollback_recovery_keeps_post_commit_legacy_edits_when_cleanup_is_retried() {
     let (root, service, context) = migrated_v2_fixture("rollback-cleanup-residue").await;
 
@@ -713,6 +863,42 @@ async fn committed_rollback_recovery_keeps_post_commit_legacy_edits_when_cleanup
     );
     assert!(fs::try_exists(service.retained_v3_path()).await.unwrap());
     assert!(response.summary.contains("retained committed"));
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn successful_rollback_removes_stale_redirect_transition_markers() {
+    let (root, service, context) = migrated_v2_fixture("rollback-cleans-redirect-markers").await;
+    fs::write(
+        service.legacy_redirect_previous_path(),
+        fs::read(service.legacy_backup_path())
+            .await
+            .expect("legacy backup should read"),
+    )
+    .await
+    .expect("stale redirect previous marker should write");
+    fs::write(
+        service.legacy_redirect_prepared_path(),
+        "schema_version: 3\nartifact_kind: redirect\nmap_type: knowledge\ntarget: knowledge/knowledge-map.yaml\n",
+    )
+    .await
+    .expect("stale redirect prepared marker should write");
+
+    service
+        .rollback_v3(&context)
+        .await
+        .expect("rollback should commit despite stale redirect markers");
+
+    assert!(
+        !fs::try_exists(service.legacy_redirect_prepared_path())
+            .await
+            .unwrap()
+    );
+    assert!(
+        !fs::try_exists(service.legacy_redirect_previous_path())
+            .await
+            .unwrap()
+    );
     let _ = fs::remove_dir_all(root).await;
 }
 

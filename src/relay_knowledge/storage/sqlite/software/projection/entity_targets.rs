@@ -46,6 +46,13 @@ pub(super) fn append_statement_targets(
         remaining = remaining.saturating_sub(targets.len());
         entities.extend(targets);
     }
+    entities.sort_by(|left, right| {
+        left.entity_kind
+            .as_str()
+            .cmp(right.entity_kind.as_str())
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.occurrence_id.cmp(&right.occurrence_id))
+    });
     Ok(())
 }
 

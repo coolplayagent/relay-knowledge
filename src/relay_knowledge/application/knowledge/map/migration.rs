@@ -46,6 +46,7 @@ impl KnowledgeMapService {
         self.require_knowledge_map("map migrate --rollback")?;
         let _legacy_lock = self.acquire_legacy_write_lock(WRITE_LOCK_TIMEOUT).await?;
         let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        self.recover_manifest_backup().await?;
         if self.discard_incomplete_forward_migration_staging().await? {
             let active_legacy =
                 read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
@@ -81,7 +82,6 @@ impl KnowledgeMapService {
         }
         let legacy_backup = self.validate_legacy_backup().await?;
         let rollback_version = map_version_from_validated_legacy_content(&legacy_backup)?;
-        self.recover_manifest_backup().await?;
         let legacy = self.legacy_map_path();
         let rollback_prepared = self.legacy_rollback_prepared_path();
         let rollback_previous = self.legacy_rollback_previous_path();
@@ -100,7 +100,7 @@ impl KnowledgeMapService {
         if ordinary_backup_exists {
             remove_regular_transition_file(&retained_backup).await?;
         }
-        write_new_synced_file(&rollback_prepared, legacy_backup.as_bytes()).await?;
+        replace_with_new_synced_file(&rollback_prepared, legacy_backup.as_bytes()).await?;
 
         let current_moved = if current_exists {
             match fs::rename(&current, &retained).await {
@@ -171,6 +171,8 @@ impl KnowledgeMapService {
             return Err(error.into());
         }
         let _ = remove_regular_transition_file(&rollback_previous).await;
+        let _ = remove_regular_transition_file(&self.legacy_redirect_prepared_path()).await;
+        let _ = remove_regular_transition_file(&self.legacy_redirect_previous_path()).await;
         Ok(self.mutation_response(
             context,
             rollback_version,
@@ -456,6 +458,10 @@ impl KnowledgeMapService {
         }
 
         let legacy_backup = self.validate_legacy_backup().await?;
+        if !live_is_redirect {
+            self.ensure_legacy_glossary_matches_canonical(&legacy_backup)
+                .await?;
+        }
         if regular_file_exists_or_missing(&previous).await? {
             let previous_legacy = read_root_file(&self.repository_root, &previous).await?;
             if previous_legacy != legacy_backup {
@@ -501,6 +507,27 @@ impl KnowledgeMapService {
         remove_regular_transition_file(&previous).await?;
         remove_regular_transition_file(&rollback_prepared).await?;
         remove_regular_transition_file(&rollback_previous).await?;
+        Ok(())
+    }
+
+    async fn ensure_legacy_glossary_matches_canonical(
+        &self,
+        legacy_backup: &str,
+    ) -> Result<(), KnowledgeMapServiceError> {
+        let Some(legacy_glossary) = self
+            .read_routed_legacy_business_glossary(LEGACY_AGENT_CONTRACT_DIR_NAME, legacy_backup)
+            .await?
+        else {
+            return Ok(());
+        };
+        let canonical_glossary =
+            read_root_file(&self.repository_root, &self.business_glossary_path()).await?;
+        if canonical_glossary.as_bytes() != legacy_glossary.as_slice() {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "legacy business glossary diverged from the migration backup after v3 publication; refusing redirect to preserve edits"
+                    .to_owned(),
+            ));
+        }
         Ok(())
     }
 

@@ -47,6 +47,39 @@ fn statement_targets_scan_past_filtered_endpoints_before_filling_the_limit() {
     );
 }
 
+#[test]
+fn statement_targets_restore_canonical_order_after_multiple_query_batches() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    initialize_schema(&connection).expect("software schema should initialize");
+    let mut statements = Vec::new();
+    for index in 0..256 {
+        let id = format!("z-target-{index:03}");
+        insert_entity(&connection, &id, "src/targets.rs");
+        statements.push(statement(&id));
+    }
+    insert_entity(&connection, "a-target", "src/targets.rs");
+    statements.push(statement("a-target"));
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        500,
+    )
+    .expect("request should validate");
+    let mut entities = Vec::new();
+
+    append_statement_targets(&connection, "scope", &request, &mut entities, &statements)
+        .expect("statement targets should load across query batches");
+
+    assert_eq!(entities.len(), 257);
+    assert_eq!(entities[0].entity_key, "entity-a-target");
+    assert!(
+        entities.windows(2).all(|pair| pair[0].name <= pair[1].name),
+        "the concatenated query batches must preserve global canonical entity order"
+    );
+}
+
 fn insert_entity(connection: &Connection, id: &str, evidence_path: &str) {
     let evidence = format!(
         r#"[{{"evidence_id":"evidence-{id}","source_scope":"scope","path":"{evidence_path}","line_range":{{"start":1,"end":1}}}}]"#

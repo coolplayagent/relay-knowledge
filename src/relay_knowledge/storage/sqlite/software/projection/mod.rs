@@ -362,6 +362,13 @@ fn projection_slices(
                 &mut entities,
                 &statements,
             )?;
+            let diagnostics = diagnostics_for_filtered_ontology(
+                connection,
+                source_scope,
+                &entities,
+                &statements,
+                request.limit,
+            )?;
             let mut slices = ProjectionSlices {
                 components,
                 dependency_usages,
@@ -394,16 +401,41 @@ fn projection_slices(
                 )?,
                 entities,
                 statements,
-                diagnostics: super::ontology::diagnostics_for_scope(
-                    connection,
-                    source_scope,
-                    request.limit,
-                )?,
+                diagnostics,
             };
             fair_limit::apply_fair_total_limit(&mut slices, request.limit);
             Ok(slices)
         }
     }
+}
+
+fn diagnostics_for_filtered_ontology(
+    connection: &Connection,
+    source_scope: &str,
+    entities: &[SoftwareEntity],
+    statements: &[SoftwareStatement],
+    limit: usize,
+) -> Result<Vec<SoftwareShapeDiagnostic>, StorageError> {
+    let entity_keys = entities
+        .iter()
+        .map(|entity| entity.entity_key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let statement_ids = statements
+        .iter()
+        .map(|statement| statement.statement_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut diagnostics = super::ontology::diagnostics_for_scope(connection, source_scope, limit)?;
+    diagnostics.retain(|diagnostic| {
+        diagnostic
+            .entity_key
+            .as_deref()
+            .is_none_or(|entity_key| entity_keys.contains(entity_key))
+            && diagnostic
+                .statement_id
+                .as_deref()
+                .is_none_or(|statement_id| statement_ids.contains(statement_id))
+    });
+    Ok(diagnostics)
 }
 
 fn dependency_components(
