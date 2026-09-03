@@ -555,4 +555,5 @@ mod tests;
 mod reserved_contract_tests;
 
 #[cfg(test)]
+#[path = "identity_contract_tests.rs"]
 mod identity_contract_tests;

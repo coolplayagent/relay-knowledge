@@ -1,6 +1,9 @@
 //! Loads route-authorized business glossaries from immutable Git snapshots.
 
-use std::path::{Component, Path};
+use std::{
+    collections::HashSet,
+    path::{Component, Path},
+};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -246,6 +249,7 @@ fn routed_business_sources(
             "business topic shard identity does not match manifest",
         ));
     }
+    validate_v2_topic_shard(&shard)?;
     Ok(shard.route.map(|route| RoutedBusinessSources {
         route,
         sources: shard.sources,
@@ -270,6 +274,39 @@ fn route_from_parts(
         .into_iter()
         .find(|route| route.topic == BUSINESS_TOPIC_ID)
         .map(|route| RoutedBusinessSources { route, sources })
+}
+
+fn validate_v2_topic_shard(shard: &V2TopicShard) -> Result<(), CodeIndexError> {
+    let mut source_ids = HashSet::with_capacity(shard.sources.len());
+    for source in &shard.sources {
+        if source.topic != shard.topic.id || !source_ids.insert(source.id.as_str()) {
+            return Err(invalid(format!(
+                "business topic shard '{}' contains a foreign or duplicate source",
+                shard.topic.id
+            )));
+        }
+    }
+    if let Some(route) = &shard.route {
+        let mut routed = HashSet::with_capacity(route.source_order.len());
+        if route.topic != shard.topic.id
+            || route
+                .source_order
+                .iter()
+                .any(|id| !source_ids.contains(id.as_str()) || !routed.insert(id.as_str()))
+            || routed.len() != source_ids.len()
+        {
+            return Err(invalid(format!(
+                "business topic shard '{}' has an invalid route",
+                shard.topic.id
+            )));
+        }
+    } else if !shard.sources.is_empty() {
+        return Err(invalid(format!(
+            "business topic shard '{}' has sources without a route",
+            shard.topic.id
+        )));
+    }
+    Ok(())
 }
 
 fn validate_v2_ref(reference: &V2TopicRef, contract_dir: &str) -> Result<(), CodeIndexError> {

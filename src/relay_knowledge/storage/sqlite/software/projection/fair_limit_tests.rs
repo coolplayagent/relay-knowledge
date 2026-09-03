@@ -33,7 +33,7 @@ fn statement_budget_replaces_unrelated_entities_with_its_resolved_endpoints() {
 }
 
 #[test]
-fn statement_budget_never_replaces_an_endpoint_of_the_statement_being_retained() {
+fn statement_budget_keeps_the_first_representable_statement_and_recovers_entity_capacity() {
     let mut slices = ProjectionSlices {
         entities: vec![entity("previous"), entity("subject"), entity("object")],
         statements: vec![
@@ -47,11 +47,13 @@ fn statement_budget_never_replaces_an_endpoint_of_the_statement_being_retained()
 
     assert_eq!(slices.statements.len(), 1);
     assert_eq!(slices.statements[0].subject_id, "previous");
-    assert!(
+    assert_eq!(
         slices
             .entities
             .iter()
-            .all(|entity| entity.entity_key != "object")
+            .map(|entity| entity.entity_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["previous", "subject", "object"]
     );
 }
 
@@ -76,7 +78,38 @@ fn statement_budget_replaces_duplicate_endpoint_occurrences_when_one_remains() {
             .iter()
             .map(|entity| entity.entity_key.as_str())
             .collect::<Vec<_>>(),
-        vec!["object", "subject"]
+        vec!["subject", "object"]
+    );
+}
+
+#[test]
+fn rejected_statements_redistribute_capacity_to_remaining_entities() {
+    let mut slices = ProjectionSlices {
+        entities: vec![
+            entity("unrelated"),
+            entity("first-subject"),
+            entity("first-object"),
+            entity("second-subject"),
+            entity("second-object"),
+        ],
+        statements: vec![
+            statement("first-subject", Some("first-object")),
+            statement("second-subject", Some("second-object")),
+        ],
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 4);
+
+    assert_eq!(slices.statements.len(), 1);
+    assert_eq!(slices.statements[0].subject_id, "first-subject");
+    assert_eq!(
+        slices
+            .entities
+            .iter()
+            .map(|entity| entity.entity_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["unrelated", "first-subject", "first-object"]
     );
 }
 
