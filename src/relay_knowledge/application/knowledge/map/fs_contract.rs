@@ -235,7 +235,7 @@ pub(super) async fn ensure_owned_directory(
     Ok(directory)
 }
 
-pub(super) fn normalize_legacy_builtin_sources(map: &mut KnowledgeMap) {
+pub(super) fn normalize_legacy_builtin_sources(map: &mut KnowledgeMap) -> bool {
     if let Some(source) = map
         .sources
         .iter_mut()
@@ -244,8 +244,10 @@ pub(super) fn normalize_legacy_builtin_sources(map: &mut KnowledgeMap) {
         if source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH {
             source.uri = crate::project::BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
             source.version = source.version.saturating_add(1);
+            return true;
         }
     }
+    false
 }
 
 #[cfg(test)]

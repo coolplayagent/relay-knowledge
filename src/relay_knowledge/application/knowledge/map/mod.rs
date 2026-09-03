@@ -121,6 +121,9 @@ impl KnowledgeMapService {
                     snapshot.map.map_version,
                     if legacy {
                         "migrated knowledge map schema v1 to v2".to_owned()
+                    } else if snapshot.legacy_glossary_uri_normalized {
+                        "migrated Knowledge Map legacy glossary URI to the canonical artifact"
+                            .to_owned()
                     } else {
                         "migrated Knowledge Map v2 history archive index".to_owned()
                     },
@@ -186,7 +189,7 @@ impl KnowledgeMapService {
             let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
                 .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
             map.schema_version = KnowledgeMap::SCHEMA_VERSION;
-            normalize_legacy_builtin_sources(&mut map);
+            let _normalized_legacy_builtin_sources = normalize_legacy_builtin_sources(&mut map);
             return Ok(MutableKnowledgeMap {
                 map_type: RepositoryMapType::Knowledge,
                 directories: baseline_directories(RepositoryMapType::Knowledge),
@@ -195,6 +198,7 @@ impl KnowledgeMapService {
                 archive: None,
                 history_index: None,
                 requires_publish: true,
+                legacy_glossary_uri_normalized: false,
             });
         }
         if !matches!(
@@ -210,13 +214,17 @@ impl KnowledgeMapService {
         self.validate_manifest_identity(&manifest)?;
         self.validate_archived_history(&manifest.history).await?;
         let history_index = self.ensure_history_index(&manifest.history).await?;
-        let requires_publish = probe.schema_version != ARTIFACT_SCHEMA_VERSION
+        let mut requires_publish = probe.schema_version != ARTIFACT_SCHEMA_VERSION
             || (manifest.history.archive.is_some() && manifest.history.index.is_none());
         let mut topics = Vec::with_capacity(manifest.topics.len());
         let mut sources = Vec::new();
         let mut routes = Vec::new();
+        let mut legacy_glossary_uri_normalized = false;
         for topic_ref in &manifest.topics {
-            let shard = self.load_topic_shard(topic_ref).await?;
+            let (shard, normalized_legacy_glossary_uri) =
+                self.load_topic_shard_for_mutation(topic_ref).await?;
+            requires_publish |= normalized_legacy_glossary_uri;
+            legacy_glossary_uri_normalized |= normalized_legacy_glossary_uri;
             topics.push(shard.topic);
             sources.extend(shard.sources);
             routes.extend(shard.route);
@@ -230,7 +238,9 @@ impl KnowledgeMapService {
             routes,
             history: manifest.history.recent,
         };
-        normalize_legacy_builtin_sources(&mut map);
+        let normalized_legacy_builtin_sources = normalize_legacy_builtin_sources(&mut map);
+        requires_publish |= normalized_legacy_builtin_sources;
+        legacy_glossary_uri_normalized |= normalized_legacy_builtin_sources;
         if probe.schema_version != LEGACY_ARTIFACT_SCHEMA_VERSION
             || self.map_type != RepositoryMapType::Knowledge
         {
@@ -248,6 +258,7 @@ impl KnowledgeMapService {
             archive: manifest.history.archive,
             history_index,
             requires_publish,
+            legacy_glossary_uri_normalized,
         })
     }
 
@@ -383,11 +394,31 @@ impl KnowledgeMapService {
         self.load_topic_shard_in(contract_dir, topic_ref).await
     }
 
+    async fn load_topic_shard_for_mutation(
+        &self,
+        topic_ref: &KnowledgeMapTopicRef,
+    ) -> Result<(KnowledgeMapTopicShard, bool), KnowledgeMapServiceError> {
+        let contract_dir = self.read_contract_dir_name().await?;
+        self.load_topic_shard_with_legacy_glossary_normalization(contract_dir, topic_ref, true)
+            .await
+    }
+
     async fn load_topic_shard_in(
         &self,
         contract_dir: &str,
         topic_ref: &KnowledgeMapTopicRef,
     ) -> Result<KnowledgeMapTopicShard, KnowledgeMapServiceError> {
+        self.load_topic_shard_with_legacy_glossary_normalization(contract_dir, topic_ref, false)
+            .await
+            .map(|(shard, _normalized_legacy_glossary_uri)| shard)
+    }
+
+    async fn load_topic_shard_with_legacy_glossary_normalization(
+        &self,
+        contract_dir: &str,
+        topic_ref: &KnowledgeMapTopicRef,
+        normalize_visible_legacy_glossary_uri: bool,
+    ) -> Result<(KnowledgeMapTopicShard, bool), KnowledgeMapServiceError> {
         let content = read_verified_ref_in(
             &self.repository_root,
             contract_dir,
@@ -397,13 +428,15 @@ impl KnowledgeMapService {
         .await?;
         let mut shard = serde_norway::from_str::<KnowledgeMapTopicShard>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        if contract_dir == LEGACY_AGENT_CONTRACT_DIR_NAME {
+        let mut normalized_legacy_glossary_uri = false;
+        if contract_dir == LEGACY_AGENT_CONTRACT_DIR_NAME || normalize_visible_legacy_glossary_uri {
             for source in &mut shard.sources {
                 if source.id == "repository-business-glossary"
                     && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
                 {
                     source.uri = crate::project::BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
                     source.version = source.version.saturating_add(1);
+                    normalized_legacy_glossary_uri = true;
                 }
             }
         }
@@ -432,7 +465,7 @@ impl KnowledgeMapService {
             )));
         }
         validate_topic_shard(&shard)?;
-        Ok(shard)
+        Ok((shard, normalized_legacy_glossary_uri))
     }
 
     async fn publish_manifest(&self, content: &[u8]) -> Result<(), KnowledgeMapServiceError> {

@@ -383,15 +383,18 @@ impl KnowledgeMapService {
         let previous = self.legacy_redirect_previous_path();
         let rollback_prepared = self.legacy_rollback_prepared_path();
         let rollback_previous = self.legacy_rollback_previous_path();
-        let live_is_redirect = match read_root_file(&self.repository_root, &legacy).await {
-            Ok(content) => content.as_bytes() == yaml.as_bytes(),
+        let live_legacy = match read_root_file(&self.repository_root, &legacy).await {
+            Ok(content) => Some(content),
             Err(KnowledgeMapServiceError::Io(error))
                 if error.kind() == std::io::ErrorKind::NotFound =>
             {
-                false
+                None
             }
             Err(error) => return Err(error),
         };
+        let live_is_redirect = live_legacy
+            .as_deref()
+            .is_some_and(|content| content.as_bytes() == yaml.as_bytes());
         if live_is_redirect {
             let has_residue = path_entry_exists(&prepared).await?
                 || path_entry_exists(&previous).await?
@@ -402,13 +405,31 @@ impl KnowledgeMapService {
             }
         }
 
-        self.validate_legacy_backup().await?;
+        let legacy_backup = self.validate_legacy_backup().await?;
+        if regular_file_exists_or_missing(&previous).await? {
+            let previous_legacy = read_root_file(&self.repository_root, &previous).await?;
+            if previous_legacy != legacy_backup {
+                return Err(KnowledgeMapServiceError::Integrity(
+                    "legacy redirect recovery preserves a root that diverged from the migration backup"
+                        .to_owned(),
+                ));
+            }
+        }
         if live_is_redirect {
             remove_regular_transition_file(&prepared).await?;
             remove_regular_transition_file(&previous).await?;
             remove_regular_transition_file(&rollback_prepared).await?;
             remove_regular_transition_file(&rollback_previous).await?;
             return Ok(());
+        }
+
+        if let Some(live_legacy) = &live_legacy
+            && live_legacy != &legacy_backup
+        {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "legacy root diverged from the migration backup after v3 publication; refusing redirect to preserve edits"
+                    .to_owned(),
+            ));
         }
 
         remove_regular_transition_file(&prepared).await?;

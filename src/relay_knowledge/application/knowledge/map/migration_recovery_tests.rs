@@ -214,6 +214,103 @@ async fn redirect_recovery_defers_legacy_redirect_until_visible_v3_publication()
 }
 
 #[tokio::test]
+async fn redirect_recovery_preserves_legacy_edits_after_v3_publication() {
+    let (root, service, context) =
+        migrated_v2_fixture("preserve-post-publication-legacy-edits").await;
+    let visible_before = fs::read(service.map_path())
+        .await
+        .expect("visible v3 root should read");
+    let mut edited_legacy = parse_manifest(
+        &fs::read_to_string(service.legacy_backup_path())
+            .await
+            .expect("migration backup should read"),
+    )
+    .expect("migration backup should parse");
+    edited_legacy.updated_at = "unix:2".to_owned();
+    let edited_legacy =
+        serialize_yaml(&edited_legacy).expect("edited legacy root should serialize");
+    fs::write(service.legacy_map_path(), &edited_legacy)
+        .await
+        .expect("legacy writer should update the live root after v3 publication");
+
+    let error = service
+        .init(&context)
+        .await
+        .expect_err("redirect recovery must preserve post-publication legacy edits");
+
+    assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
+    assert_eq!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("edited legacy root should remain live"),
+        edited_legacy
+    );
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("visible v3 root should remain available"),
+        visible_before
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn redirect_recovery_preserves_staged_legacy_edits_after_v3_publication() {
+    let (root, service, context) =
+        migrated_v2_fixture("preserve-staged-post-publication-legacy-edits").await;
+    let visible_before = fs::read(service.map_path())
+        .await
+        .expect("visible v3 root should read");
+    let redirect = fs::read(service.legacy_map_path())
+        .await
+        .expect("legacy redirect should read");
+    let mut edited_legacy = parse_manifest(
+        &fs::read_to_string(service.legacy_backup_path())
+            .await
+            .expect("migration backup should read"),
+    )
+    .expect("migration backup should parse");
+    edited_legacy.updated_at = "unix:2".to_owned();
+    let edited_legacy =
+        serialize_yaml(&edited_legacy).expect("edited legacy root should serialize");
+    fs::write(service.legacy_redirect_previous_path(), &edited_legacy)
+        .await
+        .expect("staged legacy root should preserve the old writer edit");
+    fs::remove_file(service.legacy_map_path())
+        .await
+        .expect("interrupted redirect should leave no live legacy root");
+    fs::write(service.legacy_redirect_prepared_path(), &redirect)
+        .await
+        .expect("interrupted redirect should retain the prepared redirect");
+
+    let error = service
+        .init(&context)
+        .await
+        .expect_err("redirect recovery must preserve staged post-publication legacy edits");
+
+    assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
+    assert_eq!(
+        fs::read_to_string(service.legacy_redirect_previous_path())
+            .await
+            .expect("edited staged legacy root should remain available"),
+        edited_legacy
+    );
+    assert_eq!(
+        fs::read(service.legacy_redirect_prepared_path())
+            .await
+            .expect("prepared redirect should remain available"),
+        redirect
+    );
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("visible v3 root should remain available"),
+        visible_before
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn rollback_recovery_promotes_a_retained_fallback_only_root() {
     let (root, service, _context) = migrated_v2_fixture("fallback-only-rollback").await;
     let current_before = fs::read(service.map_path())

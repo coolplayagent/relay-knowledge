@@ -471,7 +471,7 @@ async fn source_update_rejects_the_legacy_glossary_uri_before_publication() {
 }
 
 #[tokio::test]
-async fn validate_rejects_the_legacy_glossary_uri_in_the_visible_v3_namespace() {
+async fn init_migrates_the_legacy_glossary_uri_in_a_visible_v3_namespace() {
     let (root, service, context) = initialized_repository("visible-legacy-glossary-uri").await;
     let mut manifest = parse_manifest(
         &fs::read_to_string(service.map_path())
@@ -527,6 +527,48 @@ async fn validate_rejects_the_legacy_glossary_uri_in_the_visible_v3_namespace() 
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.contains(BUSINESS_GLOSSARY_RELATIVE_PATH))
+    );
+
+    let initialized = service
+        .init(&context)
+        .await
+        .expect("writer initialization should publish the canonical glossary URI");
+    assert!(initialized.summary.contains("canonical artifact"));
+    assert!(
+        service
+            .validate(&context)
+            .await
+            .expect("validation should run after the migration")
+            .valid
+    );
+    let repaired_manifest = parse_manifest(
+        &fs::read_to_string(service.map_path())
+            .await
+            .expect("repaired manifest should read"),
+    )
+    .expect("repaired manifest should parse");
+    let repaired_topic_ref = repaired_manifest
+        .topics
+        .iter()
+        .find(|topic| topic.id == "business-knowledge")
+        .expect("repaired business topic should exist");
+    let repaired_shard: KnowledgeMapTopicShard = serde_norway::from_str(
+        &fs::read_to_string(
+            root.join(AGENT_CONTRACT_DIR_NAME)
+                .join(&repaired_topic_ref.r#ref),
+        )
+        .await
+        .expect("repaired business shard should read"),
+    )
+    .expect("repaired business shard should parse");
+    assert_eq!(
+        repaired_shard
+            .sources
+            .iter()
+            .find(|source| source.id == "repository-business-glossary")
+            .expect("repaired glossary source should exist")
+            .uri,
+        BUSINESS_GLOSSARY_RELATIVE_PATH
     );
     let _ = fs::remove_dir_all(root).await;
 }
