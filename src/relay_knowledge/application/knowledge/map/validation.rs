@@ -10,9 +10,10 @@ use crate::{
 
 use super::{
     ARTIFACT_SCHEMA_VERSION, KnowledgeMapSchemaProbe, KnowledgeMapService,
-    KnowledgeMapServiceError, KnowledgeMapValidationResponse, LEGACY_ARTIFACT_SCHEMA_VERSION,
-    history::MISSING_HISTORY_INDEX_MESSAGE, metadata, parse_manifest, parse_v1_map,
-    parse_v1_map_for_legacy_recovery, safe_repository_source_path,
+    KnowledgeMapServiceError, KnowledgeMapTopicShard, KnowledgeMapValidationResponse,
+    LEGACY_ARTIFACT_SCHEMA_VERSION, history::MISSING_HISTORY_INDEX_MESSAGE, metadata,
+    parse_manifest, parse_v1_map, parse_v1_map_for_legacy_recovery, read_verified_ref_in,
+    safe_repository_source_path,
 };
 
 #[derive(Clone, Copy)]
@@ -81,7 +82,9 @@ impl KnowledgeMapService {
             content,
             MapContentValidation::LegacyRecovery,
         )
-        .await
+        .await?;
+        self.validate_routed_legacy_business_glossary(contract_dir, content)
+            .await
     }
 
     /// Confirms that a visible root has reached the current v3 publication contract.
@@ -180,6 +183,68 @@ impl KnowledgeMapService {
         {
             map.validate_reserved_repository_routes()?;
         }
+        Ok(())
+    }
+
+    async fn validate_routed_legacy_business_glossary(
+        &self,
+        contract_dir: &str,
+        content: &str,
+    ) -> Result<(), KnowledgeMapServiceError> {
+        if self.map_type != crate::domain::RepositoryMapType::Knowledge
+            || contract_dir != crate::project::LEGACY_AGENT_CONTRACT_DIR_NAME
+        {
+            return Ok(());
+        }
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        let glossary_is_routed = if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
+            let legacy_map = serde_norway::from_str::<KnowledgeMap>(content)
+                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+            legacy_map.sources.iter().any(|source| {
+                source.id == "repository-business-glossary"
+                    && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+            }) && legacy_map.routes.iter().any(|route| {
+                route
+                    .source_order
+                    .iter()
+                    .any(|source_id| source_id == "repository-business-glossary")
+            })
+        } else {
+            let manifest = parse_manifest(content)?;
+            let mut glossary_is_routed = false;
+            for topic_ref in &manifest.topics {
+                let content = read_verified_ref_in(
+                    &self.repository_root,
+                    contract_dir,
+                    &topic_ref.r#ref,
+                    &topic_ref.digest,
+                )
+                .await?;
+                let shard = serde_norway::from_str::<KnowledgeMapTopicShard>(&content)
+                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+                glossary_is_routed |= shard.sources.iter().any(|source| {
+                    source.id == "repository-business-glossary"
+                        && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+                }) && shard.route.is_some_and(|route| {
+                    route
+                        .source_order
+                        .iter()
+                        .any(|source_id| source_id == "repository-business-glossary")
+                });
+            }
+            glossary_is_routed
+        };
+        if !glossary_is_routed {
+            return Ok(());
+        }
+        let path = safe_repository_source_path(
+            &self.repository_root,
+            LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
+        )
+        .await?;
+        let content = fs::read(path).await?;
+        BusinessGlossary::parse(&content)?;
         Ok(())
     }
 

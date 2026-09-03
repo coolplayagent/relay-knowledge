@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     KnowledgeMapMutationResponse, KnowledgeMapService, KnowledgeMapServiceError,
-    WRITE_LOCK_TIMEOUT, ensure_owned_directory, now_stamp,
+    ensure_owned_directory, now_stamp,
 };
 
 impl KnowledgeMapService {
@@ -22,8 +22,11 @@ impl KnowledgeMapService {
         context: &RequestContext,
         directory: RepositoryMapDirectory,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let _mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
+        self.recover_legacy_redirect_transition().await?;
+        self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
         directory.validate(self.map_type)?;
         if snapshot
@@ -60,8 +63,11 @@ impl KnowledgeMapService {
         context: &RequestContext,
         change: RepositoryMapDirectoryChange,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let _mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
+        self.recover_legacy_redirect_transition().await?;
+        self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
         let name = change.directory.clone();
         let entry = snapshot
@@ -119,8 +125,11 @@ impl KnowledgeMapService {
                 "required directory '{directory}' cannot be removed"
             )));
         }
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let _mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
+        self.recover_legacy_redirect_transition().await?;
+        self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
         let before = snapshot.directories.len();
         snapshot

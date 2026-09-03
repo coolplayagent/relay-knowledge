@@ -8,7 +8,7 @@ use tokio::fs;
 use super::*;
 use crate::{
     api::{InterfaceKind, RequestContext},
-    domain::BusinessGlossary,
+    domain::{BusinessGlossary, DirectoryLoadHint, DirectoryUpdateRule, RepositoryMapDirectory},
     project::{
         AGENT_CONTRACT_DIR_NAME, BUSINESS_GLOSSARY_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
         LEGACY_AGENT_CONTRACT_DIR_NAME, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
@@ -93,6 +93,131 @@ async fn migration_refreshes_the_rollback_backup_from_the_active_v2_root() {
             .await
             .expect("restored refreshed root should read"),
         active_v2_root
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn directory_mutation_republishes_a_clean_legacy_rollback() {
+    let (root, service, context) = migrated_v2_fixture("directory-mutation-clean-rollback").await;
+
+    service
+        .rollback_v3(&context)
+        .await
+        .expect("rollback should restore the v2 root");
+    let directory = root.join("knowledge/integrations");
+    fs::create_dir_all(&directory)
+        .await
+        .expect("governed directory should create");
+    fs::write(directory.join("README.md"), "# Integrations\n")
+        .await
+        .expect("governed directory readme should write");
+
+    service
+        .add_directory(
+            &context,
+            RepositoryMapDirectory {
+                directory: "integrations".to_owned(),
+                purpose: "Integration knowledge.".to_owned(),
+                content_scope: vec!["knowledge/integrations/**".to_owned()],
+                key_files: vec!["knowledge/integrations/README.md".to_owned()],
+                load_hint: DirectoryLoadHint::OnDemand,
+                relations: Vec::new(),
+                update_rule: DirectoryUpdateRule::Reviewed,
+            },
+        )
+        .await
+        .expect("directory mutation should migrate and republish the legacy contract");
+
+    assert!(
+        fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("legacy root should read")
+            .contains("artifact_kind: redirect")
+    );
+    assert!(
+        service
+            .show(&context, None)
+            .await
+            .expect("republished map should read")
+            .map
+            .directories
+            .iter()
+            .any(|entry| entry.directory == "integrations")
+    );
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn rollback_rejects_an_unreadable_routed_legacy_glossary_before_hiding_v3() {
+    let (root, service, context) = migrated_v2_fixture("rollback-routed-glossary-preflight").await;
+    let visible_before = fs::read(service.map_path())
+        .await
+        .expect("visible v3 root should read");
+    let mut legacy_backup = parse_manifest(
+        &fs::read_to_string(service.legacy_backup_path())
+            .await
+            .expect("legacy backup should read"),
+    )
+    .expect("legacy backup should parse");
+    let business_topic = legacy_backup
+        .topics
+        .iter_mut()
+        .find(|topic| topic.id == "business-knowledge")
+        .expect("legacy backup should route the business glossary");
+    let mut shard: KnowledgeMapTopicShard = serde_norway::from_str(
+        &fs::read_to_string(
+            root.join(LEGACY_AGENT_CONTRACT_DIR_NAME)
+                .join(&business_topic.r#ref),
+        )
+        .await
+        .expect("legacy business shard should read"),
+    )
+    .expect("legacy business shard should parse");
+    shard
+        .sources
+        .iter_mut()
+        .find(|source| source.id == "repository-business-glossary")
+        .expect("legacy business glossary source should exist")
+        .uri = LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
+    let shard_yaml = serialize_yaml(&shard).expect("legacy business shard should serialize");
+    business_topic.digest = content_digest(shard_yaml.as_bytes());
+    business_topic.r#ref = format!(
+        "{KNOWLEDGE_MAP_TOPICS_DIR_NAME}/topic-{}-{}.yaml",
+        stable_id(&business_topic.id),
+        business_topic.digest
+    );
+    fs::write(
+        root.join(LEGACY_AGENT_CONTRACT_DIR_NAME)
+            .join(&business_topic.r#ref),
+        shard_yaml,
+    )
+    .await
+    .expect("routed legacy business shard should write");
+    fs::write(
+        service.legacy_backup_path(),
+        serialize_yaml(&legacy_backup).expect("legacy backup should serialize"),
+    )
+    .await
+    .expect("legacy backup should write");
+
+    let error = service
+        .rollback_v3(&context)
+        .await
+        .expect_err("rollback must reject a missing routed legacy glossary");
+
+    assert!(error.to_string().contains("No such file"));
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("failed rollback must keep the v3 root visible"),
+        visible_before
+    );
+    assert!(
+        !fs::try_exists(service.retained_v3_path())
+            .await
+            .expect("retained root should be probed"),
+        "rollback must not move v3 data before the glossary preflight"
     );
     let _ = fs::remove_dir_all(root).await;
 }
