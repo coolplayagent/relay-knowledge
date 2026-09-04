@@ -75,15 +75,15 @@ impl KnowledgeMapService {
         })
     }
 
-    async fn load_show_view(&self) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
-        let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+    pub(super) async fn load_show_view(
+        &self,
+    ) -> Result<KnowledgeMapView, KnowledgeMapServiceError> {
+        let root = self.read_root_snapshot().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&root.content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
             self.require_knowledge_map("legacy map show")?;
-            let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
-                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-            map.validate()?;
+            let mut map = parse_v1_map(&root.content)?;
             let omitted = map.history.len().saturating_sub(RECENT_HISTORY_LIMIT);
             let recent = map.history.split_off(omitted);
             let archived_through = recent
@@ -113,13 +113,15 @@ impl KnowledgeMapService {
                 probe.schema_version
             )));
         }
-        let manifest = parse_manifest(&content)?;
+        let manifest = parse_manifest(&root.content)?;
         self.validate_manifest_identity(&manifest)?;
         let mut topics = Vec::with_capacity(manifest.topics.len());
         let mut sources = Vec::new();
         let mut routes = Vec::new();
         for topic_ref in &manifest.topics {
-            let shard = self.load_topic_shard(topic_ref).await?;
+            let shard = self
+                .load_topic_shard_in(root.contract_dir, topic_ref)
+                .await?;
             topics.push(shard.topic);
             sources.extend(shard.sources);
             routes.extend(shard.route);
@@ -149,11 +151,11 @@ impl KnowledgeMapService {
         topic: &str,
     ) -> Result<(Option<KnowledgeMapRoute>, Vec<KnowledgeMapSource>), KnowledgeMapServiceError>
     {
-        let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+        let root = self.read_root_snapshot().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&root.content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == 1 {
-            let map = parse_v1_map(&content)?;
+            let map = parse_v1_map(&root.content)?;
             return Ok((
                 map.routes
                     .iter()
@@ -165,12 +167,15 @@ impl KnowledgeMapService {
                     .collect(),
             ));
         }
-        let manifest = parse_manifest(&content)?;
+        let manifest = parse_manifest(&root.content)?;
+        self.validate_manifest_identity(&manifest)?;
         super::validate_recent_history(&manifest)?;
         let Some(topic_ref) = manifest.topics.iter().find(|entry| entry.id == topic) else {
             return Ok((None, Vec::new()));
         };
-        let shard = self.load_topic_shard(topic_ref).await?;
+        let shard = self
+            .load_topic_shard_in(root.contract_dir, topic_ref)
+            .await?;
         Ok((shard.route, shard.sources))
     }
 }

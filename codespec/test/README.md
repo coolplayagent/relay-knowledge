@@ -11,10 +11,13 @@ The checked-in workload at `tools/self_iteration/cases/repository_map_targets.js
 - `codespec_test_directory_contract_is_visible` requires the CodeSpec `test` directory, content scope, key file, load policy, and update policy to remain queryable.
 - `knowledge_guides_directory_contract_is_visible` requires the governed Knowledge guide directory and its relation to `codespec:requirements` to remain queryable.
 - `knowledge_business_route_preserves_authored_glossary` requires the built-in business route to resolve to the authored repository glossary.
+- `knowledge_software_model_route_preserves_code_map_entry` requires the stable repository code-map entry to retain its exact topic, kind, URI, and source scope.
+- `knowledge_architecture_route_assembles_ordered_v3_shard_sources` requires targeted v3 shard loading to preserve the reviewed seven-source architecture order.
+- `knowledge_history_pages_across_archive_and_recent_boundary` requires one bounded history page to cross the v3 archive/recent boundary without a gap or duplicate.
 
-All five cases are foundational fast-profile guardrails. A non-zero CLI exit, malformed JSON, invalid map, reordered or missing required response evidence, or changed governed contract fails the corresponding case. The assertions intentionally use public CLI output instead of parsing YAML directly, so they cover repository-root discovery, map assembly, validation, filtering, routing, and JSON rendering together.
+All eight CLI cases are foundational fast-profile guardrails. A non-zero CLI exit, malformed JSON, invalid map, reordered or missing required response evidence, or changed governed contract fails the corresponding case. The assertions intentionally use public CLI output instead of parsing YAML directly, so they cover repository-root discovery, map assembly, validation, filtering, targeted shard loading, archive paging, routing, and JSON rendering together.
 
-The companion `software_global_fixture` remains the index-backed compatibility rail: its legacy inline Knowledge map includes `updated_at` and contiguous history, then must survive code indexing and expose the routed topic through `repo software --kind topics`. The 1,024-file performance fixture separately requires all 1,024 authorized `src` files at cold publication; its minimum must not count files outside the registered path filter.
+The generated `repository_map_graph_fixture` is the current v3 index-backed rail. It commits eight content-addressed topic dimensions plus one locally valid but root-unreferenced orphan shard, then runs the real durable repository index and `repo software` projections. Its three cases require every authorized topic and `documents` edge, reject the orphan, and prove that the combined software view retains map-manifest/shard roles alongside dependency, build, Kubernetes, and design evidence. The separate `software_global_fixture` retains legacy inline-map compatibility, while the 1,024-file performance fixture continues to require every authorized `src` file at cold publication.
 
 Run the focused current-worktree evaluation from the repository root:
 
@@ -23,7 +26,7 @@ cargo build --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledg
 tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate --workspace . --profile fast --categories foundational --use-current-candidate
 ```
 
-The evaluation must report every repository-map case as passed; an empty selection is not evidence of success. Also run `relay-knowledge map validate --type all --format json` when changing either governed map or its key files.
+The evaluation must report all eight CLI cases and all three index-backed repository-map cases as passed; an empty selection is not evidence of success. Also run `relay-knowledge map validate --type all --format json` when changing either governed map or its key files.
 
 ## Partitioned catalog startup regression contract
 

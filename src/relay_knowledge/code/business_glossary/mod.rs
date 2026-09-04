@@ -1,6 +1,9 @@
 //! Loads route-authorized business glossaries from immutable Git snapshots.
 
-use std::path::{Component, Path};
+use std::{
+    collections::HashSet,
+    path::{Component, Path},
+};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -12,7 +15,8 @@ use crate::{
         KnowledgeMapSourceKind, KnowledgeMapTopic,
     },
     project::{
-        KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+        BUSINESS_GLOSSARY_RELATIVE_PATH, KNOWLEDGE_MAP_RELATIVE_PATH,
+        KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
         LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
     },
 };
@@ -107,13 +111,16 @@ pub(crate) fn load_business_knowledge_projection(
         ));
     };
     let mut sources = Vec::with_capacity(routed.route.source_order.len());
-    for (authority_rank, source_id) in routed.route.source_order.iter().enumerate() {
+    for source_id in &routed.route.source_order {
+        if source_id != "repository-business-glossary" {
+            continue;
+        }
         let source = routed
             .sources
             .iter()
             .find(|source| &source.id == source_id)
             .ok_or_else(|| invalid(format!("route references missing source '{source_id}'")))?;
-        validate_routed_source(source)?;
+        validate_routed_source(source, map_path == LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH)?;
         validate_repository_path(&source.uri)?;
         let size =
             snapshot_blob_size(root, resolved_commit_sha, &source.uri)?.ok_or_else(|| {
@@ -134,7 +141,7 @@ pub(crate) fn load_business_knowledge_projection(
         sources.push(BusinessKnowledgeSource {
             source_id: source.id.clone(),
             source_path: source.uri.clone(),
-            authority_rank,
+            authority_rank: sources.len(),
             content_digest: sha256(&content),
             glossary,
         });
@@ -184,7 +191,12 @@ fn routed_business_sources(
     if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
         let map = serde_norway::from_slice::<KnowledgeMap>(content)
             .map_err(|error| invalid(format!("knowledge map YAML is invalid: {error}")))?;
-        map.validate()
+        let mut validation_map = map.clone();
+        if map_path == LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH {
+            normalize_legacy_glossary_uri(&mut validation_map);
+        }
+        validation_map
+            .validate()
             .map_err(|error| invalid(format!("knowledge map is invalid: {error}")))?;
         return Ok(route_from_parts(map.routes, map.sources));
     }
@@ -237,10 +249,33 @@ fn routed_business_sources(
             "business topic shard identity does not match manifest",
         ));
     }
-    Ok(shard.route.map(|route| RoutedBusinessSources {
+    validate_v2_topic_shard(&shard)?;
+    let route = shard.route.ok_or_else(|| {
+        invalid("business topic shard must route reserved source 'repository-business-glossary'")
+    })?;
+    if !route
+        .source_order
+        .iter()
+        .any(|source_id| source_id == "repository-business-glossary")
+    {
+        return Err(invalid(
+            "business topic route must include reserved source 'repository-business-glossary'",
+        ));
+    }
+    Ok(Some(RoutedBusinessSources {
         route,
         sources: shard.sources,
     }))
+}
+
+fn normalize_legacy_glossary_uri(map: &mut KnowledgeMap) {
+    for source in &mut map.sources {
+        if source.id == "repository-business-glossary"
+            && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+        {
+            source.uri = BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
+        }
+    }
 }
 
 fn route_from_parts(
@@ -251,6 +286,39 @@ fn route_from_parts(
         .into_iter()
         .find(|route| route.topic == BUSINESS_TOPIC_ID)
         .map(|route| RoutedBusinessSources { route, sources })
+}
+
+fn validate_v2_topic_shard(shard: &V2TopicShard) -> Result<(), CodeIndexError> {
+    let mut source_ids = HashSet::with_capacity(shard.sources.len());
+    for source in &shard.sources {
+        if source.topic != shard.topic.id || !source_ids.insert(source.id.as_str()) {
+            return Err(invalid(format!(
+                "business topic shard '{}' contains a foreign or duplicate source",
+                shard.topic.id
+            )));
+        }
+    }
+    if let Some(route) = &shard.route {
+        let mut routed = HashSet::with_capacity(route.source_order.len());
+        if route.topic != shard.topic.id
+            || route
+                .source_order
+                .iter()
+                .any(|id| !source_ids.contains(id.as_str()) || !routed.insert(id.as_str()))
+            || routed.len() != source_ids.len()
+        {
+            return Err(invalid(format!(
+                "business topic shard '{}' has an invalid route",
+                shard.topic.id
+            )));
+        }
+    } else if !shard.sources.is_empty() {
+        return Err(invalid(format!(
+            "business topic shard '{}' has sources without a route",
+            shard.topic.id
+        )));
+    }
+    Ok(())
 }
 
 fn validate_v2_ref(reference: &V2TopicRef, contract_dir: &str) -> Result<(), CodeIndexError> {
@@ -269,7 +337,10 @@ fn validate_v2_ref(reference: &V2TopicRef, contract_dir: &str) -> Result<(), Cod
     validate_repository_path(&format!("{contract_dir}/{}", reference.shard_ref))
 }
 
-fn validate_routed_source(source: &KnowledgeMapSource) -> Result<(), CodeIndexError> {
+fn validate_routed_source(
+    source: &KnowledgeMapSource,
+    legacy_contract: bool,
+) -> Result<(), CodeIndexError> {
     if source.topic != BUSINESS_TOPIC_ID
         || source.kind != KnowledgeMapSourceKind::File
         || source.source_scope.as_deref() != Some("repo")
@@ -278,6 +349,14 @@ fn validate_routed_source(source: &KnowledgeMapSource) -> Result<(), CodeIndexEr
         return Err(invalid(format!(
             "business source '{}' must be an active repository-scoped file",
             source.id
+        )));
+    }
+    let expected_uri = BUSINESS_GLOSSARY_RELATIVE_PATH;
+    let accepts_legacy_uri =
+        legacy_contract && source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH;
+    if source.uri != expected_uri && !accepts_legacy_uri {
+        return Err(invalid(format!(
+            "reserved source 'repository-business-glossary' must use uri '{expected_uri}'"
         )));
     }
     Ok(())

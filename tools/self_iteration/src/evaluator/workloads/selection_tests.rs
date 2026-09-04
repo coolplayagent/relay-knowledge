@@ -197,7 +197,7 @@ fn fast_limits_preserve_guardrail_cases() {
 }
 
 #[test]
-fn fast_default_repositories_include_typescript_import_grep_fixture() {
+fn fast_default_repositories_include_foundational_generated_fixtures() {
     if std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS").is_ok() {
         return;
     }
@@ -225,6 +225,11 @@ fn fast_default_repositories_include_typescript_import_grep_fixture() {
         names
             .iter()
             .any(|name| name == "nonstandard_layout_fixture")
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| name == "repository_map_graph_fixture")
     );
     assert!(names.iter().any(|name| name == "project_alias_fixture"));
 }

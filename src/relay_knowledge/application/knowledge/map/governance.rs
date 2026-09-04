@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     KnowledgeMapMutationResponse, KnowledgeMapService, KnowledgeMapServiceError,
-    WRITE_LOCK_TIMEOUT, ensure_owned_directory, now_stamp,
+    ensure_owned_directory, now_stamp,
 };
 
 impl KnowledgeMapService {
@@ -22,26 +22,31 @@ impl KnowledgeMapService {
         context: &RequestContext,
         directory: RepositoryMapDirectory,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        let legacy_recovery_state = mutation_locks.legacy_recovery_state;
+        self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
+        self.recover_legacy_redirect_transition().await?;
+        if legacy_recovery_state && !fs::try_exists(self.map_path()).await? {
+            let mut preflight = self.load_for_mutation().await?;
+            preflight
+                .map
+                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+            add_directory_to_collection(
+                self.map_type,
+                &mut preflight.directories,
+                directory.clone(),
+            )?;
+        }
+        self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
-        directory.validate(self.map_type)?;
-        if snapshot
-            .directories
-            .iter()
-            .any(|entry| entry.directory.eq_ignore_ascii_case(&directory.directory))
-        {
-            return Err(KnowledgeMapServiceError::InvalidRequest(format!(
-                "directory '{}' already exists",
-                directory.directory
-            )));
+        if self.map_type == RepositoryMapType::Knowledge {
+            snapshot
+                .map
+                .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
         }
         let name = directory.directory.clone();
-        snapshot.directories.push(directory);
-        snapshot
-            .directories
-            .sort_by(|left, right| left.directory.cmp(&right.directory));
-        validate_directory_collection(self.map_type, &snapshot.directories, true)?;
+        add_directory_to_collection(self.map_type, &mut snapshot.directories, directory)?;
         snapshot.map.record_change(
             "directory.add",
             format!("Added governed directory '{name}'."),
@@ -60,38 +65,26 @@ impl KnowledgeMapService {
         context: &RequestContext,
         change: RepositoryMapDirectoryChange,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        let legacy_recovery_state = mutation_locks.legacy_recovery_state;
+        self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
+        self.recover_legacy_redirect_transition().await?;
+        if legacy_recovery_state && !fs::try_exists(self.map_path()).await? {
+            let mut preflight = self.load_for_mutation().await?;
+            preflight
+                .map
+                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+            update_directory_collection(self.map_type, &mut preflight.directories, &change)?;
+        }
+        self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
-        let name = change.directory.clone();
-        let entry = snapshot
-            .directories
-            .iter_mut()
-            .find(|entry| entry.directory == name)
-            .ok_or_else(|| {
-                KnowledgeMapServiceError::InvalidRequest(format!(
-                    "directory '{name}' does not exist"
-                ))
-            })?;
-        if let Some(value) = change.purpose {
-            entry.purpose = value;
+        if self.map_type == RepositoryMapType::Knowledge {
+            snapshot
+                .map
+                .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
         }
-        if let Some(value) = change.content_scope {
-            entry.content_scope = value;
-        }
-        if let Some(value) = change.key_files {
-            entry.key_files = value;
-        }
-        if let Some(value) = change.load_hint {
-            entry.load_hint = value;
-        }
-        if let Some(value) = change.relations {
-            entry.relations = value;
-        }
-        if let Some(value) = change.update_rule {
-            entry.update_rule = value;
-        }
-        validate_directory_collection(self.map_type, &snapshot.directories, true)?;
+        let name = update_directory_collection(self.map_type, &mut snapshot.directories, &change)?;
         snapshot.map.record_change(
             "directory.update",
             format!("Updated governed directory '{name}'."),
@@ -119,19 +112,30 @@ impl KnowledgeMapService {
                 "required directory '{directory}' cannot be removed"
             )));
         }
-        let _lock = self.acquire_write_lock(WRITE_LOCK_TIMEOUT).await?;
+        let mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
+        let legacy_recovery_state = mutation_locks.legacy_recovery_state;
+        self.recover_legacy_rollback_transition().await?;
         self.recover_manifest_backup().await?;
-        let mut snapshot = self.load_for_mutation().await?;
-        let before = snapshot.directories.len();
-        snapshot
-            .directories
-            .retain(|entry| entry.directory != directory);
-        if before == snapshot.directories.len() {
-            return Err(KnowledgeMapServiceError::InvalidRequest(format!(
-                "directory '{directory}' does not exist"
-            )));
+        self.recover_legacy_redirect_transition().await?;
+        if legacy_recovery_state && !fs::try_exists(self.map_path()).await? {
+            let mut preflight = self.load_for_mutation().await?;
+            preflight
+                .map
+                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+            remove_directory_from_collection(
+                self.map_type,
+                &mut preflight.directories,
+                &directory,
+            )?;
         }
-        validate_directory_collection(self.map_type, &snapshot.directories, true)?;
+        self.prepare_legacy_migration().await?;
+        let mut snapshot = self.load_for_mutation().await?;
+        if self.map_type == RepositoryMapType::Knowledge {
+            snapshot
+                .map
+                .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+        }
+        remove_directory_from_collection(self.map_type, &mut snapshot.directories, &directory)?;
         snapshot.map.record_change(
             "directory.remove",
             format!("Removed governed directory '{directory}'."),
@@ -163,10 +167,10 @@ impl KnowledgeMapService {
         if self.uses_legacy_contract().await? {
             return Ok(());
         }
-        let snapshot = self.load_for_mutation().await?;
-        validate_directory_collection(self.map_type, &snapshot.directories, true)?;
+        let map = self.load_show_view().await?;
+        validate_directory_collection(self.map_type, &map.directories, true)?;
         let repository = fs::canonicalize(&self.repository_root).await?;
-        for entry in snapshot.directories {
+        for entry in map.directories {
             let directory = self
                 .repository_root
                 .join(self.map_type.as_str())
@@ -200,12 +204,12 @@ impl KnowledgeMapService {
     pub(super) async fn validate_cross_map_relations(
         &self,
     ) -> Result<(), KnowledgeMapServiceError> {
-        let snapshot = self.load_for_mutation().await?;
+        let map = self.load_show_view().await?;
         let peer_type = match self.map_type {
             RepositoryMapType::Knowledge => RepositoryMapType::Codespec,
             RepositoryMapType::Codespec => RepositoryMapType::Knowledge,
         };
-        let peer_targets = snapshot
+        let peer_targets = map
             .directories
             .iter()
             .flat_map(|entry| &entry.relations)
@@ -218,7 +222,7 @@ impl KnowledgeMapService {
         if peer_targets.is_empty() {
             return Ok(());
         }
-        let peer = self.for_type(peer_type).load_for_mutation().await?;
+        let peer = self.for_type(peer_type).load_show_view().await?;
         for target in peer_targets {
             if !peer
                 .directories
@@ -233,6 +237,77 @@ impl KnowledgeMapService {
         }
         Ok(())
     }
+}
+
+fn add_directory_to_collection(
+    map_type: RepositoryMapType,
+    directories: &mut Vec<RepositoryMapDirectory>,
+    directory: RepositoryMapDirectory,
+) -> Result<(), KnowledgeMapServiceError> {
+    directory.validate(map_type)?;
+    if directories
+        .iter()
+        .any(|entry| entry.directory.eq_ignore_ascii_case(&directory.directory))
+    {
+        return Err(KnowledgeMapServiceError::InvalidRequest(format!(
+            "directory '{}' already exists",
+            directory.directory
+        )));
+    }
+    directories.push(directory);
+    directories.sort_by(|left, right| left.directory.cmp(&right.directory));
+    validate_directory_collection(map_type, directories, true)?;
+    Ok(())
+}
+
+fn update_directory_collection(
+    map_type: RepositoryMapType,
+    directories: &mut [RepositoryMapDirectory],
+    change: &RepositoryMapDirectoryChange,
+) -> Result<String, KnowledgeMapServiceError> {
+    let name = change.directory.clone();
+    let entry = directories
+        .iter_mut()
+        .find(|entry| entry.directory == name)
+        .ok_or_else(|| {
+            KnowledgeMapServiceError::InvalidRequest(format!("directory '{name}' does not exist"))
+        })?;
+    if let Some(value) = &change.purpose {
+        entry.purpose = value.clone();
+    }
+    if let Some(value) = &change.content_scope {
+        entry.content_scope = value.clone();
+    }
+    if let Some(value) = &change.key_files {
+        entry.key_files = value.clone();
+    }
+    if let Some(value) = change.load_hint {
+        entry.load_hint = value;
+    }
+    if let Some(value) = &change.relations {
+        entry.relations = value.clone();
+    }
+    if let Some(value) = change.update_rule {
+        entry.update_rule = value;
+    }
+    validate_directory_collection(map_type, directories, true)?;
+    Ok(name)
+}
+
+fn remove_directory_from_collection(
+    map_type: RepositoryMapType,
+    directories: &mut Vec<RepositoryMapDirectory>,
+    directory: &str,
+) -> Result<(), KnowledgeMapServiceError> {
+    let before = directories.len();
+    directories.retain(|entry| entry.directory != directory);
+    if before == directories.len() {
+        return Err(KnowledgeMapServiceError::InvalidRequest(format!(
+            "directory '{directory}' does not exist"
+        )));
+    }
+    validate_directory_collection(map_type, directories, true)?;
+    Ok(())
 }
 
 fn baseline_readme(map_type: RepositoryMapType, directory: &str) -> String {

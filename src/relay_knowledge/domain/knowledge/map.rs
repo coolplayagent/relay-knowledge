@@ -79,19 +79,8 @@ impl KnowledgeMap {
 
     /// Ensures the stable repository entry used to discover code-derived software models.
     pub fn ensure_software_model_route(&mut self) -> Result<bool, DomainError> {
-        self.validate()?;
         let changed = self.ensure_software_model_route_state()?;
         self.validate()?;
-        Ok(changed)
-    }
-
-    pub(crate) fn ensure_software_model_route_snapshot(
-        &mut self,
-        archived_through: u64,
-    ) -> Result<bool, DomainError> {
-        self.validate_snapshot(archived_through)?;
-        let changed = self.ensure_software_model_route_state()?;
-        self.validate_snapshot(archived_through)?;
         Ok(changed)
     }
 
@@ -102,7 +91,7 @@ impl KnowledgeMap {
             .find(|source| source.id == SOFTWARE_MODEL_SOURCE_ID)
         {
             validate_software_model_source(source)?;
-            return Ok(false);
+            return self.ensure_route_contains(SOFTWARE_MODEL_TOPIC_ID, SOFTWARE_MODEL_SOURCE_ID);
         }
 
         if !self
@@ -133,19 +122,8 @@ impl KnowledgeMap {
 
     /// Ensures the stable authored repository glossary route.
     pub fn ensure_business_knowledge_route(&mut self) -> Result<bool, DomainError> {
-        self.validate()?;
         let changed = self.ensure_business_knowledge_route_state()?;
         self.validate()?;
-        Ok(changed)
-    }
-
-    pub(crate) fn ensure_business_knowledge_route_snapshot(
-        &mut self,
-        archived_through: u64,
-    ) -> Result<bool, DomainError> {
-        self.validate_snapshot(archived_through)?;
-        let changed = self.ensure_business_knowledge_route_state()?;
-        self.validate_snapshot(archived_through)?;
         Ok(changed)
     }
 
@@ -156,7 +134,8 @@ impl KnowledgeMap {
             .find(|source| source.id == BUSINESS_KNOWLEDGE_SOURCE_ID)
         {
             validate_business_knowledge_source(source)?;
-            return Ok(false);
+            return self
+                .ensure_route_contains(BUSINESS_KNOWLEDGE_TOPIC_ID, BUSINESS_KNOWLEDGE_SOURCE_ID);
         }
         if !self
             .topics
@@ -184,6 +163,26 @@ impl KnowledgeMap {
         Ok(true)
     }
 
+    /// Repairs both reserved repository routes before enforcing the complete map invariants.
+    pub(crate) fn ensure_reserved_repository_routes(
+        &mut self,
+    ) -> Result<(bool, bool), DomainError> {
+        let software_changed = self.ensure_software_model_route_state()?;
+        let business_changed = self.ensure_business_knowledge_route_state()?;
+        self.validate()?;
+        Ok((software_changed, business_changed))
+    }
+
+    pub(crate) fn ensure_reserved_repository_routes_snapshot(
+        &mut self,
+        archived_through: u64,
+    ) -> Result<(bool, bool), DomainError> {
+        let software_changed = self.ensure_software_model_route_state()?;
+        let business_changed = self.ensure_business_knowledge_route_state()?;
+        self.validate_snapshot(archived_through)?;
+        Ok((software_changed, business_changed))
+    }
+
     /// Validates the cross-reference invariants that keep the map navigable.
     pub fn validate(&self) -> Result<(), DomainError> {
         self.validate_state()?;
@@ -194,6 +193,43 @@ impl KnowledgeMap {
     pub(crate) fn validate_snapshot(&self, archived_through: u64) -> Result<(), DomainError> {
         self.validate_state()?;
         self.validate_history(archived_through)
+    }
+
+    /// Requires the two stable repository entry points without excluding ordinary sources.
+    pub(crate) fn validate_reserved_repository_routes(&self) -> Result<(), DomainError> {
+        let software_source = self
+            .sources
+            .iter()
+            .find(|source| source.id == SOFTWARE_MODEL_SOURCE_ID)
+            .ok_or_else(|| {
+                DomainError::invalid(
+                    "sources",
+                    format!("required reserved source '{SOFTWARE_MODEL_SOURCE_ID}' is missing"),
+                )
+            })?;
+        validate_software_model_source(software_source)?;
+        validate_reserved_route(
+            &self.routes,
+            SOFTWARE_MODEL_TOPIC_ID,
+            SOFTWARE_MODEL_SOURCE_ID,
+        )?;
+
+        let business_source = self
+            .sources
+            .iter()
+            .find(|source| source.id == BUSINESS_KNOWLEDGE_SOURCE_ID)
+            .ok_or_else(|| {
+                DomainError::invalid(
+                    "sources",
+                    format!("required reserved source '{BUSINESS_KNOWLEDGE_SOURCE_ID}' is missing"),
+                )
+            })?;
+        validate_business_knowledge_source(business_source)?;
+        validate_reserved_route(
+            &self.routes,
+            BUSINESS_KNOWLEDGE_TOPIC_ID,
+            BUSINESS_KNOWLEDGE_SOURCE_ID,
+        )
     }
 
     fn validate_state(&self) -> Result<(), DomainError> {
@@ -478,19 +514,20 @@ impl KnowledgeMap {
         });
     }
 
-    fn ensure_route_contains(&mut self, topic: &str, source_id: &str) -> Result<(), DomainError> {
+    fn ensure_route_contains(&mut self, topic: &str, source_id: &str) -> Result<bool, DomainError> {
         if let Some(route) = self.routes.iter_mut().find(|route| route.topic == topic) {
             if !route.source_order.iter().any(|id| id == source_id) {
                 route.source_order.push(source_id.to_owned());
+                return Ok(true);
             }
-            return Ok(());
+            return Ok(false);
         }
         self.routes.push(KnowledgeMapRoute {
             topic: topic.to_owned(),
             source_order: vec![source_id.to_owned()],
             fallback: Some("bounded-search".to_owned()),
         });
-        Ok(())
+        Ok(true)
     }
 
     fn prune_source_from_other_routes(&mut self, source_id: &str, current_topic: &str) {
@@ -528,10 +565,7 @@ fn validate_software_model_source(source: &KnowledgeMapSource) -> Result<(), Dom
 fn validate_business_knowledge_source(source: &KnowledgeMapSource) -> Result<(), DomainError> {
     let compatible = source.topic == BUSINESS_KNOWLEDGE_TOPIC_ID
         && source.kind == KnowledgeMapSourceKind::File
-        && matches!(
-            source.uri.as_str(),
-            BUSINESS_GLOSSARY_RELATIVE_PATH | LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
-        )
+        && source.uri == BUSINESS_GLOSSARY_RELATIVE_PATH
         && source.source_scope.as_deref() == Some(BUSINESS_KNOWLEDGE_SOURCE_SCOPE);
     if compatible {
         return Ok(());
@@ -541,6 +575,29 @@ fn validate_business_knowledge_source(source: &KnowledgeMapSource) -> Result<(),
         format!(
             "reserved source '{BUSINESS_KNOWLEDGE_SOURCE_ID}' must use topic '{BUSINESS_KNOWLEDGE_TOPIC_ID}', kind 'file', uri '{BUSINESS_GLOSSARY_RELATIVE_PATH}', and scope '{BUSINESS_KNOWLEDGE_SOURCE_SCOPE}'"
         ),
+    ))
+}
+
+fn validate_reserved_route(
+    routes: &[KnowledgeMapRoute],
+    topic: &str,
+    source_id: &str,
+) -> Result<(), DomainError> {
+    let route = routes
+        .iter()
+        .find(|route| route.topic == topic)
+        .ok_or_else(|| {
+            DomainError::invalid(
+                "routes",
+                format!("required reserved route '{topic}' is missing"),
+            )
+        })?;
+    if route.source_order.iter().any(|id| id == source_id) {
+        return Ok(());
+    }
+    Err(DomainError::invalid(
+        "routes",
+        format!("reserved route '{topic}' must include source '{source_id}'"),
     ))
 }
 

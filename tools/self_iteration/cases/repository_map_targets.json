@@ -1,4 +1,19 @@
 {
+  "repositories": {
+    "repository_map_graph_fixture": {
+      "generated_fixture": "repository_map_graph_v3",
+      "alias": "repository-map-graph-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "isolated_index_home": true,
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 100,
+      "query_p95_budget_ms": 250
+    }
+  },
   "cli_contract_cases": [
     {
       "id": "repository_map_help_exposes_typed_contracts",
@@ -154,6 +169,240 @@
           }
         ]
       }
+    },
+    {
+      "id": "knowledge_software_model_route_preserves_code_map_entry",
+      "command": [
+        "map",
+        "route",
+        "software-model",
+        "--type",
+        "knowledge",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "topic": "software-model",
+        "route": {
+          "topic": "software-model",
+          "source_order": [
+            "repository-software-model"
+          ]
+        },
+        "sources": [
+          {
+            "id": "repository-software-model",
+            "topic": "software-model",
+            "kind": "repo",
+            "uri": ".",
+            "source_scope": "repo",
+            "status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "id": "knowledge_architecture_route_assembles_ordered_v3_shard_sources",
+      "command": [
+        "map",
+        "route",
+        "architecture",
+        "--type",
+        "knowledge",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "topic": "architecture",
+        "route": {
+          "topic": "architecture",
+          "source_order": [
+            "commit-driven-code-index-loop",
+            "architecture-hard-constraints",
+            "code-map-knowledge-development-loop",
+            "git-commit-knowledge-development-loop",
+            "partitioned-sqlite-catalog-read-fast-path",
+            "software-global-domain-model",
+            "durable-worktree-delta-design"
+          ],
+          "fallback": "bounded-search"
+        },
+        "sources": [
+          {
+            "id": "commit-driven-code-index-loop",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "architecture-hard-constraints",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "code-map-knowledge-development-loop",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "git-commit-knowledge-development-loop",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "partitioned-sqlite-catalog-read-fast-path",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "software-global-domain-model",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "durable-worktree-delta-design",
+            "topic": "architecture",
+            "kind": "doc"
+          }
+        ]
+      }
+    },
+    {
+      "id": "knowledge_history_pages_across_archive_and_recent_boundary",
+      "command": [
+        "map",
+        "history",
+        "--type",
+        "knowledge",
+        "--from",
+        "15",
+        "--limit",
+        "4",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "from_version": 15,
+        "through_version": 18,
+        "next_from_version": 19,
+        "entries": [
+          {
+            "version": 15,
+            "action": "source.update"
+          },
+          {
+            "version": 16,
+            "action": "source.add"
+          },
+          {
+            "version": 17,
+            "action": "source.add"
+          },
+          {
+            "version": 18,
+            "action": "source.update"
+          }
+        ]
+      }
+    }
+  ],
+  "software_query_cases": [
+    {
+      "id": "repository_map_v3_indexes_all_authorized_topic_dimensions",
+      "repository": "repository_map_graph_fixture",
+      "kind": "topics",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 80,
+      "max_rank": 40,
+      "expected": [
+        {
+          "software_slice": "topic",
+          "name": "architecture",
+          "topic_kind": "knowledge_map_topic"
+        }
+      ],
+      "expected_all": [
+        {"software_slice": "topic", "name": "architecture", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "business-knowledge", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "build", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "deployment", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "operations", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "runtime", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "security", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "software-model", "topic_kind": "knowledge_map_topic"}
+      ],
+      "forbidden": [
+        {"software_slice": "topic", "name": "orphan-shadow-route", "topic_kind": "knowledge_map_topic"}
+      ],
+      "case_group": "repository_map_graph_projection"
+    },
+    {
+      "id": "repository_map_v3_projects_root_authorized_documents_edges_only",
+      "repository": "repository_map_graph_fixture",
+      "kind": "relationships",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 120,
+      "max_rank": 80,
+      "expected": [
+        {
+          "software_slice": "relationship",
+          "relationship_kind": "documents",
+          "target_kind": "topic",
+          "target_hint": "architecture"
+        }
+      ],
+      "expected_all": [
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "architecture"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "business-knowledge"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "build"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "deployment"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "operations"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "runtime"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "security"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "software-model"}
+      ],
+      "forbidden": [
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "orphan-shadow-route"}
+      ],
+      "case_group": "repository_map_graph_projection"
+    },
+    {
+      "id": "repository_map_v3_all_projection_keeps_map_and_software_dimensions_joined",
+      "repository": "repository_map_graph_fixture",
+      "kind": "all",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 200,
+      "max_rank": 100,
+      "expected": [
+        {"software_slice": "file", "path": "knowledge/knowledge-map.yaml", "file_role": "knowledge_map_manifest"}
+      ],
+      "expected_all": [
+        {"software_slice": "component", "ecosystem": "cargo", "name": "serde"},
+        {"software_slice": "file", "file_role": "knowledge_map_topic_shard"},
+        {"software_slice": "topic", "name": "architecture", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "architecture"},
+        {"software_slice": "build_target", "ecosystem": "rust", "kind": "package", "name": "repository-map-graph-fixture"},
+        {"software_slice": "iac_resource", "provider": "kubernetes", "resource_kind": "Deployment", "name": "repository-map-graph"},
+        {"software_slice": "design_element", "element_kind": "architecture", "name": "Architecture graph"}
+      ],
+      "forbidden": [
+        {"software_slice": "topic", "name": "orphan-shadow-route", "topic_kind": "knowledge_map_topic"}
+      ],
+      "case_group": "repository_map_graph_projection"
     }
   ]
 }

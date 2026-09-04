@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::KnowledgeMapSourceKind;
+use crate::domain::{KnowledgeMapChange, KnowledgeMapSourceKind};
 
 #[tokio::test]
 async fn writes_and_reads_yaml_contract() {
@@ -985,6 +985,9 @@ fn temp_root(label: &str) -> PathBuf {
 
 #[path = "history_tests.rs"]
 mod history_tests;
+
+#[path = "history_legacy_tests.rs"]
+mod history_legacy_tests;
 
 #[path = "path_tests.rs"]
 mod path_tests;

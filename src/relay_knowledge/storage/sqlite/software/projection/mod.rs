@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::{
@@ -22,6 +24,9 @@ use super::{
     schema::SOFTWARE_PROJECTION_SCHEMA_VERSION,
 };
 
+mod component_order;
+mod entity_targets;
+mod fair_limit;
 mod fenced;
 
 pub(in super::super) use fenced::{
@@ -30,6 +35,7 @@ pub(in super::super) use fenced::{
 
 const MAX_DEPENDENCY_COMPONENTS_PER_SCOPE: usize = 65_536;
 const MAX_SDK_USAGES_PER_SCOPE: usize = 131_072;
+const COMPONENT_USAGE_TARGET_QUERY_BATCH_SIZE: usize = 256;
 
 #[derive(Default)]
 struct ProjectionSlices {
@@ -46,6 +52,7 @@ struct ProjectionSlices {
     statements: Vec<SoftwareStatement>,
     diagnostics: Vec<SoftwareShapeDiagnostic>,
 }
+
 pub(in super::super) fn refresh_projection(
     connection: &mut Connection,
     source_scope: &str,
@@ -312,94 +319,92 @@ fn projection_slices(
             let remaining = request.limit.saturating_sub(statements.len());
             Ok(ProjectionSlices {
                 statements,
-                diagnostics: super::ontology::diagnostics_for_scope(
+                diagnostics: super::ontology::diagnostics_for_request(
                     connection,
                     source_scope,
+                    request,
                     remaining,
                 )?,
                 ..ProjectionSlices::default()
             })
         }
         SoftwareGlobalKind::All => {
-            let components =
+            let mut components =
                 components_for_scope(connection, source_scope, request, request.limit)?;
-            let remaining = request.limit.saturating_sub(components.len());
-            let dependency_usages =
-                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
-            let remaining = remaining.saturating_sub(dependency_usages.len());
-            let sdk_usages = if remaining == 0 {
-                Vec::new()
-            } else {
-                sdk_usages_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(sdk_usages.len());
-            let files = if remaining == 0 {
-                Vec::new()
-            } else {
-                graph::files_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(files.len());
-            let topics = if remaining == 0 {
-                Vec::new()
-            } else {
-                graph::topics_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(topics.len());
-            let relationships = if remaining == 0 {
-                Vec::new()
-            } else {
-                graph::relationships_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(relationships.len());
-            let build_targets = if remaining == 0 {
-                Vec::new()
-            } else {
-                lifecycle::build_targets_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(build_targets.len());
-            let iac_resources = if remaining == 0 {
-                Vec::new()
-            } else {
-                lifecycle::iac_resources_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(iac_resources.len());
-            let design_elements = if remaining == 0 {
-                Vec::new()
-            } else {
-                lifecycle::design_elements_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(design_elements.len());
-            let entities = if remaining == 0 {
-                Vec::new()
-            } else {
-                super::ontology::entities_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(entities.len());
-            let statements = if remaining == 0 {
-                Vec::new()
-            } else {
-                super::ontology::statements_for_scope(connection, source_scope, request, remaining)?
-            };
-            let remaining = remaining.saturating_sub(statements.len());
-            let diagnostics = if remaining == 0 {
-                Vec::new()
-            } else {
-                super::ontology::diagnostics_for_scope(connection, source_scope, remaining)?
-            };
-            Ok(ProjectionSlices {
+            let dependency_usages = dependency_usage::usages_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            add_usage_target_components(
+                connection,
+                source_scope,
+                request,
+                &mut components,
+                &dependency_usages,
+            )?;
+            let mut entities = super::ontology::entities_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            let statements = super::ontology::statements_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            entity_targets::append_statement_targets(
+                connection,
+                source_scope,
+                request,
+                &mut entities,
+                &statements,
+            )?;
+            let diagnostics = super::ontology::diagnostics_for_request(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?;
+            let mut slices = ProjectionSlices {
                 components,
                 dependency_usages,
-                sdk_usages,
-                files,
-                topics,
-                relationships,
-                build_targets,
-                iac_resources,
-                design_elements,
+                sdk_usages: sdk_usages_for_scope(connection, source_scope, request, request.limit)?,
+                files: graph::files_for_scope(connection, source_scope, request, request.limit)?,
+                topics: graph::topics_for_scope(connection, source_scope, request, request.limit)?,
+                relationships: graph::relationships_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                build_targets: lifecycle::build_targets_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                iac_resources: lifecycle::iac_resources_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
+                design_elements: lifecycle::design_elements_for_scope(
+                    connection,
+                    source_scope,
+                    request,
+                    request.limit,
+                )?,
                 entities,
                 statements,
                 diagnostics,
-            })
+            };
+            fair_limit::apply_fair_total_limit(&mut slices, request.limit);
+            Ok(slices)
         }
     }
 }
@@ -793,7 +798,8 @@ fn components_for_scope(
         WHERE source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY ecosystem ASC, name ASC, relationship_state DESC, evidence_path ASC
+        ORDER BY ecosystem ASC, name ASC, relationship_state DESC, evidence_path ASC,
+                 component_id ASC
         LIMIT ?
         ",
     );
@@ -806,6 +812,64 @@ fn components_for_scope(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn add_usage_target_components(
+    connection: &Connection,
+    source_scope: &str,
+    request: &SoftwareGlobalRequest,
+    components: &mut Vec<SoftwareComponent>,
+    dependency_usages: &[SoftwareDependencyUsage],
+) -> Result<(), StorageError> {
+    let mut seen_ids = components
+        .iter()
+        .map(|component| component.component_id.clone())
+        .collect::<BTreeSet<_>>();
+    let target_ids = dependency_usages
+        .iter()
+        .filter_map(|usage| {
+            seen_ids
+                .insert(usage.component_id.clone())
+                .then_some(usage.component_id.as_str())
+        })
+        .collect::<Vec<_>>();
+
+    for batch in target_ids.chunks(COMPONENT_USAGE_TARGET_QUERY_BATCH_SIZE) {
+        let placeholders = std::iter::repeat_n("?", batch.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let path_filter =
+            path_filter_sql_for_column("evidence_path", &request.repository.path_filters);
+        let language_filter =
+            language_filter_sql_for_column("language_id", &request.repository.language_filters);
+        let query = format!(
+            "
+            SELECT component_id, repository_id, source_scope, ecosystem, name, requirement,
+                   resolved_version, dependency_group, source_kind, relationship_state,
+                   language_id, evidence_path, evidence_line_start, evidence_line_end,
+                   confidence_basis_points, created_graph_version
+            FROM software_components
+            WHERE source_scope = ?1 AND component_id IN ({placeholders})
+            {path_filter}
+            {language_filter}
+            ORDER BY ecosystem ASC, name ASC, relationship_state DESC, evidence_path ASC,
+                     component_id ASC
+            "
+        );
+        let mut values = std::iter::once(Value::Text(source_scope.to_owned()))
+            .chain(batch.iter().map(|id| Value::Text((*id).to_owned())))
+            .collect::<Vec<_>>();
+        push_path_filter_values(&mut values, &request.repository.path_filters);
+        push_language_filter_values(&mut values, &request.repository.language_filters);
+        let mut statement = connection.prepare(&query)?;
+        let rows = statement.query_map(params_from_iter(values), component_from_row)?;
+        components.extend(
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(StorageError::from)?,
+        );
+    }
+    component_order::sort_by_canonical_evidence(components);
+    Ok(())
 }
 
 fn sdk_usages_for_scope(

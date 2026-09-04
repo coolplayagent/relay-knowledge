@@ -42,9 +42,13 @@
 
 `map init` 同时确保 `business-knowledge` topic、`repository-business-glossary` file source、`knowledge/glossary/business-glossary.yaml` URI 和 `repo` scope。该 route 只负责授权；glossary 保存 authored 业务事实，索引后才成为绑定 commit、scope、freshness 和 evidence 的图事实。已有 glossary 必须保留，保留 route/source 冲突必须失败。
 
+`map validate` 必须要求两个保留 source 具有上述精确字段，并要求每个 source 继续属于对应的保留 topic route。两个 topic 下仍可包含其他符合普通 source 契约的 source；这些 source 不得被误当成 business glossary 文档解析，visible v3 glossary source 必须使用 canonical URI。持有 writer lock 的 `map init` 把 legacy contract 或此前接受过该 URI 的 visible v3 contract 中的 legacy glossary URI 当作迁移输入，发布 canonical shard，同时保持只读 visible v3 校验严格。source removal 也不得删除任一保留入口。`map source add` 首次创建 Knowledge Map 时，必须先在内存中完成整个 mutation 的领域校验，不能先创建 writer lock 或合同文件；校验成功后，在发布 root 前创建受治理的 baseline README 和缺失的最小 glossary。被拒绝的首次 add 不得留下可见、legacy 或 CodeSpec map artifact。每个受控 source add、update 或 remove 都必须通过 current-path lock 串行化 legacy-state 探测；若 legacy state 活跃，则按 legacy-then-current 顺序取得两把 repository lock，并先针对 live legacy snapshot 在内存中校验请求 mutation。每次 forward cycle 都必须用精确的 active legacy root 刷新已验证的 rollback backup；若存在已验证的 active legacy glossary，还必须同步刷新 canonical glossary；之后才可在新的可见 v3 publication 中补齐缺失的内置 route 并安装 legacy redirect。若 v3 publication 后 live legacy root 与该 migration backup 不同，redirect 收敛必须 fail closed 并保留这些编辑。被拒绝的 legacy mutation 因而不得发布 migration state。因此 rollback 可以恢复一个结构有效但缺少当前必需 route 的旧 contract；此时当前 `map validate` 会报告缺口，直到显式 `map init` 再次升级。
+
 Repository Map v3 为两个可见根文件增加强类型 `directories`。`codespec` 固定要求 `requirements`、`design`、`api`、`test`、`decisions`；`knowledge` 固定要求 `domain`、`guides`、`ops`、`glossary`、`best-practices`，同时允许扩展受限的自定义目录。条目包含 purpose、content scope、key files、load policy、强类型限定关系和 update policy。Knowledge Map 继续保存 topic 摘要、有序 source id、内容寻址 shard ref、map version 与最多 16 条 recent history；topic 位于 `knowledge/topics/`，更早历史位于 `knowledge/history/`。`map route <topic> --type knowledge` 只加载目标 shard；聚合读取默认处理两张 map，定向写入必须指定具体 type。跨文件 digest、目录存在性、关系目标与环、history 连续性、路径边界和保留 route 均由 `map validate` 校验，不能只依赖 JSON Schema。
 
-所有生成 ref 必须限制在所选 map 根下的指定真实目录，拒绝绝对路径、`..`、symlink/reparse 逃逸和 map type/path 不匹配。多文件 mutation 先发布不可变 artifact，最后发布根文件。V2 迁移先复制保留资产，再发布 `knowledge/knowledge-map.yaml`，最后把 `.knowledge/knowledge-map.yaml` 替换为旧 reader 明确拒绝的 v3 redirect。CLI 保留经过验证的 v2 根供 `map migrate --type knowledge --rollback` 恢复；卸载不得删除仓库拥有的 map 内容。
+所有生成 ref 必须限制在所选 map 根下的指定真实目录，拒绝绝对路径、`..`、symlink/reparse 逃逸和 map type/path 不匹配。多文件 mutation 先发布不可变 artifact，最后发布根文件。V2 迁移先复制保留资产，再发布 `knowledge/knowledge-map.yaml`；只有可见 v3 root 及其 artifact 已完成校验后，才把 `.knowledge/knowledge-map.yaml` 替换为旧 reader 明确拒绝的 v3 redirect。redirect recovery 必须把仍存的 live 或 staged legacy root 与精确 migration backup 比较，不能覆盖 v3 publication 后产生的编辑，必须 fail closed。legacy topic 和 history 复制必须在加载内容前执行单文件、总字节数和文件数量预算。rollback 已准备 legacy root 但尚未发布时，reader 必须使用 retained v3 root 及其 contract directory。rollback 在移动普通 fallback-only root 到保留恢复状态前必须先将其提升；重复 rollback 会先协调已提交的转场，且 clean rollback 已活跃时会校验并保留 live legacy root，不会重新暂存较旧 backup。CLI 保留经过验证的 v2 根供 `map migrate --type knowledge --rollback` 恢复；卸载不得删除仓库拥有的 map 内容。
+
+`map show`、`map route`、`map validate` 和 `map history` 是严格只读边界。legacy v1 reader 只会在校验前归一化历史 glossary URI，visible v3 校验仍坚持 canonical URI。早期 v2 root 已归档 history 但缺少 range index 时，`map validate` 必须给出运行显式 `map init` 的诊断，不得创建 index node 或改写 root；`map route` 必须在读取目标 shard 前校验 root 的 `map_type` 与可见路径一致。只有持有 writer lock 的显式初始化/迁移路径可以补齐 history index。
 
 ## 3. 为什么 YAML 不复制派生模型
 
@@ -147,6 +151,9 @@ Agent 在验收时必须给出“requirement → authoritative evidence → test
 | KDL-08 | 文档与发布包不会回退到旧提示词 | shared skill metadata/policy self-test、PR gate、release bundle gate |
 | KDL-09 | 仓库交付通过全量质量门禁 | fmt、clippy、all-target tests、coverage、package、publish dry-run 和相关 self-iteration cases |
 | KDL-10 | 业务模型与代码/软件模型使用同一发布身份 | 端到端测试串联 business route、glossary authoring、index、business/view/context，并断言 commit、scope、freshness、evidence 与 publication fence 一致 |
+| KDL-11 | validate 要求两个精确保留 route，同时允许普通同 topic source | application tests 分别移除两个保留 shard，并增加一个非 glossary 的 business source |
+| KDL-12 | 首次 source add 发布完整 baseline，拒绝的请求零副作用 | application 与 CLI tests 校验 baseline README/glossary，并覆盖空 id 与保留 id 冲突 preflight |
+| KDL-13 | 所有 source mutation 都保留内置 route 与 legacy rollback 边界 | application tests 覆盖保留 source 删除、legacy-only add/update/remove、validate 与原字节 rollback |
 
 ---
 

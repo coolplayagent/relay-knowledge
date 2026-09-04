@@ -22,6 +22,7 @@ pub(super) struct MutableKnowledgeMap {
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
     pub(super) history_index: Option<KnowledgeMapHistoryIndexRef>,
     pub(super) requires_publish: bool,
+    pub(super) legacy_glossary_uri_normalized: bool,
 }
 
 impl MutableKnowledgeMap {
@@ -37,6 +38,7 @@ impl MutableKnowledgeMap {
             archive: None,
             history_index: None,
             requires_publish: false,
+            legacy_glossary_uri_normalized: false,
         }
     }
 }

@@ -69,6 +69,12 @@ admission、删除密集与多 batch receipt 扩展、固定 worktree context、
 CLI map namespace 报错顺序的 owner tests 均通过。resume precheck 也证明 clone phase 尚未创建
 staged target 时不会提前验证它。
 
+`completed_checkpoint_loads_a_durable_multi_batch_incremental_summary` 还从 SQLite
+持久行完整解码 completed checkpoint，覆盖 receipt 的 `batch_count = 2`、checkpoint
+的总 `batch_count = 3` 以及 12 个 parsed/blob reads 的真实多批形态；这保护
+`repo status` 和固定 ref 查询不会因把合法 multi-batch receipt 当成旧的单批 contract
+而在 checkpoint 反序列化时失败。
+
 聚焦回归 `affected_path_ownership_pages_past_the_file_quantum_and_recovers_between_leases`
 使用 7 个 changed files 和 6-file quantum，观测到 6+1 ownership 分页；它在两页之间让 lease
 过期并 reclaim，随后无重放地完成两个确定性 delta batches，也没有发生 whole-delta capacity

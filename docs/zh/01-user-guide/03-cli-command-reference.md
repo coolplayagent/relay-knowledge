@@ -198,6 +198,8 @@ Kind 取值按命令家族隔离：
 
 类型化 kind `systems`、`apis`、`resources`、`tests`、`deployments` 和 `releases` 返回带稳定 `entity_key` 与 snapshot `occurrence_id` 的 ontology entity。`statements` 返回 subject/predicate/object、source/evidence、assertion mode、resolution、有效期、extractor、confidence 和 fact state；`conflicts` 返回 conflicting、unresolved、superseded/rejected statement 及 shape diagnostics。每个响应 status 都包含 `ontology_version`、`projection_schema_version`、`source_coverage`、`completeness_basis_points`、`freshness` 和 `conflict_count`。
 
+对 `repo software --kind all`，`--limit` 是所有数组合计行数的严格上限，不是每个数组各自拥有一份额度。系统按固定响应顺序 `components`、`dependency_usages`、`sdk_usages`、`files`、`topics`、`relationships`、`build_targets`、`iac_resources`、`design_elements`、`entities`、`statements`、`diagnostics` 在非空数组间逐轮分配；空数组或已耗尽数组的额度会进入后续轮次。上限小于非空数组数时，这个顺序就是确定性的优先级；默认 100 行上限可避免密集 dependency 切片遮蔽后续 lifecycle 与 ontology 切片。
+
 `repo software export` 从同一 snapshot-bound application service 输出原始标准 JSON 文档：`spdx-3` 对应 SPDX 3.0.1 JSON-LD，`cyclonedx-1.7` 对应 CycloneDX 1.7 JSON，`prov-o` 对应 PROV-O JSON-LD。导出不会补造当前 ontology 不掌握的标准字段。查询和导出都不会执行构建工具、扫描包缓存、SDK 目录、云 API、未索引外部源码或查询时全仓文档；source scope 变化后需要重新 `repo index` 或 `repo update` 刷新投影。
 
 `repo business` 读取索引时从 Knowledge Map `business-knowledge` route 授权的 `knowledge/glossary/business-glossary.yaml` 投影。`--kind terms` 返回 canonical term、definition、alias、semantics、冲突和 evidence；`mappings` 返回 `represented_by`/`calculated_from` 技术映射。跨 domain 同名且未给 `--domain` 时返回 `ambiguous`，不会猜测；授权 scope 外或尚未覆盖的目标保留 `resolution_state=unresolved` 和 `target_hint`，不会把仓库标成 degraded。业务定义只能通过版本化 glossary 和代码评审修改。

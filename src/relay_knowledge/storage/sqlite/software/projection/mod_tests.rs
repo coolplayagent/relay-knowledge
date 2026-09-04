@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 
 use super::super::schema::initialize_schema;
 use super::test_support::*;
@@ -31,7 +31,199 @@ fn projection_query_filters_kind_without_unrelated_graph_staleness() {
 }
 
 #[test]
-fn projection_all_kind_keeps_combined_results_within_limit() {
+fn projection_all_kind_excludes_diagnostics_outside_the_requested_evidence_filter() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_symbols (
+                repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                name, kind, line_start, line_end
+            ) VALUES
+                ('repo', 'scope-1', 'symbol-api', 'src/api.rs', 'rust',
+                 'GraphApi', 'trait', 4, 20),
+                ('repo', 'scope-1', 'symbol-test', 'tests/lifecycle.rs', 'rust',
+                 'lifecycle_smoke_test', 'function', 8, 16)",
+            [],
+        )
+        .expect("ontology symbols should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+    let in_scope_entity = connection
+        .query_row(
+            "SELECT entity_key FROM software_entities WHERE primary_evidence_path = 'src/api.rs'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("source entity should materialize");
+    let out_of_scope_entity = connection
+        .query_row(
+            "SELECT entity_key FROM software_entities WHERE primary_evidence_path = 'tests/lifecycle.rs'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("test entity should materialize");
+    connection
+        .execute(
+            "INSERT INTO software_ontology_diagnostics (
+                diagnostic_id, source_scope, shape_id, code, severity, statement_id,
+                entity_key, field, message
+            ) VALUES ('diagnostic-outside-src', 'scope-1', 'shape', 'a-outside', 'error',
+                      NULL, ?1, 'entity_key', 'outside requested path')",
+            params![out_of_scope_entity],
+        )
+        .expect("out-of-scope diagnostic should insert");
+    connection
+        .execute(
+            "INSERT INTO software_ontology_diagnostics (
+                diagnostic_id, source_scope, shape_id, code, severity, statement_id,
+                entity_key, field, message
+            ) VALUES ('diagnostic-inside-src', 'scope-1', 'shape', 'z-inside', 'warning',
+                      NULL, ?1, 'entity_key', 'inside requested path')",
+            params![in_scope_entity],
+        )
+        .expect("in-scope diagnostic should insert");
+
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec!["src".to_owned()],
+            vec!["rust".to_owned()],
+        )
+        .expect("selector should validate"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        12,
+    )
+    .expect("request should validate");
+    let projection = projection(&mut connection, request).expect("projection should load");
+
+    assert_eq!(
+        projection
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.diagnostic_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["diagnostic-inside-src"]
+    );
+
+    let bounded_request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec!["src".to_owned()],
+            vec!["rust".to_owned()],
+        )
+        .expect("selector should validate"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        1,
+    )
+    .expect("request should validate");
+    let diagnostics = super::super::ontology::diagnostics_for_request(
+        &connection,
+        "scope-1",
+        &bounded_request,
+        1,
+    )
+    .expect("eligible diagnostics should be selected before their limit");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.diagnostic_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["diagnostic-inside-src"]
+    );
+}
+
+#[test]
+fn filtered_diagnostics_include_evidence_beyond_entity_candidate_limit() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_symbols (
+                repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                name, kind, line_start, line_end
+            ) VALUES
+                ('repo', 'scope-1', 'candidate-first', 'src/first.rs', 'rust',
+                 'FirstCandidate', 'trait', 1, 2),
+                ('repo', 'scope-1', 'candidate-second', 'src/second.rs', 'rust',
+                 'SecondCandidate', 'trait', 1, 2)",
+            [],
+        )
+        .expect("ontology symbols should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+    let second_entity = connection
+        .query_row(
+            "SELECT entity_key FROM software_entities WHERE primary_evidence_path = 'src/second.rs'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("second entity should materialize");
+    connection
+        .execute(
+            "INSERT INTO software_ontology_diagnostics (
+                diagnostic_id, source_scope, shape_id, code, severity, statement_id,
+                entity_key, field, message
+            ) VALUES ('second-diagnostic', 'scope-1', 'shape', 'second', 'warning',
+                      NULL, ?1, 'entity_key', 'beyond the entity candidate limit')",
+            params![second_entity],
+        )
+        .expect("second diagnostic should insert");
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec!["src".to_owned()],
+            vec!["rust".to_owned()],
+        )
+        .expect("selector should validate"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        1,
+    )
+    .expect("request should validate");
+    let candidate_entities =
+        super::super::ontology::entities_for_scope(&connection, "scope-1", &request, 1)
+            .expect("bounded entities should load");
+    assert!(
+        candidate_entities
+            .iter()
+            .all(|entity| entity.entity_key != second_entity),
+        "the diagnostic target must fall outside the bounded entity candidate slice"
+    );
+
+    let diagnostics =
+        super::super::ontology::diagnostics_for_request(&connection, "scope-1", &request, 1)
+            .expect("full filtered evidence should load the diagnostic");
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].diagnostic_id, "second-diagnostic");
+}
+
+#[test]
+fn all_slice_budget_uses_fixed_round_robin_priority_and_redistributes_capacity() {
+    assert_eq!(
+        fair_limit::round_robin_slice_budgets([8; 12], 4),
+        [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        fair_limit::round_robin_slice_budgets([0, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], 3),
+        [0, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        fair_limit::round_robin_slice_budgets([8; 12], 16),
+        [2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1]
+    );
+}
+
+#[test]
+fn projection_all_kind_applies_small_limit_across_response_arrays() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
     initialize_schema(&connection).expect("software schema should initialize");
@@ -47,10 +239,73 @@ fn projection_all_kind_keeps_combined_results_within_limit() {
     )
     .expect("request should validate");
     let projection = projection(&mut connection, request).expect("projection should load");
+    let slice_lengths = [
+        projection.components.len(),
+        projection.dependency_usages.len(),
+        projection.sdk_usages.len(),
+        projection.files.len(),
+        projection.topics.len(),
+        projection.relationships.len(),
+        projection.build_targets.len(),
+        projection.iac_resources.len(),
+        projection.design_elements.len(),
+        projection.entities.len(),
+        projection.statements.len(),
+        projection.diagnostics.len(),
+    ];
 
-    assert_eq!(projection.components.len() + projection.sdk_usages.len(), 4);
-    assert_eq!(projection.components.len(), 3);
+    assert_eq!(slice_lengths.iter().sum::<usize>(), 4);
+    assert_eq!(projection.components.len(), 1);
     assert_eq!(projection.sdk_usages.len(), 1);
+    assert_eq!(projection.files.len(), 1);
+    assert_eq!(projection.relationships.len(), 1);
+}
+
+#[test]
+fn projection_all_kind_keeps_components_referenced_by_returned_dependency_usages() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES (
+                'repo', 'scope-1', 'handwritten-rust', 'src/lib.rs', 'rust', 'parsed'
+            )",
+            [],
+        )
+        .expect("handwritten file should insert");
+    connection
+        .execute(
+            "INSERT INTO code_repository_imports (
+                repository_id, source_scope, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, line_start, line_end
+            ) VALUES (
+                'repo', 'scope-1', 'handwritten-rust', 'src/lib.rs',
+                'use serde::Serialize;', 'use serde::Serialize;', 'external', 9000, 1, 1
+            )",
+            [],
+        )
+        .expect("handwritten import should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        2,
+    )
+    .expect("request should validate");
+    let projection = projection(&mut connection, request).expect("projection should load");
+
+    assert_eq!(projection.components.len(), 1);
+    assert_eq!(projection.dependency_usages.len(), 1);
+    assert!(projection.components.iter().any(|component| {
+        component.component_id == projection.dependency_usages[0].component_id
+    }));
 }
 
 #[test]

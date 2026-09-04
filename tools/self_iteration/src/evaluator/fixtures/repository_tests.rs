@@ -173,6 +173,52 @@ fn software_global_fixture_keeps_valid_legacy_map_metadata() {
 }
 
 #[test]
+fn repository_map_graph_fixture_keeps_v3_refs_content_addressed_and_orphans_unlisted() {
+    use sha2::{Digest, Sha256};
+
+    let root = std::env::temp_dir().join(format!(
+        "relay-knowledge-repository-map-graph-fixture-test-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        std::fs::remove_dir_all(&root).expect("remove stale fixture");
+    }
+
+    create_generated_repository_files(&root, "repository_map_graph_v3")
+        .expect("repository map graph fixture should write");
+    let map = std::fs::read_to_string(root.join("knowledge/knowledge-map.yaml"))
+        .expect("knowledge map root");
+    let codespec = std::fs::read_to_string(root.join("codespec/codespec-map.yaml"))
+        .expect("CodeSpec map root");
+    let referenced = map
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("ref: "))
+        .collect::<Vec<_>>();
+    let shard_files = std::fs::read_dir(root.join("knowledge/topics"))
+        .expect("topic directory")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("topic shards should list");
+
+    assert!(map.starts_with("schema_version: 3\nartifact_kind: map\nmap_type: knowledge"));
+    assert!(codespec.contains("map_type: codespec"));
+    assert_eq!(referenced.len(), 8);
+    assert_eq!(
+        shard_files.len(),
+        9,
+        "one locally valid shard stays orphaned"
+    );
+    for relative in referenced {
+        let content = std::fs::read(root.join("knowledge").join(relative))
+            .expect("referenced shard should exist");
+        let digest = format!("{:x}", Sha256::digest(content));
+        assert!(relative.ends_with(&format!("-{digest}.yaml")));
+    }
+    assert!(!map.contains("orphan-shadow-route"));
+
+    std::fs::remove_dir_all(&root).expect("cleanup fixture");
+}
+
+#[test]
 fn generated_repository_names_cannot_escape_run_home() {
     let run_home = std::env::temp_dir().join("relay-knowledge-self-iteration-safe-roots");
 
