@@ -83,10 +83,10 @@ impl KnowledgeMapService {
         let path = self.map_path();
         if fs::try_exists(&path).await? {
             let existing = fs::read_to_string(&path).await?;
-            let legacy = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&existing)
-                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?
-                .schema_version
-                == 1;
+            let existing_schema_version =
+                serde_norway::from_str::<KnowledgeMapSchemaProbe>(&existing)
+                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?
+                    .schema_version;
             let mut snapshot = self.load_for_mutation().await?;
             let (software_changed, business_changed, glossary_created) =
                 if self.map_type == RepositoryMapType::Knowledge {
@@ -115,24 +115,14 @@ impl KnowledgeMapService {
                         .to_owned(),
                 ));
             }
-            if legacy || snapshot.requires_publish {
-                snapshot.map.record_change(
-                    "history.compact",
-                    "Migrated repository map to bounded recent-only history storage.".to_owned(),
-                    now_stamp(),
-                );
+            if existing_schema_version == 1 || snapshot.requires_publish {
+                let response_summary =
+                    snapshot.record_required_publication(existing_schema_version, now_stamp());
                 self.write_map(&mut snapshot).await?;
                 return Ok(self.mutation_response(
                     context,
                     snapshot.map.map_version,
-                    if legacy {
-                        "migrated repository map to schema v4 recent-only history".to_owned()
-                    } else if snapshot.legacy_glossary_uri_normalized {
-                        "migrated Knowledge Map legacy glossary URI to the canonical artifact"
-                            .to_owned()
-                    } else {
-                        "migrated repository map to schema v4 recent-only history".to_owned()
-                    },
+                    response_summary,
                 ));
             }
             self.finalize_recent_history_migration().await?;
@@ -366,7 +356,14 @@ impl KnowledgeMapService {
             Duration::from_secs(60),
         )
         .await;
-        self.finalize_recent_history_migration().await?;
+        if let Err(error) = self.finalize_recent_history_migration().await {
+            tracing::warn!(
+                map_type = self.map_type.as_str(),
+                map_version = snapshot.map.map_version,
+                error = %error,
+                "repository map was committed but recent-history cleanup requires maintenance"
+            );
+        }
         snapshot.requires_publish = false;
         Ok(())
     }
@@ -395,7 +392,9 @@ impl KnowledgeMapService {
                 "repository map history cleanup remains pending; rerun map init"
             );
         }
-        if self.map_type == RepositoryMapType::Knowledge {
+        if self.map_type == RepositoryMapType::Knowledge
+            && self.legacy_history_cleanup_is_safe().await?
+        {
             if let HistoryCleanupStatus::Pending { removed } =
                 cleanup_history_artifacts_in(&self.repository_root, LEGACY_AGENT_CONTRACT_DIR_NAME)
                     .await?

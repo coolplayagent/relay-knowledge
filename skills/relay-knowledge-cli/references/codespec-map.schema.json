@@ -97,6 +97,9 @@
     "historyManifest": {
       "type": "object",
       "required": ["omitted_through", "recent"],
+      "propertyNames": {
+        "not": { "enum": ["archived_through", "archive", "index"] }
+      },
       "properties": {
         "omitted_through": { "type": "integer", "minimum": 0 },
         "recent": {

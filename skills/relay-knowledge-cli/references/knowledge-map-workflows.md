@@ -128,7 +128,9 @@ fallback roots in v4, then safely removes recognized history archive files and
 their empty directories. Cleanup is bounded and resumable with `map init`; a
 committed mutation remains successful when another cleanup batch is pending,
 while `map validate` continues to report the obsolete directory until cleanup
-finishes.
+finishes. A cleanup refusal discovered after root publication is logged as
+post-commit maintenance state instead of retroactively failing the mutation.
+Legacy history is retained while a live legacy root is not a redirect.
 Unrecognized files, links, or corrupt referenced artifacts fail closed. There
 is no data-level map rollback command; use Git or a repository backup to recover
 older repository-owned map state.

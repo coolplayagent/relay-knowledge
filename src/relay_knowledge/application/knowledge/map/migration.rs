@@ -306,6 +306,23 @@ impl KnowledgeMapService {
         Ok(false)
     }
 
+    pub(super) async fn legacy_history_cleanup_is_safe(
+        &self,
+    ) -> Result<bool, KnowledgeMapServiceError> {
+        if self.map_type != RepositoryMapType::Knowledge {
+            return Ok(false);
+        }
+        match read_root_file(&self.repository_root, &self.legacy_map_path()).await {
+            Ok(content) => Ok(is_supported_legacy_redirect(&content)),
+            Err(KnowledgeMapServiceError::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Ok(true)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub(super) async fn recover_legacy_redirect_transition(
         &self,
     ) -> Result<(), KnowledgeMapServiceError> {

@@ -12,6 +12,8 @@ use crate::{
     },
 };
 
+use super::artifact::ARTIFACT_SCHEMA_VERSION;
+
 pub(super) struct MutableKnowledgeMap {
     pub(super) map_type: RepositoryMapType,
     pub(super) directories: Vec<RepositoryMapDirectory>,
@@ -34,6 +36,31 @@ impl MutableKnowledgeMap {
             requires_publish: false,
             legacy_glossary_uri_normalized: false,
         }
+    }
+
+    pub(super) fn record_required_publication(
+        &mut self,
+        source_schema_version: u16,
+        updated_at: String,
+    ) -> String {
+        let glossary_only =
+            source_schema_version == ARTIFACT_SCHEMA_VERSION && self.legacy_glossary_uri_normalized;
+        let (action, history_summary, response_summary) = if glossary_only {
+            (
+                "source.migrate",
+                "Migrated the reserved business glossary source URI to the canonical artifact.",
+                "migrated Knowledge Map legacy glossary URI to the canonical artifact",
+            )
+        } else {
+            (
+                "history.compact",
+                "Migrated repository map to bounded recent-only history storage.",
+                "migrated repository map to schema v4 recent-only history",
+            )
+        };
+        self.map
+            .record_change(action, history_summary.to_owned(), updated_at);
+        response_summary.to_owned()
     }
 }
 

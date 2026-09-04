@@ -515,9 +515,21 @@ def check_knowledge_map_schema_contract(path: Path, schema: dict[str, object]) -
     require_schema_value(
         path, history.get("$ref"), "#/$defs/historyManifest", "root history ref"
     )
-    recent = schema_property(definitions.get("historyManifest"), "recent")
+    history_manifest = definitions.get("historyManifest")
+    recent = schema_property(history_manifest, "recent")
     require_schema_value(path, recent.get("minItems"), 1, "recent minimum")
     require_schema_value(path, recent.get("maxItems"), 16, "recent maximum")
+    forbidden_history_names = (
+        history_manifest.get("propertyNames", {}).get("not", {}).get("enum")
+        if isinstance(history_manifest, dict)
+        else None
+    )
+    require_schema_value(
+        path,
+        forbidden_history_names,
+        ["archived_through", "archive", "index"],
+        "legacy history property prohibition",
+    )
 
     description = schema.get("description")
     if not isinstance(description, str):
@@ -601,6 +613,10 @@ def check_knowledge_map_schema_examples(schema: dict[str, object]) -> None:
         invalid = copy.deepcopy(examples[0])
         mutation(invalid)
         invalid_examples.append(invalid)
+    for legacy_field in ("archived_through", "archive", "index"):
+        invalid = copy.deepcopy(examples[0])
+        invalid["history"][legacy_field] = None
+        invalid_examples.append(invalid)
     for invalid in invalid_examples:
         expect_value_error(lambda value=invalid: validate_schema_instance(schema, value), "oneOf")
 
@@ -622,6 +638,18 @@ def check_codespec_map_schema(path: Path) -> None:
             raise ValueError(f"{path} is missing CodeSpec Map schema $defs/{name}")
     if any(node.get("additionalProperties") is not True for node in schema_object_nodes(schema)):
         raise ValueError(f"{path} must allow unknown fields on every object schema")
+    history_manifest = definitions.get("historyManifest")
+    forbidden_history_names = (
+        history_manifest.get("propertyNames", {}).get("not", {}).get("enum")
+        if isinstance(history_manifest, dict)
+        else None
+    )
+    require_schema_value(
+        path,
+        forbidden_history_names,
+        ["archived_through", "archive", "index"],
+        "legacy history property prohibition",
+    )
     example = {
         "schema_version": 4,
         "artifact_kind": "map",
@@ -648,6 +676,10 @@ def check_codespec_map_schema(path: Path) -> None:
     invalid = copy.deepcopy(example)
     invalid["map_type"] = "knowledge"
     expect_value_error(lambda: validate_schema_instance(schema, invalid), "const")
+    for legacy_field in ("archived_through", "archive", "index"):
+        invalid = copy.deepcopy(example)
+        invalid["history"][legacy_field] = None
+        expect_value_error(lambda value=invalid: validate_schema_instance(schema, value), "not")
 
 
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
