@@ -103,6 +103,53 @@ fn statement_budget_reserves_endpoints_for_each_retained_statement() {
 }
 
 #[test]
+fn statement_rebudget_reselects_endpoints_after_rejecting_cumulative_candidates() {
+    let mut slices = ProjectionSlices {
+        components: (0..6)
+            .map(|index| component(&format!("component-{index}")))
+            .collect(),
+        entities: vec![
+            entity("first-subject"),
+            entity("first-object"),
+            entity("second-subject"),
+            entity("second-object"),
+            entity("third-subject"),
+            entity("third-object"),
+        ],
+        statements: vec![
+            statement("first-subject", Some("first-object")),
+            statement("second-subject", Some("second-object")),
+            statement("third-subject", Some("third-object")),
+        ],
+        ..ProjectionSlices::default()
+    };
+
+    apply_fair_total_limit(&mut slices, 9);
+
+    assert_eq!(slices.components.len(), 3);
+    assert_eq!(slices.entities.len(), 4);
+    assert_eq!(slices.statements.len(), 2);
+    assert_eq!(
+        slices.components.len() + slices.entities.len() + slices.statements.len(),
+        9
+    );
+    for statement in &slices.statements {
+        assert!(
+            slices
+                .entities
+                .iter()
+                .any(|entity| entity.entity_key == statement.subject_id)
+        );
+        assert!(
+            slices
+                .entities
+                .iter()
+                .any(|entity| { entity.entity_key == statement.object_id.as_deref().unwrap() })
+        );
+    }
+}
+
+#[test]
 fn statement_budget_keeps_the_first_representable_statement_and_recovers_entity_capacity() {
     let mut slices = ProjectionSlices {
         entities: vec![entity("previous"), entity("subject"), entity("object")],

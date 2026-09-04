@@ -16,7 +16,7 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
     slices
         .dependency_usages
         .retain(|usage| component_indices_by_id.contains_key(usage.component_id.as_str()));
-    let mut initial_budgets = round_robin_slice_budgets(
+    let initial_budgets = round_robin_slice_budgets(
         [
             component_candidates.len(),
             slices.dependency_usages.len(),
@@ -34,17 +34,49 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
         total_limit,
     );
     let entity_candidates = std::mem::take(&mut slices.entities);
-    reserve_surplus_capacity_for_statement_endpoints(
-        &mut initial_budgets,
-        &entity_candidates,
-        &slices.statements,
-    );
-    let retained_entity_indices = retain_entities_referenced_by_statements(
-        &entity_candidates,
-        &mut slices.statements,
-        initial_budgets[9],
-        initial_budgets[10],
-    );
+    let statement_candidates = std::mem::take(&mut slices.statements);
+    let mut statement_budgets = initial_budgets;
+    let mut previous_retained_statement_count = statement_candidates.len();
+    let (final_budgets, retained_entity_indices, retained_statements) = loop {
+        reserve_surplus_capacity_for_statement_endpoints(
+            &mut statement_budgets,
+            &entity_candidates,
+            &statement_candidates,
+        );
+        let mut retained_statements = statement_candidates.clone();
+        let retained_entity_indices = retain_entities_referenced_by_statements(
+            &entity_candidates,
+            &mut retained_statements,
+            statement_budgets[9],
+            statement_budgets[10],
+        );
+        if retained_statements.len() == previous_retained_statement_count {
+            break (
+                statement_budgets,
+                retained_entity_indices,
+                retained_statements,
+            );
+        }
+        previous_retained_statement_count = retained_statements.len();
+        statement_budgets = round_robin_slice_budgets(
+            [
+                component_candidates.len(),
+                slices.dependency_usages.len(),
+                slices.sdk_usages.len(),
+                slices.files.len(),
+                slices.topics.len(),
+                slices.relationships.len(),
+                slices.build_targets.len(),
+                slices.iac_resources.len(),
+                slices.design_elements.len(),
+                entity_candidates.len(),
+                retained_statements.len(),
+                slices.diagnostics.len(),
+            ],
+            total_limit,
+        );
+    };
+    slices.statements = retained_statements;
     let [
         components,
         dependency_usages,
@@ -58,27 +90,7 @@ pub(super) fn apply_fair_total_limit(slices: &mut ProjectionSlices, total_limit:
         entities,
         statements,
         diagnostics,
-    ] = if slices.statements.len() == initial_budgets[10] {
-        initial_budgets
-    } else {
-        round_robin_slice_budgets(
-            [
-                component_candidates.len(),
-                slices.dependency_usages.len(),
-                slices.sdk_usages.len(),
-                slices.files.len(),
-                slices.topics.len(),
-                slices.relationships.len(),
-                slices.build_targets.len(),
-                slices.iac_resources.len(),
-                slices.design_elements.len(),
-                entity_candidates.len(),
-                slices.statements.len(),
-                slices.diagnostics.len(),
-            ],
-            total_limit,
-        )
-    };
+    ] = final_budgets;
 
     let (retained_component_indices, dependency_usages) =
         retain_components_referenced_by_dependency_usages(

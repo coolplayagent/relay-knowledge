@@ -1,4 +1,4 @@
-use rusqlite::{Connection, limits::Limit, params};
+use rusqlite::{Connection, params};
 
 use super::super::schema::initialize_schema;
 use super::test_support::*;
@@ -122,12 +122,13 @@ fn projection_all_kind_excludes_diagnostics_outside_the_requested_evidence_filte
         1,
     )
     .expect("request should validate");
-    let retained_entities =
-        super::super::ontology::entities_for_scope(&connection, "scope-1", &bounded_request, 1)
-            .expect("filtered entity should load");
-    let diagnostics =
-        diagnostics_for_filtered_ontology(&connection, "scope-1", &retained_entities, &[], 1)
-            .expect("eligible diagnostics should be selected before their limit");
+    let diagnostics = super::super::ontology::diagnostics_for_request(
+        &connection,
+        "scope-1",
+        &bounded_request,
+        1,
+    )
+    .expect("eligible diagnostics should be selected before their limit");
     assert_eq!(
         diagnostics
             .iter()
@@ -138,39 +139,71 @@ fn projection_all_kind_excludes_diagnostics_outside_the_requested_evidence_filte
 }
 
 #[test]
-fn filtered_diagnostics_do_not_expand_sqlite_bind_count_with_evidence_count() {
-    let connection = Connection::open_in_memory().expect("sqlite should open");
+fn filtered_diagnostics_include_evidence_beyond_entity_candidate_limit() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
     initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_symbols (
+                repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                name, kind, line_start, line_end
+            ) VALUES
+                ('repo', 'scope-1', 'candidate-first', 'src/first.rs', 'rust',
+                 'FirstCandidate', 'trait', 1, 2),
+                ('repo', 'scope-1', 'candidate-second', 'src/second.rs', 'rust',
+                 'SecondCandidate', 'trait', 1, 2)",
+            [],
+        )
+        .expect("ontology symbols should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+    let second_entity = connection
+        .query_row(
+            "SELECT entity_key FROM software_entities WHERE primary_evidence_path = 'src/second.rs'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("second entity should materialize");
     connection
         .execute(
             "INSERT INTO software_ontology_diagnostics (
                 diagnostic_id, source_scope, shape_id, code, severity, statement_id,
                 entity_key, field, message
-            ) VALUES ('global-diagnostic', 'scope-1', 'shape', 'global', 'warning',
-                      NULL, NULL, 'scope', 'global diagnostic')",
-            [],
+            ) VALUES ('second-diagnostic', 'scope-1', 'shape', 'second', 'warning',
+                      NULL, ?1, 'entity_key', 'beyond the entity candidate limit')",
+            params![second_entity],
         )
-        .expect("global diagnostic should insert");
-    connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 4);
-    let entity_keys = (0..32)
-        .map(|index| format!("entity-{index}"))
-        .collect::<Vec<_>>();
-    let statement_ids = (0..32)
-        .map(|index| format!("statement-{index}"))
-        .collect::<Vec<_>>();
-
-    let diagnostics = super::super::ontology::diagnostics_for_evidence(
-        &connection,
-        "scope-1",
-        &entity_keys,
-        &statement_ids,
+        .expect("second diagnostic should insert");
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec!["src".to_owned()],
+            vec!["rust".to_owned()],
+        )
+        .expect("selector should validate"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
         1,
     )
-    .expect("bounded JSON binds should load the global diagnostic");
+    .expect("request should validate");
+    let candidate_entities =
+        super::super::ontology::entities_for_scope(&connection, "scope-1", &request, 1)
+            .expect("bounded entities should load");
+    assert!(
+        candidate_entities
+            .iter()
+            .all(|entity| entity.entity_key != second_entity),
+        "the diagnostic target must fall outside the bounded entity candidate slice"
+    );
+
+    let diagnostics =
+        super::super::ontology::diagnostics_for_request(&connection, "scope-1", &request, 1)
+            .expect("full filtered evidence should load the diagnostic");
 
     assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].diagnostic_id, "global-diagnostic");
+    assert_eq!(diagnostics[0].diagnostic_id, "second-diagnostic");
 }
 
 #[test]

@@ -197,7 +197,7 @@ async fn directory_mutation_rejects_invalid_legacy_input_before_creating_migrati
 }
 
 #[tokio::test]
-async fn rollback_rejects_an_unreadable_routed_legacy_glossary_before_hiding_v3() {
+async fn rollback_rejects_an_unreadable_routed_canonical_glossary_before_hiding_v3() {
     let (root, service, context) = migrated_v2_fixture("rollback-routed-glossary-preflight").await;
     let visible_before = fs::read(service.map_path())
         .await
@@ -227,7 +227,7 @@ async fn rollback_rejects_an_unreadable_routed_legacy_glossary_before_hiding_v3(
         .iter_mut()
         .find(|source| source.id == "repository-business-glossary")
         .expect("legacy business glossary source should exist")
-        .uri = LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
+        .uri = BUSINESS_GLOSSARY_RELATIVE_PATH.to_owned();
     let shard_yaml = serialize_yaml(&shard).expect("legacy business shard should serialize");
     business_topic.digest = content_digest(shard_yaml.as_bytes());
     business_topic.r#ref = format!(
@@ -241,13 +241,16 @@ async fn rollback_rejects_an_unreadable_routed_legacy_glossary_before_hiding_v3(
         shard_yaml,
     )
     .await
-    .expect("routed legacy business shard should write");
+    .expect("routed canonical business shard should write");
     fs::write(
         service.legacy_backup_path(),
         serialize_yaml(&legacy_backup).expect("legacy backup should serialize"),
     )
     .await
     .expect("legacy backup should write");
+    fs::remove_file(root.join(BUSINESS_GLOSSARY_RELATIVE_PATH))
+        .await
+        .expect("routed canonical glossary should remove");
 
     let error = service
         .rollback_v3(&context)

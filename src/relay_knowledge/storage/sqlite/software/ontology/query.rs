@@ -123,7 +123,8 @@ pub(in super::super) fn statements_for_scope(
         "primary_evidence_path",
         &request.repository.path_filters,
     );
-    let language_filter = statement_language_filter(&request.repository.language_filters);
+    let language_filter =
+        statement_language_filter("software_statements", &request.repository.language_filters);
     let query = format!(
         "
         SELECT statement_id, subject_id, predicate, object_id, object_value,
@@ -183,52 +184,71 @@ pub(in super::super) fn diagnostics_for_scope(
         .map_err(StorageError::from)
 }
 
-pub(in super::super) fn diagnostics_for_evidence(
+pub(in super::super) fn diagnostics_for_request(
     connection: &Connection,
     source_scope: &str,
-    entity_keys: &[String],
-    statement_ids: &[String],
+    request: &SoftwareGlobalRequest,
     limit: usize,
 ) -> Result<Vec<SoftwareShapeDiagnostic>, StorageError> {
-    let entity_keys_json = serde_json::to_string(entity_keys)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let statement_ids_json = serde_json::to_string(statement_ids)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let query = "
+    let entity_path_filter = super::super::path_filter_sql_for_column(
+        "entity.primary_evidence_path",
+        &request.repository.path_filters,
+    );
+    let entity_language_filter = super::super::language_filter_sql_for_column(
+        "entity.language_id",
+        &request.repository.language_filters,
+    );
+    let statement_path_filter = super::super::path_filter_sql_for_column(
+        "statement.primary_evidence_path",
+        &request.repository.path_filters,
+    );
+    let statement_language_filter =
+        statement_language_filter("statement", &request.repository.language_filters);
+    let query = format!(
+        "
         SELECT diagnostic_id, shape_id, code, severity, statement_id, entity_key,
                field, message
-        FROM software_ontology_diagnostics
-        WHERE source_scope = ?1
-          AND (entity_key IS NULL OR entity_key IN (
-              SELECT CAST(value AS TEXT) FROM json_each(?2)
+        FROM software_ontology_diagnostics diagnostic
+        WHERE diagnostic.source_scope = ?1
+          AND (diagnostic.entity_key IS NULL OR EXISTS (
+              SELECT 1 FROM software_entities entity
+              WHERE entity.source_scope = diagnostic.source_scope
+                AND entity.entity_key = diagnostic.entity_key
+                {entity_path_filter}
+                {entity_language_filter}
           ))
-          AND (statement_id IS NULL OR statement_id IN (
-              SELECT CAST(value AS TEXT) FROM json_each(?3)
+          AND (diagnostic.statement_id IS NULL OR EXISTS (
+              SELECT 1 FROM software_statements statement
+              WHERE statement.source_scope = diagnostic.source_scope
+                AND statement.statement_id = diagnostic.statement_id
+                {statement_path_filter}
+                {statement_language_filter}
           ))
         ORDER BY severity ASC, code ASC, diagnostic_id ASC
-        LIMIT ?4
-        ";
-    let mut statement = connection.prepare(query)?;
-    let rows = statement.query_map(
-        params![
-            source_scope,
-            entity_keys_json,
-            statement_ids_json,
-            limit as i64
-        ],
-        |row| {
-            Ok(SoftwareShapeDiagnostic {
-                diagnostic_id: row.get(0)?,
-                shape_id: row.get(1)?,
-                code: row.get(2)?,
-                severity: parse_enum(row.get::<_, String>(3)?, SoftwareShapeSeverity::parse)?,
-                statement_id: row.get(4)?,
-                entity_key: row.get(5)?,
-                field: row.get(6)?,
-                message: row.get(7)?,
-            })
-        },
-    )?;
+        LIMIT ?
+        "
+    );
+    let mut values = vec![Value::Text(source_scope.to_owned())];
+    super::super::push_path_filter_values(&mut values, &request.repository.path_filters);
+    super::super::push_language_filter_values(&mut values, &request.repository.language_filters);
+    super::super::push_path_filter_values(&mut values, &request.repository.path_filters);
+    for language in &request.repository.language_filters {
+        values.push(Value::Text(language.clone()));
+    }
+    values.push(Value::Integer(limit as i64));
+    let mut statement = connection.prepare(&query)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
+        Ok(SoftwareShapeDiagnostic {
+            diagnostic_id: row.get(0)?,
+            shape_id: row.get(1)?,
+            code: row.get(2)?,
+            severity: parse_enum(row.get::<_, String>(3)?, SoftwareShapeSeverity::parse)?,
+            statement_id: row.get(4)?,
+            entity_key: row.get(5)?,
+            field: row.get(6)?,
+            message: row.get(7)?,
+        })
+    })?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
 }
@@ -288,19 +308,21 @@ fn entity_evidence_order(kind: SoftwareGlobalKind) -> &'static str {
     }
 }
 
-fn statement_language_filter(filters: &[String]) -> String {
+fn statement_language_filter(statement_table: &str, filters: &[String]) -> String {
     if filters.is_empty() {
         return String::new();
     }
     let clauses = filters
         .iter()
         .map(|_| {
-            "EXISTS (
+            format!(
+                "EXISTS (
                 SELECT 1 FROM software_entities subject
-                WHERE subject.source_scope = software_statements.source_scope
-                  AND subject.entity_key = software_statements.subject_id
+                WHERE subject.source_scope = {statement_table}.source_scope
+                  AND subject.entity_key = {statement_table}.subject_id
                   AND subject.language_id = ?
             )"
+            )
         })
         .collect::<Vec<_>>();
     format!("AND ({})", clauses.join(" OR "))

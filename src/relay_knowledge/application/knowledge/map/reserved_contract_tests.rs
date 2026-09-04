@@ -438,6 +438,41 @@ async fn validate_accepts_the_legacy_glossary_uri_in_the_legacy_namespace() {
 }
 
 #[tokio::test]
+async fn validate_legacy_root_reads_its_canonical_routed_glossary() {
+    let root = temp_root("legacy-canonical-glossary-uri");
+    fs::create_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
+        .await
+        .expect("legacy contract directory should create");
+    fs::create_dir_all(root.join("knowledge/glossary"))
+        .await
+        .expect("canonical glossary directory should create");
+    write_agents_contract(&root).await;
+    let map = KnowledgeMap::initial("unix:1".to_owned());
+    fs::write(
+        root.join(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH),
+        serde_norway::to_string(&map).expect("legacy map should serialize"),
+    )
+    .await
+    .expect("legacy map should write");
+    fs::write(
+        root.join(BUSINESS_GLOSSARY_RELATIVE_PATH),
+        serialize_yaml(&BusinessGlossary::empty_v1()).expect("glossary should serialize"),
+    )
+    .await
+    .expect("canonical glossary should write");
+    let service = KnowledgeMapService::new(root.clone());
+    let context = RequestContext::for_interface(InterfaceKind::Cli);
+
+    let validation = service
+        .validate(&context)
+        .await
+        .expect("legacy contract should validate");
+
+    assert!(validation.valid, "{:?}", validation.diagnostics);
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn source_update_rejects_the_legacy_glossary_uri_before_publication() {
     let (root, service, context) =
         initialized_repository("reject-visible-legacy-glossary-uri").await;

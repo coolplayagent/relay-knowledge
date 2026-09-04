@@ -319,9 +319,10 @@ fn projection_slices(
             let remaining = request.limit.saturating_sub(statements.len());
             Ok(ProjectionSlices {
                 statements,
-                diagnostics: super::ontology::diagnostics_for_scope(
+                diagnostics: super::ontology::diagnostics_for_request(
                     connection,
                     source_scope,
+                    request,
                     remaining,
                 )?,
                 ..ProjectionSlices::default()
@@ -362,11 +363,10 @@ fn projection_slices(
                 &mut entities,
                 &statements,
             )?;
-            let diagnostics = diagnostics_for_filtered_ontology(
+            let diagnostics = super::ontology::diagnostics_for_request(
                 connection,
                 source_scope,
-                &entities,
-                &statements,
+                request,
                 request.limit,
             )?;
             let mut slices = ProjectionSlices {
@@ -407,34 +407,6 @@ fn projection_slices(
             Ok(slices)
         }
     }
-}
-
-fn diagnostics_for_filtered_ontology(
-    connection: &Connection,
-    source_scope: &str,
-    entities: &[SoftwareEntity],
-    statements: &[SoftwareStatement],
-    limit: usize,
-) -> Result<Vec<SoftwareShapeDiagnostic>, StorageError> {
-    let entity_keys = entities
-        .iter()
-        .map(|entity| entity.entity_key.clone())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let statement_ids = statements
-        .iter()
-        .map(|statement| statement.statement_id.clone())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    super::ontology::diagnostics_for_evidence(
-        connection,
-        source_scope,
-        &entity_keys,
-        &statement_ids,
-        limit,
-    )
 }
 
 fn dependency_components(

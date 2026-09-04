@@ -23,7 +23,7 @@ use super::{
     ARTIFACT_SCHEMA_VERSION, KnowledgeMapMutationResponse, KnowledgeMapSchemaProbe,
     KnowledgeMapService, KnowledgeMapServiceError, LEGACY_ARTIFACT_SCHEMA_VERSION,
     WRITE_LOCK_TIMEOUT, ensure_owned_directory, parse_manifest, parse_v1_map_for_legacy_recovery,
-    read_root_file, temporary_path,
+    read_root_file, temporary_path, validation::LegacyGlossaryReadPolicy,
 };
 
 const MAX_LEGACY_MIGRATION_ARTIFACT_FILES: usize = 1_024;
@@ -61,8 +61,12 @@ impl KnowledgeMapService {
         if self.recover_legacy_rollback_transition().await? {
             let restored_legacy =
                 read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
-            self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &restored_legacy)
-                .await?;
+            self.validate_legacy_map_content_in(
+                LEGACY_AGENT_CONTRACT_DIR_NAME,
+                &restored_legacy,
+                LegacyGlossaryReadPolicy::LegacyRootCompatibility,
+            )
+            .await?;
             let rollback_version = map_version_from_validated_legacy_content(&restored_legacy)?;
             return Ok(self.mutation_response(
                 context,
@@ -197,8 +201,12 @@ impl KnowledgeMapService {
             }
             Err(error) => return Err(error),
         };
-        self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &legacy_content)
-            .await?;
+        self.validate_legacy_map_content_in(
+            LEGACY_AGENT_CONTRACT_DIR_NAME,
+            &legacy_content,
+            LegacyGlossaryReadPolicy::LegacyRootCompatibility,
+        )
+        .await?;
         let backup = self.legacy_backup_path();
         remove_regular_transition_file(&backup).await?;
         write_new_synced_file(&backup, legacy_content.as_bytes()).await?;
@@ -382,8 +390,12 @@ impl KnowledgeMapService {
             return Ok(None);
         }
         let active_legacy = read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
-        self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &active_legacy)
-            .await?;
+        self.validate_legacy_map_content_in(
+            LEGACY_AGENT_CONTRACT_DIR_NAME,
+            &active_legacy,
+            LegacyGlossaryReadPolicy::LegacyRootCompatibility,
+        )
+        .await?;
         Ok(Some(active_legacy))
     }
 
@@ -408,8 +420,12 @@ impl KnowledgeMapService {
         if !regular_file_exists_or_missing(&retained).await? {
             let active_legacy =
                 read_root_file(&self.repository_root, &self.legacy_map_path()).await?;
-            self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &active_legacy)
-                .await?;
+            self.validate_legacy_map_content_in(
+                LEGACY_AGENT_CONTRACT_DIR_NAME,
+                &active_legacy,
+                LegacyGlossaryReadPolicy::LegacyRootCompatibility,
+            )
+            .await?;
             remove_regular_transition_file(&current).await?;
             return Ok(true);
         }
@@ -514,15 +530,23 @@ impl KnowledgeMapService {
         &self,
         legacy_backup: &str,
     ) -> Result<(), KnowledgeMapServiceError> {
-        let Some(legacy_glossary) = self
-            .read_routed_legacy_business_glossary(LEGACY_AGENT_CONTRACT_DIR_NAME, legacy_backup)
+        let Some(_) = self
+            .routed_business_glossary_source_in(LEGACY_AGENT_CONTRACT_DIR_NAME, legacy_backup)
             .await?
         else {
             return Ok(());
         };
+        let legacy_path = self
+            .repository_root
+            .join(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH);
+        if !regular_file_exists_or_missing(&legacy_path).await? {
+            return Ok(());
+        }
+        let legacy_glossary = read_root_file(&self.repository_root, &legacy_path).await?;
+        BusinessGlossary::parse(legacy_glossary.as_bytes())?;
         let canonical_glossary =
             read_root_file(&self.repository_root, &self.business_glossary_path()).await?;
-        if canonical_glossary.as_bytes() != legacy_glossary.as_slice() {
+        if canonical_glossary != legacy_glossary {
             return Err(KnowledgeMapServiceError::Integrity(
                 "legacy business glossary diverged from the migration backup after v3 publication; refusing redirect to preserve edits"
                     .to_owned(),
@@ -544,8 +568,12 @@ impl KnowledgeMapService {
             }
             Err(error) => return Err(error),
         };
-        self.validate_legacy_map_content_in(LEGACY_AGENT_CONTRACT_DIR_NAME, &content)
-            .await?;
+        self.validate_legacy_map_content_in(
+            LEGACY_AGENT_CONTRACT_DIR_NAME,
+            &content,
+            LegacyGlossaryReadPolicy::ExactRoute,
+        )
+        .await?;
         Ok(content)
     }
 

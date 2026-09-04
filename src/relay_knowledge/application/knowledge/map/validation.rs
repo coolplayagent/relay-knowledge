@@ -4,7 +4,7 @@ use tokio::fs;
 
 use crate::{
     api::RequestContext,
-    domain::{BusinessGlossary, KnowledgeMap, KnowledgeMapSourceKind},
+    domain::{BusinessGlossary, KnowledgeMap, KnowledgeMapSource, KnowledgeMapSourceKind},
     project::{BUSINESS_GLOSSARY_RELATIVE_PATH, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH},
 };
 
@@ -20,6 +20,12 @@ use super::{
 enum MapContentValidation {
     CurrentContract,
     LegacyRecovery,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum LegacyGlossaryReadPolicy {
+    ExactRoute,
+    LegacyRootCompatibility,
 }
 
 impl KnowledgeMapService {
@@ -76,6 +82,7 @@ impl KnowledgeMapService {
         &self,
         contract_dir: &str,
         content: &str,
+        glossary_read_policy: LegacyGlossaryReadPolicy,
     ) -> Result<(), KnowledgeMapServiceError> {
         self.validate_map_content_with_policy(
             contract_dir,
@@ -84,7 +91,7 @@ impl KnowledgeMapService {
         )
         .await?;
         if let Some(glossary) = self
-            .read_routed_legacy_business_glossary(contract_dir, content)
+            .read_routed_legacy_business_glossary(contract_dir, content, glossary_read_policy)
             .await?
         {
             BusinessGlossary::parse(&glossary)?;
@@ -195,138 +202,149 @@ impl KnowledgeMapService {
         &self,
         contract_dir: &str,
         content: &str,
+        read_policy: LegacyGlossaryReadPolicy,
     ) -> Result<Option<Vec<u8>>, KnowledgeMapServiceError> {
         if self.map_type != crate::domain::RepositoryMapType::Knowledge
             || contract_dir != crate::project::LEGACY_AGENT_CONTRACT_DIR_NAME
         {
             return Ok(None);
         }
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
-            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        let (glossary_is_routed, legacy_glossary_is_required) = if probe.schema_version
-            == KnowledgeMap::SCHEMA_VERSION
-        {
-            let legacy_map = serde_norway::from_str::<KnowledgeMap>(content)
-                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-            let glossary_source = legacy_map.sources.iter().find(|source| {
-                source.id == "repository-business-glossary"
-                    && matches!(
-                        source.uri.as_str(),
-                        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH | BUSINESS_GLOSSARY_RELATIVE_PATH
-                    )
-            });
-            let glossary_is_routed = glossary_source.is_some()
-                && legacy_map.routes.iter().any(|route| {
-                    route
-                        .source_order
-                        .iter()
-                        .any(|source_id| source_id == "repository-business-glossary")
-                });
-            (
-                glossary_is_routed,
-                glossary_is_routed
-                    && glossary_source
-                        .is_some_and(|source| source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH),
-            )
-        } else {
-            let manifest = parse_manifest(content)?;
-            let mut glossary_is_routed = false;
-            let mut legacy_glossary_is_required = false;
-            for topic_ref in &manifest.topics {
-                let content = read_verified_ref_in(
-                    &self.repository_root,
-                    contract_dir,
-                    &topic_ref.r#ref,
-                    &topic_ref.digest,
-                )
-                .await?;
-                let shard = serde_norway::from_str::<KnowledgeMapTopicShard>(&content)
-                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-                let glossary_source = shard.sources.iter().find(|source| {
-                    source.id == "repository-business-glossary"
-                        && matches!(
-                            source.uri.as_str(),
-                            LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
-                                | BUSINESS_GLOSSARY_RELATIVE_PATH
-                        )
-                });
-                let shard_routes_glossary = glossary_source.is_some()
-                    && shard.route.is_some_and(|route| {
-                        route
-                            .source_order
-                            .iter()
-                            .any(|source_id| source_id == "repository-business-glossary")
-                    });
-                glossary_is_routed |= shard_routes_glossary;
-                legacy_glossary_is_required |= shard_routes_glossary
-                    && glossary_source
-                        .is_some_and(|source| source.uri == LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH);
-            }
-            (glossary_is_routed, legacy_glossary_is_required)
+        let Some(source) = self
+            .routed_business_glossary_source_in(contract_dir, content)
+            .await?
+        else {
+            return Ok(None);
         };
-        if !glossary_is_routed {
-            return Ok(None);
+        if !matches!(
+            source.uri.as_str(),
+            LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH | BUSINESS_GLOSSARY_RELATIVE_PATH
+        ) {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "routed reserved source 'repository-business-glossary' has an unsupported URI"
+                    .to_owned(),
+            ));
         }
-        let unresolved_legacy_glossary = self
-            .repository_root
-            .join(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH);
-        if !legacy_glossary_is_required && !fs::try_exists(&unresolved_legacy_glossary).await? {
-            return Ok(None);
-        }
-        let path = safe_repository_source_path(
-            &self.repository_root,
-            LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
-        )
-        .await?;
+        let path = match read_policy {
+            LegacyGlossaryReadPolicy::ExactRoute => {
+                safe_repository_source_path(&self.repository_root, &source.uri).await?
+            }
+            LegacyGlossaryReadPolicy::LegacyRootCompatibility
+                if source.uri == BUSINESS_GLOSSARY_RELATIVE_PATH
+                    && !fs::try_exists(
+                        self.repository_root.join(BUSINESS_GLOSSARY_RELATIVE_PATH),
+                    )
+                    .await? =>
+            {
+                let legacy_path = self
+                    .repository_root
+                    .join(LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH);
+                if !fs::try_exists(&legacy_path).await? {
+                    return Ok(None);
+                }
+                safe_repository_source_path(
+                    &self.repository_root,
+                    LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
+                )
+                .await?
+            }
+            LegacyGlossaryReadPolicy::LegacyRootCompatibility
+                if source.uri == BUSINESS_GLOSSARY_RELATIVE_PATH =>
+            {
+                safe_repository_source_path(&self.repository_root, BUSINESS_GLOSSARY_RELATIVE_PATH)
+                    .await?
+            }
+            LegacyGlossaryReadPolicy::LegacyRootCompatibility => {
+                safe_repository_source_path(&self.repository_root, &source.uri).await?
+            }
+        };
         Ok(Some(fs::read(path).await?))
     }
 
     async fn validate_business_glossary_route(&self) -> Result<(), KnowledgeMapServiceError> {
-        let (route, sources) = self.load_topic_route("business-knowledge").await?;
-        let route = route.ok_or_else(|| {
+        let root = self.read_root_snapshot().await?;
+        let source = self
+            .routed_business_glossary_source_in(root.contract_dir, &root.content)
+            .await?
+            .ok_or_else(|| {
             KnowledgeMapServiceError::Integrity(
                 "required business-knowledge route for reserved source 'repository-business-glossary' is missing"
                     .to_owned(),
             )
         })?;
-        if !route
-            .source_order
-            .iter()
-            .any(|source_id| source_id == "repository-business-glossary")
-        {
-            return Err(KnowledgeMapServiceError::Integrity(
-                "business-knowledge route must include reserved source 'repository-business-glossary'"
-                    .to_owned(),
-            ));
-        }
-
-        let source = sources
-            .iter()
-            .find(|source| source.id == "repository-business-glossary")
-            .ok_or_else(|| {
-                KnowledgeMapServiceError::Integrity(
-                    "business-knowledge route references missing reserved source 'repository-business-glossary'"
-                        .to_owned(),
-                )
-            })?;
-        let uses_legacy_contract = self.uses_legacy_contract().await?;
         if source.kind != KnowledgeMapSourceKind::File
-            || source.uri != BUSINESS_GLOSSARY_RELATIVE_PATH
+            || !matches!(
+                source.uri.as_str(),
+                BUSINESS_GLOSSARY_RELATIVE_PATH | LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
+            )
             || source.source_scope.as_deref() != Some("repo")
         {
             return Err(KnowledgeMapServiceError::Integrity(
-                "reserved source 'repository-business-glossary' must use topic 'business-knowledge', kind file, URI 'knowledge/glossary/business-glossary.yaml', and source scope repo"
+                "reserved source 'repository-business-glossary' must use topic 'business-knowledge', kind file, a recognized glossary URI, and source scope repo"
                     .to_owned(),
             ));
         }
-        let source_path = if uses_legacy_contract {
-            LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH
-        } else {
-            BUSINESS_GLOSSARY_RELATIVE_PATH
-        };
-        let path = safe_repository_source_path(&self.repository_root, source_path).await?;
+        let path = safe_repository_source_path(&self.repository_root, &source.uri).await?;
         let content = fs::read(path).await?;
         BusinessGlossary::parse(&content)?;
         Ok(())
+    }
+
+    pub(super) async fn routed_business_glossary_source_in(
+        &self,
+        contract_dir: &str,
+        content: &str,
+    ) -> Result<Option<KnowledgeMapSource>, KnowledgeMapServiceError> {
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        if probe.schema_version == KnowledgeMap::SCHEMA_VERSION {
+            let map = serde_norway::from_str::<KnowledgeMap>(content)
+                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+            let route_includes_glossary = map.routes.iter().any(|route| {
+                route.topic == "business-knowledge"
+                    && route
+                        .source_order
+                        .iter()
+                        .any(|source_id| source_id == "repository-business-glossary")
+            });
+            return Ok(route_includes_glossary
+                .then(|| {
+                    map.sources.into_iter().find(|source| {
+                        source.id == "repository-business-glossary"
+                            && source.topic == "business-knowledge"
+                    })
+                })
+                .flatten());
+        }
+        let manifest = parse_manifest(content)?;
+        let Some(topic_ref) = manifest
+            .topics
+            .iter()
+            .find(|topic| topic.id == "business-knowledge")
+        else {
+            return Ok(None);
+        };
+        let shard_content = read_verified_ref_in(
+            &self.repository_root,
+            contract_dir,
+            &topic_ref.r#ref,
+            &topic_ref.digest,
+        )
+        .await?;
+        let shard = serde_norway::from_str::<KnowledgeMapTopicShard>(&shard_content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        let route_includes_glossary = shard.route.is_some_and(|route| {
+            route
+                .source_order
+                .iter()
+                .any(|source_id| source_id == "repository-business-glossary")
+        });
+        Ok(route_includes_glossary
+            .then(|| {
+                shard
+                    .sources
+                    .into_iter()
+                    .find(|source| source.id == "repository-business-glossary")
+            })
+            .flatten())
     }
 }
