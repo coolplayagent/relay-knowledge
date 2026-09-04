@@ -12,15 +12,13 @@ use crate::{
     },
 };
 
-use super::artifact::{KnowledgeMapArchiveRef, KnowledgeMapHistoryIndexRef};
+use super::artifact::ARTIFACT_SCHEMA_VERSION;
 
 pub(super) struct MutableKnowledgeMap {
     pub(super) map_type: RepositoryMapType,
     pub(super) directories: Vec<RepositoryMapDirectory>,
     pub(super) map: KnowledgeMap,
-    pub(super) archived_through: u64,
-    pub(super) archive: Option<KnowledgeMapArchiveRef>,
-    pub(super) history_index: Option<KnowledgeMapHistoryIndexRef>,
+    pub(super) omitted_through: u64,
     pub(super) requires_publish: bool,
     pub(super) legacy_glossary_uri_normalized: bool,
 }
@@ -34,12 +32,35 @@ impl MutableKnowledgeMap {
             },
             map_type,
             directories: baseline_directories(map_type),
-            archived_through: 0,
-            archive: None,
-            history_index: None,
+            omitted_through: 0,
             requires_publish: false,
             legacy_glossary_uri_normalized: false,
         }
+    }
+
+    pub(super) fn record_required_publication(
+        &mut self,
+        source_schema_version: u16,
+        updated_at: String,
+    ) -> String {
+        let glossary_only =
+            source_schema_version == ARTIFACT_SCHEMA_VERSION && self.legacy_glossary_uri_normalized;
+        let (action, history_summary, response_summary) = if glossary_only {
+            (
+                "source.migrate",
+                "Migrated the reserved business glossary source URI to the canonical artifact.",
+                "migrated Knowledge Map legacy glossary URI to the canonical artifact",
+            )
+        } else {
+            (
+                "history.compact",
+                "Migrated repository map to bounded recent-only history storage.",
+                "migrated repository map to schema v4 recent-only history",
+            )
+        };
+        self.map
+            .record_change(action, history_summary.to_owned(), updated_at);
+        response_summary.to_owned()
     }
 }
 
@@ -138,18 +159,20 @@ pub struct KnowledgeMapView {
 /// Recent history and the checkpoint for history intentionally omitted from a show response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapHistoryWindow {
-    pub archived_through: u64,
+    pub omitted_through: u64,
     pub complete: bool,
     pub recent: Vec<KnowledgeMapHistoryEntry>,
 }
 
-/// One explicitly bounded page of complete Knowledge Map history.
+/// One explicitly bounded page from the retained recent repository-map history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapHistoryResponse {
     pub metadata: ApiMetadata,
     pub path: String,
     pub map_type: RepositoryMapType,
     pub map_version: u64,
+    pub omitted_through: u64,
+    pub earliest_available_version: u64,
     pub from_version: u64,
     pub through_version: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

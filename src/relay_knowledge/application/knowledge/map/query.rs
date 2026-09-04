@@ -86,7 +86,7 @@ impl KnowledgeMapService {
             let mut map = parse_v1_map(&root.content)?;
             let omitted = map.history.len().saturating_sub(RECENT_HISTORY_LIMIT);
             let recent = map.history.split_off(omitted);
-            let archived_through = recent
+            let omitted_through = recent
                 .first()
                 .map_or(0, |entry| entry.version.saturating_sub(1));
             return Ok(KnowledgeMapView {
@@ -98,7 +98,7 @@ impl KnowledgeMapService {
                 sources: map.sources,
                 routes: map.routes,
                 history: KnowledgeMapHistoryWindow {
-                    archived_through,
+                    omitted_through,
                     complete: omitted == 0,
                     recent,
                 },
@@ -106,7 +106,9 @@ impl KnowledgeMapService {
         }
         if !matches!(
             probe.schema_version,
-            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+            LEGACY_ARTIFACT_SCHEMA_VERSION
+                | super::DIRECTORY_ARTIFACT_SCHEMA_VERSION
+                | ARTIFACT_SCHEMA_VERSION
         ) {
             return Err(KnowledgeMapServiceError::Yaml(format!(
                 "unsupported schema_version {}",
@@ -126,8 +128,13 @@ impl KnowledgeMapService {
             sources.extend(shard.sources);
             routes.extend(shard.route);
         }
+        let omitted_through = if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+            manifest.history.omitted_through
+        } else {
+            manifest.history.archived_through
+        };
         Ok(KnowledgeMapView {
-            artifact_schema_version: ARTIFACT_SCHEMA_VERSION,
+            artifact_schema_version: manifest.schema_version,
             map_version: manifest.map_version,
             updated_at: manifest.updated_at,
             directories: if manifest.directories.is_empty() {
@@ -139,8 +146,8 @@ impl KnowledgeMapService {
             sources,
             routes,
             history: KnowledgeMapHistoryWindow {
-                archived_through: manifest.history.archived_through,
-                complete: manifest.history.archived_through == 0,
+                omitted_through,
+                complete: omitted_through == 0,
                 recent: manifest.history.recent,
             },
         })

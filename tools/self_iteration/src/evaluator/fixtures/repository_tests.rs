@@ -173,7 +173,7 @@ fn software_global_fixture_keeps_valid_legacy_map_metadata() {
 }
 
 #[test]
-fn repository_map_graph_fixture_keeps_v3_refs_content_addressed_and_orphans_unlisted() {
+fn repository_map_graph_fixture_keeps_v4_refs_content_addressed_and_orphans_unlisted() {
     use sha2::{Digest, Sha256};
 
     let root = std::env::temp_dir().join(format!(
@@ -184,7 +184,7 @@ fn repository_map_graph_fixture_keeps_v3_refs_content_addressed_and_orphans_unli
         std::fs::remove_dir_all(&root).expect("remove stale fixture");
     }
 
-    create_generated_repository_files(&root, "repository_map_graph_v3")
+    create_generated_repository_files(&root, "repository_map_graph_v4")
         .expect("repository map graph fixture should write");
     let map = std::fs::read_to_string(root.join("knowledge/knowledge-map.yaml"))
         .expect("knowledge map root");
@@ -199,7 +199,7 @@ fn repository_map_graph_fixture_keeps_v3_refs_content_addressed_and_orphans_unli
         .collect::<Result<Vec<_>, _>>()
         .expect("topic shards should list");
 
-    assert!(map.starts_with("schema_version: 3\nartifact_kind: map\nmap_type: knowledge"));
+    assert!(map.starts_with("schema_version: 4\nartifact_kind: map\nmap_type: knowledge"));
     assert!(codespec.contains("map_type: codespec"));
     assert_eq!(referenced.len(), 8);
     assert_eq!(

@@ -5,23 +5,23 @@ specification, starts a coding task, reacts to a Git commit, or changes an
 authoritative document/configuration source.
 
 The shared entry points are `codespec/codespec-map.yaml` and
-`knowledge/knowledge-map.yaml`. In schema v3 they govern typed repository
+`knowledge/knowledge-map.yaml`. In schema v4 they govern typed repository
 directories; Knowledge Map topic sources/routes live in content-addressed
-`knowledge/topics/` shards, and older history lives in verified
-`knowledge/history/` assets. `map route <topic> --type knowledge` loads one
+`knowledge/topics/` shards. Repository maps retain only their latest 16 history
+entries and do not create a `history/` archive tree. `map route <topic> --type knowledge` loads one
 shard; `map show` loads current shards and returns only the bounded recent-history
-window. Use `map history --from <version> --limit <count>` for explicit pages of
-at most 256 entries. The bundled Draft 2020-12 schema at
+window. Use `map history [--from <version>] [--limit <count>]` for an explicit
+page of at most 16 retained entries; omitting `--from` starts at the earliest
+retained version. The bundled Draft 2020-12 schema at
 `knowledge-map.schema.json` and `codespec-map.schema.json` describe the roots,
-typed directory entries, topic shard, history assets, and redirect for discovery and
+typed directory entries, topic shard, recent history, and redirect for discovery and
 structural validation. It deliberately accepts unknown fields to remain
 compatible with current Serde readers. It cannot prove that digests match file
 content, source ids are globally unique, routes are complete, history is
-contiguous, index ranges/heights agree, or reserved sources remain intact;
+contiguous with its omission checkpoint, or reserved sources remain intact;
 `map validate` remains authoritative for those cross-file and semantic checks.
-The schema does not authorize direct edits to generated topic shards, history
-archives, or history index nodes. Never edit shard refs or archive files
-directly. Mutations append only newly completed history chunks and
+The schema does not authorize direct edits to generated roots or topic shards.
+Never edit shard refs directly. Mutations advance the bounded recent window and
 clean superseded topic shards after committing the root while protecting any
 recovery-manifest refs. The code map is the primary source of truth for
 repository facts. The map stores stable navigation and repository-model entry
@@ -58,7 +58,7 @@ mappings. It deliberately accepts unknown fields for Serde reader compatibility.
 Its character-count limits are structural approximations of the runtime's UTF-8
 byte limits, and it cannot prove domain/term identity, domain references, or
 case-insensitive alias uniqueness; `map validate` remains authoritative. Unlike
-the generated Knowledge Map shards and history assets, this intentionally
+the generated Knowledge Map roots and shards, this intentionally
 authored glossary may be edited directly with normal source review.
 
 If that reserved source id has incompatible fields, stop and report the
@@ -73,13 +73,13 @@ conflict. Do not overwrite it.
   valid v1 map is migrated and receives the default software-model route.
 - Use `map show` before adding a source. One topic can contain multiple sources,
   each with a distinct stable id.
-- Treat `map show.history.complete=false` as an explicit archive omission, not
-  data loss; use bounded `map history` pages or `map validate` when old history
-  is relevant.
+- Treat `map show.history.complete=false` as an explicit retention boundary.
+  Use `map history` without `--from` for the retained window and use Git or a
+  repository backup when older audit history is relevant.
 - Use only `map source add`, `map source update`, or `map source remove` with
   `--type knowledge` for
   normal mutations, then validate again.
-- Use the bundled map schemas only for v3 structural discovery or tooling;
+- Use the bundled map schemas only for v4 structural discovery or tooling;
   never treat schema acceptance as a replacement for `map validate` or as
   permission to edit CLI-generated artifacts.
 - Use `business-glossary.schema.json` for authored glossary v1 field discovery
@@ -122,10 +122,19 @@ relay-knowledge map directory remove --type knowledge \
 relay-knowledge map validate --format json
 ```
 
-Use `map migrate --type knowledge --to-v3` for an explicit v2 migration. The
-CLI retains the v2 root and publishes a v3 redirect at the legacy path only
-after the visible root succeeds. `map migrate --type knowledge --rollback`
-restores the verified v2 root while retaining v3 data for forward recovery.
+Use `map migrate --type knowledge --to-v4` for an explicit legacy migration.
+The CLI verifies referenced legacy artifacts, publishes both current and reader
+fallback roots in v4, then safely removes recognized history archive files and
+their empty directories. Cleanup is bounded and resumable with `map init`; a
+committed mutation remains successful when another cleanup batch is pending,
+while `map validate` continues to report the obsolete directory until cleanup
+finishes. A cleanup refusal discovered after root publication is logged as
+post-commit maintenance state instead of retroactively failing the mutation.
+Legacy history is retained while a live legacy root is not a redirect.
+Unrecognized files, links, or corrupt referenced artifacts fail closed. There
+is no data-level map rollback command; use Git or a repository backup to recover
+older repository-owned map state.
+
 - Edit generated Knowledge Map YAML directly only when the CLI is unavailable
   and the user explicitly requests manual repair; this restriction does not
   apply to the intentionally authored business glossary.

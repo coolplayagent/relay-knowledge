@@ -67,8 +67,8 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     if fixture == "index_performance_c_fragment_v1" {
         return write_index_performance_c_fragment_fixture(root);
     }
-    if fixture == "repository_map_graph_v3" {
-        return write_repository_map_graph_v3_fixture(root);
+    if fixture == "repository_map_graph_v4" {
+        return write_repository_map_graph_v4_fixture(root);
     }
     if fixture == "index_performance_wide_mixed_files_v1" {
         return write_index_performance_wide_mixed_files_fixture(root);

@@ -1,12 +1,13 @@
-//! Recoverable v1/v2 to v3 Knowledge Map migration and rollback.
+//! Recoverable legacy Knowledge Map migration into the current contract.
 
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use tokio::{fs, io::AsyncWriteExt};
 
 use crate::{
     api::RequestContext,
-    domain::{BusinessGlossary, KnowledgeMap, RepositoryMapType},
+    domain::{BusinessGlossary, RepositoryMapType},
     project::{
         AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
         KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME,
@@ -20,26 +21,43 @@ use crate::{
 };
 
 use super::{
-    ARTIFACT_SCHEMA_VERSION, KnowledgeMapMutationResponse, KnowledgeMapSchemaProbe,
-    KnowledgeMapService, KnowledgeMapServiceError, LEGACY_ARTIFACT_SCHEMA_VERSION,
-    WRITE_LOCK_TIMEOUT, ensure_owned_directory, parse_manifest, parse_v1_map_for_legacy_recovery,
-    read_root_file, temporary_path, validation::LegacyGlossaryReadPolicy,
+    ARTIFACT_SCHEMA_VERSION, KnowledgeMapMutationResponse, KnowledgeMapService,
+    KnowledgeMapServiceError, ensure_owned_directory, read_root_file, temporary_path,
+    validation::LegacyGlossaryReadPolicy,
 };
+
+#[cfg(test)]
+use super::{
+    KnowledgeMapSchemaProbe, LEGACY_ARTIFACT_SCHEMA_VERSION, WRITE_LOCK_TIMEOUT, parse_manifest,
+    parse_v1_map_for_legacy_recovery,
+};
+#[cfg(test)]
+use crate::domain::KnowledgeMap;
 
 const MAX_LEGACY_MIGRATION_ARTIFACT_FILES: usize = 1_024;
 const MAX_LEGACY_MIGRATION_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_LEGACY_MIGRATION_ARTIFACT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
+#[derive(Deserialize)]
+struct LegacyRedirect {
+    schema_version: u16,
+    artifact_kind: String,
+    map_type: RepositoryMapType,
+    target: String,
+}
+
 impl KnowledgeMapService {
-    pub async fn migrate_to_v3(
+    pub async fn migrate_to_v4(
         &self,
         context: &RequestContext,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
-        self.require_knowledge_map("map migrate --to-v3")?;
+        self.require_knowledge_map("map migrate --to-v4")?;
         self.init(context).await
     }
 
-    pub async fn rollback_v3(
+    /// Exercises upgrade recovery from rollback states created by pre-v4 binaries.
+    #[cfg(test)]
+    pub(super) async fn rollback_v3(
         &self,
         context: &RequestContext,
     ) -> Result<KnowledgeMapMutationResponse, KnowledgeMapServiceError> {
@@ -259,9 +277,9 @@ impl KnowledgeMapService {
             return Ok(());
         }
         let current = read_root_file(&self.repository_root, &self.map_path()).await?;
-        if !self.validate_visible_v3_map_content(&current).await? {
+        if !self.validate_visible_current_map_content(&current).await? {
             return Err(KnowledgeMapServiceError::Integrity(
-                "legacy redirect publication requires a complete v3 visible root".to_owned(),
+                "legacy redirect publication requires a complete current visible root".to_owned(),
             ));
         }
         self.converge_legacy_redirect().await
@@ -288,6 +306,23 @@ impl KnowledgeMapService {
         Ok(false)
     }
 
+    pub(super) async fn legacy_history_cleanup_is_safe(
+        &self,
+    ) -> Result<bool, KnowledgeMapServiceError> {
+        if self.map_type != RepositoryMapType::Knowledge {
+            return Ok(false);
+        }
+        match read_root_file(&self.repository_root, &self.legacy_map_path()).await {
+            Ok(content) => Ok(is_supported_legacy_redirect(&content)),
+            Err(KnowledgeMapServiceError::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Ok(true)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub(super) async fn recover_legacy_redirect_transition(
         &self,
     ) -> Result<(), KnowledgeMapServiceError> {
@@ -298,7 +333,7 @@ impl KnowledgeMapService {
             return Ok(());
         }
         let current = read_root_file(&self.repository_root, &self.map_path()).await?;
-        if !self.validate_visible_v3_map_content(&current).await? {
+        if !self.validate_visible_current_map_content(&current).await? {
             return Ok(());
         }
         self.converge_legacy_redirect().await
@@ -379,6 +414,7 @@ impl KnowledgeMapService {
         Ok(None)
     }
 
+    #[cfg(test)]
     async fn active_clean_legacy_rollback(
         &self,
     ) -> Result<Option<String>, KnowledgeMapServiceError> {
@@ -399,6 +435,7 @@ impl KnowledgeMapService {
         Ok(Some(active_legacy))
     }
 
+    #[cfg(test)]
     async fn discard_incomplete_forward_migration_staging(
         &self,
     ) -> Result<bool, KnowledgeMapServiceError> {
@@ -411,7 +448,7 @@ impl KnowledgeMapService {
         }
         let current_content = read_root_file(&self.repository_root, &current).await?;
         if self
-            .validate_visible_v3_map_content(&current_content)
+            .validate_visible_current_map_content(&current_content)
             .await?
         {
             return Ok(false);
@@ -431,11 +468,12 @@ impl KnowledgeMapService {
         }
         let retained_content = read_root_file(&self.repository_root, &retained).await?;
         if !self
-            .validate_visible_v3_map_content(&retained_content)
+            .validate_visible_current_map_content(&retained_content)
             .await?
         {
             return Err(KnowledgeMapServiceError::Integrity(
-                "incomplete forward migration retained root is not a complete v3 map".to_owned(),
+                "incomplete forward migration retained root is not a complete current map"
+                    .to_owned(),
             ));
         }
         remove_regular_transition_file(&current).await?;
@@ -444,7 +482,7 @@ impl KnowledgeMapService {
 
     async fn converge_legacy_redirect(&self) -> Result<(), KnowledgeMapServiceError> {
         let yaml = format!(
-            "schema_version: 3\nartifact_kind: redirect\nmap_type: knowledge\ntarget: {KNOWLEDGE_MAP_RELATIVE_PATH}\n"
+            "schema_version: {ARTIFACT_SCHEMA_VERSION}\nartifact_kind: redirect\nmap_type: knowledge\ntarget: {KNOWLEDGE_MAP_RELATIVE_PATH}\n"
         );
         let legacy = self.legacy_map_path();
         let prepared = self.legacy_redirect_prepared_path();
@@ -460,21 +498,25 @@ impl KnowledgeMapService {
             }
             Err(error) => return Err(error),
         };
-        let live_is_redirect = live_legacy
+        let live_is_current_redirect = live_legacy
             .as_deref()
             .is_some_and(|content| content.as_bytes() == yaml.as_bytes());
-        if live_is_redirect {
-            let has_residue = path_entry_exists(&prepared).await?
-                || path_entry_exists(&previous).await?
-                || path_entry_exists(&rollback_prepared).await?
-                || path_entry_exists(&rollback_previous).await?;
-            if !has_residue {
+        let live_is_supported_redirect = live_legacy
+            .as_deref()
+            .is_some_and(is_supported_legacy_redirect);
+        let has_residue = path_entry_exists(&prepared).await?
+            || path_entry_exists(&previous).await?
+            || path_entry_exists(&rollback_prepared).await?
+            || path_entry_exists(&rollback_previous).await?;
+        if live_is_supported_redirect && !has_residue {
+            if live_is_current_redirect {
                 return Ok(());
             }
+            return replace_with_new_synced_file(&legacy, yaml.as_bytes()).await;
         }
 
         let legacy_backup = self.validate_legacy_backup().await?;
-        if !live_is_redirect {
+        if !live_is_supported_redirect {
             self.ensure_legacy_glossary_matches_canonical(&legacy_backup)
                 .await?;
         }
@@ -487,7 +529,10 @@ impl KnowledgeMapService {
                 ));
             }
         }
-        if live_is_redirect {
+        if live_is_supported_redirect {
+            if !live_is_current_redirect {
+                replace_with_new_synced_file(&legacy, yaml.as_bytes()).await?;
+            }
             remove_regular_transition_file(&prepared).await?;
             remove_regular_transition_file(&previous).await?;
             remove_regular_transition_file(&rollback_prepared).await?;
@@ -499,7 +544,7 @@ impl KnowledgeMapService {
             && live_legacy != &legacy_backup
         {
             return Err(KnowledgeMapServiceError::Integrity(
-                "legacy root diverged from the migration backup after v3 publication; refusing redirect to preserve edits"
+                "legacy root diverged from the migration backup after current-map publication; refusing redirect to preserve edits"
                     .to_owned(),
             ));
         }
@@ -625,6 +670,17 @@ impl KnowledgeMapService {
     }
 }
 
+fn is_supported_legacy_redirect(content: &str) -> bool {
+    serde_norway::from_str::<LegacyRedirect>(content).is_ok_and(|redirect| {
+        matches!(
+            redirect.schema_version,
+            super::DIRECTORY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        ) && redirect.artifact_kind == "redirect"
+            && redirect.map_type == RepositoryMapType::Knowledge
+            && redirect.target == KNOWLEDGE_MAP_RELATIVE_PATH
+    })
+}
+
 async fn path_entry_exists(path: &Path) -> Result<bool, KnowledgeMapServiceError> {
     match fs::symlink_metadata(path).await {
         Ok(_) => Ok(true),
@@ -644,6 +700,7 @@ async fn regular_file_exists_or_missing(path: &Path) -> Result<bool, KnowledgeMa
     }
 }
 
+#[cfg(test)]
 fn map_version_from_validated_legacy_content(
     content: &str,
 ) -> Result<u64, KnowledgeMapServiceError> {
@@ -654,7 +711,9 @@ fn map_version_from_validated_legacy_content(
     }
     if matches!(
         probe.schema_version,
-        LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | super::DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
     ) {
         return Ok(parse_manifest(content)?.map_version);
     }
@@ -664,6 +723,7 @@ fn map_version_from_validated_legacy_content(
     )))
 }
 
+#[cfg(test)]
 async fn restore_visible_rollback_roots(
     current: &Path,
     retained: &Path,

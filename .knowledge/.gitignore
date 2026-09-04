@@ -1,3 +1,5 @@
 # relay-knowledge transient writer locks
 /knowledge-map.yaml.lock
 /knowledge-map.yaml.lock.prepared.*
+# relay-knowledge transient writer locks
+/topics/*.retired

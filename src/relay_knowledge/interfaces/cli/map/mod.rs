@@ -25,7 +25,7 @@ pub enum MapCommand {
     },
     History {
         selection: MapSelection,
-        from_version: u64,
+        from_version: Option<u64>,
         limit: usize,
     },
     Route {
@@ -52,8 +52,7 @@ pub enum MapCommand {
         map_type: RepositoryMapType,
         directory: String,
     },
-    MigrateToV3,
-    MigrateRollback,
+    MigrateToV4,
     Validate {
         selection: MapSelection,
     },
@@ -279,25 +278,12 @@ pub(crate) async fn run_map(
                 format,
             )
         }
-        MapCommand::MigrateToV3 => {
+        MapCommand::MigrateToV4 => {
             let selected = map_service(service, format)?.for_type(RepositoryMapType::Knowledge);
             let response = selected
-                .migrate_to_v3(&context)
+                .migrate_to_v4(&context)
                 .await
-                .map_err(|error| map_error("knowledge map v3 migration failed", error, format))?;
-            super::render_response(
-                "repository.map.migrate",
-                response.metadata.clone(),
-                &response,
-                format,
-            )
-        }
-        MapCommand::MigrateRollback => {
-            let selected = map_service(service, format)?.for_type(RepositoryMapType::Knowledge);
-            let response = selected
-                .rollback_v3(&context)
-                .await
-                .map_err(|error| map_error("knowledge map v3 rollback failed", error, format))?;
+                .map_err(|error| map_error("knowledge map v4 migration failed", error, format))?;
             super::render_response(
                 "repository.map.migrate",
                 response.metadata.clone(),
@@ -448,19 +434,21 @@ fn parse_route(tokens: &[String]) -> Result<CliAction, CliError> {
 }
 
 fn parse_history(tokens: &[String]) -> Result<CliAction, CliError> {
-    const DEFAULT_HISTORY_PAGE_SIZE: usize = 64;
+    const DEFAULT_HISTORY_PAGE_SIZE: usize = 16;
 
     let (selection, tokens) = extract_selection(tokens, false)?;
-    let mut from_version = 1;
+    let mut from_version = None;
     let mut limit = DEFAULT_HISTORY_PAGE_SIZE;
     let mut index = 0;
     while index < tokens.len() {
         match tokens[index].as_str() {
             "--from" => {
                 let value = value_after(&tokens, index, "--from")?;
-                from_version = value
-                    .parse::<u64>()
-                    .map_err(|_| CliError::UnexpectedArgument(value))?;
+                from_version = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| CliError::UnexpectedArgument(value))?,
+                );
                 index += 2;
             }
             "--limit" => {
@@ -628,9 +616,8 @@ fn parse_migrate(tokens: &[String]) -> Result<CliAction, CliError> {
     let (selection, tokens) = extract_selection(tokens, true)?;
     require_knowledge_selection(selection)?;
     match tokens.as_slice() {
-        [operation] if operation == "--to-v3" => Ok(CliAction::Map(MapCommand::MigrateToV3)),
-        [operation] if operation == "--rollback" => Ok(CliAction::Map(MapCommand::MigrateRollback)),
-        _ => Err(CliError::MissingValue("--to-v3 or --rollback")),
+        [operation] if operation == "--to-v4" => Ok(CliAction::Map(MapCommand::MigrateToV4)),
+        _ => Err(CliError::MissingValue("--to-v4")),
     }
 }
 

@@ -74,7 +74,7 @@ async fn migration_refreshes_the_rollback_backup_from_the_active_v2_root() {
         .expect("v2 writer should update the active root");
 
     service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect("second migration should snapshot the active v2 root");
     assert_eq!(
@@ -297,7 +297,7 @@ async fn migration_refreshes_the_canonical_glossary_from_the_active_legacy_gloss
     .expect("legacy writer should update its glossary");
 
     service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect("forward migration should refresh the canonical glossary");
 
@@ -402,7 +402,7 @@ async fn rollback_discards_initial_forward_staging_and_keeps_the_live_legacy_roo
         .expect("initial migration should publish only legacy staging");
     assert!(
         !service
-            .validate_visible_v3_map_content(
+            .validate_visible_current_map_content(
                 &fs::read_to_string(service.map_path())
                     .await
                     .expect("initial staging root should read"),
@@ -740,7 +740,7 @@ async fn rollback_discards_incomplete_forward_staging_without_replacing_retained
         .expect("forward migration should stage the legacy root before publication");
     assert!(
         !service
-            .validate_visible_v3_map_content(
+            .validate_visible_current_map_content(
                 &fs::read_to_string(service.map_path())
                     .await
                     .expect("staged forward root should read"),
@@ -882,7 +882,7 @@ async fn successful_rollback_removes_stale_redirect_transition_markers() {
     .expect("stale redirect previous marker should write");
     fs::write(
         service.legacy_redirect_prepared_path(),
-        "schema_version: 3\nartifact_kind: redirect\nmap_type: knowledge\ntarget: knowledge/knowledge-map.yaml\n",
+        "schema_version: 4\nartifact_kind: redirect\nmap_type: knowledge\ntarget: knowledge/knowledge-map.yaml\n",
     )
     .await
     .expect("stale redirect prepared marker should write");
@@ -920,7 +920,7 @@ async fn migration_rejects_an_oversized_unreferenced_legacy_artifact() {
     .expect("oversized unreferenced artifact should write");
 
     let error = service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect_err("oversized legacy artifacts must be rejected before loading their contents");
 
@@ -932,7 +932,7 @@ async fn migration_rejects_an_oversized_unreferenced_legacy_artifact() {
 async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, RequestContext) {
     let (root, service, context) = legacy_v2_fixture(label).await;
     service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect("v2 fixture should migrate");
     (root, service, context)
@@ -962,7 +962,8 @@ async fn legacy_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Reques
     let v2 = fs::read_to_string(&legacy)
         .await
         .expect("fixture root should read")
-        .replacen("schema_version: 3", "schema_version: 2", 1);
+        .replacen("schema_version: 4", "schema_version: 2", 1)
+        .replacen("omitted_through", "archived_through", 1);
     fs::write(&legacy, v2)
         .await
         .expect("v2 fixture root should write");

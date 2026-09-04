@@ -11,20 +11,21 @@ use crate::{
     domain::{KnowledgeMap, RepositoryMapType},
     project::{
         AGENT_CONTRACT_DIR_NAME, CODESPEC_DIR_NAME, CODESPEC_MAP_FILE_NAME,
-        CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
-        KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME,
-        KNOWLEDGE_MAP_V3_RETAINED_FILE_NAME, LEGACY_AGENT_CONTRACT_DIR_NAME,
-        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH, LEGACY_KNOWLEDGE_MAP_BACKUP_FILE_NAME,
-        LEGACY_KNOWLEDGE_MAP_PREVIOUS_FILE_NAME,
+        CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME,
+        KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
+        KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME, KNOWLEDGE_MAP_V3_RETAINED_FILE_NAME,
+        LEGACY_AGENT_CONTRACT_DIR_NAME, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
+        LEGACY_KNOWLEDGE_MAP_BACKUP_FILE_NAME, LEGACY_KNOWLEDGE_MAP_PREVIOUS_FILE_NAME,
     },
 };
 
 use super::{
     KnowledgeMapService, KnowledgeMapServiceError,
     artifact::{
-        ARTIFACT_SCHEMA_VERSION, KnowledgeMapManifest, KnowledgeMapSchemaProbe,
-        LEGACY_ARTIFACT_SCHEMA_VERSION, ensure_regular_file_within, is_generated_topic_shard_name,
-        parse_manifest, read_root_file, reject_symlink, resolve_contract_ref_in, unsafe_path,
+        ARTIFACT_SCHEMA_VERSION, DIRECTORY_ARTIFACT_SCHEMA_VERSION, KnowledgeMapManifest,
+        KnowledgeMapSchemaProbe, LEGACY_ARTIFACT_SCHEMA_VERSION, ensure_regular_file_within,
+        is_generated_topic_shard_name, parse_manifest, read_root_file, reject_symlink,
+        resolve_contract_ref_in, unsafe_path,
     },
 };
 
@@ -372,7 +373,9 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
         }
         if !matches!(
             probe.schema_version,
-            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+            LEGACY_ARTIFACT_SCHEMA_VERSION
+                | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+                | ARTIFACT_SCHEMA_VERSION
         ) {
             return;
         }
@@ -434,6 +437,104 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
             let _ = fs::remove_file(marker).await;
         }
     }
+}
+
+pub(super) const HISTORY_CLEANUP_ENTRY_LIMIT: usize = 1_024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HistoryCleanupStatus {
+    Complete,
+    Pending { removed: usize },
+}
+
+pub(super) async fn cleanup_history_artifacts_in(
+    repository_root: &Path,
+    contract_dir: &str,
+) -> Result<HistoryCleanupStatus, KnowledgeMapServiceError> {
+    let directory = repository_root
+        .join(contract_dir)
+        .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME);
+    let metadata = match fs::symlink_metadata(&directory).await {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(HistoryCleanupStatus::Complete);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            directory.display().to_string(),
+        ));
+    }
+    let repository = fs::canonicalize(repository_root).await?;
+    let canonical = fs::canonicalize(&directory).await?;
+    if !canonical.starts_with(&repository) {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            directory.display().to_string(),
+        ));
+    }
+
+    let mut entries = fs::read_dir(&directory).await?;
+    let mut removable = Vec::with_capacity(HISTORY_CLEANUP_ENTRY_LIMIT);
+    let mut has_more = false;
+    while let Some(entry) = entries.next_entry().await? {
+        let file_name = entry.file_name();
+        if !is_generated_history_artifact_name(&file_name) {
+            return Err(KnowledgeMapServiceError::Integrity(format!(
+                "history cleanup refuses unrecognized entry '{}'",
+                entry.path().display()
+            )));
+        }
+        let metadata = fs::symlink_metadata(entry.path()).await?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(KnowledgeMapServiceError::UnsafePath(
+                entry.path().display().to_string(),
+            ));
+        }
+        if removable.len() == HISTORY_CLEANUP_ENTRY_LIMIT {
+            has_more = true;
+            break;
+        }
+        removable.push(entry.path());
+    }
+    drop(entries);
+    let removed = removable.len();
+    for path in removable {
+        match fs::remove_file(path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    if has_more {
+        return Ok(HistoryCleanupStatus::Pending { removed });
+    }
+    fs::remove_dir(&directory).await?;
+    Ok(HistoryCleanupStatus::Complete)
+}
+
+fn is_generated_history_artifact_name(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str().and_then(|name| name.strip_suffix(".yaml")) else {
+        return false;
+    };
+    let mut parts = name.split('-');
+    let first = parts.next();
+    let (height, from, through, digest) = if first == Some("index") {
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    } else {
+        (None, first, parts.next(), parts.next())
+    };
+    parts.next().is_none()
+        && height.is_none_or(|value| value.len() == 2 && value.bytes().all(|b| b.is_ascii_digit()))
+        && from.is_some_and(|value| value.len() == 20 && value.bytes().all(|b| b.is_ascii_digit()))
+        && through
+            .is_some_and(|value| value.len() == 20 && value.bytes().all(|b| b.is_ascii_digit()))
+        && digest.is_some_and(|value| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
 }
 
 fn recovery_manifest_paths(

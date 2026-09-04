@@ -1,84 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Relay Knowledge Map v3 artifacts",
-  "description": "Machine-readable structural schema for the Knowledge Map v3 root, topic shards, history assets, and legacy redirect. Objects intentionally allow unknown fields for Serde forward compatibility. Digest/content agreement, directory existence, cross-map relations, route completeness, history continuity, index relationships, and reserved sources cannot be fully expressed here; relay-knowledge map validate is authoritative. This schema does not authorize agents to edit them directly; generated shards, archives, indexes, and redirects remain CLI-managed assets.",
+  "title": "Relay Knowledge Map v4 artifacts",
+  "description": "Structural schema for the recent-only Knowledge Map v4 root, topic shards, and legacy redirect. Objects allow unknown fields for Serde forward compatibility. Digest agreement, directory existence, cross-map relations, route completeness, history continuity, and reserved sources are validated by relay-knowledge map validate; relay-knowledge map validate is authoritative. Generated roots, shards, and redirects remain CLI-managed assets.",
   "type": "object",
   "oneOf": [
-    {
-      "$ref": "#/$defs/rootManifest"
-    },
-    {
-      "$ref": "#/$defs/topicShard"
-    },
-    {
-      "$ref": "#/$defs/historyArchive"
-    },
-    {
-      "$ref": "#/$defs/historyIndexNode"
-    },
-    {
-      "$ref": "#/$defs/redirect"
-    }
+    { "$ref": "#/$defs/rootManifest" },
+    { "$ref": "#/$defs/topicShard" },
+    { "$ref": "#/$defs/redirect" }
   ],
   "$defs": {
-    "schemaVersion": {
-      "type": "integer",
-      "const": 3
-    },
-    "nonEmptyString": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "\\S"
-    },
+    "schemaVersion": { "type": "integer", "const": 4 },
+    "nonEmptyString": { "type": "string", "minLength": 1, "pattern": "\\S" },
     "nullableNonEmptyString": {
-      "type": [
-        "string",
-        "null"
-      ],
+      "type": ["string", "null"],
       "minLength": 1,
       "pattern": "\\S"
     },
-    "positiveInteger": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "nonNegativeInteger": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "digest": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
-    },
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "topicArtifactRef": {
       "type": "string",
       "pattern": "^topics/topic-[0-9a-f]{16}-[0-9a-f]{64}\\.yaml$"
     },
-    "historyArchiveArtifactRef": {
-      "type": "string",
-      "pattern": "^history/[0-9]{20}-[0-9]{20}-[0-9a-f]{64}\\.yaml$"
-    },
-    "historyIndexArtifactRef": {
-      "type": "string",
-      "pattern": "^history/index-[0-9]{2}-[0-9]{20}-[0-9]{20}-[0-9a-f]{64}\\.yaml$"
-    },
     "topic": {
       "type": "object",
-      "required": [
-        "id",
-        "title",
-        "description"
-      ],
+      "required": ["id", "title", "description"],
       "properties": {
-        "id": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "title": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "description": {
-          "$ref": "#/$defs/nonEmptyString"
-        }
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "$ref": "#/$defs/nonEmptyString" }
       },
       "additionalProperties": true
     },
@@ -95,291 +46,62 @@
         "version"
       ],
       "properties": {
-        "id": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "topic": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "topic": { "$ref": "#/$defs/nonEmptyString" },
         "kind": {
-          "type": "string",
-          "enum": [
-            "repo",
-            "file",
-            "doc",
-            "config",
-            "db",
-            "ci",
-            "runtime",
-            "wiki",
-            "monitoring"
-          ]
+          "enum": ["repo", "file", "doc", "config", "db", "ci", "runtime", "wiki", "monitoring"]
         },
-        "uri": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "source_scope": {
-          "$ref": "#/$defs/nullableNonEmptyString"
-        },
-        "read_policy": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "write_policy": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "status": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "description": {
-          "$ref": "#/$defs/nullableNonEmptyString"
-        }
+        "uri": { "$ref": "#/$defs/nonEmptyString" },
+        "source_scope": { "$ref": "#/$defs/nullableNonEmptyString" },
+        "read_policy": { "$ref": "#/$defs/nonEmptyString" },
+        "write_policy": { "$ref": "#/$defs/nonEmptyString" },
+        "status": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/positiveInteger" },
+        "description": { "$ref": "#/$defs/nullableNonEmptyString" }
       },
       "additionalProperties": true
     },
     "route": {
       "type": "object",
-      "required": [
-        "topic"
-      ],
+      "required": ["topic"],
       "properties": {
-        "topic": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
+        "topic": { "$ref": "#/$defs/nonEmptyString" },
         "source_order": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/nonEmptyString"
-          },
+          "items": { "$ref": "#/$defs/nonEmptyString" },
           "uniqueItems": true
         },
-        "fallback": {
-          "$ref": "#/$defs/nullableNonEmptyString"
-        }
+        "fallback": { "$ref": "#/$defs/nullableNonEmptyString" }
       },
       "additionalProperties": true
     },
     "historyEntry": {
       "type": "object",
-      "required": [
-        "version",
-        "action",
-        "actor",
-        "summary"
-      ],
+      "required": ["version", "action", "actor", "summary"],
       "properties": {
-        "version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "action": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "actor": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "summary": {
-          "$ref": "#/$defs/nonEmptyString"
-        }
+        "version": { "$ref": "#/$defs/positiveInteger" },
+        "action": { "$ref": "#/$defs/nonEmptyString" },
+        "actor": { "$ref": "#/$defs/nonEmptyString" },
+        "summary": { "$ref": "#/$defs/nonEmptyString" }
       },
       "additionalProperties": true
     },
     "topicRef": {
       "type": "object",
-      "required": [
-        "id",
-        "title",
-        "description",
-        "source_ids",
-        "ref",
-        "digest"
-      ],
+      "required": ["id", "title", "description", "source_ids", "ref", "digest"],
       "properties": {
-        "id": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "title": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "description": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "$ref": "#/$defs/nonEmptyString" },
         "source_ids": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/nonEmptyString"
-          },
+          "items": { "$ref": "#/$defs/nonEmptyString" },
           "uniqueItems": true
         },
-        "ref": {
-          "$ref": "#/$defs/topicArtifactRef"
-        },
-        "digest": {
-          "$ref": "#/$defs/digest"
-        }
+        "ref": { "$ref": "#/$defs/topicArtifactRef" },
+        "digest": { "$ref": "#/$defs/digest" }
       },
       "additionalProperties": true
-    },
-    "archiveRef": {
-      "type": "object",
-      "required": [
-        "ref",
-        "digest"
-      ],
-      "properties": {
-        "ref": {
-          "$ref": "#/$defs/historyArchiveArtifactRef"
-        },
-        "digest": {
-          "$ref": "#/$defs/digest"
-        }
-      },
-      "additionalProperties": true
-    },
-    "historyIndexRef": {
-      "type": "object",
-      "required": [
-        "from_version",
-        "through_version",
-        "height",
-        "ref",
-        "digest"
-      ],
-      "properties": {
-        "from_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "through_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "height": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "ref": {
-          "$ref": "#/$defs/historyIndexArtifactRef"
-        },
-        "digest": {
-          "$ref": "#/$defs/digest"
-        }
-      },
-      "additionalProperties": true
-    },
-    "historyManifest": {
-      "type": "object",
-      "required": [
-        "archived_through",
-        "recent"
-      ],
-      "properties": {
-        "archived_through": {
-          "$ref": "#/$defs/nonNegativeInteger"
-        },
-        "archive": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/archiveRef"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "index": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/historyIndexRef"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "recent": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/historyEntry"
-          },
-          "minItems": 1,
-          "maxItems": 16,
-          "uniqueItems": true
-        }
-      },
-      "additionalProperties": true
-    },
-    "historyIndexArchiveEntry": {
-      "type": "object",
-      "required": [
-        "from_version",
-        "through_version",
-        "kind",
-        "ref",
-        "digest"
-      ],
-      "properties": {
-        "from_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "through_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "kind": {
-          "const": "archive"
-        },
-        "ref": {
-          "$ref": "#/$defs/historyArchiveArtifactRef"
-        },
-        "digest": {
-          "$ref": "#/$defs/digest"
-        }
-      },
-      "additionalProperties": true
-    },
-    "historyIndexNodeEntry": {
-      "type": "object",
-      "required": [
-        "from_version",
-        "through_version",
-        "kind",
-        "height",
-        "ref",
-        "digest"
-      ],
-      "properties": {
-        "from_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "through_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "kind": {
-          "const": "node"
-        },
-        "height": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "ref": {
-          "$ref": "#/$defs/historyIndexArtifactRef"
-        },
-        "digest": {
-          "$ref": "#/$defs/digest"
-        }
-      },
-      "additionalProperties": true
-    },
-    "historyIndexEntry": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/historyIndexArchiveEntry"
-        },
-        {
-          "$ref": "#/$defs/historyIndexNodeEntry"
-        }
-      ]
     },
     "directoryRelation": {
       "type": "object",
@@ -397,7 +119,15 @@
     },
     "directory": {
       "type": "object",
-      "required": ["directory", "purpose", "content_scope", "key_files", "load_hint", "relations", "update_rule"],
+      "required": [
+        "directory",
+        "purpose",
+        "content_scope",
+        "key_files",
+        "load_hint",
+        "relations",
+        "update_rule"
+      ],
       "properties": {
         "directory": {
           "type": "string",
@@ -425,8 +155,26 @@
       },
       "additionalProperties": true
     },
+    "historyManifest": {
+      "type": "object",
+      "required": ["omitted_through", "recent"],
+      "propertyNames": {
+        "not": { "enum": ["archived_through", "archive", "index"] }
+      },
+      "properties": {
+        "omitted_through": { "$ref": "#/$defs/nonNegativeInteger" },
+        "recent": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/historyEntry" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": true
+    },
     "rootManifest": {
-      "title": "Knowledge Map v3 root manifest",
+      "title": "Knowledge Map v4 root manifest",
       "type": "object",
       "required": [
         "schema_version",
@@ -439,17 +187,11 @@
         "history"
       ],
       "properties": {
-        "schema_version": {
-          "$ref": "#/$defs/schemaVersion"
-        },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" },
         "artifact_kind": { "const": "map" },
         "map_type": { "const": "knowledge" },
-        "map_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "updated_at": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
+        "map_version": { "$ref": "#/$defs/positiveInteger" },
+        "updated_at": { "$ref": "#/$defs/nonEmptyString" },
         "directories": {
           "type": "array",
           "minItems": 5,
@@ -458,132 +200,33 @@
         },
         "topics": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/topicRef"
-          },
+          "items": { "$ref": "#/$defs/topicRef" },
           "uniqueItems": true
         },
-        "history": {
-          "$ref": "#/$defs/historyManifest"
-        }
+        "history": { "$ref": "#/$defs/historyManifest" }
       },
       "additionalProperties": true
     },
     "topicShard": {
-      "title": "Knowledge Map v3 topic shard",
+      "title": "Knowledge Map v4 topic shard",
       "type": "object",
-      "required": [
-        "schema_version",
-        "topic",
-        "sources"
-      ],
+      "required": ["schema_version", "topic", "sources"],
       "properties": {
-        "schema_version": {
-          "$ref": "#/$defs/schemaVersion"
-        },
-        "topic": {
-          "$ref": "#/$defs/topic"
-        },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" },
+        "topic": { "$ref": "#/$defs/topic" },
         "sources": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/source"
-          },
+          "items": { "$ref": "#/$defs/source" },
           "uniqueItems": true
         },
         "route": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/route"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "additionalProperties": true
-    },
-    "historyArchive": {
-      "title": "Knowledge Map v3 history archive",
-      "type": "object",
-      "required": [
-        "schema_version",
-        "from_version",
-        "through_version",
-        "entries"
-      ],
-      "properties": {
-        "schema_version": {
-          "$ref": "#/$defs/schemaVersion"
-        },
-        "from_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "through_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "previous": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/archiveRef"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "entries": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/historyEntry"
-          },
-          "minItems": 1,
-          "maxItems": 16,
-          "uniqueItems": true
-        }
-      },
-      "additionalProperties": true
-    },
-    "historyIndexNode": {
-      "title": "Knowledge Map v3 history index node",
-      "type": "object",
-      "required": [
-        "schema_version",
-        "from_version",
-        "through_version",
-        "height",
-        "entries"
-      ],
-      "properties": {
-        "schema_version": {
-          "$ref": "#/$defs/schemaVersion"
-        },
-        "from_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "through_version": {
-          "$ref": "#/$defs/positiveInteger"
-        },
-        "height": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "entries": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/historyIndexEntry"
-          },
-          "minItems": 1,
-          "maxItems": 64,
-          "uniqueItems": true
+          "anyOf": [{ "$ref": "#/$defs/route" }, { "type": "null" }]
         }
       },
       "additionalProperties": true
     },
     "redirect": {
-      "title": "Legacy Knowledge Map v3 redirect",
+      "title": "Legacy Knowledge Map v4 redirect",
       "type": "object",
       "required": ["schema_version", "artifact_kind", "map_type", "target"],
       "properties": {

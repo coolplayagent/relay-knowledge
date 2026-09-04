@@ -125,7 +125,7 @@ bounded by an explicit cap.
   on the visible CodeSpec and Knowledge navigation contracts plus repository
   bootstrap and spec-grounded incremental development.
 - `references/knowledge-map.schema.json`: Draft 2020-12 structural schema for
-  the v3 root manifest, topic shards, history assets, and redirect;
+  the v4 root manifest, topic shards, bounded recent history, and redirect;
   `relay-knowledge map validate` remains authoritative for cross-file and
   semantic integrity.
 - `references/codespec-map.schema.json`: Draft 2020-12 structural schema for

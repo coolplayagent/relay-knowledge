@@ -1,4 +1,4 @@
-//! Knowledge Map v2 manifest, topic-shard, and history-archive file contracts.
+//! Repository Map manifest, topic-shard, and legacy history-archive contracts.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13,7 +13,8 @@ use crate::domain::{
 use super::error::KnowledgeMapServiceError;
 
 pub(super) const RECENT_HISTORY_LIMIT: usize = 16;
-pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 3;
+pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 4;
+pub(super) const DIRECTORY_ARTIFACT_SCHEMA_VERSION: u16 = 3;
 pub(super) const LEGACY_ARTIFACT_SCHEMA_VERSION: u16 = 2;
 pub(super) const HISTORY_INDEX_FANOUT: usize = 64;
 pub(super) const HISTORY_INDEX_MAX_HEIGHT: u8 = 10;
@@ -69,7 +70,10 @@ pub(super) struct KnowledgeMapTopicShard {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapHistoryManifest {
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub(super) archived_through: u64,
+    #[serde(default)]
+    pub(super) omitted_through: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,7 +144,9 @@ pub(super) fn parse_manifest(
         .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
     if !matches!(
         manifest.schema_version,
-        LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
     ) || manifest.map_version == 0
     {
         return Err(KnowledgeMapServiceError::Integrity(
@@ -148,13 +154,21 @@ pub(super) fn parse_manifest(
         ));
     }
     if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        reject_v4_archive_fields(content)?;
+    }
+    if matches!(
+        manifest.schema_version,
+        DIRECTORY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+    ) {
         if manifest.artifact_kind.as_deref() != Some("map") {
             return Err(KnowledgeMapServiceError::Integrity(
-                "v3 manifest artifact_kind must be 'map'".to_owned(),
+                "repository map manifest artifact_kind must be 'map'".to_owned(),
             ));
         }
         let map_type = manifest.map_type.ok_or_else(|| {
-            KnowledgeMapServiceError::Integrity("v3 manifest map_type is required".to_owned())
+            KnowledgeMapServiceError::Integrity(
+                "repository map manifest map_type is required".to_owned(),
+            )
         })?;
         validate_directory_collection(map_type, &manifest.directories, true)?;
     }
@@ -193,6 +207,11 @@ pub(super) fn parse_manifest(
         }
     }
     validate_recent_history(&manifest)?;
+    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION && manifest.history.omitted_through != 0 {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "legacy history must not contain an omitted checkpoint".to_owned(),
+        ));
+    }
     if let Some(archive) = &manifest.history.archive {
         if !is_scoped_contract_ref(
             &archive.r#ref,
@@ -218,6 +237,23 @@ pub(super) fn parse_manifest(
         }
     }
     Ok(manifest)
+}
+
+fn reject_v4_archive_fields(content: &str) -> Result<(), KnowledgeMapServiceError> {
+    let document = serde_norway::from_str::<serde_norway::Value>(content)
+        .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+    let history = document.get("history").ok_or_else(|| {
+        KnowledgeMapServiceError::Integrity("manifest history is required".to_owned())
+    })?;
+    if ["archived_through", "archive", "index"]
+        .into_iter()
+        .any(|field| history.get(field).is_some())
+    {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "v4 history must not reference archive artifacts".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_history_index_ref_shape(
@@ -304,20 +340,21 @@ pub(super) fn validate_recent_history(
             "recent history must contain 1..={RECENT_HISTORY_LIMIT} entries"
         )));
     }
-    let mut expected = manifest
-        .history
-        .archived_through
-        .checked_add(1)
-        .ok_or_else(|| {
-            KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
-        })?;
+    let checkpoint = if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        manifest.history.omitted_through
+    } else {
+        manifest.history.archived_through
+    };
+    let mut expected = checkpoint.checked_add(1).ok_or_else(|| {
+        KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
+    })?;
     for entry in &manifest.history.recent {
         entry
             .validate()
             .map_err(|error| KnowledgeMapServiceError::Integrity(error.to_string()))?;
         if entry.version != expected {
             return Err(KnowledgeMapServiceError::Integrity(
-                "recent history is not contiguous with its archive checkpoint".to_owned(),
+                "recent history is not contiguous with its omission checkpoint".to_owned(),
             ));
         }
         expected = expected.checked_add(1).ok_or_else(|| {
@@ -329,15 +366,21 @@ pub(super) fn validate_recent_history(
             "recent history does not end at map_version".to_owned(),
         ));
     }
-    if (manifest.history.archived_through == 0) != manifest.history.archive.is_none() {
-        return Err(KnowledgeMapServiceError::Integrity(
-            "history archive reference and checkpoint disagree".to_owned(),
-        ));
-    }
-    if let Some(archive) = &manifest.history.archive {
-        validate_archive_ref_shape(archive, manifest.history.archived_through)?;
+    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION {
+        if (manifest.history.archived_through == 0) != manifest.history.archive.is_none() {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "history archive reference and checkpoint disagree".to_owned(),
+            ));
+        }
+        if let Some(archive) = &manifest.history.archive {
+            validate_archive_ref_shape(archive, manifest.history.archived_through)?;
+        }
     }
     Ok(())
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 fn validate_archive_ref_shape(

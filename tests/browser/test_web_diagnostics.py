@@ -240,7 +240,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".command-preview")).to_contain_text(
             "map history --from 2 --limit 4"
         )
-        expect(page.get_by_label("Limit")).to_have_attribute("max", "256")
+        expect(page.get_by_label("Limit")).to_have_attribute("max", "16")
         expect(page.locator(".payload-preview")).to_contain_text('"repository": "docs-repo"')
         page.get_by_test_id("run-operation").click()
         expect(page.locator(".operation-result")).to_contain_text("Knowledge Map history")

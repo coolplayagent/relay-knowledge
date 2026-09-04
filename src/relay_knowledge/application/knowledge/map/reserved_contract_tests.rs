@@ -279,7 +279,7 @@ async fn source_add_migrates_a_legacy_only_map_and_rollback_restores_exact_bytes
         fs::read_to_string(service.map_path())
             .await
             .expect("visible root should read")
-            .contains("schema_version: 3")
+            .contains("schema_version: 4")
     );
     assert!(
         fs::read_to_string(service.legacy_map_path())
@@ -506,7 +506,7 @@ async fn source_update_rejects_the_legacy_glossary_uri_before_publication() {
 }
 
 #[tokio::test]
-async fn init_migrates_the_legacy_glossary_uri_in_a_visible_v3_namespace() {
+async fn init_records_legacy_glossary_uri_migration_in_a_visible_v4_map() {
     let (root, service, context) = initialized_repository("visible-legacy-glossary-uri").await;
     let mut manifest = parse_manifest(
         &fs::read_to_string(service.map_path())
@@ -582,6 +582,14 @@ async fn init_migrates_the_legacy_glossary_uri_in_a_visible_v3_namespace() {
             .expect("repaired manifest should read"),
     )
     .expect("repaired manifest should parse");
+    let migration_entry = repaired_manifest
+        .history
+        .recent
+        .last()
+        .expect("glossary migration should append history");
+    assert_eq!(migration_entry.action, "source.migrate");
+    assert!(migration_entry.summary.contains("business glossary"));
+    assert!(!migration_entry.summary.contains("history"));
     let repaired_topic_ref = repaired_manifest
         .topics
         .iter()
