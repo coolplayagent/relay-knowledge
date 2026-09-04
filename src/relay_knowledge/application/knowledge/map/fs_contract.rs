@@ -439,18 +439,26 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
     }
 }
 
-const HISTORY_CLEANUP_ENTRY_LIMIT: usize = 1_024;
+pub(super) const HISTORY_CLEANUP_ENTRY_LIMIT: usize = 1_024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HistoryCleanupStatus {
+    Complete,
+    Pending { removed: usize },
+}
 
 pub(super) async fn cleanup_history_artifacts_in(
     repository_root: &Path,
     contract_dir: &str,
-) -> Result<(), KnowledgeMapServiceError> {
+) -> Result<HistoryCleanupStatus, KnowledgeMapServiceError> {
     let directory = repository_root
         .join(contract_dir)
         .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME);
     let metadata = match fs::symlink_metadata(&directory).await {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(HistoryCleanupStatus::Complete);
+        }
         Err(error) => return Err(error.into()),
     };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -490,6 +498,7 @@ pub(super) async fn cleanup_history_artifacts_in(
         removable.push(entry.path());
     }
     drop(entries);
+    let removed = removable.len();
     for path in removable {
         match fs::remove_file(path).await {
             Ok(()) => {}
@@ -498,12 +507,10 @@ pub(super) async fn cleanup_history_artifacts_in(
         }
     }
     if has_more {
-        return Err(KnowledgeMapServiceError::InvalidRequest(format!(
-            "history cleanup processed {HISTORY_CLEANUP_ENTRY_LIMIT} entries; rerun `relay-knowledge map init` to continue"
-        )));
+        return Ok(HistoryCleanupStatus::Pending { removed });
     }
     fs::remove_dir(&directory).await?;
-    Ok(())
+    Ok(HistoryCleanupStatus::Complete)
 }
 
 fn is_generated_history_artifact_name(name: &std::ffi::OsStr) -> bool {

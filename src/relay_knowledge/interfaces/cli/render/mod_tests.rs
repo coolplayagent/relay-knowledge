@@ -49,7 +49,7 @@ fn map_show_reports_a_recent_only_history_window() {
 
     assert_eq!(
         rendered,
-        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=false history_omitted_through=24 history_recent=2\nhistory_notice=entries through version 24 are not retained; run relay-knowledge map history without --from to read the retained window\n"
+        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=false history_omitted_through=24 history_recent=2\nhistory_notice=entries through version 24 are outside this view; run relay-knowledge map history without --from to read the earliest available page\n"
     );
 }
 

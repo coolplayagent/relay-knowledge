@@ -413,7 +413,7 @@ fn render_knowledge_map_show(value: &serde_json::Value) -> String {
     );
     if !complete {
         output.push_str(&format!(
-            "\nhistory_notice=entries through version {omitted_through} are not retained; run relay-knowledge map history without --from to read the retained window"
+            "\nhistory_notice=entries through version {omitted_through} are outside this view; run relay-knowledge map history without --from to read the earliest available page"
         ));
     }
 

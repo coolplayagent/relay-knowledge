@@ -97,11 +97,20 @@ impl KnowledgeMapService {
                 .repository_root
                 .join(contract_dir)
                 .join(crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME);
-            if fs::try_exists(&history).await? {
-                return Err(KnowledgeMapServiceError::Integrity(format!(
-                    "obsolete history directory '{}' remains; run `relay-knowledge map init` to finish cleanup",
-                    history.display()
-                )));
+            match fs::symlink_metadata(&history).await {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err(KnowledgeMapServiceError::UnsafePath(
+                        history.display().to_string(),
+                    ));
+                }
+                Ok(_) => {
+                    return Err(KnowledgeMapServiceError::Integrity(format!(
+                        "obsolete history directory '{}' remains; run `relay-knowledge map init` to finish cleanup",
+                        history.display()
+                    )));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
             }
         }
         Ok(())

@@ -128,8 +128,13 @@ impl KnowledgeMapService {
             sources.extend(shard.sources);
             routes.extend(shard.route);
         }
+        let omitted_through = if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+            manifest.history.omitted_through
+        } else {
+            manifest.history.archived_through
+        };
         Ok(KnowledgeMapView {
-            artifact_schema_version: ARTIFACT_SCHEMA_VERSION,
+            artifact_schema_version: manifest.schema_version,
             map_version: manifest.map_version,
             updated_at: manifest.updated_at,
             directories: if manifest.directories.is_empty() {
@@ -141,13 +146,8 @@ impl KnowledgeMapService {
             sources,
             routes,
             history: KnowledgeMapHistoryWindow {
-                omitted_through: if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
-                    manifest.history.omitted_through
-                } else {
-                    0
-                },
-                complete: manifest.schema_version != ARTIFACT_SCHEMA_VERSION
-                    || manifest.history.omitted_through == 0,
+                omitted_through,
+                complete: omitted_through == 0,
                 recent: manifest.history.recent,
             },
         })

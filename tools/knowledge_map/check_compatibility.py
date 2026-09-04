@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MINIMUM_V4_STABLE_READER = (1, 1, 16)
+MINIMUM_V4_STABLE_READER = (1, 1, 17)
 
 
 def command_json(binary: Path, *arguments: str) -> tuple[int, dict[str, object]]:
@@ -118,14 +118,14 @@ def self_test() -> None:
     assert not validation_payload_is_valid(
         {"results": [{"valid": True}, {"valid": False}]}
     )
-    assert stable_reader_status((1, 1, 16), (1, 1, 15), False) == (
+    assert stable_reader_status((1, 1, 17), (1, 1, 16), False) == (
         "staged_pending_reader_release"
     )
-    assert stable_reader_status((1, 1, 15), (1, 1, 15), False) == (
+    assert stable_reader_status((1, 1, 16), (1, 1, 16), False) == (
         "incompatible_same_version"
     )
-    assert stable_reader_status((1, 1, 16), (1, 1, 16), False) == "incompatible"
-    assert stable_reader_status((1, 1, 16), (1, 1, 15), True) == "compatible"
+    assert stable_reader_status((1, 1, 17), (1, 1, 17), False) == "incompatible"
+    assert stable_reader_status((1, 1, 17), (1, 1, 16), True) == "compatible"
     print("knowledge-map compatibility checker self-test passed")
 
 

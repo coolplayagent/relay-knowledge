@@ -125,7 +125,10 @@ relay-knowledge map validate --format json
 Use `map migrate --type knowledge --to-v4` for an explicit legacy migration.
 The CLI verifies referenced legacy artifacts, publishes both current and reader
 fallback roots in v4, then safely removes recognized history archive files and
-their empty directories. Cleanup is bounded and resumable with `map init`.
+their empty directories. Cleanup is bounded and resumable with `map init`; a
+committed mutation remains successful when another cleanup batch is pending,
+while `map validate` continues to report the obsolete directory until cleanup
+finishes.
 Unrecognized files, links, or corrupt referenced artifacts fail closed. There
 is no data-level map rollback command; use Git or a repository backup to recover
 older repository-owned map state.

@@ -386,10 +386,26 @@ impl KnowledgeMapService {
                 self.publish_manifest(current.as_bytes()).await?;
             }
         }
-        cleanup_history_artifacts_in(&self.repository_root, self.contract_dir_name()).await?;
+        if let HistoryCleanupStatus::Pending { removed } =
+            cleanup_history_artifacts_in(&self.repository_root, self.contract_dir_name()).await?
+        {
+            tracing::warn!(
+                contract_dir = self.contract_dir_name(),
+                removed,
+                "repository map history cleanup remains pending; rerun map init"
+            );
+        }
         if self.map_type == RepositoryMapType::Knowledge {
-            cleanup_history_artifacts_in(&self.repository_root, LEGACY_AGENT_CONTRACT_DIR_NAME)
-                .await?;
+            if let HistoryCleanupStatus::Pending { removed } =
+                cleanup_history_artifacts_in(&self.repository_root, LEGACY_AGENT_CONTRACT_DIR_NAME)
+                    .await?
+            {
+                tracing::warn!(
+                    contract_dir = LEGACY_AGENT_CONTRACT_DIR_NAME,
+                    removed,
+                    "repository map history cleanup remains pending; rerun map init"
+                );
+            }
         }
         Ok(())
     }
