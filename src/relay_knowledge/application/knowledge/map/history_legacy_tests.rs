@@ -23,7 +23,7 @@ async fn legacy_history_normalizes_the_business_glossary_uri_before_validation()
     let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
 
     let history = service
-        .history(&context, 1, 1)
+        .history(&context, Some(1), 1)
         .await
         .expect("legacy history should normalize the glossary URI");
 

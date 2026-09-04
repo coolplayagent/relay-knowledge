@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Relay Knowledge Business Glossary v1",
-  "description": "Machine-readable structural schema for the authored knowledge/glossary/business-glossary.yaml contract; migration readers also accept the legacy .knowledge/business-glossary.yaml path. Objects intentionally allow unknown fields to remain compatible with the Serde readers. JSON Schema maxLength counts Unicode characters, while relay-knowledge enforces UTF-8 byte limits, the 4194304-byte document limit, domain and term identity, domain references, and case-insensitive alias uniqueness; relay-knowledge map validate is authoritative for those semantic checks. Unlike generated Knowledge Map shards and history assets, the version-controlled business glossary is intentionally authored and may be edited directly with normal source review.",
+  "description": "Machine-readable structural schema for the authored knowledge/glossary/business-glossary.yaml contract; migration readers also accept the legacy .knowledge/business-glossary.yaml path. Objects intentionally allow unknown fields to remain compatible with the Serde readers. JSON Schema maxLength counts Unicode characters, while relay-knowledge enforces UTF-8 byte limits, the 4194304-byte document limit, domain and term identity, domain references, and case-insensitive alias uniqueness; relay-knowledge map validate is authoritative for those semantic checks. Unlike generated Knowledge Map artifacts, the version-controlled business glossary is intentionally authored and may be edited directly with normal source review.",
   "type": "object",
   "required": [
     "schema_version"

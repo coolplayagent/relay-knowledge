@@ -1,8 +1,8 @@
-schema_version: 3
+schema_version: 4
 artifact_kind: map
 map_type: codespec
-map_version: 4
-updated_at: unix:1788139186
+map_version: 6
+updated_at: unix:1788492340
 directories:
 - directory: requirements
   purpose: Product requirements and acceptance criteria.
@@ -21,6 +21,8 @@ directories:
   - codespec/design/**
   key_files:
   - codespec/design/README.md
+  - codespec/design/partitioned-sqlite-catalog-read-fast-path.md
+  - codespec/design/durable-worktree-delta-batching.md
   - codespec/design/software-global-evidence-priority.md
   load_hint: task_match
   relations: []
@@ -54,7 +56,7 @@ directories:
   update_rule: reviewed
 topics: []
 history:
-  archived_through: 0
+  omitted_through: 0
   recent:
   - version: 1
     action: init
@@ -72,3 +74,11 @@ history:
     action: directory.update
     actor: cli
     summary: Updated governed directory 'test'.
+  - version: 5
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'design'.
+  - version: 6
+    action: history.compact
+    actor: cli
+    summary: Migrated repository map to bounded recent-only history storage.

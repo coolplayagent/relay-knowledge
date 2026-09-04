@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Relay CodeSpec Map v3 root",
-  "description": "Structural schema for codespec/codespec-map.yaml. Unknown fields remain allowed for Serde forward compatibility. Directory existence, key-file confinement, cross-map targets, and dependency cycles are validated by relay-knowledge map validate.",
+  "title": "Relay CodeSpec Map v4 root",
+  "description": "Structural schema for codespec/codespec-map.yaml. Unknown fields remain allowed for Serde forward compatibility. Directory existence, key-file confinement, cross-map targets, dependency cycles, and recent-history continuity are validated by relay-knowledge map validate.",
   "type": "object",
   "required": [
     "schema_version",
@@ -14,7 +14,7 @@
     "history"
   ],
   "properties": {
-    "schema_version": { "type": "integer", "const": 3 },
+    "schema_version": { "type": "integer", "const": 4 },
     "artifact_kind": { "const": "map" },
     "map_type": { "const": "codespec" },
     "map_version": { "type": "integer", "minimum": 1 },
@@ -31,15 +31,6 @@
   "$defs": {
     "nonEmptyString": { "type": "string", "minLength": 1, "pattern": "\\S" },
     "positiveInteger": { "type": "integer", "minimum": 1 },
-    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "historyArchiveArtifactRef": {
-      "type": "string",
-      "pattern": "^history/[0-9]{20}-[0-9]{20}-[0-9a-f]{64}\\.yaml$"
-    },
-    "historyIndexArtifactRef": {
-      "type": "string",
-      "pattern": "^history/index-[0-9]{2}-[0-9]{20}-[0-9]{20}-[0-9a-f]{64}\\.yaml$"
-    },
     "directoryRelation": {
       "type": "object",
       "required": ["kind", "target"],
@@ -56,7 +47,15 @@
     },
     "directory": {
       "type": "object",
-      "required": ["directory", "purpose", "content_scope", "key_files", "load_hint", "relations", "update_rule"],
+      "required": [
+        "directory",
+        "purpose",
+        "content_scope",
+        "key_files",
+        "load_hint",
+        "relations",
+        "update_rule"
+      ],
       "properties": {
         "directory": {
           "type": "string",
@@ -95,34 +94,11 @@
       },
       "additionalProperties": true
     },
-    "archiveRef": {
-      "type": "object",
-      "required": ["ref", "digest"],
-      "properties": {
-        "ref": { "$ref": "#/$defs/historyArchiveArtifactRef" },
-        "digest": { "$ref": "#/$defs/digest" }
-      },
-      "additionalProperties": true
-    },
-    "historyIndexRef": {
-      "type": "object",
-      "required": ["from_version", "through_version", "height", "ref", "digest"],
-      "properties": {
-        "from_version": { "$ref": "#/$defs/positiveInteger" },
-        "through_version": { "$ref": "#/$defs/positiveInteger" },
-        "height": { "type": "integer", "minimum": 0, "maximum": 10 },
-        "ref": { "$ref": "#/$defs/historyIndexArtifactRef" },
-        "digest": { "$ref": "#/$defs/digest" }
-      },
-      "additionalProperties": true
-    },
     "historyManifest": {
       "type": "object",
-      "required": ["archived_through", "recent"],
+      "required": ["omitted_through", "recent"],
       "properties": {
-        "archived_through": { "type": "integer", "minimum": 0 },
-        "archive": { "anyOf": [{ "$ref": "#/$defs/archiveRef" }, { "type": "null" }] },
-        "index": { "anyOf": [{ "$ref": "#/$defs/historyIndexRef" }, { "type": "null" }] },
+        "omitted_through": { "type": "integer", "minimum": 0 },
         "recent": {
           "type": "array",
           "minItems": 1,

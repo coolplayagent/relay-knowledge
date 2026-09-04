@@ -9,11 +9,11 @@ use crate::{
 };
 
 use super::{
-    ARTIFACT_SCHEMA_VERSION, KnowledgeMapSchemaProbe, KnowledgeMapService,
-    KnowledgeMapServiceError, KnowledgeMapTopicShard, KnowledgeMapValidationResponse,
-    LEGACY_ARTIFACT_SCHEMA_VERSION, history::MISSING_HISTORY_INDEX_MESSAGE, metadata,
-    parse_manifest, parse_v1_map, parse_v1_map_for_legacy_recovery, read_verified_ref_in,
-    safe_repository_source_path,
+    ARTIFACT_SCHEMA_VERSION, DIRECTORY_ARTIFACT_SCHEMA_VERSION, KnowledgeMapManifest,
+    KnowledgeMapSchemaProbe, KnowledgeMapService, KnowledgeMapServiceError, KnowledgeMapTopicShard,
+    KnowledgeMapValidationResponse, LEGACY_ARTIFACT_SCHEMA_VERSION,
+    history::MISSING_HISTORY_INDEX_MESSAGE, metadata, parse_manifest, parse_v1_map,
+    parse_v1_map_for_legacy_recovery, read_verified_ref_in, safe_repository_source_path,
 };
 
 #[derive(Clone, Copy)]
@@ -35,6 +35,9 @@ impl KnowledgeMapService {
     ) -> Result<KnowledgeMapValidationResponse, KnowledgeMapServiceError> {
         let mut diagnostics = Vec::new();
         if let Err(error) = self.validate_map_contract().await {
+            diagnostics.push(error.to_string());
+        }
+        if let Err(error) = self.validate_recent_history_layout().await {
             diagnostics.push(error.to_string());
         }
         if self.map_type == crate::domain::RepositoryMapType::Knowledge
@@ -78,6 +81,32 @@ impl KnowledgeMapService {
         .await
     }
 
+    async fn validate_recent_history_layout(&self) -> Result<(), KnowledgeMapServiceError> {
+        let root = self.read_root_snapshot().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&root.content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+            return Ok(());
+        }
+        let mut contract_dirs = vec![self.contract_dir_name()];
+        if self.map_type == crate::domain::RepositoryMapType::Knowledge {
+            contract_dirs.push(crate::project::LEGACY_AGENT_CONTRACT_DIR_NAME);
+        }
+        for contract_dir in contract_dirs {
+            let history = self
+                .repository_root
+                .join(contract_dir)
+                .join(crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME);
+            if fs::try_exists(&history).await? {
+                return Err(KnowledgeMapServiceError::Integrity(format!(
+                    "obsolete history directory '{}' remains; run `relay-knowledge map init` to finish cleanup",
+                    history.display()
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) async fn validate_legacy_map_content_in(
         &self,
         contract_dir: &str,
@@ -99,11 +128,11 @@ impl KnowledgeMapService {
         Ok(())
     }
 
-    /// Confirms that a visible root has reached the current v3 publication contract.
+    /// Confirms that a visible root has reached the current v4 publication contract.
     ///
     /// Older roots are valid migration inputs, but must not trigger legacy-reader
-    /// redirect publication before the v3 root and its referenced artifacts validate.
-    pub(super) async fn validate_visible_v3_map_content(
+    /// redirect publication before the v4 root and its referenced artifacts validate.
+    pub(super) async fn validate_visible_current_map_content(
         &self,
         content: &str,
     ) -> Result<bool, KnowledgeMapServiceError> {
@@ -146,7 +175,9 @@ impl KnowledgeMapService {
         }
         if !matches!(
             probe.schema_version,
-            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+            LEGACY_ARTIFACT_SCHEMA_VERSION
+                | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+                | ARTIFACT_SCHEMA_VERSION
         ) {
             return Err(KnowledgeMapServiceError::Yaml(format!(
                 "unsupported schema_version {}",
@@ -154,10 +185,14 @@ impl KnowledgeMapService {
             )));
         }
         let manifest = parse_manifest(content)?;
+        let history_checkpoint = history_checkpoint(&manifest);
         self.validate_manifest_identity(&manifest)?;
-        self.validate_archived_history_in(contract_dir, &manifest.history)
-            .await?;
-        if matches!(policy, MapContentValidation::CurrentContract)
+        if manifest.schema_version != ARTIFACT_SCHEMA_VERSION {
+            self.validate_archived_history_in(contract_dir, &manifest.history)
+                .await?;
+        }
+        if manifest.schema_version != ARTIFACT_SCHEMA_VERSION
+            && matches!(policy, MapContentValidation::CurrentContract)
             && manifest.history.archived_through > 0
             && manifest.history.index.is_none()
         {
@@ -186,9 +221,9 @@ impl KnowledgeMapService {
         if matches!(policy, MapContentValidation::LegacyRecovery)
             && self.map_type == crate::domain::RepositoryMapType::Knowledge
         {
-            map.ensure_reserved_repository_routes_snapshot(manifest.history.archived_through)?;
+            map.ensure_reserved_repository_routes_snapshot(history_checkpoint)?;
         } else {
-            map.validate_snapshot(manifest.history.archived_through)?;
+            map.validate_snapshot(history_checkpoint)?;
         }
         if matches!(policy, MapContentValidation::CurrentContract)
             && self.map_type == crate::domain::RepositoryMapType::Knowledge
@@ -346,5 +381,13 @@ impl KnowledgeMapService {
                     .find(|source| source.id == "repository-business-glossary")
             })
             .flatten())
+    }
+}
+
+fn history_checkpoint(manifest: &KnowledgeMapManifest) -> u64 {
+    if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        manifest.history.omitted_through
+    } else {
+        manifest.history.archived_through
     }
 }

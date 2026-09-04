@@ -279,7 +279,7 @@ async fn source_add_migrates_a_legacy_only_map_and_rollback_restores_exact_bytes
         fs::read_to_string(service.map_path())
             .await
             .expect("visible root should read")
-            .contains("schema_version: 3")
+            .contains("schema_version: 4")
     );
     assert!(
         fs::read_to_string(service.legacy_map_path())

@@ -104,16 +104,17 @@ For repository knowledge navigation contracts, use
 to create, read, update, delete, validate, and route the shared
 `codespec/codespec-map.yaml` and `knowledge/knowledge-map.yaml` contracts. Read that reference for repository
 bootstrap, spec work, coding work, commit refresh, or source reconciliation.
-When an editor, validator, or agent needs the machine-readable v3 artifact
+When an editor, validator, or agent needs the machine-readable v4 artifact
 shape, load the Draft 2020-12 schemas at
 `references/knowledge-map.schema.json` and
 `references/codespec-map.schema.json`. They cover the typed roots, directory
-governance, topic shards, history assets, and redirect while allowing unknown fields
+governance, topic shards, bounded recent history, and redirect while allowing unknown fields
 for Serde reader compatibility. The schema is structural guidance only:
 `relay-knowledge map validate` remains authoritative for digests, cross-file
-identity, route and history completeness, index relationships, and reserved
-sources. It does not grant permission to edit generated topic shards, history
-archives, or history index nodes directly.
+identity, route and recent-history continuity, and reserved
+sources. It does not grant permission to edit generated roots, topic shards,
+or redirects directly. Repository map archives are not retained; use Git
+or repository backups for history older than the latest 16 entries.
 For the intentionally authored `knowledge/glossary/business-glossary.yaml`, load
 `references/business-glossary.schema.json`. This separate Draft 2020-12 schema
 describes glossary schema v1 domains, terms, aliases, semantics, and technical

@@ -373,7 +373,7 @@ Network entry points support connection budgets, request budgets, body limits, t
 - Rust line coverage stays above 90%, including invariants, error branches, boundaries, async cancellation, and backpressure.
 - Browser integration gates install Playwright Chromium, for example `uv run --extra dev python -m playwright install --with-deps chromium`.
 - Documentation changes check links, numbering, line limits, and stale state.
-- Knowledge Map writer schemas use staged rollout. CI always validates `knowledge/knowledge-map.yaml` and `codespec/codespec-map.yaml` with the current source CLI and installs the latest stable crates.io CLI for a second validation. When stable is older than the declared minimum v3 reader, `1.1.15`, incompatibility is emitted as a `staged_pending_reader_release` artifact only when the source version is newer; the same-version mismatch is an `incompatible_same_version` hard failure. Once stable reaches the minimum reader version, any incompatibility fails the gate. The default writer schema must not advance again before a compatible reader release exists.
+- Knowledge Map writer schemas use staged rollout. CI always validates `knowledge/knowledge-map.yaml` and `codespec/codespec-map.yaml` with the current source CLI and installs the latest stable crates.io CLI for a second validation. When stable is older than the declared minimum v4 reader, `1.1.16`, incompatibility is emitted as a `staged_pending_reader_release` artifact only when the source version is newer; the same-version mismatch is an `incompatible_same_version` hard failure. Once stable reaches the minimum reader version, any incompatibility fails the gate. The default writer schema must not advance again before a compatible reader release exists.
 
 ## 7. Acceptance Criteria
 
@@ -381,7 +381,7 @@ Network entry points support connection budgets, request budgets, body limits, t
 - New background or network behavior states budgets, failure modes, cancellation, and observability metrics.
 - New retrieval or performance work explains a general mechanism, not only why one example passes.
 
-Knowledge Map v2 archived-history lookup must use a root-manifest-authorized, SHA-256-content-addressed range index with hard fanout and depth limits. Public history-page I/O, memory, and node-read budgets must not grow linearly with the total archive count. Index ranges must be contiguous, non-overlapping, and cover the complete archived checkpoint. An early v2 map without an index may acquire one only through an explicit writer-locked representation migration; reads must never fall back to a reverse-chain scan. Migration and append publish immutable nodes before atomically publishing the root, so the preceding root remains readable across crashes and retrying identical content is idempotent.
+Repository Map v4 must retain at most 16 contiguous recent history entries in each root and must not create or reference repository-local history archives. `omitted_through` records the last intentionally discarded version; requests at or before that checkpoint fail explicitly, and long-term audit relies on Git or repository backups. Migration must validate the complete authorized legacy archive chain before publishing v4, publish both current and fallback roots in v4 before cleanup, and remove only recognized generated archive files through a bounded, resumable, path-confined cleanup. Symlinks, unknown entries, and integrity failures stop cleanup without deleting unrecognized data.
 
 ---
 

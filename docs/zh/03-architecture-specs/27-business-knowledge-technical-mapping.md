@@ -44,7 +44,7 @@ Schema v1 支持 synonym/abbreviation alias、非执行 formula/aggregation/unit
 
 ## 3. 投影、解析与 publication fence
 
-Repository indexer 只从同一 immutable Git commit 读取当前 route 授权的 active repository-scoped file。v2 topic shard 必须通过 manifest digest 和 identity/order 校验；绝对路径、父目录逃逸、反斜杠路径、缺失 blob、超限内容或错误 schema 都使该 durable attempt 失败。非 Git live filesystem snapshot 不把工作区 glossary 冒充 committed business fact。
+Repository indexer 只从同一 immutable Git commit 读取当前 route 授权的 active repository-scoped file。v4 topic shard 必须通过 manifest digest 和 identity/order 校验；绝对路径、父目录逃逸、反斜杠路径、缺失 blob、超限内容或错误 schema 都使该 durable attempt 失败。非 Git live filesystem snapshot 不把工作区 glossary 冒充 committed business fact。
 
 Business projection 与 code/software projection 使用同一个 durable task、lease、attempt 和 publication fence。存储边界通过独立的 `BusinessKnowledgeStore` contract 拥有业务读写，而不继续膨胀代码存储 contract。顺序为：code facts staged、business glossary loaded and staged、software projection staged、同一事务将 business/software status 和 code scope 发布为 fresh。旧 lease 或 target fence 不能执行 DELETE/INSERT；缺失或 stale business status 时 receipt 和 fast path 不能宣称 fresh。
 

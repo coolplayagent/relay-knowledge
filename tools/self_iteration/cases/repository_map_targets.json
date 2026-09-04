@@ -1,7 +1,7 @@
 {
   "repositories": {
     "repository_map_graph_fixture": {
-      "generated_fixture": "repository_map_graph_v3",
+      "generated_fixture": "repository_map_graph_v4",
       "alias": "repository-map-graph-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -206,7 +206,7 @@
       }
     },
     {
-      "id": "knowledge_architecture_route_assembles_ordered_v3_shard_sources",
+      "id": "knowledge_architecture_route_assembles_ordered_v4_shard_sources",
       "command": [
         "map",
         "route",
@@ -275,14 +275,12 @@
       }
     },
     {
-      "id": "knowledge_history_pages_across_archive_and_recent_boundary",
+      "id": "knowledge_history_defaults_to_earliest_retained_recent_entry",
       "command": [
         "map",
         "history",
         "--type",
         "knowledge",
-        "--from",
-        "15",
         "--limit",
         "4",
         "--format",
@@ -293,18 +291,12 @@
       "json_expect": {
         "path": "knowledge/knowledge-map.yaml",
         "map_type": "knowledge",
-        "from_version": 15,
-        "through_version": 18,
-        "next_from_version": 19,
+        "omitted_through": 16,
+        "earliest_available_version": 17,
+        "from_version": 17,
+        "through_version": 20,
+        "next_from_version": 21,
         "entries": [
-          {
-            "version": 15,
-            "action": "source.update"
-          },
-          {
-            "version": 16,
-            "action": "source.add"
-          },
           {
             "version": 17,
             "action": "source.add"
@@ -312,6 +304,14 @@
           {
             "version": 18,
             "action": "source.update"
+          },
+          {
+            "version": 19,
+            "action": "source.update"
+          },
+          {
+            "version": 20,
+            "action": "source.add"
           }
         ]
       }
@@ -319,7 +319,7 @@
   ],
   "software_query_cases": [
     {
-      "id": "repository_map_v3_indexes_all_authorized_topic_dimensions",
+      "id": "repository_map_v4_indexes_all_authorized_topic_dimensions",
       "repository": "repository_map_graph_fixture",
       "kind": "topics",
       "objective": "foundational_capability",
@@ -349,7 +349,7 @@
       "case_group": "repository_map_graph_projection"
     },
     {
-      "id": "repository_map_v3_projects_root_authorized_documents_edges_only",
+      "id": "repository_map_v4_projects_root_authorized_documents_edges_only",
       "repository": "repository_map_graph_fixture",
       "kind": "relationships",
       "objective": "foundational_capability",
@@ -380,7 +380,7 @@
       "case_group": "repository_map_graph_projection"
     },
     {
-      "id": "repository_map_v3_all_projection_keeps_map_and_software_dimensions_joined",
+      "id": "repository_map_v4_all_projection_keeps_map_and_software_dimensions_joined",
       "repository": "repository_map_graph_fixture",
       "kind": "all",
       "objective": "competitive_capability",

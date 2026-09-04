@@ -47,7 +47,7 @@ async fn api_error_response_maps_stable_status_codes() {
 #[test]
 fn knowledge_map_errors_preserve_contract_and_storage_statuses() {
     let invalid = knowledge_map_web_error(KnowledgeMapServiceError::InvalidRequest(
-        "limit must be within 1..=256".to_owned(),
+        "limit must be within 1..=16".to_owned(),
     ));
     let denied = knowledge_map_web_error(KnowledgeMapServiceError::Io(std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
@@ -56,7 +56,7 @@ fn knowledge_map_errors_preserve_contract_and_storage_statuses() {
 
     assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
     assert_eq!(denied.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(invalid.message.contains("limit must be within 1..=256"));
+    assert!(invalid.message.contains("limit must be within 1..=16"));
     assert!(denied.message.contains("permission denied"));
 }
 
@@ -353,19 +353,19 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
         json!({
             "snapshot": {
                 "name": "Oversized map history",
-                "command": "relay-knowledge map history --from 1 --limit 257",
+                    "command": "relay-knowledge map history --from 1 --limit 17",
                 "payload": {
                     "operation": "knowledge.map.history",
                     "repository": "missing",
                     "from_version": 1,
-                    "limit": 257
+                    "limit": 17
                 }
             }
         }),
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert_eq!(oversized["error"], "limit must be within 1..=256");
+    assert_eq!(oversized["error"], "limit must be within 1..=16");
     let map_path = root.join(crate::project::KNOWLEDGE_MAP_RELATIVE_PATH);
     std::fs::rename(&map_path, root.join("map-history-test-backup.yaml"))
         .expect("map root should move for I/O failure fixture");

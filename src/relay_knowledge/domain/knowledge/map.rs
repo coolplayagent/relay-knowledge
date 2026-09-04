@@ -175,11 +175,11 @@ impl KnowledgeMap {
 
     pub(crate) fn ensure_reserved_repository_routes_snapshot(
         &mut self,
-        archived_through: u64,
+        omitted_through: u64,
     ) -> Result<(bool, bool), DomainError> {
         let software_changed = self.ensure_software_model_route_state()?;
         let business_changed = self.ensure_business_knowledge_route_state()?;
-        self.validate_snapshot(archived_through)?;
+        self.validate_snapshot(omitted_through)?;
         Ok((software_changed, business_changed))
     }
 
@@ -189,10 +189,10 @@ impl KnowledgeMap {
         self.validate_history(0)
     }
 
-    /// Validates a v2 snapshot whose older history is represented by an archive checkpoint.
-    pub(crate) fn validate_snapshot(&self, archived_through: u64) -> Result<(), DomainError> {
+    /// Validates a snapshot whose older history precedes an omission checkpoint.
+    pub(crate) fn validate_snapshot(&self, omitted_through: u64) -> Result<(), DomainError> {
         self.validate_state()?;
-        self.validate_history(archived_through)
+        self.validate_history(omitted_through)
     }
 
     /// Requires the two stable repository entry points without excluding ordinary sources.
@@ -343,7 +343,7 @@ impl KnowledgeMap {
         Ok(())
     }
 
-    fn validate_history(&self, archived_through: u64) -> Result<(), DomainError> {
+    fn validate_history(&self, omitted_through: u64) -> Result<(), DomainError> {
         if self.history.is_empty() {
             return Err(DomainError::invalid("history", "must not be empty"));
         }
@@ -351,7 +351,7 @@ impl KnowledgeMap {
             entry.validate()?;
             let expected_version = u64::try_from(index)
                 .ok()
-                .and_then(|value| value.checked_add(archived_through))
+                .and_then(|value| value.checked_add(omitted_through))
                 .and_then(|value| value.checked_add(1))
                 .ok_or_else(|| DomainError::invalid("history", "too many entries"))?;
             if entry.version != expected_version {
@@ -388,11 +388,11 @@ impl KnowledgeMap {
     pub(crate) fn add_source_snapshot(
         &mut self,
         source: KnowledgeMapSource,
-        archived_through: u64,
+        omitted_through: u64,
     ) -> Result<(), DomainError> {
-        self.validate_snapshot(archived_through)?;
+        self.validate_snapshot(omitted_through)?;
         self.add_source_state(source)?;
-        self.validate_snapshot(archived_through)
+        self.validate_snapshot(omitted_through)
     }
 
     fn add_source_state(&mut self, source: KnowledgeMapSource) -> Result<(), DomainError> {
@@ -425,11 +425,11 @@ impl KnowledgeMap {
     pub(crate) fn update_source_snapshot(
         &mut self,
         change: KnowledgeMapChange,
-        archived_through: u64,
+        omitted_through: u64,
     ) -> Result<(), DomainError> {
-        self.validate_snapshot(archived_through)?;
+        self.validate_snapshot(omitted_through)?;
         self.update_source_state(change)?;
-        self.validate_snapshot(archived_through)
+        self.validate_snapshot(omitted_through)
     }
 
     fn update_source_state(&mut self, change: KnowledgeMapChange) -> Result<(), DomainError> {
@@ -482,11 +482,11 @@ impl KnowledgeMap {
     pub(crate) fn remove_source_snapshot(
         &mut self,
         id: &str,
-        archived_through: u64,
+        omitted_through: u64,
     ) -> Result<(), DomainError> {
-        self.validate_snapshot(archived_through)?;
+        self.validate_snapshot(omitted_through)?;
         self.remove_source_state(id)?;
-        self.validate_snapshot(archived_through)
+        self.validate_snapshot(omitted_through)
     }
 
     fn remove_source_state(&mut self, id: &str) -> Result<(), DomainError> {

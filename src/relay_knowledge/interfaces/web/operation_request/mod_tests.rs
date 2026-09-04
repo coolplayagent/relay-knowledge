@@ -14,8 +14,14 @@ fn knowledge_map_history_page_requires_positive_bounded_inputs() {
     .expect("valid page");
     assert_eq!(page.repository, "relay");
     assert_eq!(page.map_type, RepositoryMapType::Knowledge);
-    assert_eq!(page.from_version, 2);
+    assert_eq!(page.from_version, Some(2));
     assert_eq!(page.limit, 16);
+    let default_page = knowledge_map_history_page(&serde_json::json!({
+        "repository": "relay",
+        "limit": 16
+    }))
+    .expect("omitted from_version should select the retained boundary");
+    assert_eq!(default_page.from_version, None);
     let codespec = knowledge_map_history_page(&serde_json::json!({
         "repository": "relay",
         "map_type": "codespec",

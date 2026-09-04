@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MINIMUM_V3_STABLE_READER = (1, 1, 15)
+MINIMUM_V4_STABLE_READER = (1, 1, 16)
 
 
 def command_json(binary: Path, *arguments: str) -> tuple[int, dict[str, object]]:
@@ -63,7 +63,7 @@ def stable_reader_status(
 ) -> str:
     if stable_valid:
         return "compatible"
-    if stable_version >= MINIMUM_V3_STABLE_READER:
+    if stable_version >= MINIMUM_V4_STABLE_READER:
         return "incompatible"
     if current_version <= stable_version:
         return "incompatible_same_version"
@@ -84,9 +84,9 @@ def report(
         "schema_version": 1,
         "knowledge_map_path": "knowledge/knowledge-map.yaml",
         "codespec_map_path": "codespec/codespec-map.yaml",
-        "required_reader_schema_version": 3,
-        "minimum_v3_stable_reader": ".".join(
-            str(part) for part in MINIMUM_V3_STABLE_READER
+        "required_reader_schema_version": 4,
+        "minimum_v4_stable_reader": ".".join(
+            str(part) for part in MINIMUM_V4_STABLE_READER
         ),
         "current": {
             "binary": str(current),
@@ -118,14 +118,14 @@ def self_test() -> None:
     assert not validation_payload_is_valid(
         {"results": [{"valid": True}, {"valid": False}]}
     )
-    assert stable_reader_status((1, 1, 15), (1, 1, 14), False) == (
+    assert stable_reader_status((1, 1, 16), (1, 1, 15), False) == (
         "staged_pending_reader_release"
     )
-    assert stable_reader_status((1, 1, 14), (1, 1, 14), False) == (
+    assert stable_reader_status((1, 1, 15), (1, 1, 15), False) == (
         "incompatible_same_version"
     )
-    assert stable_reader_status((1, 1, 15), (1, 1, 15), False) == "incompatible"
-    assert stable_reader_status((1, 1, 15), (1, 1, 14), True) == "compatible"
+    assert stable_reader_status((1, 1, 16), (1, 1, 16), False) == "incompatible"
+    assert stable_reader_status((1, 1, 16), (1, 1, 15), True) == "compatible"
     print("knowledge-map compatibility checker self-test passed")
 
 

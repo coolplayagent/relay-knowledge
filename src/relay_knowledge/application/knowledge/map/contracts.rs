@@ -12,15 +12,11 @@ use crate::{
     },
 };
 
-use super::artifact::{KnowledgeMapArchiveRef, KnowledgeMapHistoryIndexRef};
-
 pub(super) struct MutableKnowledgeMap {
     pub(super) map_type: RepositoryMapType,
     pub(super) directories: Vec<RepositoryMapDirectory>,
     pub(super) map: KnowledgeMap,
-    pub(super) archived_through: u64,
-    pub(super) archive: Option<KnowledgeMapArchiveRef>,
-    pub(super) history_index: Option<KnowledgeMapHistoryIndexRef>,
+    pub(super) omitted_through: u64,
     pub(super) requires_publish: bool,
     pub(super) legacy_glossary_uri_normalized: bool,
 }
@@ -34,9 +30,7 @@ impl MutableKnowledgeMap {
             },
             map_type,
             directories: baseline_directories(map_type),
-            archived_through: 0,
-            archive: None,
-            history_index: None,
+            omitted_through: 0,
             requires_publish: false,
             legacy_glossary_uri_normalized: false,
         }
@@ -138,18 +132,20 @@ pub struct KnowledgeMapView {
 /// Recent history and the checkpoint for history intentionally omitted from a show response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapHistoryWindow {
-    pub archived_through: u64,
+    pub omitted_through: u64,
     pub complete: bool,
     pub recent: Vec<KnowledgeMapHistoryEntry>,
 }
 
-/// One explicitly bounded page of complete Knowledge Map history.
+/// One explicitly bounded page from the retained recent repository-map history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapHistoryResponse {
     pub metadata: ApiMetadata,
     pub path: String,
     pub map_type: RepositoryMapType,
     pub map_version: u64,
+    pub omitted_through: u64,
+    pub earliest_available_version: u64,
     pub from_version: u64,
     pub through_version: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

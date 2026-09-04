@@ -13,7 +13,7 @@ use super::super::{
 };
 
 #[tokio::test]
-async fn legacy_map_migrates_to_visible_v3_and_rolls_back() {
+async fn legacy_map_migrates_to_visible_v4_and_legacy_recovery_stays_readable() {
     let root = temp_root("map-v3-migration");
     fs::create_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
         .await
@@ -33,13 +33,13 @@ async fn legacy_map_migrates_to_visible_v3_and_rolls_back() {
     let context = RequestContext::for_interface(InterfaceKind::Cli);
 
     service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect("migration should work");
     let visible = fs::read_to_string(root.join(KNOWLEDGE_MAP_RELATIVE_PATH))
         .await
         .expect("visible root should exist");
-    assert!(visible.contains("schema_version: 3"));
+    assert!(visible.contains("schema_version: 4"));
     assert!(
         fs::try_exists(service.backup_path()).await.unwrap(),
         "v3 publication should leave the ordinary reader fallback used by this regression"
@@ -135,7 +135,7 @@ async fn legacy_map_without_current_reserved_routes_migrates_and_remains_rollbac
     let context = RequestContext::for_interface(InterfaceKind::Cli);
 
     service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect("current migration should add reserved routes to the visible contract");
     service
@@ -188,7 +188,7 @@ async fn migration_repairs_legacy_reserved_sources_without_route_membership() {
     let context = RequestContext::for_interface(InterfaceKind::Cli);
 
     service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect("migration should repair reserved route membership");
     service
@@ -228,7 +228,7 @@ async fn migration_rejects_a_legacy_redirect_instead_of_copying_it_as_a_visible_
         .expect("legacy directory should create");
     fs::write(
         root.join(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH),
-        "schema_version: 3\nartifact_kind: redirect\nmap_type: knowledge\ntarget: knowledge/knowledge-map.yaml\n",
+        "schema_version: 4\nartifact_kind: redirect\nmap_type: knowledge\ntarget: knowledge/knowledge-map.yaml\n",
     )
     .await
     .expect("orphan redirect should seed");
@@ -291,7 +291,7 @@ async fn migration_rejects_legacy_tree_directory_and_entry_symlinks() {
         let context = RequestContext::for_interface(InterfaceKind::Cli);
 
         let error = service
-            .migrate_to_v3(&context)
+            .migrate_to_v4(&context)
             .await
             .expect_err("legacy tree symlinks must fail closed");
 
@@ -385,7 +385,8 @@ async fn v2_reader_resolves_shards_from_the_legacy_contract_root() {
     let manifest = fs::read_to_string(&legacy_root)
         .await
         .expect("legacy root should read")
-        .replacen("schema_version: 3", "schema_version: 2", 1);
+        .replacen("schema_version: 4", "schema_version: 2", 1)
+        .replacen("omitted_through", "archived_through", 1);
     fs::write(legacy_root, manifest)
         .await
         .expect("v2 root should write");
@@ -952,12 +953,13 @@ async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Requ
     let v2 = fs::read_to_string(&legacy)
         .await
         .expect("fixture root should read")
-        .replacen("schema_version: 3", "schema_version: 2", 1);
+        .replacen("schema_version: 4", "schema_version: 2", 1)
+        .replacen("omitted_through", "archived_through", 1);
     fs::write(&legacy, v2)
         .await
         .expect("v2 fixture root should write");
     service
-        .migrate_to_v3(&context)
+        .migrate_to_v4(&context)
         .await
         .expect("v2 fixture should migrate");
     (root, service, context)

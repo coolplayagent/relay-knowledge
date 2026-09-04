@@ -13,7 +13,7 @@ Use the cases as an evidence ladder:
 3. Read the CodeSpec `test` and Knowledge `guides` directory filters to confirm their scopes, key files, policies, and cross-map relation.
 4. Route `business-knowledge`, `software-model`, and `architecture`; require the two reserved sources and the complete ordered architecture source set.
 5. Read versions 15 through 18 as one bounded history page and require it to cross archived version 16 into the recent window without a gap.
-6. Run the focused fast self-iteration workload and require the eight CLI observations plus three v3 index-backed observations. The generated fixture must expose all eight root-authorized topic/relationship dimensions and exclude its locally valid orphan shard.
+6. Run the focused fast self-iteration workload and require the eight CLI observations plus three v4 index-backed observations. The generated fixture must expose all eight root-authorized topic/relationship dimensions and exclude its locally valid orphan shard.
 
 ```bash
 cargo build --release --bin relay-knowledge
@@ -28,4 +28,4 @@ target/release/relay-knowledge map history --type knowledge --from 15 --limit 4 
 tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate --workspace . --profile fast --categories foundational --use-current-candidate
 ```
 
-Treat validation and route output as repository-contract evidence only. The generated v3 fixture supplies the separate snapshot-bound code-index and software-projection evidence; real-repository freshness and business facts still require the status/query workflow described by the architecture specifications.
+Treat validation and route output as repository-contract evidence only. The generated v4 fixture supplies the separate snapshot-bound code-index and software-projection evidence; real-repository freshness and business facts still require the status/query workflow described by the architecture specifications.

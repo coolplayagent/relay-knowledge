@@ -388,7 +388,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 - Rust 行覆盖率必须保持 90% 以上，覆盖 invariant、错误分支、边界值、async cancellation 和 backpressure。
 - Browser integration gate 必须安装 Playwright Chromium，例如 `uv run --extra dev python -m playwright install --with-deps chromium`。
 - 文档本身需要检查链接、编号、行数上限和过期状态。
-- Knowledge Map writer schema 采用 staged rollout：CI 总是要求当前源码 CLI 通过 `knowledge/knowledge-map.yaml` 与 `codespec/codespec-map.yaml`，并安装 crates.io 最新 stable CLI 复验。若 stable 低于声明的最小 v3 reader `1.1.15`，只有源码版本更高时，不兼容结果才可报告为 `staged_pending_reader_release` artifact；源码与 stable 同版本却不兼容必须以 `incompatible_same_version` 硬失败。stable 达到最小 reader 版本后，任何不兼容都必须使门禁失败。不得在没有兼容 reader release 的情况下继续提升默认 writer schema。
+- Knowledge Map writer schema 采用 staged rollout：CI 总是要求当前源码 CLI 通过 `knowledge/knowledge-map.yaml` 与 `codespec/codespec-map.yaml`，并安装 crates.io 最新 stable CLI 复验。若 stable 低于声明的最小 v4 reader `1.1.16`，只有源码版本更高时，不兼容结果才可报告为 `staged_pending_reader_release` artifact；源码与 stable 同版本却不兼容必须以 `incompatible_same_version` 硬失败。stable 达到最小 reader 版本后，任何不兼容都必须使门禁失败。不得在没有兼容 reader release 的情况下继续提升默认 writer schema。
 
 ## 7. 验收标准
 
@@ -396,7 +396,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 - 新 background 或 network 行为能说明资源预算、失败模式、取消和观测指标。
 - 新检索或性能优化能说明泛化机制，而不是只解释某个样例为什么通过。
 
-Knowledge Map v2 的 archived history lookup 必须使用根 manifest 授权、SHA-256 内容寻址、fanout 与深度均有硬上限的 range index；任何公开 history page 的 I/O、内存和节点读取预算不得随总 archive 数线性增长。Index range 必须连续、无重叠并覆盖完整 archived checkpoint；缺 index 的早期 v2 只能通过受 writer lock 保护的显式表示层迁移补齐，读取路径不得回退 reverse-chain scan。迁移和 append 必须先发布 immutable nodes，再原子发布 root；崩溃前的 root 始终可读且重试对同一内容幂等。
+Repository Map v4 的每个 root 最多保留 16 条连续的最近历史，不得创建或引用仓库内 history archive。`omitted_through` 记录最后一个被主动丢弃的版本；请求该 checkpoint 及更早版本必须显式失败，长期审计只依赖 Git 或仓库备份。迁移必须先校验完整且经 root 授权的 legacy archive chain，再发布 current 与 fallback 两份 v4 root，最后通过受路径约束、受界且可重入的清理删除已识别的生成型 archive 文件。遇到符号链接、未知条目或完整性失败必须停止清理，且不得删除未识别数据。
 
 ---
 

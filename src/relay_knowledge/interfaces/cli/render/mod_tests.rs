@@ -11,7 +11,7 @@ fn map_show_reports_complete_v1_history_window() {
                 "sources": [{"id": "repository-software-model"}],
                 "routes": [{"topic": "software-model"}],
                 "history": {
-                    "archived_through": 0,
+                    "omitted_through": 0,
                     "complete": true,
                     "recent": [{"version": 1}]
                 }
@@ -22,13 +22,13 @@ fn map_show_reports_complete_v1_history_window() {
 
     assert_eq!(
         rendered,
-        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=true history_archived_through=0 history_recent=1\n"
+        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=true history_omitted_through=0 history_recent=1\n"
     );
     assert!(!rendered.contains("map history"));
 }
 
 #[test]
-fn map_show_reports_truncated_v2_history_window() {
+fn map_show_reports_a_recent_only_history_window() {
     let rendered = render_text(
         "knowledge.map.show",
         &serde_json::json!({
@@ -38,7 +38,7 @@ fn map_show_reports_truncated_v2_history_window() {
                 "sources": [{"id": "repository-software-model"}],
                 "routes": [{"topic": "software-model"}],
                 "history": {
-                    "archived_through": 24,
+                    "omitted_through": 24,
                     "complete": false,
                     "recent": [{"version": 25}, {"version": 26}]
                 }
@@ -49,7 +49,7 @@ fn map_show_reports_truncated_v2_history_window() {
 
     assert_eq!(
         rendered,
-        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=false history_archived_through=24 history_recent=2\nhistory_notice=entries through version 24 are archived; use relay-knowledge map history --from 1 --limit 256 to start paging archived history\n"
+        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=false history_omitted_through=24 history_recent=2\nhistory_notice=entries through version 24 are not retained; run relay-knowledge map history without --from to read the retained window\n"
     );
 }
 
@@ -61,6 +61,8 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             serde_json::json!({
                 "path": ".knowledge/knowledge-map.yaml",
                 "map_version": 9,
+                "earliest_available_version": 5,
+                "omitted_through": 4,
                 "from_version": 5,
                 "through_version": 6,
                 "next_from_version": 7,
@@ -69,7 +71,7 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                     {"version": 6, "action": "update", "actor": "cli", "summary": "Updated source"},
                 ],
             }),
-            "knowledge_map=.knowledge/knowledge-map.yaml map_version=9 from=5 through=6 next=7\nversion=5 action=add injected actor=cli spoofed summary=Added  source\nversion=6 action=update actor=cli summary=Updated source\n",
+            "knowledge_map=.knowledge/knowledge-map.yaml map_version=9 earliest=5 omitted_through=4 from=5 through=6 next=7\nversion=5 action=add injected actor=cli spoofed summary=Added  source\nversion=6 action=update actor=cli summary=Updated source\n",
         ),
         (
             "files.content",
