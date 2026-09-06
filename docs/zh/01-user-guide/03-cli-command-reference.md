@@ -216,6 +216,11 @@ Skill 还随附独立的 `references/business-glossary.schema.json`，作为 aut
 
 该契约只保存稳定导航和模型入口元数据，不复制文档、代码、配置、CI、运行态系统、外部知识源中的真实知识，也不复制与 snapshot 绑定的架构/构建/部署 projection row。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。所有 ref 必须是仓库受控相对路径；绝对路径、父目录穿越和符号链接逃逸会被拒绝。mutation 共用跨平台 OS advisory writer lock，先发布不可变 artifact，最后替换根 manifest；活跃 writer 保持独占，进程异常退出后 owner 自动释放，无需删除持久 `.lock` inode。首次 mutation 还会创建或扩展所选 `knowledge/` 或 `codespec/` 根中的 `.gitignore`；应把这个 nested contract 与 map 一起提交，使普通 Git repository 与 linked worktree 都能排除 canonical/prepared lock inode。LLM agent 必须通过 `map directory` 更新目录治理，通过 `map show` 和 `map route` 定位 Knowledge 知识源，通过 `map source add/update/remove` 维护这些 source，并在变更后运行 `map validate --format json`。AGENTS.md 保留 `CodeSpec map: codespec/codespec-map.yaml` 与 `Knowledge map: knowledge/knowledge-map.yaml` 两个稳定引用。
 
+重复执行字段归一化后内容相同的 `map source update`，不会增加版本、历史或分片，
+也不会重写根文件；必要的迁移或保留 route 修复仍执行。即使没有内容更新，
+`map init` 也会续跑过期分片回收：保护恢复根引用，等待 60 秒退役宽限期，
+每次最多处理 1,024 个未引用普通分片。清理尚未完成时再次运行 init 即可。
+
 ## 3.5 读写影响
 
 状态、健康、帮助、setup doctor/profile、provider probe、version check、`repo list`、report、map show/history/route/validate/agent-snippet 和 audit query 是诊断入口，不应修改图谱事实。`health` 是 liveness 快路径，不会排队 index refresh，也不会等待 code-index writer 完成；存储繁忙时它可以返回 stale/degraded `storage_busy`。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`map init`、`map directory add/update/remove`、`map migrate`、`map source add/update/remove`、`repo remove`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit、仓库导航契约或 service definition。

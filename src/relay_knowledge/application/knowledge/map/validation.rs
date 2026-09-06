@@ -213,7 +213,9 @@ impl KnowledgeMapService {
         let mut sources = Vec::new();
         let mut routes = Vec::new();
         for topic_ref in &manifest.topics {
-            let shard = self.load_topic_shard_in(contract_dir, topic_ref).await?;
+            let shard = self
+                .load_topic_shard_in(contract_dir, topic_ref, manifest.schema_version)
+                .await?;
             topics.push(shard.topic);
             sources.extend(shard.sources);
             routes.extend(shard.route);

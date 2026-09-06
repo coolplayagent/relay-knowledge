@@ -1,3 +1,4 @@
+use super::super::migration::rewrite_contract_schema_for_test as rewrite_schema;
 use super::*;
 use crate::application::knowledge::map::history::MISSING_HISTORY_INDEX_MESSAGE;
 
@@ -147,7 +148,7 @@ fn balanced_prepend_shape_stays_logarithmic_past_two_full_levels() {
 }
 
 #[tokio::test]
-async fn map_validate_is_read_only_before_init_migrates_and_cleans_legacy_history() {
+async fn map_validate_is_read_only_before_init_migrates_and_defers_legacy_history_cleanup() {
     let root = temp_root("legacy-v2-index-migration");
     fs::create_dir_all(&root).await.expect("root should create");
     fs::write(
@@ -175,7 +176,7 @@ async fn map_validate_is_read_only_before_init_migrates_and_cleans_legacy_histor
             .await
             .expect("source should add");
     }
-    let mut manifest = parse_manifest(
+    let manifest = parse_manifest(
         &fs::read_to_string(service.map_path())
             .await
             .expect("manifest should read"),
@@ -215,17 +216,23 @@ async fn map_validate_is_read_only_before_init_migrates_and_cleans_legacy_histor
     )
     .await
     .expect("legacy archive should write");
-    manifest.schema_version = DIRECTORY_ARTIFACT_SCHEMA_VERSION;
-    manifest.history.archived_through = 1;
-    manifest.history.omitted_through = 0;
-    manifest.history.archive = Some(archive_ref.clone());
-    manifest.history.index = None;
-    fs::write(
-        service.map_path(),
-        serialize_yaml(&manifest).expect("legacy v2 manifest should serialize"),
+    rewrite_schema(
+        &root,
+        AGENT_CONTRACT_DIR_NAME,
+        &service.map_path(),
+        DIRECTORY_ARTIFACT_SCHEMA_VERSION,
+        Some(archive_ref.clone()),
     )
     .await
-    .expect("legacy v2 manifest should write");
+    .expect("legacy root and shards should downgrade together");
+    let manifest = parse_manifest(
+        &fs::read_to_string(service.map_path())
+            .await
+            .expect("legacy manifest should read"),
+    )
+    .expect("legacy manifest should parse");
+    assert_eq!(manifest.history.archived_through, 1);
+    assert_eq!(manifest.history.archive, Some(archive_ref.clone()));
 
     let mut history_files = fs::read_dir(&history_directory)
         .await
@@ -334,11 +341,7 @@ async fn map_validate_is_read_only_before_init_migrates_and_cleans_legacy_histor
     .expect("reader fallback should parse");
     assert_eq!(fallback.schema_version, ARTIFACT_SCHEMA_VERSION);
     assert!(fallback.history.archive.is_none());
-    assert!(
-        !fs::try_exists(&history_directory)
-            .await
-            .expect("legacy history directory should be inspectable")
-    );
+    assert!(fs::try_exists(&history_directory).await.unwrap());
     assert_eq!(
         service
             .history(&context, None, 1)
@@ -498,82 +501,6 @@ async fn legacy_show_returns_only_the_recent_history_window() {
             .collect::<Vec<_>>(),
         [1, 2, 3]
     );
-    let _ = fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn history_pages_reject_digest_valid_noncontiguous_archive_entries() {
-    let root = temp_root("invalid-history-page");
-    fs::create_dir_all(&root).await.expect("root should create");
-    let service = KnowledgeMapService::new(root.clone());
-    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
-    service.init(&context).await.expect("init should work");
-    let manifest_text = fs::read_to_string(service.map_path())
-        .await
-        .expect("manifest should read");
-    let mut manifest = parse_manifest(&manifest_text).expect("manifest should parse");
-    let mut entries = (1..=RECENT_HISTORY_LIMIT as u64)
-        .map(|version| crate::domain::KnowledgeMapHistoryEntry {
-            version,
-            action: "fixture".to_owned(),
-            actor: "test".to_owned(),
-            summary: format!("History entry {version}"),
-        })
-        .collect::<Vec<_>>();
-    entries[5].version = 5;
-    let archive = KnowledgeMapHistoryArchive {
-        schema_version: DIRECTORY_ARTIFACT_SCHEMA_VERSION,
-        from_version: 1,
-        through_version: RECENT_HISTORY_LIMIT as u64,
-        previous: None,
-        entries,
-    };
-    let archive_yaml = serialize_yaml(&archive).expect("archive should serialize");
-    let digest = content_digest(archive_yaml.as_bytes());
-    let relative = format!(
-        "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{digest}.yaml",
-        archive.from_version, archive.through_version
-    );
-    fs::create_dir_all(
-        root.join(AGENT_CONTRACT_DIR_NAME)
-            .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME),
-    )
-    .await
-    .expect("history directory should create");
-    fs::write(
-        root.join(AGENT_CONTRACT_DIR_NAME).join(&relative),
-        archive_yaml,
-    )
-    .await
-    .expect("archive should write");
-    manifest.map_version = RECENT_HISTORY_LIMIT as u64 + 1;
-    manifest.schema_version = DIRECTORY_ARTIFACT_SCHEMA_VERSION;
-    manifest.history.archived_through = RECENT_HISTORY_LIMIT as u64;
-    manifest.history.omitted_through = 0;
-    let archive_ref = KnowledgeMapArchiveRef {
-        r#ref: relative,
-        digest,
-    };
-    manifest.history.index = Some(
-        service
-            .append_history_index(None, archive_ref.clone(), &archive)
-            .await
-            .expect("index should publish"),
-    );
-    manifest.history.archive = Some(archive_ref);
-    manifest.history.recent[0].version = manifest.map_version;
-    fs::write(
-        service.map_path(),
-        serialize_yaml(&manifest).expect("manifest should serialize"),
-    )
-    .await
-    .expect("manifest should write");
-
-    let error = service
-        .history(&context, Some(1), RECENT_HISTORY_LIMIT)
-        .await
-        .expect_err("noncontiguous archive entries must fail");
-    assert!(error.to_string().contains("not contiguous"));
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -817,6 +744,9 @@ async fn cleanup_preserves_an_old_staging_inode_while_its_initializer_is_active(
             .await
             .expect("active staging path check")
     );
+    // Match the production guard's explicit unlock: concurrently spawned children
+    // can briefly inherit this descriptor and extend a drop-only lock lifetime.
+    fs2::FileExt::unlock(&prepared).expect("initializer should release its staging lock");
     drop(prepared);
     cleanup_transition_locks(&lock_path, Duration::ZERO);
     assert!(

@@ -382,15 +382,15 @@ async fn v2_reader_resolves_shards_from_the_legacy_contract_root() {
     .await
     .expect("contract should move to the legacy root");
     let legacy_root = root.join(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH);
-    let manifest = fs::read_to_string(&legacy_root)
-        .await
-        .expect("legacy root should read")
-        .replacen("schema_version: 4", "schema_version: 2", 1)
-        .replacen("omitted_through", "archived_through", 1);
-    fs::write(legacy_root, manifest)
-        .await
-        .expect("v2 root should write");
-
+    rewrite_contract_schema_for_test(
+        &root,
+        LEGACY_AGENT_CONTRACT_DIR_NAME,
+        &legacy_root,
+        LEGACY_ARTIFACT_SCHEMA_VERSION,
+        None,
+    )
+    .await
+    .expect("v2 root and shards should downgrade together");
     service
         .validate_map_contract()
         .await
@@ -950,21 +950,21 @@ async fn migrated_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Requ
     .await
     .expect("fixture contract should move to the legacy root");
     let legacy = service.legacy_map_path();
-    let v2 = fs::read_to_string(&legacy)
-        .await
-        .expect("fixture root should read")
-        .replacen("schema_version: 4", "schema_version: 2", 1)
-        .replacen("omitted_through", "archived_through", 1);
-    fs::write(&legacy, v2)
-        .await
-        .expect("v2 fixture root should write");
+    rewrite_contract_schema_for_test(
+        &root,
+        LEGACY_AGENT_CONTRACT_DIR_NAME,
+        &legacy,
+        LEGACY_ARTIFACT_SCHEMA_VERSION,
+        None,
+    )
+    .await
+    .expect("v2 fixture root and shards should downgrade together");
     service
         .migrate_to_v4(&context)
         .await
         .expect("v2 fixture should migrate");
     (root, service, context)
 }
-
 #[test]
 fn rollback_response_version_reads_a_legacy_manifest_without_a_history_index() {
     let legacy_manifest = r#"

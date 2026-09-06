@@ -38,7 +38,7 @@ async fn history_cleanup_rejects_unknown_entries_before_deleting_generated_files
         .await
         .expect("unknown file should write");
 
-    let error = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME)
+    let error = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, Duration::ZERO)
         .await
         .expect_err("unknown files must stop cleanup");
     assert!(matches!(error, KnowledgeMapServiceError::Integrity(_)));
@@ -74,7 +74,7 @@ async fn history_cleanup_rejects_a_symlinked_directory_without_touching_its_targ
     )
     .expect("history symlink should create");
 
-    let error = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME)
+    let error = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, Duration::ZERO)
         .await
         .expect_err("symlinked history directory must be rejected");
     assert!(matches!(error, KnowledgeMapServiceError::UnsafePath(_)));
@@ -102,7 +102,7 @@ async fn history_cleanup_is_bounded_and_resumes_on_the_next_attempt() {
             .expect("history artifact should write");
     }
 
-    let progress = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME)
+    let progress = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, Duration::ZERO)
         .await
         .expect("the first cleanup attempt should stop without failing its caller");
     assert_eq!(
@@ -111,8 +111,8 @@ async fn history_cleanup_is_bounded_and_resumes_on_the_next_attempt() {
             removed: HISTORY_CLEANUP_ENTRY_LIMIT
         }
     );
-    assert_eq!(history_file_contents(&directory).await.len(), 1);
-    let completed = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME)
+    assert_eq!(history_file_contents(&directory).await.len(), 2);
+    let completed = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, Duration::ZERO)
         .await
         .expect("the next attempt should finish cleanup");
     assert_eq!(completed, HistoryCleanupStatus::Complete);
@@ -121,7 +121,36 @@ async fn history_cleanup_is_bounded_and_resumes_on_the_next_attempt() {
 }
 
 #[tokio::test]
-async fn committed_map_mutation_succeeds_when_history_cleanup_needs_another_batch() {
+async fn history_cleanup_defers_removal_for_in_flight_legacy_readers() {
+    let root = temp_root("history-cleanup-reader-grace");
+    let directory = root
+        .join(AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME);
+    fs::create_dir_all(&directory)
+        .await
+        .expect("history directory should create");
+    let artifact = directory.join(format!("{:020}-{:020}-{}.yaml", 1, 1, "a".repeat(64)));
+    fs::write(&artifact, "legacy archive")
+        .await
+        .expect("history artifact should write");
+    let grace = Duration::from_millis(50);
+
+    let deferred = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, grace)
+        .await
+        .expect("the first cleanup attempt should establish reader grace");
+    assert_eq!(deferred, HistoryCleanupStatus::Deferred);
+    assert!(fs::try_exists(&artifact).await.unwrap());
+    sleep(grace + Duration::from_millis(25)).await;
+    let completed = cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, grace)
+        .await
+        .expect("cleanup should proceed after reader grace elapses");
+    assert_eq!(completed, HistoryCleanupStatus::Complete);
+    assert!(!fs::try_exists(directory).await.unwrap());
+    let _ = fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn committed_map_mutation_defers_history_cleanup_for_legacy_readers() {
     let root = temp_root("history-cleanup-after-commit");
     fs::create_dir_all(&root).await.expect("root should create");
     let service = KnowledgeMapService::new(root.clone());
@@ -159,7 +188,7 @@ async fn committed_map_mutation_succeeds_when_history_cleanup_needs_another_batc
         )
         .await
         .expect("a committed mutation must not fail because cleanup remains pending");
-    assert_eq!(history_file_contents(&directory).await.len(), 1);
+    assert_eq!(history_file_contents(&directory).await.len(), 1_026);
     assert!(
         service
             .show(&context, None)
@@ -170,10 +199,20 @@ async fn committed_map_mutation_succeeds_when_history_cleanup_needs_another_batc
             .iter()
             .any(|source| source.id == "post-cleanup-source")
     );
-    service
-        .init(&context)
-        .await
-        .expect("the next maintenance attempt should finish cleanup");
+    assert_eq!(
+        cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, Duration::ZERO)
+            .await
+            .expect("an expired cleanup batch should run"),
+        HistoryCleanupStatus::Pending {
+            removed: HISTORY_CLEANUP_ENTRY_LIMIT
+        }
+    );
+    assert_eq!(
+        cleanup_history_artifacts_in(&root, AGENT_CONTRACT_DIR_NAME, Duration::ZERO)
+            .await
+            .expect("the final expired cleanup batch should run"),
+        HistoryCleanupStatus::Complete
+    );
     assert!(!fs::try_exists(directory).await.unwrap());
     let _ = fs::remove_dir_all(root).await;
 }
@@ -278,7 +317,7 @@ async fn validation_rejects_a_dangling_history_symlink() {
 }
 
 #[tokio::test]
-async fn current_init_removes_recognized_legacy_namespace_history_artifacts() {
+async fn current_init_defers_recognized_legacy_namespace_history_artifacts() {
     let root = temp_root("legacy-namespace-history-cleanup");
     fs::create_dir_all(&root).await.expect("root should create");
     let service = KnowledgeMapService::new(root.clone());
@@ -300,7 +339,11 @@ async fn current_init_removes_recognized_legacy_namespace_history_artifacts() {
     service
         .init(&context)
         .await
-        .expect("idempotent init should clean the legacy namespace");
+        .expect("idempotent init should establish legacy-reader grace");
+    assert!(fs::try_exists(&directory).await.unwrap());
+    cleanup_history_artifacts_in(&root, LEGACY_AGENT_CONTRACT_DIR_NAME, Duration::ZERO)
+        .await
+        .expect("expired legacy-reader grace should permit cleanup");
     assert!(!fs::try_exists(directory).await.unwrap());
     let _ = fs::remove_dir_all(root).await;
 }
@@ -313,10 +356,39 @@ async fn current_init_preserves_history_referenced_by_a_live_legacy_root() {
     let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
     service.init(&context).await.expect("map should initialize");
 
-    let mut legacy_manifest = parse_manifest(
-        &fs::read_to_string(service.map_path())
+    let legacy_topics = root
+        .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    fs::create_dir_all(&legacy_topics)
+        .await
+        .expect("legacy topics directory should create");
+    let mut topics = fs::read_dir(
+        root.join(AGENT_CONTRACT_DIR_NAME)
+            .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME),
+    )
+    .await
+    .expect("current topics directory should read");
+    while let Some(entry) = topics.next_entry().await.expect("topic entry should read") {
+        fs::copy(entry.path(), legacy_topics.join(entry.file_name()))
             .await
-            .expect("current manifest should read"),
+            .expect("topic shard should copy to the legacy namespace");
+    }
+    fs::copy(service.map_path(), service.legacy_map_path())
+        .await
+        .expect("current root should copy to the legacy namespace");
+    super::migration::rewrite_contract_schema_for_test(
+        &root,
+        LEGACY_AGENT_CONTRACT_DIR_NAME,
+        &service.legacy_map_path(),
+        DIRECTORY_ARTIFACT_SCHEMA_VERSION,
+        None,
+    )
+    .await
+    .expect("legacy root and shards should downgrade together");
+    let mut legacy_manifest = parse_manifest(
+        &fs::read_to_string(service.legacy_map_path())
+            .await
+            .expect("legacy manifest should read"),
     )
     .expect("current manifest should parse");
     let archived_entry = legacy_manifest
@@ -341,7 +413,6 @@ async fn current_init_preserves_history_referenced_by_a_live_legacy_root() {
         ),
         digest: archive_digest,
     };
-    legacy_manifest.schema_version = DIRECTORY_ARTIFACT_SCHEMA_VERSION;
     legacy_manifest.map_version = 2;
     legacy_manifest.updated_at = "unix:2".to_owned();
     legacy_manifest.history.archived_through = 1;
@@ -355,23 +426,6 @@ async fn current_init_preserves_history_referenced_by_a_live_legacy_root() {
         summary: "Retain live legacy history".to_owned(),
     }];
 
-    let legacy_topics = root
-        .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
-        .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
-    fs::create_dir_all(&legacy_topics)
-        .await
-        .expect("legacy topics directory should create");
-    let mut topics = fs::read_dir(
-        root.join(AGENT_CONTRACT_DIR_NAME)
-            .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME),
-    )
-    .await
-    .expect("current topics directory should read");
-    while let Some(entry) = topics.next_entry().await.expect("topic entry should read") {
-        fs::copy(entry.path(), legacy_topics.join(entry.file_name()))
-            .await
-            .expect("topic shard should copy to the legacy namespace");
-    }
     let legacy_history = root
         .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
         .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME);

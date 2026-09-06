@@ -219,8 +219,9 @@ impl KnowledgeMapService {
         let mut routes = Vec::new();
         let mut legacy_glossary_uri_normalized = false;
         for topic_ref in &manifest.topics {
-            let (shard, normalized_legacy_glossary_uri) =
-                self.load_topic_shard_for_mutation(topic_ref).await?;
+            let (shard, normalized_legacy_glossary_uri) = self
+                .load_topic_shard_for_mutation(topic_ref, manifest.schema_version)
+                .await?;
             requires_publish |= normalized_legacy_glossary_uri;
             legacy_glossary_uri_normalized |= normalized_legacy_glossary_uri;
             topics.push(shard.topic);
@@ -348,14 +349,6 @@ impl KnowledgeMapService {
         if fs::try_exists(self.legacy_backup_path()).await? {
             self.publish_legacy_redirect().await?;
         }
-        cleanup_superseded_topic_shards_in(
-            &self.repository_root,
-            self.contract_dir_name(),
-            &self.backup_path(),
-            &manifest,
-            Duration::from_secs(60),
-        )
-        .await;
         if let Err(error) = self.finalize_recent_history_migration().await {
             tracing::warn!(
                 map_type = self.map_type.as_str(),
@@ -383,55 +376,70 @@ impl KnowledgeMapService {
                 self.publish_manifest(current.as_bytes()).await?;
             }
         }
-        if let HistoryCleanupStatus::Pending { removed } =
-            cleanup_history_artifacts_in(&self.repository_root, self.contract_dir_name()).await?
-        {
-            tracing::warn!(
-                contract_dir = self.contract_dir_name(),
-                removed,
-                "repository map history cleanup remains pending; rerun map init"
-            );
-        }
+        cleanup_history_artifacts_in(
+            &self.repository_root,
+            self.contract_dir_name(),
+            HISTORY_READER_GRACE_PERIOD,
+        )
+        .await?;
         if self.map_type == RepositoryMapType::Knowledge
             && self.legacy_history_cleanup_is_safe().await?
         {
-            if let HistoryCleanupStatus::Pending { removed } =
-                cleanup_history_artifacts_in(&self.repository_root, LEGACY_AGENT_CONTRACT_DIR_NAME)
-                    .await?
-            {
-                tracing::warn!(
-                    contract_dir = LEGACY_AGENT_CONTRACT_DIR_NAME,
-                    removed,
-                    "repository map history cleanup remains pending; rerun map init"
-                );
-            }
+            cleanup_history_artifacts_in(
+                &self.repository_root,
+                LEGACY_AGENT_CONTRACT_DIR_NAME,
+                HISTORY_READER_GRACE_PERIOD,
+            )
+            .await?;
         }
+        let manifest = parse_manifest(&current)?;
+        cleanup_superseded_topic_shards_in(
+            &self.repository_root,
+            self.contract_dir_name(),
+            &self.backup_path(),
+            &manifest,
+            HISTORY_READER_GRACE_PERIOD,
+        )
+        .await;
         Ok(())
     }
 
     async fn load_topic_shard_for_mutation(
         &self,
         topic_ref: &KnowledgeMapTopicRef,
+        manifest_schema_version: u16,
     ) -> Result<(KnowledgeMapTopicShard, bool), KnowledgeMapServiceError> {
         let contract_dir = self.read_contract_dir_name().await?;
-        self.load_topic_shard_with_legacy_glossary_normalization(contract_dir, topic_ref, true)
-            .await
+        self.load_topic_shard_with_legacy_glossary_normalization(
+            contract_dir,
+            topic_ref,
+            manifest_schema_version,
+            true,
+        )
+        .await
     }
 
     async fn load_topic_shard_in(
         &self,
         contract_dir: &str,
         topic_ref: &KnowledgeMapTopicRef,
+        manifest_schema_version: u16,
     ) -> Result<KnowledgeMapTopicShard, KnowledgeMapServiceError> {
-        self.load_topic_shard_with_legacy_glossary_normalization(contract_dir, topic_ref, false)
-            .await
-            .map(|(shard, _normalized_legacy_glossary_uri)| shard)
+        self.load_topic_shard_with_legacy_glossary_normalization(
+            contract_dir,
+            topic_ref,
+            manifest_schema_version,
+            false,
+        )
+        .await
+        .map(|(shard, _normalized_legacy_glossary_uri)| shard)
     }
 
     async fn load_topic_shard_with_legacy_glossary_normalization(
         &self,
         contract_dir: &str,
         topic_ref: &KnowledgeMapTopicRef,
+        manifest_schema_version: u16,
         normalize_visible_legacy_glossary_uri: bool,
     ) -> Result<(KnowledgeMapTopicShard, bool), KnowledgeMapServiceError> {
         let content = read_verified_ref_in(
@@ -461,12 +469,7 @@ impl KnowledgeMapService {
             topic_ref.digest
         );
         if topic_ref.r#ref != expected_ref
-            || !matches!(
-                shard.schema_version,
-                LEGACY_ARTIFACT_SCHEMA_VERSION
-                    | DIRECTORY_ARTIFACT_SCHEMA_VERSION
-                    | ARTIFACT_SCHEMA_VERSION
-            )
+            || shard.schema_version != manifest_schema_version
             || shard.topic.id != topic_ref.id
             || shard.topic.title != topic_ref.title
             || shard.topic.description != topic_ref.description
@@ -582,3 +585,7 @@ mod reserved_contract_tests;
 #[cfg(test)]
 #[path = "identity_contract_tests.rs"]
 mod identity_contract_tests;
+
+#[cfg(test)]
+#[path = "storage_tests.rs"]
+mod map_storage_tests;

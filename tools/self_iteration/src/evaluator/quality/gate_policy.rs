@@ -86,6 +86,11 @@ pub(super) fn quality_gate_stages(
                     180,
                 ),
                 quality_gate(
+                    "map_storage_regression_cases",
+                    ["cargo", "test", "--lib", "map_storage", "--", "--nocapture"],
+                    180,
+                ),
+                quality_gate(
                     "code_index_sqlite_lock_cases",
                     [
                         "cargo",

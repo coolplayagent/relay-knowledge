@@ -63,6 +63,12 @@ Supported categories are `foundational`, `competitive`, `semantic_vector`, `file
 | Unattended state | `.git/relay-knowledge-self-iteration/unattended-state-v2.json` | Category rotation, failure counters, accepted count, and deep-check schedule. |
 | Charts | `.git/relay-knowledge-self-iteration/score-v2.csv`, `score-v2.svg` | Scored-run history; green means committed accepted run, amber means manually evaluated pass, red means rejected run. |
 
+The fast `map_storage_regression_cases` gate checks zero additional files/bytes
+and unchanged mtimes after 32 equal source updates, obsolete-shard reclamation
+through idle `map init`, reader/recovery protection, bounded cleanup batches,
+and required legacy migration. Fixture byte counts measure map artifacts only,
+not SQLite database compaction.
+
 ### Observability
 
 The harness writes live progress to stderr with the `[self-iterate]` prefix. Each subprocess reports `command start`, a 15-second `command running` heartbeat, and `command done` or `command timeout` with exit status and duration. Evaluation also reports the selected profile, evaluation home, resolved parallelism, quality-gate stage, repository workload size, repository-set workload size, and final gate/case/command counts. Product command stdout and stderr are still captured in the JSON report, so long `fast` runs remain observable.

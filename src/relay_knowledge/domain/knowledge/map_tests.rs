@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn map_storage_equal_source_fields_preserve_source_version_after_normalization() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    let before = map.clone();
+    map.update_source(KnowledgeMapChange {
+        id: "repository-software-model".to_owned(),
+        topic: Some(" software-model ".to_owned()),
+        kind: Some(KnowledgeMapSourceKind::Repo),
+        uri: Some(" . ".to_owned()),
+        source_scope: Some("repo".to_owned()),
+        description: None,
+    })
+    .unwrap();
+    assert_eq!(map, before);
+    assert!(
+        !map.update_source_snapshot(
+            KnowledgeMapChange {
+                id: "repository-software-model".to_owned(),
+                topic: None,
+                kind: None,
+                uri: None,
+                source_scope: None,
+                description: None,
+            },
+            0
+        )
+        .unwrap()
+    );
+    assert_eq!(map, before);
+}
+
+#[test]
 fn initial_map_routes_the_repository_software_model() {
     let map = KnowledgeMap::initial("now".to_owned());
 

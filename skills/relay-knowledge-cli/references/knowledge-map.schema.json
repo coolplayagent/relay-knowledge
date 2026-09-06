@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Relay Knowledge Map v4 artifacts",
-  "description": "Structural schema for the recent-only Knowledge Map v4 root, topic shards, and legacy redirect. Objects allow unknown fields for Serde forward compatibility. Digest agreement, directory existence, cross-map relations, route completeness, history continuity, and reserved sources are validated by relay-knowledge map validate; relay-knowledge map validate is authoritative. Generated roots, shards, and redirects remain CLI-managed assets.",
+  "description": "Structural schema for the recent-only Knowledge Map v4 root, topic shards, and legacy redirect. Objects allow unknown fields for Serde forward compatibility, except that v4 history explicitly rejects known legacy archive keys. Digest agreement, directory existence, cross-map relations, route completeness, history continuity, and reserved sources are validated by relay-knowledge map validate; relay-knowledge map validate is authoritative. Generated roots, shards, and redirects remain CLI-managed assets.",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/rootManifest" },
