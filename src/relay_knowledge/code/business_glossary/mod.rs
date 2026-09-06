@@ -32,6 +32,7 @@ use super::{
 const BUSINESS_TOPIC_ID: &str = "business-knowledge";
 const KNOWLEDGE_MAP_V2_SCHEMA: u16 = 2;
 const KNOWLEDGE_MAP_V3_SCHEMA: u16 = 3;
+const KNOWLEDGE_MAP_V4_SCHEMA: u16 = 4;
 
 #[derive(Deserialize)]
 struct SchemaProbe {
@@ -39,13 +40,13 @@ struct SchemaProbe {
 }
 
 #[derive(Deserialize)]
-struct V2Manifest {
+struct ShardedManifest {
     schema_version: u16,
-    topics: Vec<V2TopicRef>,
+    topics: Vec<ShardedTopicRef>,
 }
 
 #[derive(Deserialize)]
-struct V2TopicRef {
+struct ShardedTopicRef {
     id: String,
     title: String,
     description: String,
@@ -56,7 +57,7 @@ struct V2TopicRef {
 }
 
 #[derive(Deserialize)]
-struct V2TopicShard {
+struct ShardedTopicShard {
     schema_version: u16,
     topic: KnowledgeMapTopic,
     sources: Vec<KnowledgeMapSource>,
@@ -202,15 +203,15 @@ fn routed_business_sources(
     }
     if !matches!(
         probe.schema_version,
-        KNOWLEDGE_MAP_V2_SCHEMA | KNOWLEDGE_MAP_V3_SCHEMA
+        KNOWLEDGE_MAP_V2_SCHEMA | KNOWLEDGE_MAP_V3_SCHEMA | KNOWLEDGE_MAP_V4_SCHEMA
     ) {
         return Err(invalid(format!(
             "knowledge map schema_version {} is unsupported",
             probe.schema_version
         )));
     }
-    let manifest = serde_norway::from_slice::<V2Manifest>(content)
-        .map_err(|error| invalid(format!("knowledge map v2 manifest is invalid: {error}")))?;
+    let manifest = serde_norway::from_slice::<ShardedManifest>(content)
+        .map_err(|error| invalid(format!("knowledge map manifest is invalid: {error}")))?;
     if manifest.schema_version != probe.schema_version {
         return Err(invalid("knowledge map manifest schema drift"));
     }
@@ -224,7 +225,7 @@ fn routed_business_sources(
     let contract_dir = map_path
         .rsplit_once('/')
         .map_or("", |(directory, _)| directory);
-    validate_v2_ref(reference, contract_dir)?;
+    validate_sharded_ref(reference, contract_dir)?;
     let snapshot_path = format!("{contract_dir}/{}", reference.shard_ref);
     let shard_content = source_snapshot_bytes(root, kind, commit, &snapshot_path)?;
     if sha256(&shard_content) != reference.digest {
@@ -233,7 +234,7 @@ fn routed_business_sources(
             reference.shard_ref
         )));
     }
-    let shard = serde_norway::from_slice::<V2TopicShard>(&shard_content)
+    let shard = serde_norway::from_slice::<ShardedTopicShard>(&shard_content)
         .map_err(|error| invalid(format!("business topic shard is invalid: {error}")))?;
     if shard.schema_version != probe.schema_version
         || shard.topic.id != reference.id
@@ -249,7 +250,7 @@ fn routed_business_sources(
             "business topic shard identity does not match manifest",
         ));
     }
-    validate_v2_topic_shard(&shard)?;
+    validate_sharded_topic(&shard)?;
     let route = shard.route.ok_or_else(|| {
         invalid("business topic shard must route reserved source 'repository-business-glossary'")
     })?;
@@ -288,7 +289,7 @@ fn route_from_parts(
         .map(|route| RoutedBusinessSources { route, sources })
 }
 
-fn validate_v2_topic_shard(shard: &V2TopicShard) -> Result<(), CodeIndexError> {
+fn validate_sharded_topic(shard: &ShardedTopicShard) -> Result<(), CodeIndexError> {
     let mut source_ids = HashSet::with_capacity(shard.sources.len());
     for source in &shard.sources {
         if source.topic != shard.topic.id || !source_ids.insert(source.id.as_str()) {
@@ -321,7 +322,10 @@ fn validate_v2_topic_shard(shard: &V2TopicShard) -> Result<(), CodeIndexError> {
     Ok(())
 }
 
-fn validate_v2_ref(reference: &V2TopicRef, contract_dir: &str) -> Result<(), CodeIndexError> {
+fn validate_sharded_ref(
+    reference: &ShardedTopicRef,
+    contract_dir: &str,
+) -> Result<(), CodeIndexError> {
     if !reference.shard_ref.starts_with("topics/")
         || (contract_dir == "knowledge"
             && !format!("{contract_dir}/{}", reference.shard_ref)

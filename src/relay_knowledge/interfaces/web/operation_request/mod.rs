@@ -69,20 +69,19 @@ pub(super) fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebE
 pub(super) struct KnowledgeMapHistoryPage {
     pub(super) repository: String,
     pub(super) map_type: RepositoryMapType,
-    pub(super) from_version: u64,
+    pub(super) from_version: Option<u64>,
     pub(super) limit: usize,
 }
 
 pub(super) fn knowledge_map_history_page(
     payload: &Value,
 ) -> Result<KnowledgeMapHistoryPage, WebError> {
-    let from_version = payload
-        .get("from_version")
-        .and_then(Value::as_u64)
-        .filter(|value| *value > 0)
-        .ok_or_else(|| {
+    let from_version = match payload.get("from_version") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(value.as_u64().filter(|value| *value > 0).ok_or_else(|| {
             WebError::bad_request("from_version must be a positive integer".to_owned())
-        })?;
+        })?),
+    };
     let limit = usize_field(payload, "limit")?;
     if limit > MAX_HISTORY_PAGE_SIZE {
         return Err(WebError::bad_request(format!(

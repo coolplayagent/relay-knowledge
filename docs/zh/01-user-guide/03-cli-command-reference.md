@@ -98,7 +98,7 @@ relay-knowledge map source remove --type knowledge --id <id>
 relay-knowledge map directory add --type <knowledge|codespec> --directory <path> --purpose <text> --content-scope <glob> --load-hint <hint> --update-rule <rule> [--key-file <path>] [--relation <kind=target>]
 relay-knowledge map directory update --type <knowledge|codespec> --directory <path> [directory fields]
 relay-knowledge map directory remove --type <knowledge|codespec> --directory <path>
-relay-knowledge map migrate --type knowledge <--to-v3|--rollback>
+relay-knowledge map migrate --type knowledge --to-v4
 relay-knowledge map validate [--type knowledge|codespec|all]
 relay-knowledge map agent-snippet
 relay-knowledge repo list
@@ -208,9 +208,9 @@ Kind 取值按命令家族隔离：
 
 面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_business_query` 覆盖 authored 业务术语与技术映射，`relay_software_query` 覆盖全部软件全域模型 kind，并可传 `export_profile=spdx-3|cyclonedx-1.7|prov-o` 返回标准导出 envelope；`relay_code_feature_flags` 覆盖配置驱动 feature flag，`relay_codebase_view` 覆盖 `repo view` kind family。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
 
-`map` 命令维护 `codespec/codespec-map.yaml` 与 `knowledge/knowledge-map.yaml`。`map init`、`show`、`history`、`validate` 默认使用 `--type all`；定向 mutation 必须显式指定 `--type knowledge` 或 `--type codespec`，source 与 route 只适用于 Knowledge。Schema v3 增加强类型 `directories`，同时保留 `knowledge/topics/` 内容寻址分片、有界 recent history、`knowledge/history/` 校验归档和有界深度 index。目录治理只能通过 `map directory add|update|remove` 更新，两张 map 各自的五个基线目录不可删除。`map migrate --type knowledge --to-v3` 保留 v1/v2 内容、最后发布可见根文件并在旧路径写入 v3 redirect；`--rollback` 恢复保留的 v2 根文件。文件、digest、关系、历史、路径、保留 source 与 AGENTS 引用均以 `map validate` 为权威。
+`map` 命令维护 `codespec/codespec-map.yaml` 与 `knowledge/knowledge-map.yaml`。`map init`、`show`、`history`、`validate` 默认使用 `--type all`；定向 mutation 必须显式指定 `--type knowledge` 或 `--type codespec`，source 与 route 只适用于 Knowledge。Schema v4 保留强类型 `directories` 与 `knowledge/topics/` 内容寻址分片，但每张 map 只在根文件保留最近 16 条历史，不再创建 history 归档目录。`map history` 默认从最早保留版本开始、最多返回 16 条；显式请求 `omitted_through` 及以前的版本会报错，长期审计应使用 Git 或仓库备份。目录治理只能通过 `map directory add|update|remove` 更新，两张 map 各自的五个基线目录不可删除。`map migrate --type knowledge --to-v4` 先验证 legacy artifact，再发布可见与 fallback v4 根、写入 v4 legacy redirect，并以有界、可重试方式清理可识别的旧 history artifact；不再提供数据级 map rollback 命令。文件、digest、关系、历史、路径、保留 source 与 AGENTS 引用均以 `map validate` 为权威。
 
-CLI skill 随附 `references/knowledge-map.schema.json`，它是覆盖 v2 根 manifest、topic shard、history archive 和 history index node 的 JSON Schema Draft 2020-12 文档。Editor 或 agent 可在把 YAML 解析成 JSON-compatible value 后，用它发现字段并执行结构检查。Schema 会有意允许未知字段，以保持与当前 Serde reader 一致。Schema 通过不代表 digest 与内容一致、跨 topic source-id 全局唯一、route 完整、history 连续、index range/height 关系正确或保留 source 合法；`relay-knowledge map validate` 仍是权威检查。Schema 也不授权 agent 直接编辑 CLI 生成的 shard、archive 或 index node。
+CLI skill 随附 `references/knowledge-map.schema.json`，它是覆盖 v4 根 manifest、topic shard、recent-history window 与 redirect 的 JSON Schema Draft 2020-12 文档。Editor 或 agent 可在把 YAML 解析成 JSON-compatible value 后，用它发现字段并执行结构检查。Schema 会有意允许未知字段，以保持与当前 Serde reader 一致。Schema 通过不代表 digest 与内容一致、跨 topic source-id 全局唯一、route 完整、recent history 与 omission checkpoint 连续或保留 source 合法；`relay-knowledge map validate` 仍是权威检查。Schema 也不授权 agent 直接编辑 CLI 生成的 root、shard 或 redirect。
 
 Skill 还随附独立的 `references/business-glossary.schema.json`，作为 authored Business Glossary v1 文档的 Draft 2020-12 schema。它覆盖 domain、term、alias、声明式 semantics、技术 mapping、枚举和集合上限，并采用相同的未知字段兼容策略。JSON Schema 的 `maxLength` 只提供按字符计数的结构近似；4 MiB 文件上限、按 UTF-8 byte 计算的字段边界、identity/domain reference 规则和 alias 大小写不敏感唯一性仍以 `relay-knowledge map validate` 为权威。与生成的 Knowledge Map artifact 不同，`knowledge/glossary/business-glossary.yaml` 应在版本控制和正常代码评审下直接维护。
 
@@ -230,8 +230,8 @@ LLM agent 通过本地 CLI 调用 relay-knowledge，并解析 JSON 输出。它�
 knowledge map 与 code map；spec-grounded commit loop 会固定一个 ref，并组合 map route、
 software/architecture model、impact 和 code context 证据。
 
-同一 skill package 还包含用于结构化工具的 Knowledge Map v2 schema。Metadata gate
-会在 release 打包前检查 Draft 标识、四类 artifact branch、关键复用定义、开放字段兼容策略，
+同一 skill package 还包含用于结构化工具的 Knowledge Map v4 schema。Metadata gate
+会在 release 打包前检查 Draft 标识、三类 artifact branch、关键复用定义、开放字段兼容策略，
 以及有代表性的正例和反例。
 
 该 skill 不配置 MCP、不调用 MCP 工具，也不管理 ACP session。协议级 agent 接入请使用

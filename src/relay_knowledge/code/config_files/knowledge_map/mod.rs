@@ -19,7 +19,8 @@ use crate::project::{
 };
 
 const LEGACY_ARTIFACT_SCHEMA_VERSION: u16 = 2;
-const ARTIFACT_SCHEMA_VERSION: u16 = 3;
+const DIRECTORY_ARTIFACT_SCHEMA_VERSION: u16 = 3;
+const ARTIFACT_SCHEMA_VERSION: u16 = 4;
 const RECENT_HISTORY_LIMIT: usize = 16;
 
 #[derive(Deserialize)]
@@ -50,7 +51,10 @@ struct RootTopicRef {
 
 #[derive(Deserialize)]
 struct RootHistory {
+    #[serde(default)]
     archived_through: u64,
+    #[serde(default)]
+    omitted_through: u64,
     #[serde(default)]
     archive: Option<RootArchiveRef>,
     #[serde(default)]
@@ -135,7 +139,9 @@ fn record_root_facts(content: &str, contract_dir: &str, definitions: &mut Vec<Co
     }
     if !matches!(
         probe.schema_version,
-        LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
     ) {
         return;
     }
@@ -181,7 +187,9 @@ fn record_root_facts(content: &str, contract_dir: &str, definitions: &mut Vec<Co
 fn valid_manifest(manifest: &RootManifest) -> bool {
     if !matches!(
         manifest.schema_version,
-        LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
     ) || manifest.map_version == 0
     {
         return false;
@@ -210,6 +218,10 @@ fn valid_manifest(manifest: &RootManifest) -> bool {
         return false;
     }
     valid_recent_history(manifest)
+        && (manifest.schema_version != ARTIFACT_SCHEMA_VERSION
+            || (manifest.history.archived_through == 0
+                && manifest.history.archive.is_none()
+                && manifest.history.index.is_none()))
         && manifest.history.archive.as_ref().is_none_or(|archive| {
             scoped_contract_ref(&archive.archive_ref, KNOWLEDGE_MAP_HISTORY_DIR_NAME)
                 && lower_hex(&archive.digest, 64)
@@ -231,7 +243,15 @@ fn valid_recent_history(manifest: &RootManifest) -> bool {
     if manifest.history.recent.is_empty() || manifest.history.recent.len() > RECENT_HISTORY_LIMIT {
         return false;
     }
-    let Some(mut expected) = manifest.history.archived_through.checked_add(1) else {
+    let checkpoint = if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        manifest.history.omitted_through
+    } else {
+        if manifest.history.omitted_through != 0 {
+            return false;
+        }
+        manifest.history.archived_through
+    };
+    let Some(mut expected) = checkpoint.checked_add(1) else {
         return false;
     };
     for entry in &manifest.history.recent {
@@ -247,8 +267,13 @@ fn valid_recent_history(manifest: &RootManifest) -> bool {
         };
         expected = next;
     }
-    if expected.saturating_sub(1) != manifest.map_version
-        || (manifest.history.archived_through == 0) != manifest.history.archive.is_none()
+    if expected.saturating_sub(1) != manifest.map_version {
+        return false;
+    }
+    if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        return true;
+    }
+    if (manifest.history.archived_through == 0) != manifest.history.archive.is_none()
         || (manifest.history.archived_through == 0 && manifest.history.index.is_some())
     {
         return false;
@@ -366,7 +391,9 @@ fn record_topic_shard_fact(path: &str, content: &str, definitions: &mut Vec<Conf
     };
     if !matches!(
         shard.schema_version,
-        LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
     ) || stable_id(&shard.topic.id) != path_topic_id
         || !valid_topic_shard(&shard)
     {

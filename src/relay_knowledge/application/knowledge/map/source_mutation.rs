@@ -44,7 +44,7 @@ impl KnowledgeMapService {
             let mut preflight = MutableKnowledgeMap::initial(self.map_type, now_stamp());
             preflight
                 .map
-                .add_source_snapshot(source.clone(), preflight.archived_through)?;
+                .add_source_snapshot(source.clone(), preflight.omitted_through)?;
         }
 
         let mutation_locks = self.acquire_legacy_aware_mutation_locks().await?;
@@ -56,20 +56,20 @@ impl KnowledgeMapService {
             let mut preflight = self.load_for_mutation().await?;
             preflight
                 .map
-                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(preflight.omitted_through)?;
             preflight
                 .map
-                .add_source_snapshot(source.clone(), preflight.archived_through)?;
+                .add_source_snapshot(source.clone(), preflight.omitted_through)?;
             preflight.map.validate_reserved_repository_routes()?;
         }
         self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_or_initial().await?;
         snapshot
             .map
-            .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+            .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
         snapshot
             .map
-            .add_source_snapshot(source, snapshot.archived_through)?;
+            .add_source_snapshot(source, snapshot.omitted_through)?;
         snapshot.map.validate_reserved_repository_routes()?;
         snapshot.map.record_change(
             "source.add",
@@ -101,21 +101,21 @@ impl KnowledgeMapService {
             let mut preflight = self.load_for_mutation().await?;
             preflight
                 .map
-                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(preflight.omitted_through)?;
             preflight
                 .map
-                .update_source_snapshot(change.clone(), preflight.archived_through)?;
+                .update_source_snapshot(change.clone(), preflight.omitted_through)?;
             preflight.map.validate_reserved_repository_routes()?;
         }
         self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
         snapshot
             .map
-            .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+            .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
         let id = change.id.clone();
         snapshot
             .map
-            .update_source_snapshot(change, snapshot.archived_through)?;
+            .update_source_snapshot(change, snapshot.omitted_through)?;
         snapshot.map.validate_reserved_repository_routes()?;
         snapshot.map.record_change(
             "source.update",
@@ -147,20 +147,20 @@ impl KnowledgeMapService {
             let mut preflight = self.load_for_mutation().await?;
             preflight
                 .map
-                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(preflight.omitted_through)?;
             preflight
                 .map
-                .remove_source_snapshot(&id, preflight.archived_through)?;
+                .remove_source_snapshot(&id, preflight.omitted_through)?;
             preflight.map.validate_reserved_repository_routes()?;
         }
         self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
         snapshot
             .map
-            .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+            .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
         snapshot
             .map
-            .remove_source_snapshot(&id, snapshot.archived_through)?;
+            .remove_source_snapshot(&id, snapshot.omitted_through)?;
         snapshot.map.validate_reserved_repository_routes()?;
         snapshot.map.record_change(
             "source.remove",

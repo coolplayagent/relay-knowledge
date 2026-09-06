@@ -244,7 +244,7 @@ history:
 }
 
 #[test]
-fn rejects_a_v3_reserved_glossary_source_with_a_noncanonical_uri() {
+fn rejects_a_v4_reserved_glossary_source_with_a_noncanonical_uri() {
     let repository = TestRepository::new();
     fs::create_dir_all(repository.path().join("knowledge/topics"))
         .expect("topic directory should create");
@@ -255,7 +255,7 @@ fn rejects_a_v3_reserved_glossary_source_with_a_noncanonical_uri() {
     )
     .expect("noncanonical glossary should write");
     let shard = concat!(
-        "schema_version: 3\n",
+        "schema_version: 4\n",
         "topic:\n",
         "  id: business-knowledge\n",
         "  title: Business knowledge\n",
@@ -277,15 +277,15 @@ fn rejects_a_v3_reserved_glossary_source_with_a_noncanonical_uri() {
     let digest = super::sha256(shard.as_bytes());
     let shard_ref = format!("topics/topic-business-knowledge-{digest}.yaml");
     let manifest = format!(
-        "schema_version: 3\nmap_version: 1\nupdated_at: unix:1\ntopics:\n  - id: business-knowledge\n    title: Business knowledge\n    description: Authored glossary\n    source_ids: [repository-business-glossary]\n    ref: {shard_ref}\n    digest: {digest}\nhistory:\n  recent: []\n  archived_through: 0\n"
+        "schema_version: 4\nmap_version: 1\nupdated_at: unix:1\ntopics:\n  - id: business-knowledge\n    title: Business knowledge\n    description: Authored glossary\n    source_ids: [repository-business-glossary]\n    ref: {shard_ref}\n    digest: {digest}\nhistory:\n  omitted_through: 0\n  recent: []\n"
     );
     fs::write(
         repository.path().join("knowledge/knowledge-map.yaml"),
         manifest,
     )
-    .expect("v3 manifest should write");
+    .expect("v4 manifest should write");
     fs::write(repository.path().join("knowledge").join(&shard_ref), shard)
-        .expect("v3 topic shard should write");
+        .expect("v4 topic shard should write");
     git(&repository, &["init"]);
     git(
         &repository,
@@ -298,12 +298,12 @@ fn rejects_a_v3_reserved_glossary_source_with_a_noncanonical_uri() {
     git(&repository, &["add", "knowledge", "docs"]);
     git(
         &repository,
-        &["commit", "-m", "Add noncanonical v3 business source"],
+        &["commit", "-m", "Add noncanonical v4 business source"],
     );
     let commit = git(&repository, &["rev-parse", "HEAD"]);
 
     let error = load_business_knowledge_projection(&registration(&repository), "scope-1", &commit)
-        .expect_err("v3 reserved glossary URI must remain canonical");
+        .expect_err("v4 reserved glossary URI must remain canonical");
 
     assert!(
         error

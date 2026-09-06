@@ -90,13 +90,13 @@ pub const BUSINESS_GLOSSARY_RELATIVE_PATH: &str = crate::domain::BUSINESS_GLOSSA
 pub const LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH: &str =
     crate::domain::LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH;
 
-/// Repository-local directory containing Knowledge Map v2 topic shards.
+/// Repository-local directory containing content-addressed Knowledge Map topic shards.
 pub const KNOWLEDGE_MAP_TOPICS_DIR_NAME: &str = "topics";
 
-/// Repository-relative prefix containing Knowledge Map v2 topic shards.
+/// Repository-relative prefix containing content-addressed Knowledge Map topic shards.
 pub const KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX: &str = "knowledge/topics/";
 
-/// Repository-local directory containing immutable Knowledge Map history archives.
+/// Legacy repository-local directory recognized only for bounded migration cleanup.
 pub const KNOWLEDGE_MAP_HISTORY_DIR_NAME: &str = "history";
 
 /// Version-check cache filename stored under the cache directory.

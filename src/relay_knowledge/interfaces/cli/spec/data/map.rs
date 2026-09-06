@@ -79,7 +79,7 @@ fn map_history() -> CliCommandSpec {
     command!(
         &["map", "history"],
         "relay-knowledge map history [--type <knowledge|codespec|all>] [--from <version>] [--limit <count>]",
-        "Read one explicitly bounded page of Knowledge Map history.",
+        "Read one explicitly bounded page of retained recent repository-map history.",
         "knowledge.map.history",
         CommandEffect::ReadOnly,
         &[],
@@ -90,7 +90,7 @@ fn map_history() -> CliCommandSpec {
                 Some("version"),
                 false,
                 false,
-                "First history version to return. Defaults to 1.",
+                "First retained history version to return. Defaults to the earliest retained version.",
                 None,
                 &[],
             ),
@@ -99,13 +99,15 @@ fn map_history() -> CliCommandSpec {
                 Some("count"),
                 false,
                 false,
-                "Maximum entries to return. Defaults to 64 and cannot exceed 256.",
+                "Maximum entries to return. Defaults to 16 and cannot exceed 16.",
                 None,
                 &[],
             ),
         ],
-        &["relay-knowledge map history --from 17 --limit 32 --format json"],
-        &["History pages verify the referenced archive chain before returning entries."],
+        &["relay-knowledge map history --from 17 --limit 16 --format json"],
+        &[
+            "Versions older than the retained window are intentionally unavailable; use Git or repository backups for long-term audit history."
+        ],
     )
 }
 
@@ -424,34 +426,27 @@ fn directory_command(
 fn map_migrate() -> CliCommandSpec {
     command!(
         &["map", "migrate"],
-        "relay-knowledge map migrate --type knowledge <--to-v3|--rollback>",
-        "Migrate a v1/v2 Knowledge Map to v3 or restore its retained v2 root.",
+        "relay-knowledge map migrate --type knowledge --to-v4",
+        "Migrate a legacy Knowledge Map to the v4 recent-only history contract.",
         "repository.map.migrate",
         CommandEffect::WritesOperationalState,
         &[],
         &[
             map_type_option(true),
             opt(
-                "--to-v3",
+                "--to-v4",
                 None,
                 false,
                 false,
-                "Publish the visible v3 root and legacy redirect.",
-                None,
-                &[]
-            ),
-            opt(
-                "--rollback",
-                None,
-                false,
-                false,
-                "Restore the retained v2 root.",
+                "Validate legacy artifacts, publish the v4 root, and safely remove old history artifacts.",
                 None,
                 &[]
             ),
         ],
-        &["relay-knowledge map migrate --type knowledge --to-v3 --format json"],
-        &["Exactly one migration action is required."],
+        &["relay-knowledge map migrate --type knowledge --to-v4 --format json"],
+        &[
+            "Long-term history remains available through Git or repository backups; the repository map no longer maintains an archive tree or a data-level rollback command."
+        ],
     )
 }
 

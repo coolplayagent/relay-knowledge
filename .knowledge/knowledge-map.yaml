@@ -1,4 +1,4 @@
-schema_version: 3
+schema_version: 4
 artifact_kind: redirect
 map_type: knowledge
 target: knowledge/knowledge-map.yaml

@@ -143,6 +143,15 @@ def validate_schema_instance(
         if invalid_one_of or invalid_any_of:
             raise ValueError(f"{location} does not satisfy {keyword}")
 
+    forbidden = schema.get("not")
+    if isinstance(forbidden, dict):
+        try:
+            validate_schema_instance(forbidden, instance, root, location)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(f"{location} violates not")
+
     expected_type = schema.get("type")
     if expected_type is not None and not _instance_type_matches(expected_type, instance):
         raise ValueError(f"{location} has invalid type")
@@ -168,6 +177,15 @@ def validate_schema_instance(
         required = schema.get("required", [])
         if isinstance(required, list) and any(name not in instance for name in required):
             raise ValueError(f"{location} is missing a required property")
+        property_names = schema.get("propertyNames")
+        if isinstance(property_names, dict):
+            for name in instance:
+                validate_schema_instance(
+                    property_names,
+                    name,
+                    root,
+                    f"{location} property name {name!r}",
+                )
         properties = schema.get("properties", {})
         if isinstance(properties, dict):
             for name, value in instance.items():

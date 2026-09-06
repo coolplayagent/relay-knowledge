@@ -63,8 +63,8 @@ async fn map_history_uses_repository_service_resolved_before_dispatch() {
                 selection: crate::interfaces::cli::map::MapSelection::One(
                     crate::domain::RepositoryMapType::Knowledge,
                 ),
-                from_version: 1,
-                limit: 64,
+                from_version: Some(1),
+                limit: 16,
             }),
             format: OutputFormat::Json,
             remote_base_url: None,

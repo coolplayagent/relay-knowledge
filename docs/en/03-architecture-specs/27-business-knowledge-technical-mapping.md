@@ -44,7 +44,7 @@ Hard limits are 4 MiB per file, 256 domains, 10,000 terms, 32 aliases and 64 map
 
 ## 3. Projection, Resolution, and Publication Fence
 
-The repository indexer reads only active repository-scoped files authorized by the current route at the same immutable Git commit. A v2 topic shard must pass manifest digest, identity, and source-order validation. Absolute paths, parent traversal, backslashes, missing blobs, oversized content, and invalid schema fail the durable attempt. A live non-Git filesystem glossary is not represented as a committed business fact.
+The repository indexer reads only active repository-scoped files authorized by the current route at the same immutable Git commit. A v4 topic shard must pass manifest digest, identity, and source-order validation. Absolute paths, parent traversal, backslashes, missing blobs, oversized content, and invalid schema fail the durable attempt. A live non-Git filesystem glossary is not represented as a committed business fact.
 
 Business, code, and software projections share one durable task, lease, attempt, and publication fence. The storage boundary owns business reads and writes through a dedicated `BusinessKnowledgeStore` contract instead of enlarging the code-store contract. Code facts are staged first, followed by the business projection and software projection; one transaction then publishes business/software status and the code scope as fresh. An old lease or mismatched target cannot perform the replacement, and receipts or fast paths cannot report freshness without a matching fresh business status.
 

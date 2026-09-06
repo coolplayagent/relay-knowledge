@@ -25,8 +25,8 @@ fn agent_snippet_is_the_only_map_command_without_a_repository_root() {
         },
         MapCommand::History {
             selection: MapSelection::All,
-            from_version: 1,
-            limit: 64,
+            from_version: Some(1),
+            limit: 16,
         },
         MapCommand::Route {
             topic: "build".to_owned(),
@@ -258,8 +258,8 @@ async fn map_execution_keeps_cli_and_repository_governance_in_sync() {
     let history = run_map(
         MapCommand::History {
             selection: MapSelection::All,
-            from_version: 1,
-            limit: 64,
+            from_version: Some(1),
+            limit: 16,
         },
         Some(&service),
         context.clone(),
@@ -423,7 +423,7 @@ async fn first_source_add_through_cli_bootstraps_a_validate_ready_knowledge_map(
 }
 
 #[tokio::test]
-async fn map_migration_commands_preserve_a_recoverable_legacy_root() {
+async fn map_migration_command_publishes_the_recent_only_contract() {
     let root = temp_root("cli-migration");
     tokio::fs::create_dir_all(root.join(LEGACY_AGENT_CONTRACT_DIR_NAME))
         .await
@@ -449,7 +449,7 @@ async fn map_migration_commands_preserve_a_recoverable_legacy_root() {
     );
 
     let migrated = run_map(
-        MapCommand::MigrateToV3,
+        MapCommand::MigrateToV4,
         Some(&service),
         context.clone(),
         OutputFormat::Json,
@@ -462,29 +462,8 @@ async fn map_migration_commands_preserve_a_recoverable_legacy_root() {
     assert!(
         tokio::fs::read_to_string(root.join(KNOWLEDGE_MAP_RELATIVE_PATH))
             .await
-            .expect("v3 root should read")
-            .contains("schema_version: 3")
-    );
-
-    let rolled_back = run_map(
-        MapCommand::MigrateRollback,
-        Some(&service),
-        context,
-        OutputFormat::Json,
-    )
-    .await
-    .expect("migration should roll back through the CLI adapter");
-    let rolled_back: serde_json::Value =
-        serde_json::from_str(rolled_back.trim()).expect("rollback should render JSON");
-    assert!(
-        rolled_back["summary"]
-            .as_str()
-            .is_some_and(|summary| summary.contains("restored Knowledge Map v2 root"))
-    );
-    assert!(
-        !tokio::fs::try_exists(root.join(KNOWLEDGE_MAP_RELATIVE_PATH))
-            .await
-            .expect("v3 root should be probed after rollback")
+            .expect("v4 root should read")
+            .contains("schema_version: 4")
     );
 
     tokio::fs::remove_dir_all(root)
@@ -528,8 +507,8 @@ fn map_parser_covers_the_complete_governance_command_surface() {
         parse_map(&args(&["history"])).expect("default history window should parse"),
         CliAction::Map(MapCommand::History {
             selection: MapSelection::All,
-            from_version: 1,
-            limit: 64,
+            from_version: None,
+            limit: 16,
         })
     );
     assert_eq!(
@@ -661,15 +640,11 @@ fn map_parser_covers_the_complete_governance_command_surface() {
         })
     );
     assert_eq!(
-        parse_map(&args(&["migrate", "--type", "knowledge", "--to-v3",]))
+        parse_map(&args(&["migrate", "--type", "knowledge", "--to-v4",]))
             .expect("forward migration should parse"),
-        CliAction::Map(MapCommand::MigrateToV3)
+        CliAction::Map(MapCommand::MigrateToV4)
     );
-    assert_eq!(
-        parse_map(&args(&["migrate", "--type", "knowledge", "--rollback",]))
-            .expect("migration rollback should parse"),
-        CliAction::Map(MapCommand::MigrateRollback)
-    );
+    assert!(parse_map(&args(&["migrate", "--type", "knowledge", "--rollback"])).is_err());
     assert_eq!(
         parse_map(&args(&["agent-snippet"])).expect("agent snippet should parse"),
         CliAction::Map(MapCommand::AgentSnippet)

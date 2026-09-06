@@ -31,7 +31,7 @@ impl KnowledgeMapService {
             let mut preflight = self.load_for_mutation().await?;
             preflight
                 .map
-                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(preflight.omitted_through)?;
             add_directory_to_collection(
                 self.map_type,
                 &mut preflight.directories,
@@ -43,7 +43,7 @@ impl KnowledgeMapService {
         if self.map_type == RepositoryMapType::Knowledge {
             snapshot
                 .map
-                .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
         }
         let name = directory.directory.clone();
         add_directory_to_collection(self.map_type, &mut snapshot.directories, directory)?;
@@ -74,7 +74,7 @@ impl KnowledgeMapService {
             let mut preflight = self.load_for_mutation().await?;
             preflight
                 .map
-                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(preflight.omitted_through)?;
             update_directory_collection(self.map_type, &mut preflight.directories, &change)?;
         }
         self.prepare_legacy_migration().await?;
@@ -82,7 +82,7 @@ impl KnowledgeMapService {
         if self.map_type == RepositoryMapType::Knowledge {
             snapshot
                 .map
-                .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
         }
         let name = update_directory_collection(self.map_type, &mut snapshot.directories, &change)?;
         snapshot.map.record_change(
@@ -121,7 +121,7 @@ impl KnowledgeMapService {
             let mut preflight = self.load_for_mutation().await?;
             preflight
                 .map
-                .ensure_reserved_repository_routes_snapshot(preflight.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(preflight.omitted_through)?;
             remove_directory_from_collection(
                 self.map_type,
                 &mut preflight.directories,
@@ -133,7 +133,7 @@ impl KnowledgeMapService {
         if self.map_type == RepositoryMapType::Knowledge {
             snapshot
                 .map
-                .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+                .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
         }
         remove_directory_from_collection(self.map_type, &mut snapshot.directories, &directory)?;
         snapshot.map.record_change(

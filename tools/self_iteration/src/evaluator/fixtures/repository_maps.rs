@@ -1,4 +1,4 @@
-//! Generated Repository Map v3 fixture used by index-backed acceptance cases.
+//! Generated Repository Map v4 fixture used by index-backed acceptance cases.
 
 use std::path::Path;
 
@@ -158,7 +158,7 @@ const ORPHAN_TOPIC: MapTopicSpec = MapTopicSpec {
     }],
 };
 
-pub(super) fn write_repository_map_graph_v3_fixture(root: &Path) -> Result<(), String> {
+pub(super) fn write_repository_map_graph_v4_fixture(root: &Path) -> Result<(), String> {
     for (path, content) in repository_evidence_files() {
         write_fixture_file(&root.join(path), content)?;
     }
@@ -204,7 +204,7 @@ fn topic_shard(topic: &MapTopicSpec) -> String {
         source_order.push_str(&format!("  - {}\n", source.id));
     }
     format!(
-        "schema_version: 3\ntopic:\n  id: {}\n  title: {}\n  description: {}\nsources:\n{}route:\n  topic: {}\n  source_order:\n{}  fallback: bounded-search\n",
+        "schema_version: 4\ntopic:\n  id: {}\n  title: {}\n  description: {}\nsources:\n{}route:\n  topic: {}\n  source_order:\n{}  fallback: bounded-search\n",
         topic.id, topic.title, topic.description, sources, topic.id, source_order
     )
 }
@@ -233,7 +233,7 @@ fn repository_evidence_files() -> [(&'static str, &'static str); 22] {
         ),
         (
             ".relay-knowledge-fixture-version",
-            "repository_map_graph_v3\n",
+            "repository_map_graph_v4\n",
         ),
         (
             "Cargo.toml",
@@ -288,7 +288,7 @@ fn repository_evidence_files() -> [(&'static str, &'static str); 22] {
     ]
 }
 
-const KNOWLEDGE_MAP_HEADER: &str = r#"schema_version: 3
+const KNOWLEDGE_MAP_HEADER: &str = r#"schema_version: 4
 artifact_kind: map
 map_type: knowledge
 map_version: 1
@@ -333,7 +333,7 @@ topics:
 "#;
 
 const KNOWLEDGE_MAP_HISTORY: &str = r#"history:
-  archived_through: 0
+  omitted_through: 0
   recent:
   - version: 1
     action: init
@@ -341,7 +341,7 @@ const KNOWLEDGE_MAP_HISTORY: &str = r#"history:
     summary: Created the high-dimensional repository map fixture.
 "#;
 
-const CODESPEC_MAP: &str = r#"schema_version: 3
+const CODESPEC_MAP: &str = r#"schema_version: 4
 artifact_kind: map
 map_type: codespec
 map_version: 1
@@ -384,7 +384,7 @@ directories:
   update_rule: reviewed
 topics: []
 history:
-  archived_through: 0
+  omitted_through: 0
   recent:
   - version: 1
     action: init

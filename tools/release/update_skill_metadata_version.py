@@ -52,24 +52,17 @@ KNOWLEDGE_MAP_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 KNOWLEDGE_MAP_ARTIFACT_DEFS = (
     "rootManifest",
     "topicShard",
-    "historyArchive",
-    "historyIndexNode",
     "redirect",
 )
 KNOWLEDGE_MAP_REQUIRED_DEFS = (
     "digest",
     "topicArtifactRef",
-    "historyArchiveArtifactRef",
-    "historyIndexArtifactRef",
     "topic",
     "source",
     "route",
     "historyEntry",
     "topicRef",
-    "archiveRef",
-    "historyIndexRef",
     "historyManifest",
-    "historyIndexEntry",
     "directoryRelation",
     "directory",
     *KNOWLEDGE_MAP_ARTIFACT_DEFS,
@@ -522,17 +515,21 @@ def check_knowledge_map_schema_contract(path: Path, schema: dict[str, object]) -
     require_schema_value(
         path, history.get("$ref"), "#/$defs/historyManifest", "root history ref"
     )
-    recent = schema_property(definitions.get("historyManifest"), "recent")
-    archive_entries = schema_property(definitions["historyArchive"], "entries")
-    index_entries = schema_property(definitions["historyIndexNode"], "entries")
-    index_height = schema_property(definitions["historyIndexNode"], "height")
-    for name, value in (("recent", recent), ("archive", archive_entries)):
-        require_schema_value(path, value.get("minItems"), 1, f"{name} minimum")
-        require_schema_value(path, value.get("maxItems"), 16, f"{name} maximum")
-    require_schema_value(path, index_entries.get("minItems"), 1, "index fanout minimum")
-    require_schema_value(path, index_entries.get("maxItems"), 64, "index fanout maximum")
-    require_schema_value(path, index_height.get("minimum"), 0, "index height minimum")
-    require_schema_value(path, index_height.get("maximum"), 10, "index height maximum")
+    history_manifest = definitions.get("historyManifest")
+    recent = schema_property(history_manifest, "recent")
+    require_schema_value(path, recent.get("minItems"), 1, "recent minimum")
+    require_schema_value(path, recent.get("maxItems"), 16, "recent maximum")
+    forbidden_history_names = (
+        history_manifest.get("propertyNames", {}).get("not", {}).get("enum")
+        if isinstance(history_manifest, dict)
+        else None
+    )
+    require_schema_value(
+        path,
+        forbidden_history_names,
+        ["archived_through", "archive", "index"],
+        "legacy history property prohibition",
+    )
 
     description = schema.get("description")
     if not isinstance(description, str):
@@ -543,7 +540,7 @@ def check_knowledge_map_schema_contract(path: Path, schema: dict[str, object]) -
         (
             "allow unknown fields",
             "relay-knowledge map validate is authoritative",
-            "does not authorize agents to edit them directly",
+            "CLI-managed assets",
         ),
     )
 
@@ -552,7 +549,7 @@ def knowledge_map_schema_examples() -> list[dict[str, object]]:
     digest = "a" * 64
     history_entry = {"version": 1, "action": "init", "actor": "cli", "summary": "Created map."}
     manifest = {
-        "schema_version": 3,
+        "schema_version": 4,
         "artifact_kind": "map",
         "map_type": "knowledge",
         "map_version": 1,
@@ -570,7 +567,7 @@ def knowledge_map_schema_examples() -> list[dict[str, object]]:
             "id": "cli", "title": "CLI", "description": "CLI docs", "source_ids": ["cli-doc"],
             "ref": f"topics/topic-{'b' * 16}-{digest}.yaml", "digest": digest,
         }],
-        "history": {"archived_through": 0, "archive": None, "index": None, "recent": [history_entry]},
+        "history": {"omitted_through": 0, "recent": [history_entry]},
     }
     source = {
         "id": "cli-doc", "topic": "cli", "kind": "doc", "uri": "docs/cli.md",
@@ -578,30 +575,18 @@ def knowledge_map_schema_examples() -> list[dict[str, object]]:
         "status": "active", "version": 1, "description": None,
     }
     shard = {
-        "schema_version": 3,
+        "schema_version": 4,
         "topic": {"id": "cli", "title": "CLI", "description": "CLI docs"},
         "sources": [source],
         "route": {"topic": "cli", "source_order": ["cli-doc"], "fallback": None},
     }
-    archive_ref = f"history/{1:020}-{1:020}-{digest}.yaml"
-    archive = {
-        "schema_version": 3, "from_version": 1, "through_version": 1,
-        "previous": None, "entries": [history_entry],
-    }
-    index = {
-        "schema_version": 3, "from_version": 1, "through_version": 1, "height": 0,
-        "entries": [{
-            "from_version": 1, "through_version": 1, "kind": "archive",
-            "ref": archive_ref, "digest": digest,
-        }],
-    }
     redirect = {
-        "schema_version": 3,
+        "schema_version": 4,
         "artifact_kind": "redirect",
         "map_type": "knowledge",
         "target": "knowledge/knowledge-map.yaml",
     }
-    return [manifest, shard, archive, index, redirect]
+    return [manifest, shard, redirect]
 
 
 def check_knowledge_map_schema_examples(schema: dict[str, object]) -> None:
@@ -628,27 +613,10 @@ def check_knowledge_map_schema_examples(schema: dict[str, object]) -> None:
         invalid = copy.deepcopy(examples[0])
         mutation(invalid)
         invalid_examples.append(invalid)
-    oversized_archive = copy.deepcopy(examples[2])
-    oversized_archive["entries"] = [
-        {"version": version, "action": "update", "actor": "cli", "summary": f"Change {version}."}
-        for version in range(1, 18)
-    ]
-    invalid_examples.append(oversized_archive)
-    oversized_index = copy.deepcopy(examples[3])
-    oversized_index["entries"] = [
-        {
-            "from_version": version,
-            "through_version": version,
-            "kind": "archive",
-            "ref": f"history/{version:020}-{version:020}-{'a' * 64}.yaml",
-            "digest": "a" * 64,
-        }
-        for version in range(1, 66)
-    ]
-    invalid_examples.append(oversized_index)
-    invalid_height = copy.deepcopy(examples[3])
-    invalid_height["height"] = 11
-    invalid_examples.append(invalid_height)
+    for legacy_field in ("archived_through", "archive", "index"):
+        invalid = copy.deepcopy(examples[0])
+        invalid["history"][legacy_field] = None
+        invalid_examples.append(invalid)
     for invalid in invalid_examples:
         expect_value_error(lambda value=invalid: validate_schema_instance(schema, value), "oneOf")
 
@@ -670,8 +638,20 @@ def check_codespec_map_schema(path: Path) -> None:
             raise ValueError(f"{path} is missing CodeSpec Map schema $defs/{name}")
     if any(node.get("additionalProperties") is not True for node in schema_object_nodes(schema)):
         raise ValueError(f"{path} must allow unknown fields on every object schema")
+    history_manifest = definitions.get("historyManifest")
+    forbidden_history_names = (
+        history_manifest.get("propertyNames", {}).get("not", {}).get("enum")
+        if isinstance(history_manifest, dict)
+        else None
+    )
+    require_schema_value(
+        path,
+        forbidden_history_names,
+        ["archived_through", "archive", "index"],
+        "legacy history property prohibition",
+    )
     example = {
-        "schema_version": 3,
+        "schema_version": 4,
         "artifact_kind": "map",
         "map_type": "codespec",
         "map_version": 1,
@@ -687,7 +667,7 @@ def check_codespec_map_schema(path: Path) -> None:
         } for name in ("requirements", "design", "api", "test", "decisions")],
         "topics": [],
         "history": {
-            "archived_through": 0,
+            "omitted_through": 0,
             "recent": [{"version": 1, "action": "init", "actor": "cli", "summary": "Created map."}],
         },
         "future_extension": True,
@@ -696,6 +676,10 @@ def check_codespec_map_schema(path: Path) -> None:
     invalid = copy.deepcopy(example)
     invalid["map_type"] = "knowledge"
     expect_value_error(lambda: validate_schema_instance(schema, invalid), "const")
+    for legacy_field in ("archived_through", "archive", "index"):
+        invalid = copy.deepcopy(example)
+        invalid["history"][legacy_field] = None
+        expect_value_error(lambda value=invalid: validate_schema_instance(schema, value), "not")
 
 
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:

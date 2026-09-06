@@ -6,14 +6,15 @@ use tokio::time::Duration;
 use tokio::time::sleep;
 
 #[cfg(test)]
-use crate::project::{AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME};
+use crate::project::{
+    AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_FILE_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME,
+};
 use crate::{
     api::RequestContext,
     domain::{BusinessGlossary, KnowledgeMap, RepositoryMapType, validate_directory_collection},
     project::{
-        CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
-        KNOWLEDGE_MAP_TOPICS_DIR_NAME, LEGACY_AGENT_CONTRACT_DIR_NAME,
-        LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
+        CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
+        LEGACY_AGENT_CONTRACT_DIR_NAME, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
     },
 };
 
@@ -82,16 +83,16 @@ impl KnowledgeMapService {
         let path = self.map_path();
         if fs::try_exists(&path).await? {
             let existing = fs::read_to_string(&path).await?;
-            let legacy = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&existing)
-                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?
-                .schema_version
-                == 1;
+            let existing_schema_version =
+                serde_norway::from_str::<KnowledgeMapSchemaProbe>(&existing)
+                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?
+                    .schema_version;
             let mut snapshot = self.load_for_mutation().await?;
             let (software_changed, business_changed, glossary_created) =
                 if self.map_type == RepositoryMapType::Knowledge {
                     let (software_changed, business_changed) = snapshot
                         .map
-                        .ensure_reserved_repository_routes_snapshot(snapshot.archived_through)?;
+                        .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
                     (
                         software_changed,
                         business_changed,
@@ -114,21 +115,17 @@ impl KnowledgeMapService {
                         .to_owned(),
                 ));
             }
-            if legacy || snapshot.requires_publish {
+            if existing_schema_version == 1 || snapshot.requires_publish {
+                let response_summary =
+                    snapshot.record_required_publication(existing_schema_version, now_stamp());
                 self.write_map(&mut snapshot).await?;
                 return Ok(self.mutation_response(
                     context,
                     snapshot.map.map_version,
-                    if legacy {
-                        "migrated knowledge map schema v1 to v2".to_owned()
-                    } else if snapshot.legacy_glossary_uri_normalized {
-                        "migrated Knowledge Map legacy glossary URI to the canonical artifact"
-                            .to_owned()
-                    } else {
-                        "migrated Knowledge Map v2 history archive index".to_owned()
-                    },
+                    response_summary,
                 ));
             }
+            self.finalize_recent_history_migration().await?;
             return Ok(self.mutation_response(
                 context,
                 snapshot.map.map_version,
@@ -194,16 +191,16 @@ impl KnowledgeMapService {
                 map_type: RepositoryMapType::Knowledge,
                 directories: baseline_directories(RepositoryMapType::Knowledge),
                 map,
-                archived_through: 0,
-                archive: None,
-                history_index: None,
+                omitted_through: 0,
                 requires_publish: true,
                 legacy_glossary_uri_normalized: false,
             });
         }
         if !matches!(
             probe.schema_version,
-            LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+            LEGACY_ARTIFACT_SCHEMA_VERSION
+                | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+                | ARTIFACT_SCHEMA_VERSION
         ) {
             return Err(KnowledgeMapServiceError::Yaml(format!(
                 "unsupported schema_version {}",
@@ -211,11 +208,12 @@ impl KnowledgeMapService {
             )));
         }
         let manifest = parse_manifest(&content)?;
+        let history_checkpoint = history_checkpoint(&manifest);
         self.validate_manifest_identity(&manifest)?;
-        self.validate_archived_history(&manifest.history).await?;
-        let history_index = self.ensure_history_index(&manifest.history).await?;
-        let mut requires_publish = probe.schema_version != ARTIFACT_SCHEMA_VERSION
-            || (manifest.history.archive.is_some() && manifest.history.index.is_none());
+        if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+            self.validate_archived_history(&manifest.history).await?;
+        }
+        let mut requires_publish = probe.schema_version != ARTIFACT_SCHEMA_VERSION;
         let mut topics = Vec::with_capacity(manifest.topics.len());
         let mut sources = Vec::new();
         let mut routes = Vec::new();
@@ -244,7 +242,7 @@ impl KnowledgeMapService {
         if probe.schema_version != LEGACY_ARTIFACT_SCHEMA_VERSION
             || self.map_type != RepositoryMapType::Knowledge
         {
-            map.validate_snapshot(manifest.history.archived_through)?;
+            map.validate_snapshot(history_checkpoint)?;
         }
         Ok(MutableKnowledgeMap {
             map_type: self.map_type,
@@ -254,9 +252,7 @@ impl KnowledgeMapService {
                 manifest.directories
             },
             map,
-            archived_through: manifest.history.archived_through,
-            archive: manifest.history.archive,
-            history_index,
+            omitted_through: history_checkpoint,
             requires_publish,
             legacy_glossary_uri_normalized,
         })
@@ -266,7 +262,7 @@ impl KnowledgeMapService {
         &self,
         snapshot: &mut MutableKnowledgeMap,
     ) -> Result<(), KnowledgeMapServiceError> {
-        snapshot.map.validate_snapshot(snapshot.archived_through)?;
+        snapshot.map.validate_snapshot(snapshot.omitted_through)?;
         validate_directory_collection(self.map_type, &snapshot.directories, true)?;
         let dir = self.repository_root.join(self.contract_dir_name());
         fs::create_dir_all(&dir).await?;
@@ -316,44 +312,21 @@ impl KnowledgeMapService {
             });
         }
 
-        while snapshot.map.history.len() > RECENT_HISTORY_LIMIT {
-            let chunk: Vec<_> = snapshot.map.history.drain(..RECENT_HISTORY_LIMIT).collect();
-            let archive = KnowledgeMapHistoryArchive {
-                schema_version: ARTIFACT_SCHEMA_VERSION,
-                from_version: chunk.first().expect("non-empty archive chunk").version,
-                through_version: chunk.last().expect("non-empty archive chunk").version,
-                previous: snapshot.archive.clone(),
-                entries: chunk,
-            };
-            let yaml = serialize_yaml(&archive)?;
-            let digest = content_digest(yaml.as_bytes());
-            let relative = format!(
-                "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{digest}.yaml",
-                archive.from_version, archive.through_version
-            );
-            publish_immutable_in(
-                &self.repository_root,
-                self.contract_dir_name(),
-                &relative,
-                yaml.as_bytes(),
-            )
-            .await?;
-            let archive_ref = KnowledgeMapArchiveRef {
-                r#ref: relative,
-                digest,
-            };
-            snapshot.history_index = Some(
-                self.append_history_index(
-                    snapshot.history_index.take(),
-                    archive_ref.clone(),
-                    &archive,
-                )
-                .await?,
-            );
-            snapshot.archived_through = archive.through_version;
-            snapshot.archive = Some(archive_ref);
+        if snapshot.map.history.len() > RECENT_HISTORY_LIMIT {
+            let omitted = snapshot.map.history.len() - RECENT_HISTORY_LIMIT;
+            let discarded = snapshot
+                .map
+                .history
+                .drain(..omitted)
+                .next_back()
+                .ok_or_else(|| {
+                    KnowledgeMapServiceError::Integrity(
+                        "recent history compaction did not discard an entry".to_owned(),
+                    )
+                })?;
+            snapshot.omitted_through = discarded.version;
         }
-        snapshot.map.validate_snapshot(snapshot.archived_through)?;
+        snapshot.map.validate_snapshot(snapshot.omitted_through)?;
         let manifest = KnowledgeMapManifest {
             schema_version: ARTIFACT_SCHEMA_VERSION,
             artifact_kind: Some("map".to_owned()),
@@ -363,9 +336,10 @@ impl KnowledgeMapService {
             directories: snapshot.directories.clone(),
             topics: topic_refs,
             history: KnowledgeMapHistoryManifest {
-                archived_through: snapshot.archived_through,
-                archive: snapshot.archive.clone(),
-                index: snapshot.history_index.clone(),
+                archived_through: 0,
+                omitted_through: snapshot.omitted_through,
+                archive: None,
+                index: None,
                 recent: snapshot.map.history.clone(),
             },
         };
@@ -382,7 +356,56 @@ impl KnowledgeMapService {
             Duration::from_secs(60),
         )
         .await;
+        if let Err(error) = self.finalize_recent_history_migration().await {
+            tracing::warn!(
+                map_type = self.map_type.as_str(),
+                map_version = snapshot.map.map_version,
+                error = %error,
+                "repository map was committed but recent-history cleanup requires maintenance"
+            );
+        }
         snapshot.requires_publish = false;
+        Ok(())
+    }
+
+    async fn finalize_recent_history_migration(&self) -> Result<(), KnowledgeMapServiceError> {
+        let current = read_root_file(&self.repository_root, &self.map_path()).await?;
+        let current_probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&current)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        if current_probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+            return Ok(());
+        }
+        if fs::try_exists(self.backup_path()).await? {
+            let backup = read_root_file(&self.repository_root, &self.backup_path()).await?;
+            let backup_probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&backup)
+                .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+            if backup_probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+                self.publish_manifest(current.as_bytes()).await?;
+            }
+        }
+        if let HistoryCleanupStatus::Pending { removed } =
+            cleanup_history_artifacts_in(&self.repository_root, self.contract_dir_name()).await?
+        {
+            tracing::warn!(
+                contract_dir = self.contract_dir_name(),
+                removed,
+                "repository map history cleanup remains pending; rerun map init"
+            );
+        }
+        if self.map_type == RepositoryMapType::Knowledge
+            && self.legacy_history_cleanup_is_safe().await?
+        {
+            if let HistoryCleanupStatus::Pending { removed } =
+                cleanup_history_artifacts_in(&self.repository_root, LEGACY_AGENT_CONTRACT_DIR_NAME)
+                    .await?
+            {
+                tracing::warn!(
+                    contract_dir = LEGACY_AGENT_CONTRACT_DIR_NAME,
+                    removed,
+                    "repository map history cleanup remains pending; rerun map init"
+                );
+            }
+        }
         Ok(())
     }
 
@@ -440,7 +463,9 @@ impl KnowledgeMapService {
         if topic_ref.r#ref != expected_ref
             || !matches!(
                 shard.schema_version,
-                LEGACY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+                LEGACY_ARTIFACT_SCHEMA_VERSION
+                    | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+                    | ARTIFACT_SCHEMA_VERSION
             )
             || shard.topic.id != topic_ref.id
             || shard.topic.title != topic_ref.title
@@ -535,6 +560,14 @@ impl KnowledgeMapService {
             return Err(error.into());
         }
         Ok(true)
+    }
+}
+
+fn history_checkpoint(manifest: &KnowledgeMapManifest) -> u64 {
+    if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        manifest.history.omitted_through
+    } else {
+        manifest.history.archived_through
     }
 }
 

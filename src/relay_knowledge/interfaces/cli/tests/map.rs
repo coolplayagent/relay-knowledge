@@ -46,7 +46,7 @@ fn parses_knowledge_map_source_commands() {
         history.action,
         CliAction::Map(map::MapCommand::History {
             selection: map::MapSelection::All,
-            from_version: 17,
+            from_version: Some(17),
             limit: 32,
         })
     );

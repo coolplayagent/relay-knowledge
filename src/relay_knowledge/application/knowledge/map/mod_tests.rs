@@ -520,7 +520,7 @@ async fn route_rejects_overflow_and_unsafe_archive_metadata() {
 }
 
 #[tokio::test]
-async fn show_rejects_a_non_content_addressed_archive_head() {
+async fn show_rejects_archive_fields_in_a_recent_only_manifest() {
     let root = temp_root("invalid-show-archive-ref");
     fs::create_dir_all(&root).await.expect("root should create");
     let service = KnowledgeMapService::new(root.clone());
@@ -531,6 +531,7 @@ async fn show_rejects_a_non_content_addressed_archive_head() {
         .expect("manifest should read");
     let mut manifest = parse_manifest(&content).expect("manifest should parse");
     manifest.map_version = 2;
+    manifest.history.omitted_through = 1;
     manifest.history.archived_through = 1;
     manifest.history.archive = Some(KnowledgeMapArchiveRef {
         r#ref: "history/archive.yaml".to_owned(),
@@ -547,8 +548,12 @@ async fn show_rejects_a_non_content_addressed_archive_head() {
     let error = service
         .show(&context, None)
         .await
-        .expect_err("show must reject a structurally invalid archive head");
-    assert!(error.to_string().contains("not content addressed"));
+        .expect_err("show must reject archive fields in schema v4");
+    let message = error.to_string();
+    assert!(
+        message.contains("must not reference archive artifacts"),
+        "unexpected validation error: {message}"
+    );
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -983,12 +988,12 @@ fn temp_root(label: &str) -> PathBuf {
     ))
 }
 
-#[path = "history_tests.rs"]
-mod history_tests;
-
+#[path = "history_cleanup_tests.rs"]
+mod history_cleanup_tests;
 #[path = "history_legacy_tests.rs"]
 mod history_legacy_tests;
-
+#[path = "history_tests.rs"]
+mod history_tests;
 #[path = "path_tests.rs"]
 mod path_tests;
 use std::time::{SystemTime, UNIX_EPOCH};

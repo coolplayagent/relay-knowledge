@@ -1,8 +1,8 @@
-schema_version: 3
+schema_version: 4
 artifact_kind: map
 map_type: knowledge
-map_version: 25
-updated_at: unix:1788149781
+map_version: 26
+updated_at: unix:1788492340
 directories:
 - directory: domain
   purpose: Domain concepts, models, and business rules.
@@ -65,8 +65,8 @@ topics:
   - git-commit-knowledge-development-loop
   - partitioned-sqlite-catalog-read-fast-path
   - software-global-domain-model
-  ref: topics/topic-4ca303a3bf7ddf7b-29241b44dc8e89c7e1419b31f15d80af3d5912ce7f159913206dbc761c26be42.yaml
-  digest: 29241b44dc8e89c7e1419b31f15d80af3d5912ce7f159913206dbc761c26be42
+  ref: topics/topic-4ca303a3bf7ddf7b-b1c4ed6504c17950bc35e64c1880f89d9bd02f9825161b0505339d108ca3781d.yaml
+  digest: b1c4ed6504c17950bc35e64c1880f89d9bd02f9825161b0505339d108ca3781d
 - id: benchmarks
   title: Benchmark knowledge
   description: Self-iteration and benchmark guardrail documentation.
@@ -76,49 +76,40 @@ topics:
   - profile-all-performance-source-surface-2026-06-04
   - software-global-evidence-priority-verification-2026-08-31
   - software-global-ranking-evaluation
-  ref: topics/topic-cb1d2fdcc86ce72a-8b3e7416a2f93141b136174bae329fb35ac77467f503f964f2323ebe91e5a7fc.yaml
-  digest: 8b3e7416a2f93141b136174bae329fb35ac77467f503f964f2323ebe91e5a7fc
+  ref: topics/topic-cb1d2fdcc86ce72a-89b546186126348428cbe7f41ae078342963fc553113d2c25c6d363e16d18dee.yaml
+  digest: 89b546186126348428cbe7f41ae078342963fc553113d2c25c6d363e16d18dee
 - id: business-knowledge
   title: Business knowledge
   description: Version-controlled business domains, terminology, aliases, semantics, and technical mappings.
   source_ids:
   - repository-business-glossary
-  ref: topics/topic-17438b0266842113-0379e85217e8a3d1432b5ba9e72a8b9c4b978ced416dc27d8b13b6aa2c93ab6c.yaml
-  digest: 0379e85217e8a3d1432b5ba9e72a8b9c4b978ced416dc27d8b13b6aa2c93ab6c
+  ref: topics/topic-17438b0266842113-d054e16723063999154e9ac168ec10521b02b5a4a46e22b49e56fbc1f7ee336f.yaml
+  digest: d054e16723063999154e9ac168ec10521b02b5a4a46e22b49e56fbc1f7ee336f
 - id: cli
   title: CLI knowledge
   description: CLI command reference and agent workflow guidance.
   source_ids:
   - cli-command-reference
   - cli-skill-workflows
-  ref: topics/topic-99bb88401742848e-2556ca2b68c14479502a0ff8eb8fc3dab664305a8432f0ccce2cfd98162f025e.yaml
-  digest: 2556ca2b68c14479502a0ff8eb8fc3dab664305a8432f0ccce2cfd98162f025e
+  ref: topics/topic-99bb88401742848e-92d24f0fea8b084f22203d0680ebd9c6c96c92b08ef83b46542979554215c74e.yaml
+  digest: 92d24f0fea8b084f22203d0680ebd9c6c96c92b08ef83b46542979554215c74e
 - id: release-documentation
   title: Release documentation knowledge
   description: Release-readiness documentation, navigation, and validation records.
   source_ids:
   - documentation-release-readiness-2026-06-05
   - documentation-self-iteration-readiness-2026-08-18
-  ref: topics/topic-06be3638d1633e1a-c5c16af56f8c277913928faf0342060d9fa43f7e716e431f38736fdfaf5d05fd.yaml
-  digest: c5c16af56f8c277913928faf0342060d9fa43f7e716e431f38736fdfaf5d05fd
+  ref: topics/topic-06be3638d1633e1a-32bef6245e90fdb3f57bafd15b2fbbd7ff9684d66e10d5253d80bcfc42ec9ba9.yaml
+  digest: 32bef6245e90fdb3f57bafd15b2fbbd7ff9684d66e10d5253d80bcfc42ec9ba9
 - id: software-model
   title: Whole-software model
   description: Code-map-backed architecture, build, deployment, dependency, configuration, and design knowledge.
   source_ids:
   - repository-software-model
-  ref: topics/topic-247e2a0d6f43d185-b752f818d859387488b3ee9c2aefa0d86d9d3e8cb69fe907f28fd756cc567629.yaml
-  digest: b752f818d859387488b3ee9c2aefa0d86d9d3e8cb69fe907f28fd756cc567629
+  ref: topics/topic-247e2a0d6f43d185-ac637c335d170f7adca9bdd5a8632f3ed04bd7f8a7346a4bfb6fe50044d4a761.yaml
+  digest: ac637c335d170f7adca9bdd5a8632f3ed04bd7f8a7346a4bfb6fe50044d4a761
 history:
-  archived_through: 16
-  archive:
-    ref: history/00000000000000000001-00000000000000000016-d8d12f83fc6a833ad46901c200451cd85a939e12118e40ddaa1368a706e80bd7.yaml
-    digest: d8d12f83fc6a833ad46901c200451cd85a939e12118e40ddaa1368a706e80bd7
-  index:
-    from_version: 1
-    through_version: 16
-    height: 0
-    ref: history/index-00-00000000000000000001-00000000000000000016-919315c03837a9cd2b2906ec547fe7a0ca6f4c41aa8e259e617e69bdc217b889.yaml
-    digest: 919315c03837a9cd2b2906ec547fe7a0ca6f4c41aa8e259e617e69bdc217b889
+  omitted_through: 16
   recent:
   - version: 17
     action: source.add
@@ -156,3 +147,7 @@ history:
     action: source.add
     actor: cli
     summary: Added source 'durable-worktree-delta-verification-2026-08-31' to topic 'benchmarks'.
+  - version: 26
+    action: history.compact
+    actor: cli
+    summary: Migrated repository map to bounded recent-only history storage.
