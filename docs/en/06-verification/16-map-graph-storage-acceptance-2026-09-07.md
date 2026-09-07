@@ -18,8 +18,9 @@ its exact count after streaming domain validation of every joined fact, includin
 losing configuration duplicates. Invalid facts cannot publish a fresh checkpoint.
 Stable identity, evidence, unresolved targets and graph version
 remain in the response. Duplicate configuration identities select the highest
-confidence, widest end line and then smallest usage ID; different relationship
-kinds remain separate.
+confidence, widest end line and then smallest usage ID after Unicode-whitespace
+normalization of target IDs; different relationship kinds remain separate.
+Path and source-language filters run before configuration window ranking.
 
 Typed ontology statements retain their stored provenance, fact state and
 reconciliation semantics. Code calls, references, imports and search indexes
@@ -34,6 +35,7 @@ database does not bulk-delete data or compact SQLite. See the
 | --- | --- |
 | Both maps remain compatible | Current and published 1.1.17 CLIs validate CodeSpec and Knowledge Map v4; eight CLI governance contracts cover directory visibility, source ordering, reserved routes and retained history. |
 | Large topic projections avoid duplicate writes | Owner tests count 4,101 relationships over 4,096 additional topics, return a bounded 1,000-edge window, and require unchanged SQLite write/page counters and zero stored compatibility rows. A separate 513-topic refresh crosses the former 512-row page boundary. |
+| Filtered configuration reads avoid unrelated window work | A 16,384-usage case requires path-only, language-only and combined filters to use less than half the VM instructions of the full-scope query at limit 1. ASCII/Unicode target-ID variants must collapse to one stable identity; the trim character set is checked against every Rust Unicode scalar. |
 | Durable recovery retains the optimization | The 12,000-file performance case resumes fenced software publication, reports 12,000 SDK relationships and requires zero stored compatibility rows before the completed checkpoint. |
 | Migration preserves recovery | A failing ontology insert rolls back legacy-row cleanup; a successful refresh reclaims only its own scope. Schema initialization marks old state stale without deleting old payloads. |
 | High-dimensional map indexing | Four repository-map cases cover eight authorized topics, orphan-shard exclusion, combined software slices and typed `documents`, `derived_from`, `depends_on`, `deploys`, and `runs_as` provenance. |
@@ -102,8 +104,8 @@ timings are observations for this workload, not a universal speed guarantee.
 | Stored compatibility rows | 4,120 | 0 | 100% |
 | Compatibility table and index bytes | 1,507,328 | 12,288 | 99.18% |
 | Database allocated bytes | 35,438,592 | 33,943,552 | 4.22% |
-| Cold indexing | 1,355.2 ms | 1,332.5 ms | 1.67% |
-| Bounded relationship query | 72.8 ms | 70.5 ms | 3.08% |
+| Cold indexing | 926.9 ms | 887.8 ms | 4.22% |
+| Bounded relationship query | 65.3 ms | 65.7 ms | -0.74% |
 
 Both builds retain 546 files, 5,860 code symbols, 2,048 references, 2,048 calls,
 1,314 chunks, 4,118 topics, 8,776 ontology entities and 12,893 typed statements.
@@ -114,7 +116,7 @@ non-stale snapshots.
 Baseline binary SHA-256:
 `f2b2a3fe38bc77c620ca0c1e536a80bdce607475221e2028b9234d3d97de3904`.
 Candidate binary SHA-256:
-`e913ac3ee26f7a1cddec2fefc6f89770fd3ca0eb099c70c57ff74a4cb3c778ed`.
+`8d60c8ae482d3871a5b464420f7d34723200dbe0d4737c268bb90e2a8586bab3`.
 The baseline source was compared byte-for-byte against all 1,825 tracked
 Cargo/source files at the baseline revision. An earlier pair of identically
 hashed binaries was rejected as invalid comparison evidence. A pilot run
@@ -126,7 +128,7 @@ overlapping test compilation is excluded from the reported timings.
 | --- | --- |
 | Cargo check and Clippy, all targets/features | Passed, warnings denied |
 | Rust formatting and documentation checker | Passed; 216 Markdown files |
-| Rust unit tests | 3,908 passed; one subprocess fixture intentionally ignored and invoked by its parent tests |
+| Rust unit tests | 3,910 passed; one subprocess fixture intentionally ignored and invoked by its parent tests |
 | Rust integration tests | 157 passed |
 | Deterministic benchmark target | 1 passed |
 | Self-iteration harness unit tests | 240 passed |
@@ -137,11 +139,20 @@ overlapping test compilation is excluded from the reported timings.
 | Fast/performance evaluation | `would_accept`; 392/392 gates, 139/139 cases, 327 command contracts, 86 metrics; performance and stability scores both 1.0 |
 
 The complete evaluation used `--jobs 2 --repo-jobs 1 --query-jobs 2` and took
-134,542 ms. Report:
-`manual-evaluate-1788784416972397547-0-518296.json`, SHA-256
-`06df94a4a92af9051198d1c8c77fa3d91193fa448ae41b9f0a9278dc035c19a8`.
+98,469 ms. Report:
+`manual-evaluate-1788786746823466017-0-592471.json`, SHA-256
+`3df1a58cfcfd072bfe64cc66f772928221d5754c9eb9f35071debd4b7ea2eb91`.
 Its generated map fixture passed all four cases through the harness's actual
 scoring path. Evaluation mode created no commit.
+
+A separate evaluation run overlapped the full Rust tests and was rejected:
+`relay_teams_cold_index_ms` was 62,925 ms against a 45,000 ms budget, while all
+392 gates and 139 functional cases passed. Its report
+`manual-evaluate-1788786344239603782-0-562704.json` is retained with SHA-256
+`4d5edc4e7d27e93d8b35239f6797eed88bb085a89aae8947935d1c9bbfbe94fd`.
+The acceptance evaluation above is run separately after that competing load
+exits and records 32,287 ms for the same cold-index metric; no performance
+threshold is relaxed.
 
 Chromium was installed through Playwright and ran against the existing Linux
 libraries. The `--with-deps` installation attempt required unavailable sudo

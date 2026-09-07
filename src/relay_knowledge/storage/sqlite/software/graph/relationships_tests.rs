@@ -301,3 +301,102 @@ fn software_relationship_storage_validates_configuration_facts_before_deduplicat
         assert_eq!(connection.total_changes(), changes);
     }
 }
+
+#[test]
+fn software_relationship_storage_normalizes_configuration_identity_before_ranking() {
+    let whitespace: String = (0..=u32::from(char::MAX))
+        .filter_map(char::from_u32)
+        .filter(|character| character.is_whitespace())
+        .collect();
+    assert_eq!(RELATIONSHIP_TRIM_CHARACTERS, whitespace);
+    for target in [
+        " flag ",
+        "\tflag\n",
+        "\u{2003}flag\u{3000}",
+        "\u{0085}flag\u{00a0}",
+    ] {
+        let connection = relationship_fixture();
+        connection
+            .execute(
+                "INSERT INTO code_repository_feature_flags VALUES
+                 ('scope', ?1, 'normalized-duplicate', 'FEATURE', 'reads_config',
+                  9500, 'extracted', 'src/lib.rs', 8, 12)",
+                [target],
+            )
+            .unwrap();
+        let request = relationship_request(Vec::new(), Vec::new());
+        let edges = relationships_for_scope(&connection, "scope", &request, 1000).unwrap();
+        assert_eq!(edges.len(), 5, "duplicate normalized target: {target:?}");
+        assert_eq!(
+            relationship_count_for_scope(&connection, "scope").unwrap(),
+            5
+        );
+        let identities = edges
+            .iter()
+            .map(|edge| &edge.relationship_id)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(identities.len(), edges.len());
+        let configuration = edges
+            .iter()
+            .find(|edge| edge.relationship_kind == "configures")
+            .unwrap();
+        assert_eq!(configuration.target_id, "flag");
+        assert_eq!(configuration.confidence_basis_points, 9500);
+        assert_eq!(configuration.evidence_line_range.end, 12);
+    }
+}
+
+#[test]
+fn software_relationship_storage_filters_configuration_before_window_work() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
+
+    let connection = relationship_fixture();
+    connection.execute_batch(
+        "INSERT INTO software_files VALUES
+            ('selected', 'repo', 'scope', 'config/feature.ini', 'ini', 'configuration', 'parsed', 1),
+            ('unrelated', 'repo', 'scope', 'other/source.rs', 'rust', 'source', 'parsed', 1);
+         INSERT INTO code_repository_feature_flags VALUES
+            ('scope', 'selected-flag', 'selected', 'FEATURE', 'reads_config', 9000, 'extracted', 'config/feature.ini', 1, 1);
+         WITH RECURSIVE numbers(value) AS (
+             SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 16384
+         )
+         INSERT INTO code_repository_feature_flags
+         SELECT 'scope', 'flag-' || value, 'usage-' || value, 'FEATURE',
+                'reads_config', 8000, 'inferred', 'other/source.rs', value, value
+         FROM numbers;"
+    ).unwrap();
+    let changes = connection.total_changes();
+    let measured_query = |request: &SoftwareGlobalRequest| {
+        let steps = Arc::new(AtomicU64::new(0));
+        let observed = Arc::clone(&steps);
+        connection.progress_handler(
+            100,
+            Some(move || {
+                observed.fetch_add(100, Ordering::Relaxed);
+                false
+            }),
+        );
+        let result = relationships_for_scope(&connection, "scope", request, 1);
+        connection.progress_handler(0, None::<fn() -> bool>);
+        (steps.load(Ordering::Relaxed), result.unwrap())
+    };
+    let (full_steps, _) = measured_query(&relationship_request(Vec::new(), Vec::new()));
+    for request in [
+        relationship_request(vec!["config".into()], Vec::new()),
+        relationship_request(Vec::new(), vec!["ini".into()]),
+        relationship_request(vec!["config".into()], vec!["ini".into()]),
+    ] {
+        let (filtered_steps, edges) = measured_query(&request);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].target_id, "selected-flag");
+        assert!(
+            filtered_steps * 2 < full_steps,
+            "request predicates must reduce VM work before ranking: filtered={filtered_steps}, full={full_steps}"
+        );
+        eprintln!("configuration_window_vm_steps filtered={filtered_steps} full={full_steps}");
+    }
+    assert_eq!(connection.total_changes(), changes);
+}

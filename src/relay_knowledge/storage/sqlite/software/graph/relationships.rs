@@ -27,23 +27,46 @@ const RELATIONSHIP_FACTS_SQL: &str = "
            resolution_state, confidence_basis_points, 'ambiguous', evidence_path,
            evidence_line_start, evidence_line_end, NULL, 1
     FROM software_sdk_usages WHERE source_scope = ?1
+";
+
+// SQLite's default trim only removes ASCII spaces. Match Rust's Unicode
+// White_Space contract; an exhaustive char::is_whitespace test guards drift.
+const RELATIONSHIP_TRIM_CHARACTERS: &str = "\t\n\u{000b}\u{000c}\r \u{0085}\u{00a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}";
+
+fn relationship_facts_sql(paths: &[String], languages: &[String]) -> String {
+    let paths = super::super::path_filter_sql_for_column("flags.path", paths);
+    let languages =
+        super::super::language_filter_sql_for_column("flag_files.language_id", languages);
+    let language_guard = if languages.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "AND EXISTS (SELECT 1 FROM software_files flag_files
+             WHERE flag_files.source_scope = flags.source_scope
+               AND flag_files.path = flags.path {languages})"
+        )
+    };
+    format!(
+        "{RELATIONSHIP_FACTS_SQL}
     UNION ALL
     SELECT source_scope,
            CASE edge_kind WHEN 'defines_config' THEN 'configures'
                           WHEN 'reads_config' THEN 'configures'
                           WHEN 'guards_code' THEN 'configures' ELSE 'references' END,
-           feature_flag_id, 'configuration', source_key, 'inferred',
+           trim(feature_flag_id, ?2), 'configuration', source_key, 'inferred',
            confidence_basis_points, confidence_tier, path, line_start, line_end, NULL, edge_rank
     FROM (
-        SELECT *, ROW_NUMBER() OVER (
-            PARTITION BY source_scope, feature_flag_id, path, line_start,
+        SELECT flags.*, ROW_NUMBER() OVER (
+            PARTITION BY source_scope, trim(feature_flag_id, ?2), path, line_start,
                          CASE WHEN edge_kind IN ('defines_config', 'reads_config', 'guards_code')
                               THEN 'configures' ELSE 'references' END
             ORDER BY confidence_basis_points DESC, line_end DESC, usage_id ASC
         ) AS edge_rank
-        FROM code_repository_feature_flags WHERE source_scope = ?1
+        FROM code_repository_feature_flags flags WHERE source_scope = ?1
+        {paths} {language_guard}
+    )"
     )
-";
+}
 
 const RELATIONSHIP_COLUMNS_SQL: &str = "
     files.repository_id, relationships.source_scope,
@@ -61,14 +84,15 @@ pub(in crate::storage::sqlite::software) fn relationship_count_for_scope(
     connection: &Connection,
     source_scope: &str,
 ) -> Result<usize, StorageError> {
+    let facts = relationship_facts_sql(&[], &[]);
     let query = format!(
-        "WITH relationships AS ({RELATIONSHIP_FACTS_SQL})
+        "WITH relationships AS ({facts})
          SELECT {RELATIONSHIP_COLUMNS_SQL}, 0, relationships.edge_rank FROM relationships
          JOIN software_files files ON files.source_scope = relationships.source_scope
                                   AND files.path = relationships.evidence_path"
     );
     let mut statement = connection.prepare(&query)?;
-    let rows = statement.query_map(params![source_scope], |row| {
+    let rows = statement.query_map(params![source_scope, RELATIONSHIP_TRIM_CHARACTERS], |row| {
         Ok((relationship_from_row(row)?, row.get::<_, u64>(15)? == 1))
     })?;
     let mut count = 0_usize;
@@ -92,6 +116,10 @@ pub(in crate::storage::sqlite::software) fn relationships_for_scope(
     request: &SoftwareGlobalRequest,
     limit: usize,
 ) -> Result<Vec<SoftwareRelationship>, StorageError> {
+    let facts = relationship_facts_sql(
+        &request.repository.path_filters,
+        &request.repository.language_filters,
+    );
     let path_filter = super::super::path_filter_sql_for_column(
         "relationships.evidence_path",
         &request.repository.path_filters,
@@ -99,7 +127,7 @@ pub(in crate::storage::sqlite::software) fn relationships_for_scope(
     let language_filter = relationship_language_filter_sql(&request.repository.language_filters);
     let query = format!(
         "
-        WITH relationships AS ({RELATIONSHIP_FACTS_SQL})
+        WITH relationships AS ({facts})
         SELECT {RELATIONSHIP_COLUMNS_SQL}, status.projected_graph_version
         FROM relationships
         JOIN software_files files
@@ -142,7 +170,14 @@ pub(in crate::storage::sqlite::software) fn relationships_for_scope(
         LIMIT ?
         ",
     );
-    let mut values = vec![Value::Text(source_scope.to_owned())];
+    let mut values = vec![
+        Value::Text(source_scope.to_owned()),
+        Value::Text(RELATIONSHIP_TRIM_CHARACTERS.to_owned()),
+    ];
+    // Window predicates bind before the outer filters. Both layers must use
+    // the same request values so unrelated facts never enter configuration ranking.
+    super::super::push_path_filter_values(&mut values, &request.repository.path_filters);
+    super::super::push_language_filter_values(&mut values, &request.repository.language_filters);
     super::super::push_path_filter_values(&mut values, &request.repository.path_filters);
     push_relationship_language_filter_values(&mut values, &request.repository.language_filters);
     values.push(Value::Integer(limit as i64));

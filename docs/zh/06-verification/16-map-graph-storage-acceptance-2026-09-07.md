@@ -14,7 +14,8 @@ snapshot 的源行重建。Schema 8 删除逐条关系写入和反复 OFFSET 扫
 relationships 阶段逐行复用 domain 校验，包括未选中的配置重复项，再记录精确
 计数；无效事实不能发布 fresh checkpoint。返回值保留稳定 identity、evidence、未解析目标和
 graph version。配置的重复 identity 按最高置信度、最宽结束行和最小 usage ID
-确定唯一结果，不同 relationship kind 保持独立。
+确定唯一结果；target ID 先进行 Unicode 空白规范化，不同 relationship kind 保持独立。
+Path 和源文件 language 过滤在配置窗口排序前施加。
 
 类型化 ontology statement 继续持久化来源、事实状态和 reconciliation 语义。
 代码调用、引用、导入和检索索引保持完整。旧兼容表暂留，以支持历史 import 和
@@ -27,6 +28,7 @@ retention cursor；成功刷新 scope 后回收其旧行，打开数据库不会
 | --- | --- |
 | 双地图兼容 | 当前源码与已发布 1.1.17 CLI 均验证 CodeSpec、Knowledge Map v4；8 个 CLI 治理合同覆盖目录可见性、source 顺序、保留 route 和保留历史。 |
 | 大规模主题无重复写入 | Owner 测试在新增 4,096 个 topic 后计数 4,101 条关系，读取有界 1,000 条窗口，要求 SQLite write/page counter 不变且兼容表 0 行；另有 513-topic refresh 跨过旧 512 行分页边界。 |
+| 配置过滤排除无关窗口工作 | 16,384 条 usage case 要求 path、language 及组合过滤在 limit 1 时使用的 VM 指令少于完整 scope 查询的一半；ASCII/Unicode target ID 变体必须合并为一个稳定 identity，并逐个 Rust Unicode scalar 校验 trim 字符集合。 |
 | 恢复路径保留优化 | 12,000 文件性能 case 从 fenced software publication 阶段继续，报告 12,000 条 SDK 关系，完成 checkpoint 前必须确认兼容表 0 行。 |
 | 迁移可恢复 | 注入 ontology insert 失败后旧行清理整体回滚，成功刷新只回收自身 scope；schema 初始化标记旧状态 stale，但不删除旧 payload。 |
 | 高维 map 索引 | 4 个 repository-map case 验证 8 个授权 topic、孤立 shard 排除、软件维度组合和类型化 `documents`、`derived_from`、`depends_on`、`deploys`、`runs_as` 来源。 |
@@ -86,8 +88,8 @@ Release 对比在生成的 `repository_map_graph_v4` fixture 上增加 256 个 M
 | 兼容关系持久行数 | 4,120 | 0 | 100% |
 | 兼容表及索引占用字节 | 1,507,328 | 12,288 | 99.18% |
 | 数据库分配字节 | 35,438,592 | 33,943,552 | 4.22% |
-| 冷索引 | 1,355.2 ms | 1,332.5 ms | 1.67% |
-| 有界关系查询 | 72.8 ms | 70.5 ms | 3.08% |
+| 冷索引 | 926.9 ms | 887.8 ms | 4.22% |
+| 有界关系查询 | 65.3 ms | 65.7 ms | -0.74% |
 
 两个构建均保留 546 文件、5,860 code symbol、2,048 reference、2,048 call、
 1,314 chunk、4,118 topic、8,776 ontology entity 和 12,893 typed statement。
@@ -97,7 +99,7 @@ completed、非 stale 的 snapshot。
 Baseline 二进制 SHA-256：
 `f2b2a3fe38bc77c620ca0c1e536a80bdce607475221e2028b9234d3d97de3904`。
 Candidate 二进制 SHA-256：
-`e913ac3ee26f7a1cddec2fefc6f89770fd3ca0eb099c70c57ff74a4cb3c778ed`。
+`8d60c8ae482d3871a5b464420f7d34723200dbe0d4737c268bb90e2a8586bab3`。
 Baseline 源码已与基线 revision 的全部 1,825 个 tracked Cargo/source 文件逐字节
 比较。此前发现的新旧二进制 hash 相同的一组产物已作为无效对比证据排除；
 与测试编译重叠的 pilot 轮次也不计入上表耗时。
@@ -108,7 +110,7 @@ Baseline 源码已与基线 revision 的全部 1,825 个 tracked Cargo/source �
 | --- | --- |
 | Cargo check、Clippy，全 targets/features | 通过，warnings denied |
 | Rust formatting、文档检查 | 通过，216 个 Markdown 文件 |
-| Rust unit tests | 3,908 通过；1 个 subprocess fixture 按设计 ignored，由父测试调用 |
+| Rust unit tests | 3,910 通过；1 个 subprocess fixture 按设计 ignored，由父测试调用 |
 | Rust integration tests | 157 通过 |
 | 确定性 benchmark target | 1 通过 |
 | Self-iteration harness unit tests | 240 通过 |
@@ -118,11 +120,18 @@ Baseline 源码已与基线 revision 的全部 1,825 个 tracked Cargo/source �
 | Playwright Chromium browser test | 1 通过 |
 | Fast/performance evaluation | `would_accept`；392/392 gate、139/139 case、327 command contract、86 metric；performance 和 stability 均为 1.0 |
 
-完整评估使用 `--jobs 2 --repo-jobs 1 --query-jobs 2`，耗时 134,542 ms。
-报告 `manual-evaluate-1788784416972397547-0-518296.json` 的 SHA-256 为
-`06df94a4a92af9051198d1c8c77fa3d91193fa448ae41b9f0a9278dc035c19a8`。
+完整评估使用 `--jobs 2 --repo-jobs 1 --query-jobs 2`，耗时 98,469 ms。
+报告 `manual-evaluate-1788786746823466017-0-592471.json` 的 SHA-256 为
+`3df1a58cfcfd072bfe64cc66f772928221d5754c9eb9f35071debd4b7ea2eb91`。
 生成的 map fixture 通过 harness 实际评分路径的全部 4 个 case；evaluate 模式没有
 自动创建 commit。
+
+另一次与全量 Rust 测试并发的评估被拒绝：`relay_teams_cold_index_ms` 为
+62,925 ms，超过 45,000 ms 预算；392 个门禁和 139 个功能 case 均通过。该轮报告
+`manual-evaluate-1788786344239603782-0-562704.json` 已保留，SHA-256 为
+`4d5edc4e7d27e93d8b35239f6797eed88bb085a89aae8947935d1c9bbfbe94fd`。
+上方验收评估在该竞争负载退出后独立执行，同一冷索引指标为 32,287 ms，
+没有放宽性能阈值。
 
 Chromium 已通过 Playwright 安装并使用现有 Linux library 成功执行；
 `--with-deps` 的系统依赖安装尝试需要当前不可用的 sudo 凭据。Browser test 使用
