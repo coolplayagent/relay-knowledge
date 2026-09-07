@@ -77,6 +77,23 @@ Full release validation still requires the normal release gates from the root
 README and CI, including package checks, coverage, browser integration setup,
 and release workflow dry-run validation when a release tag is being prepared.
 
+## 6. Release 1.1.17 refresh — 2026-09-07
+
+This documentation-only preparation adds matching English and Chinese 1.1.17
+release pages, updates both Pages homepages and root READMEs, and records the
+Actions publication procedure in the release contract. The notes cover Map v4,
+its 16-entry history bound, migration/backup requirements, storage churn,
+worktree recovery, and the shared ontology schema. Product code and workflows
+are unchanged.
+
+Validation passed: `python3 tools/docs/check_docs.py --self-test-and-check`
+(214 Markdown files), skill metadata validation at 1.1.17, Cargo manifest/lock
+version agreement, the Pages workflow's bilingual version/link assertions,
+local HTML navigation/assets, changed-file line limits, and `git diff --check`.
+Release quality gates, platform builds, publication, and deployment remain
+subject to the tag-triggered Release and main-triggered Pages Actions results.
+
+
 ---
 
 Navigation: Previous:

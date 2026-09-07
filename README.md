@@ -33,6 +33,10 @@ target/debug/relay-knowledge help --format json
 
 ## Installing Releases
 
+Version 1.1.17 introduces Repository Map v4 with the latest 16 history entries.
+See the [1.1.17 release notes](pages/en/releases/1.1.17.html) for migration,
+backup, and installation guidance.
+
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 provide prebuilt archives for Linux x64/ARM64, macOS Intel/Apple Silicon, and
 Windows x64/ARM64. Verify the selected archive with `checksums.txt` before

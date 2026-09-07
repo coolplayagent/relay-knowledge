@@ -31,6 +31,9 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
+1.1.17 引入只保留最近 16 条历史的 Repository Map v4。迁移、备份与安装说明见
+[1.1.17 发布说明](pages/zh/releases/1.1.17.html)。
+
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 提供 Linux x64/ARM64、macOS Intel/Apple Silicon 和 Windows x64/ARM64
 预构建压缩包。将二进制放入 `PATH` 前，应使用 `checksums.txt` 校验所选压缩包；

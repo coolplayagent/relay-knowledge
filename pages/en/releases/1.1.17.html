@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="relay-knowledge 1.1.17 release notes: Repository Map v4, bounded history, reduced storage churn, durable worktree recovery, and shared ontology schema."
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.17 release notes</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="Page navigation">
+        <a href="../">English documentation</a>
+        <a href="../../zh/releases/1.1.17.html">中文</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.17">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.17 release notes</h1>
+        <p>
+          Version 1.1.17 introduces Repository Map v4 with bounded recent history,
+          reduces map storage writes, and strengthens migration and recovery. It also improves
+          durable worktree indexing and consolidates the software ontology schema.
+        </p>
+        <p>Release date: September 7, 2026.</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.17">Release downloads</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.17">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.17/checksums.txt">Checksums</a>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Install and verify</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.17 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json</code></pre>
+        <p class="notice">
+          Upgrade every writer and reader that shares a repository before migrating its visible
+          Repository Map v4 contract. Version 1.1.17 is the minimum v4 reader. Back up or commit repository-owned map files before a
+          migration, and use the documented service lifecycle dry-run before replacing a resident
+          service binary. There is no data-level map rollback command: restore the pre-migration
+          map snapshot from Git or backup before running an older binary. Back up runtime databases
+          and all shards for an exact rollback of storage migrations.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Repository Map v4</h2>
+        <p>CodeSpec and Knowledge maps keep their visible <code>codespec/</code> and
+          <code>knowledge/</code> roots. Each root retains the latest 16 history entries;
+          <code>omitted_through</code> records the discarded-history checkpoint. Requests for
+          older history fail explicitly. Long-term audit and recovery use Git or repository backups.</p>
+        <ul>
+          <li>Migration validates the complete authorized legacy history chain before publishing v4 roots and the legacy redirect.</li>
+          <li>Cleanup waits for a 60-second reader grace period and removes at most 1,024 recognized files per pass.</li>
+          <li>Symlinks, unknown entries, unsafe paths, and integrity failures stop cleanup without deleting unrecognized data.</li>
+          <li>Run <code>map init</code> again to continue pending cleanup; <code>map validate</code> remains read-only.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Less map storage churn</h2>
+        <ul>
+          <li>Unchanged source updates no longer consume map/source versions or write new topic shards.</li>
+          <li>Topic-shard cleanup preserves current and fallback reader roots and uses bounded, resumable maintenance.</li>
+          <li>Recovery and migration validate ownership and legacy state under repository writer locks.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Indexing and ontology</h2>
+        <ul>
+          <li>Durable worktree indexing strengthens recovery and publication checks while retaining leases and checkpoints.</li>
+          <li>Read-only catalog startup avoids taking a catalog writer lock.</li>
+          <li>Software ontology projections share a core schema for vocabulary, properties, and validation.</li>
+          <li>Layered commit quality gates and high-dimensional indexing validation strengthen regression coverage.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Release packages</h2>
+        <p>
+          The release contains six platform archives, <code>checksums.txt</code>, artifact
+          attestations, and the versioned CLI skill archive. Linux GNU binaries are built and
+          started on a glibc 2.28 baseline before publication.
+        </p>
+        <ul>
+          <li>Linux x64 and ARM64</li>
+          <li>macOS Intel and Apple Silicon</li>
+          <li>Windows x64 and ARM64</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.17.tar.gz</code> for agent CLI workflows</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>Further reading</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/en/03-architecture-specs/19-installation-release-and-upgrade.md">Installation, release, and upgrade</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/en/03-architecture-specs/21-software-global-domain-modeling.md">Software-global domain model</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/en/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md">Knowledge development loop</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/en/03-architecture-specs/26-git-commit-knowledge-development-loop.md">Git commit knowledge loop</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
