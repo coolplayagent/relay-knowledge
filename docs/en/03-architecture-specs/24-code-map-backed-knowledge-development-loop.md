@@ -165,6 +165,8 @@ Missing external dependency source remains unresolved metadata, not repository d
 | KDL-12 | First source add publishes a complete baseline and rejected requests are side-effect free | Application and CLI tests validate baseline READMEs/glossary plus blank and reserved-conflict preflight cases |
 | KDL-13 | Every source mutation preserves reserved routes and the recent-only history boundary | Application tests cover reserved removal, legacy migration validation, bounded history, and archive cleanup |
 
+The graph acceptance suite exercises map initialization and ordered routing, eight topic dimensions, dependency/SDK/build/IaC/design/ontology projections, endpoint closure, incremental source removal with an empty authored topic, retired-shard exclusion, and immutable base replay. Compatibility-edge storage tests cover 4,096 topics with zero edge writes, exact deduplicated counts, path/language admission before limits, and unresolved external metadata. The fast self-iteration gate runs these storage regressions.
+
 ---
 
 Navigation: Previous: [22. Service Deployment, Control Plane, and Data Plane](22-service-deployment-control-data-plane.md) | Next: [25. Code Index Retention](25-code-index-retention.md)

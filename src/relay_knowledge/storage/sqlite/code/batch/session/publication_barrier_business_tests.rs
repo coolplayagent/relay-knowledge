@@ -172,6 +172,22 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
     assert_eq!(projection.status.file_count, PROJECTED_FILE_COUNT);
     assert_eq!(projection.status.sdk_usage_count, PROJECTED_FILE_COUNT);
     assert_eq!(projection.status.relationship_count, PROJECTED_FILE_COUNT);
+    let stored_edges = store
+        .run(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM software_relationships WHERE source_scope = ?1",
+                    rusqlite::params![SOURCE_SCOPE],
+                    |row| row.get::<_, usize>(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("legacy relationship storage should remain readable after phase resume");
+    assert_eq!(
+        stored_edges, 0,
+        "resuming fenced publication must not recreate redundant relationship rows"
+    );
     let completed_checkpoint = store
         .code_index_checkpoint(SOURCE_SCOPE.to_owned())
         .await

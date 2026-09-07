@@ -403,6 +403,53 @@
         {"software_slice": "topic", "name": "orphan-shadow-route", "topic_kind": "knowledge_map_topic"}
       ],
       "case_group": "repository_map_graph_projection"
+    },
+    {
+      "id": "repository_map_v4_keeps_typed_cross_dimension_provenance",
+      "repository": "repository_map_graph_fixture",
+      "kind": "statements",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 500,
+      "max_rank": 500,
+      "status_projection_schema_version": 8,
+      "status_ontology_version": "1.0.0",
+      "status_completeness_basis_points_min": 10000,
+      "expected": [
+        {
+          "software_slice": "statement",
+          "predicate": "documents",
+          "source_kind": "documentation",
+          "fact_state": "active"
+        }
+      ],
+      "expected_all": [
+        {
+          "software_slice": "statement",
+          "predicate": "derived_from",
+          "source_kind": "documentation",
+          "fact_state": "active"
+        },
+        {
+          "software_slice": "statement",
+          "predicate": "depends_on",
+          "source_kind": "manifest",
+          "fact_state": "active"
+        },
+        {
+          "software_slice": "statement",
+          "predicate": "deploys",
+          "source_kind": "iac",
+          "fact_state": "active"
+        },
+        {
+          "software_slice": "statement",
+          "predicate": "runs_as",
+          "source_kind": "service_definition",
+          "fact_state": "active"
+        }
+      ],
+      "case_group": "repository_map_graph_projection"
     }
   ]
 }

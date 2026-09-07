@@ -103,8 +103,7 @@ pub(in super::super) fn refresh_projection(
 
     let topic_count = graph::materialize_topics(&transaction, source_scope, graph_version)?;
 
-    let relationship_count =
-        graph::materialize_relationships(&transaction, source_scope, graph_version)?;
+    let relationship_count = graph::relationship_count_for_scope(&transaction, source_scope)?;
     let ontology_projection =
         super::ontology::refresh_projection(&transaction, source_scope, graph_version)?;
 

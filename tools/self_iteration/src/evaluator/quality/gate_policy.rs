@@ -86,6 +86,18 @@ pub(super) fn quality_gate_stages(
                     180,
                 ),
                 quality_gate(
+                    "software_relationship_storage_cases",
+                    [
+                        "cargo",
+                        "test",
+                        "--lib",
+                        "software_relationship_storage",
+                        "--",
+                        "--nocapture",
+                    ],
+                    180,
+                ),
+                quality_gate(
                     "map_storage_regression_cases",
                     ["cargo", "test", "--lib", "map_storage", "--", "--nocapture"],
                     180,

@@ -24,8 +24,12 @@ target/release/relay-knowledge map show --type knowledge --directory guides --fo
 target/release/relay-knowledge map route business-knowledge --type knowledge --format json
 target/release/relay-knowledge map route software-model --type knowledge --format json
 target/release/relay-knowledge map route architecture --type knowledge --format json
-target/release/relay-knowledge map history --type knowledge --from 15 --limit 4 --format json
+target/release/relay-knowledge map history --type knowledge --limit 4 --format json
 tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate --workspace . --profile fast --categories foundational --use-current-candidate
 ```
 
 Treat validation and route output as repository-contract evidence only. The generated v4 fixture supplies the separate snapshot-bound code-index and software-projection evidence; real-repository freshness and business facts still require the status/query workflow described by the architecture specifications.
+
+`cargo test --test relay_knowledge knowledge_development_loop` exercises map bootstrap, same-commit business/context/views, all graph dimensions, incremental source removal, retired-shard exclusion and immutable base replay. Removing the final source preserves the authored topic with an empty route; its new shard replaces the old shard in the indexed projection.
+
+`cargo test --lib software_relationship_storage -- --nocapture` checks zero redundant edge writes, 4,096-topic count/read budgets, stable compatibility payloads, configuration deduplication, scoped filtering and transactional legacy-row reclamation. These storage regressions run in the fast self-iteration gate.

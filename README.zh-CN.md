@@ -53,6 +53,11 @@ relay-knowledge service doctor
 卸载合同见 [CLI skill 包](skills/relay-knowledge-cli/README.md)与
 [安装、发布与升级](docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md)。
 
+采用 software projection schema 8 的构建从索引事实推导兼容关系，不再重复存储
+关系 payload。已有 scope 需要通过持久任务刷新投影。降级到 schema-7 reader 前，
+先停止服务并恢复升级前的数据库及全部分片，或在独立 runtime home 中重新索引；
+旧 reader 需要其自身物化的关系数据。
+
 ## 能力概览
 
 - 混合 GraphRAG 上下文包组合 BM25、本地或外部 semantic/vector 检索、

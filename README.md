@@ -58,6 +58,12 @@ that use the CLI instead of MCP/ACP. See the
 for platform details, verification, service installation, upgrade, rollback,
 and uninstall behavior.
 
+Builds using software projection schema 8 derive compatibility relationships
+from indexed facts without storing duplicate edge payloads. Existing scopes
+require a durable projection refresh. Before downgrading to a schema-7 reader,
+stop the service and restore the pre-upgrade database and shards, or reindex in
+a separate runtime home; the old reader requires its own materialized edges.
+
 ## Capability Snapshot
 
 - Hybrid GraphRAG context packs combine BM25, local or external semantic/vector

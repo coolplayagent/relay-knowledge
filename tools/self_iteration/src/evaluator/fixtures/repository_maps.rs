@@ -225,7 +225,7 @@ fn sha256(content: &[u8]) -> String {
     format!("{:x}", Sha256::digest(content))
 }
 
-fn repository_evidence_files() -> [(&'static str, &'static str); 22] {
+fn repository_evidence_files() -> [(&'static str, &'static str); 23] {
     [
         (
             "AGENTS.md",
@@ -266,6 +266,10 @@ fn repository_evidence_files() -> [(&'static str, &'static str); 22] {
         (
             "k8s/app.yaml",
             "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: repository-map-graph\n",
+        ),
+        (
+            "compose.yaml",
+            "services:\n  graph:\n    image: example.invalid/map-graph:1\n",
         ),
         (
             "systemd/relay-map.service",

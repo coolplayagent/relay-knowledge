@@ -73,7 +73,7 @@ pub(in crate::storage::sqlite) fn advance_fenced_projection(
         CodeSoftwareProjectionPhase::Files => materialize_files(&transaction, source_scope)?,
         CodeSoftwareProjectionPhase::Topics => materialize_topics(&transaction, source_scope)?,
         CodeSoftwareProjectionPhase::Relationships => {
-            materialize_relationships(&transaction, source_scope)?
+            count_relationships(&transaction, source_scope)?
         }
         CodeSoftwareProjectionPhase::Ontology => materialize_ontology(&transaction, source_scope)?,
         CodeSoftwareProjectionPhase::Publish => {
@@ -361,16 +361,10 @@ fn materialize_topics(connection: &Connection, source_scope: &str) -> Result<(),
     upsert_status(connection, &status)
 }
 
-fn materialize_relationships(
-    connection: &Connection,
-    source_scope: &str,
-) -> Result<(), StorageError> {
+fn count_relationships(connection: &Connection, source_scope: &str) -> Result<(), StorageError> {
     let mut status = require_staged_status(connection, source_scope)?;
-    status.relationship_count = super::super::graph::materialize_relationships(
-        connection,
-        source_scope,
-        status.projected_graph_version,
-    )?;
+    status.relationship_count =
+        super::super::graph::relationship_count_for_scope(connection, source_scope)?;
     upsert_status(connection, &status)
 }
 
