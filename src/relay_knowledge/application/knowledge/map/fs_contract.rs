@@ -387,6 +387,13 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
     let directory = repository_root
         .join(contract_dir)
         .join(KNOWLEDGE_MAP_TOPICS_DIR_NAME);
+    // CodeSpec has no topic shards. Maintenance must not create empty storage.
+    if !fs::symlink_metadata(&directory)
+        .await
+        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+    {
+        return;
+    }
     if ensure_owned_directory(repository_root, &directory)
         .await
         .is_err()
@@ -396,6 +403,7 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
     let Ok(mut entries) = fs::read_dir(directory).await else {
         return;
     };
+    let mut retired = 0;
     while let Ok(Some(entry)) = entries.next_entry().await {
         let file_name = entry.file_name();
         if !is_generated_topic_shard_name(&file_name) {
@@ -408,6 +416,21 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
             let _ = fs::remove_file(marker).await;
             continue;
         }
+        if retired == TOPIC_CLEANUP_ENTRY_LIMIT {
+            tracing::warn!(
+                contract_dir,
+                retired,
+                "topic cleanup remains pending; rerun map init"
+            );
+            break;
+        }
+        if !fs::symlink_metadata(entry.path())
+            .await
+            .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        {
+            continue;
+        }
+        retired += 1;
         match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -439,17 +462,22 @@ pub(super) async fn cleanup_superseded_topic_shards_in(
     }
 }
 
+pub(super) const TOPIC_CLEANUP_ENTRY_LIMIT: usize = 1_024;
 pub(super) const HISTORY_CLEANUP_ENTRY_LIMIT: usize = 1_024;
+pub(super) const HISTORY_READER_GRACE_PERIOD: Duration = Duration::from_secs(60);
+const HISTORY_READER_GRACE_MARKER_NAME: &str = ".reader-grace";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum HistoryCleanupStatus {
     Complete,
+    Deferred,
     Pending { removed: usize },
 }
 
 pub(super) async fn cleanup_history_artifacts_in(
     repository_root: &Path,
     contract_dir: &str,
+    reader_grace: Duration,
 ) -> Result<HistoryCleanupStatus, KnowledgeMapServiceError> {
     let directory = repository_root
         .join(contract_dir)
@@ -479,6 +507,9 @@ pub(super) async fn cleanup_history_artifacts_in(
     let mut has_more = false;
     while let Some(entry) = entries.next_entry().await? {
         let file_name = entry.file_name();
+        if file_name == HISTORY_READER_GRACE_MARKER_NAME {
+            continue;
+        }
         if !is_generated_history_artifact_name(&file_name) {
             return Err(KnowledgeMapServiceError::Integrity(format!(
                 "history cleanup refuses unrecognized entry '{}'",
@@ -498,6 +529,15 @@ pub(super) async fn cleanup_history_artifacts_in(
         removable.push(entry.path());
     }
     drop(entries);
+    let grace_marker = directory.join(HISTORY_READER_GRACE_MARKER_NAME);
+    if !history_reader_grace_elapsed(&grace_marker, reader_grace).await? {
+        tracing::warn!(
+            contract_dir,
+            grace_seconds = reader_grace.as_secs(),
+            "repository map history cleanup is deferred for in-flight legacy readers"
+        );
+        return Ok(HistoryCleanupStatus::Deferred);
+    }
     let removed = removable.len();
     for path in removable {
         match fs::remove_file(path).await {
@@ -507,10 +547,47 @@ pub(super) async fn cleanup_history_artifacts_in(
         }
     }
     if has_more {
+        tracing::warn!(
+            contract_dir,
+            removed,
+            "repository map history cleanup remains pending; rerun map init"
+        );
         return Ok(HistoryCleanupStatus::Pending { removed });
+    }
+    match fs::remove_file(&grace_marker).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     fs::remove_dir(&directory).await?;
     Ok(HistoryCleanupStatus::Complete)
+}
+
+async fn history_reader_grace_elapsed(
+    marker: &Path,
+    reader_grace: Duration,
+) -> Result<bool, KnowledgeMapServiceError> {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(marker)
+        .await
+    {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    let metadata = fs::symlink_metadata(marker).await?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(KnowledgeMapServiceError::UnsafePath(
+            marker.display().to_string(),
+        ));
+    }
+    Ok(reader_grace.is_zero()
+        || metadata
+            .modified()?
+            .elapsed()
+            .is_ok_and(|age| age >= reader_grace))
 }
 
 fn is_generated_history_artifact_name(name: &std::ffi::OsStr) -> bool {

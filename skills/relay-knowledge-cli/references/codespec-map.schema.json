@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Relay CodeSpec Map v4 root",
-  "description": "Structural schema for codespec/codespec-map.yaml. Unknown fields remain allowed for Serde forward compatibility. Directory existence, key-file confinement, cross-map targets, dependency cycles, and recent-history continuity are validated by relay-knowledge map validate.",
+  "description": "Structural schema for codespec/codespec-map.yaml. Unknown fields remain allowed for Serde forward compatibility, except that v4 history explicitly rejects known legacy archive keys. Directory existence, key-file confinement, cross-map targets, dependency cycles, and recent-history continuity are validated by relay-knowledge map validate.",
   "type": "object",
   "required": [
     "schema_version",

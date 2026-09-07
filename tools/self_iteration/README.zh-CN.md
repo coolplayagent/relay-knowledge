@@ -63,6 +63,11 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 | 无人值守状态 | `.git/relay-knowledge-self-iteration/unattended-state-v2.json` | 恢复 category rotation、失败计数、accepted 计数和 deep-check 调度。 |
 | 图表 | `.git/relay-knowledge-self-iteration/score-v2.csv`、`score-v2.svg` | 查看 scored-run 历史；绿色为已提交采纳，琥珀色为手动评估可采纳，红色为拒绝。 |
 
+fast 的 `map_storage_regression_cases` 门禁要求 32 次相同 source 更新新增
+0 文件、0 字节且 mtime 不变，并覆盖空闲后的 `map init` 分片回收、reader/recovery
+保护、有界清理批次和必要的 legacy 迁移。fixture 字节数只测量 map artifact，
+不代表 SQLite 数据库压缩效果。
+
 ### 运行可观测性
 
 harness 会把实时进度写到 stderr，统一使用 `[self-iterate]` 前缀。每个子进程都会输出 `command start`、每 15 秒一次的 `command running` 心跳，以及带退出码和耗时的 `command done` 或 `command timeout`。评估阶段还会输出 profile、evaluation home、并发度、质量门禁 stage、仓库 workload 规模、repository-set workload 规模和最终 gate/case/command 计数。产品命令 stdout/stderr 仍捕获进 JSON 报告，长时间运行的 `fast` profile 不会处于无输出状态。

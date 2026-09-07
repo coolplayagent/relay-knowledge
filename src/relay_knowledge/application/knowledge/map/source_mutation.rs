@@ -109,21 +109,28 @@ impl KnowledgeMapService {
         }
         self.prepare_legacy_migration().await?;
         let mut snapshot = self.load_for_mutation().await?;
-        snapshot
+        let (software_changed, business_changed) = snapshot
             .map
             .ensure_reserved_repository_routes_snapshot(snapshot.omitted_through)?;
         let id = change.id.clone();
-        snapshot
+        let source_changed = snapshot
             .map
             .update_source_snapshot(change, snapshot.omitted_through)?;
         snapshot.map.validate_reserved_repository_routes()?;
+        self.ensure_baseline_files().await?;
+        self.ensure_default_business_glossary().await?;
+        if !source_changed && !software_changed && !business_changed && !snapshot.requires_publish {
+            return Ok(self.mutation_response(
+                context,
+                snapshot.map.map_version,
+                format!("source {id} is unchanged"),
+            ));
+        }
         snapshot.map.record_change(
             "source.update",
             format!("Updated source '{id}'."),
             now_stamp(),
         );
-        self.ensure_baseline_files().await?;
-        self.ensure_default_business_glossary().await?;
         self.write_map(&mut snapshot).await?;
         Ok(self.mutation_response(
             context,

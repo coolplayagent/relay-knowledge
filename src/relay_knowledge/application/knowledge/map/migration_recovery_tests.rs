@@ -959,14 +959,15 @@ async fn legacy_v2_fixture(label: &str) -> (PathBuf, KnowledgeMapService, Reques
     .await
     .expect("fixture contract should move to the legacy root");
     let legacy = service.legacy_map_path();
-    let v2 = fs::read_to_string(&legacy)
-        .await
-        .expect("fixture root should read")
-        .replacen("schema_version: 4", "schema_version: 2", 1)
-        .replacen("omitted_through", "archived_through", 1);
-    fs::write(&legacy, v2)
-        .await
-        .expect("v2 fixture root should write");
+    rewrite_contract_schema_for_test(
+        &root,
+        LEGACY_AGENT_CONTRACT_DIR_NAME,
+        &legacy,
+        LEGACY_ARTIFACT_SCHEMA_VERSION,
+        None,
+    )
+    .await
+    .expect("fixture root and shards should downgrade together");
     (root, service, context)
 }
 

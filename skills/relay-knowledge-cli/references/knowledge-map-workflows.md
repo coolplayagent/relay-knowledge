@@ -23,7 +23,12 @@ contiguous with its omission checkpoint, or reserved sources remain intact;
 The schema does not authorize direct edits to generated roots or topic shards.
 Never edit shard refs directly. Mutations advance the bounded recent window and
 clean superseded topic shards after committing the root while protecting any
-recovery-manifest refs. The code map is the primary source of truth for
+recovery-manifest refs. Equal-field source updates preserve versions, history,
+and artifact bytes unless migration or reserved-route repair requires publication.
+An idempotent `map init` also resumes retired-shard cleanup after the 60-second
+reader grace, processing at most 1,024 unreferenced regular shards per attempt.
+It preserves recovery refs and unknown files and does not create empty CodeSpec
+topic storage. The code map is the primary source of truth for
 repository facts. The map stores stable navigation and repository-model entry
 metadata; it must not copy derived architecture narratives, build targets,
 deployment resources, framework scan results, or resolved commit ids. Read
@@ -130,7 +135,8 @@ committed mutation remains successful when another cleanup batch is pending,
 while `map validate` continues to report the obsolete directory until cleanup
 finishes. A cleanup refusal discovered after root publication is logged as
 post-commit maintenance state instead of retroactively failing the mutation.
-Legacy history is retained while a live legacy root is not a redirect.
+Cleanup establishes a 60-second reader grace before archive deletion, and
+legacy history is retained while a live legacy root is not a redirect.
 Unrecognized files, links, or corrupt referenced artifacts fail closed. There
 is no data-level map rollback command; use Git or a repository backup to recover
 older repository-owned map state.

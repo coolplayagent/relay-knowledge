@@ -145,6 +145,20 @@ fn record_root_facts(content: &str, contract_dir: &str, definitions: &mut Vec<Co
     ) {
         return;
     }
+    if probe.schema_version == ARTIFACT_SCHEMA_VERSION {
+        let Ok(document) = serde_norway::from_str::<serde_norway::Value>(content) else {
+            return;
+        };
+        let Some(history) = document.get("history") else {
+            return;
+        };
+        if ["archived_through", "archive", "index"]
+            .into_iter()
+            .any(|field| history.get(field).is_some())
+        {
+            return;
+        }
+    }
     let Ok(manifest) = serde_norway::from_str::<RootManifest>(content) else {
         return;
     };

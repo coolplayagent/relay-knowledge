@@ -28,8 +28,10 @@ use super::{
 
 #[cfg(test)]
 use super::{
-    KnowledgeMapSchemaProbe, LEGACY_ARTIFACT_SCHEMA_VERSION, WRITE_LOCK_TIMEOUT, parse_manifest,
-    parse_v1_map_for_legacy_recovery,
+    KnowledgeMapArchiveRef, KnowledgeMapSchemaProbe, KnowledgeMapTopicShard,
+    LEGACY_ARTIFACT_SCHEMA_VERSION, WRITE_LOCK_TIMEOUT, content_digest, parse_manifest,
+    parse_v1_map_for_legacy_recovery, publish_immutable_in, read_verified_ref_in, serialize_yaml,
+    stable_id,
 };
 #[cfg(test)]
 use crate::domain::KnowledgeMap;
@@ -668,6 +670,58 @@ impl KnowledgeMapService {
             .join(LEGACY_AGENT_CONTRACT_DIR_NAME)
             .join(LEGACY_KNOWLEDGE_MAP_BACKUP_FILE_NAME)
     }
+}
+
+#[cfg(test)]
+pub(super) async fn rewrite_contract_schema_for_test(
+    repository_root: &Path,
+    contract_dir: &str,
+    root_path: &Path,
+    target_schema_version: u16,
+    history_archive: Option<KnowledgeMapArchiveRef>,
+) -> Result<(), KnowledgeMapServiceError> {
+    if !matches!(
+        target_schema_version,
+        LEGACY_ARTIFACT_SCHEMA_VERSION | super::DIRECTORY_ARTIFACT_SCHEMA_VERSION
+    ) {
+        return Err(KnowledgeMapServiceError::InvalidRequest(
+            "test fixture target must be a readable legacy artifact schema".to_owned(),
+        ));
+    }
+    let content = read_root_file(repository_root, root_path).await?;
+    let mut manifest = parse_manifest(&content)?;
+    for topic_ref in &mut manifest.topics {
+        let content = read_verified_ref_in(
+            repository_root,
+            contract_dir,
+            &topic_ref.r#ref,
+            &topic_ref.digest,
+        )
+        .await?;
+        let mut shard = serde_norway::from_str::<KnowledgeMapTopicShard>(&content)
+            .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+        shard.schema_version = target_schema_version;
+        let yaml = serialize_yaml(&shard)?;
+        let digest = content_digest(yaml.as_bytes());
+        let relative = format!(
+            "{KNOWLEDGE_MAP_TOPICS_DIR_NAME}/topic-{}-{digest}.yaml",
+            stable_id(&topic_ref.id)
+        );
+        publish_immutable_in(repository_root, contract_dir, &relative, yaml.as_bytes()).await?;
+        topic_ref.r#ref = relative;
+        topic_ref.digest = digest;
+    }
+    manifest.schema_version = target_schema_version;
+    manifest.history.archived_through = manifest.history.omitted_through;
+    manifest.history.omitted_through = 0;
+    if (manifest.history.archived_through == 0) != history_archive.is_none() {
+        return Err(KnowledgeMapServiceError::InvalidRequest(
+            "test fixture history checkpoint and archive must agree".to_owned(),
+        ));
+    }
+    manifest.history.archive = history_archive;
+    manifest.history.index = None;
+    replace_with_new_synced_file(root_path, serialize_yaml(&manifest)?.as_bytes()).await
 }
 
 fn is_supported_legacy_redirect(content: &str) -> bool {

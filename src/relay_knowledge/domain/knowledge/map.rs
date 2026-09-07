@@ -426,17 +426,18 @@ impl KnowledgeMap {
         &mut self,
         change: KnowledgeMapChange,
         omitted_through: u64,
-    ) -> Result<(), DomainError> {
+    ) -> Result<bool, DomainError> {
         self.validate_snapshot(omitted_through)?;
-        self.update_source_state(change)?;
-        self.validate_snapshot(omitted_through)
+        let changed = self.update_source_state(change)?;
+        self.validate_snapshot(omitted_through)?;
+        Ok(changed)
     }
 
-    fn update_source_state(&mut self, change: KnowledgeMapChange) -> Result<(), DomainError> {
+    fn update_source_state(&mut self, change: KnowledgeMapChange) -> Result<bool, DomainError> {
         let Some(source) = self.sources.iter_mut().find(|entry| entry.id == change.id) else {
             return Err(DomainError::invalid("id", "source does not exist"));
         };
-        let previous_topic = source.topic.clone();
+        let previous = source.clone();
         if let Some(topic) = change.topic {
             source.topic = required_text("topic", topic)?;
         }
@@ -453,6 +454,9 @@ impl KnowledgeMap {
         if let Some(description) = change.description {
             source.description = Some(required_text("description", description)?);
         }
+        if *source == previous {
+            return Ok(false);
+        }
         source.version = source.version.saturating_add(1);
 
         if !self.topics.iter().any(|topic| topic.id == source.topic) {
@@ -464,12 +468,12 @@ impl KnowledgeMap {
         }
         let topic_id = source.topic.clone();
         let source_id = source.id.clone();
-        if previous_topic != topic_id {
+        if previous.topic != topic_id {
             self.prune_source_from_other_routes(&source_id, &topic_id);
         }
         self.ensure_route_contains(&topic_id, &source_id)?;
         self.sort_entries();
-        Ok(())
+        Ok(true)
     }
 
     /// Removes a source and prunes routes that referenced it.
