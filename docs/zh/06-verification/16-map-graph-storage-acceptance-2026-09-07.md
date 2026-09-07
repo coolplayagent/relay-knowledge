@@ -11,7 +11,8 @@
 兼容关系不携带独立事实：文件到主题、依赖、SDK 和配置的关系可以从绑定同一
 snapshot 的源行重建。Schema 8 删除逐条关系写入和反复 OFFSET 扫描物化，
 读取通过一个 SQL 投影应用 scope、path、language 和结果预算；持久化
-relationships 阶段记录精确计数。返回值保留稳定 identity、evidence、未解析目标和
+relationships 阶段逐行复用 domain 校验，包括未选中的配置重复项，再记录精确
+计数；无效事实不能发布 fresh checkpoint。返回值保留稳定 identity、evidence、未解析目标和
 graph version。配置的重复 identity 按最高置信度、最宽结束行和最小 usage ID
 确定唯一结果，不同 relationship kind 保持独立。
 
@@ -32,7 +33,8 @@ retention cursor；成功刷新 scope 后回收其旧行，打开数据库不会
 | 增量变化保留不可变历史 | CLI integration 删除 source，检查空 route 与替换 shard，排除已退役 shard 的关系，验证图端点，并回放完全相同的 base-commit topic 和 relationship。 |
 | 业务和架构绑定同一快照 | Bootstrap integration 检查 authored business mapping、software/context 与 architecture/business-domain view 的固定 commit 和 source scope。 |
 
-存储 case 进入 fast self-iteration 强制门禁。配置去重、未解析 SDK hint、先过滤后
+存储 case 进入 fast self-iteration 强制门禁。配置去重、无效 public feature-flag
+发布、Unicode 空白字段、未解析 SDK hint、先过滤后
 limit、跨 scope 排除、无效事实及 SQL 错误均有 focused owner tests。
 
 ## 3. 真实仓库快照
@@ -84,8 +86,8 @@ Release 对比在生成的 `repository_map_graph_v4` fixture 上增加 256 个 M
 | 兼容关系持久行数 | 4,120 | 0 | 100% |
 | 兼容表及索引占用字节 | 1,507,328 | 12,288 | 99.18% |
 | 数据库分配字节 | 35,438,592 | 33,943,552 | 4.22% |
-| 冷索引 | 949.2 ms | 918.2 ms | 3.27% |
-| 有界关系查询 | 64.6 ms | 60.5 ms | 6.27% |
+| 冷索引 | 1,355.2 ms | 1,332.5 ms | 1.67% |
+| 有界关系查询 | 72.8 ms | 70.5 ms | 3.08% |
 
 两个构建均保留 546 文件、5,860 code symbol、2,048 reference、2,048 call、
 1,314 chunk、4,118 topic、8,776 ontology entity 和 12,893 typed statement。
@@ -95,7 +97,7 @@ completed、非 stale 的 snapshot。
 Baseline 二进制 SHA-256：
 `f2b2a3fe38bc77c620ca0c1e536a80bdce607475221e2028b9234d3d97de3904`。
 Candidate 二进制 SHA-256：
-`bf48c19c82258b3e9574b11cc2230a39a764026fc952cac133d68f4a6ad702d6`。
+`e913ac3ee26f7a1cddec2fefc6f89770fd3ca0eb099c70c57ff74a4cb3c778ed`。
 Baseline 源码已与基线 revision 的全部 1,825 个 tracked Cargo/source 文件逐字节
 比较。此前发现的新旧二进制 hash 相同的一组产物已作为无效对比证据排除；
 与测试编译重叠的 pilot 轮次也不计入上表耗时。
@@ -106,19 +108,19 @@ Baseline 源码已与基线 revision 的全部 1,825 个 tracked Cargo/source �
 | --- | --- |
 | Cargo check、Clippy，全 targets/features | 通过，warnings denied |
 | Rust formatting、文档检查 | 通过，216 个 Markdown 文件 |
-| Rust unit tests | 3,906 通过；1 个 subprocess fixture 按设计 ignored，由父测试调用 |
+| Rust unit tests | 3,908 通过；1 个 subprocess fixture 按设计 ignored，由父测试调用 |
 | Rust integration tests | 157 通过 |
 | 确定性 benchmark target | 1 通过 |
 | Self-iteration harness unit tests | 240 通过 |
 | Current/stable map compatibility 与 CLI contracts | 两个 reader 兼容，8 个合同通过 |
 | Release map graph matrix | 4 个 case 通过 |
-| LLVM coverage，全 targets/features | 行覆盖率 90.09%，关系 reader 为 100%，90% 门禁通过 |
+| 首次本地 LLVM coverage，全 targets/features | `9d2363394b` 行覆盖率 90.09%，90% 门禁通过；最终评审修复仍须通过 PR coverage 门禁 |
 | Playwright Chromium browser test | 1 通过 |
 | Fast/performance evaluation | `would_accept`；392/392 gate、139/139 case、327 command contract、86 metric；performance 和 stability 均为 1.0 |
 
-完整评估使用 `--jobs 2 --repo-jobs 1 --query-jobs 2`，耗时 134,136 ms。
-报告 `manual-evaluate-1788781664665217390-0-449970.json` 的 SHA-256 为
-`8e133b95c0f6565bde4a4dae4c94247dd3ee74cff12029ee79c9fffc11d156e7`。
+完整评估使用 `--jobs 2 --repo-jobs 1 --query-jobs 2`，耗时 134,542 ms。
+报告 `manual-evaluate-1788784416972397547-0-518296.json` 的 SHA-256 为
+`06df94a4a92af9051198d1c8c77fa3d91193fa448ae41b9f0a9278dc035c19a8`。
 生成的 map fixture 通过 harness 实际评分路径的全部 4 个 case；evaluate 模式没有
 自动创建 commit。
 

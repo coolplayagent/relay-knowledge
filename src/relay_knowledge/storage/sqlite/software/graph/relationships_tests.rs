@@ -265,6 +265,10 @@ fn software_relationship_storage_reports_invalid_facts_and_sql_errors() {
         .unwrap();
     let request = relationship_request(Vec::new(), Vec::new());
     assert!(matches!(
+        relationship_count_for_scope(&connection, "scope"),
+        Err(StorageError::InvalidInput(_))
+    ));
+    assert!(matches!(
         relationships_for_scope(&connection, "scope", &request, 1),
         Err(StorageError::InvalidInput(_))
     ));
@@ -273,4 +277,27 @@ fn software_relationship_storage_reports_invalid_facts_and_sql_errors() {
         .unwrap();
     assert!(relationship_count_for_scope(&connection, "scope").is_err());
     assert!(relationships_for_scope(&connection, "scope", &request, 1).is_err());
+}
+
+#[test]
+fn software_relationship_storage_validates_configuration_facts_before_deduplication() {
+    for mutation in [
+        "UPDATE code_repository_feature_flags SET confidence_basis_points = 10001",
+        "UPDATE code_repository_feature_flags SET feature_flag_id = ''",
+        "UPDATE code_repository_feature_flags SET source_key = ''",
+        // Rust Unicode whitespace validation must also cover a losing duplicate.
+        "UPDATE code_repository_feature_flags SET confidence_tier = '\u{2003}' WHERE usage_id = 'read'",
+    ] {
+        let connection = relationship_fixture();
+        connection.execute(mutation, []).unwrap();
+        let changes = connection.total_changes();
+        assert!(
+            matches!(
+                relationship_count_for_scope(&connection, "scope"),
+                Err(StorageError::InvalidInput(_))
+            ),
+            "invalid fact reached the publication count: {mutation}"
+        );
+        assert_eq!(connection.total_changes(), changes);
+    }
 }

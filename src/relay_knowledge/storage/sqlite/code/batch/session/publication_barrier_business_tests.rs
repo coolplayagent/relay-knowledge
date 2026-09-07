@@ -4,6 +4,90 @@ use super::*;
 use crate::storage::sqlite::{code::lifecycle, software};
 
 #[tokio::test]
+async fn software_relationship_storage_rejects_invalid_public_flags_before_fenced_publish() {
+    let store = registered_store().await;
+    let (session, fence) = begin_fenced_session(
+        &store,
+        SOURCE_SCOPE,
+        "invalid-relationship-fact",
+        LEASE_OWNER,
+        Default::default(),
+    )
+    .await;
+    store
+        .begin_code_index_session_with_fence(session.clone(), fence.clone())
+        .await
+        .unwrap();
+    let mut facts = batch(SOURCE_SCOPE, 1);
+    facts.files = vec![file(
+        SOURCE_SCOPE,
+        "file-1",
+        "src/lib.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+    )];
+    facts.feature_flags = vec![crate::domain::CodeFeatureFlagRecord {
+        repository_id: "repo".into(),
+        source_scope: SOURCE_SCOPE.into(),
+        feature_flag_id: "flag".into(),
+        usage_id: "usage".into(),
+        file_id: "file-1".into(),
+        path: "src/lib.rs".into(),
+        language_id: "rust".into(),
+        name: "FEATURE".into(),
+        source_kind: "environment".into(),
+        source_key: "FEATURE".into(),
+        edge_kind: "reads_config".into(),
+        confidence_basis_points: 10001,
+        confidence_tier: "inferred".into(),
+        byte_range: crate::domain::RepositoryCodeRange { start: 0, end: 1 },
+        line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
+        excerpt: "FEATURE".into(),
+    }];
+    store
+        .apply_code_index_batch_with_fence(facts, fence.clone())
+        .await
+        .expect("public code facts stage before relationship validation");
+    store
+        .finalize_code_index_session_with_fence(session, fence.clone())
+        .await
+        .unwrap();
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        "repo",
+        SOURCE_SCOPE,
+        "commit",
+        fence.clone(),
+    )
+    .await
+    .unwrap();
+    let error = store
+        .refresh_software_global_projection_with_fence(SOURCE_SCOPE.into(), fence)
+        .await
+        .expect_err("invalid relationship facts must prevent fresh publication");
+    assert!(matches!(
+        error,
+        crate::storage::StorageError::InvalidInput(_)
+    ));
+    let checkpoint = store
+        .code_index_checkpoint(SOURCE_SCOPE.into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        checkpoint.state,
+        "finalizing:software_projection:v2:relationships"
+    );
+    let status = store
+        .code_repository_status("fixture".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.stale);
+    assert_eq!(status.last_indexed_scope_id, None);
+}
+
+#[tokio::test]
 async fn code_index_persistence_performance_suite_fenced_projection_resumes_between_writer_quanta()
 {
     const PROJECTED_FILE_COUNT: usize = 12_000;

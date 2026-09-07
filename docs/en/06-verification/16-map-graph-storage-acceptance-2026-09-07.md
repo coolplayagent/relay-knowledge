@@ -14,7 +14,9 @@ dependency, SDK and configuration edges can be reconstructed from their
 snapshot-bound source rows. Schema 8 removes their per-edge writes and repeated
 OFFSET materialization scans. Reads apply scope, path and language filters and
 the result budget to one SQL projection; the durable relationships phase stores
-its exact count. Stable identity, evidence, unresolved targets and graph version
+its exact count after streaming domain validation of every joined fact, including
+losing configuration duplicates. Invalid facts cannot publish a fresh checkpoint.
+Stable identity, evidence, unresolved targets and graph version
 remain in the response. Duplicate configuration identities select the highest
 confidence, widest end line and then smallest usage ID; different relationship
 kinds remain separate.
@@ -39,7 +41,8 @@ database does not bulk-delete data or compact SQLite. See the
 | Business and architecture stay on one snapshot | The bootstrap integration case checks authored business mappings, software/context and both architecture/business-domain views against one immutable commit and source scope. |
 
 The storage cases are mandatory fast self-iteration gates. Configuration
-deduplication, unresolved SDK hints, filtering before limiting, cross-scope
+deduplication, invalid public feature-flag publication, Unicode-whitespace fields,
+unresolved SDK hints, filtering before limiting, cross-scope
 exclusion, invalid facts and SQL errors have focused owner tests.
 
 ## 3. Real Repository Snapshot
@@ -99,8 +102,8 @@ timings are observations for this workload, not a universal speed guarantee.
 | Stored compatibility rows | 4,120 | 0 | 100% |
 | Compatibility table and index bytes | 1,507,328 | 12,288 | 99.18% |
 | Database allocated bytes | 35,438,592 | 33,943,552 | 4.22% |
-| Cold indexing | 949.2 ms | 918.2 ms | 3.27% |
-| Bounded relationship query | 64.6 ms | 60.5 ms | 6.27% |
+| Cold indexing | 1,355.2 ms | 1,332.5 ms | 1.67% |
+| Bounded relationship query | 72.8 ms | 70.5 ms | 3.08% |
 
 Both builds retain 546 files, 5,860 code symbols, 2,048 references, 2,048 calls,
 1,314 chunks, 4,118 topics, 8,776 ontology entities and 12,893 typed statements.
@@ -111,7 +114,7 @@ non-stale snapshots.
 Baseline binary SHA-256:
 `f2b2a3fe38bc77c620ca0c1e536a80bdce607475221e2028b9234d3d97de3904`.
 Candidate binary SHA-256:
-`bf48c19c82258b3e9574b11cc2230a39a764026fc952cac133d68f4a6ad702d6`.
+`e913ac3ee26f7a1cddec2fefc6f89770fd3ca0eb099c70c57ff74a4cb3c778ed`.
 The baseline source was compared byte-for-byte against all 1,825 tracked
 Cargo/source files at the baseline revision. An earlier pair of identically
 hashed binaries was rejected as invalid comparison evidence. A pilot run
@@ -123,20 +126,20 @@ overlapping test compilation is excluded from the reported timings.
 | --- | --- |
 | Cargo check and Clippy, all targets/features | Passed, warnings denied |
 | Rust formatting and documentation checker | Passed; 216 Markdown files |
-| Rust unit tests | 3,906 passed; one subprocess fixture intentionally ignored and invoked by its parent tests |
+| Rust unit tests | 3,908 passed; one subprocess fixture intentionally ignored and invoked by its parent tests |
 | Rust integration tests | 157 passed |
 | Deterministic benchmark target | 1 passed |
 | Self-iteration harness unit tests | 240 passed |
 | Current/stable map compatibility and CLI contracts | Both readers compatible; 8 contracts passed |
 | Release map graph matrix | 4 cases passed |
-| LLVM coverage, all targets/features | 90.09% line coverage; relationship reader 100%; 90% gate passed |
+| Initial local LLVM coverage, all targets/features | 90.09% line coverage at `9d2363394b`; 90% gate passed; final review fixes also require the PR coverage gate |
 | Playwright Chromium browser test | 1 passed |
 | Fast/performance evaluation | `would_accept`; 392/392 gates, 139/139 cases, 327 command contracts, 86 metrics; performance and stability scores both 1.0 |
 
 The complete evaluation used `--jobs 2 --repo-jobs 1 --query-jobs 2` and took
-134,136 ms. Report:
-`manual-evaluate-1788781664665217390-0-449970.json`, SHA-256
-`8e133b95c0f6565bde4a4dae4c94247dd3ee74cff12029ee79c9fffc11d156e7`.
+134,542 ms. Report:
+`manual-evaluate-1788784416972397547-0-518296.json`, SHA-256
+`06df94a4a92af9051198d1c8c77fa3d91193fa448ae41b9f0a9278dc035c19a8`.
 Its generated map fixture passed all four cases through the harness's actual
 scoring path. Evaluation mode created no commit.
 

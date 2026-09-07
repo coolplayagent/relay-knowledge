@@ -15,17 +15,17 @@ const RELATIONSHIP_FACTS_SQL: &str = "
            'topic' AS target_kind, name AS target_hint, 'resolved' AS resolution_state,
            10000 AS confidence_basis_points, 'extracted' AS confidence_tier,
            source_path AS evidence_path, line_start AS evidence_line_start,
-           line_end AS evidence_line_end, NULL AS component_language
+           line_end AS evidence_line_end, NULL AS component_language, 1 AS edge_rank
     FROM software_topics WHERE source_scope = ?1
     UNION ALL
     SELECT source_scope, 'depends_on', component_id, 'component', name,
            relationship_state, confidence_basis_points, 'extracted', evidence_path,
-           evidence_line_start, evidence_line_end, language_id
+           evidence_line_start, evidence_line_end, language_id, 1
     FROM software_components WHERE source_scope = ?1
     UNION ALL
     SELECT source_scope, 'uses_sdk', usage_id, 'sdk_usage', COALESCE(target_hint, module),
            resolution_state, confidence_basis_points, 'ambiguous', evidence_path,
-           evidence_line_start, evidence_line_end, NULL
+           evidence_line_start, evidence_line_end, NULL, 1
     FROM software_sdk_usages WHERE source_scope = ?1
     UNION ALL
     SELECT source_scope,
@@ -33,7 +33,7 @@ const RELATIONSHIP_FACTS_SQL: &str = "
                           WHEN 'reads_config' THEN 'configures'
                           WHEN 'guards_code' THEN 'configures' ELSE 'references' END,
            feature_flag_id, 'configuration', source_key, 'inferred',
-           confidence_basis_points, confidence_tier, path, line_start, line_end, NULL
+           confidence_basis_points, confidence_tier, path, line_start, line_end, NULL, edge_rank
     FROM (
         SELECT *, ROW_NUMBER() OVER (
             PARTITION BY source_scope, feature_flag_id, path, line_start,
@@ -42,10 +42,20 @@ const RELATIONSHIP_FACTS_SQL: &str = "
             ORDER BY confidence_basis_points DESC, line_end DESC, usage_id ASC
         ) AS edge_rank
         FROM code_repository_feature_flags WHERE source_scope = ?1
-    ) WHERE edge_rank = 1
+    )
 ";
 
-/// Counts the same snapshot joins used by reads, without allocating or writing edges.
+const RELATIONSHIP_COLUMNS_SQL: &str = "
+    files.repository_id, relationships.source_scope,
+    relationships.relationship_kind, files.software_file_id,
+    'file', relationships.target_id,
+    relationships.target_kind, relationships.target_hint,
+    relationships.resolution_state, relationships.confidence_basis_points,
+    relationships.confidence_tier, relationships.evidence_path,
+    relationships.evidence_line_start, relationships.evidence_line_end
+";
+
+/// Validates each joined fact with bounded row memory and counts selected edges without writes.
 /// The durable Relationships phase still publishes this count before ontology/freshness.
 pub(in crate::storage::sqlite::software) fn relationship_count_for_scope(
     connection: &Connection,
@@ -53,13 +63,27 @@ pub(in crate::storage::sqlite::software) fn relationship_count_for_scope(
 ) -> Result<usize, StorageError> {
     let query = format!(
         "WITH relationships AS ({RELATIONSHIP_FACTS_SQL})
-         SELECT COUNT(*) FROM relationships
+         SELECT {RELATIONSHIP_COLUMNS_SQL}, 0, relationships.edge_rank FROM relationships
          JOIN software_files files ON files.source_scope = relationships.source_scope
                                   AND files.path = relationships.evidence_path"
     );
-    connection
-        .query_row(&query, params![source_scope], |row| row.get(0))
-        .map_err(StorageError::from)
+    let mut statement = connection.prepare(&query)?;
+    let rows = statement.query_map(params![source_scope], |row| {
+        Ok((relationship_from_row(row)?, row.get::<_, u64>(15)? == 1))
+    })?;
+    let mut count = 0_usize;
+    for row in rows {
+        let (input, selected) = row?;
+        // Validate even a losing duplicate, as the former write path did. Use
+        // the domain constructor so Unicode whitespace and future invariants
+        // cannot diverge between publication and queries.
+        SoftwareRelationship::new(input)
+            .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+        count = count.checked_add(usize::from(selected)).ok_or_else(|| {
+            StorageError::CapacityExceeded("software relationship count overflow".to_owned())
+        })?;
+    }
+    Ok(count)
 }
 
 pub(in crate::storage::sqlite::software) fn relationships_for_scope(
@@ -76,20 +100,14 @@ pub(in crate::storage::sqlite::software) fn relationships_for_scope(
     let query = format!(
         "
         WITH relationships AS ({RELATIONSHIP_FACTS_SQL})
-        SELECT files.repository_id, relationships.source_scope,
-               relationships.relationship_kind, files.software_file_id,
-               'file', relationships.target_id,
-               relationships.target_kind, relationships.target_hint,
-               relationships.resolution_state, relationships.confidence_basis_points,
-               relationships.confidence_tier, relationships.evidence_path,
-               relationships.evidence_line_start, relationships.evidence_line_end,
-               status.projected_graph_version
+        SELECT {RELATIONSHIP_COLUMNS_SQL}, status.projected_graph_version
         FROM relationships
         JOIN software_files files
           ON files.source_scope = relationships.source_scope
          AND files.path = relationships.evidence_path
         JOIN software_global_status status ON status.source_scope = relationships.source_scope
         WHERE relationships.source_scope = ?1
+          AND relationships.edge_rank = 1
         {path_filter}
         {language_filter}
         ORDER BY
