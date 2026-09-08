@@ -28,6 +28,7 @@ async fn empty_control_plane_lists_no_repository_shards() {
 
 fn runtime_paths() -> RuntimePaths {
     RuntimePaths {
+        windows_data_sid: None,
         config_dir: PathBuf::from("/tmp/relay-knowledge/config"),
         data_dir: PathBuf::from("/tmp/relay-knowledge/data"),
         state_dir: PathBuf::from("/tmp/relay-knowledge/state"),

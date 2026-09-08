@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    paths::RuntimePaths,
+    paths::{RuntimePaths, StorageDirectoryAccess},
     storage::{
         KnowledgeStore, KnowledgeStoreFactory, KnowledgeStoreFactoryFuture,
         PartitionedSqliteKnowledgeStore, SqliteGraphStore, StorageError, StorageTopology,
@@ -17,6 +17,7 @@ pub struct SqliteKnowledgeStoreFactory {
     database_path: PathBuf,
     paths: RuntimePaths,
     topology: StorageTopology,
+    access_verified: Arc<tokio::sync::OnceCell<()>>,
 }
 
 impl SqliteKnowledgeStoreFactory {
@@ -26,7 +27,22 @@ impl SqliteKnowledgeStoreFactory {
             database_path: paths.database_file(),
             paths,
             topology,
+            access_verified: Arc::new(tokio::sync::OnceCell::new()),
         }
+    }
+
+    /// Serializes initial ACL work and reuses it for diagnostics after open,
+    /// keeping repeated status queries free of security subprocess launches.
+    async fn ensure_access(&self, access: StorageDirectoryAccess) -> Result<(), StorageError> {
+        self.access_verified
+            .get_or_try_init(|| async {
+                self.paths
+                    .ensure_storage_access(access)
+                    .await
+                    .map_err(|error| StorageError::InvalidInput(error.to_string()))
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -34,6 +50,9 @@ impl KnowledgeStoreFactory for SqliteKnowledgeStoreFactory {
     fn open(&self) -> KnowledgeStoreFactoryFuture<'_, Arc<dyn KnowledgeStore>> {
         let config = self.clone();
         Box::pin(async move {
+            config
+                .ensure_access(StorageDirectoryAccess::OpenOrCreate)
+                .await?;
             tokio::task::spawn_blocking(move || open_store(config))
                 .await
                 .map_err(StorageError::from)?
@@ -43,6 +62,9 @@ impl KnowledgeStoreFactory for SqliteKnowledgeStoreFactory {
     fn topology_snapshot(&self) -> KnowledgeStoreFactoryFuture<'_, StorageTopologySnapshot> {
         let config = self.clone();
         Box::pin(async move {
+            config
+                .ensure_access(StorageDirectoryAccess::ExistingOnly)
+                .await?;
             tokio::task::spawn_blocking(move || {
                 PartitionedSqliteKnowledgeStore::topology_snapshot_from_catalog(
                     config.database_path,

@@ -55,6 +55,7 @@ fn staging_an_active_scope_never_closes_its_read_gate() {
 
 fn runtime_paths(data_dir: PathBuf) -> RuntimePaths {
     RuntimePaths {
+        windows_data_sid: None,
         config_dir: PathBuf::from("/etc/relay-knowledge"),
         data_dir,
         state_dir: PathBuf::from("/var/lib/relay-knowledge/state"),

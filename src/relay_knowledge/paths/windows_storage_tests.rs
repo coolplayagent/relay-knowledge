@@ -216,6 +216,26 @@ async fn runtime_data_and_home_overrides_bypass_legacy_discovery() {
 
 #[cfg(windows)]
 #[tokio::test]
+async fn windows_runtime_only_records_policy_without_provisioning_storage() {
+    let fixture = Fixture::new();
+    let env = fixture.environment();
+    let sid = windows_storage::current_sid().await.unwrap();
+    let current = windows_data_directory(&sid).unwrap();
+    let existed = current.exists();
+    let paths = RuntimePaths::resolve_for_runtime(&env.platform, &env.paths)
+        .await
+        .unwrap();
+    assert_eq!(paths.data_dir, current);
+    assert_eq!(paths.windows_data_sid.as_deref(), Some(sid.as_str()));
+    assert_eq!(
+        current.exists(),
+        existed,
+        "configuration must not create the default data directory"
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
 async fn runtime_resolution_discovers_legacy_data_without_overrides() {
     let fixture = Fixture::new();
     let env = fixture.environment();

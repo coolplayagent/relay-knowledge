@@ -26,17 +26,25 @@ fn windows_sid_validation_accepts_accounts_and_rejects_path_injection() {
 
 #[tokio::test]
 async fn windows_security_rejects_invalid_inputs_before_launching_a_process() {
-    let error = prepare_private_directory(Path::new("/data"), "../account")
-        .await
-        .unwrap_err();
+    let error = prepare_private_directory(
+        Path::new("/data"),
+        "../account",
+        StorageDirectoryAccess::OpenOrCreate,
+    )
+    .await
+    .unwrap_err();
     assert!(error.to_string().contains("invalid account SID"));
     for path in ["/bad\0path".to_owned(), "x".repeat(4097)] {
         assert!(
-            prepare_private_directory(Path::new(&path), "S-1-5-18")
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("4096 bytes")
+            prepare_private_directory(
+                Path::new(&path),
+                "S-1-5-18",
+                StorageDirectoryAccess::OpenOrCreate
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("4096 bytes")
         );
     }
 }
@@ -52,11 +60,15 @@ async fn windows_identity_requires_a_native_host_without_an_environment_fallback
             .contains("Windows host")
     );
     assert!(
-        prepare_private_directory(Path::new("/quoted'path"), "S-1-5-18")
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("Windows host")
+        prepare_private_directory(
+            Path::new("/quoted'path"),
+            "S-1-5-18",
+            StorageDirectoryAccess::ExistingOnly
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("Windows host")
     );
 }
 
@@ -140,4 +152,34 @@ async fn windows_native_sid_is_stable_across_repeated_token_reads() {
     let first = current_sid().await.unwrap();
     assert_eq!(first, current_sid().await.unwrap());
     validate_sid(&first).unwrap();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_native_ignores_a_counterfeit_system_root() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("relay-fake-system-root-{nonce}"));
+    let shell = root.join("System32/WindowsPowerShell/v1.0");
+    tokio::fs::create_dir_all(&shell).await.unwrap();
+    tokio::fs::write(
+        shell.join("powershell.exe"),
+        b"counterfeit executable must never run",
+    )
+    .await
+    .unwrap();
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
+    child.args(["--exact", "paths::windows_storage::tests::windows_native_sid_is_stable_across_repeated_token_reads"])
+        .env("SystemRoot", &root)
+        .env("WINDIR", &root)
+        .env("PSModulePath", &root)
+        .env("COR_ENABLE_PROFILING", "1")
+        .env("COR_PROFILER_PATH", root.join("fake-profiler.dll"));
+    let output = bounded_command(&mut child, std::time::Duration::from_secs(30))
+        .await
+        .unwrap();
+    assert!(output.contains("1 passed"));
+    tokio::fs::remove_dir_all(root).await.unwrap();
 }

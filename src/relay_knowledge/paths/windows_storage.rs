@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{PathError, PathErrorKind, PathPurpose};
+use super::{PathError, PathErrorKind, PathPurpose, StorageDirectoryAccess};
 
 pub(super) async fn current_sid() -> Result<String, PathError> {
     let sid = run_security_script("Get-RelayStorageSid").await?;
@@ -36,7 +36,11 @@ pub(super) fn validate_sid(sid: &str) -> Result<(), PathError> {
     Ok(())
 }
 
-pub(super) async fn prepare_private_directory(path: &Path, sid: &str) -> Result<(), PathError> {
+pub(super) async fn prepare_private_directory(
+    path: &Path,
+    sid: &str,
+    access: StorageDirectoryAccess,
+) -> Result<(), PathError> {
     validate_sid(sid)?;
     let path = path
         .to_str()
@@ -44,8 +48,13 @@ pub(super) async fn prepare_private_directory(path: &Path, sid: &str) -> Result<
         .ok_or_else(|| {
             security_error("Windows data path must be valid Unicode and at most 4096 bytes")
         })?;
+    let existing_only = if access == StorageDirectoryAccess::ExistingOnly {
+        " -ExistingOnly"
+    } else {
+        ""
+    };
     let command = format!(
-        "Initialize-RelayPrivateStorage -DataPath '{}' -ExpectedSid '{sid}'; 'secured'",
+        "Initialize-RelayPrivateStorage -DataPath '{}' -ExpectedSid '{sid}'{existing_only}; 'secured'",
         path.replace('\'', "''")
     );
     if run_security_script(&command).await? != "secured" {
@@ -58,16 +67,27 @@ pub(super) async fn prepare_private_directory(path: &Path, sid: &str) -> Result<
 
 #[cfg(windows)]
 async fn run_security_script(command: &str) -> Result<String, PathError> {
-    let root = crate::env::windows_system_root_from_process()
-        .map(std::path::PathBuf::from)
-        .filter(|root| root.is_absolute())
-        .ok_or_else(|| security_error("SystemRoot must identify the Windows installation"))?;
-    let program = root.join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let system_directory = std::path::PathBuf::from(
+        winsafe::GetSystemDirectory().map_err(|error| security_error(error.to_string()))?,
+    );
+    let windows_directory = system_directory
+        .parent()
+        .filter(|_| system_directory.is_absolute())
+        .ok_or_else(|| security_error("Windows returned an invalid system directory"))?;
+    let shell_directory = system_directory.join("WindowsPowerShell/v1.0");
+    let program = shell_directory.join("powershell.exe");
     let script = format!(
         "{}\ntry {{ {command} }} catch {{ [Console]::WriteLine($_.Exception.Message); exit 1 }}",
         include_str!("windows_storage.ps1")
     );
     let mut process = tokio::process::Command::new(program);
+    // No inherited CLR profiler, module-search, or launcher environment may
+    // influence this privileged token/ACL boundary.
+    process
+        .env_clear()
+        .env("SystemRoot", windows_directory)
+        .env("WINDIR", windows_directory)
+        .env("PSModulePath", shell_directory.join("Modules"));
     process.args([
         "-NoLogo",
         "-NoProfile",

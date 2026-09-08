@@ -43,6 +43,15 @@ pub struct RuntimePaths {
     pub temp_dir: PathBuf,
     pub runtime_dir: PathBuf,
     pub service_dir: PathBuf,
+    /// Account policy retained for automatic Windows storage; explicit overrides use operator-managed ACLs.
+    pub windows_data_sid: Option<String>,
+}
+
+/// Whether a storage boundary may provision missing default directories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageDirectoryAccess {
+    OpenOrCreate,
+    ExistingOnly,
 }
 
 impl RuntimePaths {
@@ -60,6 +69,7 @@ impl RuntimePaths {
         };
 
         let resolved = Self {
+            windows_data_sid: None,
             config_dir: override_path(
                 PathPurpose::Config,
                 defaults.config_dir,
@@ -113,6 +123,7 @@ impl RuntimePaths {
         overrides: &PathEnvOverrides,
     ) -> Result<Self, PathError> {
         let mut effective = overrides.clone();
+        let mut windows_data_sid = None;
         if environment.platform == PlatformKind::Windows
             && overrides.home.is_none()
             && overrides.data_dir.is_none()
@@ -123,11 +134,35 @@ impl RuntimePaths {
             let current = windows_data_directory(&sid)?;
             let selected = select_windows_data_directory(&current, &legacy).await?;
             if selected == current {
-                windows_storage::prepare_private_directory(&selected, &sid).await?;
+                windows_data_sid = Some(sid);
             }
             effective.data_dir = Some(selected);
         }
-        Self::resolve(environment, &effective)
+        let mut resolved = Self::resolve(environment, &effective)?;
+        resolved.windows_data_sid = windows_data_sid;
+        Ok(resolved)
+    }
+
+    /// Applies the automatic Windows account policy at the storage-open boundary.
+    /// Existing-only diagnostics never provision directories. Explicit paths and
+    /// legacy stores retain operator-managed permissions.
+    pub async fn ensure_storage_access(
+        &self,
+        access: StorageDirectoryAccess,
+    ) -> Result<(), PathError> {
+        let Some(sid) = &self.windows_data_sid else {
+            return Ok(());
+        };
+        if self.data_dir != windows_data_directory(sid)? {
+            return Err(PathError {
+                purpose: PathPurpose::Data,
+                kind: PathErrorKind::WindowsStorageSecurity {
+                    reason: "automatic Windows storage path no longer matches its account policy"
+                        .to_owned(),
+                },
+            });
+        }
+        windows_storage::prepare_private_directory(&self.data_dir, sid, access).await
     }
 
     /// Returns the JSONL audit log owned by resident agent protocol adapters.
@@ -327,6 +362,7 @@ fn runtime_home_defaults(root: &Path) -> Result<RuntimePaths, PathError> {
     validate_path(PathPurpose::Home, root)?;
 
     Ok(RuntimePaths {
+        windows_data_sid: None,
         config_dir: root.join("config"),
         data_dir: root.join("data"),
         state_dir: root.join("state"),
@@ -394,6 +430,7 @@ fn unix_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, Path
     };
 
     Ok(RuntimePaths {
+        windows_data_sid: None,
         config_dir: config_base.join(APP_DIR_NAME),
         data_dir: data_base.join(APP_DIR_NAME),
         state_dir: state_dir.clone(),
@@ -415,6 +452,7 @@ fn macos_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, Pat
     let state_dir = application_support.join(APP_DIR_NAME).join("state");
 
     Ok(RuntimePaths {
+        windows_data_sid: None,
         config_dir: application_support.join(APP_DIR_NAME).join("config"),
         data_dir: application_support.join(APP_DIR_NAME).join("data"),
         state_dir: state_dir.clone(),
@@ -458,6 +496,7 @@ fn windows_defaults(
     };
 
     Ok(RuntimePaths {
+        windows_data_sid: None,
         config_dir: config_base.join(APP_DIR_NAME),
         data_dir: data_override
             .map(Path::to_path_buf)

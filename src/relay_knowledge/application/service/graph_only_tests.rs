@@ -101,6 +101,49 @@ async fn service_plan_metadata_uses_current_graph_version() {
 }
 
 #[tokio::test]
+async fn install_and_uninstall_plans_do_not_open_unavailable_storage() {
+    let root = unique_root("storage-free-lifecycle-plan");
+    std::fs::write(&root, b"parent is a file, so database open would fail").unwrap();
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let mut runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    // This policy would also fail immediately if the lazy SQLite factory opened.
+    runtime.paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+    let service = RelayKnowledgeService::new(runtime);
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Uninstall,
+    ] {
+        let response = service
+            .service_plan(
+                ServicePlanRequest {
+                    action,
+                    dry_run: true,
+                    execute: false,
+                    target_version: None,
+                    install_dir: None,
+                },
+                RequestContext::for_interface(InterfaceKind::Cli),
+            )
+            .await
+            .expect("lifecycle plan must not require storage");
+        assert_eq!(response.metadata.graph_version, 0);
+        assert!(response.execution.is_none());
+        assert!(service.storage.ready_store().is_none());
+    }
+    assert_eq!(
+        std::fs::read(&root).unwrap(),
+        b"parent is a file, so database open would fail"
+    );
+    std::fs::remove_file(root).unwrap();
+}
+
+#[tokio::test]
 async fn service_definition_write_metadata_uses_current_graph_version() {
     let root = unique_root("service-definition-metadata");
     let _ = std::fs::remove_dir_all(&root);

@@ -48,7 +48,7 @@ function Assert-RelayDirectorySecurity {
 }
 
 function Initialize-RelayPrivateStorage {
-    param([string]$DataPath, [string]$ExpectedSid)
+    param([string]$DataPath, [string]$ExpectedSid, [switch]$ExistingOnly)
     $sid = Get-RelayStorageSid
     if ($sid -ne $ExpectedSid) { throw 'Windows account changed during storage resolution' }
     $data = [System.IO.DirectoryInfo]::new($DataPath)
@@ -63,7 +63,7 @@ function Initialize-RelayPrivateStorage {
     }
     for ($index = $ancestors.Count - 1; $index -ge 0; $index--) {
         $directory = $ancestors[$index]
-        if (-not $directory.Exists -and $null -ne $directory.Parent) { $directory.Create() }
+        if (-not $ExistingOnly -and -not $directory.Exists -and $null -ne $directory.Parent) { $directory.Create() }
         Assert-RelayDirectorySecurity $directory $sid $false
     }
     $security = [System.Security.AccessControl.DirectorySecurity]::new()
@@ -81,7 +81,7 @@ function Initialize-RelayPrivateStorage {
     foreach ($directory in @($profile, $data)) {
         # Create is a no-op for existing directories; validation then rejects
         # pre-created permissive directories rather than silently repairing them.
-        $directory.Create($security)
+        if (-not $ExistingOnly) { $directory.Create($security) }
         Assert-RelayDirectorySecurity $directory $sid $true
     }
 }

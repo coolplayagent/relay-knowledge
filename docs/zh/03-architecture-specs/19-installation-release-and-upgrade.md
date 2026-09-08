@@ -63,7 +63,9 @@ Web Knowledge Map 请求必须显式指定已注册仓库。安装后的服务�
 Windows 新安装的数据目录为 `D:\relay-knowledge\users\<user-sid>\data`，
 主库为 `relay-knowledge.sqlite`，分片位于 `stores/repositories/`。
 SID 通过 Windows PowerShell 5.1 从当前进程令牌获取，迁移用户配置目录或修改 LocalAppData
-不会改变账户存储标识。paths 边界使用 SystemRoot 下的固定可执行文件、非交互命令、
+不会改变账户存储标识。paths 边界通过 OS `GetSystemDirectoryW` API（兼容 MSRV 的 WinSafe kernel
+包装）定位 PowerShell，不依赖 SystemRoot 或 PATH。子进程仅保留从 OS 派生的 SystemRoot/WINDIR
+和系统模块目录，不继承模块/CLR profiler 注入设置。非交互命令使用
 每进程 10 秒超时和 4096 字节输出上限；超时或取消会终止子进程，不回退到环境变量或账户名称。
 其他 Windows 运行时目录
 继续使用 AppData/TEMP；Linux、macOS 的默认规则不变。数据目录优先级固定为
@@ -85,17 +87,24 @@ SID 通过 Windows PowerShell 5.1 从当前进程令牌获取，迁移用户配�
 通过升级后的 CLI/Web 配置重新打开含有实际图谱数据的旧库。
 `windows-storage` PR job 在 Windows 上执行 PowerShell ACL、Rust UT 和旧 SQLite 升级集成测试，
 覆盖私有目录和文件继承、校验前后落盘 ACL 保持不变、已有目录及父目录宽松 ACL、junction 拒绝、稳定 SID 和已有图谱。
+Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不创建目录；存储工厂与服务测试
+证明策略失败先于 SQLite 打开，且数据路径不可用时仍能生成生命周期计划。
 Linux UT 验证子进程失败、输出限制、超时和取消，不模拟 Windows 账户令牌。
 
-新默认路径在创建 SID 目录及其 `data` 子目录时原子设置 owner 和受保护 DACL，
+路径解析仅保留 SID 策略，不创建目录。工厂通过共享 once-cell 串行执行首次 ACL 校验，
+已打开存储后的常规诊断复用校验结果，不再启动子进程。SQLite 工厂在实际打开存储前创建 SID 目录及其 `data`
+子目录，并原子设置 owner 和受保护 DACL，
 仅授予当前账户、SYSTEM、Administrators 可继承的完全控制。已有目录必须满足同一 ACL 合同，
-启动不会自动修复宽松 ACL。自卷根逐级检查最多 32 个父目录，拒绝重解析点、不可信 owner，
+存储边界不会自动修复宽松 ACL。只读存储诊断仅校验已有目录，不创建目录。自卷根逐级检查最多 32 个父目录，拒绝重解析点、不可信 owner，
 以及允许其他账户删除、修改属性、修改权限或夺取所有权的 ACL；共享父目录可以授予读取、
 遍历和创建子目录权限。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
 权限受限的共享父目录，或通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
 及支持 ACL 的本地卷。显式 HOME/DATA 和保留的旧库继续由操作者管理权限。
 服务定义固定解析后的目录，默认 ACL 支持 LocalSystem 访问；卸载和回滚不迁移 ACL。
+安装/卸载计划及卸载执行不打开图存储；未打开存储时计划 metadata 使用图版本 0。
+无需协调旧目录时，缺少或 ACL 不安全的 D: 不会阻止这些生命周期操作进入自身检查。
 实现依据微软的 [SID 合同](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
+[系统目录查询](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw)
 和[带安全描述符的目录创建](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1)。
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。早期数据库的 `code_repository_schema_migrations` 可能只有 `name` 列；schema 初始化必须先幂等增加 `applied_at_ms INTEGER NOT NULL DEFAULT 0`，再运行任何会写 capability marker 的 retention、search-owner 或其他迁移，不能要求 operator 重建数据库或手工补列。

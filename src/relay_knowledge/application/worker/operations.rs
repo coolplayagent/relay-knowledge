@@ -355,11 +355,15 @@ impl RelayKnowledgeService {
         request: ServicePlanRequest,
         context: RequestContext,
     ) -> Result<ServicePlanResponse, ApiError> {
-        let store = self.storage.get().await.map_err(storage_api_error)?;
-        let graph_version = store
-            .current_graph_version()
-            .await
-            .map_err(storage_api_error)?;
+        // Lifecycle plans and removal must work without opening or provisioning
+        // graph storage. Reuse the version only when a store is already open.
+        let graph_version = match self.storage.ready_store() {
+            Some(store) => store
+                .current_graph_version()
+                .await
+                .map_err(storage_api_error)?,
+            None => crate::domain::GraphVersion::ZERO,
+        };
         let plan = self
             .render_service_plan_for_request(&request)
             .map_err(ApiError::invalid_argument)?;

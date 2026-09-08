@@ -23,6 +23,7 @@ fn test_paths(label: &str) -> RuntimePaths {
         .as_nanos();
     let root = std::env::temp_dir().join(format!("relay-model-provider-{label}-{now}"));
     RuntimePaths {
+        windows_data_sid: None,
         config_dir: root.join("config"),
         data_dir: root.join("data"),
         state_dir: root.join("state"),

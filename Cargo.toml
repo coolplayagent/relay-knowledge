@@ -80,6 +80,10 @@ unicode-ident = "1.0"
 url = "2.5.8"
 quick-xml = "0.41"
 
+[target.'cfg(windows)'.dependencies]
+# Safe GetSystemDirectory wrapper compatible with the crate's Rust 1.85 MSRV.
+winsafe = { version = "0.0.23", features = ["kernel"] }
+
 [dev-dependencies]
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 rusqlite = { version = "0.32", features = ["trace"] }

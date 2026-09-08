@@ -30,8 +30,11 @@ if ($LASTEXITCODE -ne 0) { throw 'Cannot create isolated drive alias' }
 try {
     $base = "$drive\shared"
     $data = "$base\users\$sid\data"
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -ExistingOnly } 'existing directories'
+    if ([System.IO.Directory]::Exists($base)) { throw 'Read-only validation provisioned storage' }
     Initialize-RelayPrivateStorage $data $sid
     Initialize-RelayPrivateStorage $data $sid
+    Initialize-RelayPrivateStorage $data $sid -ExistingOnly
     foreach ($path in @((Split-Path $data), $data)) {
         $acl = [System.IO.DirectoryInfo]::new($path).GetAccessControl()
         if (-not $acl.AreAccessRulesProtected) { throw 'Private DACL must be protected' }

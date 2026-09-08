@@ -98,7 +98,7 @@ New Windows installations store SQLite in
 `D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`, with shards
 under `stores/repositories/` in the same data directory. The user SID comes from
 the Windows process token, so profile relocation and LocalAppData changes do not
-change the default store. New account directories receive a protected ACL for
+change the default store. When SQLite is opened, new account directories receive a protected ACL for
 the account, SYSTEM, and Administrators. Unsafe existing ACLs, reparse points,
 or ancestors granting other accounts deletion or permission changes are rejected.
 Automatic defaults require Windows PowerShell 5.1 and an ACL-capable local volume;

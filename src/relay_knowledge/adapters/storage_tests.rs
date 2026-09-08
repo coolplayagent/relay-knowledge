@@ -17,6 +17,41 @@ use crate::{
 use super::*;
 
 #[tokio::test]
+async fn windows_storage_policy_is_checked_before_either_topology_opens_sqlite() {
+    for topology in [
+        StorageTopology::SingleSqlite,
+        StorageTopology::PartitionedSqlite,
+    ] {
+        let mut paths = runtime_paths();
+        paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+        let data = paths.data_dir.clone();
+        let factory = SqliteKnowledgeStoreFactory::new(paths, topology);
+        assert!(!data.exists(), "factory construction must stay lazy");
+        let error = match factory.open().await {
+            Ok(_) => panic!("mismatched automatic storage policy must fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("no longer matches its account policy")
+        );
+        assert!(
+            factory
+                .topology_snapshot()
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("no longer matches its account policy")
+        );
+        assert!(
+            !data.exists(),
+            "policy failure must precede SQLite directory creation"
+        );
+    }
+}
+
+#[tokio::test]
 async fn single_sqlite_rejects_active_partitioned_catalog() {
     let paths = runtime_paths();
     let database_path = paths.database_file();

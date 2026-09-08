@@ -64,8 +64,11 @@ New Windows installations default to `D:\relay-knowledge\users\<user-sid>\data`,
 containing `relay-knowledge.sqlite` and shards under `stores/repositories/`.
 The user SID comes from the current Windows process token through Windows
 PowerShell 5.1, so account identity survives profile and LocalAppData relocation.
-The paths boundary uses a fixed executable below SystemRoot, noninteractive
-commands, a 10-second deadline per process, a 4096-byte output cap, and child
+The paths boundary locates PowerShell through the OS `GetSystemDirectoryW` API
+(using the MSRV-compatible WinSafe kernel wrapper), never through SystemRoot or
+PATH. Its child receives only OS-derived SystemRoot/WINDIR and the system module
+directory, excluding inherited module/profiler injection settings. Noninteractive
+commands use a 10-second deadline per process, a 4096-byte output cap, and child
 termination on timeout or cancellation. No process environment values or account
 names serve as SID fallbacks. Other Windows runtime directories retain AppData/TEMP defaults; Linux and macOS defaults are
 unchanged. Data-directory precedence is `RELAY_KNOWLEDGE_DATA_DIR` >
@@ -82,22 +85,30 @@ Non-directory paths, inspection errors, or timeouts fail visibly. Two existing
 old/new directories require an explicit data override instead of guessing which
 store is authoritative. No database is opened or moved during path resolution.
 
-Before selecting a new default, startup creates the SID directory and its `data`
+Path resolution retains the selected SID policy without creating directories.
+The factory serializes initial ACL verification in a shared once-cell, so ordinary
+diagnostics after open reuse the policy check without launching subprocesses.
+Immediately before SQLite opens, its factory creates the SID directory and `data`
 child with a protected DACL owned by the account. It grants inheritable full
 control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
-creation. Existing directories must already satisfy that policy; startup never
+creation. Existing directories must already satisfy that policy; the storage boundary never
 silently rewrites permissions or adopts a permissive directory. Ancestors are
 checked from the volume root downward (at most 32): reparse points, untrusted
 owners, and grants allowing other accounts to delete, change attributes, change
 permissions, or take ownership are rejected. Read/traverse/create-child rights
-on shared ancestors are allowed. A missing or insecure D: volume fails visibly;
+on shared ancestors are allowed. Read-only storage diagnostics validate existing directories without creating them.
+A missing or insecure D: volume fails visibly when storage is opened;
 an administrator can provision the shared ancestors with an administrator owner
 and restricted write/delete rights, or users can explicitly choose a private
 location. Explicit HOME/DATA overrides and retained legacy storage keep their
 operator-managed ACL policy. Service definitions pin the chosen directory, and
-the default ACL permits LocalSystem service access. No ACL migration runs on
-uninstall or rollback. These rules use Microsoft's
+the default ACL permits LocalSystem service access. Service install/uninstall plans and uninstall execution do not open graph storage;
+they report graph version zero until storage is already open. With no legacy
+directory to reconcile, a missing or ACL-unsafe D: does not prevent those lifecycle
+operations from reaching their own checks.
+No ACL migration runs on uninstall or rollback. These rules use Microsoft's
 [SID identity contract](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
+[system-directory lookup](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw),
 and [directory creation with security](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1).
 
 This default change does not alter SQLite schemas or automatically move old
@@ -117,7 +128,10 @@ graph through upgraded CLI/Web configuration for both storage topologies.
 The `windows-storage` PR job runs native PowerShell ACL checks, Windows Rust unit
 tests, and legacy SQLite upgrade integration tests. It covers protected child/file
 inheritance, persisted ACL preservation across validation, unsafe existing and ancestor ACLs, junction rejection, stable SIDs,
-and populated legacy stores. Linux unit tests cover subprocess failures, output
+populated legacy stores, counterfeit SystemRoot/module/profiler settings, and
+read-only validation without directory creation. Storage-factory and service tests
+prove that policy failures precede SQLite open and lifecycle plans work with an
+unavailable data path. Linux unit tests cover subprocess failures, output
 limits, timeout, and cancellation; they do not impersonate a Windows token.
 
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations. Early databases may have a `code_repository_schema_migrations` table containing only the `name` column; schema initialization must idempotently add `applied_at_ms INTEGER NOT NULL DEFAULT 0` before running retention, search-owner, or any other migration that writes a capability marker, without requiring operators to rebuild the database or add the column manually.
