@@ -317,6 +317,11 @@ relay-knowledge service run --web --mcp streamable-http
 
 ### 14.5.3 安装并启动 Windows Service
 
+服务固定 `D:\relay-knowledge\users\<user-sid>\data` 时会保留原账户的权限策略。
+LocalSystem 在每次服务进程启动后首次打开 SQLite 前重新检查 ACL 和 junction；
+安装时的目录预检不能代替启动校验。该布局由原账户或 LocalSystem 管理，
+其他自定义目录仍由操作者配置权限。
+
 以管理员权限打开 PowerShell：
 
 ```powershell

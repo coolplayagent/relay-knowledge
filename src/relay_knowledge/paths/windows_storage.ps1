@@ -8,6 +8,16 @@ function Get-RelayStorageSid {
     try { return $identity.User.Value } finally { $identity.Dispose() }
 }
 
+function Get-RelayStorageCreationOwner {
+    param([string]$ActorSid, [string]$ExpectedSid)
+    # Installed services run as LocalSystem but retain the installing account's
+    # directory. Other accounts cannot adopt that account's reserved path.
+    if ($ActorSid -ne $ExpectedSid -and $ActorSid -ne 'S-1-5-18') {
+        throw 'Storage requires the owning account or LocalSystem'
+    }
+    return $ActorSid
+}
+
 function Assert-RelayDirectorySecurity {
     param([System.IO.DirectoryInfo]$Directory, [string]$Sid, [bool]$Private)
     $Directory.Refresh()
@@ -49,11 +59,10 @@ function Assert-RelayDirectorySecurity {
 
 function Initialize-RelayPrivateStorage {
     param([string]$DataPath, [string]$ExpectedSid, [switch]$ExistingOnly)
-    $sid = Get-RelayStorageSid
-    if ($sid -ne $ExpectedSid) { throw 'Windows account changed during storage resolution' }
+    $creationOwner = Get-RelayStorageCreationOwner (Get-RelayStorageSid) $ExpectedSid
     $data = [System.IO.DirectoryInfo]::new($DataPath)
     $profile = $data.Parent
-    if ($data.Name -ne 'data' -or $profile.Name -ne $sid) { throw 'Invalid account storage layout' }
+    if ($data.Name -ne 'data' -or $profile.Name -ne $ExpectedSid) { throw 'Invalid account storage layout' }
     # Check/create one ancestor at a time, from the volume root down. Never
     # rewrite existing ACLs or adopt an untrusted directory and its contents.
     $ancestors = [System.Collections.Generic.List[System.IO.DirectoryInfo]]::new()
@@ -64,12 +73,12 @@ function Initialize-RelayPrivateStorage {
     for ($index = $ancestors.Count - 1; $index -ge 0; $index--) {
         $directory = $ancestors[$index]
         if (-not $ExistingOnly -and -not $directory.Exists -and $null -ne $directory.Parent) { $directory.Create() }
-        Assert-RelayDirectorySecurity $directory $sid $false
+        Assert-RelayDirectorySecurity $directory $ExpectedSid $false
     }
     $security = [System.Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)
-    $security.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
-    foreach ($principal in (@($sid, 'S-1-5-18', 'S-1-5-32-544') | Select-Object -Unique)) {
+    $security.SetOwner([System.Security.Principal.SecurityIdentifier]::new($creationOwner))
+    foreach ($principal in (@($ExpectedSid, 'S-1-5-18', 'S-1-5-32-544') | Select-Object -Unique)) {
         $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
             [System.Security.Principal.SecurityIdentifier]::new($principal),
             [System.Security.AccessControl.FileSystemRights]::FullControl,
@@ -82,6 +91,6 @@ function Initialize-RelayPrivateStorage {
         # Create is a no-op for existing directories; validation then rejects
         # pre-created permissive directories rather than silently repairing them.
         if (-not $ExistingOnly) { $directory.Create($security) }
-        Assert-RelayDirectorySecurity $directory $sid $true
+        Assert-RelayDirectorySecurity $directory $ExpectedSid $true
     }
 }

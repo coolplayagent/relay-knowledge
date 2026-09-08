@@ -43,7 +43,7 @@ pub struct RuntimePaths {
     pub temp_dir: PathBuf,
     pub runtime_dir: PathBuf,
     pub service_dir: PathBuf,
-    /// Account policy retained for automatic Windows storage; explicit overrides use operator-managed ACLs.
+    /// Account policy for the reserved Windows SID layout, including pinned service paths.
     pub windows_data_sid: Option<String>,
 }
 
@@ -68,7 +68,7 @@ impl RuntimePaths {
             platform_defaults(environment, overrides.data_dir.as_deref())?
         };
 
-        let resolved = Self {
+        let mut resolved = Self {
             windows_data_sid: None,
             config_dir: override_path(
                 PathPurpose::Config,
@@ -113,6 +113,9 @@ impl RuntimePaths {
         };
 
         validate_all(&resolved)?;
+        if environment.platform == PlatformKind::Windows {
+            resolved.windows_data_sid = windows_data_sid_from_path(&resolved.data_dir)?;
+        }
         Ok(resolved)
     }
 
@@ -123,7 +126,6 @@ impl RuntimePaths {
         overrides: &PathEnvOverrides,
     ) -> Result<Self, PathError> {
         let mut effective = overrides.clone();
-        let mut windows_data_sid = None;
         if environment.platform == PlatformKind::Windows
             && overrides.home.is_none()
             && overrides.data_dir.is_none()
@@ -132,20 +134,14 @@ impl RuntimePaths {
             let legacy = local_base.join(APP_DIR_NAME).join("data");
             let sid = windows_storage::current_sid().await?;
             let current = windows_data_directory(&sid)?;
-            let selected = select_windows_data_directory(&current, &legacy).await?;
-            if selected == current {
-                windows_data_sid = Some(sid);
-            }
-            effective.data_dir = Some(selected);
+            effective.data_dir = Some(select_windows_data_directory(&current, &legacy).await?);
         }
-        let mut resolved = Self::resolve(environment, &effective)?;
-        resolved.windows_data_sid = windows_data_sid;
-        Ok(resolved)
+        Self::resolve(environment, &effective)
     }
 
     /// Applies the automatic Windows account policy at the storage-open boundary.
-    /// Existing-only diagnostics never provision directories. Explicit paths and
-    /// legacy stores retain operator-managed permissions.
+    /// Existing-only diagnostics never provision directories. Overrides outside
+    /// the reserved SID layout and legacy stores retain operator-managed permissions.
     pub async fn ensure_storage_access(
         &self,
         access: StorageDirectoryAccess,
@@ -153,7 +149,7 @@ impl RuntimePaths {
         let Some(sid) = &self.windows_data_sid else {
             return Ok(());
         };
-        if self.data_dir != windows_data_directory(sid)? {
+        if windows_data_sid_from_path(&self.data_dir)?.as_ref() != Some(sid) {
             return Err(PathError {
                 purpose: PathPurpose::Data,
                 kind: PathErrorKind::WindowsStorageSecurity {
@@ -542,6 +538,33 @@ fn windows_data_directory(sid: &str) -> Result<PathBuf, PathError> {
         .join("data"))
 }
 
+/// Recover the account policy even when a service pins its data directory as an
+/// explicit override. Match Windows separators/case without filesystem access.
+fn windows_data_sid_from_path(path: &Path) -> Result<Option<String>, PathError> {
+    let Some(path) = path.to_str() else {
+        return Ok(None);
+    };
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let components: Vec<_> = path
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != ".")
+        .take(6)
+        .collect();
+    let [drive, app, users, sid, data] = components.as_slice() else {
+        return Ok(None);
+    };
+    if !drive.eq_ignore_ascii_case(WINDOWS_DATA_VOLUME.trim_end_matches('/'))
+        || !app.eq_ignore_ascii_case(APP_DIR_NAME)
+        || !users.eq_ignore_ascii_case("users")
+        || !data.eq_ignore_ascii_case("data")
+    {
+        return Ok(None);
+    }
+    let sid = sid.to_ascii_uppercase();
+    windows_storage::validate_sid(&sid)?;
+    Ok(Some(sid))
+}
+
 async fn select_windows_data_directory(
     current: &Path,
     legacy: &Path,
@@ -722,4 +745,5 @@ fn repository_shard_dir_name(repository_id: &str) -> String {
 mod tests;
 
 #[cfg(test)]
+#[path = "windows_storage_tests.rs"]
 mod windows_storage_tests;

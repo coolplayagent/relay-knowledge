@@ -55,7 +55,10 @@ which takes precedence over existing Windows LocalAppData storage and platform
 defaults. New Windows installations use
 `D:\relay-knowledge\users\<user-sid>\data`; the SID is obtained from the Windows process token
 and remains stable when LocalAppData moves. New default directories require
-protected ACLs; unsafe directories fail with an actionable error. Existing
+protected ACLs; unsafe directories fail with an actionable error. Explicit HOME/DATA
+settings that select this SID layout retain its original account policy, including
+LocalSystem service startup checks. Overrides elsewhere retain operator-managed
+permissions. Existing
 Windows data directories remain selected on upgrade; conflicting old/new directories require an explicit override.
 Other platforms retain their normal data directories.
 An empty override is an error. See [installation and migration](01-install-and-runtime.md#14-zero-config-defaults)

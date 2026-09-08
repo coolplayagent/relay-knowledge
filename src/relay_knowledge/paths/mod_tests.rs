@@ -361,7 +361,10 @@ fn windows_sqlite_defaults_use_d_drive_for_main_database_and_shards() {
             }
         )
         .expect("absolute Windows paths"),
-        paths
+        RuntimePaths {
+            windows_data_sid: Some("S-1-5-21-1-2-3-1001".to_owned()),
+            ..paths
+        }
     );
 }
 

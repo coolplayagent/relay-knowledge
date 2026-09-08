@@ -101,7 +101,10 @@ the Windows process token, so profile relocation and LocalAppData changes do not
 change the default store. When SQLite is opened, new account directories receive a protected ACL for
 the account, SYSTEM, and Administrators. Unsafe existing ACLs, reparse points,
 or ancestors granting other accounts deletion or permission changes are rejected.
-Automatic defaults require Windows PowerShell 5.1 and an ACL-capable local volume;
+Service paths pinned to the SID layout retain this policy and revalidate ACLs
+and reparse points on every new service startup. Install/upgrade/rollback execution
+also provisions or validates these directories before service-manager steps;
+plans and uninstall do not provision storage. This layout requires Windows PowerShell 5.1 and an ACL-capable local volume;
 use an explicitly configured private directory if D: cannot meet these conditions. `status --format json`
 shows the resolved directory. Config, logs, and other runtime directories retain
 their AppData/TEMP defaults. Linux and macOS defaults are unchanged.

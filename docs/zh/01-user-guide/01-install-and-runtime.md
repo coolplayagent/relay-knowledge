@@ -102,8 +102,9 @@ Windows 新安装的主库为
 `D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`，
 仓库分片位于同一数据目录下的 `stores/repositories/`。
 SID 来自 Windows 进程令牌，迁移用户配置目录或修改 LocalAppData 不会改变默认库。
-实际打开 SQLite 时才创建账户目录并设置受保护 ACL，仅允许该账户、SYSTEM 和 Administrators；
-服务计划和卸载不创建数据目录。
+实际打开 SQLite 或执行服务安装/升级/回滚预检时创建账户目录并设置受保护 ACL，仅允许该账户、SYSTEM 和 Administrators；
+服务计划和卸载不创建数据目录。服务固定的 SID 路径仍保留权限策略，
+每次启动的新服务进程都会重新校验 ACL 和重解析点。
 已有目录 ACL 不安全、存在重解析点，或父目录允许其他账户删除或修改权限时会报错。
 自动默认路径需要 Windows PowerShell 5.1 和支持 ACL 的本地卷；D: 不满足条件时，
 请显式指定已配置私有权限的数据目录。

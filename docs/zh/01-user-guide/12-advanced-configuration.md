@@ -53,7 +53,9 @@ RELAY_KNOWLEDGE_SERVICE_DIR
 `stores/repositories/` 所在目录，优先于 `RELAY_KNOWLEDGE_HOME/data`，再优先于已有 Windows
 LocalAppData 数据目录和平台默认值。Windows 新安装目录为
 `D:\relay-knowledge\users\<user-sid>\data`，SID 来自 Windows 进程令牌，迁移 LocalAppData 不会改变该目录。
-新默认目录必须使用受保护 ACL，权限不安全时会明确报错。
+新默认目录必须使用受保护 ACL，权限不安全时会明确报错。显式 HOME/DATA
+选择该 SID 布局时仍恢复原账户权限策略，LocalSystem 服务启动也会校验；
+其他覆盖目录继续由操作者管理权限。
 升级会继续使用已有目录；旧目录与新用户目录同时存在时必须显式覆盖。
 其他平台保留原数据目录规则。
 空值会报错。PowerShell 示例、持久化用户环境、服务配置和已有数据库搬迁见

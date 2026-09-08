@@ -68,6 +68,68 @@ fn windows_account_storage_survives_profile_relocation() {
 }
 
 #[test]
+fn pinned_windows_sid_paths_recover_the_original_account_policy() {
+    for path in [
+        "D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data",
+        r"d:\RELAY-KNOWLEDGE\Users\s-1-5-21-1-2-3-1001\DATA\",
+        r"\\?\D:\relay-knowledge\users\S-1-5-21-1-2-3-1001\data",
+        "D:/relay-knowledge/./users/S-1-5-21-1-2-3-1001/data/",
+    ] {
+        assert_eq!(
+            windows_data_sid_from_path(Path::new(path))
+                .unwrap()
+                .as_deref(),
+            Some("S-1-5-21-1-2-3-1001"),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn only_the_reserved_windows_data_layout_restores_policy() {
+    for path in [
+        "E:/relay-knowledge/users/S-1-5-18/data",
+        "D:/custom/users/S-1-5-18/data",
+        "D:/relay-knowledge/profiles/S-1-5-18/data",
+        "D:/relay-knowledge/users/S-1-5-18/config",
+        "D:/relay-knowledge/users/S-1-5-18/data/custom",
+        "D:/relay-knowledge/users",
+        "C:/Users/example/AppData/Local/relay-knowledge/data",
+    ] {
+        assert_eq!(windows_data_sid_from_path(Path::new(path)).unwrap(), None);
+    }
+    assert!(
+        windows_data_sid_from_path(Path::new("D:/relay-knowledge/users/S-1-5-invalid/data"))
+            .is_err()
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_service_data_override_preserves_the_installer_sid_without_provisioning() {
+    let fixture = Fixture::new();
+    let mut env = fixture.environment();
+    // Simulate a service loading a path pinned by a different account; this
+    // must not query the service token and replace the original directory SID.
+    let sid = "S-1-5-21-1-2-3-123456";
+    let data = windows_data_directory(sid).unwrap();
+    let existed = data.exists();
+    env.paths.data_dir = Some(data.clone());
+    for use_home in [false, true] {
+        if use_home {
+            env.paths.data_dir = None;
+            env.paths.home = Some(data.parent().unwrap().to_path_buf());
+        }
+        let selected = RuntimePaths::resolve_for_runtime(&env.platform, &env.paths)
+            .await
+            .unwrap();
+        assert_eq!(selected.windows_data_sid.as_deref(), Some(sid));
+        assert_eq!(selected.data_dir, data);
+        assert_eq!(data.exists(), existed);
+    }
+}
+
+#[test]
 fn lexical_windows_resolution_requires_an_explicit_data_directory() {
     let fixture = Fixture::new();
     let env = fixture.environment();
@@ -206,12 +268,14 @@ async fn runtime_data_and_home_overrides_bypass_legacy_discovery() {
         .await
         .unwrap();
     assert_eq!(selected.data_dir, fixture.0.join("selected-data"));
+    assert_eq!(selected.windows_data_sid, None);
     env.paths.data_dir = None;
     env.paths.home = Some(fixture.0.join("selected-home"));
     let selected = RuntimePaths::resolve_for_runtime(&env.platform, &env.paths)
         .await
         .unwrap();
     assert_eq!(selected.data_dir, fixture.0.join("selected-home/data"));
+    assert_eq!(selected.windows_data_sid, None);
 }
 
 #[cfg(windows)]

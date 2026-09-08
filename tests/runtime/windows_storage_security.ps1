@@ -12,6 +12,9 @@ function Assert-Rejected {
 }
 
 $sid = Get-RelayStorageSid
+if ((Get-RelayStorageCreationOwner $sid $sid) -ne $sid) { throw 'Account must own newly created storage' }
+if ((Get-RelayStorageCreationOwner 'S-1-5-18' $sid) -ne 'S-1-5-18') { throw 'LocalSystem must own service-created storage' }
+Assert-Rejected { Get-RelayStorageCreationOwner 'S-1-5-21-1-2-3-9999' $sid } 'owning account'
 $root = Join-Path ([System.IO.Path]::GetTempPath()) ("relay-storage-acl-" + [guid]::NewGuid())
 $rootSecurity = [System.Security.AccessControl.DirectorySecurity]::new()
 $rootSecurity.SetAccessRuleProtection($true, $false)
@@ -35,6 +38,13 @@ try {
     Initialize-RelayPrivateStorage $data $sid
     Initialize-RelayPrivateStorage $data $sid
     Initialize-RelayPrivateStorage $data $sid -ExistingOnly
+    # Exercise the service identity branch against real persisted ACLs. Only
+    # token lookup is stubbed in this test scope; ACL/owner/reparse reads are real.
+    $originalSidFunction = ${function:Get-RelayStorageSid}
+    try {
+        function Get-RelayStorageSid { return 'S-1-5-18' }
+        Initialize-RelayPrivateStorage $data $sid -ExistingOnly
+    } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
     foreach ($path in @((Split-Path $data), $data)) {
         $acl = [System.IO.DirectoryInfo]::new($path).GetAccessControl()
         if (-not $acl.AreAccessRulesProtected) { throw 'Private DACL must be protected' }
@@ -72,6 +82,10 @@ try {
     # reads, not the pre-persistence in-memory descriptor against an OS read.
     $beforeValidation = $privateDirectory.GetAccessControl().GetSecurityDescriptorSddlForm('Access')
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'Unsafe storage permissions'
+    try {
+        function Get-RelayStorageSid { return 'S-1-5-18' }
+        Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -ExistingOnly } 'Unsafe storage permissions'
+    } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
     # Validation must not silently repair a pre-existing ACL.
     if ($privateDirectory.GetAccessControl().GetSecurityDescriptorSddlForm('Access') -ne $beforeValidation) {
         throw 'Validation unexpectedly rewrote a directory ACL'
@@ -88,8 +102,12 @@ try {
     $junction = "$drive\junction"
     New-Item -ItemType Junction -Path $junction -Target "$drive\shared" | Out-Null
     Assert-Rejected { Initialize-RelayPrivateStorage "$junction\users\$sid\data" $sid } 'reparse points'
+    try {
+        function Get-RelayStorageSid { return 'S-1-5-18' }
+        Assert-Rejected { Initialize-RelayPrivateStorage "$junction\users\$sid\data" $sid -ExistingOnly } 'reparse points'
+    } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
     [System.IO.Directory]::Delete($junction)
-    Assert-Rejected { Initialize-RelayPrivateStorage "$drive\safe\$sid\data" 'S-1-5-18' } 'account changed'
+    Assert-Rejected { Initialize-RelayPrivateStorage "$drive\safe\$sid\data" 'S-1-5-18' } 'owning account'
     Write-Host 'Windows account identity and storage ACL regression tests passed.'
 } finally {
     & $subst $drive /D

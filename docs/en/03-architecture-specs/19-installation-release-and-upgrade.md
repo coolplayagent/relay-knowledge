@@ -89,7 +89,7 @@ Path resolution retains the selected SID policy without creating directories.
 The factory serializes initial ACL verification in a shared once-cell, so ordinary
 diagnostics after open reuse the policy check without launching subprocesses.
 Immediately before SQLite opens, its factory creates the SID directory and `data`
-child with a protected DACL owned by the account. It grants inheritable full
+child with a protected DACL owned by the creating account or LocalSystem. It grants inheritable full
 control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
 creation. Existing directories must already satisfy that policy; the storage boundary never
 silently rewrites permissions or adopts a permissive directory. Ancestors are
@@ -100,10 +100,16 @@ on shared ancestors are allowed. Read-only storage diagnostics validate existing
 A missing or insecure D: volume fails visibly when storage is opened;
 an administrator can provision the shared ancestors with an administrator owner
 and restricted write/delete rights, or users can explicitly choose a private
-location. Explicit HOME/DATA overrides and retained legacy storage keep their
-operator-managed ACL policy. Service definitions pin the chosen directory, and
-the default ACL permits LocalSystem service access. Before executing install, upgrade, or rollback, the lifecycle boundary also
-provisions or validates automatic storage, before any service-manager step can
+location. HOME/DATA overrides outside the reserved SID layout and retained legacy
+storage keep their operator-managed ACL policy. The reserved
+`D:\relay-knowledge\users\<user-sid>\data` layout always restores the original SID
+policy, including explicit overrides pinned in service definitions. Each new
+service process therefore checks existing ACLs and reparse points again before
+opening SQLite; lifecycle preflight cannot replace this startup check. Only the
+original account or LocalSystem can access this managed layout through the
+storage boundary. LocalSystem creates missing private directories with itself
+as owner while retaining grants for the original account, SYSTEM, and Administrators. Before executing install, upgrade, or rollback, the lifecycle boundary also
+provisions or validates managed SID storage, before any service-manager step can
 pin the directory as an explicit override and start LocalSystem. The plan warns
 about this preflight; failure prevents service changes. This creates no SQLite
 database. Dry-runs and uninstall skip this provisioning.
