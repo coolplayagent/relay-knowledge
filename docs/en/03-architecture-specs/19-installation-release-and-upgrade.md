@@ -156,6 +156,10 @@ database/shard isolation, stable account identities, environment precedence,
 legacy selection, conflicting directories, and probe errors. Integration tests
 verify overridden persistence across CLI processes and reopen a populated legacy
 graph through upgraded CLI/Web configuration for both storage topologies.
+Native ACL fixtures restore saved access descriptors through a fresh FileSecurity
+object, marking the access section modified before writing it. This follows
+[.NET Framework ACL persistence](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/filesecurity.cs);
+a descriptor that was only read does not persist a reset.
 The `windows-storage` PR job runs native PowerShell ACL checks, Windows Rust unit
 tests, and legacy SQLite upgrade integration tests. It covers protected child/file
 inheritance, persisted ACL preservation across validation, unsafe existing and ancestor ACLs, junction rejection, stable SIDs,

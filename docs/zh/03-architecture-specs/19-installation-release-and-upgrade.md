@@ -87,6 +87,9 @@ runtime 退出的后台文件探测。显式 data/home 覆盖不做目录发现�
 卸载仍默认保留数据。路径 UT 覆盖 Windows 主库/分片隔离、稳定账户 SID、环境覆盖优先级、
 旧目录保留、冲突目录和探测错误。集成测试验证环境覆盖后的 CLI 跨进程持久化，并在两种存储拓扑下
 通过升级后的 CLI/Web 配置重新打开含有实际图谱数据的旧库。
+原生 ACL 夹具恢复权限时，将保存的 access 描述符导入新的 FileSecurity 对象，
+明确标记 access 部分已修改再写回；仅传回读取的对象不会恢复注入前的 ACL，
+依据 [.NET Framework 的持久化规则](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/filesecurity.cs)。
 `windows-storage` PR job 在 Windows 上执行 PowerShell ACL、Rust UT 和旧 SQLite 升级集成测试，
 覆盖私有目录和文件继承、校验前后落盘 ACL 保持不变、已有目录及父目录宽松 ACL、junction 拒绝、稳定 SID 和已有图谱。
 Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不创建目录；存储工厂与服务测试

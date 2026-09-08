@@ -82,7 +82,7 @@ try {
         $incoming = "$drive\incoming-payload"
         [System.IO.File]::WriteAllText($incoming, 'moved payload')
         $acl = [System.IO.File]::GetAccessControl($incoming)
-        $safeAcl = [System.IO.File]::GetAccessControl($database)
+        $safeAccess = [System.IO.File]::GetAccessControl($database).GetSecurityDescriptorSddlForm('Access')
         $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
             [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow'))
         [System.IO.File]::SetAccessControl($incoming, $acl)
@@ -97,7 +97,11 @@ try {
             Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $payload -ExistingOnly } 'payload permissions'
         } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
         if ([System.IO.File]::GetAccessControl($payload).GetSecurityDescriptorSddlForm('Access') -ne $before) { throw 'Payload validation rewrote ACLs' }
-        [System.IO.File]::SetAccessControl($payload, $safeAcl)
+        # SetAccessControl persists only modified sections. A descriptor loaded
+        # with GetAccessControl alone would leave the injected Everyone ACE intact.
+        $restored = [System.Security.AccessControl.FileSecurity]::new()
+        $restored.SetSecurityDescriptorSddlForm($safeAccess, 'Access')
+        [System.IO.File]::SetAccessControl($payload, $restored)
         Initialize-RelayPrivateStorage $data $sid -DatabasePath $payload -ExistingOnly
     }
     $fileLink = "$data\linked.sqlite"
@@ -152,6 +156,9 @@ try {
     [System.IO.Directory]::Delete($junction)
     Assert-Rejected { Initialize-RelayPrivateStorage "$drive\safe\$sid\data" 'S-1-5-18' } 'owning account'
     Write-Host 'Windows account identity and storage ACL regression tests passed.'
+} catch {
+    Write-Host $_.ScriptStackTrace
+    throw
 } finally {
     & $subst $drive /D
     Remove-Item -LiteralPath $root -Recurse -Force
