@@ -180,7 +180,10 @@ object, marking the access section modified before writing it. This follows
 a descriptor that was only read does not persist a reset.
 Native regressions remove each required principal and add account, service,
 administrator, and Everyone deny rules to directories and files, asserting rejection
-without ACL repair. Warm-health tests fail if a full payload scan returns, and topology
+without ACL repair. Grant-removal fixtures rebuild explicit test ACEs because
+[`PurgeAccessRules` preserves inherited ACEs](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/acl.cs#L2674); they read the persisted DACL back and
+verify the intended revocation or denial before testing the validator.
+Warm-health tests fail if a full payload scan returns, and topology
 tests redirect future paths while verifying that the retained handle still reads its catalog.
 The `windows-storage` PR job runs native PowerShell ACL checks, Windows Rust unit
 tests, and legacy SQLite upgrade integration tests. It covers protected child/file

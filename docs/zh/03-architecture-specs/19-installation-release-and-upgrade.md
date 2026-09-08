@@ -106,7 +106,9 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 服务计划/执行拒绝拓扑冲突、服务定义固定拓扑、Windows 探测超时后 runtime 能及时退出、
 保留显式 ACL 的搬入数据库及恢复文件、文件符号链接、分片 junction 和树深度上限。
 新增原生回归逐一移除账户、SYSTEM、Administrators 授权，并向目录与文件加入主体及 Everyone 拒绝规则，
-验证拒绝且不修复 ACL。健康回归确保不会再次扫描全树；拓扑回归重定向后续路径，验证仍通过保留句柄读取原库。
+验证拒绝且不修复 ACL。撤销授权的夹具重建显式测试 ACE，因为 [`PurgeAccessRules` 会保留继承 ACE](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/acl.cs#L2674)；
+测试先重读落盘 DACL，确认授权已撤销或 deny 已写入，再检查产品校验器。
+健康回归确保不会再次扫描全树；拓扑回归重定向后续路径，验证仍通过保留句柄读取原库。
 
 路径解析仅保留 SID 策略，不创建目录。工厂通过异步互斥锁串行执行首次 ACL 校验；
 只读诊断不能授权后续 SQLite 打开，每次工厂打开都会重新校验。成功打开后，工厂保留真实的
