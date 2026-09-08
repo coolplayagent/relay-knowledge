@@ -283,6 +283,10 @@ fn parse_update(tokens: &[String]) -> Result<RepoCommand, CliError> {
 }
 
 fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let mut domain = None;
+    let mut source = None;
+    let mut hot_reload = None;
+    let mut consistency = false;
     let alias = positional_alias(tokens)?;
     let mut query = None;
     let mut limit = 50;
@@ -293,6 +297,25 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--domain" => {
+                domain = Some(value_after(tokens, index, "--domain")?);
+                index += 2;
+            }
+            "--source" => {
+                source = Some(value_after(tokens, index, "--source")?);
+                index += 2;
+            }
+            "--hot-reload" => {
+                let value = value_after(tokens, index, "--hot-reload")?;
+                hot_reload = Some(value.parse::<bool>().map_err(|_| {
+                    CliError::UnexpectedArgument("--hot-reload requires true or false".to_owned())
+                })?);
+                index += 2;
+            }
+            "--consistency" => {
+                consistency = true;
+                index += 1;
+            }
             "--query" => {
                 let (value, next_index) = collect_query_value(tokens, index, "--query")?;
                 query = Some(value);
@@ -331,6 +354,10 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
     }
 
     Ok(RepoCommand::FeatureFlags {
+        domain,
+        source,
+        hot_reload,
+        consistency,
         alias,
         query,
         limit,

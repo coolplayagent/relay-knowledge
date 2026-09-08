@@ -625,3 +625,24 @@ fn unique_temp_dir(label: &str) -> PathBuf {
 
     std::env::temp_dir().join(format!("relay-knowledge-web-{label}-{now}"))
 }
+
+#[test]
+fn feature_flag_http_normalization_preserves_metadata_filters() {
+    let selector = CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()).unwrap();
+    let mut request = CodeFeatureFlagRequest::new(None, selector, 10, FreshnessPolicy::AllowStale)
+        .unwrap()
+        .with_metadata_filters(
+            Some("task".to_owned()),
+            Some("properties".to_owned()),
+            Some(false),
+            true,
+        )
+        .unwrap();
+    assert!(super::normalize_feature_flag_request(&mut request).is_none());
+    assert_eq!(request.domain.as_deref(), Some("task"));
+    assert_eq!(request.source.as_deref(), Some("properties"));
+    assert_eq!(request.hot_reload, Some(false));
+    assert!(request.consistency);
+    request.domain = Some(" ".to_owned());
+    assert!(super::normalize_feature_flag_request(&mut request).is_some());
+}

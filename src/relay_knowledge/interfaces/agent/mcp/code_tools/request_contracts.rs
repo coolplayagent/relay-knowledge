@@ -88,6 +88,14 @@ pub(super) struct CodeImpactArgs {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CodeFeatureFlagsArgs {
+    #[serde(default)]
+    pub(super) domain: Option<String>,
+    #[serde(default)]
+    pub(super) source: Option<String>,
+    #[serde(default)]
+    pub(super) hot_reload: Option<bool>,
+    #[serde(default)]
+    pub(super) consistency: bool,
     pub(super) repository: String,
     #[serde(default)]
     pub(super) query: Option<String>,

@@ -1,0 +1,27 @@
+{
+  "repositories": {
+    "feature_flags_wide": {
+      "generated_fixture": "feature_flags_wide_v1",
+      "alias": "feature-flags-wide-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 13,
+      "query_p95_budget_ms": 2000
+    }
+  },
+  "query_cases": [
+    {
+      "id": "feature_flags_wide_exact_key",
+      "repository": "feature_flags_wide",
+      "surface": "feature-flags",
+      "query": "selected_switch",
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 2,
+      "degraded_reason": false,
+      "expected": [{"name": "selected_switch", "path": "config/selected.properties", "kind": "defines_config"}],
+      "case_group": "index_performance"
+    }
+  ]
+}

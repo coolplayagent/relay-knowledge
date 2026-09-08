@@ -257,7 +257,15 @@ pub(super) async fn code_feature_flags_tool(
         Ok(selector) => selector,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };
-    let request = match CodeFeatureFlagRequest::new(args.query, selector, limit, freshness) {
+    let request = match CodeFeatureFlagRequest::new(args.query, selector, limit, freshness)
+        .and_then(|request| {
+            request.with_metadata_filters(
+                args.domain,
+                args.source,
+                args.hot_reload,
+                args.consistency,
+            )
+        }) {
         Ok(request) => request,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };

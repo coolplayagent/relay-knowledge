@@ -185,6 +185,7 @@ Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source execu
 - 控制服务和 split worker 的服务定义、运行时目录、日志、环境变量和权限边界在 plan/install/uninstall 中可诊断、可回滚。
 - 安装后的 Web 服务必须通过显式的托管仓库别名与持久化仓库根目录解析 Knowledge Map 操作；服务行为不得依赖 service manager 设置的进程工作目录。
 - Release workflow 或等价门禁必须运行 service lifecycle dry-run smoke，验证发布二进制生成的 service definition、rollback plan 和 package manifest 检查不会与 release tag 漂移。
+- 配置注册表元数据升级会幂等增加 `code_repository_feature_flags.metadata_json`，旧行默认为 `{}`；升级同时创建按 scope/source-kind/key 查找的索引；warm-open capability 校验显式检查列和索引，不能只信任旧 current marker。Index fact-version refresh 经普通 durable task 流程补齐新抽取元数据，snapshot copy、删除和历史读取保持 source-scope 所有权。升级前独占 writer 并备份 runtime database 及全部 shard；binary rollback 可忽略新增列，但不能重现新版注册表分析，精确回滚须同时恢复升级前 database/shard checkpoint 和旧 binary。
 
 ---
 

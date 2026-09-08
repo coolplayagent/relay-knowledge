@@ -14,14 +14,11 @@ const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
 // provenance-status surfaces. Existing databases must run the additive schema
 // initializer before a v6 software projection can be published.
 pub(super) const SCHEMA_MARKER_VERSION: i64 = 8;
-pub(in crate::storage::sqlite) const SEARCH_OWNER_V2_MIGRATION: &str =
-    "search-owner-v2-writer-and-serving-gate";
-pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_V2_MIGRATION: &str =
-    "reference-search-group-owner-v2";
-pub(in crate::storage::sqlite) const SEARCH_ORPHAN_GC_PHASE_MIGRATION: &str =
-    "scope-gc-search-orphans-phase-v1";
-pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION: &str =
-    "scope-gc-reference-search-groups-phase-v1";
+use super::code_capabilities::code_schema_capability_markers_are_current;
+pub(in crate::storage::sqlite) use super::code_capabilities::{
+    REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION, REFERENCE_SEARCH_GROUP_V2_MIGRATION,
+    SEARCH_ORPHAN_GC_PHASE_MIGRATION, SEARCH_OWNER_V2_MIGRATION,
+};
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
     "document_kind",
@@ -488,34 +485,6 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     }
 
     Ok(true)
-}
-
-fn code_schema_capability_markers_are_current(
-    connection: &Connection,
-) -> Result<bool, StorageError> {
-    if !table_exists(connection, "code_repository_schema_migrations")? {
-        return Ok(false);
-    }
-    connection
-        .query_row(
-            "SELECT EXISTS (
-                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?1
-             ) AND EXISTS (
-                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?2
-             ) AND EXISTS (
-                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?3
-             ) AND EXISTS (
-                 SELECT 1 FROM code_repository_schema_migrations WHERE name = ?4
-             )",
-            params![
-                SEARCH_OWNER_V2_MIGRATION,
-                SEARCH_ORPHAN_GC_PHASE_MIGRATION,
-                REFERENCE_SEARCH_GROUP_V2_MIGRATION,
-                REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION,
-            ],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(StorageError::from)
 }
 
 pub(in crate::storage::sqlite) fn reference_resolution_progress_schema_is_current(

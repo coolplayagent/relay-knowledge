@@ -5,6 +5,63 @@ use crate::code::{
     feature_flags::{FeatureFlagFileInput, extract_feature_flags},
 };
 
+pub(super) fn record_syntax_flags(
+    build: &mut SnapshotBuild,
+    input: &super::SyntaxFileInput<'_>,
+    root: tree_sitter::Node<'_>,
+    file_flags_start: usize,
+) -> Result<(), CodeIndexError> {
+    let flag_input = FeatureFlagFileInput {
+        repository_id: &build.repository_id,
+        source_scope: &build.source_scope,
+        file_id: input.file_id,
+        path: input.path,
+        language_id: input.language.id,
+        content: input.content,
+        config_facts: &[],
+    };
+    let records = match input.language.id {
+        "java" => crate::code::feature_flags::java::extract(&flag_input, root),
+        "bash" => crate::code::feature_flags::shell::extract(&flag_input, root),
+        _ => return Ok(()),
+    }
+    .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
+    // Replace only this file's coarse line facts that have structured evidence.
+    // AST identities include byte ranges so distinct calls on one line survive.
+    let covered = records
+        .iter()
+        .map(|record| {
+            (
+                record.source_kind.clone(),
+                record.source_key.clone(),
+                record.edge_kind.clone(),
+                record.line_range.start,
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let lexical = build
+        .feature_flags
+        .split_off(file_flags_start)
+        .into_iter()
+        .filter(|record| {
+            // Java platform environment calls require AST receiver resolution;
+            // retaining a lexical fallback would resurrect rejected shadowed calls.
+            !(input.language.id == "java" && record.source_kind == "env_var")
+                && !covered.contains(&(
+                    record.source_kind.clone(),
+                    record.source_key.clone(),
+                    record.edge_kind.clone(),
+                    record.line_range.start,
+                ))
+        });
+    let records = lexical
+        .chain(records)
+        .map(|record| (record.usage_id.clone(), record))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    build.feature_flags.extend(records.into_values());
+    Ok(())
+}
+
 pub(super) fn record_feature_flags(
     build: &mut SnapshotBuild,
     path: &str,

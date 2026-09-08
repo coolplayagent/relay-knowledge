@@ -252,6 +252,10 @@ fn parses_repo_feature_flags_with_optional_filter_and_scope() {
     assert_eq!(
         command,
         RepoCommand::FeatureFlags {
+            domain: None,
+            source: None,
+            hot_reload: None,
+            consistency: false,
             alias: "core".to_owned(),
             query: Some("checkout".to_owned()),
             limit: 20,
@@ -636,4 +640,27 @@ fn update_parser_rejects_impact_only_and_duplicate_flags() {
     ])
     .expect_err("duplicate refs should fail closed");
     assert_eq!(duplicate, CliError::UnexpectedArgument("--head".to_owned()));
+}
+
+#[test]
+fn parses_config_registry_metadata_and_consistency_options() {
+    let tokens = [
+        "feature-flags",
+        "repo",
+        "--domain",
+        "task",
+        "--source",
+        "ini",
+        "--hot-reload",
+        "false",
+        "--consistency",
+    ]
+    .map(str::to_owned);
+    let command = parse_repo(&tokens).unwrap();
+    assert!(
+        matches!(command, RepoCommand::FeatureFlags { domain: Some(domain), source: Some(source), hot_reload: Some(false), consistency: true, .. } if domain == "task" && source == "ini")
+    );
+    assert!(
+        parse_repo(&["feature-flags", "repo", "--hot-reload", "maybe"].map(str::to_owned)).is_err()
+    );
 }

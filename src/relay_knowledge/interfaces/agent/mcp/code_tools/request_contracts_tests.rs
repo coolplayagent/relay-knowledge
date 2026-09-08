@@ -37,3 +37,20 @@ fn code_context_limit_uses_codegraph_default_when_policy_allows_more() {
     );
     assert!(authorize_code_context_limit(Some(21), &policy).is_err());
 }
+
+#[test]
+fn feature_flag_tool_arguments_preserve_metadata_and_reject_non_boolean_policy() {
+    let args: super::CodeFeatureFlagsArgs = serde_json::from_value(serde_json::json!({
+        "repository": "repo", "domain": "task", "source": "ini", "hot_reload": false, "consistency": true
+    })).unwrap();
+    assert_eq!(args.domain.as_deref(), Some("task"));
+    assert_eq!(args.source.as_deref(), Some("ini"));
+    assert_eq!(args.hot_reload, Some(false));
+    assert!(args.consistency);
+    assert!(
+        serde_json::from_value::<super::CodeFeatureFlagsArgs>(serde_json::json!({
+            "repository": "repo", "hot_reload": "true"
+        }))
+        .is_err()
+    );
+}

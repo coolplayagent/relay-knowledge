@@ -113,6 +113,10 @@ pub(in crate::interfaces::agent::mcp) fn code_feature_flags_tool_definition() ->
             "type": "object",
             "properties": {
                 "repository": {"type": "string", "minLength": 1},
+                "domain": {"type": "string", "minLength": 1, "maxLength": 128},
+                "source": {"type": "string", "minLength": 1, "maxLength": 128},
+                "hot_reload": {"type": "boolean"},
+                "consistency": {"type": "boolean"},
                 "query": {"type": "string", "maxLength": MAX_AGENT_QUERY_CHARS},
                 "limit": {"type": "integer", "minimum": 1},
                 "ref_selector": {"type": "string"},

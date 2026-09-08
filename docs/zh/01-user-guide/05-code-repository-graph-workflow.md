@@ -166,7 +166,20 @@ relay-knowledge repo feature-flags repo --ref HEAD --format json
 relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 --format json
 ```
 
-响应按 feature flag 分组，包含配置来源、`defines_config`、`reads_config` 或 `guards_code` 关系、source range、置信度、相关符号和 excerpt。索引器识别环境访问、config/settings 读取、支持配置格式里的布尔 config fact，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用中的静态代码/配置证据；provider 控制面的 rollout strategy、segment 和 variant 不在该路径同步。该查询只读取当前 indexed scope 下的 feature-flag 表和 FTS 文档，不在查询时递归 grep 全仓库；新增开关或抽取规则变化后需要重新 `repo index` 或 `repo update`。
+响应按 feature flag 分组，包含配置来源、`defines_config`、`reads_config` 或 `guards_code` 关系、source range、置信度、相关符号和 excerpt。索引器识别环境访问、config/settings 读取、支持配置格式里的布尔 config fact，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用中的静态代码/配置证据；provider 控制面的 rollout strategy、segment 和 variant 不在该路径同步。该查询只读取当前 indexed scope 下持久化的 feature-flag 和 symbol facts，不在查询时递归 grep 全仓库；新增开关或抽取规则变化后需要重新 `repo index` 或 `repo update`。
+
+元数据过滤和一致性分析在 CLI、Web、MCP 中使用相同请求合同：
+
+```bash
+relay-knowledge repo feature-flags repo --domain task --source properties --hot-reload true --format json
+relay-knowledge repo feature-flags repo --query feature_y --consistency --format json
+```
+
+`--source` 匹配已持久化的来源格式；`--domain` 和 `--hot-reload true|false` 仅匹配显式元数据，未知值不匹配布尔过滤。命中的开关保留所选 scope 的全部 usage，使定义和受控读取同时可见。每个 usage 的 `metadata` 包含默认值、类型、来源格式、显式 domain/hot-reload、symbol binding 和起始 read-site id，另有 `resolution_state`；默认值冲突保留为独立来源证据，不推测运行时值。Java constant/getter binding 只在所选持久化 scope 内通过最多两跳精确 symbol 解析，歧义或未解析 binding 显式保留，不读取 live source 或其他历史 snapshot。
+
+常量绑定保留读取 API 的命名空间：`System.getenv(Keys.KEY)` 仍为 `env_var`，`System.getProperty(Keys.KEY)` 仍为 `config_key`。两个 API 读取同一字符串时形成独立分组和对应命名空间的标识，getter 别名解析沿用原始读取命名空间。API 可证明类型时，metadata 保存有类型的 `read_source_kind`。共用标识编码由无依赖 identity owner 持有，与已有持久化 ID 保持字节兼容。
+
+`--consistency` 为每个开关增加 `consistency_diagnostics`，报告无定义的读取、在所选 indexed facts 已观察到的来源格式中缺失的 key，以及显式默认值冲突。Java key declaration 计为声明，不充当运行时默认值。这些是相对所选 scope 的比较，不推测拼写错误，也不声称每种格式必须包含全部 key。scope stale/degraded 或 key 无法解析时，缺失结论为 `unknown`，`analysis_complete` 为 false。普通查询先在 SQL 中选出有界 ranked group，再加载 usage 并跟踪同一 snapshot 的 binding 闭包（最多四轮加载、1,000 个身份）；即使有超过 10,000 个无关 usage，唯一 key 查询仍可用。一致性分析覆盖全部所选 scope facts，template read 计为格式存在证据，但不充当定义。单次分析或候选闭包最多 10,000 个 usage 和 16 MiB 持久化事实文本，每个 usage 的 metadata 最多 64 KiB；超过预算返回显式 incomplete-analysis 错误，不生成错误的 missing-key 结论。可使用 `--path`、`--language` 缩小比较 scope；`--limit` 在分析后限制返回 group。定义及元数据的修改、删除沿用 durable incremental snapshot 的复制/删除流程，历史 ref 保留自己的事实。
 
 ### 软件全域本体与兼容投影
 

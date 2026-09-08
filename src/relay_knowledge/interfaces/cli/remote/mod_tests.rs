@@ -93,6 +93,10 @@ async fn every_repository_remote_command_rejects_an_empty_alias_before_transport
             exclude_generated: true,
         },
         RepoCommand::FeatureFlags {
+            domain: None,
+            source: None,
+            hot_reload: None,
+            consistency: false,
             alias: String::new(),
             query: Some("catalog".to_owned()),
             limit: 10,
@@ -226,6 +230,10 @@ async fn remote_command_families_map_connection_failures_without_local_fallback(
             exclude_generated: true,
         },
         RepoCommand::FeatureFlags {
+            domain: None,
+            source: None,
+            hot_reload: None,
+            consistency: false,
             alias: "fixture".to_owned(),
             query: Some("catalog".to_owned()),
             limit: 10,

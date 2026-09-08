@@ -7,9 +7,10 @@ mod scope_identity;
 mod validation;
 
 pub use indexed_records::{
-    CodeCallRecord, CodeFeatureFlagRecord, CodeFileDiagnostic, CodeFileFingerprint,
-    CodeImportRecord, CodePathTombstone, CodeRouteRecord, RepositoryCodeChunkRecord,
-    RepositoryCodeFileRecord, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    CodeCallRecord, CodeConfigurationReadKind, CodeFeatureFlagMetadata, CodeFeatureFlagRecord,
+    CodeFileDiagnostic, CodeFileFingerprint, CodeImportRecord, CodePathTombstone, CodeRouteRecord,
+    RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord,
 };
 pub use registration::{
     CodeIndexMode, CodeIndexRequest, CodeRepositoryRegistration, CodeRepositorySelector,

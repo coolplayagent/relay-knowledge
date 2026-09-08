@@ -13,3 +13,5 @@ pub(super) use sdk_calls::{
     sdk_pending_argument_index,
 };
 pub(super) use source_keys::{config_read_keys, env_keys, preprocessor_flag_keys, usage_edge_kind};
+pub(in crate::code) mod java;
+pub(super) mod registry_files;

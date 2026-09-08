@@ -10,6 +10,8 @@ use super::{
 mod comments;
 mod config;
 mod extractors;
+pub(in crate::code) use extractors::java;
+pub(in crate::code) use extractors::registry_files::shell;
 
 use comments::CommentState;
 use config::{boolean_config_keys, looks_like_config_file};
@@ -34,7 +36,8 @@ pub(crate) fn extract_feature_flags(
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut records = Vec::new();
     let mut byte_start = 0usize;
-    let config_file = looks_like_config_file(input.path);
+    let config_file = looks_like_config_file(input.path)
+        && !(matches!(input.language_id, "properties" | "ini") && !input.config_facts.is_empty());
     let mut comment_state = CommentState::default();
     let mut sdk_receivers = BTreeMap::new();
     let mut shadowed_sdk_receivers = BTreeMap::new();
@@ -125,6 +128,7 @@ pub(crate) fn extract_feature_flags(
         byte_start = byte_start.saturating_add(segment.len());
     }
     collect_config_fact_records(&mut records, &input)?;
+    records.extend(extractors::registry_files::extract(&input)?);
 
     let mut deduped = BTreeMap::new();
     for record in records {
@@ -342,6 +346,8 @@ fn feature_flag_record_from_range(
             source_key,
             edge_kind,
             &range.line_start.to_string(),
+            &range.byte_start.to_string(),
+            &range.byte_end.to_string(),
         ],
     );
 
@@ -362,6 +368,10 @@ fn feature_flag_record_from_range(
         byte_range,
         line_range,
         excerpt: excerpt.to_owned(),
+        metadata: crate::domain::CodeFeatureFlagMetadata {
+            source_format: input.language_id.to_owned(),
+            ..Default::default()
+        },
     })
 }
 

@@ -233,6 +233,7 @@ automatic silent upgrades.
 - Control-service and split-worker service definitions, runtime directories, logs, environment variables, and permission boundaries are diagnosable and rollbackable in plan/install/uninstall flows.
 - Installed Web services resolve Knowledge Map operations through explicit managed repository aliases and persisted repository roots; service behavior must not depend on the service manager's process working directory.
 - The release workflow or an equivalent gate must run a service lifecycle dry-run smoke so release binaries prove their service definition, rollback plan, and package-manifest checks do not drift from the release tag.
+- Configuration-registry metadata upgrades add `code_repository_feature_flags.metadata_json` idempotently with `{}` as the legacy-row default. The upgrade also creates the scoped source-kind/key lookup index. Warm-open capability admission checks both the column and index rather than trusting an older current marker. Index fact-version refresh supplies newly extracted metadata through the ordinary durable task workflow; snapshot copy, deletion and historical reads retain source-scope ownership. Back up the runtime database and all shards before upgrading with exclusive writer access. Binary rollback can ignore the additive column but cannot reproduce the new registry analysis; exact rollback restores the pre-upgrade database/shard checkpoint together with the previous binary.
 
 ---
 

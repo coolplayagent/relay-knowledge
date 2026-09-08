@@ -224,6 +224,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
     build.references.extend(output.references);
     build.imports.extend(imports);
     record_dependencies(build, input.path, input.file_id, input.content)?;
+    let feature_flags_start = build.feature_flags.len();
     feature_flag_projection::record_feature_flags(
         build,
         input.path,
@@ -232,6 +233,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         input.content,
         Some(&config_definitions),
     )?;
+    feature_flag_projection::record_syntax_flags(build, &input, root, feature_flags_start)?;
     build.chunks.extend(chunks);
     route_projection::record_routes(
         build,

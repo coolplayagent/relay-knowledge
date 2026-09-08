@@ -49,6 +49,10 @@ pub struct CodeRetrievalHit {
 /// One code location where a feature flag is defined, read, or guards code.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagUsage {
+    #[serde(default)]
+    pub metadata: super::CodeFeatureFlagMetadata,
+    #[serde(default)]
+    pub resolution_state: String,
     pub usage_id: String,
     pub path: String,
     pub language_id: String,
@@ -68,6 +72,12 @@ pub struct CodeFeatureFlagUsage {
 /// Feature flag graph grouped by stable configuration source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagGraph {
+    /// Metadata remains attached to each usage to preserve conflicting source evidence.
+    #[serde(default)]
+    pub consistency_diagnostics: Vec<String>,
+    /// False means absence diagnostics are unknown because the bounded scope scan was incomplete.
+    #[serde(default)]
+    pub analysis_complete: bool,
     pub feature_flag_id: String,
     pub name: String,
     pub source_kind: String,

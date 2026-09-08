@@ -1,5 +1,6 @@
 {
   "include_files": [
+    "cases/repository_feature_flag_targets.json",
     "cases/repository_project_alias_targets.json",
     "cases/repository_relay_teams_targets.json",
     "cases/repository_linux_targets.json",

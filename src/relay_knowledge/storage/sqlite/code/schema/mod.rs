@@ -42,6 +42,16 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     initialize_repository_schema(connection)?;
     super::super::schema::columns::ensure_column(
         connection,
+        "code_repository_feature_flags",
+        "metadata_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS code_repository_feature_flags_source_key
+        ON code_repository_feature_flags(source_scope, source_kind, source_key)",
+    )?;
+    super::super::schema::columns::ensure_column(
+        connection,
         "code_repository_schema_migrations",
         "applied_at_ms",
         "INTEGER NOT NULL DEFAULT 0",

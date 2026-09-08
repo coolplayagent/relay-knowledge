@@ -152,6 +152,14 @@ impl CodeRetrievalRequest {
 /// Feature-flag graph query over an indexed repository scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagRequest {
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub hot_reload: Option<bool>,
+    #[serde(default)]
+    pub consistency: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
     pub repository: CodeRepositorySelector,
@@ -160,6 +168,33 @@ pub struct CodeFeatureFlagRequest {
 }
 
 impl CodeFeatureFlagRequest {
+    /// Validates metadata filters without changing snapshot selection or result bounds.
+    pub fn with_metadata_filters(
+        mut self,
+        domain: Option<String>,
+        source: Option<String>,
+        hot_reload: Option<bool>,
+        consistency: bool,
+    ) -> Result<Self, DomainError> {
+        self.domain = domain
+            .map(|value| required_text("domain", value))
+            .transpose()?;
+        self.source = source
+            .map(|value| required_text("source", value))
+            .transpose()?;
+        for value in [&self.domain, &self.source].into_iter().flatten() {
+            if value.len() > 128 {
+                return Err(DomainError::invalid(
+                    "metadata_filter",
+                    "must be 128 bytes or less",
+                ));
+            }
+        }
+        self.hot_reload = hot_reload;
+        self.consistency = consistency;
+        Ok(self)
+    }
+
     /// Validates optional filter text and bounds the number of returned flags.
     pub fn new(
         query: Option<String>,
@@ -181,6 +216,10 @@ impl CodeFeatureFlagRequest {
             repository,
             limit,
             freshness_policy,
+            domain: None,
+            source: None,
+            hot_reload: None,
+            consistency: false,
         })
     }
 }

@@ -1,6 +1,7 @@
 mod agent_workflow;
 mod case_scoring;
 mod cli_cases;
+mod feature_flags;
 mod file_evaluation;
 mod file_fixture;
 mod repository;

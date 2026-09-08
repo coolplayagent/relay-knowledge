@@ -87,6 +87,10 @@ pub enum RepoCommand {
         exclude_generated: bool,
     },
     FeatureFlags {
+        domain: Option<String>,
+        source: Option<String>,
+        hot_reload: Option<bool>,
+        consistency: bool,
         alias: String,
         query: Option<String>,
         limit: usize,

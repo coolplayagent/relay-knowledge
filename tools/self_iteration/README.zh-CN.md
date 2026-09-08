@@ -4,6 +4,8 @@
 
 `tools/self_iteration` 是独立的 Rust 自迭代 harness，用 Codex 生成候选补丁，并用固定评估集判断它是否真正改进代码仓库检索、semantic/vector 检索、性能、稳定性或研究质量。它不属于产品 crate 的 `src/` 模块树，运行状态统一写入 `.git/relay-knowledge-self-iteration/`。旧的 tracked Python harness 已在功能对齐后移除，仓库根目录的 `self-iterate.sh` 会直接构建并运行 Rust binary。
 
+`feature_flags_wide` guardrail 纳入 `fast` 和 performance 类别评估。生成仓库包含 11,000 个无关 properties 键、一个目标键及其 Java 读取；`surface: "feature-flags"` 查询必须在 fresh 索引上返回目标键的真实定义 usage，不能因整个 scope 超过配置分析行数预算而失败。复用 repository query 延迟指标，p95 预算为 2,000 ms。该 surface 支持 CLI 元数据和 scope 过滤，评分保留 usage 来源证据并拒绝空结果或错误响应结构。这个精确查询用例不请求全 scope 一致性分析。
+
 ## 快速路径
 
 ### 5 分钟上手

@@ -519,7 +519,8 @@ fn create_view_tables(connection: &Connection) {
                 byte_end INTEGER NOT NULL,
                 line_start INTEGER NOT NULL,
                 line_end INTEGER NOT NULL,
-                excerpt TEXT NOT NULL
+                excerpt TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
             );
             ",
         )
@@ -551,8 +552,8 @@ fn seed_view_rows(connection: &Connection) {
                 ('dependency:api', 'scope', 'src/api/Cargo.toml', 'rust', 'cargo', 'serde', '^1', '1.0.0', 'runtime', 'manifest', 0, 1, 1),
                 ('dependency:js', 'scope', 'src/js/package.json', 'javascript', 'npm', 'vite', '^6', NULL, 'dev', 'manifest', 0, 1, 1);
             INSERT INTO code_repository_feature_flags VALUES
-                ('repo', 'scope', 'flag:api', 'usage:api', 'file:api', 'src/api/users.rs', 'rust', 'users_enabled', 'config', 'users.enabled', 'guards', 8500, 'extracted', 10, 20, 7, 7, 'users_enabled'),
-                ('repo', 'scope', 'flag:js', 'usage:js', 'file:js', 'src/js/app.js', 'javascript', 'js_enabled', 'config', 'js.enabled', 'guards', 8500, 'extracted', 10, 20, 7, 7, 'js_enabled');
+                ('repo', 'scope', 'flag:api', 'usage:api', 'file:api', 'src/api/users.rs', 'rust', 'users_enabled', 'config', 'users.enabled', 'guards', 8500, 'extracted', 10, 20, 7, 7, 'users_enabled', '{}'),
+                ('repo', 'scope', 'flag:js', 'usage:js', 'file:js', 'src/js/app.js', 'javascript', 'js_enabled', 'config', 'js.enabled', 'guards', 8500, 'extracted', 10, 20, 7, 7, 'js_enabled', '{}');
             ",
         )
         .unwrap();

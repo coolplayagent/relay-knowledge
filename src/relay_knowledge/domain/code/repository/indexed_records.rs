@@ -128,6 +128,39 @@ pub struct CodeRouteRecord {
     pub line_range: RepositoryCodeRange,
 }
 
+/// Configuration namespace established by the read API, independent of key-string bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeConfigurationReadKind {
+    ConfigKey,
+    EnvVar,
+}
+
+impl CodeConfigurationReadKind {
+    /// Stable namespace used in scoped configuration identities and query groups.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ConfigKey => "config_key",
+            Self::EnvVar => "env_var",
+        }
+    }
+}
+
+/// Feature flag or runtime configuration relationship extracted from code.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeFeatureFlagMetadata {
+    pub default_value: Option<String>,
+    pub value_type: Option<String>,
+    pub domain: Option<String>,
+    pub source_format: String,
+    pub hot_reload: Option<bool>,
+    pub bindings: Vec<String>,
+    pub referenced_symbol: Option<String>,
+    pub read_usage_id: Option<String>,
+    pub read_source_kind: Option<CodeConfigurationReadKind>,
+}
+
 /// Feature flag or runtime configuration relationship extracted from code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagRecord {
@@ -135,6 +168,8 @@ pub struct CodeFeatureFlagRecord {
     pub source_scope: String,
     pub feature_flag_id: String,
     pub usage_id: String,
+    #[serde(default)]
+    pub metadata: CodeFeatureFlagMetadata,
     pub file_id: String,
     pub path: String,
     pub language_id: String,

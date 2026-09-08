@@ -488,11 +488,18 @@ fn evaluate_repository_in_runtime(
         let repo_name = repo_name.to_owned();
         move |case| {
             let query_alias = string_or(&case, "repository_alias", &alias).to_owned();
-            let framework_surface = string_or(&case, "surface", "query") == "framework";
-            let command = if framework_surface {
-                framework_query_command(&runtime.binary, &query_alias, &ref_selector, &case)
-            } else {
-                query_command(&runtime.binary, &query_alias, &ref_selector, &case)
+            let surface = string_or(&case, "surface", "query");
+            let command = match surface {
+                "feature-flags" => super::feature_flags::query_command(
+                    &runtime.binary,
+                    &query_alias,
+                    &ref_selector,
+                    &case,
+                ),
+                "framework" => {
+                    framework_query_command(&runtime.binary, &query_alias, &ref_selector, &case)
+                }
+                _ => query_command(&runtime.binary, &query_alias, &ref_selector, &case),
             };
             let query = run_limited(
                 &runtime.limiter,
@@ -505,10 +512,10 @@ fn evaluate_repository_in_runtime(
                 ),
             );
             let duration_ms = query.duration_ms;
-            let observation = if framework_surface {
-                score_framework_case(&repo_name, &case, &query)
-            } else {
-                score_query_case(&repo_name, &case, &query)
+            let observation = match surface {
+                "feature-flags" => super::feature_flags::score(&repo_name, &case, &query),
+                "framework" => score_framework_case(&repo_name, &case, &query),
+                _ => score_query_case(&repo_name, &case, &query),
             };
             let guardrail_gate = guardrail_gate_from_case(&observation, duration_ms);
             (query, observation, guardrail_gate)

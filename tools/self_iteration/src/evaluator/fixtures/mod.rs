@@ -3,6 +3,7 @@ mod agent_workflow;
 mod c_and_cpp;
 mod common_languages;
 mod cross_language;
+mod feature_flags;
 mod incremental;
 mod nonstandard_layout;
 mod repository;

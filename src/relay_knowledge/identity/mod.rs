@@ -34,6 +34,16 @@ pub(crate) fn stable_hash64(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
+/// Hashes length-prefixed UTF-8 parts with the existing scoped-record identity encoding.
+pub(crate) fn stable_id<'a>(prefix: &str, parts: impl IntoIterator<Item = &'a str>) -> String {
+    let mut hasher = StableHasher64::new();
+    for part in parts {
+        hasher.update(&(part.len() as u64).to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    format!("{prefix}:{:016x}", hasher.finish())
+}
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

@@ -4,6 +4,8 @@
 
 `tools/self_iteration` is the standalone Rust self-iteration harness. It asks Codex to generate candidate patches, then accepts only candidates that improve repository retrieval, semantic/vector retrieval, performance, stability, or research quality against fixed evaluation workloads. It stays outside the product crate `src/` tree and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; the repository-root `self-iterate.sh` builds and runs the Rust binary directly.
 
+The `feature_flags_wide` guardrail runs in `fast` and performance-focused evaluation. Its generated repository contains 11,000 unrelated property keys, one selected key and a Java read. A `surface: "feature-flags"` query must return that key's real definition usage with a fresh index, even though a full-scope analysis would exceed the configuration-analysis row budget. The shared repository query metrics record its latency with a 2,000 ms p95 budget. Feature-flag cases support the CLI metadata and scope filters; scoring preserves source usage evidence and rejects empty or malformed responses. This narrow-query workload deliberately does not request whole-scope consistency analysis.
+
 ## Quick Path
 
 ### Five-Minute Start

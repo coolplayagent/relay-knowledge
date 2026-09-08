@@ -14,3 +14,12 @@ fn incremental_hashing_matches_single_buffer_hashing() {
 
     assert_eq!(hasher.finish(), stable_hash64(b"relay-knowledge"));
 }
+
+#[test]
+fn scoped_ids_preserve_length_prefix_encoding_after_owner_move() {
+    assert_eq!(
+        stable_id("feature_flag", ["repo", "scope", "env_var", "FEATURE_X"]),
+        "feature_flag:0bbcb881859c495a"
+    );
+    assert_ne!(stable_id("key", ["ab", "c"]), stable_id("key", ["a", "bc"]));
+}

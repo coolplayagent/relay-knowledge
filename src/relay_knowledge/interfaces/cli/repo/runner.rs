@@ -324,6 +324,10 @@ pub async fn run_repo(
             )
         }
         RepoCommand::FeatureFlags {
+            domain,
+            source,
+            hot_reload,
+            consistency,
             alias,
             query,
             limit,
@@ -332,13 +336,16 @@ pub async fn run_repo(
             language_filters,
             freshness,
         } => {
-            let request = CodeFeatureFlagRequest::new(
+            let mut request = CodeFeatureFlagRequest::new(
                 query,
                 selector(alias, ref_selector, path_filters, language_filters, format)?,
                 limit,
                 freshness,
             )
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            request = request
+                .with_metadata_filters(domain.clone(), source.clone(), hot_reload, consistency)
+                .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .query_code_repository_feature_flags(request, context)
                 .await

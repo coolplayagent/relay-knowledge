@@ -548,7 +548,15 @@ fn normalize_feature_flag_request(request: &mut CodeFeatureFlagRequest) -> Optio
         request.repository.clone(),
         request.limit,
         request.freshness_policy,
-    ) {
+    )
+    .and_then(|validated| {
+        validated.with_metadata_filters(
+            request.domain.take(),
+            request.source.take(),
+            request.hot_reload,
+            request.consistency,
+        )
+    }) {
         Ok(validated) => {
             *request = validated;
             None

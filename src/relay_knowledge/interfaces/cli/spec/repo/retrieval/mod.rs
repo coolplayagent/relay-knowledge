@@ -300,7 +300,7 @@ pub(in crate::interfaces::cli::spec) fn repo_context() -> CliCommandSpec {
 pub(in crate::interfaces::cli::spec) fn repo_feature_flags() -> CliCommandSpec {
     command!(
         &["repo", "feature-flags"],
-        "relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]",
+        "relay-knowledge repo feature-flags <alias> [--query <text>] [--domain <name>] [--source <format>] [--hot-reload <true|false>] [--consistency] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]",
         "List configuration-driven feature flags and code relationships from a repository index.",
         "code.repo.feature_flags",
         CommandEffect::ReadOnly,
@@ -313,6 +313,42 @@ pub(in crate::interfaces::cli::spec) fn repo_feature_flags() -> CliCommandSpec {
             &[],
         )],
         &[
+            opt(
+                "--domain",
+                Some("name"),
+                false,
+                false,
+                "Filter explicit owning-domain metadata.",
+                None,
+                &[]
+            ),
+            opt(
+                "--source",
+                Some("format"),
+                false,
+                false,
+                "Filter persisted source format.",
+                None,
+                &[]
+            ),
+            opt(
+                "--hot-reload",
+                Some("bool"),
+                false,
+                false,
+                "Filter explicit hot-reload metadata; unknown never matches.",
+                None,
+                &["true", "false"]
+            ),
+            opt(
+                "--consistency",
+                None,
+                false,
+                false,
+                "Compare definitions and reads within selected indexed facts.",
+                None,
+                &[]
+            ),
             opt(
                 "--query",
                 Some("text"),

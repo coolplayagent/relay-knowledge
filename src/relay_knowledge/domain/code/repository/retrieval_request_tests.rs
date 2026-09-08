@@ -67,3 +67,35 @@ fn retrieval_request_rejects_unbounded_limits() {
 
     assert_eq!(error.field, "limit");
 }
+
+#[test]
+fn feature_flag_metadata_filters_validate_text_and_preserve_unknown_boolean() {
+    let selector =
+        super::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()).unwrap();
+    let request =
+        super::CodeFeatureFlagRequest::new(None, selector, 10, super::FreshnessPolicy::AllowStale)
+            .unwrap();
+    assert!(
+        request
+            .clone()
+            .with_metadata_filters(Some(" ".to_owned()), None, None, false)
+            .is_err()
+    );
+    assert!(
+        request
+            .clone()
+            .with_metadata_filters(None, Some("x".repeat(129)), None, false)
+            .is_err()
+    );
+    let filtered = request
+        .with_metadata_filters(
+            Some(" task ".to_owned()),
+            Some("java".to_owned()),
+            Some(false),
+            true,
+        )
+        .unwrap();
+    assert_eq!(filtered.domain.as_deref(), Some("task"));
+    assert_eq!(filtered.hot_reload, Some(false));
+    assert!(filtered.consistency);
+}
