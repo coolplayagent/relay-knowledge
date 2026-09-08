@@ -50,8 +50,11 @@ RELAY_KNOWLEDGE_SERVICE_DIR
 所有覆盖路径必须是绝对路径，且不能包含 `..`。
 
 `RELAY_KNOWLEDGE_DATA_DIR` 同时指定 `relay-knowledge.sqlite` 和
-`stores/repositories/` 所在目录，优先于 `RELAY_KNOWLEDGE_HOME/data`，再优先于平台默认值。
-Windows 默认数据目录为 `D:\relay-knowledge\data`，其他平台保留原数据目录规则。
+`stores/repositories/` 所在目录，优先于 `RELAY_KNOWLEDGE_HOME/data`，再优先于已有 Windows
+LocalAppData 数据目录和平台默认值。Windows 新安装目录为
+`D:\relay-knowledge\users\<profile-id>\data`，profile id 从归一化 LocalAppData 路径派生。
+升级会继续使用已有目录；旧目录与新用户目录同时存在时必须显式覆盖。
+其他平台保留原数据目录规则。
 空值会报错。PowerShell 示例、持久化用户环境、服务配置和已有数据库搬迁见
 [安装与迁移说明](01-install-and-runtime.md#14-零配置默认值)。
 

@@ -60,20 +60,28 @@ Web Knowledge Map 请求必须显式指定已注册仓库。安装后的服务�
 
 ## 4. 运行时状态
 
-Windows 默认数据目录为 `D:\relay-knowledge\data`，主库是其中的
-`relay-knowledge.sqlite`，分片位于 `stores/repositories/`。其他 Windows 运行时目录
+Windows 新安装的数据目录为 `D:\relay-knowledge\users\<profile-id>\data`，
+主库为 `relay-knowledge.sqlite`，分片位于 `stores/repositories/`。
+profile id 对 LocalAppData 路径（或 HOME 回退路径）的无损编码分量计算 SHA-256：
+折叠 ASCII 大小写，接受两种 Windows 分隔符，省略空分量和 `.`，每个分量后追加 NUL 分隔字节。
+固定摘要合同让不同账户的默认主库和分片命名空间保持隔离，等价路径拼写得到相同 id。其他 Windows 运行时目录
 继续使用 AppData/TEMP；Linux、macOS 的默认规则不变。数据目录优先级固定为
-`RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > 平台默认值，环境变量必须是
-非空绝对目录且不含 `..`。D 盘不可用或目录不可写时应暴露创建/打开失败，由用户指定
-其他目录，不得静默切换到 C 盘。路径默认值计算不执行文件系统探测或数据搬迁。
+`RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > 已有 Windows LocalAppData 数据目录 >
+新平台默认值，环境变量必须是非空绝对目录且不含 `..`。新安装需要可写的 D 盘目录或显式覆盖。
+`RuntimePaths::resolve` 只计算词法默认值；应用启动使用 `resolve_for_runtime`，最多执行两次
+异步 metadata 探测，每次等待上限为 5 秒。显式 data/home 覆盖不做探测。
+旧目录缺失时选择新默认值；已有旧目录或符号链接继续被选中。非目录路径、探测错误和超时
+必须显式失败。旧目录与新目录同时存在时要求显式数据覆盖，不推测哪一份是权威。
+路径解析期间不会打开数据库或搬迁数据。
 
 此默认值变化不修改 SQLite schema，也不会自动迁移旧的
-`%LOCALAPPDATA%\relay-knowledge\data`。升级前可用 `RELAY_KNOWLEDGE_DATA_DIR` 固定旧位置；
+`%LOCALAPPDATA%\relay-knowledge\data`。升级会自动保留存在的旧目录，让 CLI/Web 与已固定旧路径的服务保持一致。
 选择搬迁时必须先停止服务及所有 writer，备份并整体复制主库、WAL/SHM 和全部仓库分片，
 保留旧副本。服务定义必须保存解析后的数据目录；已有服务不能仅依靠安装终端的环境变量
 变更目录，需刷新并应用生命周期计划。回滚应显式选择原数据目录并遵守数据库备份合同，
-卸载仍默认保留数据。路径 UT 覆盖 Windows 默认主库/分片位置、环境覆盖优先级和非法路径，
-CLI 集成测试在隔离目录验证环境覆盖后的持久化及跨进程重新打开。
+卸载仍默认保留数据。路径 UT 覆盖 Windows 主库/分片隔离、固定 profile id、环境覆盖优先级、
+旧目录保留、冲突目录和探测错误。集成测试验证环境覆盖后的 CLI 跨进程持久化，并在两种存储拓扑下
+通过升级后的 CLI/Web 配置重新打开含有实际图谱数据的旧库。
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。早期数据库的 `code_repository_schema_migrations` 可能只有 `name` 列；schema 初始化必须先幂等增加 `applied_at_ms INTEGER NOT NULL DEFAULT 0`，再运行任何会写 capability marker 的 retention、search-owner 或其他迁移，不能要求 operator 重建数据库或手工补列。
 Code-search ownership v2 升级不会在同步 database open 期间重写 legacy FTS 数据。Startup 安装 non-replacing writer 与 exact metadata serving gate，以 `search-owner-v2-writer-and-serving-gate` 一次性把既有 scope 及其 active repository 标 stale，并把 source-scope identity 推进到 `search-owner-v2` fact component。该 marker 只证明 writer 与 serving boundary 已安装，不认证旧 FTS row 或 imported FTS row。每个 FTS `MATCH` read 都要求 metadata ownership 的 rowid/scope/kind/record/path 精确匹配；随后由普通 durable full-index task 复用既有 lease、checkpoint 与 publication fence 替换 stale scope。Database import 只有在 attached source 具有该 marker、完整 search/metadata schema shape、每个 indexed metadata row 都按 rowid 与完整 identity JOIN 到一个 FTS row，并且 fact-versioned Git scope 的 identity 与 imported repository、tree、filters 和当前 fact version 匹配时，才能保留 search freshness。Import 与 incremental clone 以 indexed metadata owner 表为枚举权威，只复制这些 JOIN row；绝不通过 FTS 的 `UNINDEXED` scope/kind 列做反向 COUNT。没有 metadata 的 raw FTS row 不复制、不服务，并保留给受界 `search_orphans` GC。Metadata-side orphan、duplicate owner identity 或 affected-count mismatch 必须让 repository metadata、facts、已复制 search row 与 scope publication 一起回滚。缺少该 capability 的 legacy import 可以保留 base facts 以便恢复，但不得复制 search row，并且必须用 full-reindex 原因持久化为 stale；owner exact 但 fact-version identity 过旧的 import 同样必须显式 stale。Manual/custom 非 fact scope 继续遵守既有兼容合同。Upgrade 与 doctor output 不能仅因 database open、marker 创建或 base-fact import 完成就把 search ownership 报告为 fresh。

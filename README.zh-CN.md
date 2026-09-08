@@ -11,7 +11,9 @@
 默认本地配置不依赖外部服务：运行时目录使用平台默认位置，SQLite 保存本地状态，
 并启用确定性的本地 semantic/vector 读模型。
 
-Windows 的 SQLite 默认位置为 `D:\relay-knowledge\data\relay-knowledge.sqlite`。
+Windows 新安装的 SQLite 默认位置为
+`D:\relay-knowledge\users\<profile-id>\data\relay-knowledge.sqlite`。
+`profile-id` 由 LocalAppData 路径稳定派生，避免不同账户共用默认库；升级时会自动继续使用已有的 LocalAppData 数据目录。
 设置环境变量 `RELAY_KNOWLEDGE_DATA_DIR` 可指定主库和仓库分片的存储目录，
 优先于 `RELAY_KNOWLEDGE_HOME` 和平台默认值；Linux、macOS 仍使用各自的平台数据目录。
 

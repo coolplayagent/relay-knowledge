@@ -236,7 +236,10 @@ fn windows_falls_back_to_home_appdata_paths() {
         paths.config_dir,
         PathBuf::from("/Users/Alice/AppData/Roaming/relay-knowledge")
     );
-    assert_eq!(paths.data_dir, PathBuf::from("D:/relay-knowledge/data"));
+    assert_eq!(
+        paths.data_dir,
+        windows_data_directory(Path::new("/Users/Alice/AppData/Local"))
+    );
     assert_eq!(
         paths.temp_dir,
         PathBuf::from("/Users/Alice/AppData/Local/relay-knowledge/tmp")
@@ -311,14 +314,15 @@ fn windows_sqlite_defaults_use_d_drive_for_main_database_and_shards() {
     .expect("environment should parse");
     let paths = windows_defaults(&config.platform).expect("Windows defaults should resolve");
 
-    assert_eq!(paths.data_dir, PathBuf::from("D:/relay-knowledge/data"));
+    assert!(paths.data_dir.starts_with("D:/relay-knowledge/users"));
+    assert!(paths.data_dir.ends_with("data"));
     assert_eq!(
         paths.database_file(),
-        PathBuf::from("D:/relay-knowledge/data/relay-knowledge.sqlite")
+        paths.data_dir.join("relay-knowledge.sqlite")
     );
     assert_eq!(
         paths.repository_shards_dir(),
-        PathBuf::from("D:/relay-knowledge/data/stores/repositories")
+        paths.data_dir.join("stores/repositories")
     );
     assert!(
         paths

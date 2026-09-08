@@ -94,12 +94,23 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 
 After setting `RELAY_KNOWLEDGE_HOME`, config, data, state, cache, logs, temp, runtime, and service directories are placed under that root. See [Chapter 12: Advanced Configuration](12-advanced-configuration.md) for the full directory override list.
 
-Without overrides, Windows stores SQLite in
-`D:\relay-knowledge\data\relay-knowledge.sqlite`, with repository shards under
-`D:\relay-knowledge\data\stores\repositories`. Config, logs, caches, and other
-runtime directories retain their AppData/TEMP defaults. Linux and macOS data
-defaults are unchanged. The data directory precedence is
-`RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > platform default.
+New Windows installations store SQLite in
+`D:\relay-knowledge\users\<profile-id>\data\relay-knowledge.sqlite`, with shards
+under `stores/repositories/` in the same data directory. The profile id is the
+SHA-256 digest of the normalized LocalAppData path (or its HOME fallback), so
+different accounts do not automatically share a database. ASCII case, path
+separators, and `.` components do not change the id. `status --format json`
+shows the resolved directory. Config, logs, and other runtime directories retain
+their AppData/TEMP defaults. Linux and macOS defaults are unchanged.
+
+Data directory precedence is `RELAY_KNOWLEDGE_DATA_DIR` >
+`RELAY_KNOWLEDGE_HOME/data` > existing Windows LocalAppData data directory > new
+platform default. Without an explicit override, startup preserves
+`%LOCALAPPDATA%\relay-knowledge\data` whenever that directory exists, including
+its database, recovery files, and shards. If both the old directory and the new
+profile directory exist, startup requires `RELAY_KNOWLEDGE_DATA_DIR` to select
+one explicitly. Directory inspection errors or timeouts are reported instead
+of silently opening an empty database elsewhere.
 
 To choose another directory for SQLite in PowerShell:
 
@@ -111,12 +122,12 @@ relay-knowledge status --format json
 ```
 
 The value is a directory, not a database filename. Empty values, relative paths,
-and paths containing `..` are rejected. If D: is absent or the directory is not
-writable, database creation/opening fails; choose an accessible absolute path.
-The application does not silently fall back to C:.
+and paths containing `..` are rejected. For a new installation, if D: is absent
+or its directory is not writable, database creation/opening fails; choose an
+accessible absolute path. Existing LocalAppData stores remain usable without D:.
 
-Upgrades do not move old databases automatically. To keep using the previous
-Windows location, set the override before starting the upgraded binary:
+Upgrades retain existing databases in place rather than moving them. You can
+also pin the old Windows location explicitly, including for a service:
 
 ```powershell
 $env:RELAY_KNOWLEDGE_DATA_DIR = Join-Path $env:LOCALAPPDATA 'relay-knowledge\data'

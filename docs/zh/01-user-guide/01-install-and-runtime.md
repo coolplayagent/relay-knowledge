@@ -98,10 +98,19 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 
 设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。完整目录覆盖项见 [第 12 章 高级配置参考](12-advanced-configuration.md)。
 
-没有覆盖配置时，Windows 的主库为 `D:\relay-knowledge\data\relay-knowledge.sqlite`，
-仓库分片位于 `D:\relay-knowledge\data\stores\repositories`。
-配置、日志、缓存等其他目录仍使用 AppData/TEMP 默认值，Linux、macOS 的数据目录规则不变。
-数据目录优先级为 `RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > 平台默认值。
+Windows 新安装的主库为
+`D:\relay-knowledge\users\<profile-id>\data\relay-knowledge.sqlite`，
+仓库分片位于同一数据目录下的 `stores/repositories/`。
+`profile-id` 是归一化 LocalAppData 路径（或 HOME 回退路径）的 SHA-256 摘要，
+不同账户不会自动共用默认库；ASCII 大小写、分隔符和 `.` 路径分量不会改变该 id。
+`status --format json` 会显示实际目录。配置、日志等其他目录仍使用 AppData/TEMP 默认值，
+Linux、macOS 的数据目录规则不变。
+
+数据目录优先级为 `RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` >
+已有的 Windows LocalAppData 数据目录 > 新的平台默认值。
+没有显式覆盖时，只要 `%LOCALAPPDATA%\relay-knowledge\data` 目录存在，启动就继续使用它，
+保留主库、恢复文件和全部分片。旧目录与新的用户目录同时存在时，必须通过
+`RELAY_KNOWLEDGE_DATA_DIR` 明确选择。探测目录失败或超时会报错，不会在其他位置另开空库。
 
 在 PowerShell 中指定其他 SQLite 存储目录：
 
@@ -113,10 +122,10 @@ relay-knowledge status --format json
 ```
 
 变量值是目录，不是数据库文件名。空值、相对路径和包含 `..` 的路径会被拒绝。
-D 盘不存在或目标目录不可写时，创建或打开数据库会失败，需要指定可访问的绝对路径，
-不会静默退回 C 盘。
+新安装时，D 盘不存在或目标目录不可写会导致创建或打开数据库失败，需要指定可访问的绝对路径。
+已有 LocalAppData 数据库在没有 D 盘时仍可继续使用。
 
-升级不会自动搬迁旧数据库。若要继续使用原 Windows 目录，在启动新版前设置：
+升级会原地保留已有数据库，不会自动搬迁。也可以显式固定原 Windows 目录，包括服务配置：
 
 ```powershell
 $env:RELAY_KNOWLEDGE_DATA_DIR = Join-Path $env:LOCALAPPDATA 'relay-knowledge\data'

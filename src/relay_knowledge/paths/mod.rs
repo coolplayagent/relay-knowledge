@@ -7,12 +7,15 @@
 
 use std::{
     error::Error,
-    fmt,
+    fmt, io,
     path::{Component, Path, PathBuf},
+    time::Duration,
 };
 
+use sha2::{Digest, Sha256};
+
 use crate::{
-    env::{PathEnvOverrides, PlatformEnvironment, PlatformKind},
+    env::{PathEnvOverrides, PlatformEnvironment, PlatformKind, RELAY_KNOWLEDGE_DATA_DIR},
     identity::stable_hash64,
     project::{
         DATABASE_FILE_NAME, MODEL_CATALOG_CACHE_FILE_NAME, MODEL_FALLBACK_FILE_NAME,
@@ -25,6 +28,7 @@ mod repository_root;
 
 /// Default Windows data volume; runtime-home and data-directory overrides take precedence.
 const WINDOWS_DATA_VOLUME: &str = "D:/";
+const DATA_DIRECTORY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub use crate::project::APP_DIR_NAME;
 pub use repository_root::{RepositoryRootDiscoveryError, discover_repository_root};
@@ -43,7 +47,8 @@ pub struct RuntimePaths {
 }
 
 impl RuntimePaths {
-    /// Resolves platform defaults and relay-specific overrides into absolute paths.
+    /// Resolves lexical defaults and overrides without inspecting existing storage.
+    /// Application startup must use `resolve_for_runtime` to preserve legacy stores.
     pub fn resolve(
         environment: &PlatformEnvironment,
         overrides: &PathEnvOverrides,
@@ -99,6 +104,27 @@ impl RuntimePaths {
 
         validate_all(&resolved)?;
         Ok(resolved)
+    }
+
+    /// Resolves startup paths while preserving existing Windows data directories.
+    /// Explicit overrides bypass discovery; filesystem probes have bounded waits.
+    pub async fn resolve_for_runtime(
+        environment: &PlatformEnvironment,
+        overrides: &PathEnvOverrides,
+    ) -> Result<Self, PathError> {
+        let mut effective = overrides.clone();
+        if environment.platform == PlatformKind::Windows
+            && overrides.home.is_none()
+            && overrides.data_dir.is_none()
+        {
+            let local_base = windows_local_base(environment)?;
+            let legacy = local_base.join(APP_DIR_NAME).join("data");
+            effective.data_dir = Some(
+                select_windows_data_directory(&windows_data_directory(&local_base), &legacy)
+                    .await?,
+            );
+        }
+        Self::resolve(environment, &effective)
     }
 
     /// Returns the JSONL audit log owned by resident agent protocol adapters.
@@ -248,6 +274,8 @@ pub enum PathErrorKind {
     MissingBase { variable: &'static str },
     RelativePath { path: PathBuf },
     ParentComponent { path: PathBuf },
+    DataDirectoryProbe { path: PathBuf, reason: String },
+    ConflictingDataDirectories { current: PathBuf, legacy: PathBuf },
 }
 
 impl fmt::Display for PathError {
@@ -269,6 +297,17 @@ impl fmt::Display for PathError {
                 "{} directory must not contain '..', got {}",
                 self.purpose,
                 path.display()
+            ),
+            PathErrorKind::DataDirectoryProbe { path, reason } => write!(
+                formatter,
+                "cannot inspect data directory '{}': {reason}; set {RELAY_KNOWLEDGE_DATA_DIR} explicitly to select storage",
+                path.display()
+            ),
+            PathErrorKind::ConflictingDataDirectories { current, legacy } => write!(
+                formatter,
+                "both Windows data directories '{}' and '{}' exist; set {RELAY_KNOWLEDGE_DATA_DIR} explicitly to select storage",
+                current.display(),
+                legacy.display()
             ),
         }
     }
@@ -394,18 +433,7 @@ fn windows_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, P
                 .map(|home| home.join("AppData/Roaming"))
         })
         .ok_or_else(|| PathError::missing_base(PathPurpose::Config, "APPDATA or HOME"))?;
-    let local_base = environment
-        .local_app_data
-        .as_deref()
-        .map(|path| validate_path(PathPurpose::Data, path).map(|_| path.to_path_buf()))
-        .transpose()?
-        .or_else(|| {
-            environment
-                .home_dir
-                .as_ref()
-                .map(|home| home.join("AppData/Local"))
-        })
-        .ok_or_else(|| PathError::missing_base(PathPurpose::Data, "LOCALAPPDATA or HOME"))?;
+    let local_base = windows_local_base(environment)?;
     let root = local_base.join(APP_DIR_NAME);
     let temp_dir = match environment.temp_dir.as_deref() {
         Some(path) => {
@@ -417,15 +445,106 @@ fn windows_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, P
 
     Ok(RuntimePaths {
         config_dir: config_base.join(APP_DIR_NAME),
-        data_dir: PathBuf::from(WINDOWS_DATA_VOLUME)
-            .join(APP_DIR_NAME)
-            .join("data"),
+        data_dir: windows_data_directory(&local_base),
         state_dir: root.join("state"),
         cache_dir: root.join("cache"),
         log_dir: root.join("logs"),
         temp_dir,
         runtime_dir: root.join("run"),
         service_dir: config_base.join(APP_DIR_NAME).join("service"),
+    })
+}
+
+fn windows_local_base(environment: &PlatformEnvironment) -> Result<PathBuf, PathError> {
+    let base = environment
+        .local_app_data
+        .as_deref()
+        .map(|path| validate_path(PathPurpose::Data, path).map(|_| path.to_path_buf()))
+        .transpose()?
+        .or_else(|| {
+            environment
+                .home_dir
+                .as_ref()
+                .map(|home| home.join("AppData/Local"))
+        })
+        .ok_or_else(|| PathError::missing_base(PathPurpose::Data, "LOCALAPPDATA or HOME"))?;
+    validate_path(PathPurpose::Data, &base)?;
+    Ok(base)
+}
+
+fn windows_data_directory(local_base: &Path) -> PathBuf {
+    // Hash losslessly encoded path components, folding ASCII case and separators
+    // so ordinary Windows path spelling changes do not select another store.
+    let mut identity = Sha256::new();
+    for component in local_base
+        .as_os_str()
+        .as_encoded_bytes()
+        .split(|byte| matches!(*byte, b'/' | b'\\'))
+        .filter(|component| !component.is_empty() && *component != b".")
+    {
+        let normalized: Vec<_> = component.iter().map(u8::to_ascii_lowercase).collect();
+        identity.update(normalized);
+        identity.update([0]);
+    }
+    PathBuf::from(WINDOWS_DATA_VOLUME)
+        .join(APP_DIR_NAME)
+        .join("users")
+        .join(format!("{:x}", identity.finalize()))
+        .join("data")
+}
+
+async fn select_windows_data_directory(
+    current: &Path,
+    legacy: &Path,
+) -> Result<PathBuf, PathError> {
+    if !existing_data_directory(legacy).await? {
+        return Ok(current.to_path_buf());
+    }
+    if current != legacy && existing_data_directory(current).await? {
+        return Err(PathError {
+            purpose: PathPurpose::Data,
+            kind: PathErrorKind::ConflictingDataDirectories {
+                current: current.to_path_buf(),
+                legacy: legacy.to_path_buf(),
+            },
+        });
+    }
+    Ok(legacy.to_path_buf())
+}
+
+async fn existing_data_directory(path: &Path) -> Result<bool, PathError> {
+    let result = tokio::time::timeout(
+        DATA_DIRECTORY_PROBE_TIMEOUT,
+        tokio::fs::symlink_metadata(path),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "directory probe timed out",
+        ))
+    });
+    data_directory_probe_result(path, result)
+}
+
+fn data_directory_probe_result(
+    path: &Path,
+    result: io::Result<std::fs::Metadata>,
+) -> Result<bool, PathError> {
+    let reason = match result {
+        // Keep legacy symlinks, including dangling ones, selected so a broken
+        // existing store fails visibly instead of opening a new empty database.
+        Ok(metadata) if metadata.is_dir() || metadata.is_symlink() => return Ok(true),
+        Ok(_) => "path is not a directory".to_owned(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => error.to_string(),
+    };
+    Err(PathError {
+        purpose: PathPurpose::Data,
+        kind: PathErrorKind::DataDirectoryProbe {
+            path: path.to_path_buf(),
+            reason,
+        },
     })
 }
 
@@ -552,3 +671,6 @@ fn repository_shard_dir_name(repository_id: &str) -> String {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod windows_storage_tests;

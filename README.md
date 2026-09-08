@@ -13,8 +13,11 @@ The default local profile needs no external service: platform defaults select
 the runtime directories, SQLite stores local state, and deterministic local
 semantic/vector read models are enabled.
 
-On Windows, SQLite defaults to `D:\relay-knowledge\data\relay-knowledge.sqlite`.
-Set `RELAY_KNOWLEDGE_DATA_DIR` to an absolute directory to relocate the main
+New Windows installations default to
+`D:\relay-knowledge\users\<profile-id>\data\relay-knowledge.sqlite`, with a stable
+profile id derived from LocalAppData so accounts use separate stores. Existing
+LocalAppData data directories remain selected automatically during upgrades.
+Set `RELAY_KNOWLEDGE_DATA_DIR` to an absolute directory to select the main
 database and repository shards together. This overrides `RELAY_KNOWLEDGE_HOME`
 and platform defaults; Linux and macOS retain their platform data directories.
 
