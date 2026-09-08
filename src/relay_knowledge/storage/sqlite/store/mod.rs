@@ -33,6 +33,21 @@ pub struct SqliteGraphStore {
 }
 
 impl SqliteGraphStore {
+    /// Reads physical SQLite health through an already-open pool handle.
+    pub(in crate::storage) fn sqlite_diagnostics(
+        &self,
+    ) -> StorageFuture<'_, crate::storage::SqliteStorageDiagnostics> {
+        let path = self.database_path.clone();
+        let maintenance = Arc::clone(&self.maintenance);
+        self.try_run_read(move |connection| {
+            super::connection_runtime::maintenance::diagnostics(
+                connection,
+                path.as_deref(),
+                &maintenance,
+            )
+        })
+    }
+
     /// Opens a SQLite database and initializes the current schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let path = path.as_ref().to_path_buf();
@@ -100,7 +115,7 @@ impl SqliteGraphStore {
         })
     }
 
-    pub(super) fn run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    pub(in crate::storage) fn run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,

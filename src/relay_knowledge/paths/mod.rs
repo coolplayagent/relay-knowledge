@@ -25,6 +25,9 @@ use crate::{
 mod repository_root;
 mod windows_storage;
 
+#[cfg(windows)]
+pub use windows_storage::{initialize_windows_probe_executable, windows_probe_worker};
+
 /// Default Windows data volume; runtime-home and data-directory overrides take precedence.
 const WINDOWS_DATA_VOLUME: &str = "D:/";
 const DATA_DIRECTORY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);

@@ -157,11 +157,17 @@ fn windows_probe_timeout_does_not_delay_runtime_shutdown() {
         .enable_all()
         .build()
         .unwrap();
+    let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args([
+            "--exact",
+            "paths::windows_storage::tests::windows_native_probe_worker",
+            "--nocapture",
+        ])
+        .env("RELAY_TEST_WINDOWS_PROBE_PATH", "C:/")
+        .env("RELAY_TEST_WINDOWS_PROBE_PAUSE", "1");
     let error = runtime
-        .block_on(run_security_script(
-            "Start-Sleep -Seconds 30",
-            Duration::from_millis(200),
-        ))
+        .block_on(bounded_command(&mut command, Duration::from_millis(200)))
         .unwrap_err();
     assert!(error.to_string().contains("timed out"));
     drop(runtime);
@@ -177,6 +183,55 @@ async fn windows_native_sid_is_stable_across_repeated_token_reads() {
     let first = current_sid().await.unwrap();
     assert_eq!(first, current_sid().await.unwrap());
     validate_sid(&first).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_native_probe_worker() {
+    // A child test executable substitutes for the product main dispatcher.
+    // Only this test shim reads test-only process input.
+    if let Ok(path) = std::env::var("RELAY_TEST_WINDOWS_PROBE_PATH") {
+        if std::env::var("RELAY_TEST_WINDOWS_PROBE_PAUSE").as_deref() == Ok("1") {
+            std::thread::sleep(Duration::from_secs(30));
+        }
+        let args = vec!["--internal-windows-storage-probe".to_owned(), path];
+        match windows_probe_worker(&args).unwrap() {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                println!("{error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        assert!(
+            initialize_windows_probe_executable(std::path::PathBuf::from("relative-probe.exe"))
+                .is_err()
+        );
+        let executable = std::env::current_exe().unwrap();
+        initialize_windows_probe_executable(executable.clone()).unwrap();
+        initialize_windows_probe_executable(executable.clone()).unwrap();
+        assert!(
+            initialize_windows_probe_executable(executable.with_extension("different.exe"))
+                .is_err()
+        );
+        assert!(windows_probe_worker(&["--version".to_owned()]).is_none());
+        assert!(
+            windows_probe_worker(&["--internal-windows-storage-probe".to_owned()])
+                .unwrap()
+                .is_err()
+        );
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_native_security_shell_matches_native_token_sid() {
+    assert_eq!(
+        current_sid().await.unwrap(),
+        run_security_script("Get-RelayStorageSid", SECURITY_COMMAND_TIMEOUT)
+            .await
+            .unwrap()
+    );
 }
 
 #[cfg(windows)]
@@ -196,7 +251,11 @@ async fn windows_native_ignores_a_counterfeit_system_root() {
     .await
     .unwrap();
     let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
-    child.args(["--exact", "paths::windows_storage::tests::windows_native_sid_is_stable_across_repeated_token_reads"])
+    child
+        .args([
+            "--exact",
+            "paths::windows_storage::tests::windows_native_security_shell_matches_native_token_sid",
+        ])
         .env("SystemRoot", &root)
         .env("WINDIR", &root)
         .env("PSModulePath", &root)

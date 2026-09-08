@@ -69,22 +69,40 @@ async fn read_only_topology_does_not_authorize_the_first_database_open() {
 }
 
 #[tokio::test]
-async fn topology_revalidates_paths_after_a_successful_store_open() {
+async fn topology_uses_the_validated_handle_after_a_successful_store_open() {
     for topology in [
         StorageTopology::SingleSqlite,
         StorageTopology::PartitionedSqlite,
     ] {
         let paths = runtime_paths();
         let root = paths.data_dir.parent().unwrap().to_path_buf();
-        let mut factory = SqliteKnowledgeStoreFactory::new(paths, topology);
+        let mut factory = SqliteKnowledgeStoreFactory::new(paths.clone(), topology);
         let store = factory.open().await.unwrap();
-        factory.topology_snapshot().await.unwrap();
-        // A valid open must not cache authorization for a later path-based
-        // read. Simulate a policy failure without requiring Windows ACL APIs.
+        let catalog = PartitionedSqliteKnowledgeStore::open(paths.database_file(), paths).unwrap();
+        catalog
+            .upsert_code_repository(
+                CodeRepositoryRegistration::new(
+                    "handle-repository",
+                    "handle",
+                    "/tmp/handle-repository",
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Redirecting future path opens cannot redirect the retained reader.
+        // The live catalog must remain visible without another security probe.
+        factory.database_path = root.join("absent.sqlite");
         factory.paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
-        let error = factory.topology_snapshot().await.unwrap_err();
-        assert!(error.to_string().contains("account policy"));
+        let snapshot = factory.topology_snapshot().await.unwrap();
+        assert_eq!(snapshot.shards.len(), 1);
+        assert_eq!(snapshot.shards[0].repository_id, "handle-repository");
+        assert!(!factory.database_path.exists());
+        drop(catalog);
         drop(store);
+        drop(factory);
         fs::remove_dir_all(root).unwrap();
     }
 }

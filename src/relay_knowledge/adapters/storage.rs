@@ -1,13 +1,16 @@
 //! SQLite storage construction behind the application factory contract.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     paths::{RuntimePaths, StorageDirectoryAccess},
     storage::{
         KnowledgeStore, KnowledgeStoreFactory, KnowledgeStoreFactoryFuture,
-        PartitionedSqliteKnowledgeStore, SqliteGraphStore, StorageError, StorageTopology,
-        StorageTopologySnapshot,
+        PartitionedSqliteKnowledgeStore, SqliteGraphStore, SqliteTopologyReader, StorageError,
+        StorageTopology, StorageTopologySnapshot,
     },
 };
 
@@ -18,6 +21,7 @@ pub struct SqliteKnowledgeStoreFactory {
     paths: RuntimePaths,
     topology: StorageTopology,
     validation_lock: Arc<tokio::sync::Mutex<()>>,
+    catalog_reader: Arc<Mutex<Option<SqliteTopologyReader>>>,
 }
 
 impl SqliteKnowledgeStoreFactory {
@@ -28,6 +32,7 @@ impl SqliteKnowledgeStoreFactory {
             paths,
             topology,
             validation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            catalog_reader: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -67,9 +72,17 @@ impl KnowledgeStoreFactory for SqliteKnowledgeStoreFactory {
                 .ensure_storage_access(StorageDirectoryAccess::OpenOrCreate)
                 .await
                 .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-            tokio::task::spawn_blocking(move || open_store(config))
-                .await
-                .map_err(StorageError::from)?
+            tokio::task::spawn_blocking(move || {
+                let store = open_store(config.clone())?;
+                let reader = SqliteTopologyReader::open(&config.database_path, config.paths)?;
+                *config
+                    .catalog_reader
+                    .lock()
+                    .map_err(|_| StorageError::LockPoisoned)? = Some(reader);
+                Ok(store)
+            })
+            .await
+            .map_err(StorageError::from)?
         })
     }
 
@@ -78,8 +91,21 @@ impl KnowledgeStoreFactory for SqliteKnowledgeStoreFactory {
         Box::pin(async move {
             let validation_lock = Arc::clone(&config.validation_lock);
             let validation = validation_lock.lock().await;
-            // Every snapshot opens a new pathname-based connection. A prior
-            // store handle cannot authorize the current path or its sidecars.
+            let catalog = Arc::clone(&config.catalog_reader);
+            if let Some(snapshot) = tokio::task::spawn_blocking(move || {
+                catalog
+                    .lock()
+                    .map_err(|_| StorageError::LockPoisoned)?
+                    .as_mut()
+                    .map(SqliteTopologyReader::snapshot)
+                    .transpose()
+            })
+            .await??
+            {
+                return Ok(snapshot);
+            }
+            // A cold snapshot needs a fresh pathname-based connection, with
+            // current validation. Its permission result is never cached.
             config
                 .paths
                 .ensure_storage_database_access(

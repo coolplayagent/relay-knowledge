@@ -1,5 +1,4 @@
-//! Windows account identity and private storage provisioning through a bounded
-//! Windows PowerShell 5.1 process. No native unsafe code or executor-blocking I/O.
+//! Native Windows identity, bounded path probes, and private ACL provisioning.
 
 use std::{path::Path, time::Duration};
 
@@ -7,10 +6,55 @@ use super::{PathError, PathErrorKind, PathPurpose, StorageDirectoryAccess};
 
 const SECURITY_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[cfg(windows)]
+static PROBE_EXECUTABLE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Registers the immutable native worker executable during host bootstrap.
+/// Embedded hosts must point to the relay-knowledge CLI, which implements the
+/// worker dispatch. This avoids recursively launching an arbitrary library host.
+#[cfg(windows)]
+pub fn initialize_windows_probe_executable(
+    executable: std::path::PathBuf,
+) -> Result<(), PathError> {
+    super::validate_path(PathPurpose::Runtime, &executable)?;
+    if let Err(executable) = PROBE_EXECUTABLE.set(executable) {
+        if PROBE_EXECUTABLE.get() != Some(&executable) {
+            return Err(security_error(
+                "Windows path probe executable is already configured",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn current_sid() -> Result<String, PathError> {
-    let sid = run_security_script("Get-RelayStorageSid", SECURITY_COMMAND_TIMEOUT).await?;
-    validate_sid(&sid)?;
-    Ok(sid)
+    #[cfg(windows)]
+    {
+        use winsafe::{co, prelude::*};
+        let token = winsafe::HPROCESS::GetCurrentProcess()
+            .OpenProcessToken(co::TOKEN::QUERY)
+            .map_err(|error| security_error(error.to_string()))?;
+        let information = token
+            .GetTokenInformation(co::TOKEN_INFORMATION_CLASS::User)
+            .map_err(|error| security_error(error.to_string()))?;
+        let winsafe::TokenInfo::User(user) = information else {
+            return Err(security_error(
+                "Windows returned unexpected token information",
+            ));
+        };
+        let sid = winsafe::ConvertSidToStringSid(
+            user.User
+                .Sid()
+                .ok_or_else(|| security_error("Windows token has no account SID"))?,
+        )
+        .map_err(|error| security_error(error.to_string()))?;
+        validate_sid(&sid)?;
+        Ok(sid)
+    }
+    #[cfg(not(windows))]
+    Err(security_error(
+        "automatic Windows storage requires a Windows host",
+    ))
 }
 
 pub(super) fn validate_sid(sid: &str) -> Result<(), PathError> {
@@ -90,19 +134,69 @@ pub(super) async fn probe_path(path: &Path) -> Result<Option<bool>, PathError> {
         .ok_or_else(|| {
             security_error("Windows probe path must be Unicode and at most 4096 bytes")
         })?;
-    let command = format!(
-        "Get-RelayStoragePathKind -Path '{}'",
-        path.replace('\'', "''")
-    );
-    match run_security_script(&command, super::DATA_DIRECTORY_PROBE_TIMEOUT)
-        .await?
-        .as_str()
-    {
-        "missing" => Ok(None),
-        "directory" | "reparse" => Ok(Some(true)),
-        "file" => Ok(Some(false)),
+    // Reuse the trusted running binary as a disposable native filesystem worker.
+    // It performs no runtime/service initialization and needs no script engine.
+    #[cfg(not(test))]
+    let executable = PROBE_EXECUTABLE.get().ok_or_else(|| {
+        security_error(
+            "host must initialize the Windows path probe executable before resolving storage",
+        )
+    })?;
+    #[cfg(test)]
+    let executable = std::env::current_exe().map_err(|error| security_error(error.to_string()))?;
+    let mut command = tokio::process::Command::new(executable);
+    command.env_clear();
+    #[cfg(not(test))]
+    command.args(["--internal-windows-storage-probe", path]);
+    #[cfg(test)]
+    command
+        .args([
+            "--exact",
+            "paths::windows_storage::tests::windows_native_probe_worker",
+            "--nocapture",
+        ])
+        .env("RELAY_TEST_WINDOWS_PROBE_PATH", path);
+    let output = bounded_command(&mut command, super::DATA_DIRECTORY_PROBE_TIMEOUT).await?;
+    let mut responses = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("relay-storage-probe:"));
+    let result = responses.next();
+    if responses.next().is_some() {
+        return Err(security_error("duplicate Windows path probe response"));
+    }
+    match result {
+        Some("missing") => Ok(None),
+        Some("directory" | "reparse") => Ok(Some(true)),
+        Some("file") => Ok(Some(false)),
         _ => Err(security_error("unexpected Windows path probe response")),
     }
+}
+
+/// Handles the disposable native path worker before CLI/runtime configuration.
+/// The caller must exit after printing the result. Blocking filesystem access
+/// is confined to this child, which its parent kills on timeout or cancellation.
+#[cfg(windows)]
+pub fn windows_probe_worker(args: &[String]) -> Option<Result<String, PathError>> {
+    use winsafe::{co, prelude::*};
+    if args.first().map(String::as_str) != Some("--internal-windows-storage-probe") {
+        return None;
+    }
+    Some((|| {
+        let path = args
+            .get(1)
+            .filter(|path| args.len() == 2 && !path.contains('\0') && path.len() <= 4096)
+            .ok_or_else(|| {
+                security_error("Windows probe requires one path of at most 4096 bytes")
+            })?;
+        let kind = match winsafe::GetFileAttributes(path) {
+            Ok(attributes) if attributes.has(co::FILE_ATTRIBUTE::REPARSE_POINT) => "reparse",
+            Ok(attributes) if attributes.has(co::FILE_ATTRIBUTE::DIRECTORY) => "directory",
+            Ok(_) => "file",
+            Err(co::ERROR::FILE_NOT_FOUND | co::ERROR::PATH_NOT_FOUND) => "missing",
+            Err(error) => return Err(security_error(error.to_string())),
+        };
+        Ok(format!("relay-storage-probe:{kind}"))
+    })())
 }
 
 #[cfg(windows)]

@@ -2,7 +2,7 @@ use std::{path::Path, sync::Arc};
 
 mod catalog;
 mod control_plane;
-mod diagnostics;
+pub(super) mod diagnostics;
 mod framework;
 mod indexing;
 mod repository;
@@ -50,8 +50,8 @@ impl PartitionedSqliteKnowledgeStore {
         initialize_catalog_schema(&control_path)?;
 
         Ok(Self {
-            control,
-            catalog: Arc::new(SqliteShardCatalog::new(control_path, paths)),
+            control: Arc::clone(&control),
+            catalog: Arc::new(SqliteShardCatalog::new(control_path, paths, control)),
         })
     }
 }

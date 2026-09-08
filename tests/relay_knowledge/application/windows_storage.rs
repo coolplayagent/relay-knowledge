@@ -14,6 +14,11 @@ use relay_knowledge::{
 
 #[tokio::test]
 async fn windows_upgrade_reopens_existing_graph_for_cli_web_and_pinned_service() {
+    #[cfg(windows)]
+    relay_knowledge::paths::initialize_windows_probe_executable(std::path::PathBuf::from(env!(
+        "CARGO_BIN_EXE_relay-knowledge"
+    )))
+    .unwrap();
     for topology in ["single_sqlite", "partitioned_sqlite"] {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -16,7 +16,11 @@ async fn first_shard_open_validates_managed_paths_before_creating_sqlite() {
     let data_dir = unique_database_path("private-shard").with_extension("data");
     let mut paths = runtime_paths(data_dir.clone());
     paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
-    let catalog = super::SqliteShardCatalog::new(paths.database_file(), paths);
+    let catalog = super::SqliteShardCatalog::new(
+        paths.database_file(),
+        paths,
+        std::sync::Arc::new(crate::storage::SqliteGraphStore::open_in_memory().unwrap()),
+    );
     let error = match catalog
         .staged_repository_store("private-repository".to_owned())
         .await

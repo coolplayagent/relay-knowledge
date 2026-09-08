@@ -1,6 +1,7 @@
 # Native ACL regression tests; run with Windows PowerShell 5.1, without Pester.
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/../../src/relay_knowledge/paths/windows_storage.ps1"
+. "$PSScriptRoot/windows_storage_grants.ps1"
 
 function Assert-Rejected {
     param([scriptblock]$Action, [string]$Expected)
@@ -62,6 +63,7 @@ try {
     # Newly created SQLite files inherit only the approved principals.
     $database = Join-Path $data 'test.sqlite'
     [System.IO.File]::WriteAllText($database, 'existing graph')
+    Test-RelayRequiredStorageGrants $data $database $sid
     $fileAcl = [System.IO.File]::GetAccessControl($database)
     foreach ($rule in $fileAcl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -eq 'Allow' -and @($sid, 'S-1-5-18', 'S-1-5-32-544') -notcontains $rule.IdentityReference.Value) {

@@ -62,8 +62,8 @@ Web Knowledge Map 请求必须显式指定已注册仓库。安装后的服务�
 
 Windows 新安装的数据目录为 `D:\relay-knowledge\users\<user-sid>\data`，
 主库为 `relay-knowledge.sqlite`，分片位于 `stores/repositories/`。
-SID 通过 Windows PowerShell 5.1 从当前进程令牌获取，迁移用户配置目录或修改 LocalAppData
-不会改变账户存储标识。paths 边界通过 OS `GetSystemDirectoryW` API（兼容 MSRV 的 WinSafe kernel
+SID 通过安全的 WinSafe advapi 包装直接调用 `OpenProcessToken` / `GetTokenInformation`，
+无需脚本引擎；迁移用户配置目录或修改 LocalAppData 不会改变账户存储标识。paths 边界通过 OS `GetSystemDirectoryW` API（兼容 MSRV 的 WinSafe kernel
 包装）定位 PowerShell，不依赖 SystemRoot 或 PATH。子进程仅保留从 OS 派生的 SystemRoot/WINDIR
 和系统模块目录，不继承模块/CLR profiler 注入设置。非交互命令使用
 每进程 10 秒超时和 4096 字节输出上限；超时或取消会终止子进程，不回退到环境变量或账户名称。
@@ -72,7 +72,10 @@ SID 通过 Windows PowerShell 5.1 从当前进程令牌获取，迁移用户配�
 `RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > 已有 Windows LocalAppData 数据目录 >
 新平台默认值，环境变量必须是非空绝对目录且不含 `..`。新安装需要可写的 D 盘目录或显式覆盖。
 `RuntimePaths::resolve` 在 Windows 上要求显式 data/home 覆盖；应用启动使用 `resolve_for_runtime`，最多执行两次
-异步 metadata 探测，每次在可终止的 PowerShell 子进程内执行，超时上限 5 秒。
+异步 metadata 探测，每次在当前二进制的可终止原生子进程内执行，超时上限 5 秒。
+内部 `--internal-windows-storage-probe` 模式仅调用 `GetFileAttributesW`，在 CLI 配置和存储启动前退出；
+子进程不继承环境，只接受一个有界路径并返回有界输出。CLI 启动时固定注册自身绝对路径；
+嵌入式库宿主须先通过 `paths::initialize_windows_probe_executable` 注册已安装的 CLI，避免递归启动任意宿主程序。旧目录发现和生命周期存在性探测均不依赖 PowerShell。
 文件系统 I/O 不进入 Tokio blocking pool，因此离线或挂起的 LocalAppData 不会留下阻止
 runtime 退出的后台文件探测。显式 data/home 覆盖不做目录发现。
 旧目录缺失时选择新默认值；已有旧目录或符号链接继续被选中。非目录路径、探测错误和超时
@@ -102,13 +105,18 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 输出限制、超时和取消，不模拟 Windows 账户令牌。新增回归覆盖只读诊断不授权首次打开、
 服务计划/执行拒绝拓扑冲突、服务定义固定拓扑、Windows 探测超时后 runtime 能及时退出、
 保留显式 ACL 的搬入数据库及恢复文件、文件符号链接、分片 junction 和树深度上限。
+新增原生回归逐一移除账户、SYSTEM、Administrators 授权，并向目录与文件加入主体及 Everyone 拒绝规则，
+验证拒绝且不修复 ACL。健康回归确保不会再次扫描全树；拓扑回归重定向后续路径，验证仍通过保留句柄读取原库。
 
 路径解析仅保留 SID 策略，不创建目录。工厂通过异步互斥锁串行执行首次 ACL 校验；
-只读诊断不能授权后续 SQLite 打开，每次工厂打开都会重新校验。每次 topology 查询也会
-在新建只读连接前重新校验 control 文件、恢复文件和父目录，成功打开过存储也不能跳过；
-受管理的 control 文件缺失时明确报错，不返回空拓扑。该定向检查不扫描无关分片。SQLite 工厂在实际打开存储前创建 SID 目录及其 `data`
+只读诊断不能授权后续 SQLite 打开，每次工厂打开都会重新校验。成功打开后，工厂保留真实的
+只读 control 连接供 topology 查询复用，不把历史权限结果用于授权新的路径打开。冷 topology 查询
+仍在每次新建连接前检查 control 文件、恢复文件和父目录；这类打开遇到受管理的主库缺失时明确报错。
+定向检查不扫描无关分片。SQLite 工厂在实际打开存储前创建 SID 目录及其 `data`
 子目录，并原子设置创建账户或 LocalSystem 为 owner 及受保护 DACL，
-仅授予目录所标识的账户、SYSTEM、Administrators 可继承的完全控制。已有目录必须满足同一 ACL 合同，
+仅授予目录所标识的账户、SYSTEM、Administrators 可继承的完全控制。已有私有目录和文件
+必须为这三类主体分别保留完整授权，目录同时包含文件和目录继承标志。拒绝任何 deny ACE
+（包括组拒绝）及适用于父目录的 deny ACE，避免猜测组成员关系导致误判。已有目录必须满足同一 ACL 合同，
 存储边界不会自动修复宽松 ACL。只读存储诊断仅校验已有目录，不创建目录。自卷根逐级检查最多 32 个父目录，拒绝重解析点、不可信 owner，
 以及允许其他账户删除、修改属性、修改权限或夺取所有权的 ACL；共享父目录可以授予读取、
 遍历和创建子目录权限。已有数据库、WAL/SHM/journal、仓库分片及所有后代目录也必须
@@ -117,7 +125,9 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 超过任一限制都明确失败。每个分片首次打开还会在现有 blocking worker 中通过有界异步
 子进程检查具体路径、父目录和 sidecar，由独立的 `catalog::store_access` 模块负责，
 缓存句柄不重复启动校验，安全检查期间不持有共享 cache 锁。新建分片诊断连接前
-统一批量校验数据树；只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
+在完整图谱诊断中统一批量校验数据树。500 毫秒健康检查改用保留的 control 连接池及已校验分片句柄，
+保留 WAL 汇总、维护状态、仓库统计和缺失分片报告，不在每次轮询时扫描全树。冷分片首次打开仍校验
+具体路径，初始忙碌状态可见，后续健康检查复用已打开的句柄。只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
 权限受限的共享父目录，或通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
 及支持 ACL 的本地卷。保留的旧库及保留 SID 布局之外的显式 HOME/DATA 继续由操作者管理权限。
 `D:\relay-knowledge\users\<user-sid>\data` 布局始终恢复目录中原账户的 SID 策略，

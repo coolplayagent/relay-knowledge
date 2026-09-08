@@ -62,8 +62,9 @@ Exact code-source fallback is implemented inside the product and must not requir
 
 New Windows installations default to `D:\relay-knowledge\users\<user-sid>\data`,
 containing `relay-knowledge.sqlite` and shards under `stores/repositories/`.
-The user SID comes from the current Windows process token through Windows
-PowerShell 5.1, so account identity survives profile and LocalAppData relocation.
+The user SID comes directly from the current Windows process token through
+`OpenProcessToken` / `GetTokenInformation` and the safe WinSafe advapi wrapper,
+so account identity survives profile and LocalAppData relocation without a script engine.
 The paths boundary locates PowerShell through the OS `GetSystemDirectoryW` API
 (using the MSRV-compatible WinSafe kernel wrapper), never through SystemRoot or
 PATH. Its child receives only OS-derived SystemRoot/WINDIR and the system module
@@ -78,8 +79,14 @@ without `..`. New installations require a writable D: directory or an explicit
 override. `RuntimePaths::resolve` requires an explicit Windows data/home override;
 application startup uses `resolve_for_runtime` to obtain the SID and preserve
 existing storage through at most
-two asynchronous metadata probes, each in a terminable PowerShell child with a
-five-second deadline. Filesystem I/O stays in that child, so a hung redirected
+two asynchronous metadata probes, each in a terminable native child of the running
+binary with a five-second deadline. The internal `--internal-windows-storage-probe`
+mode calls `GetFileAttributesW` and exits before CLI configuration or storage startup.
+The helper inherits no environment, accepts one bounded path, and returns bounded output.
+CLI bootstrap registers its own absolute executable once; embedded library hosts
+must call `paths::initialize_windows_probe_executable` with the installed CLI before
+Windows path discovery, preventing accidental recursion into an arbitrary host.
+Legacy discovery and lifecycle existence probes therefore do not require PowerShell. Filesystem I/O stays in that child, so a hung redirected
 LocalAppData path cannot leave a detached Tokio blocking task delaying shutdown.
 Explicit data/home overrides bypass discovery. Missing legacy directories select
 the new default; existing legacy directories and symlinks remain selected.
@@ -90,14 +97,18 @@ store is authoritative. No database is opened or moved during path resolution.
 Path resolution retains the selected SID policy without creating directories.
 The factory serializes initial ACL verification with an async mutex. Read-only
 diagnostics never authorize a later SQLite open: every factory open revalidates.
-Every topology snapshot also validates its control database, recovery files, and
-ancestors immediately before creating a fresh read-only connection, even after
-a successful store open. Missing managed control files fail visibly rather than
-reporting an empty topology. This targeted check avoids walking unrelated shards.
+After a successful open, the factory retains an actual read-only control connection
+for topology snapshots; it never treats a cached permission result as authorization
+for another pathname open. Cold topology reads validate their control database,
+recovery files, and ancestors before each fresh connection. Missing managed control
+files fail visibly on those path opens. This targeted check avoids unrelated shards.
 Immediately before SQLite opens, its factory creates the SID directory and `data`
 child with a protected DACL owned by the creating account or LocalSystem. It grants inheritable full
 control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
-creation. Existing directories must already satisfy that policy; the storage boundary never
+creation. Existing private directories and payload files must explicitly grant full control
+to all three principals, with both inheritance flags on directories. Deny ACEs
+(including group denies) and applicable ancestor deny ACEs are conservatively rejected
+rather than guessing effective group membership. Existing directories must already satisfy that policy; the storage boundary never
 silently rewrites permissions or adopts a permissive directory. Ancestors are
 checked from the volume root downward (at most 32): reparse points, untrusted
 owners, and grants allowing other accounts to delete, change attributes, change
@@ -112,8 +123,12 @@ first shard open additionally validates its own path components and sidecars in
 the existing blocking worker, owned by `catalog::store_access` and using the bounded async child process; cached
 shard handles skip that extra launch. The shared cache lock is released during
 security checks so unrelated cached repositories are not held behind them. Fresh shard diagnostic connections perform
-one batched tree validation. Read-only checks never provision directories or
-repair existing ACLs.
+one batched tree validation for full graph inspection. The 500 ms health path instead
+reads the retained control pool and cached shard handles, preserving aggregate WAL,
+maintenance diagnostics, repository totals, and missing-shard reports. Cold shard
+opens still validate their own path; a busy initial open remains observable and
+subsequent health polls reuse its handle. Health never repeats a full payload scan.
+Read-only checks never provision directories or repair existing ACLs.
 A missing or insecure D: volume fails visibly when storage is opened;
 an administrator can provision the shared ancestors with an administrator owner
 and restricted write/delete rights, or users can explicitly choose a private
@@ -163,6 +178,10 @@ Native ACL fixtures restore saved access descriptors through a fresh FileSecurit
 object, marking the access section modified before writing it. This follows
 [.NET Framework ACL persistence](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/filesecurity.cs);
 a descriptor that was only read does not persist a reset.
+Native regressions remove each required principal and add account, service,
+administrator, and Everyone deny rules to directories and files, asserting rejection
+without ACL repair. Warm-health tests fail if a full payload scan returns, and topology
+tests redirect future paths while verifying that the retained handle still reads its catalog.
 The `windows-storage` PR job runs native PowerShell ACL checks, Windows Rust unit
 tests, and legacy SQLite upgrade integration tests. It covers protected child/file
 inheritance, persisted ACL preservation across validation, unsafe existing and ancestor ACLs, junction rejection, stable SIDs,

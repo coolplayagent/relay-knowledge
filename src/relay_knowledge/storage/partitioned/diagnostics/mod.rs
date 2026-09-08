@@ -15,6 +15,34 @@ use super::{
     catalog::{catalog_has_active_repositories, catalog_topology_snapshot},
 };
 
+/// Retains an already validated control database handle for short health reads.
+#[derive(Debug)]
+pub struct SqliteTopologyReader {
+    connection: rusqlite::Connection,
+    paths: RuntimePaths,
+}
+
+impl SqliteTopologyReader {
+    /// Opens only at a validated storage boundary, on its blocking worker.
+    pub fn open(path: &Path, paths: RuntimePaths) -> Result<Self, StorageError> {
+        let connection = rusqlite::Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        connection.busy_timeout(std::time::Duration::from_millis(50))?;
+        connection.execute_batch("PRAGMA query_only = ON")?;
+        Ok(Self { connection, paths })
+    }
+
+    /// Reads a consistent catalog snapshot without reopening a filesystem path.
+    pub fn snapshot(&mut self) -> Result<StorageTopologySnapshot, StorageError> {
+        let transaction = self.connection.transaction()?;
+        let snapshot = super::catalog::topology_from_connection(&transaction, &self.paths)?;
+        transaction.commit()?;
+        Ok(snapshot)
+    }
+}
+
 impl PartitionedSqliteKnowledgeStore {
     pub fn has_active_catalog(control_path: impl AsRef<Path>) -> Result<bool, StorageError> {
         catalog_has_active_repositories(control_path.as_ref())
@@ -45,7 +73,25 @@ pub(super) async fn health_snapshot(
     now_ms: u64,
 ) -> Result<HealthStorageSnapshot, StorageError> {
     let mut snapshot = store.control.health_snapshot(now_ms).await?;
-    snapshot.graph.sqlite = aggregate_sqlite_diagnostics(store, snapshot.graph.sqlite).await?;
+    let mut aggregate = SqliteDiagnosticsAggregate::new();
+    aggregate.push("control", snapshot.graph.sqlite);
+    // Reuse shard handles whose first open enforces the account policy. Health
+    // must not rescan unrelated payloads or open diagnostic paths every poll.
+    for repository_id in store.catalog.repository_ids().await? {
+        let label = format!("shard {repository_id}");
+        match store.catalog.existing_repository_store(repository_id).await {
+            Ok(Some(shard)) => match shard.sqlite_diagnostics().await {
+                Ok(diagnostics) => aggregate.push(label, diagnostics),
+                Err(error) => aggregate.push_error(label, error),
+            },
+            Ok(None) => aggregate.push_error(
+                label,
+                StorageError::InvalidInput("repository shard is missing".to_owned()),
+            ),
+            Err(error) => aggregate.push_error(label, error),
+        }
+    }
+    snapshot.graph.sqlite = aggregate.finish();
     Ok(snapshot)
 }
 

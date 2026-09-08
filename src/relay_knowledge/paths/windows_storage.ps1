@@ -30,6 +30,24 @@ function Get-RelayStorageCreationOwner {
     return $ActorSid
 }
 
+function Assert-RelayStorageGrants {
+    param([System.Security.AccessControl.FileSystemSecurity]$Acl, [string]$Sid, [string]$Path, [bool]$Directory)
+    # Reserved storage has a deliberately narrow allow-only ACL contract. Reject
+    # deny ACEs even for groups: their membership may include a service principal.
+    $required = @($Sid, 'S-1-5-18', 'S-1-5-32-544') | Select-Object -Unique
+    $granted = @{}
+    foreach ($rule in $Acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -eq 'Deny') { throw "Storage deny permissions are unsupported: $Path" }
+        if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { continue }
+        if ($rule.PropagationFlags -ne [System.Security.AccessControl.PropagationFlags]::None) { continue }
+        if ($Directory -and ($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit') -ne [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit') { continue }
+        $granted[$rule.IdentityReference.Value] = $true
+    }
+    foreach ($principal in $required) {
+        if (-not $granted.ContainsKey($principal)) { throw "Storage must grant full control to account, SYSTEM, and Administrators: $Path ($principal)" }
+    }
+}
+
 function Assert-RelayDirectorySecurity {
     param([System.IO.DirectoryInfo]$Directory, [string]$Sid, [bool]$Private, [switch]$AllowInheritance)
     $Directory.Refresh()
@@ -50,23 +68,14 @@ function Assert-RelayDirectorySecurity {
     # Attribute/ACL/owner writes can also redirect or replace a storage ancestor.
     $dangerous = [int][System.Security.AccessControl.FileSystemRights]'DeleteSubdirectoriesAndFiles,Delete,ChangePermissions,TakeOwnership,WriteAttributes,WriteExtendedAttributes'
     $dangerous = $dangerous -bor 0x10000000 -bor 0x40000000 # GENERIC_ALL / GENERIC_WRITE
-    $ownerCanInherit = $false
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
-        if ($rule.AccessControlType -ne 'Allow') { continue }
         if (-not $Private -and ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly)) { continue }
+        if ($rule.AccessControlType -eq 'Deny') { throw "Storage deny permissions are unsupported: $($Directory.FullName)" }
         if ($trusted -notcontains $rule.IdentityReference.Value -and ($Private -or ($rule.FileSystemRights -band $dangerous))) {
             throw "Unsafe storage permissions for $($rule.IdentityReference.Value): $($Directory.FullName)"
         }
-        if ($rule.IdentityReference.Value -eq $Sid -and
-            ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl -and
-            ($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit') -eq [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit' -and
-            $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None) {
-            $ownerCanInherit = $true
-        }
     }
-    if ($Private -and -not $ownerCanInherit) {
-        throw "Private storage must grant the account inheritable full control: $($Directory.FullName)"
-    }
+    if ($Private) { Assert-RelayStorageGrants $acl $Sid $Directory.FullName $true }
 }
 
 function Assert-RelayStoragePayload {
@@ -91,6 +100,7 @@ function Assert-RelayStoragePayload {
             throw "Unsafe storage payload permissions: $($Item.FullName)"
         }
     }
+    Assert-RelayStorageGrants $acl $Sid $Item.FullName $false
 }
 
 function Assert-RelayStoragePayloadTree {

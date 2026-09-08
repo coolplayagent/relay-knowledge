@@ -106,7 +106,9 @@ ACLs and no links; files moved from shared directories are checked explicitly.
 Service paths pinned to the SID layout retain this policy and revalidate ACLs
 and reparse points on every new service startup. Install/upgrade/rollback execution
 also provisions or validates these directories before service-manager steps;
-plans and uninstall do not provision storage. This layout requires Windows PowerShell 5.1 and an ACL-capable local volume;
+plans and uninstall do not provision storage. Existing managed ACLs must retain
+full access for the account, SYSTEM, and Administrators; deny rules are rejected.
+Legacy directory discovery uses native Windows APIs and does not require PowerShell. This layout requires Windows PowerShell 5.1 and an ACL-capable local volume;
 use an explicitly configured private directory if D: cannot meet these conditions. `status --format json`
 shows the resolved directory. Config, logs, and other runtime directories retain
 their AppData/TEMP defaults. Linux and macOS defaults are unchanged.

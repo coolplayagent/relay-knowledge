@@ -11,10 +11,11 @@ async fn empty_control_plane_lists_no_repository_shards() {
     let control = Arc::new(SqliteGraphStore::open_in_memory().expect("control store should open"));
     let paths = runtime_paths();
     let store = super::super::PartitionedSqliteKnowledgeStore {
-        control,
+        control: Arc::clone(&control),
         catalog: Arc::new(SqliteShardCatalog::new(
             paths.data_dir.join("control.db"),
             paths,
+            control,
         )),
     };
 

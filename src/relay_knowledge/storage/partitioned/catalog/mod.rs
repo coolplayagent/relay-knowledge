@@ -24,6 +24,7 @@ use crate::{
 
 const CATALOG_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
 
+mod read_access;
 mod schema;
 mod store_access;
 
@@ -34,14 +35,20 @@ pub(super) use schema::initialize_catalog_schema;
 #[derive(Debug)]
 pub(super) struct SqliteShardCatalog {
     control_path: PathBuf,
+    control: Arc<SqliteGraphStore>,
     pub(super) paths: RuntimePaths,
     cache: Arc<Mutex<HashMap<String, Arc<SqliteGraphStore>>>>,
 }
 
 impl SqliteShardCatalog {
-    pub(super) fn new(control_path: PathBuf, paths: RuntimePaths) -> Self {
+    pub(super) fn new(
+        control_path: PathBuf,
+        paths: RuntimePaths,
+        control: Arc<SqliteGraphStore>,
+    ) -> Self {
         Self {
             control_path,
+            control,
             paths,
             cache: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -95,31 +102,6 @@ impl SqliteShardCatalog {
             if !db_path.exists() {
                 return Ok(None);
             }
-            open_cached_repository_store(&cache, repository_id, db_path, control_path, &paths)
-                .map(Some)
-        })
-        .await?
-    }
-
-    pub(super) async fn existing_repository_store(
-        &self,
-        repository_id: String,
-    ) -> Result<Option<Arc<SqliteGraphStore>>, StorageError> {
-        let control_path = self.control_path.clone();
-        let paths = self.paths.clone();
-        let cache = Arc::clone(&self.cache);
-        tokio::task::spawn_blocking(move || {
-            let Some(db_path) = catalog_repository_path(&control_path, &paths, &repository_id)?
-            else {
-                return Ok(None);
-            };
-            if !db_path.exists() {
-                return Err(StorageError::InvalidInput(format!(
-                    "repository shard '{}' is missing",
-                    db_path.display()
-                )));
-            }
-
             open_cached_repository_store(&cache, repository_id, db_path, control_path, &paths)
                 .map(Some)
         })
@@ -305,11 +287,6 @@ impl SqliteShardCatalog {
         .await?
     }
 
-    pub(super) async fn repository_ids(&self) -> Result<Vec<String>, StorageError> {
-        let control_path = self.control_path.clone();
-        tokio::task::spawn_blocking(move || catalog_repository_ids(&control_path)).await?
-    }
-
     pub(super) async fn active_repository_database_paths(
         &self,
     ) -> Result<Vec<(String, PathBuf)>, StorageError> {
@@ -329,10 +306,10 @@ impl SqliteShardCatalog {
     }
 
     pub(super) async fn topology_snapshot(&self) -> Result<StorageTopologySnapshot, StorageError> {
-        let control_path = self.control_path.clone();
         let paths = self.paths.clone();
-        tokio::task::spawn_blocking(move || catalog_topology_snapshot(&control_path, &paths))
-            .await?
+        self.control
+            .run_read(move |connection| topology_from_connection(connection, &paths))
+            .await
     }
 
     pub(super) async fn remove_repository(
@@ -675,27 +652,6 @@ fn catalog_active_repository_for_scope(
         .map_err(StorageError::from)
 }
 
-fn catalog_repository_path(
-    control_path: &Path,
-    paths: &RuntimePaths,
-    repository_id: &str,
-) -> Result<Option<PathBuf>, StorageError> {
-    let connection = open_catalog_readonly_connection(control_path)?;
-    let is_active = connection
-        .query_row(
-            "
-            SELECT 1
-            FROM storage_repository_shards
-            WHERE repository_id = ?1 AND state = 'active'
-            ",
-            params![repository_id],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some();
-    Ok(is_active.then(|| paths.repository_shard_database_file(repository_id)))
-}
-
 fn catalog_repository_ids(control_path: &Path) -> Result<Vec<String>, StorageError> {
     let connection = open_catalog_readonly_connection(control_path)?;
     let mut statement = connection.prepare(
@@ -756,6 +712,13 @@ pub(super) fn catalog_topology_snapshot(
         return Ok(StorageTopologySnapshot::default());
     }
     let connection = open_catalog_readonly_connection(control_path)?;
+    topology_from_connection(&connection, paths)
+}
+
+pub(super) fn topology_from_connection(
+    connection: &Connection,
+    paths: &RuntimePaths,
+) -> Result<StorageTopologySnapshot, StorageError> {
     let has_catalog = connection
         .query_row(
             "

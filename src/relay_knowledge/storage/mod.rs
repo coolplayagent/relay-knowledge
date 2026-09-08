@@ -11,7 +11,7 @@ mod partitioned;
 mod sqlite;
 
 pub use contracts::*;
-pub use partitioned::PartitionedSqliteKnowledgeStore;
+pub use partitioned::{PartitionedSqliteKnowledgeStore, diagnostics::SqliteTopologyReader};
 pub use sqlite::SqliteGraphStore;
 
 /// Async result returned by a configured storage factory.
