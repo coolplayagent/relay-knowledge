@@ -89,6 +89,8 @@ SID 通过 Windows PowerShell 5.1 从当前进程令牌获取，迁移用户配�
 覆盖私有目录和文件继承、校验前后落盘 ACL 保持不变、已有目录及父目录宽松 ACL、junction 拒绝、稳定 SID 和已有图谱。
 Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不创建目录；存储工厂与服务测试
 证明策略失败先于 SQLite 打开，且数据路径不可用时仍能生成生命周期计划。
+生命周期预检测试覆盖安装/升级/回滚执行前拒绝，以及 dry-run/卸载跳过预检；测试清空外部
+执行步骤，避免回归时修改真实服务。
 Linux UT 验证子进程失败、输出限制、超时和取消，不模拟 Windows 账户令牌。
 
 路径解析仅保留 SID 策略，不创建目录。工厂通过共享 once-cell 串行执行首次 ACL 校验，
@@ -101,6 +103,9 @@ Linux UT 验证子进程失败、输出限制、超时和取消，不模拟 Wind
 权限受限的共享父目录，或通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
 及支持 ACL 的本地卷。显式 HOME/DATA 和保留的旧库继续由操作者管理权限。
 服务定义固定解析后的目录，默认 ACL 支持 LocalSystem 访问；卸载和回滚不迁移 ACL。
+实际执行安装、升级或回滚前，生命周期边界也会创建或校验自动数据目录，确保服务将目录
+固定为显式覆盖并以 LocalSystem 启动前，目录已具有私有权限。计划会提示这项预检，失败时
+不执行服务管理步骤；该预检不创建 SQLite 数据库，dry-run 和卸载跳过它。
 安装/卸载计划及卸载执行不打开图存储；未打开存储时计划 metadata 使用图版本 0。
 无需协调旧目录时，缺少或 ACL 不安全的 D: 不会阻止这些生命周期操作进入自身检查。
 实现依据微软的 [SID 合同](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)

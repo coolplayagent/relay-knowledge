@@ -144,6 +144,63 @@ async fn install_and_uninstall_plans_do_not_open_unavailable_storage() {
 }
 
 #[tokio::test]
+async fn service_start_actions_validate_automatic_storage_before_any_lifecycle_step() {
+    let root = unique_root("service-storage-preflight");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let mut runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    runtime.paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+    let service = RelayKnowledgeService::new(runtime);
+    let mut plan = service
+        .render_service_plan_for_request(&ServicePlanRequest {
+            action: ServiceManagerAction::Install,
+            dry_run: false,
+            execute: true,
+            target_version: None,
+            install_dir: None,
+        })
+        .unwrap();
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| warning.contains("before execution, automatic Windows storage"))
+    );
+    // Even a regression must never issue real service-manager commands in this
+    // test: an empty execution list observes only the orchestration preflight.
+    plan.lifecycle_steps.clear();
+    plan.rollback_steps.clear();
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Upgrade,
+        ServiceManagerAction::Rollback,
+        ServiceManagerAction::Uninstall,
+    ] {
+        for dry_run in [true, false] {
+            plan.action = action;
+            plan.dry_run = dry_run;
+            let result = service.execute_service_plan(&plan).await;
+            if !dry_run && action != ServiceManagerAction::Uninstall {
+                assert!(result.unwrap_err().message.contains("account policy"));
+            } else {
+                let report = result.unwrap();
+                assert_eq!(report.executed, !dry_run);
+                assert!(report.completed_steps.is_empty());
+            }
+            assert!(service.storage.ready_store().is_none());
+            assert!(
+                !root.exists(),
+                "preflight failure and storage-free actions must not create data"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn service_definition_write_metadata_uses_current_graph_version() {
     let root = unique_root("service-definition-metadata");
     let _ = std::fs::remove_dir_all(&root);

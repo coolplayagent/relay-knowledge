@@ -9,7 +9,7 @@ use crate::{
         ServicePackageManifestCheck,
     },
     identity::stable_hash64,
-    paths::RuntimePaths,
+    paths::{RuntimePaths, StorageDirectoryAccess},
     project::{PROJECT_NAME, SERVICE_LIFECYCLE_CHECKPOINT_FILE_NAME},
     storage::StorageTopology,
 };
@@ -79,6 +79,16 @@ impl RelayKnowledgeService {
         &self,
         plan: &ServiceDefinitionPlan,
     ) -> Result<ServiceLifecycleExecutionReport, ApiError> {
+        // A service pins this path as an explicit override and can start as
+        // LocalSystem, so automatic directories must be protected before any
+        // install/upgrade/rollback step can hand storage to the service.
+        if !plan.dry_run && plan.action != ServiceManagerAction::Uninstall {
+            self.runtime
+                .paths
+                .ensure_storage_access(StorageDirectoryAccess::OpenOrCreate)
+                .await
+                .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+        }
         let plan = plan.clone();
         let current_executable = self.runtime.process.current_executable.clone();
         let report = tokio::task::spawn_blocking(move || {
@@ -143,6 +153,12 @@ fn render_service_plan_for_platform(
         "dry-run is the default; pass --execute to run local file steps and platform service-manager commands".to_owned(),
         "runtime state is preserved unless an operator explicitly removes it after reviewing runtime_state_paths".to_owned(),
     ];
+    if paths.windows_data_sid.is_some() && request.action != ServiceManagerAction::Uninstall {
+        warnings.push(format!(
+            "before execution, automatic Windows storage at '{}' and its account directory will be created or validated with protected account/SYSTEM/Administrators permissions; dry-run does not provision storage",
+            paths.data_dir.display()
+        ));
+    }
     if topology == StorageTopology::PartitionedSqlite {
         runtime_state_paths.push(paths.repository_shards_dir().display().to_string());
         warnings.push(

@@ -102,7 +102,12 @@ an administrator can provision the shared ancestors with an administrator owner
 and restricted write/delete rights, or users can explicitly choose a private
 location. Explicit HOME/DATA overrides and retained legacy storage keep their
 operator-managed ACL policy. Service definitions pin the chosen directory, and
-the default ACL permits LocalSystem service access. Service install/uninstall plans and uninstall execution do not open graph storage;
+the default ACL permits LocalSystem service access. Before executing install, upgrade, or rollback, the lifecycle boundary also
+provisions or validates automatic storage, before any service-manager step can
+pin the directory as an explicit override and start LocalSystem. The plan warns
+about this preflight; failure prevents service changes. This creates no SQLite
+database. Dry-runs and uninstall skip this provisioning.
+Service install/uninstall plans and uninstall execution do not open graph storage;
 they report graph version zero until storage is already open. With no legacy
 directory to reconcile, a missing or ACL-unsafe D: does not prevent those lifecycle
 operations from reaching their own checks.
@@ -131,7 +136,9 @@ inheritance, persisted ACL preservation across validation, unsafe existing and a
 populated legacy stores, counterfeit SystemRoot/module/profiler settings, and
 read-only validation without directory creation. Storage-factory and service tests
 prove that policy failures precede SQLite open and lifecycle plans work with an
-unavailable data path. Linux unit tests cover subprocess failures, output
+unavailable data path. A lifecycle preflight test covers install/upgrade/rollback
+rejection before execution and dry-run/uninstall bypass, with external steps
+removed so regression testing cannot change an installed service. Linux unit tests cover subprocess failures, output
 limits, timeout, and cancellation; they do not impersonate a Windows token.
 
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations. Early databases may have a `code_repository_schema_migrations` table containing only the `name` column; schema initialization must idempotently add `applied_at_ms INTEGER NOT NULL DEFAULT 0` before running retention, search-owner, or any other migration that writes a capability marker, without requiring operators to rebuild the database or add the column manually.
