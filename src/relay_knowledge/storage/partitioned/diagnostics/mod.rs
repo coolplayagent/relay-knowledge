@@ -6,8 +6,8 @@ use std::path::Path;
 use crate::paths::{RuntimePaths, StorageDirectoryAccess};
 use crate::storage::sqlite::read_only_database_diagnostics;
 use crate::storage::{
-    GraphInspection, GraphStore, HealthStorageSnapshot, SqliteStorageDiagnostics, StorageError,
-    StorageTopologySnapshot,
+    CodeQueryReadStore, GraphInspection, GraphStore, HealthStorageSnapshot,
+    SqliteStorageDiagnostics, StorageError, StorageTopologySnapshot,
 };
 
 use super::{
@@ -72,24 +72,26 @@ pub(super) async fn health_snapshot(
     store: &PartitionedSqliteKnowledgeStore,
     now_ms: u64,
 ) -> Result<HealthStorageSnapshot, StorageError> {
+    let shards = store.catalog.cached_health_shards().await?;
     let mut snapshot = store.control.health_snapshot(now_ms).await?;
+    snapshot.repository_code_totals = store
+        .control
+        .code_repository_totals_excluding(shards.iter().map(|(id, _)| id.clone()).collect())
+        .await?;
     let mut aggregate = SqliteDiagnosticsAggregate::new();
     aggregate.push("control", snapshot.graph.sqlite);
     // Reuse shard handles whose first open enforces the account policy. Health
     // must not rescan unrelated payloads or open diagnostic paths every poll.
-    for repository_id in store.catalog.repository_ids().await? {
+    for (repository_id, shard) in shards {
         let label = format!("shard {repository_id}");
-        match store.catalog.existing_repository_store(repository_id).await {
-            Ok(Some(shard)) => match shard.sqlite_diagnostics().await {
-                Ok(diagnostics) => aggregate.push(label, diagnostics),
-                Err(error) => aggregate.push_error(label, error),
-            },
-            Ok(None) => aggregate.push_error(
-                label,
-                StorageError::InvalidInput("repository shard is missing".to_owned()),
-            ),
+        match shard.sqlite_diagnostics().await {
+            Ok(diagnostics) => aggregate.push(label, diagnostics),
             Err(error) => aggregate.push_error(label, error),
         }
+        super::totals::add_code_repository_totals(
+            &mut snapshot.repository_code_totals,
+            shard.code_repository_totals().await?,
+        );
     }
     snapshot.graph.sqlite = aggregate.finish();
     Ok(snapshot)

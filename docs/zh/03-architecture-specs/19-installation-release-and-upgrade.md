@@ -128,8 +128,11 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 子进程检查具体路径、父目录和 sidecar，由独立的 `catalog::store_access` 模块负责，
 缓存句柄不重复启动校验，安全检查期间不持有共享 cache 锁。新建分片诊断连接前
 在完整图谱诊断中统一批量校验数据树。500 毫秒健康检查改用保留的 control 连接池及已校验分片句柄，
-保留 WAL 汇总、维护状态、仓库统计和缺失分片报告，不在每次轮询时扫描全树。冷分片首次打开仍校验
-具体路径，初始忙碌状态可见，后续健康检查复用已打开的句柄。只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
+为已打开的分片保留 WAL 汇总、维护状态和仓库统计，不在每次轮询时扫描全树。
+任何 active 分片尚无缓存句柄时，健康检查返回 stale、unhealthy 的 `storage_cold` 状态，
+不启动 ACL 校验、可写打开或完整图谱诊断回退。业务请求负责校验和打开冷分片，
+重复健康探针不会预热；只读缺失分片清单通过 status/doctor 查询。发布围栏首次 `ATTACH`
+还会在附加前独立校验 control 文件、sidecar 和父目录，后续变更复用已经附加的句柄。只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
 权限受限的共享父目录，或通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
 及支持 ACL 的本地卷。保留的旧库及保留 SID 布局之外的显式 HOME/DATA 继续由操作者管理权限。
 `D:\relay-knowledge\users\<user-sid>\data` 布局始终恢复目录中原账户的 SID 策略，
@@ -140,6 +143,12 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 实际执行安装、升级或回滚前，生命周期边界也会创建或校验受管理的 SID 数据目录，确保服务将目录
 固定为显式覆盖并以 LocalSystem 启动前，目录已具有私有权限。计划会提示这项预检，失败时
 不执行服务管理步骤；该预检不创建 SQLite 数据库，dry-run 和卸载跳过它。
+Windows 升级或显式回滚停止现有服务前，还会读取旧安装定义或检查点中的定义
+（最多 64 KiB、XML 深度 32，拒绝 DTD 和重复存储设置），按 DATA_DIR 优先于 HOME
+解析其固定路径并只读校验。即使当前运行时选择另一目录，旧库缺失、SID ACL 不安全
+或存在 junction 都会在修改服务之前失败。旧定义必须固定存储路径；预检不补建回滚库，
+启动时仍会重新校验。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
+catalog 的工厂提供默认空实现，保持源码兼容；SQLite 覆盖该方法执行权限和 catalog 检查。
 生命周期计划及执行会只读检查已有 control catalog，不初始化图存储或 schema。
 已有 active partitioned catalog 却选择 single_sqlite 时，在渲染计划或执行服务步骤前报错，
 要求设置 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite`。数据库路径缺失时仍可

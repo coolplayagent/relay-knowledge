@@ -47,6 +47,7 @@ pub(super) fn open_cached_repository_store(
     let store = Arc::new(SqliteGraphStore::open_with_publication_authority(
         &db_path,
         control_path,
+        paths.clone(),
     )?);
     cache.insert(repository_id, Arc::clone(&store));
     Ok(store)

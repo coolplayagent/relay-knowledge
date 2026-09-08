@@ -29,7 +29,11 @@ pub trait KnowledgeStoreFactory: Send + Sync {
 
     /// Checks an existing catalog before lifecycle planning without creating a
     /// database; a missing data path must not prevent plan or uninstall use.
-    fn validate_lifecycle_storage(&self) -> KnowledgeStoreFactoryFuture<'_, ()>;
+    /// Factories without an external lifecycle catalog retain the original
+    /// contract and need not implement this optional preflight capability.
+    fn validate_lifecycle_storage(&self) -> KnowledgeStoreFactoryFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 #[cfg(test)]

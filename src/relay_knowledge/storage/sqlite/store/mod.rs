@@ -28,7 +28,8 @@ pub struct SqliteGraphStore {
     pub(super) connection: Arc<Mutex<Connection>>,
     pub(super) read_pool: Option<Arc<ReadConnectionPool>>,
     pub(super) database_path: Option<PathBuf>,
-    pub(super) publication_authority_path: Option<PathBuf>,
+    pub(super) publication_authority_path:
+        Option<Arc<code::lifecycle::publication_fence::PublicationAuthority>>,
     pub(super) maintenance: Arc<Mutex<SqliteMaintenanceState>>,
 }
 
@@ -92,9 +93,15 @@ impl SqliteGraphStore {
     pub(in crate::storage) fn open_with_publication_authority(
         path: impl AsRef<Path>,
         authority_path: impl AsRef<Path>,
+        paths: crate::paths::RuntimePaths,
     ) -> Result<Self, StorageError> {
         let mut store = Self::open(path)?;
-        store.publication_authority_path = Some(authority_path.as_ref().to_path_buf());
+        store.publication_authority_path = Some(Arc::new(
+            code::lifecycle::publication_fence::PublicationAuthority {
+                path: authority_path.as_ref().to_path_buf(),
+                paths,
+            },
+        ));
         Ok(store)
     }
 

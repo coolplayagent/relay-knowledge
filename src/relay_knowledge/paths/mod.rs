@@ -23,6 +23,7 @@ use crate::{
 };
 
 mod repository_root;
+mod service_storage;
 mod windows_storage;
 
 #[cfg(windows)]

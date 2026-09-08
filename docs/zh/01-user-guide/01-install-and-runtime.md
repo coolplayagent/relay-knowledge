@@ -162,6 +162,10 @@ relay-knowledge service doctor --format json
 ```
 
 确认 graph storage、index freshness、worker/service live health 和 telemetry 状态。
+分片存储的 `storage_cold` 表示 active 分片尚无已校验的打开句柄，健康状态会标记
+stale/unhealthy，探针不会打开分片；业务请求负责预热，存储清单可用 `status` 或
+`service doctor` 查询。Windows 升级/回滚会在停止服务前校验旧服务定义固定的数据目录，
+旧目录缺失或权限不安全时需先修正。
 
 ## 1.6 网络与路径边界
 

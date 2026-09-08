@@ -169,6 +169,11 @@ relay-knowledge service doctor --format json
 ```
 
 to check graph storage, index freshness, worker/service live health, and telemetry state.
+With partitioned storage, `storage_cold` means active shards have no validated open
+handles yet: health remains stale/unhealthy and does not open them. Business
+requests warm shards; use `status` or `service doctor` for storage inventory.
+Windows upgrade/rollback validates the old service definition's pinned storage
+before stopping the service; a missing or unsafe old directory must be corrected first.
 
 ## 1.6 Network and Path Boundaries
 

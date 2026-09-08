@@ -79,6 +79,9 @@ impl RelayKnowledgeService {
         &self,
         plan: &ServiceDefinitionPlan,
     ) -> Result<ServiceLifecycleExecutionReport, ApiError> {
+        validate_restored_storage(plan, &self.runtime.paths)
+            .await
+            .map_err(ApiError::storage_unavailable)?;
         self.storage
             .validate_lifecycle_storage()
             .await
@@ -107,6 +110,39 @@ impl RelayKnowledgeService {
         Ok(report)
     }
 }
+
+async fn validate_restored_storage(
+    plan: &ServiceDefinitionPlan,
+    current: &RuntimePaths,
+) -> Result<(), String> {
+    if plan.dry_run
+        || plan.platform != "windows"
+        || !matches!(
+            plan.action,
+            ServiceManagerAction::Upgrade | ServiceManagerAction::Rollback
+        )
+    {
+        return Ok(());
+    }
+    let plan = plan.clone();
+    let definition = tokio::task::spawn_blocking(move || {
+        if plan.action == ServiceManagerAction::Rollback {
+            checkpoint::restored_definition(&plan)
+        } else {
+            checkpoint::read_bounded_definition(Path::new(&plan.definition_path))
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let Some(definition) = definition else {
+        return Ok(());
+    };
+    current.validate_restored_service_storage(&definition).await
+}
+
+#[cfg(test)]
+#[path = "checkpoint_storage_tests.rs"]
+mod checkpoint_storage_tests;
 
 fn service_execution_error(report: &ServiceLifecycleExecutionReport) -> Option<ApiError> {
     let failed_step_id = report.failed_step_id.as_deref()?;

@@ -23,7 +23,8 @@ async fn warm_health_reuses_validated_shards_without_a_payload_security_scan() {
     )
     .unwrap();
     let paths = RuntimePaths::resolve(&env.platform, &env.paths).unwrap();
-    let mut store = PartitionedSqliteKnowledgeStore::open(paths.database_file(), paths).unwrap();
+    let mut store =
+        PartitionedSqliteKnowledgeStore::open(paths.database_file(), paths.clone()).unwrap();
     store
         .upsert_code_repository(
             CodeRepositoryRegistration::new(
@@ -59,6 +60,24 @@ async fn warm_health_reuses_validated_shards_without_a_payload_security_scan() {
             .contains("account policy")
     );
     drop(store);
+    let mut cold = PartitionedSqliteKnowledgeStore::open(paths.database_file(), paths).unwrap();
+    std::sync::Arc::get_mut(&mut cold.catalog)
+        .unwrap()
+        .paths
+        .windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+    for _ in 0..3 {
+        let error = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            cold.health_snapshot(0),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            matches!(error, StorageError::Busy(message) if message.starts_with("storage_cold:"))
+        );
+    }
+    drop(cold);
     std::fs::remove_dir_all(root).unwrap();
 }
 

@@ -125,9 +125,14 @@ shard handles skip that extra launch. The shared cache lock is released during
 security checks so unrelated cached repositories are not held behind them. Fresh shard diagnostic connections perform
 one batched tree validation for full graph inspection. The 500 ms health path instead
 reads the retained control pool and cached shard handles, preserving aggregate WAL,
-maintenance diagnostics, repository totals, and missing-shard reports. Cold shard
-opens still validate their own path; a busy initial open remains observable and
-subsequent health polls reuse its handle. Health never repeats a full payload scan.
+maintenance diagnostics and repository totals for warm shards. If any active shard
+has no cached handle, health returns stale, unhealthy `storage_cold` diagnostics
+without launching ACL checks, writable opens, or a full-inspection fallback.
+Business requests validate and open cold shards; repeated health probes do not
+warm them. Use status/doctor for the read-only missing-shard inventory. Health
+never repeats a full payload scan. Each first publication-fence `ATTACH` separately
+revalidates the control database, sidecars, and ancestors immediately before SQLite
+attaches it; subsequent fenced mutations reuse the attached handle.
 Read-only checks never provision directories or repair existing ACLs.
 A missing or insecure D: volume fails visibly when storage is opened;
 an administrator can provision the shared ancestors with an administrator owner
@@ -145,6 +150,16 @@ provisions or validates managed SID storage, before any service-manager step can
 pin the directory as an explicit override and start LocalSystem. The plan warns
 about this preflight; failure prevents service changes. This creates no SQLite
 database. Dry-runs and uninstall skip this provisioning.
+Before Windows upgrade or explicit rollback stops the live service, it also reads
+the old installed definition or checkpointed definition (at most 64 KiB, XML depth
+32, no DTD or duplicate storage settings), resolves its pinned DATA_DIR/HOME with
+DATA_DIR precedence, and validates that storage read-only. Missing old databases
+and unsafe SID ACLs or junctions fail before service changes, even when the
+current runtime selects another directory. The old definition must pin storage;
+preflight never provisions a missing rollback database. Startup repeats validation.
+The public `KnowledgeStoreFactory::validate_lifecycle_storage` hook defaults to a
+no-op for catalog-free factories, retaining source compatibility; SQLite overrides
+it to enforce its catalog and permission checks.
 Lifecycle plans and execution inspect an existing control catalog read-only
 without initializing graph storage or schemas. An active partitioned catalog with
 `single_sqlite` selected fails before rendering or running manager steps; specify

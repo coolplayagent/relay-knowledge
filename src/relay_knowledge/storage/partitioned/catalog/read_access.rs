@@ -6,6 +6,35 @@ use rusqlite::OptionalExtension;
 use std::sync::Arc;
 
 impl SqliteShardCatalog {
+    pub(in crate::storage::partitioned) async fn cached_health_shards(
+        &self,
+    ) -> Result<Vec<(String, Arc<SqliteGraphStore>)>, StorageError> {
+        let ids = self.repository_ids().await?;
+        let cache = self.cache.try_lock().map_err(|error| match error {
+            std::sync::TryLockError::Poisoned(_) => StorageError::LockPoisoned,
+            std::sync::TryLockError::WouldBlock => {
+                StorageError::Busy("shard cache is occupied".to_owned())
+            }
+        })?;
+        let cold = ids.iter().filter(|id| !cache.contains_key(*id)).count();
+        if cold > 0 {
+            return Err(StorageError::Busy(format!(
+                "storage_cold: {cold} repository shards have no validated open handle; health does not open cold shards"
+            )));
+        }
+        Ok(ids
+            .into_iter()
+            .map(|id| {
+                let store = Arc::clone(
+                    cache
+                        .get(&id)
+                        .expect("all active handles were checked under this lock"),
+                );
+                (id, store)
+            })
+            .collect())
+    }
+
     pub(in crate::storage::partitioned) async fn repository_ids(
         &self,
     ) -> Result<Vec<String>, StorageError> {
