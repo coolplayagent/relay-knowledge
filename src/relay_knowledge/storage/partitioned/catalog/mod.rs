@@ -788,12 +788,14 @@ fn remove_catalog_repository(control_path: &Path, repository_id: &str) -> Result
 }
 
 fn open_catalog_connection(control_path: &Path) -> Result<Connection, StorageError> {
+    crate::storage::sqlite::validate_new_database_access(control_path)?;
     let connection = Connection::open(control_path)?;
     configure_connection(&connection)?;
     Ok(connection)
 }
 
 fn open_catalog_readonly_connection(control_path: &Path) -> Result<Connection, StorageError> {
+    crate::storage::sqlite::validate_new_database_access(control_path)?;
     let connection = Connection::open_with_flags(control_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     configure_connection(&connection)?;
     connection.busy_timeout(CATALOG_READ_BUSY_TIMEOUT)?;
@@ -894,3 +896,7 @@ fn json<T: serde::Serialize>(value: &T) -> Result<String, StorageError> {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "path_access_tests.rs"]
+mod path_access_tests;

@@ -116,10 +116,12 @@ impl KnowledgeStoreFactory for SqliteKnowledgeStoreFactory {
                 .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
             drop(validation);
             tokio::task::spawn_blocking(move || {
-                PartitionedSqliteKnowledgeStore::topology_snapshot_from_catalog(
-                    config.database_path,
-                    &config.paths,
-                )
+                // The cancellable async check above already admitted this open.
+                // Do not launch another security process inside this worker.
+                if !config.database_path.exists() {
+                    return Ok(StorageTopologySnapshot::default());
+                }
+                SqliteTopologyReader::open(&config.database_path, config.paths)?.snapshot()
             })
             .await
             .map_err(StorageError::from)?

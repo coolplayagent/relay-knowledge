@@ -22,6 +22,7 @@ use crate::{
     },
 };
 
+mod database_access;
 mod repository_root;
 mod service_storage;
 mod windows_storage;
@@ -34,6 +35,7 @@ const WINDOWS_DATA_VOLUME: &str = "D:/";
 const DATA_DIRECTORY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub use crate::project::APP_DIR_NAME;
+pub(crate) use database_access::managed_database_validation;
 pub use repository_root::{RepositoryRootDiscoveryError, discover_repository_root};
 
 /// Resolved runtime directories used by CLI, Web, services, and future workers.
@@ -212,29 +214,40 @@ impl RuntimePaths {
     pub async fn database_file_exists(&self) -> Result<bool, PathError> {
         let path = self.database_file();
         #[cfg(windows)]
-        {
-            Ok(windows_storage::probe_path(&path).await?.is_some())
-        }
+        let is_file = windows_storage::probe_path(&path)
+            .await?
+            .map(|is_directory| !is_directory);
         #[cfg(not(windows))]
-        {
-            match tokio::fs::symlink_metadata(&path).await {
-                Ok(_) => Ok(true),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-                    ) =>
-                {
-                    Ok(false)
-                }
-                Err(error) => Err(PathError {
+        let is_file = match tokio::fs::symlink_metadata(&path).await {
+            Ok(metadata) => Some(metadata.file_type().is_file()),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                ) =>
+            {
+                None
+            }
+            Err(error) => {
+                return Err(PathError {
                     purpose: PathPurpose::Data,
                     kind: PathErrorKind::DataDirectoryProbe {
                         path,
                         reason: error.to_string(),
                     },
-                }),
+                });
             }
+        };
+        match is_file {
+            None => Ok(false),
+            Some(true) => Ok(true),
+            Some(false) => Err(PathError {
+                purpose: PathPurpose::Data,
+                kind: PathErrorKind::DataDirectoryProbe {
+                    path,
+                    reason: "database path is not a regular file".to_owned(),
+                },
+            }),
         }
     }
 

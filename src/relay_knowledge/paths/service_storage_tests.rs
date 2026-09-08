@@ -91,3 +91,25 @@ fn ambiguous_or_unbounded_service_definitions_are_rejected() {
         .is_err()
     );
 }
+
+#[test]
+fn service_definition_rejects_elements_and_content_outside_its_root() {
+    let (_, _, definition) = fixture();
+    for invalid in [
+        format!("{definition}<extra/>"),
+        format!("<extra/>{definition}"),
+        format!("{definition}<extra></extra>"),
+        format!("{definition}extra"),
+        format!("{definition}<![CDATA[extra]]>"),
+        format!("{definition}&amp;"),
+        format!("{definition}<?xml version=\"1.0\"?>"),
+    ] {
+        assert!(storage_overrides(&invalid).is_err(), "{invalid}");
+    }
+    assert!(
+        storage_overrides(&format!(
+            "<?xml version=\"1.0\"?>\n<!--before-->{definition}<!--after-->\n"
+        ))
+        .is_ok()
+    );
+}

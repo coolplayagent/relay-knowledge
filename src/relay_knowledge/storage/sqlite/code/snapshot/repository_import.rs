@@ -21,6 +21,7 @@ pub(in crate::storage::sqlite::code) fn import_repository_from_database(
     repository_id: &str,
     source_scope: Option<&str>,
 ) -> Result<(), StorageError> {
+    crate::storage::sqlite::validate_new_database_access(source_path)?;
     connection.execute(
         &format!("ATTACH DATABASE ?1 AS {IMPORT_SCHEMA}"),
         params![source_path.display().to_string()],
@@ -492,3 +493,7 @@ fn import_commit_scope_aliases(
 #[cfg(test)]
 #[path = "import_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "repository_import_path_tests.rs"]
+mod path_tests;

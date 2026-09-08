@@ -133,6 +133,14 @@ warm them. Use status/doctor for the read-only missing-shard inventory. Health
 never repeats a full payload scan. Each first publication-fence `ATTACH` separately
 revalidates the control database, sidecars, and ancestors immediately before SQLite
 attaches it; subsequent fenced mutations reuse the attached handle.
+Every fresh catalog read/write connection also recovers the reserved SID policy
+from its pathname and rechecks the database, sidecars, and ancestors immediately
+before opening. The same worker boundary guards repository-import attachments
+and fresh full-inspection connections. Cold factory topology reads keep their
+cancellable async validation immediately before the read-only worker open; they
+do not launch a second security process inside that worker. Path decoding is capped at 4096
+bytes; security checks remain bounded child processes. Retained connections do
+not authorize later pathname opens, and health continues to use cached handles.
 Read-only checks never provision directories or repair existing ACLs.
 A missing or insecure D: volume fails visibly when storage is opened;
 an administrator can provision the shared ancestors with an administrator owner
@@ -152,11 +160,13 @@ about this preflight; failure prevents service changes. This creates no SQLite
 database. Dry-runs and uninstall skip this provisioning.
 Before Windows upgrade or explicit rollback stops the live service, it also reads
 the old installed definition or checkpointed definition (at most 64 KiB, XML depth
-32, no DTD or duplicate storage settings), resolves its pinned DATA_DIR/HOME with
+32, a single service root, no additional roots or non-whitespace text outside it,
+no DTD or duplicate storage settings), resolves its pinned DATA_DIR/HOME with
 DATA_DIR precedence, and validates that storage read-only. Missing old databases
 and unsafe SID ACLs or junctions fail before service changes, even when the
 current runtime selects another directory. The old definition must pin storage;
-preflight never provisions a missing rollback database. Startup repeats validation.
+preflight never provisions a missing rollback database. The database pathname must
+identify a regular file; directories and reparse/symlink entries fail preflight. Startup repeats validation.
 The native Windows CI gate also runs restored-definition parsing and old/checkpointed
 storage preflight regressions, including Windows drive paths and SID recovery.
 The public `KnowledgeStoreFactory::validate_lifecycle_storage` hook defaults to a

@@ -82,6 +82,18 @@ async fn upgrade_and_rollback_validate_old_storage_before_execution() {
             .unwrap_err()
             .contains("checkpointed service database is missing")
     );
+    std::fs::create_dir(old.database_file()).unwrap();
+    assert!(
+        validate_restored_storage(&plan, &current)
+            .await
+            .unwrap_err()
+            .contains("not a regular file")
+    );
+    assert!(
+        old.database_file().is_dir(),
+        "preflight must preserve the rejected entry"
+    );
+    std::fs::remove_dir(old.database_file()).unwrap();
     plan.dry_run = true;
     validate_restored_storage(&plan, &current).await.unwrap();
     plan.dry_run = false;

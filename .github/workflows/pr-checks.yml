@@ -129,6 +129,9 @@ jobs:
           cargo test --lib --all-features --
           paths::service_storage
           application::service::lifecycle_plan::checkpoint_storage_tests
+          storage::sqlite::connection_runtime::path_access
+          storage::partitioned::catalog::path_access_tests
+          storage::sqlite::code::snapshot::repository_import::path_tests
 
       - name: Windows legacy SQLite upgrade integration gate
         run: cargo test --test relay_knowledge --all-features windows_upgrade_reopens_existing_graph_for_cli_web_and_pinned_service

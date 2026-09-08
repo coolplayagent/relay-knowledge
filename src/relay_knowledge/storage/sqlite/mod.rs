@@ -27,6 +27,7 @@ pub(in crate::storage) use code::{preserve_existing_scope_commit, record_commit_
 pub(in crate::storage) use connection_runtime::maintenance::{
     configure_connection, read_only_database_diagnostics,
 };
+pub(in crate::storage) use connection_runtime::path_access::validate_new_database_access;
 pub use store::SqliteGraphStore;
 
 #[cfg(test)]

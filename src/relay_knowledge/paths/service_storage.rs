@@ -56,6 +56,7 @@ impl RuntimePaths {
 
 fn storage_overrides(definition: &str) -> Result<PathEnvOverrides, String> {
     let mut reader = Reader::from_str(definition);
+    reader.config_mut().check_comments = true;
     let mut depth = 0_usize;
     let mut root_seen = false;
     let mut values = Vec::new();
@@ -112,6 +113,20 @@ fn storage_overrides(definition: &str) -> Result<PathEnvOverrides, String> {
                 if depth > 32 {
                     return Err("service definition nesting exceeds 32 levels".to_owned());
                 }
+            }
+            Event::Empty(_) if depth == 0 => {
+                return Err("service definition contains an element outside its root".to_owned());
+            }
+            Event::Text(text)
+                if depth == 0 && !text.as_ref().iter().all(u8::is_ascii_whitespace) =>
+            {
+                return Err("service definition contains text outside its root".to_owned());
+            }
+            Event::CData(_) | Event::GeneralRef(_) if depth == 0 => {
+                return Err("service definition contains content outside its root".to_owned());
+            }
+            Event::Decl(_) if root_seen => {
+                return Err("service definition contains a misplaced XML declaration".to_owned());
             }
             Event::End(_) => {
                 depth = depth

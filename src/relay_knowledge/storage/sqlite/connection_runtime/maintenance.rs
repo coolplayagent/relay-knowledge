@@ -117,6 +117,7 @@ pub(in crate::storage::sqlite) fn diagnostics(
 pub(in crate::storage) fn read_only_database_diagnostics(
     database_path: &Path,
 ) -> Result<SqliteStorageDiagnostics, StorageError> {
+    super::path_access::validate_new_database_access(database_path)?;
     let connection = Connection::open_with_flags(
         database_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
