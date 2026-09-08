@@ -40,6 +40,8 @@ try {
     Initialize-RelayPrivateStorage $data $sid -ExistingOnly
     if ((Get-RelayStoragePathKind $data) -ne 'directory') { throw 'Directory probe lost its type' }
     if ((Get-RelayStoragePathKind "$data\absent") -ne 'missing') { throw 'Missing probe must stay missing' }
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath "$data\absent.sqlite" -ExistingOnly } 'SQLite database is missing'
+    if ([System.IO.File]::Exists("$data\absent.sqlite")) { throw 'Read-only database validation created a file' }
     # Exercise the service identity branch against real persisted ACLs. Only
     # token lookup is stubbed in this test scope; ACL/owner/reparse reads are real.
     $originalSidFunction = ${function:Get-RelayStorageSid}
@@ -109,6 +111,11 @@ try {
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'reparse points'
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $fileLink } 'regular file'
     [System.IO.File]::Delete($fileLink)
+    $removed = "$data\removed.sqlite"
+    [System.IO.File]::WriteAllText($removed, 'valid before removal')
+    Initialize-RelayPrivateStorage $data $sid -DatabasePath $removed -ExistingOnly
+    [System.IO.File]::Delete($removed)
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $removed -ExistingOnly } 'SQLite database is missing'
     $shardLink = "$data\stores\repositories\linked"
     New-Item -ItemType Junction -Path $shardLink -Target "$data\stores\repositories\fixture" | Out-Null
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'reparse points'

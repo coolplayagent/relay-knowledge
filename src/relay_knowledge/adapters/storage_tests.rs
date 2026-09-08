@@ -69,6 +69,27 @@ async fn read_only_topology_does_not_authorize_the_first_database_open() {
 }
 
 #[tokio::test]
+async fn topology_revalidates_paths_after_a_successful_store_open() {
+    for topology in [
+        StorageTopology::SingleSqlite,
+        StorageTopology::PartitionedSqlite,
+    ] {
+        let paths = runtime_paths();
+        let root = paths.data_dir.parent().unwrap().to_path_buf();
+        let mut factory = SqliteKnowledgeStoreFactory::new(paths, topology);
+        let store = factory.open().await.unwrap();
+        factory.topology_snapshot().await.unwrap();
+        // A valid open must not cache authorization for a later path-based
+        // read. Simulate a policy failure without requiring Windows ACL APIs.
+        factory.paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+        let error = factory.topology_snapshot().await.unwrap_err();
+        assert!(error.to_string().contains("account policy"));
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[tokio::test]
 async fn single_sqlite_rejects_active_partitioned_catalog() {
     let paths = runtime_paths();
     let database_path = paths.database_file();

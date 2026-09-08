@@ -154,6 +154,7 @@ impl RuntimePaths {
 
     /// Validates a specific SQLite file, sidecars, and descendant directories
     /// before a shard/diagnostic opens them. Work is bounded by path depth.
+    /// Existing-only access requires the managed database file to exist.
     pub async fn ensure_storage_database_access(
         &self,
         database_path: &Path,

@@ -1,12 +1,6 @@
 //! SQLite storage construction behind the application factory contract.
 
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     paths::{RuntimePaths, StorageDirectoryAccess},
@@ -23,7 +17,6 @@ pub struct SqliteKnowledgeStoreFactory {
     database_path: PathBuf,
     paths: RuntimePaths,
     topology: StorageTopology,
-    store_opened: Arc<AtomicBool>,
     validation_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -34,7 +27,6 @@ impl SqliteKnowledgeStoreFactory {
             database_path: paths.database_file(),
             paths,
             topology,
-            store_opened: Arc::new(AtomicBool::new(false)),
             validation_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -75,14 +67,9 @@ impl KnowledgeStoreFactory for SqliteKnowledgeStoreFactory {
                 .ensure_storage_access(StorageDirectoryAccess::OpenOrCreate)
                 .await
                 .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-            let opened = Arc::clone(&config.store_opened);
-            let store = tokio::task::spawn_blocking(move || open_store(config))
+            tokio::task::spawn_blocking(move || open_store(config))
                 .await
-                .map_err(StorageError::from)??;
-            // Only a successful open enables diagnostics to reuse validation.
-            // A read-only probe or a failed open cannot authorize a later open.
-            opened.store(true, Ordering::Release);
-            Ok(store)
+                .map_err(StorageError::from)?
         })
     }
 
@@ -91,13 +78,16 @@ impl KnowledgeStoreFactory for SqliteKnowledgeStoreFactory {
         Box::pin(async move {
             let validation_lock = Arc::clone(&config.validation_lock);
             let validation = validation_lock.lock().await;
-            if !config.store_opened.load(Ordering::Acquire) {
-                config
-                    .paths
-                    .ensure_storage_access(StorageDirectoryAccess::ExistingOnly)
-                    .await
-                    .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-            }
+            // Every snapshot opens a new pathname-based connection. A prior
+            // store handle cannot authorize the current path or its sidecars.
+            config
+                .paths
+                .ensure_storage_database_access(
+                    &config.database_path,
+                    StorageDirectoryAccess::ExistingOnly,
+                )
+                .await
+                .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
             drop(validation);
             tokio::task::spawn_blocking(move || {
                 PartitionedSqliteKnowledgeStore::topology_snapshot_from_catalog(

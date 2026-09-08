@@ -134,7 +134,10 @@ function Initialize-RelayStorageDatabase {
     foreach ($suffix in @('', '-wal', '-shm', '-journal')) {
         $path = $database.FullName + $suffix
         $kind = Get-RelayStoragePathKind $path
-        if ($kind -eq 'missing') { continue }
+        if ($kind -eq 'missing') {
+            if ($ExistingOnly -and $suffix -eq '') { throw "SQLite database is missing: $path" }
+            continue
+        }
         if ($kind -ne 'file') { throw "SQLite payload must be a regular file: $path" }
         Assert-RelayStoragePayload ([System.IO.FileInfo]::new($path)) $Sid
     }

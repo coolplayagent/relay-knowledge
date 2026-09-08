@@ -89,8 +89,11 @@ store is authoritative. No database is opened or moved during path resolution.
 
 Path resolution retains the selected SID policy without creating directories.
 The factory serializes initial ACL verification with an async mutex. Read-only
-diagnostics never authorize the first SQLite open: every factory open revalidates,
-and only a successful open permits later topology queries to reuse its check.
+diagnostics never authorize a later SQLite open: every factory open revalidates.
+Every topology snapshot also validates its control database, recovery files, and
+ancestors immediately before creating a fresh read-only connection, even after
+a successful store open. Missing managed control files fail visibly rather than
+reporting an empty topology. This targeted check avoids walking unrelated shards.
 Immediately before SQLite opens, its factory creates the SID directory and `data`
 child with a protected DACL owned by the creating account or LocalSystem. It grants inheritable full
 control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
