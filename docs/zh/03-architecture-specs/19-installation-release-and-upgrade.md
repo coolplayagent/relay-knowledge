@@ -84,7 +84,7 @@ SID 通过 Windows PowerShell 5.1 从当前进程令牌获取，迁移用户配�
 旧目录保留、冲突目录和探测错误。集成测试验证环境覆盖后的 CLI 跨进程持久化，并在两种存储拓扑下
 通过升级后的 CLI/Web 配置重新打开含有实际图谱数据的旧库。
 `windows-storage` PR job 在 Windows 上执行 PowerShell ACL、Rust UT 和旧 SQLite 升级集成测试，
-覆盖私有目录和文件继承、已有目录及父目录宽松 ACL、junction 拒绝、稳定 SID 和已有图谱。
+覆盖私有目录和文件继承、校验前后落盘 ACL 保持不变、已有目录及父目录宽松 ACL、junction 拒绝、稳定 SID 和已有图谱。
 Linux UT 验证子进程失败、输出限制、超时和取消，不模拟 Windows 账户令牌。
 
 新默认路径在创建 SID 目录及其 `data` 子目录时原子设置 owner 和受保护 DACL，

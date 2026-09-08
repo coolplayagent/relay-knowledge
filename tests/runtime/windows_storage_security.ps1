@@ -65,9 +65,12 @@ try {
     $insecure.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
         [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow'))
     $privateDirectory.SetAccessControl($insecure)
+    # Windows canonicalizes descriptors when persisting them. Compare two OS
+    # reads, not the pre-persistence in-memory descriptor against an OS read.
+    $beforeValidation = $privateDirectory.GetAccessControl().GetSecurityDescriptorSddlForm('Access')
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'Unsafe storage permissions'
     # Validation must not silently repair a pre-existing ACL.
-    if ($privateDirectory.GetAccessControl().GetSecurityDescriptorSddlForm('Access') -ne $insecure.GetSecurityDescriptorSddlForm('Access')) {
+    if ($privateDirectory.GetAccessControl().GetSecurityDescriptorSddlForm('Access') -ne $beforeValidation) {
         throw 'Validation unexpectedly rewrote a directory ACL'
     }
 

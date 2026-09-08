@@ -116,7 +116,7 @@ verify overridden persistence across CLI processes and reopen a populated legacy
 graph through upgraded CLI/Web configuration for both storage topologies.
 The `windows-storage` PR job runs native PowerShell ACL checks, Windows Rust unit
 tests, and legacy SQLite upgrade integration tests. It covers protected child/file
-inheritance, unsafe existing and ancestor ACLs, junction rejection, stable SIDs,
+inheritance, persisted ACL preservation across validation, unsafe existing and ancestor ACLs, junction rejection, stable SIDs,
 and populated legacy stores. Linux unit tests cover subprocess failures, output
 limits, timeout, and cancellation; they do not impersonate a Windows token.
 
