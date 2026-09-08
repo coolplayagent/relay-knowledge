@@ -355,8 +355,12 @@ impl RelayKnowledgeService {
         request: ServicePlanRequest,
         context: RequestContext,
     ) -> Result<ServicePlanResponse, ApiError> {
-        // Lifecycle plans and removal must work without opening or provisioning
-        // graph storage. Reuse the version only when a store is already open.
+        // Inspect an existing catalog without opening/provisioning graph storage;
+        // a missing path still permits planning and removal.
+        self.storage
+            .validate_lifecycle_storage()
+            .await
+            .map_err(storage_api_error)?;
         let graph_version = match self.storage.ready_store() {
             Some(store) => store
                 .current_graph_version()

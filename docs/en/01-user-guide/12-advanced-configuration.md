@@ -60,7 +60,10 @@ settings that select this SID layout retain its original account policy, includi
 LocalSystem service startup checks. Overrides elsewhere retain operator-managed
 permissions. Existing
 Windows data directories remain selected on upgrade; conflicting old/new directories require an explicit override.
-Other platforms retain their normal data directories.
+Other platforms retain their normal data directories. Lifecycle plans inspect
+an existing catalog read-only and reject `single_sqlite` when active partitioned
+shards exist. Service definitions preserve the selected topology alongside the
+data directory; missing storage still permits plans and uninstall.
 An empty override is an error. See [installation and migration](01-install-and-runtime.md#14-zero-config-defaults)
 for PowerShell examples, persistent user settings, service configuration, and
 moving an existing database safely.

@@ -146,8 +146,38 @@ impl RuntimePaths {
         &self,
         access: StorageDirectoryAccess,
     ) -> Result<(), PathError> {
-        let Some(sid) = &self.windows_data_sid else {
+        let Some(sid) = self.validated_windows_data_sid()? else {
             return Ok(());
+        };
+        windows_storage::prepare_private_directory(&self.data_dir, sid, access, None).await
+    }
+
+    /// Validates a specific SQLite file, sidecars, and descendant directories
+    /// before a shard/diagnostic opens them. Work is bounded by path depth.
+    pub async fn ensure_storage_database_access(
+        &self,
+        database_path: &Path,
+        access: StorageDirectoryAccess,
+    ) -> Result<(), PathError> {
+        let Some(sid) = self.validated_windows_data_sid()? else {
+            return Ok(());
+        };
+        validate_path(PathPurpose::Data, database_path)?;
+        if !database_path.starts_with(&self.data_dir) || database_path == self.data_dir {
+            return Err(PathError {
+                purpose: PathPurpose::Data,
+                kind: PathErrorKind::WindowsStorageSecurity {
+                    reason: "database must remain below its private data directory".to_owned(),
+                },
+            });
+        }
+        windows_storage::prepare_private_directory(&self.data_dir, sid, access, Some(database_path))
+            .await
+    }
+
+    fn validated_windows_data_sid(&self) -> Result<Option<&str>, PathError> {
+        let Some(sid) = &self.windows_data_sid else {
+            return Ok(None);
         };
         if windows_data_sid_from_path(&self.data_dir)?.as_ref() != Some(sid) {
             return Err(PathError {
@@ -158,7 +188,7 @@ impl RuntimePaths {
                 },
             });
         }
-        windows_storage::prepare_private_directory(&self.data_dir, sid, access).await
+        Ok(Some(sid))
     }
 
     /// Returns the JSONL audit log owned by resident agent protocol adapters.
@@ -169,6 +199,38 @@ impl RuntimePaths {
     /// Returns the default single-file SQLite database path.
     pub fn database_file(&self) -> PathBuf {
         self.data_dir.join(DATABASE_FILE_NAME)
+    }
+
+    /// Probes for an existing control database without creating runtime state.
+    /// Windows uses a terminable process so an offline volume cannot keep the
+    /// Tokio blocking pool alive after a timed-out lifecycle check.
+    pub async fn database_file_exists(&self) -> Result<bool, PathError> {
+        let path = self.database_file();
+        #[cfg(windows)]
+        {
+            Ok(windows_storage::probe_path(&path).await?.is_some())
+        }
+        #[cfg(not(windows))]
+        {
+            match tokio::fs::symlink_metadata(&path).await {
+                Ok(_) => Ok(true),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    Ok(false)
+                }
+                Err(error) => Err(PathError {
+                    purpose: PathPurpose::Data,
+                    kind: PathErrorKind::DataDirectoryProbe {
+                        path,
+                        reason: error.to_string(),
+                    },
+                }),
+            }
+        }
     }
 
     /// Returns the directory containing per-repository SQLite shards.
@@ -584,6 +646,25 @@ async fn select_windows_data_directory(
     Ok(legacy.to_path_buf())
 }
 
+#[cfg(windows)]
+async fn existing_data_directory(path: &Path) -> Result<bool, PathError> {
+    match windows_storage::probe_path(path).await? {
+        None => Ok(false),
+        Some(true) => Ok(true),
+        Some(false) => Err(PathError {
+            purpose: PathPurpose::Data,
+            kind: PathErrorKind::DataDirectoryProbe {
+                path: path.to_path_buf(),
+                reason: "path is not a directory".to_owned(),
+            },
+        }),
+    }
+}
+
+// Native production discovery uses the terminable Windows probe above. This
+// host implementation supports deterministic non-Windows path fixtures only;
+// runtime Windows resolution on other hosts fails at token lookup first.
+#[cfg(not(windows))]
 async fn existing_data_directory(path: &Path) -> Result<bool, PathError> {
     let result = tokio::time::timeout(
         DATA_DIRECTORY_PROBE_TIMEOUT,
@@ -599,6 +680,7 @@ async fn existing_data_directory(path: &Path) -> Result<bool, PathError> {
     data_directory_probe_result(path, result)
 }
 
+#[cfg(any(not(windows), test))]
 fn data_directory_probe_result(
     path: &Path,
     result: io::Result<std::fs::Metadata>,

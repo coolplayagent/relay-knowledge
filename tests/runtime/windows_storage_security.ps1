@@ -38,6 +38,8 @@ try {
     Initialize-RelayPrivateStorage $data $sid
     Initialize-RelayPrivateStorage $data $sid
     Initialize-RelayPrivateStorage $data $sid -ExistingOnly
+    if ((Get-RelayStoragePathKind $data) -ne 'directory') { throw 'Directory probe lost its type' }
+    if ((Get-RelayStoragePathKind "$data\absent") -ne 'missing') { throw 'Missing probe must stay missing' }
     # Exercise the service identity branch against real persisted ACLs. Only
     # token lookup is stubbed in this test scope; ACL/owner/reparse reads are real.
     $originalSidFunction = ${function:Get-RelayStorageSid}
@@ -72,6 +74,47 @@ try {
         Initialize-RelayPrivateStorage $data $sid
         if ([System.IO.File]::ReadAllText($database) -ne 'existing graph') { throw 'Lost graph during profile relocation' }
     } finally { $env:LOCALAPPDATA = $previousLocal }
+
+    # Files moved on the same NTFS volume retain explicit ACLs. A private parent
+    # alone must not authorize the database, recovery files, or repository shards.
+    foreach ($payload in @($database, "$database-wal", "$database-shm", "$database-journal", "$data\stores\repositories\fixture\code.sqlite")) {
+        Initialize-RelayPrivateStorage $data $sid -DatabasePath $payload
+        $incoming = "$drive\incoming-payload"
+        [System.IO.File]::WriteAllText($incoming, 'moved payload')
+        $acl = [System.IO.File]::GetAccessControl($incoming)
+        $safeAcl = [System.IO.File]::GetAccessControl($database)
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow'))
+        [System.IO.File]::SetAccessControl($incoming, $acl)
+        if ([System.IO.File]::Exists($payload)) { [System.IO.File]::Delete($payload) }
+        [System.IO.File]::Move($incoming, $payload)
+        if ((Get-RelayStoragePathKind $payload) -ne 'file') { throw 'File probe lost its type' }
+        $before = [System.IO.File]::GetAccessControl($payload).GetSecurityDescriptorSddlForm('Access')
+        Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'payload permissions'
+        Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $payload -ExistingOnly } 'payload permissions'
+        try {
+            function Get-RelayStorageSid { return 'S-1-5-18' }
+            Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $payload -ExistingOnly } 'payload permissions'
+        } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
+        if ([System.IO.File]::GetAccessControl($payload).GetSecurityDescriptorSddlForm('Access') -ne $before) { throw 'Payload validation rewrote ACLs' }
+        [System.IO.File]::SetAccessControl($payload, $safeAcl)
+        Initialize-RelayPrivateStorage $data $sid -DatabasePath $payload -ExistingOnly
+    }
+    $fileLink = "$data\linked.sqlite"
+    New-Item -ItemType SymbolicLink -Path $fileLink -Target $database | Out-Null
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'reparse points'
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $fileLink } 'regular file'
+    [System.IO.File]::Delete($fileLink)
+    $shardLink = "$data\stores\repositories\linked"
+    New-Item -ItemType Junction -Path $shardLink -Target "$data\stores\repositories\fixture" | Out-Null
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'reparse points'
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath "$shardLink\code.sqlite" } 'reparse points'
+    [System.IO.Directory]::Delete($shardLink)
+    $deep = "$data\deep"
+    $leaf = $deep + ('\d' * 32)
+    [System.IO.Directory]::CreateDirectory($leaf) | Out-Null
+    Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'depth limit'
+    Remove-Item -LiteralPath $deep -Recurse -Force
 
     $privateDirectory = [System.IO.DirectoryInfo]::new($data)
     $insecure = $privateDirectory.GetAccessControl()

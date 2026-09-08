@@ -144,6 +144,84 @@ async fn install_and_uninstall_plans_do_not_open_unavailable_storage() {
 }
 
 #[tokio::test]
+async fn lifecycle_plans_reject_an_existing_catalog_with_the_wrong_topology() {
+    let root = unique_root("lifecycle-topology-guard");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    let partitioned = crate::storage::PartitionedSqliteKnowledgeStore::open(
+        runtime.paths.database_file(),
+        runtime.paths.clone(),
+    )
+    .unwrap();
+    partitioned
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "lifecycle-repository",
+                "lifecycle",
+                root.join("repository").display().to_string(),
+                Vec::new(),
+                Vec::new(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    drop(partitioned);
+    let service = RelayKnowledgeService::new(runtime);
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Upgrade,
+        ServiceManagerAction::Rollback,
+        ServiceManagerAction::Uninstall,
+    ] {
+        let error = service
+            .service_plan(
+                ServicePlanRequest {
+                    action,
+                    dry_run: true,
+                    execute: false,
+                    target_version: None,
+                    install_dir: None,
+                },
+                RequestContext::for_interface(InterfaceKind::Cli),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("single_sqlite"));
+        assert!(error.message.contains("partitioned_sqlite"));
+        let mut plan = service
+            .render_service_plan_for_request(&ServicePlanRequest {
+                action,
+                dry_run: false,
+                execute: true,
+                target_version: None,
+                install_dir: None,
+            })
+            .unwrap();
+        // A regression must not run any actual service-manager commands.
+        plan.lifecycle_steps.clear();
+        plan.rollback_steps.clear();
+        assert!(
+            service
+                .execute_service_plan(&plan)
+                .await
+                .unwrap_err()
+                .message
+                .contains("partitioned_sqlite")
+        );
+        assert!(service.storage.ready_store().is_none());
+        assert!(!service.runtime.paths.service_dir.exists());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn service_start_actions_validate_automatic_storage_before_any_lifecycle_step() {
     let root = unique_root("service-storage-preflight");
     let environment = EnvironmentConfig::from_pairs(

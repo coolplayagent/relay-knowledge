@@ -30,6 +30,7 @@ async fn windows_security_rejects_invalid_inputs_before_launching_a_process() {
         Path::new("/data"),
         "../account",
         StorageDirectoryAccess::OpenOrCreate,
+        None,
     )
     .await
     .unwrap_err();
@@ -39,7 +40,8 @@ async fn windows_security_rejects_invalid_inputs_before_launching_a_process() {
             prepare_private_directory(
                 Path::new(&path),
                 "S-1-5-18",
-                StorageDirectoryAccess::OpenOrCreate
+                StorageDirectoryAccess::OpenOrCreate,
+                None
             )
             .await
             .unwrap_err()
@@ -63,7 +65,8 @@ async fn windows_identity_requires_a_native_host_without_an_environment_fallback
         prepare_private_directory(
             Path::new("/quoted'path"),
             "S-1-5-18",
-            StorageDirectoryAccess::ExistingOnly
+            StorageDirectoryAccess::ExistingOnly,
+            None
         )
         .await
         .unwrap_err()
@@ -144,6 +147,28 @@ async fn windows_command_timeout_and_cancellation_terminate_the_child() {
     .await
     .expect("cancelled child must exit and be reaped");
     tokio::fs::remove_file(pid_file).await.unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_probe_timeout_does_not_delay_runtime_shutdown() {
+    let started = std::time::Instant::now();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let error = runtime
+        .block_on(run_security_script(
+            "Start-Sleep -Seconds 30",
+            Duration::from_millis(200),
+        ))
+        .unwrap_err();
+    assert!(error.to_string().contains("timed out"));
+    drop(runtime);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "timed-out probe must not leave blocking I/O in the runtime"
+    );
 }
 
 #[cfg(windows)]

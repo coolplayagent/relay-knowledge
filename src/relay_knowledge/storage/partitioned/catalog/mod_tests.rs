@@ -11,6 +11,23 @@ use super::{
 };
 use crate::paths::RuntimePaths;
 
+#[tokio::test]
+async fn first_shard_open_validates_managed_paths_before_creating_sqlite() {
+    let data_dir = unique_database_path("private-shard").with_extension("data");
+    let mut paths = runtime_paths(data_dir.clone());
+    paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+    let catalog = super::SqliteShardCatalog::new(paths.database_file(), paths);
+    let error = match catalog
+        .staged_repository_store("private-repository".to_owned())
+        .await
+    {
+        Ok(_) => panic!("invalid managed policy must not create a shard"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("account policy"));
+    assert!(!data_dir.exists());
+}
+
 #[test]
 fn shard_locator_is_relative_only_inside_the_runtime_data_directory() {
     let paths = runtime_paths(PathBuf::from("/var/lib/relay-knowledge"));

@@ -78,7 +78,9 @@ without `..`. New installations require a writable D: directory or an explicit
 override. `RuntimePaths::resolve` requires an explicit Windows data/home override;
 application startup uses `resolve_for_runtime` to obtain the SID and preserve
 existing storage through at most
-two asynchronous metadata probes, each with a five-second waiting deadline.
+two asynchronous metadata probes, each in a terminable PowerShell child with a
+five-second deadline. Filesystem I/O stays in that child, so a hung redirected
+LocalAppData path cannot leave a detached Tokio blocking task delaying shutdown.
 Explicit data/home overrides bypass discovery. Missing legacy directories select
 the new default; existing legacy directories and symlinks remain selected.
 Non-directory paths, inspection errors, or timeouts fail visibly. Two existing
@@ -86,8 +88,9 @@ old/new directories require an explicit data override instead of guessing which
 store is authoritative. No database is opened or moved during path resolution.
 
 Path resolution retains the selected SID policy without creating directories.
-The factory serializes initial ACL verification in a shared once-cell, so ordinary
-diagnostics after open reuse the policy check without launching subprocesses.
+The factory serializes initial ACL verification with an async mutex. Read-only
+diagnostics never authorize the first SQLite open: every factory open revalidates,
+and only a successful open permits later topology queries to reuse its check.
 Immediately before SQLite opens, its factory creates the SID directory and `data`
 child with a protected DACL owned by the creating account or LocalSystem. It grants inheritable full
 control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
@@ -96,7 +99,18 @@ silently rewrites permissions or adopts a permissive directory. Ancestors are
 checked from the volume root downward (at most 32): reparse points, untrusted
 owners, and grants allowing other accounts to delete, change attributes, change
 permissions, or take ownership are rejected. Read/traverse/create-child rights
-on shared ancestors are allowed. Read-only storage diagnostics validate existing directories without creating them.
+on shared ancestors are allowed. Existing payloads are also validated, including
+SQLite databases, WAL/SHM/journal files, repository directories, and shards.
+Files with untrusted owners or foreign allow ACEs and all descendant reparse
+points are rejected; directory inheritance alone is insufficient for moved files.
+The initial walk enumerates lazily with limits of 65,536 entries and 32 levels,
+within the ten-second process deadline. Hitting a limit fails explicitly. Each
+first shard open additionally validates its own path components and sidecars in
+the existing blocking worker, owned by `catalog::store_access` and using the bounded async child process; cached
+shard handles skip that extra launch. The shared cache lock is released during
+security checks so unrelated cached repositories are not held behind them. Fresh shard diagnostic connections perform
+one batched tree validation. Read-only checks never provision directories or
+repair existing ACLs.
 A missing or insecure D: volume fails visibly when storage is opened;
 an administrator can provision the shared ancestors with an administrator owner
 and restricted write/delete rights, or users can explicitly choose a private
@@ -113,14 +127,20 @@ provisions or validates managed SID storage, before any service-manager step can
 pin the directory as an explicit override and start LocalSystem. The plan warns
 about this preflight; failure prevents service changes. This creates no SQLite
 database. Dry-runs and uninstall skip this provisioning.
-Service install/uninstall plans and uninstall execution do not open graph storage;
-they report graph version zero until storage is already open. With no legacy
-directory to reconcile, a missing or ACL-unsafe D: does not prevent those lifecycle
-operations from reaching their own checks.
+Lifecycle plans and execution inspect an existing control catalog read-only
+without initializing graph storage or schemas. An active partitioned catalog with
+`single_sqlite` selected fails before rendering or running manager steps; specify
+`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite`. Missing database paths
+permit plans and uninstall without provisioning; inaccessible existing catalogs
+fail visibly. Plans report graph version zero until storage is already open.
+Generated systemd, launchd, and Windows service definitions pin both the selected
+data directory and topology, so a fresh service does not lose that setting.
 No ACL migration runs on uninstall or rollback. These rules use Microsoft's
 [SID identity contract](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
 [system-directory lookup](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw),
-and [directory creation with security](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1).
+[directory creation with security](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1),
+[file ACL inspection](https://learn.microsoft.com/en-us/dotnet/api/system.io.fileinfo.getaccesscontrol?view=netframework-4.8.1),
+and [link attribute behavior](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesa).
 
 This default change does not alter SQLite schemas or automatically move old
 `%LOCALAPPDATA%\relay-knowledge\data` databases. Upgrades automatically retain

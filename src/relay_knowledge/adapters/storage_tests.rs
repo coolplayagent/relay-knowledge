@@ -52,6 +52,23 @@ async fn windows_storage_policy_is_checked_before_either_topology_opens_sqlite()
 }
 
 #[tokio::test]
+async fn read_only_topology_does_not_authorize_the_first_database_open() {
+    let paths = runtime_paths();
+    let data = paths.data_dir.clone();
+    let mut factory = SqliteKnowledgeStoreFactory::new(paths, StorageTopology::SingleSqlite);
+    assert!(factory.topology_snapshot().await.unwrap().shards.is_empty());
+    assert!(!data.exists());
+    // Make the next policy check fail, as a changed ACL would on Windows.
+    factory.paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+    let error = match factory.open().await {
+        Ok(_) => panic!("a diagnostic must not cache permission to open storage"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("account policy"));
+    assert!(!data.exists());
+}
+
+#[tokio::test]
 async fn single_sqlite_rejects_active_partitioned_catalog() {
     let paths = runtime_paths();
     let database_path = paths.database_file();
@@ -71,10 +88,20 @@ async fn single_sqlite_rejects_active_partitioned_catalog() {
         .await
         .expect("partitioned registration activates catalog");
 
-    let error = match SqliteKnowledgeStoreFactory::new(paths, StorageTopology::SingleSqlite)
-        .open()
+    let factory = SqliteKnowledgeStoreFactory::new(paths.clone(), StorageTopology::SingleSqlite);
+    assert!(
+        factory
+            .validate_lifecycle_storage()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("partitioned_sqlite")
+    );
+    SqliteKnowledgeStoreFactory::new(paths, StorageTopology::PartitionedSqlite)
+        .validate_lifecycle_storage()
         .await
-    {
+        .unwrap();
+    let error = match factory.open().await {
         Ok(_) => panic!("single topology should reject active shard catalog"),
         Err(error) => error,
     };

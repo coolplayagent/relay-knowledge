@@ -25,13 +25,16 @@ use crate::{
 const CATALOG_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
 
 mod schema;
+mod store_access;
+
+use store_access::open_cached_repository_store;
 
 pub(super) use schema::initialize_catalog_schema;
 
 #[derive(Debug)]
 pub(super) struct SqliteShardCatalog {
     control_path: PathBuf,
-    paths: RuntimePaths,
+    pub(super) paths: RuntimePaths,
     cache: Arc<Mutex<HashMap<String, Arc<SqliteGraphStore>>>>,
 }
 
@@ -51,8 +54,9 @@ impl SqliteShardCatalog {
         let db_path = self.paths.repository_shard_database_file(&repository_id);
         let cache = Arc::clone(&self.cache);
         let control_path = self.control_path.clone();
+        let paths = self.paths.clone();
         tokio::task::spawn_blocking(move || {
-            open_cached_repository_store(&cache, repository_id, db_path, control_path)
+            open_cached_repository_store(&cache, repository_id, db_path, control_path, &paths)
         })
         .await?
     }
@@ -73,7 +77,8 @@ impl SqliteShardCatalog {
             if !db_path.exists() {
                 return Ok(None);
             }
-            open_cached_repository_store(&cache, repository_id, db_path, control_path).map(Some)
+            open_cached_repository_store(&cache, repository_id, db_path, control_path, &paths)
+                .map(Some)
         })
         .await?
     }
@@ -85,11 +90,13 @@ impl SqliteShardCatalog {
         let db_path = self.paths.repository_shard_database_file(&repository_id);
         let cache = Arc::clone(&self.cache);
         let control_path = self.control_path.clone();
+        let paths = self.paths.clone();
         tokio::task::spawn_blocking(move || {
             if !db_path.exists() {
                 return Ok(None);
             }
-            open_cached_repository_store(&cache, repository_id, db_path, control_path).map(Some)
+            open_cached_repository_store(&cache, repository_id, db_path, control_path, &paths)
+                .map(Some)
         })
         .await?
     }
@@ -113,7 +120,8 @@ impl SqliteShardCatalog {
                 )));
             }
 
-            open_cached_repository_store(&cache, repository_id, db_path, control_path).map(Some)
+            open_cached_repository_store(&cache, repository_id, db_path, control_path, &paths)
+                .map(Some)
         })
         .await?
     }
@@ -342,25 +350,6 @@ impl SqliteShardCatalog {
         })
         .await?
     }
-}
-
-fn open_cached_repository_store(
-    cache: &Arc<Mutex<HashMap<String, Arc<SqliteGraphStore>>>>,
-    repository_id: String,
-    db_path: PathBuf,
-    control_path: PathBuf,
-) -> Result<Arc<SqliteGraphStore>, StorageError> {
-    let mut cache = cache.lock().map_err(|_| StorageError::LockPoisoned)?;
-    if let Some(store) = cache.get(&repository_id) {
-        return Ok(Arc::clone(store));
-    }
-
-    let store = Arc::new(SqliteGraphStore::open_with_publication_authority(
-        &db_path,
-        control_path,
-    )?);
-    cache.insert(repository_id, Arc::clone(&store));
-    Ok(store)
 }
 
 fn shard_locator(paths: &RuntimePaths, db_path: &Path) -> String {

@@ -101,6 +101,8 @@ the Windows process token, so profile relocation and LocalAppData changes do not
 change the default store. When SQLite is opened, new account directories receive a protected ACL for
 the account, SYSTEM, and Administrators. Unsafe existing ACLs, reparse points,
 or ancestors granting other accounts deletion or permission changes are rejected.
+Existing database/recovery files and shard directories must also have private
+ACLs and no links; files moved from shared directories are checked explicitly.
 Service paths pinned to the SID layout retain this policy and revalidate ACLs
 and reparse points on every new service startup. Install/upgrade/rollback execution
 also provisions or validates these directories before service-manager steps;

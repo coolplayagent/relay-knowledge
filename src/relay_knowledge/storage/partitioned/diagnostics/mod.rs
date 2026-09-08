@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::paths::RuntimePaths;
+use crate::paths::{RuntimePaths, StorageDirectoryAccess};
 use crate::storage::sqlite::read_only_database_diagnostics;
 use crate::storage::{
     GraphInspection, GraphStore, HealthStorageSnapshot, SqliteStorageDiagnostics, StorageError,
@@ -53,6 +53,14 @@ async fn aggregate_sqlite_diagnostics(
     store: &PartitionedSqliteKnowledgeStore,
     control_sqlite: SqliteStorageDiagnostics,
 ) -> Result<SqliteStorageDiagnostics, StorageError> {
+    // Validate the existing payload set once before opening fresh diagnostic
+    // connections, instead of spawning one security process per repository.
+    store
+        .catalog
+        .paths
+        .ensure_storage_access(StorageDirectoryAccess::ExistingOnly)
+        .await
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let mut aggregate = SqliteDiagnosticsAggregate::new();
     aggregate.push("control", control_sqlite);
     for (repository_id, shard_path) in store.catalog.active_repository_database_paths().await? {

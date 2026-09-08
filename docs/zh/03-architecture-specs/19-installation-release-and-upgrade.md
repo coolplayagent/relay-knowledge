@@ -72,7 +72,9 @@ SID 通过 Windows PowerShell 5.1 从当前进程令牌获取，迁移用户配�
 `RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > 已有 Windows LocalAppData 数据目录 >
 新平台默认值，环境变量必须是非空绝对目录且不含 `..`。新安装需要可写的 D 盘目录或显式覆盖。
 `RuntimePaths::resolve` 在 Windows 上要求显式 data/home 覆盖；应用启动使用 `resolve_for_runtime`，最多执行两次
-异步 metadata 探测，每次等待上限为 5 秒。显式 data/home 覆盖不做探测。
+异步 metadata 探测，每次在可终止的 PowerShell 子进程内执行，超时上限 5 秒。
+文件系统 I/O 不进入 Tokio blocking pool，因此离线或挂起的 LocalAppData 不会留下阻止
+runtime 退出的后台文件探测。显式 data/home 覆盖不做目录发现。
 旧目录缺失时选择新默认值；已有旧目录或符号链接继续被选中。非目录路径、探测错误和超时
 必须显式失败。旧目录与新目录同时存在时要求显式数据覆盖，不推测哪一份是权威。
 路径解析期间不会打开数据库或搬迁数据。
@@ -94,15 +96,24 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 服务路径测试验证显式 DATA/HOME 重载保留原 SID 策略。Windows ACL 测试仅在测试作用域
 替换令牌查询来覆盖 LocalSystem 分支，其余 ACL、owner 和 junction 检查均读取真实文件系统；
 验证安全目录可访问、权限改动和 junction 在新启动校验时被拒绝。Linux UT 验证子进程失败、
-输出限制、超时和取消，不模拟 Windows 账户令牌。
+输出限制、超时和取消，不模拟 Windows 账户令牌。新增回归覆盖只读诊断不授权首次打开、
+服务计划/执行拒绝拓扑冲突、服务定义固定拓扑、Windows 探测超时后 runtime 能及时退出、
+保留显式 ACL 的搬入数据库及恢复文件、文件符号链接、分片 junction 和树深度上限。
 
-路径解析仅保留 SID 策略，不创建目录。工厂通过共享 once-cell 串行执行首次 ACL 校验，
-已打开存储后的常规诊断复用校验结果，不再启动子进程。SQLite 工厂在实际打开存储前创建 SID 目录及其 `data`
+路径解析仅保留 SID 策略，不创建目录。工厂通过异步互斥锁串行执行首次 ACL 校验；
+只读诊断不能授权首次 SQLite 打开。每次工厂打开都会重新校验，只有成功打开后，
+后续 topology 查询才能复用校验结果。SQLite 工厂在实际打开存储前创建 SID 目录及其 `data`
 子目录，并原子设置创建账户或 LocalSystem 为 owner 及受保护 DACL，
 仅授予目录所标识的账户、SYSTEM、Administrators 可继承的完全控制。已有目录必须满足同一 ACL 合同，
 存储边界不会自动修复宽松 ACL。只读存储诊断仅校验已有目录，不创建目录。自卷根逐级检查最多 32 个父目录，拒绝重解析点、不可信 owner，
 以及允许其他账户删除、修改属性、修改权限或夺取所有权的 ACL；共享父目录可以授予读取、
-遍历和创建子目录权限。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
+遍历和创建子目录权限。已有数据库、WAL/SHM/journal、仓库分片及所有后代目录也必须
+验证 owner、ACL 和重解析点，不能因父目录私有而信任保留宽松 ACL 的搬入文件。
+初次校验按需枚举，最多 65,536 个条目、32 层，且受同一子进程 10 秒超时约束；
+超过任一限制都明确失败。每个分片首次打开还会在现有 blocking worker 中通过有界异步
+子进程检查具体路径、父目录和 sidecar，由独立的 `catalog::store_access` 模块负责，
+缓存句柄不重复启动校验，安全检查期间不持有共享 cache 锁。新建分片诊断连接前
+统一批量校验数据树；只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
 权限受限的共享父目录，或通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
 及支持 ACL 的本地卷。保留的旧库及保留 SID 布局之外的显式 HOME/DATA 继续由操作者管理权限。
 `D:\relay-knowledge\users\<user-sid>\data` 布局始终恢复目录中原账户的 SID 策略，
@@ -113,11 +124,17 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 实际执行安装、升级或回滚前，生命周期边界也会创建或校验受管理的 SID 数据目录，确保服务将目录
 固定为显式覆盖并以 LocalSystem 启动前，目录已具有私有权限。计划会提示这项预检，失败时
 不执行服务管理步骤；该预检不创建 SQLite 数据库，dry-run 和卸载跳过它。
-安装/卸载计划及卸载执行不打开图存储；未打开存储时计划 metadata 使用图版本 0。
-无需协调旧目录时，缺少或 ACL 不安全的 D: 不会阻止这些生命周期操作进入自身检查。
+生命周期计划及执行会只读检查已有 control catalog，不初始化图存储或 schema。
+已有 active partitioned catalog 却选择 single_sqlite 时，在渲染计划或执行服务步骤前报错，
+要求设置 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite`。数据库路径缺失时仍可
+规划或卸载且不创建目录；已有 catalog 无法安全检查时明确失败。未打开存储时计划 metadata
+使用图版本 0。systemd、launchd 和 Windows 服务定义同时固定数据路径及存储拓扑，
+避免新服务进程丢失安装终端选择的拓扑。
 实现依据微软的 [SID 合同](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
 [系统目录查询](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw)
-和[带安全描述符的目录创建](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1)。
+[带安全描述符的目录创建](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1)、
+[文件 ACL 检查](https://learn.microsoft.com/en-us/dotnet/api/system.io.fileinfo.getaccesscontrol?view=netframework-4.8.1)
+和[链接属性行为](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesa)。
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。早期数据库的 `code_repository_schema_migrations` 可能只有 `name` 列；schema 初始化必须先幂等增加 `applied_at_ms INTEGER NOT NULL DEFAULT 0`，再运行任何会写 capability marker 的 retention、search-owner 或其他迁移，不能要求 operator 重建数据库或手工补列。
 Code-search ownership v2 升级不会在同步 database open 期间重写 legacy FTS 数据。Startup 安装 non-replacing writer 与 exact metadata serving gate，以 `search-owner-v2-writer-and-serving-gate` 一次性把既有 scope 及其 active repository 标 stale，并把 source-scope identity 推进到 `search-owner-v2` fact component。该 marker 只证明 writer 与 serving boundary 已安装，不认证旧 FTS row 或 imported FTS row。每个 FTS `MATCH` read 都要求 metadata ownership 的 rowid/scope/kind/record/path 精确匹配；随后由普通 durable full-index task 复用既有 lease、checkpoint 与 publication fence 替换 stale scope。Database import 只有在 attached source 具有该 marker、完整 search/metadata schema shape、每个 indexed metadata row 都按 rowid 与完整 identity JOIN 到一个 FTS row，并且 fact-versioned Git scope 的 identity 与 imported repository、tree、filters 和当前 fact version 匹配时，才能保留 search freshness。Import 与 incremental clone 以 indexed metadata owner 表为枚举权威，只复制这些 JOIN row；绝不通过 FTS 的 `UNINDEXED` scope/kind 列做反向 COUNT。没有 metadata 的 raw FTS row 不复制、不服务，并保留给受界 `search_orphans` GC。Metadata-side orphan、duplicate owner identity 或 affected-count mismatch 必须让 repository metadata、facts、已复制 search row 与 scope publication 一起回滚。缺少该 capability 的 legacy import 可以保留 base facts 以便恢复，但不得复制 search row，并且必须用 full-reindex 原因持久化为 stale；owner exact 但 fact-version identity 过旧的 import 同样必须显式 stale。Manual/custom 非 fact scope 继续遵守既有兼容合同。Upgrade 与 doctor output 不能仅因 database open、marker 创建或 base-fact import 完成就把 search ownership 报告为 fresh。

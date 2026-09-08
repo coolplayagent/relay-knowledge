@@ -26,6 +26,10 @@ pub trait KnowledgeStoreFactory: Send + Sync {
     fn open(&self) -> KnowledgeStoreFactoryFuture<'_, Arc<dyn KnowledgeStore>>;
 
     fn topology_snapshot(&self) -> KnowledgeStoreFactoryFuture<'_, StorageTopologySnapshot>;
+
+    /// Checks an existing catalog before lifecycle planning without creating a
+    /// database; a missing data path must not prevent plan or uninstall use.
+    fn validate_lifecycle_storage(&self) -> KnowledgeStoreFactoryFuture<'_, ()>;
 }
 
 #[cfg(test)]

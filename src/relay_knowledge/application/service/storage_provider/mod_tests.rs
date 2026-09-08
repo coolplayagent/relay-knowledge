@@ -5,6 +5,14 @@ use super::*;
 struct FailingFactory;
 
 impl KnowledgeStoreFactory for FailingFactory {
+    fn validate_lifecycle_storage(&self) -> KnowledgeStoreFactoryFuture<'_, ()> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "factory-lifecycle-failed".to_owned(),
+            ))
+        })
+    }
+
     fn open(&self) -> KnowledgeStoreFactoryFuture<'_, Arc<dyn KnowledgeStore>> {
         Box::pin(async { Err(StorageError::InvalidInput("factory-open-failed".to_owned())) })
     }
@@ -28,4 +36,12 @@ async fn lazy_provider_preserves_factory_errors_without_partial_initialization()
         "invalid storage input: factory-open-failed"
     );
     assert!(provider.ready_store().is_none());
+    assert!(
+        provider
+            .validate_lifecycle_storage()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("factory-lifecycle-failed")
+    );
 }

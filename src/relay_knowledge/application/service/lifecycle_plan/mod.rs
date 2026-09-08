@@ -79,6 +79,10 @@ impl RelayKnowledgeService {
         &self,
         plan: &ServiceDefinitionPlan,
     ) -> Result<ServiceLifecycleExecutionReport, ApiError> {
+        self.storage
+            .validate_lifecycle_storage()
+            .await
+            .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
         // A service pins this path as an explicit override and can start as
         // LocalSystem, so automatic directories must be protected before any
         // install/upgrade/rollback step can hand storage to the service.
@@ -140,6 +144,7 @@ fn render_service_plan_for_platform(
         platform,
         &binary_path.display().to_string(),
         &paths.data_dir.display().to_string(),
+        topology,
     );
     let checksum = format!("{:016x}", stable_hash64(definition.as_bytes()));
     let mut runtime_state_paths = vec![

@@ -1,12 +1,14 @@
 //! Windows account identity and private storage provisioning through a bounded
 //! Windows PowerShell 5.1 process. No native unsafe code or executor-blocking I/O.
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use super::{PathError, PathErrorKind, PathPurpose, StorageDirectoryAccess};
 
+const SECURITY_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub(super) async fn current_sid() -> Result<String, PathError> {
-    let sid = run_security_script("Get-RelayStorageSid").await?;
+    let sid = run_security_script("Get-RelayStorageSid", SECURITY_COMMAND_TIMEOUT).await?;
     validate_sid(&sid)?;
     Ok(sid)
 }
@@ -40,6 +42,7 @@ pub(super) async fn prepare_private_directory(
     path: &Path,
     sid: &str,
     access: StorageDirectoryAccess,
+    database_path: Option<&Path>,
 ) -> Result<(), PathError> {
     validate_sid(sid)?;
     let path = path
@@ -54,10 +57,24 @@ pub(super) async fn prepare_private_directory(
         ""
     };
     let command = format!(
-        "Initialize-RelayPrivateStorage -DataPath '{}' -ExpectedSid '{sid}'{existing_only}; 'secured'",
-        path.replace('\'', "''")
+        "Initialize-RelayPrivateStorage -DataPath '{}' -ExpectedSid '{sid}'{existing_only}{}; 'secured'",
+        path.replace('\'', "''"),
+        database_path
+            .map(|path| {
+                let path = path
+                    .to_str()
+                    .filter(|value| !value.contains('\0') && value.len() <= 4096)
+                    .ok_or_else(|| {
+                        security_error(
+                            "Windows database path must be Unicode and at most 4096 bytes",
+                        )
+                    })?;
+                Ok::<_, PathError>(format!(" -DatabasePath '{}'", path.replace('\'', "''")))
+            })
+            .transpose()?
+            .unwrap_or_default()
     );
-    if run_security_script(&command).await? != "secured" {
+    if run_security_script(&command, SECURITY_COMMAND_TIMEOUT).await? != "secured" {
         return Err(security_error(
             "unexpected Windows storage security response",
         ));
@@ -66,7 +83,30 @@ pub(super) async fn prepare_private_directory(
 }
 
 #[cfg(windows)]
-async fn run_security_script(command: &str) -> Result<String, PathError> {
+pub(super) async fn probe_path(path: &Path) -> Result<Option<bool>, PathError> {
+    let path = path
+        .to_str()
+        .filter(|value| !value.contains('\0') && value.len() <= 4096)
+        .ok_or_else(|| {
+            security_error("Windows probe path must be Unicode and at most 4096 bytes")
+        })?;
+    let command = format!(
+        "Get-RelayStoragePathKind -Path '{}'",
+        path.replace('\'', "''")
+    );
+    match run_security_script(&command, super::DATA_DIRECTORY_PROBE_TIMEOUT)
+        .await?
+        .as_str()
+    {
+        "missing" => Ok(None),
+        "directory" | "reparse" => Ok(Some(true)),
+        "file" => Ok(Some(false)),
+        _ => Err(security_error("unexpected Windows path probe response")),
+    }
+}
+
+#[cfg(windows)]
+async fn run_security_script(command: &str, timeout: Duration) -> Result<String, PathError> {
     let system_directory = std::path::PathBuf::from(
         winsafe::GetSystemDirectory().map_err(|error| security_error(error.to_string()))?,
     );
@@ -95,11 +135,11 @@ async fn run_security_script(command: &str) -> Result<String, PathError> {
         "-Command",
         &script,
     ]);
-    bounded_command(&mut process, std::time::Duration::from_secs(10)).await
+    bounded_command(&mut process, timeout).await
 }
 
 #[cfg(not(windows))]
-async fn run_security_script(_command: &str) -> Result<String, PathError> {
+async fn run_security_script(_command: &str, _timeout: Duration) -> Result<String, PathError> {
     Err(security_error(
         "automatic Windows storage requires a Windows host",
     ))

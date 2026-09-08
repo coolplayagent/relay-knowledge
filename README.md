@@ -16,7 +16,8 @@ semantic/vector read models are enabled.
 New Windows installations default to
 `D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`, using the Windows
 account SID and a protected directory ACL. Profile relocation retains the same
-store. Services pinned to this SID path revalidate its ACLs on startup. Existing
+store. Services pinned to this SID path revalidate directory and existing SQLite
+payload ACLs on startup, including descendant links and recovery files. Existing
 LocalAppData data directories remain selected automatically during upgrades.
 Set `RELAY_KNOWLEDGE_DATA_DIR` to an absolute directory to select the main
 database and repository shards together. This overrides `RELAY_KNOWLEDGE_HOME`
