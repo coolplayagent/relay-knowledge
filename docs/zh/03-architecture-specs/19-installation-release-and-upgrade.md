@@ -147,7 +147,8 @@ Windows 升级或显式回滚停止现有服务前，还会读取旧安装定义
 （最多 64 KiB、XML 深度 32，拒绝 DTD 和重复存储设置），按 DATA_DIR 优先于 HOME
 解析其固定路径并只读校验。即使当前运行时选择另一目录，旧库缺失、SID ACL 不安全
 或存在 junction 都会在修改服务之前失败。旧定义必须固定存储路径；预检不补建回滚库，
-启动时仍会重新校验。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
+启动时仍会重新校验。原生 Windows CI 同时执行旧定义解析和检查点存储预检回归，
+实际验证 Windows 盘符与 SID 策略恢复。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
 catalog 的工厂提供默认空实现，保持源码兼容；SQLite 覆盖该方法执行权限和 catalog 检查。
 生命周期计划及执行会只读检查已有 control catalog，不初始化图存储或 schema。
 已有 active partitioned catalog 却选择 single_sqlite 时，在渲染计划或执行服务步骤前报错，

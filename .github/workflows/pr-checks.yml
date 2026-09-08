@@ -124,6 +124,12 @@ jobs:
       - name: Windows storage unit gate
         run: cargo test --lib --all-features paths::windows_storage
 
+      - name: Windows restored storage preflight unit gate
+        run: >-
+          cargo test --lib --all-features --
+          paths::service_storage
+          application::service::lifecycle_plan::checkpoint_storage_tests
+
       - name: Windows legacy SQLite upgrade integration gate
         run: cargo test --test relay_knowledge --all-features windows_upgrade_reopens_existing_graph_for_cli_web_and_pinned_service
 

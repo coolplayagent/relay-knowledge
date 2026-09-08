@@ -157,6 +157,8 @@ DATA_DIR precedence, and validates that storage read-only. Missing old databases
 and unsafe SID ACLs or junctions fail before service changes, even when the
 current runtime selects another directory. The old definition must pin storage;
 preflight never provisions a missing rollback database. Startup repeats validation.
+The native Windows CI gate also runs restored-definition parsing and old/checkpointed
+storage preflight regressions, including Windows drive paths and SID recovery.
 The public `KnowledgeStoreFactory::validate_lifecycle_storage` hook defaults to a
 no-op for catalog-free factories, retaining source compatibility; SQLite overrides
 it to enforce its catalog and permission checks.
