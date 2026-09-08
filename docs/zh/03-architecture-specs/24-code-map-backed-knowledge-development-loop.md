@@ -161,6 +161,8 @@ Agent 在验收时必须给出“requirement → authoritative evidence → test
 | KDL-12 | 首次 source add 发布完整 baseline，拒绝的请求零副作用 | application 与 CLI tests 校验 baseline README/glossary，并覆盖空 id 与保留 id 冲突 preflight |
 | KDL-13 | 所有 source mutation 都保留内置 route 与 recent-only history 边界 | application tests 覆盖保留 source 删除、legacy migration 校验、有界历史与 archive cleanup |
 
+图谱验收覆盖 map 初始化与有序路由、八个 topic 维度、dependency/SDK/build/IaC/design/ontology 投影、端点闭合、删除 source 后保留空 authored topic、退休 shard 排除与不可变 base 重放。兼容边存储用例覆盖 4,096 topic 的零边写入、精确去重计数、limit 前路径/语言准入及 unresolved 外部元数据；fast 自迭代门禁执行这些存储回归。
+
 ---
 
 导航：上一章：[23. HTTP API 参考](23-api-reference.md) | 下一章：[25. 代码索引保留策略](25-code-index-retention.md) | 返回：[架构规格](README.md)

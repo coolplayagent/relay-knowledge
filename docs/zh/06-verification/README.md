@@ -24,6 +24,7 @@
 13. [文档与自迭代准备度验证记录 2026-08-18](13-documentation-self-iteration-readiness-2026-08-18.md)
 14. [软件全域证据优先级验证记录 2026-08-31](14-software-global-evidence-priority-2026-08-31.md)
 15. [Durable Worktree Delta 与固定身份查询验证记录 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
+16. [地图与图关系存储验收 2026-09-07](16-map-graph-storage-acceptance-2026-09-07.md)
 
 ## 证据规则
 

@@ -83,6 +83,9 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
         CREATE INDEX IF NOT EXISTS software_topics_scope
             ON software_topics(source_scope, topic_kind, source_path);
 
+        -- Legacy payload only: new projections derive these edges from their facts.
+        -- Retained for resumable old retention/import cursors. Scope refresh and
+        -- existing bounded retention reclaim old rows; never bulk-delete on open.
         CREATE TABLE IF NOT EXISTS software_relationships (
             relationship_id TEXT PRIMARY KEY,
             repository_id TEXT NOT NULL,
@@ -118,7 +121,7 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
             build_target_count INTEGER NOT NULL DEFAULT 0,
             iac_resource_count INTEGER NOT NULL DEFAULT 0,
             design_element_count INTEGER NOT NULL DEFAULT 0,
-            projection_schema_version INTEGER NOT NULL DEFAULT 7,
+            projection_schema_version INTEGER NOT NULL DEFAULT 8,
             ontology_version TEXT NOT NULL DEFAULT '0',
             source_coverage_json TEXT NOT NULL DEFAULT '{\"source_kinds\":[],\"source_path_count\":0,\"evidence_ref_count\":0}',
             completeness_basis_points INTEGER NOT NULL DEFAULT 0,

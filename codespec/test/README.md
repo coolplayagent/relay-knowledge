@@ -17,7 +17,7 @@ The checked-in workload at `tools/self_iteration/cases/repository_map_targets.js
 
 All eight CLI cases are foundational fast-profile guardrails. A non-zero CLI exit, malformed JSON, invalid map, reordered or missing required response evidence, or changed governed contract fails the corresponding case. The assertions intentionally use public CLI output instead of parsing YAML directly, so they cover repository-root discovery, map assembly, validation, filtering, targeted shard loading, recent-history paging, routing, and JSON rendering together.
 
-The generated `repository_map_graph_fixture` is the current v4 index-backed rail. It commits eight content-addressed topic dimensions plus one locally valid but root-unreferenced orphan shard, then runs the real durable repository index and `repo software` projections. Its three cases require every authorized topic and `documents` edge, reject the orphan, and prove that the combined software view retains map-manifest/shard roles alongside dependency, build, Kubernetes, and design evidence. The separate `software_global_fixture` retains legacy inline-map compatibility, while the 1,024-file performance fixture continues to require every authorized `src` file at cold publication.
+The generated `repository_map_graph_fixture` is the current v4 index-backed rail. It commits eight content-addressed topic dimensions plus one locally valid but root-unreferenced orphan shard, then runs the real durable repository index and `repo software` projections. Its four cases require every authorized topic and `documents` edge, reject the orphan, and prove that the combined software view retains map-manifest/shard roles alongside dependency, build, Kubernetes, and design evidence. The fourth case requires complete typed statement provenance across documentation, manifest dependencies, container deployment and managed runtime services. The separate `software_global_fixture` retains legacy inline-map compatibility, while the 1,024-file performance fixture continues to require every authorized `src` file at cold publication.
 
 Run the focused current-worktree evaluation from the repository root:
 
@@ -26,7 +26,7 @@ cargo build --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledg
 tools/self_iteration/target/debug/relay-knowledge-self-iterate evaluate --workspace . --profile fast --categories foundational --use-current-candidate
 ```
 
-The evaluation must report all eight CLI cases and all three index-backed repository-map cases as passed; an empty selection is not evidence of success. Also run `relay-knowledge map validate --type all --format json` when changing either governed map or its key files.
+The evaluation must report all eight CLI cases and all four index-backed repository-map cases as passed; an empty selection is not evidence of success. Also run `relay-knowledge map validate --type all --format json` when changing either governed map or its key files.
 
 ## Partitioned catalog startup regression contract
 

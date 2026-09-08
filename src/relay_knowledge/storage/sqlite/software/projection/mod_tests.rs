@@ -764,7 +764,7 @@ fn refresh_projection_reads_knowledge_map_topics_from_symbols() {
 }
 
 #[test]
-fn refresh_projection_pages_knowledge_map_topic_symbols() {
+fn software_relationship_storage_keeps_all_map_topics_without_edge_writes() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
     initialize_schema(&connection).expect("software schema should initialize");
@@ -782,17 +782,33 @@ fn refresh_projection_pages_knowledge_map_topic_symbols() {
             |row| row.get(0),
         )
         .expect("topic count should load");
-    let relationship_count: i64 = connection
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec![".knowledge".to_owned()],
+            Vec::new(),
+        )
+        .expect("selector"),
+        SoftwareGlobalKind::Relationships,
+        crate::domain::FreshnessPolicy::AllowStale,
+        500,
+    )
+    .expect("request");
+    let relationships = graph::relationships_for_scope(&connection, "scope-1", &request, 600)
+        .expect("derived relationships should load");
+    let relationship_count = relationships
+        .iter()
+        .filter(|edge| edge.relationship_kind == "documents")
+        .count();
+    let stored_count: usize = connection
         .query_row(
-            "SELECT COUNT(*)
-             FROM software_relationships
-             WHERE source_scope = 'scope-1'
-               AND relationship_kind = 'documents'
-               AND evidence_path = '.knowledge/knowledge-map.yaml'",
+            "SELECT COUNT(*) FROM software_relationships WHERE source_scope = 'scope-1'",
             [],
             |row| row.get(0),
         )
-        .expect("relationship count should load");
+        .expect("legacy count");
+    assert_eq!(stored_count, 0);
 
     assert_eq!(topic_count, 513);
     assert_eq!(relationship_count, 513);
@@ -840,4 +856,66 @@ fn projection_topics_apply_language_filters_to_source_files() {
         projection(&mut connection, markdown_topics).expect("projection should load");
     assert_eq!(markdown_projection.topics.len(), 1);
     assert_eq!(markdown_projection.topics[0].name, "Runtime Configuration");
+}
+
+#[test]
+fn software_relationship_storage_reclaims_legacy_scope_only_after_successful_refresh() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    create_test_schema(&connection);
+    initialize_schema(&connection).unwrap();
+    seed_scope(&connection);
+    refresh_projection(&mut connection, "scope-1").unwrap();
+    connection.execute_batch(
+        "INSERT INTO software_relationships VALUES
+            ('legacy', 'repo', 'scope-1', 'depends_on', 'source', 'file', 'target', 'component', NULL,
+             'declared', 10000, 'extracted', 'Cargo.toml', 7, 7, 1),
+            ('other', 'repo', 'other-scope', 'documents', 'source', 'file', 'topic', 'topic', NULL,
+             'resolved', 10000, 'extracted', 'README.md', 1, 1, 1);
+         UPDATE software_global_status SET projection_schema_version = 7;
+         CREATE TRIGGER reject_ontology BEFORE INSERT ON software_entities
+         BEGIN SELECT RAISE(ABORT, 'test failed projection'); END;"
+    ).unwrap();
+    initialize_schema(&connection).unwrap();
+    let status = status_for_scope(&connection, "scope-1").unwrap().unwrap();
+    assert!(status.stale);
+    assert_eq!(status.projection_schema_version, 8);
+    let count = || {
+        connection
+            .query_row("SELECT COUNT(*) FROM software_relationships", [], |row| {
+                row.get::<_, usize>(0)
+            })
+            .unwrap()
+    };
+    assert_eq!(
+        count(),
+        2,
+        "schema open must not bulk-delete legacy payload"
+    );
+    assert!(refresh_projection(&mut connection, "scope-1").is_err());
+    let remaining: usize = connection
+        .query_row("SELECT COUNT(*) FROM software_relationships", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(remaining, 2, "failed refresh rolls back legacy cleanup");
+    connection
+        .execute("DROP TRIGGER reject_ontology", [])
+        .unwrap();
+    let refreshed = refresh_projection(&mut connection, "scope-1").unwrap();
+    assert!(!refreshed.status.stale);
+    let remaining: String = connection
+        .query_row(
+            "SELECT source_scope FROM software_relationships",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        remaining, "other-scope",
+        "refresh cannot reclaim a different snapshot"
+    );
+    assert_eq!(
+        refreshed.status.relationship_count,
+        graph::relationship_count_for_scope(&connection, "scope-1").unwrap()
+    );
 }

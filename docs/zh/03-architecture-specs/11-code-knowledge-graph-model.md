@@ -32,7 +32,7 @@
 
 `FeatureFlag` v1 只覆盖配置驱动开关：环境变量读取、常见 config/settings key 读取、布尔配置声明、OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用，以及这些读取参与条件表达式时产生的 guarded-code 关系。布尔配置声明来自同一套结构化 configuration fact 和 config-key symbol 抽取结果，并写成 `defines_config`；普通读取或 SDK evaluation 写成 `reads_config`，条件上下文写成 `guards_code`。provider 控制面的 rollout strategy、segment 和 variant 不属于这条静态代码索引路径。查询必须读取版本化图事实和 FTS 文档，不能为了列出全仓库开关在查询热路径递归扫描源码。
 
-代码仓库内 Markdown/spec 文档和 `knowledge/knowledge-map.yaml` 同样参与软件全域投影：heading 和 knowledge map topic 会形成 `software_topics`/`DocumentationUnit`，文档文件与主题形成 `documents` 关系，配置定义/读取和 feature flag facts 会进一步投影成连接文档、配置文件、代码文件与配置 key 的 `software_relationships`。普通 heading 不会仅凭关键词或 README 路径晋升为 `SoftwareSystem`；该晋升要求显式 frontmatter、受控 manifest/schema 或结构化交叉证据。这些关系来自索引和 projection 阶段的已提交事实，不在查询热路径扫描全仓文档或源码。
+代码仓库内 Markdown/spec 文档和 `knowledge/knowledge-map.yaml` 同样参与软件全域投影：heading 和 knowledge map topic 会形成 `software_topics`/`DocumentationUnit`，文档文件与主题形成 `documents` 关系，配置定义/读取和 feature flag facts 会形成连接文档、配置文件、代码文件与配置 key 的兼容关系。Schema 8 从同一 snapshot 的已提交事实有界推导这些关系，不再重复写入 `software_relationships`；类型化 statement 仍保存独立的 provenance 和 fact state。普通 heading 不会仅凭关键词或 README 路径晋升为 `SoftwareSystem`；该晋升要求显式 frontmatter、受控 manifest/schema 或结构化交叉证据。这些关系来自索引和 projection 阶段的已提交事实，不在查询热路径扫描全仓文档或源码。
 
 有界 `all` 投影必须保留每条已返回 dependency usage 的 component target，以及每条已返回 statement 的 subject 和已解析 object target。若 target 落在普通页面之外但仍满足请求的 path 和 language filter，必须在响应预算前通过有界精确查询补入其已索引记录；否则省略该关系。statement endpoint 查询对每个 entity key 至多选择一个确定性 occurrence，且总量受 request limit 限制；替换必须保留每个 endpoint key 的最后一个 occurrence，同时允许重复 occurrence 为缺失 endpoint 腾出位置，并且必须继续扫描有界 statement candidate，直至填满该配额或候选耗尽。响应不得暴露悬空的 `component_id` 或 statement entity key，也不得扩大调用方 filter scope。
 
