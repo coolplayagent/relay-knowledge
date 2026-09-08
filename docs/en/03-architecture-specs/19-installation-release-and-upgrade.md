@@ -60,26 +60,45 @@ Exact code-source fallback is implemented inside the product and must not requir
 
 ## 4. Runtime State
 
-New Windows installations default to `D:\relay-knowledge\users\<profile-id>\data`,
+New Windows installations default to `D:\relay-knowledge\users\<user-sid>\data`,
 containing `relay-knowledge.sqlite` and shards under `stores/repositories/`.
-The profile id is SHA-256 over losslessly encoded LocalAppData path components
-(or the HOME fallback), with ASCII case folded, both Windows separators accepted,
-empty/`.` components omitted, and a NUL delimiter after each component. The
-fixed digest contract prevents accounts from automatically sharing their main
-database or shard namespace and keeps equivalent path spellings stable. Other Windows
-runtime directories retain AppData/TEMP defaults; Linux and macOS defaults are
+The user SID comes from the current Windows process token through Windows
+PowerShell 5.1, so account identity survives profile and LocalAppData relocation.
+The paths boundary uses a fixed executable below SystemRoot, noninteractive
+commands, a 10-second deadline per process, a 4096-byte output cap, and child
+termination on timeout or cancellation. No process environment values or account
+names serve as SID fallbacks. Other Windows runtime directories retain AppData/TEMP defaults; Linux and macOS defaults are
 unchanged. Data-directory precedence is `RELAY_KNOWLEDGE_DATA_DIR` >
 `RELAY_KNOWLEDGE_HOME/data` > existing Windows LocalAppData data directory > new
 platform default. Environment overrides must be nonempty absolute directories
 without `..`. New installations require a writable D: directory or an explicit
-override. `RuntimePaths::resolve` computes lexical defaults only; application
-startup uses `resolve_for_runtime` to preserve existing storage through at most
+override. `RuntimePaths::resolve` requires an explicit Windows data/home override;
+application startup uses `resolve_for_runtime` to obtain the SID and preserve
+existing storage through at most
 two asynchronous metadata probes, each with a five-second waiting deadline.
 Explicit data/home overrides bypass discovery. Missing legacy directories select
 the new default; existing legacy directories and symlinks remain selected.
 Non-directory paths, inspection errors, or timeouts fail visibly. Two existing
 old/new directories require an explicit data override instead of guessing which
 store is authoritative. No database is opened or moved during path resolution.
+
+Before selecting a new default, startup creates the SID directory and its `data`
+child with a protected DACL owned by the account. It grants inheritable full
+control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
+creation. Existing directories must already satisfy that policy; startup never
+silently rewrites permissions or adopts a permissive directory. Ancestors are
+checked from the volume root downward (at most 32): reparse points, untrusted
+owners, and grants allowing other accounts to delete, change attributes, change
+permissions, or take ownership are rejected. Read/traverse/create-child rights
+on shared ancestors are allowed. A missing or insecure D: volume fails visibly;
+an administrator can provision the shared ancestors with an administrator owner
+and restricted write/delete rights, or users can explicitly choose a private
+location. Explicit HOME/DATA overrides and retained legacy storage keep their
+operator-managed ACL policy. Service definitions pin the chosen directory, and
+the default ACL permits LocalSystem service access. No ACL migration runs on
+uninstall or rollback. These rules use Microsoft's
+[SID identity contract](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
+and [directory creation with security](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1).
 
 This default change does not alter SQLite schemas or automatically move old
 `%LOCALAPPDATA%\relay-knowledge\data` databases. Upgrades automatically retain
@@ -91,10 +110,15 @@ data directory; changing the installation shell environment alone cannot move
 an existing service, so regenerate and apply its lifecycle plan. Rollback must
 explicitly select the old directory and obey database backup requirements.
 Uninstall still retains data by default. Path unit tests cover the Windows main
-database/shard isolation, fixed profile identities, environment precedence,
+database/shard isolation, stable account identities, environment precedence,
 legacy selection, conflicting directories, and probe errors. Integration tests
 verify overridden persistence across CLI processes and reopen a populated legacy
 graph through upgraded CLI/Web configuration for both storage topologies.
+The `windows-storage` PR job runs native PowerShell ACL checks, Windows Rust unit
+tests, and legacy SQLite upgrade integration tests. It covers protected child/file
+inheritance, unsafe existing and ancestor ACLs, junction rejection, stable SIDs,
+and populated legacy stores. Linux unit tests cover subprocess failures, output
+limits, timeout, and cancellation; they do not impersonate a Windows token.
 
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations. Early databases may have a `code_repository_schema_migrations` table containing only the `name` column; schema initialization must idempotently add `applied_at_ms INTEGER NOT NULL DEFAULT 0` before running retention, search-owner, or any other migration that writes a capability marker, without requiring operators to rebuild the database or add the column manually.
 The code-search ownership v2 upgrade does not rewrite legacy FTS data during synchronous database open. Startup installs the non-replacing writer and exact metadata serving gate, marks existing scopes and their active repositories stale once under `search-owner-v2-writer-and-serving-gate`, and advances source-scope identity with the `search-owner-v2` fact component. The marker proves only that the writer and serving boundary are installed; it does not certify old or imported FTS rows. Every FTS `MATCH` read requires exact rowid/scope/kind/record/path metadata ownership, while an ordinary durable full-index task with its existing lease, checkpoint, and publication fence replaces the stale scope. Database import preserves search freshness only when the attached source has this marker, the complete search/metadata schema shape, every indexed metadata row joins one FTS row by rowid and full identity, and—when the scope is a fact-versioned Git snapshot—an identity matching the imported repository, tree, filters, and current fact version. Import and incremental clone enumerate the indexed metadata owner table and copy only those joined rows; they never reverse-count FTS through its `UNINDEXED` scope/kind columns. A raw FTS row without metadata is not copied or served and remains isolated for bounded `search_orphans` GC. A metadata-side orphan, duplicate owner identity, or affected-count mismatch rolls back repository metadata, facts, copied search rows, and scope publication together. A legacy import without that capability may retain base facts for recovery, but copies no search rows and is persisted stale with a full-reindex reason; an otherwise exact import with an old fact-version identity is likewise explicitly stale. Manual/custom non-fact scopes retain their compatibility contract. Upgrade and doctor output must not report search ownership fresh merely because database open, marker creation, or base-fact import completed.

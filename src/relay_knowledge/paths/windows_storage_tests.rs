@@ -39,51 +39,46 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn windows_profile_directory_identity_is_stable_and_account_scoped() {
-    let alice = windows_data_directory(Path::new(r"C:\Users\Alice\AppData\Local"));
+fn windows_account_storage_survives_profile_relocation() {
+    let sid = "S-1-5-21-1-2-3-1001";
+    let data = windows_data_directory(sid).unwrap();
     assert_eq!(
-        alice,
-        PathBuf::from(
-            "D:/relay-knowledge/users/dc1293f29700252a5b44de80167715a182d410224faa8aa434540635880df529/data"
-        )
+        data,
+        PathBuf::from("D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data")
     );
-    for spelling in [
-        "c:/users/alice/appdata/local/",
-        "C:/Users/./Alice/AppData/Local",
-        r"C:\USERS\ALICE\APPDATA\LOCAL",
-    ] {
-        assert_eq!(windows_data_directory(Path::new(spelling)), alice);
-    }
-    for other in [
-        r"C:\Users\Bob\AppData\Local",
-        r"E:\Users\Alice\AppData\Local",
-    ] {
-        assert_ne!(windows_data_directory(Path::new(other)), alice);
-    }
+    let fixture = Fixture::new();
+    let mut env = fixture.environment();
+    let first = windows_defaults(&env.platform, Some(&data)).unwrap();
+    env.platform.local_app_data = Some(fixture.0.join("relocated-profile/local"));
+    env.platform.home_dir = Some(fixture.0.join("relocated-profile"));
+    let moved =
+        windows_defaults(&env.platform, Some(&windows_data_directory(sid).unwrap())).unwrap();
+    assert_eq!(first.database_file(), moved.database_file());
+    assert_eq!(first.repository_shards_dir(), moved.repository_shards_dir());
+    let other = windows_defaults(
+        &env.platform,
+        Some(&windows_data_directory("S-1-5-21-1-2-3-1002").unwrap()),
+    )
+    .unwrap();
+    assert_ne!(first.database_file(), other.database_file());
+    assert_ne!(
+        first.repository_shard_database_file("repo:same"),
+        other.repository_shard_database_file("repo:same")
+    );
 }
 
 #[test]
-fn windows_users_receive_distinct_main_databases_and_shards() {
+fn lexical_windows_resolution_requires_an_explicit_data_directory() {
     let fixture = Fixture::new();
-    let first = windows_defaults(&fixture.environment().platform).unwrap();
-    let mut other = fixture.environment();
-    other.platform.local_app_data = Some(fixture.0.join("other-user/local"));
-    let second = windows_defaults(&other.platform).unwrap();
-    assert_ne!(first.database_file(), second.database_file());
-    assert_ne!(
-        first.repository_shard_database_file("repo:same"),
-        second.repository_shard_database_file("repo:same")
-    );
-    assert!(first.data_dir.starts_with("D:/relay-knowledge/users"));
-    assert!(second.data_dir.starts_with("D:/relay-knowledge/users"));
+    let env = fixture.environment();
+    let error = RuntimePaths::resolve(&env.platform, &env.paths).unwrap_err();
+    assert!(error.to_string().contains("resolve_for_runtime"));
 }
 
 #[tokio::test]
 async fn new_windows_install_selects_d_directory_without_creating_it() {
     let fixture = Fixture::new();
-    let current = windows_defaults(&fixture.environment().platform)
-        .unwrap()
-        .data_dir;
+    let current = windows_data_directory("S-1-5-21-1-2-3-1001").unwrap();
     let legacy = fixture.0.join("absent-legacy");
     assert_eq!(
         select_windows_data_directory(&current, &legacy)
@@ -219,6 +214,7 @@ async fn runtime_data_and_home_overrides_bypass_legacy_discovery() {
     assert_eq!(selected.data_dir, fixture.0.join("selected-home/data"));
 }
 
+#[cfg(windows)]
 #[tokio::test]
 async fn runtime_resolution_discovers_legacy_data_without_overrides() {
     let fixture = Fixture::new();

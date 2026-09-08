@@ -806,7 +806,7 @@ relay-knowledge audit query --limit 50 --format json
 | 路径 | 默认值 |
 |------|--------|
 | config | `%APPDATA%/relay-knowledge` |
-| data | 新安装：`D:\relay-knowledge\users\<profile-id>\data`；升级保留已有 LocalAppData 数据目录；可用 `RELAY_KNOWLEDGE_DATA_DIR` 覆盖 |
+| data | 新安装：`D:\relay-knowledge\users\<user-sid>\data`；升级保留已有 LocalAppData 数据目录；可用 `RELAY_KNOWLEDGE_DATA_DIR` 覆盖 |
 | state | `%LOCALAPPDATA%/relay-knowledge/state` |
 | cache | `%LOCALAPPDATA%/relay-knowledge/cache` |
 | logs | `%LOCALAPPDATA%/relay-knowledge/logs` |

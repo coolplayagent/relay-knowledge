@@ -95,11 +95,14 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 After setting `RELAY_KNOWLEDGE_HOME`, config, data, state, cache, logs, temp, runtime, and service directories are placed under that root. See [Chapter 12: Advanced Configuration](12-advanced-configuration.md) for the full directory override list.
 
 New Windows installations store SQLite in
-`D:\relay-knowledge\users\<profile-id>\data\relay-knowledge.sqlite`, with shards
-under `stores/repositories/` in the same data directory. The profile id is the
-SHA-256 digest of the normalized LocalAppData path (or its HOME fallback), so
-different accounts do not automatically share a database. ASCII case, path
-separators, and `.` components do not change the id. `status --format json`
+`D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`, with shards
+under `stores/repositories/` in the same data directory. The user SID comes from
+the Windows process token, so profile relocation and LocalAppData changes do not
+change the default store. New account directories receive a protected ACL for
+the account, SYSTEM, and Administrators. Unsafe existing ACLs, reparse points,
+or ancestors granting other accounts deletion or permission changes are rejected.
+Automatic defaults require Windows PowerShell 5.1 and an ACL-capable local volume;
+use an explicitly configured private directory if D: cannot meet these conditions. `status --format json`
 shows the resolved directory. Config, logs, and other runtime directories retain
 their AppData/TEMP defaults. Linux and macOS defaults are unchanged.
 
@@ -108,7 +111,7 @@ Data directory precedence is `RELAY_KNOWLEDGE_DATA_DIR` >
 platform default. Without an explicit override, startup preserves
 `%LOCALAPPDATA%\relay-knowledge\data` whenever that directory exists, including
 its database, recovery files, and shards. If both the old directory and the new
-profile directory exist, startup requires `RELAY_KNOWLEDGE_DATA_DIR` to select
+account directory exist, startup requires `RELAY_KNOWLEDGE_DATA_DIR` to select
 one explicitly. Directory inspection errors or timeouts are reported instead
 of silently opening an empty database elsewhere.
 

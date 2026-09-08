@@ -149,7 +149,13 @@ fn windows_temp_dir_is_scoped_under_application_directory() {
     };
 
     // Exercise Windows defaults without interpreting drive letters on a Unix host.
-    let paths = windows_defaults(&environment).expect("windows defaults should resolve");
+    let paths = windows_defaults(
+        &environment,
+        Some(Path::new(
+            "D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data",
+        )),
+    )
+    .expect("windows defaults should resolve");
 
     assert_eq!(
         paths.temp_dir,
@@ -230,7 +236,13 @@ fn windows_falls_back_to_home_appdata_paths() {
         temp_dir: None,
     };
 
-    let paths = windows_defaults(&environment).expect("windows fallback should resolve");
+    let paths = windows_defaults(
+        &environment,
+        Some(Path::new(
+            "D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data",
+        )),
+    )
+    .expect("windows fallback should resolve");
 
     assert_eq!(
         paths.config_dir,
@@ -238,7 +250,7 @@ fn windows_falls_back_to_home_appdata_paths() {
     );
     assert_eq!(
         paths.data_dir,
-        windows_data_directory(Path::new("/Users/Alice/AppData/Local"))
+        windows_data_directory("S-1-5-21-1-2-3-1001").unwrap()
     );
     assert_eq!(
         paths.temp_dir,
@@ -312,7 +324,13 @@ fn windows_sqlite_defaults_use_d_drive_for_main_database_and_shards() {
         ],
     )
     .expect("environment should parse");
-    let paths = windows_defaults(&config.platform).expect("Windows defaults should resolve");
+    let paths = windows_defaults(
+        &config.platform,
+        Some(Path::new(
+            "D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data",
+        )),
+    )
+    .expect("Windows defaults should resolve");
 
     assert!(paths.data_dir.starts_with("D:/relay-knowledge/users"));
     assert!(paths.data_dir.ends_with("data"));
@@ -335,7 +353,14 @@ fn windows_sqlite_defaults_use_d_drive_for_main_database_and_shards() {
     // The complete resolver uses native std::path validation on Windows.
     #[cfg(windows)]
     assert_eq!(
-        RuntimePaths::resolve(&config.platform, &config.paths).expect("absolute Windows paths"),
+        RuntimePaths::resolve(
+            &config.platform,
+            &PathEnvOverrides {
+                data_dir: Some(paths.data_dir.clone()),
+                ..config.paths.clone()
+            }
+        )
+        .expect("absolute Windows paths"),
         paths
     );
 }

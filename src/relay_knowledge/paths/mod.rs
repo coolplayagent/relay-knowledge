@@ -12,8 +12,6 @@ use std::{
     time::Duration,
 };
 
-use sha2::{Digest, Sha256};
-
 use crate::{
     env::{PathEnvOverrides, PlatformEnvironment, PlatformKind, RELAY_KNOWLEDGE_DATA_DIR},
     identity::stable_hash64,
@@ -25,6 +23,7 @@ use crate::{
 };
 
 mod repository_root;
+mod windows_storage;
 
 /// Default Windows data volume; runtime-home and data-directory overrides take precedence.
 const WINDOWS_DATA_VOLUME: &str = "D:/";
@@ -48,7 +47,8 @@ pub struct RuntimePaths {
 
 impl RuntimePaths {
     /// Resolves lexical defaults and overrides without inspecting existing storage.
-    /// Application startup must use `resolve_for_runtime` to preserve legacy stores.
+    /// Windows callers must supply a data override or use `resolve_for_runtime`,
+    /// which obtains the account SID and preserves legacy stores.
     pub fn resolve(
         environment: &PlatformEnvironment,
         overrides: &PathEnvOverrides,
@@ -56,7 +56,7 @@ impl RuntimePaths {
         let defaults = if let Some(root) = overrides.home.as_deref() {
             runtime_home_defaults(root)?
         } else {
-            platform_defaults(environment)?
+            platform_defaults(environment, overrides.data_dir.as_deref())?
         };
 
         let resolved = Self {
@@ -119,10 +119,13 @@ impl RuntimePaths {
         {
             let local_base = windows_local_base(environment)?;
             let legacy = local_base.join(APP_DIR_NAME).join("data");
-            effective.data_dir = Some(
-                select_windows_data_directory(&windows_data_directory(&local_base), &legacy)
-                    .await?,
-            );
+            let sid = windows_storage::current_sid().await?;
+            let current = windows_data_directory(&sid)?;
+            let selected = select_windows_data_directory(&current, &legacy).await?;
+            if selected == current {
+                windows_storage::prepare_private_directory(&selected, &sid).await?;
+            }
+            effective.data_dir = Some(selected);
         }
         Self::resolve(environment, &effective)
     }
@@ -276,11 +279,16 @@ pub enum PathErrorKind {
     ParentComponent { path: PathBuf },
     DataDirectoryProbe { path: PathBuf, reason: String },
     ConflictingDataDirectories { current: PathBuf, legacy: PathBuf },
+    WindowsStorageSecurity { reason: String },
 }
 
 impl fmt::Display for PathError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
+            PathErrorKind::WindowsStorageSecurity { reason } => write!(
+                formatter,
+                "cannot select secure Windows storage: {reason}; configure a private directory with {RELAY_KNOWLEDGE_DATA_DIR} or ask an administrator to provision secure D-drive storage"
+            ),
             PathErrorKind::MissingBase { variable } => write!(
                 formatter,
                 "cannot resolve {} directory because {variable} is unavailable",
@@ -330,10 +338,13 @@ fn runtime_home_defaults(root: &Path) -> Result<RuntimePaths, PathError> {
     })
 }
 
-fn platform_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, PathError> {
+fn platform_defaults(
+    environment: &PlatformEnvironment,
+    data_override: Option<&Path>,
+) -> Result<RuntimePaths, PathError> {
     match environment.platform {
         PlatformKind::Macos => macos_defaults(environment),
-        PlatformKind::Windows => windows_defaults(environment),
+        PlatformKind::Windows => windows_defaults(environment, data_override),
         PlatformKind::Unix | PlatformKind::Other => unix_defaults(environment),
     }
 }
@@ -420,7 +431,10 @@ fn macos_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, Pat
     })
 }
 
-fn windows_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, PathError> {
+fn windows_defaults(
+    environment: &PlatformEnvironment,
+    data_override: Option<&Path>,
+) -> Result<RuntimePaths, PathError> {
     let config_base = environment
         .app_data
         .as_deref()
@@ -445,7 +459,15 @@ fn windows_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, P
 
     Ok(RuntimePaths {
         config_dir: config_base.join(APP_DIR_NAME),
-        data_dir: windows_data_directory(&local_base),
+        data_dir: data_override
+            .map(Path::to_path_buf)
+            .ok_or_else(|| PathError {
+                purpose: PathPurpose::Data,
+                kind: PathErrorKind::WindowsStorageSecurity {
+                    reason: "account SID requires async RuntimePaths::resolve_for_runtime"
+                        .to_owned(),
+                },
+            })?,
         state_dir: root.join("state"),
         cache_dir: root.join("cache"),
         log_dir: root.join("logs"),
@@ -472,25 +494,13 @@ fn windows_local_base(environment: &PlatformEnvironment) -> Result<PathBuf, Path
     Ok(base)
 }
 
-fn windows_data_directory(local_base: &Path) -> PathBuf {
-    // Hash losslessly encoded path components, folding ASCII case and separators
-    // so ordinary Windows path spelling changes do not select another store.
-    let mut identity = Sha256::new();
-    for component in local_base
-        .as_os_str()
-        .as_encoded_bytes()
-        .split(|byte| matches!(*byte, b'/' | b'\\'))
-        .filter(|component| !component.is_empty() && *component != b".")
-    {
-        let normalized: Vec<_> = component.iter().map(u8::to_ascii_lowercase).collect();
-        identity.update(normalized);
-        identity.update([0]);
-    }
-    PathBuf::from(WINDOWS_DATA_VOLUME)
+fn windows_data_directory(sid: &str) -> Result<PathBuf, PathError> {
+    windows_storage::validate_sid(sid)?;
+    Ok(PathBuf::from(WINDOWS_DATA_VOLUME)
         .join(APP_DIR_NAME)
         .join("users")
-        .join(format!("{:x}", identity.finalize()))
-        .join("data")
+        .join(sid)
+        .join("data"))
 }
 
 async fn select_windows_data_directory(

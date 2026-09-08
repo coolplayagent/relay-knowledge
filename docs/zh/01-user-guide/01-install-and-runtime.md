@@ -99,10 +99,13 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。完整目录覆盖项见 [第 12 章 高级配置参考](12-advanced-configuration.md)。
 
 Windows 新安装的主库为
-`D:\relay-knowledge\users\<profile-id>\data\relay-knowledge.sqlite`，
+`D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`，
 仓库分片位于同一数据目录下的 `stores/repositories/`。
-`profile-id` 是归一化 LocalAppData 路径（或 HOME 回退路径）的 SHA-256 摘要，
-不同账户不会自动共用默认库；ASCII 大小写、分隔符和 `.` 路径分量不会改变该 id。
+SID 来自 Windows 进程令牌，迁移用户配置目录或修改 LocalAppData 不会改变默认库。
+新账户目录在创建时设置受保护 ACL，仅允许该账户、SYSTEM 和 Administrators。
+已有目录 ACL 不安全、存在重解析点，或父目录允许其他账户删除或修改权限时会报错。
+自动默认路径需要 Windows PowerShell 5.1 和支持 ACL 的本地卷；D: 不满足条件时，
+请显式指定已配置私有权限的数据目录。
 `status --format json` 会显示实际目录。配置、日志等其他目录仍使用 AppData/TEMP 默认值，
 Linux、macOS 的数据目录规则不变。
 
