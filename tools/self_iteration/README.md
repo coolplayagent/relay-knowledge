@@ -4,6 +4,8 @@
 
 `tools/self_iteration` is the standalone Rust self-iteration harness. It asks Codex to generate candidate patches, then accepts only candidates that improve repository retrieval, semantic/vector retrieval, performance, stability, or research quality against fixed evaluation workloads. It stays outside the product crate `src/` tree and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; the repository-root `self-iterate.sh` builds and runs the Rust binary directly.
 
+The `canonical_calls_wide` fast/performance guardrail indexes 2,048 unrelated Java calls plus one unique target. Cases can set `canonical_from_definition: true` to resolve the configured symbol query through the real definition CLI before measuring callers/callees. Both commands are retained in the report; only the call query enters latency metrics (2,000 ms p95 for this fixture). Missing or ambiguous definition identities fail the guardrail. This also detects absent exact-call query indexes, which the product refuses to replace with a scope scan.
+
 ## Quick Path
 
 ### Five-Minute Start

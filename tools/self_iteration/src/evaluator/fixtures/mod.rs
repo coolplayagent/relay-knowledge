@@ -1,6 +1,7 @@
 mod additional_languages;
 mod agent_workflow;
 mod c_and_cpp;
+mod canonical_calls;
 mod common_languages;
 mod cross_language;
 mod incremental;

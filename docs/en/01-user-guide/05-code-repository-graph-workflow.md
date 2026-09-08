@@ -124,7 +124,13 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
-For `callers` and `callees`, pass the complete method `canonical_symbol_id` returned by a definition result as `--query`. A `repo://...` query is an exact, case-sensitive selector of the callee or caller respectively, including its repository and module identity. It never falls back to a same-name method or text search when no edge matches. Class IDs select only edges attached to that exact symbol; they do not aggregate every method in a class. Java method calls are queryable with the method name or its canonical ID.
+For `callers` and `callees`, pass a definition result’s complete `canonical_symbol_id` (`repo://...`) or `symbol_snapshot_id` (`symbol:...`) as `--query`. Canonical selectors are case-sensitive and retain repository/module identity. If a canonical ID has multiple definitions in the served scope, such as Java/C++ overloads, the query returns an ambiguity error instead of combining their call chains. Select the desired structured definition (its `retrieval_layers` includes `symbol`), copy its `symbol_snapshot_id`, and reuse the same indexed ref. Snapshot selectors never cross source scopes. An unknown exact selector returns no hits and never falls back to same-name methods or text search. Class IDs do not aggregate all methods. Inline `path:` and `name:` filters apply before bounded call candidate selection. Upgrading to the `canonical-call-selectors-v1` read model makes earlier scopes stale; run `repo index <alias> --ref <ref>` to rebuild through the durable indexing workflow. Exact selectors reject missing indexes until that work completes. Copy snapshot IDs again from the rebuilt scope; canonical IDs are not rewritten. `repo index --reset` resets unfinished task state and does not force a completed scope to rebuild.
+
+```sh
+relay-knowledge repo query repo --query dispatch --kind definition --ref HEAD --format json
+# Copy symbol_snapshot_id from the desired overload definition into the next query.
+relay-knowledge repo query repo --query "<symbol_snapshot_id>" --kind callees --ref HEAD --format json
+```
 
 
 Agents can also put structured filters inside `--query`, for example

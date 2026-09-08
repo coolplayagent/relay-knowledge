@@ -124,7 +124,13 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
-`callers` 和 `callees` 可将 definition 返回的方法完整 `canonical_symbol_id` 作为 `--query`。`repo://...` 查询分别精确、区分大小写地选择被调用方或调用方，并保留仓库及模块身份；无匹配边时不会回退到同名方法或文本检索。类 ID 仅选择附着于该精确符号的边，不聚合类中全部方法。Java 方法调用可通过方法名或其 canonical ID 查询。
+`callers` 和 `callees` 支持将 definition 结果的完整 `canonical_symbol_id`（`repo://...`）或 `symbol_snapshot_id`（`symbol:...`）作为 `--query`。canonical 查询区分大小写并保留仓库、模块身份；若所服务 scope 中该 ID 对应多个定义（例如 Java/C++ 重载），返回歧义错误，不混合不同方法的调用链。请选择 `retrieval_layers` 含 `symbol` 的所需结构化定义，复制其 `symbol_snapshot_id` 并使用相同已索引 ref；snapshot 查询不会跨 source scope。未知精确 ID 返回空结果，不回退同名方法或文本检索。类 ID 不聚合全部方法。内联 `path:`、`name:` 过滤先于有界调用候选截断。 升级到 `canonical-call-selectors-v1` 读模型后旧 scope 失效；运行 `repo index <alias> --ref <ref>` 通过持久索引流程重建。完成前精确查询拒绝缺失索引。请从重建后的 scope 重新复制 snapshot ID；canonical ID 不作改写。`repo index --reset` 只重置未完成任务状态，不会强制重建已完成 scope。
+
+```sh
+relay-knowledge repo query repo --query dispatch --kind definition --ref HEAD --format json
+# 将所需重载定义返回的完整 symbol_snapshot_id 填入下一条查询。
+relay-knowledge repo query repo --query "<symbol_snapshot_id>" --kind callees --ref HEAD --format json
+```
 
 
 Agent 也可以把结构化过滤标签直接写进 `--query`，例如

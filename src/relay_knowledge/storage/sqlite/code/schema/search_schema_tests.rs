@@ -410,9 +410,7 @@ fn import_scope_path_line_index_has_exact_startup_shape_and_supports_path_seek()
     prepare_query_indexes_for_empty_owners(&connection)
         .expect("fresh target tables should receive all query indexes");
 
-    let descriptor = SEARCH_QUERY_INDEXES
-        .last()
-        .expect("the query-index plan should not be empty");
+    let descriptor = &SEARCH_QUERY_INDEXES[16];
     assert_eq!(
         descriptor.name,
         "code_repository_imports_scope_path_line_lookup"
@@ -461,18 +459,13 @@ fn version_one_finalization_cursor_builds_the_appended_import_index() {
         advance,
         SearchQueryIndexAdvance::Created {
             completed_unit: 16,
-            plan_complete: true,
+            plan_complete: false,
         }
     );
     assert_eq!(
-        persisted_query_index_columns(
-            &connection,
-            SEARCH_QUERY_INDEXES
-                .last()
-                .expect("the appended descriptor should exist"),
-        )
-        .expect("appended import index shape should load")
-        .expect("appended import index should persist"),
+        persisted_query_index_columns(&connection, &SEARCH_QUERY_INDEXES[16],)
+            .expect("appended import index shape should load")
+            .expect("appended import index should persist"),
         ["source_scope", "path", "line_start", "line_end"]
     );
     require_persisted_query_index(&connection, &SEARCH_QUERY_INDEXES[1])

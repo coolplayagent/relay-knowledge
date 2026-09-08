@@ -1,0 +1,18 @@
+{
+  "repositories": {
+    "canonical_calls_wide": {
+      "generated_fixture": "canonical_calls_wide_v1",
+      "alias": "canonical-calls-wide-self-iteration",
+      "ref": "HEAD", "scope": "all", "path_filters": ["src"],
+      "isolated_index_home": true, "cold_index_min_file_count": 34,
+      "query_p95_budget_ms": 2000
+    }
+  },
+  "query_cases": [{
+    "id": "canonical_calls_wide_exact_target", "repository": "canonical_calls_wide",
+    "query": "selectedOperation", "kind": "callers", "canonical_from_definition": true,
+    "guardrail": true, "limit": 5, "max_rank": 1, "degraded_reason": false,
+    "expected": [{"path": "src/Caller.java", "retrieval_layer": "call_graph", "excerpt_contains": "selectedOperation"}],
+    "case_group": "index_performance"
+  }]
+}

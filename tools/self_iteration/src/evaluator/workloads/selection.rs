@@ -286,6 +286,7 @@ fn fast_repository_names() -> Vec<String> {
                 "grep_budget_fixture".to_owned(),
                 "index_performance_many_files".to_owned(),
                 "index_performance_c_fragment".to_owned(),
+                "canonical_calls_wide".to_owned(),
                 "c_syntax_fixture".to_owned(),
                 "cpp_syntax_fixture".to_owned(),
                 "cross_language_syntax_fixture".to_owned(),

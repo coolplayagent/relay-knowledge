@@ -12,6 +12,7 @@ pub(super) struct CallIdentityQuery {
     pub(super) direction: CallIdentityDirection,
     symbol: Option<SymbolIdentityQuery>,
     pub(super) canonical_id: Option<String>,
+    pub(super) snapshot_id: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,7 @@ impl CallIdentityQuery {
 
     fn is_scoped(&self) -> bool {
         self.canonical_id.is_some()
+            || self.snapshot_id.is_some()
             || self
                 .symbol
                 .as_ref()
@@ -36,15 +38,25 @@ impl CallIdentityQuery {
     }
 
     pub(super) fn match_column(&self) -> &'static str {
-        match (self.direction, self.canonical_id.is_some()) {
-            (CallIdentityDirection::Caller, true) => "caller.canonical_symbol_id",
-            (CallIdentityDirection::Callee, true) => "callee.canonical_symbol_id",
+        match (
+            self.direction,
+            self.canonical_id.is_some() || self.snapshot_id.is_some(),
+        ) {
+            (CallIdentityDirection::Caller, true) => "c.caller_symbol_snapshot_id",
+            (CallIdentityDirection::Callee, true) => "c.callee_symbol_snapshot_id",
             (CallIdentityDirection::Caller, false) => "c.caller_name",
             (CallIdentityDirection::Callee, false) => "c.callee_name",
         }
     }
 
     pub(super) fn matches_row(&self, row: &CallRow) -> bool {
+        if let Some(snapshot_id) = &self.snapshot_id {
+            let actual = match self.direction {
+                CallIdentityDirection::Caller => &row.caller_symbol_snapshot_id,
+                CallIdentityDirection::Callee => &row.callee_symbol_snapshot_id,
+            };
+            return actual.as_ref() == Some(snapshot_id);
+        }
         if let Some(canonical_id) = &self.canonical_id {
             let actual = match self.direction {
                 CallIdentityDirection::Caller => &row.caller_canonical_symbol_id,
@@ -86,7 +98,8 @@ pub(super) fn call_identity_query(request: &CodeRetrievalRequest) -> Option<Call
     };
     let query = request.query.trim();
     let canonical_id = query.starts_with("repo://").then(|| query.to_owned());
-    let symbol = if canonical_id.is_some() {
+    let snapshot_id = query.starts_with("symbol:").then(|| query.to_owned());
+    let symbol = if canonical_id.is_some() || snapshot_id.is_some() {
         None
     } else {
         Some(SymbolIdentityQuery::from_query(query)?)
@@ -95,6 +108,7 @@ pub(super) fn call_identity_query(request: &CodeRetrievalRequest) -> Option<Call
         direction,
         symbol,
         canonical_id,
+        snapshot_id,
     })
 }
 

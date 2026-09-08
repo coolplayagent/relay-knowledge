@@ -301,7 +301,7 @@ async fn code_index_task_v3_query_index_ordinal_is_durable_across_reopen() {
     else {
         panic!("one missing descriptor should leave finalization pending");
     };
-    assert_eq!(checkpoint_state, "finalizing:build_query_indexes:v3:2");
+    assert_eq!(checkpoint_state, "finalizing:build_query_indexes:v4:2");
     assert_eq!(
         code_query_index_subphase(&checkpoint_state).map(|cursor| cursor.completed_unit),
         Some(2)
@@ -345,7 +345,7 @@ async fn code_index_task_v3_query_index_ordinal_is_durable_across_reopen() {
     assert!(matches!(
         resumed,
         super::finalization::CodeIndexFinalizationAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:build_query_indexes:v3:3"
+            if checkpoint_state == "finalizing:build_query_indexes:v4:3"
     ));
     let second_index_rebuilt = store
         .run(|connection| {
@@ -416,6 +416,14 @@ async fn every_legacy_coarse_checkpoint_repairs_and_restores_across_reopen() {
         .run(|connection| {
             super::super::super::schema::ensure_code_query_indexes(connection)?;
             connection.execute("DROP INDEX code_repository_calls_caller_lookup", [])?;
+            connection.execute(
+                "DROP INDEX code_repository_calls_caller_snapshot_lookup",
+                [],
+            )?;
+            connection.execute(
+                "DROP INDEX code_repository_calls_callee_snapshot_lookup",
+                [],
+            )?;
             connection.execute(
                 "ALTER TABLE code_repository_calls DROP COLUMN line_start",
                 [],

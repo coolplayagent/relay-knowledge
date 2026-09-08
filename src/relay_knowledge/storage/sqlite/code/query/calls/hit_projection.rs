@@ -106,6 +106,16 @@ pub(super) fn call_rows_to_hits(
                     ),
                 ),
             };
+            let selected_snapshot = match request.code_query_kind {
+                CodeQueryKind::Callers => row.callee_symbol_snapshot_id.as_deref(),
+                CodeQueryKind::Callees => row.caller_symbol_snapshot_id.as_deref(),
+                _ => None,
+            };
+            let base_score = if selected_snapshot == Some(query) {
+                base_score.max(4.0)
+            } else {
+                base_score
+            };
             let source_path_bonus = call_site_source_path_bonus(
                 base_score,
                 &row.path,

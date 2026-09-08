@@ -25,7 +25,7 @@ pub(in crate::storage::sqlite) use self::search_schema::validate_existing_query_
 pub(in crate::storage::sqlite::code) use self::search_schema::{
     SearchQueryIndexAdvance, advance_search_query_index_repair, advance_search_query_indexes,
     prepare_query_indexes_for_empty_owners, prepare_restart_query_indexes,
-    query_indexes_ready_for_fact_publication,
+    query_indexes_ready_for_fact_publication, require_canonical_call_query_indexes,
 };
 use self::search_schema::{initialize_search_schema, require_query_indexes_for_fact_publication};
 use super::super::schema::marker::{

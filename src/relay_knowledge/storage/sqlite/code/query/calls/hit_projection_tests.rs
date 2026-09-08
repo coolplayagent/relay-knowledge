@@ -178,3 +178,20 @@ fn caller_row(caller_name: &str, canonical_id: &str, line: u32) -> CallRow {
         is_generated: false,
     }
 }
+
+#[test]
+fn exact_snapshot_hits_survive_without_lexical_name_overlap() {
+    for kind in [CodeQueryKind::Callers, CodeQueryKind::Callees] {
+        let mut row = caller_row("dispatch", "repo://repo/src::Worker.dispatch", 3);
+        row.caller_symbol_snapshot_id = Some("symbol:caller-id".to_owned());
+        row.callee_symbol_snapshot_id = Some("symbol:callee-id".to_owned());
+        let id = if kind == CodeQueryKind::Callers {
+            "symbol:callee-id"
+        } else {
+            "symbol:caller-id"
+        };
+        let hits = call_rows_to_hits(&status(), &request(id, kind), vec![row]);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].score > 0.0);
+    }
+}

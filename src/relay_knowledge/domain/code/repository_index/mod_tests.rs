@@ -72,7 +72,7 @@ fn reference_resolution_query_index_repair_preserves_the_exact_page_token() {
         })
     );
     let legacy_plan = state.replacen(
-        "finalizing:query_index_repair:v3:",
+        "finalizing:query_index_repair:v4:",
         "finalizing:query_index_repair:v2:",
         1,
     );
@@ -135,7 +135,7 @@ fn reference_search_query_index_repair_tokens_preserve_canonical_page_boundaries
         })
     );
     let version_two_state = state.replacen(
-        "finalizing:query_index_repair:v3:",
+        "finalizing:query_index_repair:v4:",
         "finalizing:query_index_repair:v2:",
         1,
     );
@@ -166,7 +166,7 @@ fn reference_search_query_index_repair_tokens_preserve_canonical_page_boundaries
     );
     for state in [
         "finalizing:query_index_repair:v1:16:resume:reference_search:v2:build:0",
-        "finalizing:query_index_repair:v4:16:resume:reference_search:v2:build:0",
+        "finalizing:query_index_repair:v5:16:resume:reference_search:v2:build:0",
         "finalizing:query_index_repair:v2:17:resume:reference_search:v2:build:0",
         "finalizing:query_index_repair:v3:16:resume:reference_search:v0:build:0",
         "finalizing:query_index_repair:v3:16:resume:reference_search:v2:build:00",
@@ -227,9 +227,15 @@ fn reference_search_tokens_are_versioned_and_canonical() {
 
 #[test]
 fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
+    let legacy_three = code_query_index_subphase("finalizing:build_query_indexes:v3:16").unwrap();
+    assert!(!legacy_three.requires_legacy_retired_prefix());
+    assert_eq!(
+        legacy_three.next_state(17).as_deref(),
+        Some("finalizing:build_query_indexes:v4:17")
+    );
     for unit in 0..CODE_QUERY_INDEX_PLAN_UNIT_COUNT {
         let state = code_query_index_subphase_state(unit).expect("bounded unit should format");
-        assert_eq!(state, format!("finalizing:build_query_indexes:v3:{unit}"));
+        assert_eq!(state, format!("finalizing:build_query_indexes:v4:{unit}"));
         assert_eq!(
             code_query_index_subphase(&state).map(|cursor| cursor.completed_unit),
             Some(unit)
@@ -253,7 +259,10 @@ fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
         version_one.next_state(2).as_deref(),
         Some("finalizing:build_query_indexes:v1:2")
     );
-    assert!(version_one.next_state(16).is_none());
+    assert_eq!(
+        version_one.next_state(16).as_deref(),
+        Some("finalizing:build_query_indexes:v4:16")
+    );
     let version_two = code_query_index_subphase("finalizing:build_query_indexes:v2:1")
         .expect("version-two cursor should parse");
     assert_eq!(
@@ -290,7 +299,7 @@ fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
             .requires_legacy_retired_prefix()
     );
     assert_eq!(
-        code_query_index_subphase("finalizing:build_query_indexes:v4:0")
+        code_query_index_subphase("finalizing:build_query_indexes:v5:0")
             .map(|cursor| cursor.completed_unit),
         None
     );
@@ -316,7 +325,7 @@ fn query_index_repair_tokens_preserve_every_stable_coarse_phase() {
     for resume_phase in CodeQueryIndexRepairResumePhase::ALL {
         let state = code_query_index_repair_state(16, resume_phase)
             .expect("bounded repair unit should format");
-        assert!(state.starts_with("finalizing:query_index_repair:v3:16:resume:"));
+        assert!(state.starts_with("finalizing:query_index_repair:v4:16:resume:"));
         assert_eq!(
             code_query_index_repair(&state),
             Some(CodeQueryIndexRepair {
@@ -357,7 +366,7 @@ fn query_index_repair_tokens_preserve_every_stable_coarse_phase() {
 fn query_index_repair_tokens_reject_noncanonical_or_unknown_fields() {
     for state in [
         "finalizing:query_index_repair:v1:15:resume:0",
-        "finalizing:query_index_repair:v4:0:resume:0",
+        "finalizing:query_index_repair:v5:0:resume:0",
         "finalizing:query_index_repair:v2:17:resume:0",
         "finalizing:query_index_repair:v3:00:resume:0",
         "finalizing:query_index_repair:v3:0:resume:00",

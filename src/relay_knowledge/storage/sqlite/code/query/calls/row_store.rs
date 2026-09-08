@@ -28,6 +28,34 @@ pub(super) fn search_call_identity_rows(
     request: &CodeRetrievalRequest,
     identity: &CallIdentityQuery,
 ) -> Result<CallIdentityRows, StorageError> {
+    if identity.canonical_id.is_some() || identity.snapshot_id.is_some() {
+        crate::storage::sqlite::code::schema::require_canonical_call_query_indexes(connection)?;
+    }
+    let exact_snapshot_id = if let Some(canonical_id) = &identity.canonical_id {
+        let mut statement = prepare_code_search_statement(
+            connection,
+            "SELECT symbol_snapshot_id FROM code_repository_symbols WHERE source_scope = ? AND canonical_symbol_id = ? LIMIT 2",
+        )?;
+        let mut symbols =
+            statement.query(rusqlite::params![required_scope(status)?, canonical_id])?;
+        let first = symbols
+            .next()?
+            .map(|row| row.get::<_, String>(0))
+            .transpose()?;
+        if first.is_some() && symbols.next()?.is_some() {
+            return Err(StorageError::AmbiguousCodeSymbol(
+                "canonical symbol matches multiple definitions in this scope; use the desired definition's symbol_snapshot_id (symbol:...) as --query".to_owned()));
+        }
+        let Some(snapshot_id) = first else {
+            return Ok(CallIdentityRows {
+                rows: Vec::new(),
+                saturated: false,
+            });
+        };
+        Some(snapshot_id)
+    } else {
+        identity.snapshot_id.clone()
+    };
     let path_filter = path_filter_sql_for_column("c.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
@@ -36,11 +64,32 @@ pub(super) fn search_call_identity_rows(
     } else {
         ""
     };
+    let mut inline_filters = Vec::new();
+    push_query_path_substring_filter_sql(
+        &mut inline_filters,
+        "c.path",
+        &request.query_path_substrings,
+    );
+    let result_identity_column = match request.code_query_kind {
+        crate::domain::CodeQueryKind::Callees => "callee.canonical_symbol_id",
+        _ => "caller.canonical_symbol_id",
+    };
+    push_query_path_substring_filter_sql(
+        &mut inline_filters,
+        result_identity_column,
+        &request.query_name_substrings,
+    );
+    let inline_filters = if inline_filters.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", inline_filters.join(" AND "))
+    };
     let direct_limit = call_identity_candidate_limit(request);
     let sql = call_rows_sql(&format!(
         "
           AND {} = ?
           {path_filter}
+          {inline_filters}
           {language_filter}
           {generated_filter}
         ",
@@ -49,8 +98,7 @@ pub(super) fn search_call_identity_rows(
     let mut values = vec![
         Value::Text(required_scope(status)?.to_owned()),
         Value::Text(
-            identity
-                .canonical_id
+            exact_snapshot_id
                 .as_deref()
                 .unwrap_or_else(|| identity.leaf_name())
                 .to_owned(),
@@ -58,6 +106,8 @@ pub(super) fn search_call_identity_rows(
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
+    push_query_path_substring_filter_values(&mut values, &request.query_name_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
     push_language_filter_values(&mut values, &request.query_language_filters);

@@ -20,3 +20,12 @@ fn checkpoint_invariant_maps_to_internal_error() {
     assert_eq!(error.error_kind, ErrorKind::Internal);
     assert!(error.message.contains("checkpoint"));
 }
+
+#[test]
+fn ambiguous_code_selector_is_an_actionable_argument_error() {
+    let error = storage_api_error(StorageError::AmbiguousCodeSymbol(
+        "use symbol_snapshot_id".to_owned(),
+    ));
+    assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
+    assert!(error.message.contains("symbol_snapshot_id"));
+}

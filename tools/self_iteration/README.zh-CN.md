@@ -4,6 +4,8 @@
 
 `tools/self_iteration` 是独立的 Rust 自迭代 harness，用 Codex 生成候选补丁，并用固定评估集判断它是否真正改进代码仓库检索、semantic/vector 检索、性能、稳定性或研究质量。它不属于产品 crate 的 `src/` 模块树，运行状态统一写入 `.git/relay-knowledge-self-iteration/`。旧的 tracked Python harness 已在功能对齐后移除，仓库根目录的 `self-iterate.sh` 会直接构建并运行 Rust binary。
 
+`canonical_calls_wide` 纳入 fast/performance guardrail，索引 2,048 个无关 Java 调用及一个唯一目标。case 可用 `canonical_from_definition: true` 先通过真实 definition CLI 解析配置的符号查询，再测 callers/callees；报告保留两个命令，仅调用查询计入延迟指标（该 fixture 的 p95 预算 2,000 ms）。定义身份缺失或有歧义时 guardrail 失败，也能检测缺失精确调用索引时产品的拒绝行为，防止恢复为 scope 全扫描。
+
 ## 快速路径
 
 ### 5 分钟上手

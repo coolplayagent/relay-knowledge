@@ -156,3 +156,26 @@ fn workspace_scope_semantics_are_canonical_and_backward_compatible() {
         Some(Some(0))
     );
 }
+
+#[test]
+fn canonical_call_read_model_upgrade_invalidates_pre_index_scope_identity() {
+    // Persisted scope before canonical-call-selectors-v1 for these same inputs.
+    let old_scope = "git_snapshot:a9cee41bf143c3e1";
+    assert!(CODE_SNAPSHOT_FACT_VERSION.ends_with("canonical-call-selectors-v1"));
+    assert!(!code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        old_scope
+    ));
+    let current = code_snapshot_scope_id("repo-upgrade", "tree-unchanged", &[], &[]);
+    assert_ne!(old_scope, current);
+    assert!(code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        &current
+    ));
+}

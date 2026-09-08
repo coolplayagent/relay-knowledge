@@ -108,3 +108,142 @@ async fn java_canonical_call_queries_preserve_exact_repository_and_class_identit
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn canonical_inline_filters_precede_the_call_candidate_limit() {
+    let repo = FixtureRepo::create("java-filtered-calls");
+    repo.write("src/Sink.java", "class Sink { static void accept() {} }");
+    for index in 0..205 {
+        repo.write(
+            &format!("src/Caller{index:03}.java"),
+            &format!("class Caller{index:03} {{ void run() {{ Sink.accept(); }} }}"),
+        );
+    }
+    repo.write(
+        "src/Zulu.java",
+        "class Zulu { void finalCaller() { Sink.accept(); } }",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "bounded call filters"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index"),
+        )
+        .await
+        .expect("index bounded fixture");
+    let definitions = query(&service, "accept", CodeQueryKind::Definition).await;
+    let id = definitions
+        .results
+        .iter()
+        .filter_map(|hit| hit.canonical_symbol_id.as_deref())
+        .find(|id| id.ends_with(".accept"))
+        .unwrap();
+    for filter in [
+        "path:Zulu",
+        "name:finalCaller",
+        "path:Zulu name:finalCaller",
+    ] {
+        let hits = query(&service, &format!("{id} {filter}"), CodeQueryKind::Callers).await;
+        assert_eq!(hits.results.len(), 1, "{filter}: {:?}", hits.results);
+        assert_eq!(hits.results[0].path, "src/Zulu.java");
+    }
+}
+
+#[tokio::test]
+async fn overloaded_java_methods_require_the_definition_snapshot_selector() {
+    let repo = FixtureRepo::create("java-overloaded-calls");
+    repo.write("src/Worker.java", "class Worker {\n void dispatch() {\n first();\n }\n void dispatch(int value) {\n second();\n }\n void first() {}\n void second() {}\n}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "overloaded methods"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index"),
+        )
+        .await
+        .expect("index overload fixture");
+    let definitions = query(&service, "dispatch", CodeQueryKind::Definition).await;
+    let symbols = definitions
+        .results
+        .iter()
+        .filter(|hit| hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol))
+        .filter(|hit| {
+            hit.canonical_symbol_id
+                .as_deref()
+                .is_some_and(|id| id.ends_with(".dispatch"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(symbols.len(), 2);
+    let obsolete_snapshot = symbols[0].symbol_snapshot_id.clone().unwrap();
+    let canonical = symbols[0].canonical_symbol_id.as_ref().unwrap();
+    let error = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                canonical,
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Callees,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .unwrap(),
+            context("ambiguous"),
+        )
+        .await
+        .expect_err("canonical must not merge overload bodies");
+    assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
+    assert!(error.message.contains("symbol_snapshot_id"));
+    let mut called = std::collections::BTreeSet::new();
+    for symbol in symbols {
+        let id = symbol.symbol_snapshot_id.as_deref().unwrap();
+        let hits = query(&service, id, CodeQueryKind::Callees).await;
+        assert_eq!(hits.results.len(), 1, "{id}: {:?}", hits.results);
+        called.insert(hits.results[0].canonical_symbol_id.clone().unwrap());
+    }
+    assert!(called.iter().any(|id| id.ends_with(".first")));
+    assert!(called.iter().any(|id| id.ends_with(".second")));
+    assert!(
+        query(&service, "symbol:does-not-exist", CodeQueryKind::Callees)
+            .await
+            .results
+            .is_empty()
+    );
+    repo.write("src/Extra.java", "class Extra {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "next snapshot"]);
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("next-index"),
+        )
+        .await
+        .expect("index subsequent snapshot");
+    assert!(
+        query(&service, &obsolete_snapshot, CodeQueryKind::Callees)
+            .await
+            .results
+            .is_empty()
+    );
+}
