@@ -13,6 +13,19 @@ The default local profile needs no external service: platform defaults select
 the runtime directories, SQLite stores local state, and deterministic local
 semantic/vector read models are enabled.
 
+On Windows, SQLite defaults to `D:\relay-knowledge\data\relay-knowledge.sqlite`.
+Set `RELAY_KNOWLEDGE_DATA_DIR` to an absolute directory to relocate the main
+database and repository shards together. This overrides `RELAY_KNOWLEDGE_HOME`
+and platform defaults; Linux and macOS retain their platform data directories.
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = 'E:\KnowledgeData'
+relay-knowledge status --format json
+```
+
+The directory must be writable. Existing databases are not moved automatically;
+see [storage configuration and migration](docs/en/01-user-guide/01-install-and-runtime.md#14-zero-config-defaults).
+
 ```bash
 cargo build
 target/debug/relay-knowledge status

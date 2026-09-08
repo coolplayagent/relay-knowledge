@@ -98,6 +98,38 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 
 设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。完整目录覆盖项见 [第 12 章 高级配置参考](12-advanced-configuration.md)。
 
+没有覆盖配置时，Windows 的主库为 `D:\relay-knowledge\data\relay-knowledge.sqlite`，
+仓库分片位于 `D:\relay-knowledge\data\stores\repositories`。
+配置、日志、缓存等其他目录仍使用 AppData/TEMP 默认值，Linux、macOS 的数据目录规则不变。
+数据目录优先级为 `RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > 平台默认值。
+
+在 PowerShell 中指定其他 SQLite 存储目录：
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = 'E:\KnowledgeData'
+relay-knowledge status --format json
+# 可选：持久化到当前用户环境，供后续新终端使用。
+[Environment]::SetEnvironmentVariable('RELAY_KNOWLEDGE_DATA_DIR', 'E:\KnowledgeData', 'User')
+```
+
+变量值是目录，不是数据库文件名。空值、相对路径和包含 `..` 的路径会被拒绝。
+D 盘不存在或目标目录不可写时，创建或打开数据库会失败，需要指定可访问的绝对路径，
+不会静默退回 C 盘。
+
+升级不会自动搬迁旧数据库。若要继续使用原 Windows 目录，在启动新版前设置：
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = Join-Path $env:LOCALAPPDATA 'relay-knowledge\data'
+```
+
+需要迁移时，先停止托管服务及其他 writer，对完整数据目录做一致性备份，再把主库、
+存在的 WAL/SHM 恢复文件和 `stores/repositories` 一起复制到目标目录，保留原副本以便回滚。
+所有 CLI 和服务必须使用同一数据目录。已安装服务会在服务定义中保存显式数据路径，
+只修改终端变量不会改变已有服务；应重新生成并应用生命周期计划，再运行 `status`、
+`health` 和 `service doctor` 检查。恢复旧二进制还需遵守
+[升级与回滚合同](../03-architecture-specs/19-installation-release-and-upgrade.md)。
+卸载默认保留运行时数据。
+
 ## 1.5 配置 readiness
 
 不确定当前机器是否 ready 时，先运行只读配置诊断:

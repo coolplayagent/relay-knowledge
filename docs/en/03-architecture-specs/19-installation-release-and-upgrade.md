@@ -60,6 +60,28 @@ Exact code-source fallback is implemented inside the product and must not requir
 
 ## 4. Runtime State
 
+Windows defaults to `D:\relay-knowledge\data`, containing the main
+`relay-knowledge.sqlite` and shards under `stores/repositories/`. Other Windows
+runtime directories retain AppData/TEMP defaults; Linux and macOS defaults are
+unchanged. Data-directory precedence is `RELAY_KNOWLEDGE_DATA_DIR` >
+`RELAY_KNOWLEDGE_HOME/data` > platform default. Environment overrides must be
+nonempty absolute directories without `..`. An unavailable D: volume or
+unwritable directory must surface a creation/open error so the user can select
+another directory, with no silent C: fallback. Default path resolution performs
+no filesystem probes or data relocation.
+
+This default change does not alter SQLite schemas or automatically move old
+`%LOCALAPPDATA%\relay-knowledge\data` databases. Before upgrading, pin the old
+location with `RELAY_KNOWLEDGE_DATA_DIR`, or stop the service and all writers,
+back up and copy the main database, WAL/SHM files, and all repository shards
+together, retaining the old copy. Service definitions must preserve the resolved
+data directory; changing the installation shell environment alone cannot move
+an existing service, so regenerate and apply its lifecycle plan. Rollback must
+explicitly select the old directory and obey database backup requirements.
+Uninstall still retains data by default. Path unit tests cover the Windows main
+database/shard defaults, environment precedence, and invalid paths; an isolated
+CLI integration test verifies overridden storage persistence across processes.
+
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations. Early databases may have a `code_repository_schema_migrations` table containing only the `name` column; schema initialization must idempotently add `applied_at_ms INTEGER NOT NULL DEFAULT 0` before running retention, search-owner, or any other migration that writes a capability marker, without requiring operators to rebuild the database or add the column manually.
 The code-search ownership v2 upgrade does not rewrite legacy FTS data during synchronous database open. Startup installs the non-replacing writer and exact metadata serving gate, marks existing scopes and their active repositories stale once under `search-owner-v2-writer-and-serving-gate`, and advances source-scope identity with the `search-owner-v2` fact component. The marker proves only that the writer and serving boundary are installed; it does not certify old or imported FTS rows. Every FTS `MATCH` read requires exact rowid/scope/kind/record/path metadata ownership, while an ordinary durable full-index task with its existing lease, checkpoint, and publication fence replaces the stale scope. Database import preserves search freshness only when the attached source has this marker, the complete search/metadata schema shape, every indexed metadata row joins one FTS row by rowid and full identity, and—when the scope is a fact-versioned Git snapshot—an identity matching the imported repository, tree, filters, and current fact version. Import and incremental clone enumerate the indexed metadata owner table and copy only those joined rows; they never reverse-count FTS through its `UNINDEXED` scope/kind columns. A raw FTS row without metadata is not copied or served and remains isolated for bounded `search_orphans` GC. A metadata-side orphan, duplicate owner identity, or affected-count mismatch rolls back repository metadata, facts, copied search rows, and scope publication together. A legacy import without that capability may retain base facts for recovery, but copies no search rows and is persisted stale with a full-reindex reason; an otherwise exact import with an old fact-version identity is likewise explicitly stale. Manual/custom non-fact scopes retain their compatibility contract. Upgrade and doctor output must not report search ownership fresh merely because database open, marker creation, or base-fact import completed.
 

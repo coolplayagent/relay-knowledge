@@ -49,6 +49,12 @@ RELAY_KNOWLEDGE_SERVICE_DIR
 
 所有覆盖路径必须是绝对路径，且不能包含 `..`。
 
+`RELAY_KNOWLEDGE_DATA_DIR` 同时指定 `relay-knowledge.sqlite` 和
+`stores/repositories/` 所在目录，优先于 `RELAY_KNOWLEDGE_HOME/data`，再优先于平台默认值。
+Windows 默认数据目录为 `D:\relay-knowledge\data`，其他平台保留原数据目录规则。
+空值会报错。PowerShell 示例、持久化用户环境、服务配置和已有数据库搬迁见
+[安装与迁移说明](01-install-and-runtime.md#14-零配置默认值)。
+
 ## 12.3 存储拓扑
 
 默认存储拓扑是 `single_sqlite`，所有运行时状态写入 runtime data 目录下的主

@@ -49,6 +49,14 @@ RELAY_KNOWLEDGE_SERVICE_DIR
 
 All overrides must be absolute paths and must not contain `..`.
 
+`RELAY_KNOWLEDGE_DATA_DIR` selects the directory for both `relay-knowledge.sqlite`
+and `stores/repositories/`. It takes precedence over `RELAY_KNOWLEDGE_HOME/data`,
+which takes precedence over platform defaults. Windows defaults to
+`D:\relay-knowledge\data`; other platforms retain their normal data directories.
+An empty override is an error. See [installation and migration](01-install-and-runtime.md#14-zero-config-defaults)
+for PowerShell examples, persistent user settings, service configuration, and
+moving an existing database safely.
+
 ## 12.3 Storage Topology
 
 The default storage topology is `single_sqlite` and stores all runtime state in

@@ -94,6 +94,44 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 
 After setting `RELAY_KNOWLEDGE_HOME`, config, data, state, cache, logs, temp, runtime, and service directories are placed under that root. See [Chapter 12: Advanced Configuration](12-advanced-configuration.md) for the full directory override list.
 
+Without overrides, Windows stores SQLite in
+`D:\relay-knowledge\data\relay-knowledge.sqlite`, with repository shards under
+`D:\relay-knowledge\data\stores\repositories`. Config, logs, caches, and other
+runtime directories retain their AppData/TEMP defaults. Linux and macOS data
+defaults are unchanged. The data directory precedence is
+`RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > platform default.
+
+To choose another directory for SQLite in PowerShell:
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = 'E:\KnowledgeData'
+relay-knowledge status --format json
+# Optional: persist for future shells of the current user.
+[Environment]::SetEnvironmentVariable('RELAY_KNOWLEDGE_DATA_DIR', 'E:\KnowledgeData', 'User')
+```
+
+The value is a directory, not a database filename. Empty values, relative paths,
+and paths containing `..` are rejected. If D: is absent or the directory is not
+writable, database creation/opening fails; choose an accessible absolute path.
+The application does not silently fall back to C:.
+
+Upgrades do not move old databases automatically. To keep using the previous
+Windows location, set the override before starting the upgraded binary:
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = Join-Path $env:LOCALAPPDATA 'relay-knowledge\data'
+```
+
+To migrate, stop the managed service and other writers, back up the complete
+data directory consistently, then copy the main database, any WAL/SHM recovery
+files, and `stores/repositories` together to the selected directory. Retain the
+old copy for rollback. Configure every CLI/service with the same directory;
+installed services retain the explicit data path in their service definition,
+so changing a shell variable alone does not relocate an existing service.
+Regenerate and apply its lifecycle plan, then check `status`, `health`, and
+`service doctor`. Follow the [upgrade and rollback contract](../03-architecture-specs/19-installation-release-and-upgrade.md)
+when restoring a previous binary. Uninstall preserves runtime data by default.
+
 ## 1.5 Configuration Readiness
 
 If you are not sure whether the machine is ready, start with the read-only configuration diagnostic:

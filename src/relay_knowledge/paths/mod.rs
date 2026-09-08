@@ -23,6 +23,9 @@ use crate::{
 
 mod repository_root;
 
+/// Default Windows data volume; runtime-home and data-directory overrides take precedence.
+const WINDOWS_DATA_VOLUME: &str = "D:/";
+
 pub use crate::project::APP_DIR_NAME;
 pub use repository_root::{RepositoryRootDiscoveryError, discover_repository_root};
 
@@ -414,7 +417,9 @@ fn windows_defaults(environment: &PlatformEnvironment) -> Result<RuntimePaths, P
 
     Ok(RuntimePaths {
         config_dir: config_base.join(APP_DIR_NAME),
-        data_dir: root.join("data"),
+        data_dir: PathBuf::from(WINDOWS_DATA_VOLUME)
+            .join(APP_DIR_NAME)
+            .join("data"),
         state_dir: root.join("state"),
         cache_dir: root.join("cache"),
         log_dir: root.join("logs"),
