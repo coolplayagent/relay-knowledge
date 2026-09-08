@@ -32,20 +32,7 @@ pub(super) fn search_call_identity_rows(
         crate::storage::sqlite::code::schema::require_canonical_call_query_indexes(connection)?;
     }
     let exact_snapshot_id = if let Some(canonical_id) = &identity.canonical_id {
-        let mut statement = prepare_code_search_statement(
-            connection,
-            "SELECT symbol_snapshot_id FROM code_repository_symbols WHERE source_scope = ? AND canonical_symbol_id = ? LIMIT 2",
-        )?;
-        let mut symbols =
-            statement.query(rusqlite::params![required_scope(status)?, canonical_id])?;
-        let first = symbols
-            .next()?
-            .map(|row| row.get::<_, String>(0))
-            .transpose()?;
-        if first.is_some() && symbols.next()?.is_some() {
-            return Err(StorageError::AmbiguousCodeSymbol(
-                "canonical symbol matches multiple definitions in this scope; use the desired definition's symbol_snapshot_id (symbol:...) as --query".to_owned()));
-        }
+        let first = canonical_callable_snapshot(connection, required_scope(status)?, canonical_id)?;
         let Some(snapshot_id) = first else {
             return Ok(CallIdentityRows {
                 rows: Vec::new(),
@@ -122,6 +109,62 @@ pub(super) fn search_call_identity_rows(
     rows.truncate(direct_limit);
 
     Ok(CallIdentityRows { rows, saturated })
+}
+
+// Bound canonical collisions without allowing declarations to hide later definitions.
+const MAX_CANONICAL_SYMBOL_CANDIDATES: usize = 1024;
+
+fn canonical_callable_snapshot(
+    connection: &Connection,
+    scope: &str,
+    canonical_id: &str,
+) -> Result<Option<String>, StorageError> {
+    let mut statement = prepare_code_search_statement(
+        connection,
+        "SELECT symbol_snapshot_id, kind, signature FROM code_repository_symbols
+         WHERE source_scope = ?1 AND canonical_symbol_id = ?2 LIMIT ?3",
+    )?;
+    let mut symbols = statement.query(rusqlite::params![
+        scope,
+        canonical_id,
+        (MAX_CANONICAL_SYMBOL_CANDIDATES + 1) as i64,
+    ])?;
+    let mut selected = None;
+    let mut declaration = None;
+    let mut multiple_declarations = false;
+    let mut count = 0;
+    while let Some(row) = symbols.next()? {
+        count += 1;
+        if count > MAX_CANONICAL_SYMBOL_CANDIDATES {
+            return Err(StorageError::AmbiguousCodeSymbol(
+                "canonical symbol exceeds the 1024-candidate definition budget; use the desired definition's symbol_snapshot_id (symbol:...) as --query".to_owned(),
+            ));
+        }
+        let kind: String = row.get(1)?;
+        let signature: String = row.get(2)?;
+        if !crate::domain::code_call_targets::callable_definition_symbol(&kind, &signature) {
+            if crate::domain::code_call_targets::callable_target_symbol_kind(&kind) {
+                if declaration.is_some() {
+                    multiple_declarations = true;
+                } else {
+                    declaration = Some(row.get::<_, String>(0)?);
+                }
+            }
+            continue;
+        }
+        if selected.is_some() {
+            return Err(StorageError::AmbiguousCodeSymbol(
+                "canonical symbol matches multiple definitions in this scope; use the desired definition's symbol_snapshot_id (symbol:...) as --query".to_owned(),
+            ));
+        }
+        selected = Some(row.get::<_, String>(0)?);
+    }
+    if selected.is_none() && multiple_declarations {
+        return Err(StorageError::AmbiguousCodeSymbol(
+            "canonical symbol matches multiple callable declarations without a definition; use the desired declaration's symbol_snapshot_id (symbol:...) as --query".to_owned(),
+        ));
+    }
+    Ok(selected.or(declaration))
 }
 
 pub(super) fn search_call_fts_rows(

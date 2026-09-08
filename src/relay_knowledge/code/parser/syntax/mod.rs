@@ -255,6 +255,17 @@ fn extract_tag_captures(
         if let (Some(name_node), Some((capture_kind, target_node))) =
             (name_capture, primary_capture)
         {
+            let capture_kind = if language.id == "cpp"
+                && matches!(
+                    capture_kind.as_str(),
+                    "definition.function" | "definition.method"
+                )
+                && super::languages::cpp::is_callable_declaration(target_node)
+            {
+                "definition.function_declaration".to_owned()
+            } else {
+                capture_kind
+            };
             let doc_owner_node = capture_doc_owner_node(language.id, &capture_kind, target_node);
             captures.push(TagCapture {
                 name: node_text(content, name_node),

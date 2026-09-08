@@ -247,3 +247,77 @@ async fn overloaded_java_methods_require_the_definition_snapshot_selector() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn cpp_canonical_call_queries_ignore_prototypes_before_the_unique_definition() {
+    let repo = FixtureRepo::create("cpp-canonical-prototypes");
+    repo.write("src/main.cpp", "void helper();\nvoid helper();\nvoid leaf() {}\nvoid helper() { leaf(); }\nvoid caller() { helper(); }\n");
+    repo.write(
+        "src/external.cpp",
+        "void external(); void source() { external(); }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "C++ prototypes and implementation"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-prototypes"),
+        )
+        .await
+        .unwrap();
+    let definitions = query(&service, "helper", CodeQueryKind::Definition).await;
+    let canonical = definitions
+        .results
+        .iter()
+        .find_map(|hit| {
+            hit.canonical_symbol_id
+                .as_deref()
+                .filter(|id| id.ends_with("::helper"))
+        })
+        .unwrap();
+    let callers = query(&service, canonical, CodeQueryKind::Callers).await;
+    assert_eq!(callers.results.len(), 1);
+    assert!(
+        callers.results[0]
+            .canonical_symbol_id
+            .as_deref()
+            .unwrap()
+            .ends_with("::caller")
+    );
+    let callees = query(&service, canonical, CodeQueryKind::Callees).await;
+    assert_eq!(callees.results.len(), 1);
+    assert!(
+        callees.results[0]
+            .canonical_symbol_id
+            .as_deref()
+            .unwrap()
+            .ends_with("::leaf")
+    );
+    let declarations = query(&service, "external", CodeQueryKind::Definition).await;
+    let declaration = declarations
+        .results
+        .iter()
+        .find_map(|hit| {
+            hit.canonical_symbol_id
+                .as_deref()
+                .filter(|id| id.ends_with("::external"))
+        })
+        .unwrap();
+    let callers = query(&service, declaration, CodeQueryKind::Callers).await;
+    assert_eq!(callers.results.len(), 1);
+    assert!(
+        callers.results[0]
+            .canonical_symbol_id
+            .as_deref()
+            .unwrap()
+            .ends_with("::source")
+    );
+}
