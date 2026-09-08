@@ -48,7 +48,13 @@ pub(super) fn search_call_identity_rows(
     ));
     let mut values = vec![
         Value::Text(required_scope(status)?.to_owned()),
-        Value::Text(identity.leaf_name().to_owned()),
+        Value::Text(
+            identity
+                .canonical_id
+                .as_deref()
+                .unwrap_or_else(|| identity.leaf_name())
+                .to_owned(),
+        ),
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);

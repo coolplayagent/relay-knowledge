@@ -124,6 +124,9 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
+For `callers` and `callees`, pass the complete method `canonical_symbol_id` returned by a definition result as `--query`. A `repo://...` query is an exact, case-sensitive selector of the callee or caller respectively, including its repository and module identity. It never falls back to a same-name method or text search when no edge matches. Class IDs select only edges attached to that exact symbol; they do not aggregate every method in a class. Java method calls are queryable with the method name or its canonical ID.
+
+
 Agents can also put structured filters inside `--query`, for example
 `--query "kind:function,method lang:rust path:storage name:query search_code"`.
 Recognized labels are `kind:`, `lang:` or `language:`, `path:`, and `name:`.

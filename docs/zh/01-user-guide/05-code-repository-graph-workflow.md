@@ -124,6 +124,9 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
+`callers` 和 `callees` 可将 definition 返回的方法完整 `canonical_symbol_id` 作为 `--query`。`repo://...` 查询分别精确、区分大小写地选择被调用方或调用方，并保留仓库及模块身份；无匹配边时不会回退到同名方法或文本检索。类 ID 仅选择附着于该精确符号的边，不聚合类中全部方法。Java 方法调用可通过方法名或其 canonical ID 查询。
+
+
 Agent 也可以把结构化过滤标签直接写进 `--query`，例如
 `--query "kind:function,method lang:rust path:storage name:query search_code"`。
 已识别标签包括 `kind:`、`lang:` 或 `language:`、`path:` 和 `name:`；未知
