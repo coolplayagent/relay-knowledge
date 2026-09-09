@@ -3,6 +3,10 @@ use super::*;
 #[test]
 fn storage_errors_preserve_boundary_messages() {
     assert_eq!(
+        StorageError::QueryBudgetExceeded("narrow the query".to_owned()).to_string(),
+        "query budget exceeded: narrow the query"
+    );
+    assert_eq!(
         StorageError::AmbiguousCodeSymbol("multiple definitions".to_owned()).to_string(),
         "ambiguous code symbol: multiple definitions"
     );

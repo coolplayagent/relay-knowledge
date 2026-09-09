@@ -113,22 +113,21 @@ fn constant_definition(
 ) -> Result<Option<CodeFeatureFlagRecord>, DomainError> {
     let Some(field) = node
         .parent()
-        .filter(|parent| parent.kind() == "field_declaration")
+        .filter(|parent| matches!(parent.kind(), "field_declaration" | "constant_declaration"))
     else {
         return Ok(None);
     };
-    let Some(modifiers) = field
+    let mut is_static = field.kind() == "constant_declaration";
+    let mut is_final = is_static;
+    if let Some(modifiers) = field
         .named_child(0)
         .filter(|node| node.kind() == "modifiers")
-    else {
-        return Ok(None);
-    };
-    let mut cursor = modifiers.walk();
-    let mut is_static = false;
-    let mut is_final = false;
-    for modifier in modifiers.children(&mut cursor) {
-        is_static |= modifier.kind() == "static";
-        is_final |= modifier.kind() == "final";
+    {
+        let mut cursor = modifiers.walk();
+        for modifier in modifiers.children(&mut cursor) {
+            is_static |= modifier.kind() == "static";
+            is_final |= modifier.kind() == "final";
+        }
     }
     if !is_static || !is_final {
         return Ok(None);
@@ -211,21 +210,64 @@ fn collect_variable_guards(
                 if writes_name(statement, text(name, input.content), input.content) {
                     break;
                 }
-                if let Some(condition) = statement.child_by_field_name("condition") {
-                    if contains_identifier(condition, text(name, input.content), input.content) {
-                        records.push(record(input, condition, kind, key, "guards_code")?);
-                    }
-                }
+                collect_statement_guards(
+                    input,
+                    statement,
+                    text(name, input.content),
+                    kind,
+                    key,
+                    records,
+                )?;
                 next = statement.next_named_sibling();
             }
             break;
         }
-        if matches!(parent.kind(), "statement" | "block" | "method_declaration") {
+        if matches!(
+            parent.kind(),
+            "statement" | "block" | "method_declaration" | "lambda_expression" | "class_body"
+        ) {
             break;
         }
         read = parent;
     }
     Ok(())
+}
+
+fn collect_statement_guards(
+    input: &FeatureFlagFileInput<'_>,
+    statement: Node<'_>,
+    name: &str,
+    kind: &str,
+    key: &str,
+    records: &mut Vec<CodeFeatureFlagRecord>,
+) -> Result<(), DomainError> {
+    let mut cursor = statement.walk();
+    loop {
+        let node = cursor.node();
+        let boundary = matches!(
+            node.kind(),
+            "block"
+                | "lambda_expression"
+                | "class_body"
+                | "method_declaration"
+                | "constructor_declaration"
+        );
+        if !boundary {
+            if let Some(condition) = node.child_by_field_name("condition") {
+                if contains_identifier(condition, name, input.content) {
+                    records.push(record(input, condition, kind, key, "guards_code")?);
+                }
+            }
+            if cursor.goto_first_child() {
+                continue;
+            }
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return Ok(());
+            }
+        }
+    }
 }
 
 fn contains_identifier(node: Node<'_>, name: &str, content: &str) -> bool {
@@ -242,7 +284,11 @@ fn contains_identifier(node: Node<'_>, name: &str, content: &str) -> bool {
         {
             return true;
         }
-        if cursor.goto_first_child() {
+        if !matches!(
+            current.kind(),
+            "lambda_expression" | "class_body" | "method_declaration" | "constructor_declaration"
+        ) && cursor.goto_first_child()
+        {
             continue;
         }
         while !cursor.goto_next_sibling() {

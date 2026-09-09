@@ -89,11 +89,14 @@ pub(super) fn constant_symbol(node: Node<'_>, content: &str) -> Option<String> {
                     }
                 }
             }
-            let class = enclosing(node, "class_declaration")?;
+            let mut class = node.parent()?;
+            while !is_type(class) {
+                class = class.parent()?;
+            }
             let body = class.child_by_field_name("body")?;
             let mut cursor = body.walk();
             let declared = body.named_children(&mut cursor).any(|field| {
-                if field.kind() != "field_declaration" {
+                if !matches!(field.kind(), "field_declaration" | "constant_declaration") {
                     return false;
                 }
                 let mut cursor = field.walk();
@@ -278,7 +281,22 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
     }
     // A returned read provides evidence for the getter contract. Calls performed
     // solely for logging or side effects do not define its returned value.
-    if enclosing(node, "return_statement").is_none() {
+    let mut current = node;
+    let mut returned = false;
+    while let Some(parent) = current.parent() {
+        if parent == method {
+            break;
+        }
+        if matches!(
+            parent.kind(),
+            "lambda_expression" | "method_declaration" | "constructor_declaration" | "class_body"
+        ) {
+            return Vec::new();
+        }
+        returned |= parent.kind() == "return_statement";
+        current = parent;
+    }
+    if !returned {
         return Vec::new();
     }
     let Some(class) = enclosing(node, "class_declaration") else {

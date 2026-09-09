@@ -255,12 +255,13 @@ fn extract_tag_captures(
         if let (Some(name_node), Some((capture_kind, target_node))) =
             (name_capture, primary_capture)
         {
-            let capture_kind = if language.id == "cpp"
-                && matches!(
-                    capture_kind.as_str(),
-                    "definition.function" | "definition.method"
-                )
-                && super::languages::cpp::is_callable_declaration(target_node)
+            let capture_kind = if matches!(
+                capture_kind.as_str(),
+                "definition.function" | "definition.method"
+            ) && ((language.id == "cpp"
+                && super::languages::cpp::is_callable_declaration(target_node))
+                || (language.id == "python"
+                    && super::languages::python::is_overload_declaration(content, target_node)))
             {
                 "definition.function_declaration".to_owned()
             } else {

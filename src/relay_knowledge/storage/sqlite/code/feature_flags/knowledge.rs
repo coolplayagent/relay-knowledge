@@ -71,6 +71,7 @@ fn assemble(
             _ => 12.0,
         } + f64::from(record.confidence_basis_points) / 1000.0;
         group.score = group.score.max(score);
+        group.analysis_complete &= !matches!(resolution_state.as_str(), "ambiguous" | "unresolved");
         group.usages.push(CodeFeatureFlagUsage {
             metadata: record.metadata,
             resolution_state,
@@ -245,7 +246,7 @@ fn promote_bound_declarations(
         .collect::<BTreeSet<_>>();
     let mut projected = Vec::new();
     for (record, state) in records.into_iter().zip(states) {
-        if record.source_kind == "config_getter" {
+        if record.source_kind == "config_getter" && state != "ambiguous" {
             continue;
         }
         if record.edge_kind != "binds_config_symbol" {
@@ -362,6 +363,10 @@ fn diagnose(
     if status.stale
         || status.degraded_reason.is_some()
         || group.source_kind == "config_symbol"
+        || group
+            .usages
+            .iter()
+            .any(|usage| matches!(usage.resolution_state.as_str(), "ambiguous" | "unresolved"))
         || group
             .usages
             .iter()

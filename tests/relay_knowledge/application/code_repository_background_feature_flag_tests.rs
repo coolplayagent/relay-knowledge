@@ -524,3 +524,83 @@ class Shadow { static class System {} void run() { System.getProperty("nested_fa
         assert!(flag(key).usages[0].metadata.default_value.is_none());
     }
 }
+
+#[tokio::test]
+async fn java_getter_returns_interface_constants_and_ternaries_keep_callable_boundaries() {
+    let repo = FixtureRepo::create("java-config-callable-boundaries");
+    repo.write("src/App.java", r#"
+package demo;
+interface Keys { String FLAG = "interface_key"; }
+class LambdaConfig { java.util.function.Supplier<String> getValue() { return () -> System.getProperty("lambda_inner"); } }
+class BlockConfig { java.util.function.Supplier<String> getValue() { return () -> { return System.getProperty("block_inner"); }; } }
+class DirectConfig { String getValue() { return System.getProperty("direct_key"); } }
+class App {
+ void use(LambdaConfig lambda, BlockConfig block, DirectConfig direct) {
+  System.getProperty(Keys.FLAG);
+  if (lambda.getValue() != null) {}
+  if (block.getValue() != null) {}
+  if (direct.getValue() != null) {}
+ }
+ String returned() { boolean enabled = Boolean.getBoolean("return_key"); return enabled ? "yes" : "no"; }
+ void initialized() { boolean enabled = Boolean.getBoolean("init_key"); String value = enabled ? "yes" : "no"; }
+}
+"#);
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Java callable boundaries"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-callable-boundaries").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-callable-boundaries"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src"),
+                100,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-callable-boundaries"),
+        )
+        .await
+        .unwrap();
+    let flag = |key: &str| {
+        response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == key)
+            .unwrap()
+    };
+    for key in ["lambda_inner", "block_inner"] {
+        assert_eq!(flag(key).usages.len(), 1);
+        assert_eq!(flag(key).usages[0].edge_kind, "reads_config");
+        assert!(flag(key).usages[0].metadata.bindings.is_empty());
+    }
+    assert!(
+        flag("interface_key")
+            .usages
+            .iter()
+            .any(|u| u.edge_kind == "reads_config" && u.resolution_state == "resolved")
+    );
+    for key in ["direct_key", "return_key", "init_key"] {
+        assert_eq!(
+            flag(key)
+                .usages
+                .iter()
+                .filter(|u| u.edge_kind == "guards_code")
+                .count(),
+            1
+        );
+    }
+}

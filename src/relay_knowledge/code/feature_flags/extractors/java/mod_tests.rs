@@ -309,3 +309,88 @@ fn visible_java_type_kinds_shadow_platform_but_unrelated_nested_types_do_not() {
         assert!(records.iter().any(|r| r.source_key == "unrelated"));
     }
 }
+
+#[test]
+fn getter_bindings_do_not_cross_expression_or_block_lambda_returns() {
+    let records = facts(
+        r#"class Config {
+      java.util.function.Supplier<String> getLambda() { return () -> System.getProperty("lambda"); }
+      java.util.function.Supplier<String> getBlock() { return () -> { return System.getProperty("block"); }; }
+      String getDirect() { return System.getProperty("direct"); }
+    }"#,
+    );
+    for key in ["lambda", "block"] {
+        assert!(
+            records
+                .iter()
+                .find(|r| r.source_key == key)
+                .unwrap()
+                .metadata
+                .bindings
+                .is_empty()
+        );
+    }
+    assert!(
+        records
+            .iter()
+            .find(|r| r.source_key == "direct")
+            .unwrap()
+            .metadata
+            .bindings
+            .contains(&"Config.getDirect".to_owned())
+    );
+}
+
+#[test]
+fn interface_constants_use_implicit_modifiers_and_complete_type_owners() {
+    let records = facts(
+        r#"package demo;
+      interface Keys { String FLAG = "top"; }
+      class Outer { interface Keys { String FLAG = "nested"; } }
+      class Ordinary { String mutable = "not_constant"; }
+      class App { void read() { System.getProperty(Keys.FLAG); System.getProperty(Outer.Keys.FLAG); } }
+    "#,
+    );
+    for (key, owner) in [
+        ("top", "demo.Keys.FLAG"),
+        ("nested", "demo.Outer.Keys.FLAG"),
+    ] {
+        assert!(
+            records
+                .iter()
+                .any(|r| r.source_key == key && r.metadata.bindings.contains(&owner.to_owned())),
+            "{records:#?}"
+        );
+    }
+    assert!(!records.iter().any(|r| r.source_key == "not_constant"));
+}
+
+#[test]
+fn local_flags_reach_nested_ternary_conditions_without_crossing_callable_or_write_boundaries() {
+    let records = facts(
+        r#"class App {
+      String returned() { boolean enabled = Boolean.getBoolean("returned"); return enabled ? "yes" : "no"; }
+      void initialized() { boolean enabled = Boolean.getBoolean("initialized"); String value = enabled ? "yes" : "no"; }
+      void boundaries() {
+        boolean enabled = Boolean.getBoolean("boundaries");
+        java.util.function.Supplier<String> later = () -> enabled ? "yes" : "no";
+        { String nested = enabled ? "yes" : "no"; }
+        enabled = false; String afterWrite = enabled ? "yes" : "no";
+      }
+    }"#,
+    );
+    for key in ["returned", "initialized"] {
+        assert_eq!(
+            records
+                .iter()
+                .filter(|r| r.source_key == key && r.edge_kind == "guards_code")
+                .count(),
+            1
+        );
+    }
+    assert!(
+        !records
+            .iter()
+            .any(|r| r.source_key == "boundaries" && r.edge_kind == "guards_code")
+    );
+}

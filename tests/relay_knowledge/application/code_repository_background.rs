@@ -901,3 +901,6 @@ mod feature_flag_tests;
 #[path = "code_repository_background_support.rs"]
 mod support;
 use support::*;
+
+#[path = "code_repository_ambiguous_config_getters.rs"]
+mod ambiguous_config_getters;

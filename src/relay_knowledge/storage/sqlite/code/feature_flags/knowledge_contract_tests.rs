@@ -116,3 +116,40 @@ fn exhausted_seed_budget_does_not_report_an_unproven_empty_result() {
             .contains("1000-seed budget")
     );
 }
+
+#[test]
+fn ambiguous_configuration_getter_keeps_its_callsite_and_unknown_consistency() {
+    let mut first = record("first", "first_enabled", "config_key");
+    first.metadata.bindings = vec!["demo.Config.getEnabled".into()];
+    let mut second = record("second", "second_enabled", "config_key");
+    second.metadata.bindings = first.metadata.bindings.clone();
+    let mut read = record("reader", "demo.Config.getEnabled", "config_getter");
+    read.metadata.referenced_symbol = Some("demo.Config.getEnabled".into());
+    let mut guard = read.clone();
+    guard.usage_id = "guard".into();
+    guard.edge_kind = "guards_code".into();
+    guard.metadata.read_usage_id = Some("reader".into());
+    let dto = record("dto", "demo.Dto.getName", "config_getter");
+    let mut query = request();
+    query.consistency = true;
+    let groups = assemble(vec![first, second, read, guard, dto], &status(), &query);
+    assert_eq!(groups.len(), 3);
+    let ambiguous = groups
+        .iter()
+        .find(|g| g.source_kind == "config_getter")
+        .unwrap();
+    assert_eq!(ambiguous.usages.len(), 2);
+    assert!(
+        ambiguous
+            .usages
+            .iter()
+            .all(|u| u.resolution_state == "ambiguous")
+    );
+    assert!(!ambiguous.analysis_complete);
+    assert_eq!(ambiguous.consistency_diagnostics.len(), 1);
+    assert!(ambiguous.consistency_diagnostics[0].starts_with("unknown:"));
+    assert_eq!(
+        ambiguous.usages[0].metadata.read_usage_id.as_deref(),
+        Some("reader")
+    );
+}

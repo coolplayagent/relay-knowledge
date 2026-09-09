@@ -115,7 +115,7 @@ relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definiti
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
 relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue] [--kind component|directive|pipe|template|input|output|prop|emit|model|slot|template-variable|control-flow] [--ref <ref>] [--path <filter>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
-relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
+relay-knowledge repo feature-flags <alias> [--query <text>] [--domain <name>] [--source <format>] [--hot-reload <true|false>] [--consistency] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
@@ -201,6 +201,17 @@ After a bulk code-index snapshot apply or checkpointed finalize succeeds, SQLite
 `repo query --query` accepts inline filters such as `kind:function`, `lang:rust` or `language:rust`, `path:storage`, and `name:query`. Unknown `prefix:value` tokens remain ordinary search text. Inline language filters intersect explicit `--language`; `kind` and language narrow SQL candidates, while `path` and `name` filter scored hits before truncation. `name:` matches symbol identities and SBOM package identities, not arbitrary excerpt text.
 
 `repo feature-flags` reads configuration-driven feature-flag graph facts written during indexing. By default it lists flags, configuration sources, and code-usage edges in the selected repository scope; `--query` filters by flag name, config key, path, or excerpt. Its JSON response includes the same `freshness` object as `repo query`, including pending task, checkpoint cursor, index lag, stale/degraded reason, and direct-source-read paths for returned feature-flag usage files. The extractor recognizes environment variables, config/settings keys, boolean config declarations, and common SDK evaluation calls such as OpenFeature, LaunchDarkly, and Unleash clients. It does not sync provider control-plane state, strategies, segments, or rollout variants. The command does not scan the whole source tree at query time; after extractor changes or newly added flags, run `repo index` or `repo update` before expecting new facts.
+
+Feature-flag usages include optional metadata for the default value, value type, owning domain, source format, hot reload, and proven bindings. Unknown values remain unknown. Java property/getter reads and guards can connect to properties, INI, template, and shell definitions; environment and property keys remain separate namespaces.
+
+| Option | Behavior |
+| --- | --- |
+| `--domain <name>` | Match explicit owning-domain metadata. |
+| `--source <format>` | Match the persisted source format, for example `properties`, `ini`, `ctmpl`, `java`, or `shell`. |
+| `--hot-reload <true\|false>` | Match an explicit boolean; unknown metadata matches neither value. |
+| `--consistency` | Add diagnostics for missing definitions or formats and conflicting defaults within the selected indexed facts and namespace. Stale, degraded, or unresolved evidence cannot prove absence. |
+
+Text and metadata filters select authorized configuration groups across proven aliases; the requested `--limit` counts distinct groups. Path and language filters always stay inside the indexed scope. Consistency diagnostics describe that selected evidence, not provider state or configuration outside the scope. The same options work with global `--remote`; `--freshness` accepts `allow-stale` (default), `wait-until-fresh`, or `graph-only`.
 
 `repo framework` reads the independent Angular/Vue component-template graph written during indexing. Repeat `--framework`, `--kind`, or `--path` to intersect filters; omit them to enumerate the bounded selected scope. The graph includes typed nodes for components, templates, bindings, slots, template variables, and control flow, plus ownership, render, binding, event, read/write, directive, and slot edges. Vue SFC script symbols and imports remain available through ordinary `repo query`. The command never scans source at query time and never starts indexing; `wait-until-fresh` requires the durable indexed snapshot to include current framework facts.
 

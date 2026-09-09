@@ -112,7 +112,7 @@ relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definiti
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
 relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue] [--kind component|directive|pipe|template|input|output|prop|emit|model|slot|template-variable|control-flow] [--ref <ref>] [--path <filter>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
-relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
+relay-knowledge repo feature-flags <alias> [--query <text>] [--domain <name>] [--source <format>] [--hot-reload <true|false>] [--consistency] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
@@ -191,6 +191,17 @@ Kind 取值按命令家族隔离：
 `repo query --query` 支持内联过滤标签，例如 `kind:function`、`lang:rust` 或 `language:rust`、`path:storage`、`name:query`。未知 `prefix:value` 会保留为普通检索文本。查询内 language filter 与显式 `--language` 取交集；`kind` 和 language 收窄 SQL 候选，`path` 和 `name` 在打分后、截断前过滤命中。`name:` 匹配符号 identity 和 SBOM 包 identity，不匹配任意 excerpt 文本。
 
 `repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。JSON 响应包含与 `repo query` 相同的 `freshness` 对象，包括 pending task、checkpoint cursor、index lag、stale/degraded reason，以及返回 feature-flag usage 文件的 direct-source-read paths。抽取器识别环境变量、config/settings key、布尔配置声明，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用。它不会同步 provider 控制面的状态、策略、segment 或 rollout variant。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
+
+特性开关 usage 包含默认值、值类型、所属 domain、来源格式、热更新能力及已证明绑定等可选 metadata；未知值保持未知。Java property/getter 读取和 guard 可关联 properties、INI、模板及 shell 定义，环境变量与 property key 保持独立命名空间。
+
+| 参数 | 行为 |
+| --- | --- |
+| `--domain <name>` | 匹配显式的所属 domain metadata。 |
+| `--source <format>` | 匹配持久化来源格式，例如 `properties`、`ini`、`ctmpl`、`java` 或 `shell`。 |
+| `--hot-reload <true\|false>` | 匹配显式布尔值；未知 metadata 不匹配任一值。 |
+| `--consistency` | 在所选索引事实和命名空间内补充缺少定义、缺少来源格式及默认值冲突等诊断；stale、degraded 或未解析证据不能证明缺失。 |
+
+文本与 metadata 过滤可跨已证明的 alias 选择授权范围内的配置组，`--limit` 按不同配置组计数。路径和语言过滤始终受已索引范围约束。一致性诊断只描述所选证据，不代表 provider 状态或范围外配置。全局 `--remote` 支持相同参数；`--freshness` 接受 `allow-stale`（默认）、`wait-until-fresh` 或 `graph-only`。
 
 `repo framework` 读取索引阶段写入的独立 Angular/Vue component-template graph。重复传入 `--framework`、`--kind` 或 `--path` 可以取交集过滤；省略时在所选 scope 内受界枚举。Graph 包含 component、template、binding、slot、template variable 和 control flow 等类型化 node，以及 ownership、render、binding、event、read/write、directive 和 slot edge。Vue SFC 的 script symbol/import 仍可通过普通 `repo query` 查询。该命令不在查询期扫描源码，也不启动索引；`wait-until-fresh` 要求 durable indexed snapshot 已包含当前 framework fact。
 

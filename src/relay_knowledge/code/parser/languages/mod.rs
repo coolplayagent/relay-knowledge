@@ -139,6 +139,7 @@ pub(super) fn language_manual_definitions(
     match language_id {
         "c" => c::manual_definitions(content, node),
         "cpp" => cpp::manual_definitions(content, node),
+        "python" => python::manual_definitions(content, node),
         "go" => go::manual_definitions(content, node),
         "rust" => rust::manual_definitions(content, node),
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => {

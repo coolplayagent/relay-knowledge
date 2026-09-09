@@ -6,7 +6,7 @@ use crate::evaluator::quality::QualityGateStage;
 fn full_profile_quality_gates_run_in_dependency_stages() {
     let stages = quality_gate_stages("full", Some(ProductBinaryProfile::Release));
 
-    assert_eq!(stages.len(), 5);
+    assert_eq!(stages.len(), 6);
     match &stages[0] {
         QualityGateStage::Parallel(gates) => {
             assert_eq!(
@@ -47,7 +47,7 @@ fn full_profile_quality_gates_run_in_dependency_stages() {
         }
         QualityGateStage::Rails(_) => panic!("BM25 measurement should have an isolated stage"),
     }
-    match &stages[4] {
+    match &stages[5] {
         QualityGateStage::Rails(rails) => {
             let rail_names = rails
                 .iter()
@@ -69,7 +69,7 @@ fn full_profile_quality_gates_run_in_dependency_stages() {
 fn fast_profile_skips_full_quality_gates() {
     let stages = quality_gate_stages("fast", Some(ProductBinaryProfile::Release));
 
-    assert_eq!(stages.len(), 6);
+    assert_eq!(stages.len(), 7);
     let gate_names = stages
         .iter()
         .flat_map(|stage| match stage {
@@ -224,4 +224,35 @@ fn product_build_gate_targets_only_the_selected_release_binary() {
         gate.command,
         vec!["cargo", "build", "--release", "--bin", "relay-knowledge"]
     );
+}
+
+#[test]
+fn canonical_call_work_gate_runs_after_test_build_in_isolation() {
+    for profile in ["fast", "full", "exhaustive"] {
+        let stages = quality_gate_stages(profile, Some(ProductBinaryProfile::Release));
+        let build = stages
+            .iter()
+            .position(|s| stage_has_gate(s, "bm25_hierarchy_build"))
+            .unwrap();
+        let work = stages
+            .iter()
+            .position(|s| stage_has_gate(s, "canonical_call_query_work_budget"))
+            .unwrap();
+        assert!(work > build);
+        let gate = only_parallel_gate(&stages[work]);
+        assert_eq!(
+            gate.command,
+            [
+                "cargo",
+                "test",
+                "--lib",
+                "--all-features",
+                "canonical_call_query_work_budget",
+                "--",
+                "--nocapture"
+            ]
+        );
+        assert_eq!(gate.timeout_seconds, 120);
+        assert_eq!(quality_budget_ms(gate.name), None);
+    }
 }

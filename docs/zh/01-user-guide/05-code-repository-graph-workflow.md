@@ -128,6 +128,8 @@ relay-knowledge repo query repo --query serde --kind sbom --format json
 
 Canonical 调用查询按既有调用目标规则优先选择可调用定义，不将 C/C++ 原型及只有签名的声明计为额外实现。没有定义时，唯一可调用声明仍可查询，多个声明则明确报告歧义。同一 canonical ID 最多检查 1024 个符号；超过预算会明确报错并指引使用定义的 `symbol_snapshot_id`，不会伪装为空结果或唯一匹配。
 
+直接调用查询分别按路径、行号扫描非生成和生成候选，保持非生成文件优先，避免在候选截断前排序全部匹配边。标识解析、两路扫描和代码片段读取共享约 410 万条 SQLite 指令预算。耗尽时明确报告 `call query incomplete`，错误类型为 `timeout`（仓库 API 返回 HTTP 408），不回退为空结果或部分成功；可缩小路径、语言过滤或选择更具体的 snapshot。此查询调整复用现有持久化方向索引，不需要迁移数据库或重建仓库。
+
 `cpp-callable-declarations-v1` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
 
 ```sh
@@ -339,3 +341,7 @@ relay-knowledge repo status repo --format json
 配置提取按检测到的 INI language 分派，包含 `.conf`、`.cfg` 及大小写扩展名。`@config` 只作用于紧邻的下一条定义，空行、普通注释、section header 都打断邻接。Java binding 保留全部 enclosing type 名称，并在声明和读取两侧统一擦除结构化 generic type argument。guard 数据流只关联真实局部变量：复制值不视为覆盖，同名 member 不产生依赖；可见 class/interface/enum/record 遮蔽阻止平台 API 推断。Bash parameter operator 保留参数读取，仅 `-`、`:-`、`=`、`:=` 的明确静态 operand 作为默认值，替代值、报错、长度、删除、替换及转换不作为默认值。
 
 一致性只在相同 `source_kind` 命名空间比较已观察格式。query 的多个词可以分布于解析后 group 的不同 usage，组合 metadata 条件仍必须由同一 usage 满足。普通 SQL seed 是有界候选超集，alias 合并导致结果不足时以倍增窗口扩至最多 1,000 个原始身份；最终 `--limit` 在 alias 解析后生效。预算耗尽且仍有候选时返回显式 incomplete-analysis 错误，既有 10,000 usage 与 16 MiB 分析上限继续有效。
+
+Java getter binding 要求读取位于 getter 自己的 callable scope 的 return 中；返回 expression/block lambda 时，其中的读取仍作为事实保留，但不绑定到返回回调对象的 getter。interface constant declaration 使用 Java 隐式 static/final 语义及完整 enclosing type 身份。局部 flag 数据流包含 return 或变量初始化中嵌套的 ternary condition，但写入、嵌套 block 与 callable 边界仍阻止越界追踪。已证明存在多个不同 key 实现的配置 getter 保留 ambiguous read/guard 引用，一致性为 unknown、`analysis_complete=false`，不猜测具体 destination。
+
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。`python-overload-declarations-v1` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。

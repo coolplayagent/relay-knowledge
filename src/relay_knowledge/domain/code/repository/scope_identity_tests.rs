@@ -224,3 +224,27 @@ fn feature_flag_key_index_upgrade_changes_scope_for_the_same_tree() {
         code_snapshot_scope_id("repo-upgrade", "tree-unchanged", &[], &[])
     );
 }
+
+#[test]
+fn python_overload_upgrade_invalidates_the_previous_completed_scope() {
+    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("-python-overload-declarations-v1", "");
+    assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
+    let mut input = Vec::new();
+    for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {
+        append_hash_part(&mut input, value);
+    }
+    append_hash_list(&mut input, &[]);
+    append_hash_list(&mut input, &[]);
+    append_hash_part(&mut input, &previous);
+    let old_scope = format!(
+        "git_snapshot:{:016x}",
+        crate::identity::stable_hash64(&input)
+    );
+    assert!(!code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        &old_scope
+    ));
+}
