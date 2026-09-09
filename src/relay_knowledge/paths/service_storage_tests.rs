@@ -123,6 +123,11 @@ fn windows_storage_aliases_cannot_hide_the_reserved_sid_tree() {
         "D:/elsewhere/../relay-knowledge/users/S-1-5-18/data",
         "D:/RELAY-~1/users/S-1-5-18/data",
         r"\\.\D:\relay-knowledge\users\S-1-5-18\data",
+        r"\\localhost\D$\relay-knowledge\users\S-1-5-18\data",
+        r"\\?\UNC\localhost\D$\relay-knowledge\users\S-1-5-18\data",
+        "//localhost/D$/relay-knowledge/users/S-1-5-18/data",
+        r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\relay-knowledge\users\S-1-5-18\data",
+        r"\\server\custom\data",
     ] {
         assert!(
             windows_data_sid_from_path(Path::new(path)).is_err(),
@@ -139,6 +144,46 @@ fn windows_storage_aliases_cannot_hide_the_reserved_sid_tree() {
             .unwrap()
             .is_none()
     );
+    assert_eq!(
+        windows_data_sid_from_path(Path::new(r"\\?\D:\relay-knowledge\users\S-1-5-18\data"))
+            .unwrap()
+            .as_deref(),
+        Some("S-1-5-18")
+    );
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn service_storage_rejects_files_in_data_directory_ancestors() {
+    let (root, paths, _) = fixture();
+    paths
+        .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+        .await
+        .unwrap();
+    assert!(!root.exists(), "validation must not provision storage");
+    std::fs::write(&root, "blocked ancestor").unwrap();
+    assert!(
+        paths
+            .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(&root).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(&paths.data_dir, "blocked data directory").unwrap();
+    assert!(
+        paths
+            .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(&paths.data_dir).unwrap();
+    std::fs::create_dir(&paths.data_dir).unwrap();
+    paths
+        .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[cfg(windows)]

@@ -636,6 +636,15 @@ fn windows_data_sid_from_path(path: &Path) -> Result<Option<String>, PathError> 
     // Win32 strips trailing periods/spaces and accepts traversal and device
     // spellings that can otherwise disguise the reserved SID layout.
     let native = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let extended_drive = path.starts_with(r"\\?\")
+        && native
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+        && native.as_bytes().get(1) == Some(&b':');
+    if (path.starts_with(r"\\") || path.starts_with("//")) && !extended_drive {
+        return Err(PathError { purpose: PathPurpose::Data, kind: PathErrorKind::WindowsStorageSecurity { reason: "Windows storage requires a local drive-letter path; UNC and volume-GUID aliases are unsupported".to_owned() } });
+    }
     let windows_spelling = native.as_bytes().get(1) == Some(&b':') || native.starts_with(r"\\");
     let short_root_alias = native
         .get(..2)

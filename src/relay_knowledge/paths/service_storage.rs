@@ -5,8 +5,8 @@ use crate::env::{EnvironmentConfig, RELAY_KNOWLEDGE_HOME};
 use quick_xml::{Reader, events::Event};
 
 impl RuntimePaths {
-    /// Checks a path before privileged service registration/startup without
-    /// following links or changing operator-managed ACLs.
+    /// Rejects unusable data directories before service execution. Windows also
+    /// rejects links; operator-managed ACLs are never changed.
     pub(crate) async fn ensure_privileged_service_storage(
         &self,
         access: StorageDirectoryAccess,
@@ -18,7 +18,31 @@ impl RuntimePaths {
         #[cfg(not(windows))]
         {
             let _ = access;
-            Ok(())
+            let result = tokio::time::timeout(
+                DATA_DIRECTORY_PROBE_TIMEOUT,
+                tokio::fs::metadata(&self.data_dir),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "directory probe timed out",
+                ))
+            });
+            match result {
+                Ok(metadata) if metadata.is_dir() => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                result => Err(PathError {
+                    purpose: PathPurpose::Data,
+                    kind: PathErrorKind::DataDirectoryProbe {
+                        path: self.data_dir.clone(),
+                        reason: match result {
+                            Err(error) => error.to_string(),
+                            Ok(_) => "data path is not a directory".to_owned(),
+                        },
+                    },
+                }),
+            }
         }
     }
 

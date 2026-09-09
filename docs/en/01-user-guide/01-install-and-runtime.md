@@ -109,8 +109,12 @@ also provisions or validates these directories before service-manager steps;
 plans and uninstall do not provision storage. Existing managed ACLs must retain
 full access for the account, SYSTEM, and Administrators; deny rules are rejected.
 An administrator provisions missing shared D: ancestors with an Administrators
-owner and restricted shared ACL; later accounts create their private SID folders
-without elevation. Ambiguous Win32 path spellings are rejected. Legacy/custom
+owner and restricted shared ACL. Each account SID directory also requires initial
+administrator provisioning; ordinary users cannot create siblings under the shared
+root. Existing shared ACLs with account creation/write rights are rejected without
+repair. Elevated administrators may provision or validate another installer's SID
+path; its original account retains full access. UNC and volume-GUID roots, along
+with ambiguous Win32 spellings, are rejected; use an absolute local drive-letter path. Legacy/custom
 paths keep operator-managed ACLs, but service preflight/startup and LocalSystem
 fresh opens reject reparse points in ancestors and SQLite/recovery files.
 Synchronous storage APIs use a bounded owned security worker; async callers use

@@ -103,7 +103,8 @@ for another pathname open. Cold topology reads validate their control database,
 recovery files, and ancestors before each fresh connection. Missing managed control
 files fail visibly on those path opens. This targeted check avoids unrelated shards.
 Immediately before SQLite opens, its factory creates the SID directory and `data`
-child with a protected DACL owned by the creating account or LocalSystem. It grants inheritable full
+child with a protected DACL owned by the creating account, LocalSystem, or the
+Administrators group for delegated provisioning. It grants inheritable full
 control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
 creation. Existing private directories and payload files must explicitly grant full control
 to all three principals, with both inheritance flags on directories. Deny ACEs
@@ -112,8 +113,9 @@ rather than guessing effective group membership. Existing directories must alrea
 silently rewrites permissions or adopts a permissive directory. Ancestors are
 checked from the volume root downward (at most 32): reparse points, untrusted
 owners, and grants allowing other accounts to delete, change attributes, change
-permissions, or take ownership are rejected. Read/traverse/create-child rights
-on shared ancestors are allowed. Existing payloads are also validated, including
+permissions, or take ownership are rejected. Volume ancestors may allow child
+creation; the two application-owned shared ancestors permit ordinary accounts
+only read/traverse rights, preventing SID-directory squatting. Existing payloads are also validated, including
 SQLite databases, WAL/SHM/journal files, repository directories, and shards.
 Files with untrusted owners or foreign allow ACEs and all descendant reparse
 points are rejected; directory inheritance alone is insufficient for moved files.
@@ -152,10 +154,15 @@ A missing or insecure D: volume fails visibly when storage is opened;
 an administrator must initially provision missing shared `relay-knowledge` and
 `users` ancestors. Creation atomically assigns an Administrators owner and a
 protected DACL: SYSTEM/Administrators have full control; Authenticated Users have
-read/traverse and create-directory rights on that shared directory only. Existing
-shared roots owned by the first ordinary user are rejected without repair.
-Subsequent users create their own private SID directories without elevation;
-the volume and other ancestors must also meet the shared trust policy. Users may
+read/traverse rights on that shared directory only. Existing shared roots owned
+by an ordinary user, inheriting ACLs, or granting ordinary accounts creation/write
+rights are rejected without repair. Each SID directory requires initial elevated
+administrator or LocalSystem provisioning; ordinary users subsequently use their
+private directories and cannot create siblings. Elevated administrators can
+validate or provision a different installer's SID path, using the Administrators
+group as owner for newly created directories while preserving the original
+account's full-control grants. Other ordinary accounts remain unauthorized.
+The volume and other ancestors must also meet the shared trust policy. Users may
 instead explicitly choose a private location. HOME/DATA overrides outside the reserved SID layout and retained legacy
 storage keep their operator-managed ACL policy. Windows service preflight also
 checks those paths, all ancestors, and SQLite recovery files for reparse points
@@ -165,12 +172,14 @@ with a junction after installation cannot bypass service admission. User-mode
 legacy discovery still accepts retained directory links. Service checks require
 Windows PowerShell 5.1 and use the same bounded process deadline.
 Win32 trailing-period/space, parent traversal, device, and short aliases of the
-reserved D: root are rejected before SID policy recovery. The reserved
+reserved D: root are rejected before SID policy recovery. UNC and volume-GUID
+roots are unsupported, including administrative shares and extended UNC paths;
+Windows storage requires an absolute local drive-letter path. The reserved
 `D:\relay-knowledge\users\<user-sid>\data` layout always restores the original SID
 policy, including explicit overrides pinned in service definitions. Each new
 service process therefore checks existing ACLs and reparse points again before
 opening SQLite; lifecycle preflight cannot replace this startup check. Only the
-original account or LocalSystem can access this managed layout through the
+original account, LocalSystem, or an elevated administrator can access this managed layout through the
 storage boundary. LocalSystem creates missing private directories with itself
 as owner while retaining grants for the original account, SYSTEM, and Administrators. Before executing install, upgrade, or rollback, the lifecycle boundary also
 provisions or validates managed SID storage, before any service-manager step can
@@ -186,6 +195,9 @@ and unsafe SID ACLs or junctions fail before service changes, even when the
 current runtime selects another directory. The old definition must pin storage;
 preflight never provisions a missing rollback database. The database pathname must
 identify a regular file; directories and reparse/symlink entries fail preflight. Startup repeats validation.
+Executed install/upgrade/rollback also reject a file at the data directory or any
+ancestor on Linux/macOS before mutating lifecycle steps. Dry-run plans and
+uninstall remain storage-free; a missing directory can still be provisioned later.
 The native Windows CI gate also runs restored-definition parsing and old/checkpointed
 storage preflight regressions, including Windows drive paths, SID recovery, shared-owner
 stability across principals, alias rejection, synchronous runtime independence,

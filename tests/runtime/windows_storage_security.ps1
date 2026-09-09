@@ -15,7 +15,12 @@ function Assert-Rejected {
 $sid = Get-RelayStorageSid
 if ((Get-RelayStorageCreationOwner $sid $sid) -ne $sid) { throw 'Account must own newly created storage' }
 if ((Get-RelayStorageCreationOwner 'S-1-5-18' $sid) -ne 'S-1-5-18') { throw 'LocalSystem must own service-created storage' }
-Assert-Rejected { Get-RelayStorageCreationOwner 'S-1-5-21-1-2-3-9999' $sid } 'owning account'
+$originalAdministratorFunction = ${function:Test-RelayStorageAdministrator}
+try {
+    function Test-RelayStorageAdministrator { return $false }
+    Assert-Rejected { Get-RelayStorageCreationOwner 'S-1-5-21-1-2-3-9999' $sid } 'owning account'
+} finally { Set-Item Function:Test-RelayStorageAdministrator $originalAdministratorFunction }
+if ((Get-RelayStorageCreationOwner 'S-1-5-21-1-2-3-9999' $sid) -ne 'S-1-5-32-544') { throw 'Elevated maintenance must retain a trusted group owner' }
 $root = Join-Path ([System.IO.Path]::GetTempPath()) ("relay-storage-acl-" + [guid]::NewGuid())
 $rootSecurity = New-RelaySharedStorageSecurity
 [System.IO.DirectoryInfo]::new($root).Create($rootSecurity)
@@ -63,20 +68,33 @@ try {
         Assert-RelayDirectorySecurity ([System.IO.DirectoryInfo]::new($shared)) 'S-1-5-21-1-2-3-1002' $false
     }
     $secondSid = 'S-1-5-21-1-2-3-1002'
-    $secondSecurity = [System.Security.AccessControl.DirectorySecurity]::new()
-    $secondSecurity.SetAccessRuleProtection($true, $false)
-    $secondSecurity.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
-    foreach ($principal in @($secondSid, 'S-1-5-18', 'S-1-5-32-544')) {
-        $secondSecurity.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
-            [System.Security.Principal.SecurityIdentifier]::new($principal), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
-    }
     $secondProfile = "$base\users\$secondSid"
-    [System.IO.DirectoryInfo]::new($secondProfile).Create($secondSecurity)
-    [System.IO.DirectoryInfo]::new("$secondProfile\data").Create($secondSecurity)
+    Initialize-RelayPrivateStorage "$secondProfile\data" $secondSid
+    if ([System.IO.DirectoryInfo]::new($secondProfile).GetAccessControl().GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-32-544') { throw 'Delegated provisioning must use the Administrators owner' }
+    Initialize-RelayPrivateStorage "$secondProfile\data" $secondSid -ExistingOnly
     try {
+        function Test-RelayStorageAdministrator { return $false }
+        Assert-Rejected { Initialize-RelayPrivateStorage "$secondProfile\data" $secondSid -ExistingOnly } 'owning account'
         function Get-RelayStorageSid { return $secondSid }
         Initialize-RelayPrivateStorage "$secondProfile\data" $secondSid -ExistingOnly
-    } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
+        $unprovisionedSid = 'S-1-5-21-1-2-3-1003'
+        function Get-RelayStorageSid { return $unprovisionedSid }
+        Assert-Rejected { Initialize-RelayPrivateStorage "$base\users\$unprovisionedSid\data" $unprovisionedSid } 'administrator must provision each account'
+        if ([System.IO.Directory]::Exists("$base\users\$unprovisionedSid")) { throw 'Ordinary users must not create SID siblings' }
+    } finally {
+        Set-Item Function:Get-RelayStorageSid $originalSidFunction
+        Set-Item Function:Test-RelayStorageAdministrator $originalAdministratorFunction
+    }
+    # Persisted shared ACLs cannot grant any account name-squatting rights,
+    # including ACLs created by an earlier installation.
+    $usersInfo = [System.IO.DirectoryInfo]::new("$base\users")
+    $safeUsersAcl = $usersInfo.GetAccessControl()
+    $squattingAcl = $usersInfo.GetAccessControl()
+    $squattingAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+        [System.Security.Principal.SecurityIdentifier]::new('S-1-5-11'), 'CreateDirectories', 'Allow'))
+    $usersInfo.SetAccessControl($squattingAcl)
+    try { Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -ExistingOnly } 'forbids account creation/write rights' }
+    finally { $usersInfo.SetAccessControl($safeUsersAcl) }
     $sharedInfo = [System.IO.DirectoryInfo]::new($base)
     $changedOwner = $sharedInfo.GetAccessControl()
     $changedOwner.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
@@ -192,7 +210,10 @@ try {
         Assert-Rejected { Initialize-RelayPrivateStorage "$junction\users\$sid\data" $sid -ExistingOnly } 'reparse points'
     } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
     [System.IO.Directory]::Delete($junction)
-    Assert-Rejected { Initialize-RelayPrivateStorage "$drive\safe\$sid\data" 'S-1-5-18' } 'owning account'
+    try {
+        function Test-RelayStorageAdministrator { return $false }
+        Assert-Rejected { Initialize-RelayPrivateStorage "$drive\safe\$sid\data" 'S-1-5-18' } 'owning account'
+    } finally { Set-Item Function:Test-RelayStorageAdministrator $originalAdministratorFunction }
     Write-Host 'Windows account identity and storage ACL regression tests passed.'
 } catch {
     Write-Host $_.ScriptStackTrace

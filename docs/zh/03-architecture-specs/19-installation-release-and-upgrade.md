@@ -100,7 +100,7 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 生命周期预检测试覆盖安装/升级/回滚执行前拒绝，以及 dry-run/卸载跳过预检；测试清空外部
 执行步骤，避免回归时修改真实服务。
 服务路径测试验证显式 DATA/HOME 重载保留原 SID 策略。Windows ACL 测试仅在测试作用域
-替换令牌查询来覆盖 LocalSystem 分支，其余 ACL、owner 和 junction 检查均读取真实文件系统；
+替换令牌和管理员角色查询来覆盖授权分支，其余 ACL、owner 和 junction 检查均读取真实文件系统；
 验证安全目录可访问、权限改动和 junction 在新启动校验时被拒绝。Linux UT 验证子进程失败、
 输出限制、超时和取消，不模拟 Windows 账户令牌。新增回归覆盖只读诊断不授权首次打开、
 服务计划/执行拒绝拓扑冲突、服务定义固定拓扑、Windows 探测超时后 runtime 能及时退出、
@@ -115,13 +115,13 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 只读 control 连接供 topology 查询复用，不把历史权限结果用于授权新的路径打开。冷 topology 查询
 仍在每次新建连接前检查 control 文件、恢复文件和父目录；这类打开遇到受管理的主库缺失时明确报错。
 定向检查不扫描无关分片。SQLite 工厂在实际打开存储前创建 SID 目录及其 `data`
-子目录，并原子设置创建账户或 LocalSystem 为 owner 及受保护 DACL，
+子目录，并原子设置创建账户、LocalSystem 或代管的 Administrators 组为 owner 及受保护 DACL，
 仅授予目录所标识的账户、SYSTEM、Administrators 可继承的完全控制。已有私有目录和文件
 必须为这三类主体分别保留完整授权，目录同时包含文件和目录继承标志。拒绝任何 deny ACE
 （包括组拒绝）及适用于父目录的 deny ACE，避免猜测组成员关系导致误判。已有目录必须满足同一 ACL 合同，
 存储边界不会自动修复宽松 ACL。只读存储诊断仅校验已有目录，不创建目录。自卷根逐级检查最多 32 个父目录，拒绝重解析点、不可信 owner，
-以及允许其他账户删除、修改属性、修改权限或夺取所有权的 ACL；共享父目录可以授予读取、
-遍历和创建子目录权限。已有数据库、WAL/SHM/journal、仓库分片及所有后代目录也必须
+以及允许其他账户删除、修改属性、修改权限或夺取所有权的 ACL；卷级父目录可允许创建子目录，
+应用拥有的两级共享父目录只向普通账户授予读取和遍历权限，防止 SID 目录抢占。已有数据库、WAL/SHM/journal、仓库分片及所有后代目录也必须
 验证 owner、ACL 和重解析点，不能因父目录私有而信任保留宽松 ACL 的搬入文件。
 初次校验按需枚举，最多 65,536 个条目、32 层，且受同一子进程 10 秒超时约束；
 超过任一限制都明确失败。每个分片首次打开还会在现有 blocking worker 中通过有界异步
@@ -142,18 +142,22 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 并发时返回可见的 `Busy`，不增加无界排队。这些入口仍是阻塞 API，异步应用使用工厂和
 SQLite worker 边界；冷 topology 诊断保留可取消的异步预检，健康检查不用同步校验线程预热分片。只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，缺失的共享 `relay-knowledge`、`users` 目录需要管理员首次配置：创建时原子设置
 Administrators owner 和受保护 DACL，SYSTEM/Administrators 完全控制，Authenticated Users
-仅在共享目录本身具有读取、遍历和创建子目录权限。已有共享根若由第一个普通用户拥有则拒绝，
-不自动修复；后续用户无需提权即可创建各自私有 SID 目录，卷根和其他父目录也必须满足共享信任策略。
+仅在共享目录本身具有读取和遍历权限。已有共享根若由普通用户拥有、继承 ACL 或授予普通
+账户创建/写入权限则拒绝，不自动修复。每个 SID 目录需提权管理员或 LocalSystem 首次配置，
+普通账户随后使用已有私有目录，不能创建兄弟目录。提权管理员可以校验或代为配置其他
+安装者的 SID 路径，新目录由 Administrators 组拥有，原账户仍保留完全控制；其他普通账户
+无权代管。卷根和其他父目录也必须满足共享信任策略。
 也可通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
 及支持 ACL 的本地卷。保留的旧库及保留 SID 布局之外的显式 HOME/DATA 继续由操作者管理 ACL，
 但 Windows 服务预检仍检查这些路径、所有父目录及 SQLite 恢复文件的重解析点，不改写 ACL。
 LocalSystem 在启动以及新建 catalog/import/diagnostic 打开前重复检查，防止安装后将旧目录
 替换成 junction 绕过服务准入。用户态旧目录发现仍可保留目录链接；服务检查需要 Windows
 PowerShell 5.1，使用同一有界子进程超时。SID 策略恢复前拒绝 Win32 尾部点/空格、父路径遍历、
-设备命名空间以及保留 D: 根的短文件名别名。
+设备命名空间以及保留 D: 根的短文件名别名。也拒绝 UNC、管理共享、扩展 UNC 和卷 GUID 根，
+Windows 存储必须使用本地盘符绝对路径。
 `D:\relay-knowledge\users\<user-sid>\data` 布局始终恢复目录中原账户的 SID 策略，
 包括服务定义固定的显式路径。每个新服务进程在打开 SQLite 前重新检查 ACL 和重解析点，
-生命周期预检不能代替启动校验。该存储边界仅允许原账户或 LocalSystem；LocalSystem
+生命周期预检不能代替启动校验。该存储边界允许原账户、LocalSystem 或提权管理员；LocalSystem
 创建缺失私有目录时以自身为 owner，仍授予原账户、SYSTEM、Administrators 权限。
 卸载和回滚不迁移 ACL。
 实际执行安装、升级或回滚前，生命周期边界也会创建或校验受管理的 SID 数据目录，确保服务将目录
@@ -164,7 +168,9 @@ Windows 升级或显式回滚停止现有服务前，还会读取旧安装定义
 和重复存储设置），按 DATA_DIR 优先于 HOME
 解析其固定路径并只读校验。即使当前运行时选择另一目录，旧库缺失、SID ACL 不安全
 或存在 junction 都会在修改服务之前失败。旧定义必须固定存储路径；预检不补建回滚库，
-数据库路径必须是普通文件，目录及 reparse/symlink 条目在预检时拒绝；启动时仍会重新校验。原生 Windows CI 同时执行旧定义解析和检查点存储预检回归，
+数据库路径必须是普通文件，目录及 reparse/symlink 条目在预检时拒绝；启动时仍会重新校验。
+Linux/macOS 执行安装、升级或回滚时也会拒绝数据目录或任一父路径为文件的配置，在任何
+生命周期修改步骤前失败。dry-run 和卸载保持无需存储，缺失目录仍可在后续正常配置。原生 Windows CI 同时执行旧定义解析和检查点存储预检回归，
 实际验证 Windows 盘符、SID 策略恢复、跨主体共享 owner 稳定性、路径别名拒绝、
 同步入口不依赖外部 runtime，以及安装后旧目录被替换成链接的拒绝行为。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
 catalog 的工厂提供默认空实现，保持源码兼容；SQLite 覆盖该方法执行权限和 catalog 检查。

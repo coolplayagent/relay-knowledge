@@ -23,21 +23,27 @@ function Get-RelayStoragePathKind {
 function Get-RelayStorageCreationOwner {
     param([string]$ActorSid, [string]$ExpectedSid)
     # Installed services run as LocalSystem but retain the installing account's
-    # directory. Other accounts cannot adopt that account's reserved path.
+    # directory. Elevated administrators can provision or maintain another
+    # installer's path, with the Administrators group as creation owner.
     if ($ActorSid -ne $ExpectedSid -and $ActorSid -ne 'S-1-5-18') {
-        throw 'Storage requires the owning account or LocalSystem'
+        if (Test-RelayStorageAdministrator) { return 'S-1-5-32-544' }
+        throw 'Storage requires the owning account, LocalSystem, or an elevated administrator'
     }
     return $ActorSid
 }
 
-function New-RelaySharedStorageSecurity {
+function Test-RelayStorageAdministrator {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     try {
         $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
-        if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
-            throw 'An administrator must provision shared storage ancestors before ordinary accounts initialize their SID directories'
-        }
+        return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
     } finally { $identity.Dispose() }
+}
+
+function New-RelaySharedStorageSecurity {
+    if (-not (Test-RelayStorageAdministrator)) {
+        throw 'An administrator must provision shared storage ancestors and each account SID directory'
+    }
     $security = [System.Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)
     $security.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
@@ -48,9 +54,26 @@ function New-RelaySharedStorageSecurity {
     }
     $security.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
         [System.Security.Principal.SecurityIdentifier]::new('S-1-5-11'),
-        [System.Security.AccessControl.FileSystemRights]'ReadAndExecute,CreateDirectories',
+        [System.Security.AccessControl.FileSystemRights]::ReadAndExecute,
         'None', 'None', 'Allow'))
     return $security
+}
+
+function Assert-RelaySharedStorageSecurity {
+    param([System.IO.DirectoryInfo]$Directory)
+    $acl = $Directory.GetAccessControl()
+    $administrators = @('S-1-5-18', 'S-1-5-32-544')
+    if ($administrators -notcontains $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value) {
+        throw "Shared storage ancestor requires a SYSTEM or Administrators owner: $($Directory.FullName)"
+    }
+    if (-not $acl.AreAccessRulesProtected) { throw 'Shared storage ancestors must have protected ACLs' }
+    $readOnly = [int][System.Security.AccessControl.FileSystemRights]'ReadAndExecute,Synchronize'
+    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($administrators -notcontains $rule.IdentityReference.Value -and ($rule.FileSystemRights -band (-bnot $readOnly))) {
+            throw "Shared storage forbids account creation/write rights: $($Directory.FullName)"
+        }
+    }
+    Assert-RelayStorageGrants $acl 'S-1-5-18' $Directory.FullName $true
 }
 
 function Assert-RelayServiceDatabasePath {
@@ -217,9 +240,11 @@ function Initialize-RelayPrivateStorage {
         }
         Assert-RelayDirectorySecurity $directory $ExpectedSid $false
         if ($directory.FullName -eq $profile.Parent.FullName -or $directory.FullName -eq $profile.Parent.Parent.FullName) {
-            $owner = $directory.GetAccessControl().GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-            if (@('S-1-5-18', 'S-1-5-32-544') -notcontains $owner) { throw "Shared storage ancestor requires a SYSTEM or Administrators owner: $($directory.FullName)" }
+            Assert-RelaySharedStorageSecurity $directory
         }
+    }
+    if (-not $ExistingOnly -and -not $profile.Exists -and -not (Test-RelayStorageAdministrator)) {
+        throw 'An administrator must provision each account SID directory before ordinary use'
     }
     $security = [System.Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)

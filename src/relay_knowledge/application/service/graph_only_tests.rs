@@ -143,6 +143,53 @@ async fn install_and_uninstall_plans_do_not_open_unavailable_storage() {
     std::fs::remove_file(root).unwrap();
 }
 
+#[cfg(not(windows))]
+#[tokio::test]
+async fn executed_service_actions_reject_non_directory_ancestors_before_mutation() {
+    let root = unique_root("service-non-directory-preflight");
+    std::fs::write(&root, "blocked ancestor").unwrap();
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    let service = RelayKnowledgeService::new(runtime);
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Upgrade,
+        ServiceManagerAction::Rollback,
+        ServiceManagerAction::Uninstall,
+    ] {
+        let mut plan = service
+            .render_service_plan_for_request(&ServicePlanRequest {
+                action,
+                dry_run: false,
+                execute: true,
+                target_version: None,
+                install_dir: None,
+            })
+            .unwrap();
+        // Observe admission only; regressions cannot invoke a service manager.
+        plan.lifecycle_steps.clear();
+        plan.rollback_steps.clear();
+        for dry_run in [true, false] {
+            plan.dry_run = dry_run;
+            let result = service.execute_service_plan(&plan).await;
+            if !dry_run && action != ServiceManagerAction::Uninstall {
+                assert!(result.unwrap_err().message.contains("Not a directory"));
+            } else {
+                assert!(result.unwrap().completed_steps.is_empty());
+            }
+            assert!(service.storage.ready_store().is_none());
+            assert_eq!(std::fs::read(&root).unwrap(), b"blocked ancestor");
+        }
+    }
+    std::fs::remove_file(root).unwrap();
+}
+
 #[tokio::test]
 async fn lifecycle_plans_reject_an_existing_catalog_with_the_wrong_topology() {
     let root = unique_root("lifecycle-topology-guard");

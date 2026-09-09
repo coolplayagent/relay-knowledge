@@ -95,13 +95,11 @@ impl RelayKnowledgeService {
                 .ensure_storage_access(StorageDirectoryAccess::OpenOrCreate)
                 .await
                 .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
-            if plan.platform == "windows" {
-                self.runtime
-                    .paths
-                    .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
-                    .await
-                    .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
-            }
+            self.runtime
+                .paths
+                .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+                .await
+                .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
         }
         let plan = plan.clone();
         let current_executable = self.runtime.process.current_executable.clone();
