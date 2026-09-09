@@ -66,7 +66,9 @@ fn search_call_identity_rows_with_budget(
         &request.query_path_substrings,
     );
     let result_identity_column = match request.code_query_kind {
-        crate::domain::CodeQueryKind::Callees => "callee.canonical_symbol_id",
+        crate::domain::CodeQueryKind::Callees => {
+            "COALESCE(callee.canonical_symbol_id, c.target_hint, c.callee_name)"
+        }
         _ => "caller.canonical_symbol_id",
     };
     push_query_path_substring_filter_sql(

@@ -271,7 +271,7 @@ pub(in crate::storage::sqlite::code) fn has_query_field_hit_filters(
 fn query_field_filters_allow_hit(hit: &CodeRetrievalHit, request: &CodeRetrievalRequest) -> bool {
     kind_filters_allow_hit(hit, &request.query_kind_filters)
         && path_substrings_allow_hit(&hit.path, &request.query_path_substrings)
-        && name_substrings_allow_hit(hit, &request.query_name_substrings)
+        && name_substrings_allow_hit(hit, request)
 }
 
 fn kind_filters_allow_hit(hit: &CodeRetrievalHit, filters: &[String]) -> bool {
@@ -289,7 +289,8 @@ fn path_substrings_allow_hit(path: &str, filters: &[String]) -> bool {
             .any(|filter| contains_ignore_ascii_case(path, filter))
 }
 
-fn name_substrings_allow_hit(hit: &CodeRetrievalHit, filters: &[String]) -> bool {
+fn name_substrings_allow_hit(hit: &CodeRetrievalHit, request: &CodeRetrievalRequest) -> bool {
+    let filters = &request.query_name_substrings;
     filters.is_empty()
         || filters.iter().any(|filter| {
             hit.canonical_symbol_id
@@ -297,6 +298,15 @@ fn name_substrings_allow_hit(hit: &CodeRetrievalHit, filters: &[String]) -> bool
                 .is_some_and(|symbol_id| contains_ignore_ascii_case(symbol_id, filter))
                 || sbom_dependency_name(hit)
                     .is_some_and(|package_name| contains_ignore_ascii_case(package_name, filter))
+                || (request.code_query_kind == crate::domain::CodeQueryKind::Callees
+                    && hit.canonical_symbol_id.is_none()
+                    && hit
+                        .retrieval_layers
+                        .contains(&CodeRetrievalLayer::CallGraph)
+                    && hit
+                        .edge_target_hint
+                        .as_deref()
+                        .is_some_and(|name| contains_ignore_ascii_case(name, filter)))
         })
 }
 

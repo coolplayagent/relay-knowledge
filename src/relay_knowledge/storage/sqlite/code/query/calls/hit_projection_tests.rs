@@ -2,6 +2,28 @@ use super::*;
 use crate::domain::{CodeRepositorySelector, FreshnessPolicy, RepositoryCodeRange};
 
 #[test]
+fn unresolved_callee_without_hint_preserves_its_indexed_name_as_target_metadata() {
+    let mut row = caller_row("run", "Service.run", 3);
+    row.callee_symbol_snapshot_id = None;
+    row.callee_canonical_symbol_id = None;
+    row.resolution_state = "unresolved".to_owned();
+    row.target_hint = None;
+    let hits = call_rows_to_hits(
+        &status(),
+        &request("run", CodeQueryKind::Callees),
+        vec![row],
+    );
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("check_claims_from_token")
+    );
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("unresolved"));
+    assert!(hits[0].canonical_symbol_id.is_none());
+    assert!(hits[0].degraded_reason.is_none());
+}
+
+#[test]
 fn callees_project_the_resolved_callee_identity() {
     let status = CodeRepositoryStatus {
         repository_id: "repo".to_owned(),

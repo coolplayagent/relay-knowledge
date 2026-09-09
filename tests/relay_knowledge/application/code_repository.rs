@@ -954,3 +954,8 @@ mod historical_reuse_tests;
 
 #[path = "code_repository_canonical_calls.rs"]
 mod canonical_calls;
+
+#[path = "code_repository_python_rebinding.rs"]
+mod python_rebinding;
+#[path = "code_repository_unresolved_call_names.rs"]
+mod unresolved_call_names;

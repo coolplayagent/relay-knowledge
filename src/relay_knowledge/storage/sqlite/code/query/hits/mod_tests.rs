@@ -3,6 +3,30 @@
 use super::*;
 use crate::domain::{CodeRetrievalLayer, RepositoryCodeRange, StalenessHint};
 
+#[test]
+fn unresolved_callee_name_filter_uses_target_metadata_only_in_callee_direction() {
+    let mut hit = make_hit(None);
+    hit.retrieval_layers = vec![CodeRetrievalLayer::CallGraph];
+    hit.edge_target_hint = Some("External.send".to_owned());
+    let mut request = CodeRetrievalRequest::new(
+        "run name:SEND",
+        CodeRepositorySelector::new("repo", "HEAD", vec![], vec![]).unwrap(),
+        crate::domain::CodeQueryKind::Callees,
+        10,
+        crate::domain::FreshnessPolicy::AllowStale,
+    )
+    .unwrap();
+    assert!(name_substrings_allow_hit(&hit, &request));
+    request.code_query_kind = crate::domain::CodeQueryKind::Callers;
+    assert!(!name_substrings_allow_hit(&hit, &request));
+    request.code_query_kind = crate::domain::CodeQueryKind::Callees;
+    hit.canonical_symbol_id = Some("Local.other".to_owned());
+    assert!(!name_substrings_allow_hit(&hit, &request));
+    hit.canonical_symbol_id = None;
+    hit.retrieval_layers = vec![CodeRetrievalLayer::Lexical];
+    assert!(!name_substrings_allow_hit(&hit, &request));
+}
+
 fn make_hit(staleness_hint: Option<StalenessHint>) -> CodeRetrievalHit {
     let r = RepositoryCodeRange { start: 0, end: 1 };
     CodeRetrievalHit {
